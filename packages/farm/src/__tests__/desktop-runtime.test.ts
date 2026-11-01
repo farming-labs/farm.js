@@ -332,6 +332,48 @@ export function nitro() { return { name: "nitro" }; }`,
         .status,
     ).toBe(403);
   }, 120_000);
+
+  it("runs the guard before middleware from enforce: pre Vite plugins", async () => {
+    const root = await createApp("farm-desktop-dev-pre-", {
+      ...APP_FILES,
+      "farm.config.ts": `export default {
+  telemetry: false,
+  desktop: { name: "Notes", id: "com.example.notes" },
+  vite: {
+    plugins: [
+      {
+        name: "test:pre-middleware",
+        enforce: "pre",
+        configureServer(server) {
+          server.middlewares.use((req, res, next) => {
+            if (req.url !== "/pre-plugin") return next();
+            res.end("pre plugin");
+          });
+        },
+      },
+    ],
+  },
+};`,
+    });
+    const session = secretPair();
+    installFarmDesktopSetup({ command: "dev" });
+    process.env.FARM_PLATFORM = "desktop";
+    process.env.FARM_DESKTOP_DATA_DIR = path.join(root, ".farm", "data", "desktop");
+    (globalThis as Record<PropertyKey, unknown>)[FARM_DESKTOP_DEV_SESSION] = session;
+    const server = await createServer({ root });
+    servers.add(server);
+    const port = await getAvailablePort();
+    await server.listen(port);
+    connectHost = "localhost";
+
+    expect((await raw(port, "/pre-plugin")).status).toBe(403);
+    const handshake = await raw(port, `${FARM_DESKTOP_HANDSHAKE_PATH}?t=${session.handshakeToken}`);
+    expect(handshake.status).toBe(303);
+    const cookie = ([handshake.headers["set-cookie"]].flat()[0] ?? "").split(";")[0];
+    const allowed = await raw(port, "/pre-plugin", { headers: { cookie } });
+    expect(allowed.status).toBe(200);
+    expect(allowed.body).toBe("pre plugin");
+  }, 120_000);
 });
 
 describe("farm build --desktop", () => {
