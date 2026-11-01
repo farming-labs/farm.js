@@ -11,8 +11,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "0.1.48",
-    "@farm.js/react": "0.1.0-beta.33",
+    "@farm.js/core": "0.1.49",
+    "@farm.js/react": "0.1.0-beta.34",
     "@farming-labs/docs": "0.2.130",
     "@farming-labs/farmjs": "0.2.130",
     "@farming-labs/theme": "0.2.130",
@@ -22,8 +22,8 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.48",
-    "@farm.js/devtools": "0.1.48",
+    "@farm.js/cli": "0.1.49",
+    "@farm.js/devtools": "0.1.49",
     "@playwright/test": "^1.52.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "22.20.1",

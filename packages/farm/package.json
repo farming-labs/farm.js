@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.48",
+  "version": "0.1.49",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",

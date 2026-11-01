@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/desktop",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Desktop shells for Farm.js apps (farm dev --desktop, farm build --desktop). Ships the Electrobun shell.",
   "keywords": [
     "desktop",
