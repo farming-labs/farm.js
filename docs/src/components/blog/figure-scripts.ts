@@ -1780,42 +1780,86 @@ agentsCode.narrow = {
 
 /* ---------- agent-native post: the four layers, and who a tool call runs as ---------- */
 
-// What an agent meets at an app's origin, innermost first: content it can read, an index that
-// points at it, rules about who may use it, and tools it can call.
-const AGENT_LAYERS: [GlyphKey, string, string, string][] = [
-  ["file", "Readable", "/pricing.md", "text/markdown"],
-  ["search", "Discoverable", "/llms.txt", "2 pages"],
-  ["swap", "Governed", "/robots.txt", "2 groups"],
-  ["server", "Actionable", "/api/mcp", "2 tools"],
+// One request, both halves of the answer: what an agent can read, and what it can call. Lines
+// stream in as each pulse lands, so the card shows the exchange rather than a list of features.
+const READ_LINES: [string, string][] = [
+  ["bf-dim", "200 text/markdown"],
+  ["bf-hi", "# Pricing"],
+  ["", "- Hobby: free"],
+  ["", "- Pro: $20 / month"],
+];
+const ACT_LINES: [string, string][] = [
+  ["bf-dim", "tools/list -> 2 tools"],
+  ["bf-hi", "create_project"],
+  ["", 'name: "Invoice redesign"'],
+  ["bf-dim", "201 project-3"],
 ];
 const agentLayers: FigureSpec = {
-  duration: 0.4 + AGENT_LAYERS.length * BEAT + HOLD,
-  stage: CARD,
+  duration: 0.5 + BEAT * 0.6 + PULSE + 4 * 0.3 + 0.6 + HOLD,
+  stage: { w: 440, h: 258 },
   label:
-    "The four layers an agent meets at a Farm.js app: readable pages, a discoverable index, crawler rules, and callable tools",
-  panels: [{ id: "layers", x: 0, y: 0, ...CARD, title: "What an agent finds · acme.test" }],
-  wires: {},
+    "One origin answers an agent twice: the page as Markdown it can read, and a typed tool it can call",
+  panels: [
+    {
+      id: "agent",
+      x: 120,
+      y: 0,
+      w: 200,
+      h: 48,
+      flow: true,
+      icon: "agent",
+      kicker: "Agent",
+      label: "acme.test",
+    },
+    { id: "read", x: 0, y: 96, w: 205, h: 162, title: "Reads" },
+    { id: "act", x: 235, y: 96, w: 205, h: 162, title: "Calls" },
+  ],
+  wires: {
+    read: [
+      [170, 48],
+      [170, 72],
+      [102, 72],
+      [102, 96],
+    ],
+    act: [
+      [270, 48],
+      [270, 72],
+      [337, 72],
+      [337, 96],
+    ],
+  },
   frame(t) {
-    let done = 0;
-    const rows = AGENT_LAYERS.map(([icon, name, path, result], i) => {
-      const start = 0.4 + i * BEAT;
-      const end = start + BEAT * 0.75;
-      const finished = t >= end;
-      if (finished) done++;
-      const last = i === AGENT_LAYERS.length - 1;
-      return row(
-        icon,
-        name,
-        esc(path),
-        finished ? result : "",
-        step(t, start, end),
-        t >= start && (!finished || last) ? "bf-von" : t < start ? "bf-item--wait" : "",
-      );
-    }).join("");
+    const asked = 0.5;
+    const acted = asked + BEAT * 0.6;
+    const readAt = asked + PULSE;
+    const actAt = acted + PULSE;
+    const stream = (lines: [string, string][], at: number) =>
+      lines
+        .map(
+          ([cls, text], i) =>
+            `<span class="bf-line${cls ? ` ${cls}` : ""}" style="opacity:${ease(
+              prog(t, at + i * 0.3, 0.3),
+            ).toFixed(3)}">${esc(text)}</span>`,
+        )
+        .join("");
+    const settled = actAt + ACT_LINES.length * 0.3;
     return {
-      slots: { layers: rows, "layers:meta": `${done} / ${AGENT_LAYERS.length}` },
-      wires: {},
-      states: {},
+      slots: {
+        agent: step(t, 0.2, settled),
+        read: stream(READ_LINES, readAt),
+        "read:meta": t >= readAt ? "/pricing.md" : "",
+        act: stream(ACT_LINES, actAt),
+        "act:meta": t >= actAt ? "/api/mcp" : "",
+      },
+      wires: {
+        read: wire(t, 0.1, [[asked]]),
+        act: wire(t, 0.2, [[acted]]),
+      },
+      states: {
+        agent: busy(t, 0.2, acted),
+        read: busy(t, readAt, readAt + READ_LINES.length * 0.3),
+        act: busy(t, actAt, settled),
+      },
     };
   },
 };

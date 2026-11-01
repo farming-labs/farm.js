@@ -340,4 +340,30 @@ In rough order of value per minute of work:
 
 Layer four is where this gets genuinely interesting, and where the industry is still improvising. The thing I would argue for is narrow: whatever an agent can do to your app should go through the same validation, the same middleware, and the same authorization as everything else. Not because agents are dangerous, but because a second path into your data is dangerous, and "for the AI" is a bad reason to build one.
 
+<span id="try-it-on-farm-js" className="blog-heading-anchor" />
+
+## Try it on Farm.js
+
+None of this is a plugin you bolt on at the end. It works because the framework already knows your routes, your schemas, and your guards, which is the argument for having it in the framework at all.
+
+If you want to see the whole stack answering on your own machine, a new app takes about a minute. Node.js 22.13 or newer:
+
+```bash
+npx @farm.js/create-app@latest my-app
+cd my-app
+npm run dev
+```
+
+Then, in another terminal, meet your own app the way an agent would:
+
+```bash
+npx farm agent check
+```
+
+You will get the report from the last section against your app, including the surfaces that are off and the exact config that turns each one on. Add the `agent` and `mcp` blocks as you decide you want them.
+
+Already have an app elsewhere? `farm migrate inspect` identifies a supported source and prints a plan before changing anything; Next.js and TanStack Start have dry-run-first migrators, and Nuxt and SvelteKit have manual guides. The [migration guides](https://farmjs.dev/docs/migrations) cover both.
+
+And if you build something with this, or hit the place where layer four stops being enough, I would genuinely like to hear about it: [open an issue](https://github.com/farming-labs/farm.js/issues), or come argue with me about the design. The agent web is early enough that the conventions are still up for grabs, and I would rather get them right than get them first.
+
 The [agent infrastructure page](/agents) covers what we are building above this, and [`farm agent check`](/docs/cli#check-agent-readiness) will tell you where your own site stands in about two seconds.

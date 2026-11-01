@@ -83,6 +83,7 @@ export const agentNativeSections = [
   ["where-frameworks-stop", "Where frameworks stop"],
   ["what-it-costs", "What it costs"],
   ["do-this-in-your-own-app", "Do it yourself"],
+  ["try-it-on-farm-js", "Try it"],
 ] as const satisfies BlogSections;
 
 /** Every post, newest first. The index features the first and lists the rest. */
