@@ -2301,7 +2301,7 @@ export function toBakedMarkdownSourcePath(root: string, filePath: string | undef
   return relative.split(path.sep).join("/");
 }
 
-export function generateUniversalRouterStateRuntime(): string {
+export function generateUniversalRouterStateRuntime(streamNavigations = false): string {
   return `
 const FARM_PAGE_STATE_KEY = "__farmPageState";
 const FARM_HISTORY_INDEX_KEY = "__farmHistoryIndex";
@@ -2367,6 +2367,50 @@ async function fetchFarmNavigationDocument(url, headers, recover = true, signal)
     throw error;
   }
   return response;
+}
+
+${
+  streamNavigations
+    ? `const FARM_FLUSH_MARKER = "<!--farm-flush-->";
+
+// Reads a streamed navigation (F-Stream) up to the end of React's shell. \`next\` then resolves
+// with each later flush as it ends, and null at the end; a document without a marker is all shell.
+async function readFarmNavigationStream(body) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let done = false;
+  const next = async function() {
+    for (;;) {
+      const at = text.indexOf(FARM_FLUSH_MARKER);
+      if (at !== -1) {
+        const flush = text.slice(0, at);
+        text = text.slice(at + FARM_FLUSH_MARKER.length);
+        return flush;
+      }
+      if (done) {
+        const flush = text;
+        text = "";
+        return flush ? flush : null;
+      }
+      const result = await reader.read();
+      if (result.done) {
+        done = true;
+        text += decoder.decode();
+      } else {
+        text += decoder.decode(result.value, { stream: true });
+      }
+    }
+  };
+  const shell = await next();
+  if (done && !text) return { shell: shell || "" };
+  return {
+    shell: shell,
+    next: next,
+    cancel: function() { reader.cancel().catch(function() {}); },
+  };
+}`
+    : ""
 }
 
 function clearFarmPrefetchCacheOnDeploymentMismatch(router, error) {
@@ -2587,9 +2631,39 @@ function interpolateRedirectDestination(destination, params) {
 `.trim();
 }
 
-export function generateUniversalRouterStateProperties(): string {
+export function generateUniversalRouterStateProperties(streamNavigations = false): string {
   return `
-  blockers: new Set(),
+${
+  streamNavigations
+    ? `  // A streamed navigation swaps in the page's shell; its Suspense content follows flush by flush.
+  navigationStream: null,
+  streamingNavigation: null,
+  takeNavigationStream: function(html) {
+    const stream = this.navigationStream;
+    this.navigationStream = null;
+    if (!stream) return;
+    if (stream.html !== html) {
+      stream.cancel();
+      return;
+    }
+    this.streamingNavigation = stream;
+    void streamFarmNavigation(
+      stream,
+      document.getElementById("root") || document.body,
+      () => this.streamingNavigation === stream,
+    );
+  },
+  stopNavigationStream: function() {
+    this.navigationStream?.cancel();
+    this.streamingNavigation?.cancel();
+    this.navigationStream = null;
+    this.streamingNavigation = null;
+  },
+`
+    : `  takeNavigationStream: function() {},
+  stopNavigationStream: function() {},
+`
+}  blockers: new Set(),
   unloadBlockers: new Map(),
   navigationListeners: new Set(),
   navigationState: IDLE_NAVIGATION_STATE,
@@ -2883,6 +2957,15 @@ export function generateUniversalRouterStateProperties(): string {
     // Only speculative requests have shared ownership. Ordinary navigations
     // keep their own abort signal and cannot cancel another caller's work.
     const record = recover ? null : { valid: true, deploymentId, promise: null };
+    // A navigation (not a prefetch) streams when the router supports it: the page goes in as
+    // soon as its shell arrives, and its Suspense content follows (takeNavigationStream). A page
+    // whose layouts hydrate, or one rendered in this page's React root, arrives whole.
+    const streamShell = ${
+      streamNavigations
+        ? `recover && !interceptFrom && !partialHeaders["F-Render"] &&
+      !hasHydratableLayout(new URL(url, window.location.href).pathname)`
+        : "false"
+    };
     const request = async () => {
       const response = await fetchFarmNavigationDocument(url, {
         "Accept": "text/html",
@@ -2891,13 +2974,32 @@ export function generateUniversalRouterStateProperties(): string {
         // layouts it shows.
         ...getFarmIslandValueHeaders(),
         ...partialHeaders,
+        ...(streamShell ? { "F-Stream": "flush" } : {}),
       }, recover, signal);
       if (!response.ok) throw new Error("Failed to fetch page");
-      const html = await response.text();
-      if (cacheResult && !signal?.aborted && generation === this.prefetchGeneration &&
-          deploymentId === window.__FARM_DEPLOYMENT_ID__ && (!record || record.valid)) {
-        this.storePrefetchedHtml(cacheKey, html);
+      const store = (html) => {
+        if (cacheResult && !signal?.aborted && generation === this.prefetchGeneration &&
+            deploymentId === window.__FARM_DEPLOYMENT_ID__ && (!record || record.valid)) {
+          this.storePrefetchedHtml(cacheKey, html);
+        }
+      };
+${
+  streamNavigations
+    ? `      if (streamShell && response.body) {
+        const streamed = await readFarmNavigationStream(response.body);
+        if (!streamed.next) {
+          store(streamed.shell);
+          return streamed.shell;
+        }
+        this.stopNavigationStream();
+        this.navigationStream = { html: streamed.shell, next: streamed.next, cancel: streamed.cancel, store };
+        return streamed.shell;
       }
+`
+    : ""
+}
+      const html = await response.text();
+      store(html);
       return html;
     };
     if (!record) return request();
@@ -4088,7 +4190,7 @@ let currentPathname = null;
 let isHydrated = false;
 let pendingPageHydrationController = null;
 
-${generateUniversalRouterStateRuntime()}
+${generateUniversalRouterStateRuntime(islandValues)}
 
 function cancelPendingPageHydration() {
   pendingPageHydrationController?.abort();
@@ -4296,6 +4398,63 @@ function activateNavigationScripts(root) {
   }
 }
 
+${
+  islandValues
+    ? `// Adds the flushes after a streamed navigation's shell: React's staged Suspense content and the
+// scripts that reveal it. In islands mode, the islands React reveals hydrate as they appear, and
+// the ones it removes (a replaced fallback) are released.
+async function streamFarmNavigation(stream, root, isCurrent) {
+  let html = stream.html;
+  let streaming = true;
+  ${
+    isolatedHydrationEnabled
+      ? `const removed = new Set();
+  let queued = false;
+  const run = function() {
+    queued = false;
+    if (!isCurrent()) return observer.disconnect();
+    for (const node of removed) if (!node.isConnected) disposeFarmIsolatedClientBoundaries(node);
+    removed.clear();
+    if (!streaming && !root.querySelector('div[hidden][id^="S:"]')) observer.disconnect();
+    hydrateFarmIsolatedClientBoundaries(root).catch(function(error) {
+      console.error("[Farm.js] Hydrating streamed islands failed:", error);
+    });
+  };
+  const observer = new MutationObserver(function(records) {
+    for (const record of records) for (const node of record.removedNodes) removed.add(node);
+    if (queued) return;
+    queued = true;
+    queueMicrotask(run);
+  });
+  observer.observe(root, { childList: true, subtree: true });`
+      : "const observer = { disconnect: function() {} };"
+  }
+  try {
+    for (let flush = await stream.next(); flush !== null; flush = await stream.next()) {
+      if (!isCurrent()) return stream.cancel();
+      html += flush;
+      const parsed = new DOMParser().parseFromString('<div id="root">' + flush, "text/html");
+      const fragment = document.createDocumentFragment();
+      for (const node of Array.from(parsed.getElementById("root").childNodes)) fragment.appendChild(node);
+      activateNavigationScripts(fragment);
+      root.appendChild(fragment);
+    }
+  } catch (error) {
+    streaming = false;
+    if (!isCurrent()) return observer.disconnect();
+    console.error("[Farm.js] A streamed navigation failed:", error);
+    ${isolatedHydrationEnabled ? "farmIsolatedHydrationRuntime.endStream?.(root);\n    if (!queued) run();" : ""}
+    return;
+  }
+  // A cancelled stream ends early: keep its partial document out of the cache.
+  if (!isCurrent()) return observer.disconnect();
+  streaming = false;
+  stream.store(html);
+  ${isolatedHydrationEnabled ? "farmIsolatedHydrationRuntime.endStream?.(root);\n  if (!queued) run();" : ""}
+}`
+    : ""
+}
+
 function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
   const currentPatterns = getLayoutPatterns(currentRoot);
   const nextPatterns = getLayoutPatterns(nextRoot);
@@ -4346,7 +4505,7 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
 
 // SPA Router
 const spaRouter = {
-${generateUniversalRouterStateProperties()}
+${generateUniversalRouterStateProperties(islandValues)}
   prefetchCache: new Map(),
 ${
   islandValues
@@ -4362,7 +4521,7 @@ ${
   },
 `
     : ""
-}  
+}
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.href);
     if (isFarmBlockedNavigationURL(url)) return;
@@ -4415,6 +4574,7 @@ ${
 
     // A route transition invalidates any trigger waiting on the previous DOM boundary.
     cancelPendingPageHydration();
+    this.stopNavigationStream();
     this.saveScrollPosition(window.location.pathname + window.location.search);
     const navigation = this.startNavigation(from, url, action);
     // A refresh keeps the islands still on the page (islands mode).
@@ -4539,6 +4699,7 @@ ${
         if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         await this.runViewTransition(options.viewTransition, async () => {
           if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+          let swappedHtml = html;
           let swapped = await this.swapContent(
             html,
             url.pathname + url.search,
@@ -4558,6 +4719,7 @@ ${
               false,
             );
             if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+            swappedHtml = documentHtml;
             swapped = await this.swapContent(
               documentHtml,
               url.pathname + url.search,
@@ -4569,6 +4731,7 @@ ${
           if (!swapped || swapped === "segment-mismatch") {
             throw new Error("Farm could not swap the target document");
           }
+          this.takeNavigationStream(swappedHtml);
           this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
           currentPathname = pathname;
           this.currentPath = to;
@@ -7287,11 +7450,16 @@ function escapeFarmHtmlAttribute(value) {
     .replace(/>/g, "&gt;");
 }
 
-async function renderFarmElement(ReactDOMServer, element, routeKey) {
+async function renderFarmElement(ReactDOMServer, element, routeKey, flushMarkers = false) {
+  // Written after each React flush in a streamed navigation (flushMarkers): the browser swaps in
+  // the shell, then adds each Suspense boundary as soon as the flush that completed it ends.
+  const FARM_FLUSH_MARKER = "<!--farm-flush-->";
   // Islands mode: each render writes its islands' values itself, so a request that renders twice
   // (notFound(), or a synchronous attempt that suspends and streams) still sends them.
   if (typeof farmIslandsRender === "function") element = farmIslandsRender(element);
   const streamErrors = [];
+  // A browser that leaves the page cancels the stream: React's abort errors are not failures.
+  let cancelled = false;
   const syncHtml = renderFarmElementSync(ReactDOMServer, element, routeKey);
   if (syncHtml !== undefined) return { html: syncHtml, shellHtml: syncHtml, streamErrors };
   let encoder;
@@ -7329,7 +7497,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
         // request handler must still receive them to map the response status,
         // but they should not produce a misleading SSR failure log.
         streamErrors.push(error);
-        if (isFarmRedirectError(error) || isFarmNotFoundError(error)) return;
+        if (cancelled || isFarmRedirectError(error) || isFarmNotFoundError(error)) return;
         console.error("[Farm SSR stream]", error);
       },
     });
@@ -7376,13 +7544,33 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
     }
 
     let replayFirstChunk = true;
+    let pendingRead = null;
+    // A flush is the chunks React has queued when a task boundary passes.
+    const drainFlush = async function(controller, waitForFirst) {
+      for (let first = waitForFirst; ; first = false) {
+        const read = pendingRead || (pendingRead = reader.read());
+        const result = first
+          ? await read
+          : await Promise.race([read, new Promise(function(resolve) { setTimeout(resolve, 0); })]);
+        if (!result) break;
+        pendingRead = null;
+        if (result.done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(normalizeChunk(result.value));
+      }
+      controller.enqueue(normalizeChunk(FARM_FLUSH_MARKER));
+    };
     const replayStream = new ReadableStream({
       pull(controller) {
         if (replayFirstChunk) {
           replayFirstChunk = false;
           controller.enqueue(firstChunk);
+          if (flushMarkers) return drainFlush(controller, false);
           return;
         }
+        if (flushMarkers) return drainFlush(controller, true);
         return reader.read().then(
           function(result) {
             if (result.done) controller.close();
@@ -7394,6 +7582,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
         );
       },
       cancel(reason) {
+        cancelled = true;
         return reader.cancel(reason);
       },
     });
@@ -7418,6 +7607,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
     let settleComplete;
     let rejectComplete;
     const chunks = [];
+    let unflushed = false;
     const decision = new Promise(function(resolve, reject) {
       settleDecision = resolve;
       rejectDecision = reject;
@@ -7440,7 +7630,14 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
         const normalized = normalizeChunk(chunk);
         if (streamStarted) streamController.enqueue(normalized);
         else chunks.push(normalized);
+        unflushed = true;
         return true;
+      },
+      // React calls this after each flush.
+      flush() {
+        if (!flushMarkers || !streamStarted || streamClosed || !unflushed) return;
+        unflushed = false;
+        streamController.enqueue(normalizeChunk(FARM_FLUSH_MARKER));
       },
       end() {
         if (streamClosed) return;
@@ -7470,6 +7667,9 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
                   streamController = controller;
                 },
                 cancel(reason) {
+                  // React writes its abort instructions: the stream no longer takes them.
+                  cancelled = true;
+                  streamClosed = true;
                   if (pipeableStream && typeof pipeableStream.abort === "function") {
                     pipeableStream.abort(reason);
                   }
@@ -7489,7 +7689,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
       onError(error) {
         // Same control-flow guard as the readable-stream path above.
         streamErrors.push(error);
-        if (isFarmRedirectError(error) || isFarmNotFoundError(error)) return;
+        if (cancelled || isFarmRedirectError(error) || isFarmNotFoundError(error)) return;
         console.error("[Farm SSR stream]", error);
       },
     });
@@ -7510,6 +7710,11 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
 
     streamStarted = true;
     for (const chunk of chunks) streamController.enqueue(chunk);
+    // What React wrote while its shell was ready is the shell; Suspense content follows.
+    if (flushMarkers && unflushed) {
+      unflushed = false;
+      streamController.enqueue(normalizeChunk(FARM_FLUSH_MARKER));
+    }
     if (streamClosed) streamController.close();
     return {
       stream,
@@ -9955,9 +10160,13 @@ ${
           shouldHydrateLayout &&
           route.serverTree === true &&
           !route.shouldHydrate &&
-          request.headers.get("f-render") === "tree";`
+          request.headers.get("f-render") === "tree";
+        // A navigation the browser streams marks where each React flush ends, so the browser
+        // shows the page before its Suspense content arrives (FARM_FLUSH_MARKER).
+        const farmFlushMarkers = request.headers.get("f-stream") === "flush";`
             : `const farmLayoutKeyOf = null;
-        const farmPayloadOnlyNavigation = false;`
+        const farmPayloadOnlyNavigation = false;
+        const farmFlushMarkers = false;`
         }
         const renderPageElement = async () => {
             // First, render the page content
@@ -10080,7 +10289,7 @@ ${
           }
 
           wrappedElement = wrapWithFarmIntegrationProviders(wrappedElement);
-          return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern);
+          return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern, farmFlushMarkers);
         };
         const renderedPage = ${
           hasMiddlewareRuntime
@@ -10213,7 +10422,7 @@ ${
         // gets HTML without them.
         responseHeaders["Vary"] = farmSharedCacheableRoute
           ? "F-Layouts"
-          : "F-Values, F-Layouts, F-Render";`
+          : "F-Values, F-Layouts, F-Render, F-Stream";`
             : ""
         }
         let html = renderedPage.html;

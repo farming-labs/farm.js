@@ -18,6 +18,7 @@ import {
   createServerHtml,
   createServerTreeElement,
   createServerTreeLayout,
+  endStreamedContent,
 } from "@farm.js/islx/react/client";
 import type { FarmIslandStrategy } from "../island";
 import { getFarmIslandValuesServer } from "./island-value-protocol";
@@ -67,6 +68,8 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIslandsRuntimeOp
     updateModule: runtime.update,
     dispose: runtime.dispose,
     rootCount: runtime.rootCount,
+    // A streamed navigation ended: boundaries it never completed render in the browser.
+    endStream: endStreamedContent,
   };
 }
 

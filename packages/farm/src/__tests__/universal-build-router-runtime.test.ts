@@ -782,6 +782,55 @@ describe("generateUniversalRouterStateRuntime", () => {
   });
 });
 
+describe("streamed navigations", () => {
+  const encoder = new TextEncoder();
+  const readStream = new Function(
+    `${generateUniversalRouterStateRuntime(true)}; return readFarmNavigationStream;`,
+  )() as (body: ReadableStream<Uint8Array>) => Promise<{
+    shell: string;
+    next?: () => Promise<string | null>;
+  }>;
+  const body = (chunks: string[]) =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    });
+
+  it("splits a navigation into its shell and each later flush, across chunk boundaries", async () => {
+    const streamed = await readStream(
+      body([
+        "<main>shell</main><!--farm-",
+        'flush--><div hidden id="S:0">a</div><!--farm-flush-->',
+        "tail",
+      ]),
+    );
+    expect(streamed.shell).toBe("<main>shell</main>");
+    expect(await streamed.next!()).toBe('<div hidden id="S:0">a</div>');
+    expect(await streamed.next!()).toBe("tail");
+    expect(await streamed.next!()).toBe(null);
+  });
+
+  it("treats a document without a marker as all shell", async () => {
+    expect(await readStream(body(["<main>", "whole</main>"]))).toEqual({
+      shell: "<main>whole</main>",
+    });
+  });
+
+  it("ships only to routers that stream", () => {
+    for (const source of [
+      generateUniversalRouterStateRuntime(),
+      generateUniversalRouterStateProperties(),
+    ]) {
+      expect(source).not.toContain("farm-flush");
+      expect(source).not.toContain("readFarmNavigationStream");
+      expect(source).not.toContain("streamFarmNavigation");
+    }
+    expect(generateUniversalRouterStateProperties(true)).toContain('"F-Stream": "flush"');
+  });
+});
+
 describe("generateRuntimePathMatcherSource", () => {
   const matcher = generateRuntimePathMatcherSource();
 

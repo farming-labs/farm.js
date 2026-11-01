@@ -12,7 +12,8 @@ const nitroIndexPath = path.join(process.cwd(), "src", "nitro", "index.ts");
 
 function extractRenderPageElement(source: string): string {
   const start = source.indexOf("const renderPageElement = async () => {");
-  const endMarker = "return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern);";
+  const endMarker =
+    "return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern, farmFlushMarkers);";
   const endIndex = source.indexOf(endMarker, start);
   expect(start).toBeGreaterThan(-1);
   expect(endIndex).toBeGreaterThan(-1);
@@ -42,6 +43,7 @@ async function runRenderPageElement(
     "wrapWithFarmIntegrationProviders",
     "farmKeptLayouts",
     "farmLayoutKeyOf",
+    "farmFlushMarkers",
     `${extractRenderPageElement(source)}\nreturn renderPageElement();`,
   );
   await run(
@@ -64,6 +66,7 @@ async function runRenderPageElement(
     (element: unknown) => element,
     0,
     null,
+    false,
   );
   return { pageTree };
 }

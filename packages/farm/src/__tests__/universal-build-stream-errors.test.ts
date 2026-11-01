@@ -15,7 +15,12 @@ type RenderedElement = {
 };
 
 type StreamRenderer = {
-  renderFarmElement: (ReactDOMServer: unknown, element: unknown) => Promise<RenderedElement>;
+  renderFarmElement: (
+    ReactDOMServer: unknown,
+    element: unknown,
+    routeKey?: string,
+    flushMarkers?: boolean,
+  ) => Promise<RenderedElement>;
 };
 
 // The production stream renderer only exists inside the generated-entry
@@ -31,7 +36,7 @@ function instantiateStreamRenderer(
     "utf-8",
   );
   const start = source.indexOf(
-    "async function renderFarmElement(ReactDOMServer, element, routeKey)",
+    "async function renderFarmElement(ReactDOMServer, element, routeKey, flushMarkers = false)",
   );
   const end = source.indexOf("function createFarmDocumentStream(");
   expect(start).toBeGreaterThan(-1);
@@ -316,6 +321,41 @@ describe("generated renderer allocation eligibility", () => {
     expect(html).toContain("resolved 🌱");
     expect(rendered.streamErrors).toEqual([]);
   });
+
+  it.each(["node", "web"])(
+    "lets a browser cancel a %s stream with Suspense content still pending",
+    async (runtime) => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const renderer = instantiateStreamRenderer({
+          node: runtime === "node",
+          web: runtime === "web",
+        });
+        function Pending(): never {
+          throw new Promise(() => {});
+        }
+        const rendered = await renderer.renderFarmElement(
+          ReactDOMServer,
+          React.createElement(
+            "main",
+            null,
+            React.createElement(
+              React.Suspense,
+              { fallback: React.createElement("p", null, "loading") },
+              React.createElement(Pending),
+            ),
+          ),
+        );
+        const reader = rendered.stream!.getReader();
+        expect(new TextDecoder().decode((await reader.read()).value)).toContain("loading");
+        await reader.cancel();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(errors).not.toHaveBeenCalled();
+      } finally {
+        errors.mockRestore();
+      }
+    },
+  );
 });
 
 function captureThrown(throwing: () => never): unknown {
@@ -603,5 +643,73 @@ describe("generated production stream renderer control-flow errors", () => {
     expect(calls).toEqual(["node", "web"]);
     expect(nodeTarget.html).toBe("<div>node</div>");
     expect(edgeTarget.html).toBe("<div>web</div>");
+  });
+});
+
+describe("streamed navigation flush markers", () => {
+  const encoder = new TextEncoder();
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  it("marks the end of each React flush on the readable-stream path", async () => {
+    let late!: ReadableStreamDefaultController<Uint8Array>;
+    const server = {
+      renderToReadableStream: async () => {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            late = controller;
+            // One flush can enqueue several chunks: all of them are the shell.
+            controller.enqueue(encoder.encode("<main>"));
+            controller.enqueue(encoder.encode("shell</main>"));
+          },
+        });
+        return Object.assign(stream, { allReady: new Promise(() => {}) });
+      },
+    };
+    const { renderFarmElement } = instantiateStreamRenderer({ node: false, web: true });
+    const rendered = await renderFarmElement(server, null, "/stream", true);
+    void (async () => {
+      await tick();
+      late.enqueue(encoder.encode('<div hidden id="S:0">a</div>'));
+      late.enqueue(encoder.encode("<script>$RC(0)</script>"));
+      await tick();
+      late.enqueue(encoder.encode('<div hidden id="S:1">b</div>'));
+      late.close();
+    })();
+    expect(await new Response(rendered.stream).text()).toBe(
+      "<main>shell</main><!--farm-flush-->" +
+        '<div hidden id="S:0">a</div><script>$RC(0)</script><!--farm-flush-->' +
+        '<div hidden id="S:1">b</div>',
+    );
+  });
+
+  it("marks the shell and each flush() React calls on the pipeable path", async () => {
+    const server = controlledNodeServer(["<main>", "shell</main>"], false);
+    const { renderFarmElement } = instantiateStreamRenderer({ node: true, web: false });
+    const rendered = await renderFarmElement(server, null, "/stream", true);
+    const destination = server.destination as typeof server.destination & { flush(): void };
+    destination.write('<div hidden id="S:0">a</div>');
+    destination.flush();
+    // A flush that wrote nothing adds no marker.
+    destination.flush();
+    destination.write('<div hidden id="S:1">b</div>');
+    destination.end();
+    expect(await new Response(rendered.stream).text()).toBe(
+      "<main>shell</main><!--farm-flush-->" +
+        '<div hidden id="S:0">a</div><!--farm-flush-->' +
+        '<div hidden id="S:1">b</div>',
+    );
+  });
+
+  it("writes no marker unless asked", async () => {
+    const server = controlledNodeServer(["<main>shell</main>"], false);
+    const rendered = await instantiateStreamRenderer({ node: true, web: false }).renderFarmElement(
+      server,
+      null,
+    );
+    const destination = server.destination as typeof server.destination & { flush(): void };
+    destination.write("<p>late</p>");
+    destination.flush();
+    destination.end();
+    expect(await new Response(rendered.stream).text()).toBe("<main>shell</main><p>late</p>");
   });
 });

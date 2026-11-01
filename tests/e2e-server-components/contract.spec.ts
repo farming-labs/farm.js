@@ -165,6 +165,59 @@ test("client components before and inside slow Suspense content both hydrate", a
   }).toPass({ timeout: 10_000 });
 });
 
+test("a client navigation shows a Suspense page before its slow content arrives", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands" || dev, "islands production navigations stream");
+  const errors = collectErrors(page);
+  await page.goto("/");
+  await hydrated(page);
+  await page.evaluate(() => ((window as unknown as { sameDocument: boolean }).sameDocument = true));
+  await page.getByRole("link", { name: "Stream", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
+  await expect(page.getByTestId("slow-fallback")).toBeVisible();
+  expect(await page.getByTestId("slow-content").count()).toBe(0);
+  await expect(page).toHaveURL(/\/stream$/);
+  const early = page.getByRole("button", { name: /^Early: / });
+  await early.click();
+  await expect(early).toHaveText("Early: 1");
+
+  await expect(page.getByTestId("slow-content")).toBeVisible();
+  await expect(page.getByTestId("slow-fallback")).toHaveCount(0);
+  const late = page.getByRole("button", { name: /^Late: / });
+  await late.click();
+  await expect(late).toHaveText("Late: 1");
+  expect(
+    await page.evaluate(() => (window as unknown as { sameDocument?: boolean }).sameDocument),
+  ).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("leaving a streaming page drops the rest of its content", async ({ page }) => {
+  test.skip(mode !== "islands" || dev, "islands production navigations stream");
+  const errors = collectErrors(page);
+  await page.goto("/");
+  await hydrated(page);
+  const streamRequest = page.waitForRequest((request) => request.url().endsWith("/stream"));
+  await page.getByRole("link", { name: "Stream", exact: true }).click();
+  const request = await streamRequest;
+  const streamEnded = new Promise<void>((resolve) => {
+    const end = (ended: typeof request) => ended === request && resolve();
+    page.on("requestfinished", end);
+    page.on("requestfailed", end);
+  });
+  await expect(page.getByTestId("slow-fallback")).toBeVisible();
+  await page.getByRole("link", { name: "Home", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId("slow-fallback")).toHaveCount(0);
+  // Whether the browser dropped the response or it finished, the slow content never shows.
+  await streamEnded;
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  expect(await page.getByTestId("slow-content").count()).toBe(0);
+  expect(await page.locator('div[hidden][id^="S:"]').count()).toBe(0);
+  expect(errors).toEqual([]);
+});
+
 test("generateMetadata sets the head", async ({ request }) => {
   const html = await (await request.get("/meta")).text();
   expect(html).toContain("<title>Contract meta 42</title>");
