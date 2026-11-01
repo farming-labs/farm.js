@@ -43,6 +43,11 @@ export interface FarmDesktopGuardOptions {
   basePath?: string;
   /** The port the server listens on. Read per request, since port 0 is bound after start. */
   port: () => number | undefined;
+  /**
+   * Where the guard records that the handshake token was used. Pass an object that outlives the
+   * guard (the dev session, which survives Vite restarts) so a rebuilt guard keeps it used.
+   */
+  handshakeState?: { handshakeUsed?: boolean };
 }
 
 export type FarmDesktopGuard = (request: FarmDesktopGuardRequest) => Response | undefined;
@@ -105,8 +110,8 @@ export function createFarmDesktopGuard(options: FarmDesktopGuardOptions): FarmDe
   if (options.secret === options.handshakeToken) {
     throw new TypeError("[Farm] The desktop secret and handshake token must be different values.");
   }
-  const { secret } = options;
-  let handshakeToken: string | undefined = options.handshakeToken;
+  const { secret, handshakeToken } = options;
+  const handshakeState = options.handshakeState ?? {};
   const basePath = normalizeBasePath(options.basePath);
   const handshakePath = `${basePath}${FARM_DESKTOP_HANDSHAKE_PATH}`;
   const home = `${basePath}/`;
@@ -134,11 +139,11 @@ export function createFarmDesktopGuard(options: FarmDesktopGuardOptions): FarmDe
     if (pathname === handshakePath) {
       if (method !== "GET") return forbidden("handshake must be a GET");
       const token = new URLSearchParams(search).get(FARM_DESKTOP_HANDSHAKE_PARAM) ?? "";
-      if (handshakeToken === undefined || !farmSecretsMatch(token, handshakeToken)) {
+      if (handshakeState.handshakeUsed || !farmSecretsMatch(token, handshakeToken)) {
         return forbidden("invalid or used handshake token");
       }
       // One use: a token copied from a log or a process listing opens nothing later.
-      handshakeToken = undefined;
+      handshakeState.handshakeUsed = true;
       return new Response(null, {
         status: 303,
         headers: {

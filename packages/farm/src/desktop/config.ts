@@ -15,6 +15,8 @@ export const FARM_DESKTOP_DEV_SESSION = Symbol.for("@farm.js/core/desktop-dev-se
 export interface FarmDesktopDevSession {
   secret: string;
   handshakeToken: string;
+  /** Set by the dev guard once the window used the token, so a Vite restart cannot reopen it. */
+  handshakeUsed?: boolean;
 }
 
 /** Called by the CLI before it starts the dev server for `farm dev --desktop`. */

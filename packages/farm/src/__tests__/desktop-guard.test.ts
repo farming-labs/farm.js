@@ -1,6 +1,10 @@
 // @vitest-environment node
 
-import { describe, expect, it } from "vitest";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import type { ViteDevServer } from "vite";
+import { afterEach, describe, expect, it } from "vitest";
+import { createFarmDesktopDevGuard, FARM_DESKTOP_DEV_SESSION } from "../desktop/dev-guard";
 import {
   createFarmDesktopGuard,
   FARM_DESKTOP_COOKIE,
@@ -165,5 +169,42 @@ describe("desktop guard", () => {
     expect(() => guardWith({ handshakeToken: "t".repeat(20) })).toThrow(/at least 32/);
     expect(() => guardWith({ secret: `${"a".repeat(40)};x` })).toThrow(/base64url/);
     expect(() => guardWith({ handshakeToken: SECRET })).toThrow(/different/);
+  });
+});
+
+describe("farm dev --desktop guard", () => {
+  afterEach(() => {
+    delete (globalThis as Record<PropertyKey, unknown>)[FARM_DESKTOP_DEV_SESSION];
+  });
+
+  it("keeps the handshake token used across a Vite restart", async () => {
+    (globalThis as Record<PropertyKey, unknown>)[FARM_DESKTOP_DEV_SESSION] = {
+      secret: SECRET,
+      handshakeToken: TOKEN,
+    };
+    type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
+    let middleware: Middleware | undefined;
+    const httpServer = createServer((req, res) => middleware!(req, res, () => res.end("app")));
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const { port } = httpServer.address() as AddressInfo;
+    const vite = {
+      httpServer,
+      config: { logger: { warn() {} } },
+    } as unknown as ViteDevServer;
+    // Each Vite restart runs configureServer again, which builds the guard again.
+    const restart = () => (middleware = createFarmDesktopDevGuard(vite, { basePath: "" }));
+    const handshake = () =>
+      fetch(`http://127.0.0.1:${port}${FARM_DESKTOP_HANDSHAKE_PATH}?t=${TOKEN}`, {
+        redirect: "manual",
+      }).then((response) => response.status);
+    try {
+      restart();
+      expect(await handshake()).toBe(303);
+      expect(await handshake()).toBe(403);
+      restart();
+      expect(await handshake()).toBe(403);
+    } finally {
+      await new Promise((resolve) => httpServer.close(resolve));
+    }
   });
 });
