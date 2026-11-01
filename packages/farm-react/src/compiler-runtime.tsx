@@ -11280,6 +11280,15 @@ export const keyedRowsPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsPlainPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:plain-position-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner, {
+      keyedUpdates: keyedPositionUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsBatchPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:batch-position-hinted",
   create: (owner) => ({
