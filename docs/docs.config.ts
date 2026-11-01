@@ -284,6 +284,7 @@ const sidebar = [
         icon: "sparkles",
         children: [
           { label: "Agent frameworks", slug: "integrations/agent-frameworks", icon: "sparkles" },
+          { label: "Durable agents", slug: "integrations/agent", icon: "timer" },
           { label: "Eve", slug: "integrations/eve", icon: "brand-eve" },
           {
             label: "Cloudflare Agents",

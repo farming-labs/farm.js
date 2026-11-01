@@ -432,6 +432,7 @@ export default defineConfig({
 
 | Runtime                                          | Farm manages                                                                                             | Application uses                                                        |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [Durable agents](/docs/integrations/agent)       | Agents in `src/agents` on agent-unit's engine: dev serving, build into every target, sweep and storage.  | `defineAgent` or a framework's agent, and `agent-unit/client`.          |
 | [Eve](/docs/integrations/eve)                    | Eve development process, `/eve` and workflow routes, Vercel build composition.                           | `agent/` files and `useEveAgent()`.                                     |
 | [Cloudflare Agents](/docs/integrations/cf-agent) | Wrangler development process, `/agents` WebSocket proxy, combined Worker output and deployment metadata. | Agent classes, Durable Object bindings, `useAgent()`, and callable RPC. |
 
