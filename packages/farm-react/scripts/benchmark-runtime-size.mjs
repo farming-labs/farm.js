@@ -41,6 +41,9 @@ async function bundle(entry, compiler) {
     .map((output) => output.code)
     .join("\n");
   const bytes = Buffer.from(code);
+  if (compiler && code.includes("@farm.js/react/compiler-hmr-registry")) {
+    throw new Error(`${entry} retained the development refresh registry in production.`);
+  }
   return {
     code,
     raw: bytes.length,

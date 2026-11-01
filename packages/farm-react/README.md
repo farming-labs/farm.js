@@ -57,6 +57,11 @@ automatic and does not add a configuration option or asynchronous runtime loadin
 `createCompiledComponent` export remains a complete compatibility entry for hand-authored
 definitions, while generated code uses the tree-shakable feature entry.
 
+Generated code also selects refresh support through `import.meta.hot`. Production bundles can
+remove the development refresh registry and compatibility checks; development retains
+state-preserving refresh. Both entries share the same component runtime, including SSR, hydration,
+DOM ownership, and fallback behavior. Existing hand-authored runtime entries retain refresh support.
+
 Plain keyed lists with filter hints and only identity-based selection also use the single-kind
 target runtime. Filtering keeps its existing native-method checks and fallback; mixed Set/Map
 targets, conditional rows, and nested host blocks keep their existing runtime capabilities.

@@ -10623,6 +10623,11 @@ export async function compileReactModule(
         const candidates = collectCandidates(programPath);
         const createComponentIdentifier =
           programPath.scope.generateUidIdentifier("createCompiledComponent");
+        const createRefreshComponentIdentifier =
+          programPath.scope.generateUidIdentifier("createRefreshComponent");
+        const createProductionComponentIdentifier = programPath.scope.generateUidIdentifier(
+          "createProductionComponent",
+        );
         const keyedMapUpdateIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedMapUpdate",
         );
@@ -10793,11 +10798,31 @@ export async function compileReactModule(
         if (compiled.length > 0) {
           programPath.unshiftContainer(
             "body",
+            t.variableDeclaration("const", [
+              t.variableDeclarator(
+                t.cloneNode(createComponentIdentifier),
+                t.conditionalExpression(
+                  t.memberExpression(
+                    t.metaProperty(t.identifier("import"), t.identifier("meta")),
+                    t.identifier("hot"),
+                  ),
+                  t.cloneNode(createRefreshComponentIdentifier),
+                  t.cloneNode(createProductionComponentIdentifier),
+                ),
+              ),
+            ]),
+          );
+          programPath.unshiftContainer(
+            "body",
             t.importDeclaration(
               [
                 t.importSpecifier(
-                  createComponentIdentifier,
+                  createRefreshComponentIdentifier,
                   t.identifier("createCompiledComponentWithFeatures"),
+                ),
+                t.importSpecifier(
+                  createProductionComponentIdentifier,
+                  t.identifier("createCompiledComponentWithoutRefresh"),
                 ),
                 ...(optimizationCounts.keyedMapUpdateHints > compilerUsage.keyedArrayMapUpdateHints
                   ? [
