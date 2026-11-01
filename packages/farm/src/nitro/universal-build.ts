@@ -422,7 +422,9 @@ const NITRO_EXTERNAL_MODULES = new Set([
   "rolldown/utils",
   "rollup",
   "vite",
-  "nitro",
+  // Not "nitro": it is Nitro's runtime (defineHandler, definePlugin), which handlers that Nitro
+  // modules add import by name. Left external it is missing from a Worker, which has no
+  // node_modules, and a Node server loads a second copy of the runtime.
   "nitropack",
   "sharp",
 ]);
@@ -674,7 +676,8 @@ function shouldUseExternalMetadataImageRuntime(preset: string, usesImageRuntime:
   return usesImageRuntime && preset !== "vercel-edge" && !isCloudflareImagePreset(preset);
 }
 
-function isNitroRollupExternal(id: string): boolean {
+/** @internal Exported for tests. */
+export function isNitroRollupExternal(id: string): boolean {
   const normalizedId = id.replace(/\\/g, "/");
 
   return (
