@@ -4440,15 +4440,17 @@ async function streamFarmNavigation(stream, root, isCurrent) {
       root.appendChild(fragment);
     }
   } catch (error) {
-    observer.disconnect();
-    if (isCurrent()) console.error("[Farm.js] A streamed navigation failed:", error);
+    streaming = false;
+    if (!isCurrent()) return observer.disconnect();
+    console.error("[Farm.js] A streamed navigation failed:", error);
+    ${isolatedHydrationEnabled ? "farmIsolatedHydrationRuntime.endStream?.(root);\n    if (!queued) run();" : ""}
     return;
   }
   // A cancelled stream ends early: keep its partial document out of the cache.
   if (!isCurrent()) return observer.disconnect();
   streaming = false;
   stream.store(html);
-  ${isolatedHydrationEnabled ? "if (!queued) run();" : ""}
+  ${isolatedHydrationEnabled ? "farmIsolatedHydrationRuntime.endStream?.(root);\n  if (!queued) run();" : ""}
 }`
     : ""
 }
