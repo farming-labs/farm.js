@@ -11,7 +11,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Link href="/context">Context</Link> <Link href="/async">Async</Link>{" "}
         <Link href="/stream">Stream</Link> <Link href="/meta">Meta</Link>{" "}
         <Link href="/action">Action</Link> <Link href="/nav/a">Nav</Link>{" "}
-        <Link href="/static/a">Static</Link> <Link href="/window">Window</Link>
+        <Link href="/static/a">Static</Link> <Link href="/window">Window</Link>{" "}
+        <Link href="/promise">Promise</Link>
       </nav>
       <main>{children}</main>
     </div>

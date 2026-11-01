@@ -218,6 +218,38 @@ test("leaving a streaming page drops the rest of its content", async ({ page }) 
   expect(errors).toEqual([]);
 });
 
+test("a promise passed to a client component streams in, and the component works before it", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/promise", { waitUntil: "commit" });
+  const like = page.getByRole("button", { name: /^Likes: / });
+  let quoteArrivedFirst = true;
+  await expect(async () => {
+    await like.click({ timeout: 100 });
+    await expect(like).toHaveText(/^Likes: [1-9]/, { timeout: 50 });
+    quoteArrivedFirst = (await page.getByTestId("quote").count()) > 0;
+  }).toPass({ intervals: [20], timeout: 10_000 });
+  // As with Suspense content: islands start while the body streams, RSC once it ends.
+  if (mode === "islands") expect(quoteArrivedFirst).toBe(false);
+  // The resolved value keeps its types (a Date).
+  await expect(page.getByTestId("quote")).toHaveText("Promises cross the wire (2026)");
+  await expect(page.getByTestId("quote-fallback")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("a promise prop resolves after a client navigation", async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto("/");
+  await hydrated(page);
+  await page.getByRole("link", { name: "Promise", exact: true }).click();
+  await expect(page.getByTestId("quote")).toHaveText("Promises cross the wire (2026)");
+  const like = page.getByRole("button", { name: /^Likes: / });
+  await like.click();
+  await expect(like).toHaveText("Likes: 1");
+  expect(errors).toEqual([]);
+});
+
 test("generateMetadata sets the head", async ({ request }) => {
   const html = await (await request.get("/meta")).text();
   expect(html).toContain("<title>Contract meta 42</title>");
