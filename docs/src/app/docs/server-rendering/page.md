@@ -331,7 +331,11 @@ copy, and a client navigation leaves out the values the browser already holds. A
 also leaves out the layouts the browser keeps: the server renders the page and any layout that
 changed, so a layout's client state survives and its HTML is not sent again. A layout the browser
 keeps does not render on that navigation, so put access checks in middleware or a page `guard`,
-not in a layout's body. `router.refresh()` and full loads render every layout. A PPR route caches
+not in a layout's body. `router.refresh()` and full loads render every layout. A client
+navigation streams too, in production: the browser shows the page with its Suspense fallbacks as
+soon as the shell arrives, then each boundary as React completes it, and hydrates the client
+components inside. Leaving the page drops the rest of the response. A page under a layout that
+hydrates arrives whole. A PPR route caches
 each segment under its own key next to the full page, and sends every value so the cached HTML
 suits any browser; a prerendered page always sends the whole document. A page under a layout that
 hydrates as one root (a client provider around the pages) sends its large prop values once too,
