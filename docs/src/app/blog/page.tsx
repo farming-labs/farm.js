@@ -2,9 +2,9 @@ import type { Metadata } from "@farm.js/core";
 import { ArrowRight, Newspaper } from "lucide-react";
 import { BlogAuthor } from "../../components/blog/author";
 import { BlogExplore } from "../../components/blog/explore";
-import { ReleaseArtwork } from "../../components/blog/release-artwork";
+import { POST_ART } from "../../components/blog/post-art";
 import { IndexedLabel } from "../../components/site-chrome";
-import { launchPost } from "../../lib/blog";
+import { posts } from "../../lib/blog";
 
 export const metadata = {
   openGraph: { title: "Blog — Farm.js", url: "/blog" },
@@ -13,6 +13,8 @@ export const metadata = {
 } satisfies Metadata;
 
 export default function BlogPage() {
+  const [featured, ...rest] = posts.map(({ post }) => post);
+
   return (
     <>
       <header className="blog-index-header">
@@ -36,24 +38,41 @@ export default function BlogPage() {
         <article className="blog-featured" aria-labelledby="featured-title">
           <div className="blog-featured-copy">
             <div className="blog-post-meta">
-              <span className="blog-category">{launchPost.category}</span>
-              <time dateTime={launchPost.dateTime}>{launchPost.date}</time>
+              <span className="blog-category">{featured.category}</span>
+              <time dateTime={featured.dateTime}>{featured.date}</time>
             </div>
             <h3 id="featured-title">
-              <a href={launchPost.href}>
-                Farm.js v0.1.0: <span>Stable, Integrated, and Agent-Native.</span>
-              </a>
+              <a href={featured.href}>{POST_ART[featured.href].heading}</a>
             </h3>
-            <p>{launchPost.description}</p>
+            <p>{featured.description}</p>
           </div>
-          <ReleaseArtwork />
+          {POST_ART[featured.href].card}
           <div className="blog-featured-bottom">
-            <BlogAuthor />
-            <a className="blog-read-link" href={launchPost.href}>
+            <BlogAuthor post={featured} />
+            <a className="blog-read-link" href={featured.href}>
               Read article <ArrowRight aria-hidden size={16} strokeWidth={1.5} />
             </a>
           </div>
         </article>
+        {rest.length > 0 && (
+          <ul className="blog-post-list">
+            {rest.map((post) => (
+              <li key={post.href}>
+                <a href={post.href}>
+                  <div className="blog-post-meta">
+                    <span className="blog-category">{post.category}</span>
+                    <time dateTime={post.dateTime}>{post.date}</time>
+                  </div>
+                  <h3>{post.title}</h3>
+                  <p>{post.description}</p>
+                  <span className="blog-post-list-more">
+                    Read article <ArrowRight aria-hidden size={14} strokeWidth={1.5} />
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <BlogExplore />

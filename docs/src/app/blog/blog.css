@@ -446,6 +446,50 @@
   color: #777;
   border-right: 1px solid var(--blog-line);
 }
+/* Posts after the featured one: a plain rule-separated list, no artwork. */
+.blog-post-list {
+  border-top: 1px solid var(--blog-line);
+  list-style: none;
+}
+.blog-post-list > li + li {
+  border-top: 1px solid var(--blog-line);
+}
+.blog-post-list a {
+  display: block;
+  padding: 32px 48px;
+  color: inherit;
+  text-decoration: none;
+}
+.blog-post-list a:hover {
+  background: rgb(255 255 255 / 0.015);
+}
+.blog-post-list h3 {
+  margin: 18px 0 10px;
+  font-size: clamp(20px, 1.9vw, 25px);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+}
+.blog-post-list p {
+  max-width: 54ch;
+  color: var(--blog-muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.blog-post-list-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 18px;
+  color: #a6a6a6;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.blog-post-list a:hover .blog-post-list-more {
+  color: #fff;
+}
 .blog-explore-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -541,6 +585,19 @@
 .blog-release-art--full-bleed {
   min-height: 100%;
   background: #000;
+}
+/* A post whose header artwork is a scripted figure rather than the release reel. */
+.blog-post-artwork {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 36px;
+  border-left: 1px solid var(--blog-line);
+}
+.blog-post-artwork .blog-figure {
+  width: 100%;
+  margin: 0;
 }
 .blog-release-art--full-bleed .blog-art-label,
 .blog-release-art--full-bleed .blog-art-caption {
@@ -660,6 +717,75 @@
   font-weight: 300;
   line-height: 1.85;
   overflow-wrap: break-word;
+}
+/* Tables read as a comparison, not a data grid: no box, hairline row rules, mono headers. */
+.blog-prose .farm-markdown table {
+  display: table;
+  width: 100%;
+  margin: 34px 0;
+  border: 0;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.blog-prose .farm-markdown thead {
+  border: 0;
+}
+.blog-prose .farm-markdown th,
+.blog-prose .farm-markdown td {
+  padding: 14px 24px 14px 0;
+  border: 0;
+  border-bottom: 1px solid var(--blog-line);
+  background: none;
+  text-align: left;
+  vertical-align: baseline;
+}
+.blog-prose .farm-markdown th {
+  padding-bottom: 10px;
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.blog-prose .farm-markdown tbody td:first-child {
+  width: 32%;
+  color: #ededed;
+}
+.blog-prose .farm-markdown tbody td:last-child {
+  color: #ededed;
+}
+.blog-prose .farm-markdown tbody tr:last-child td {
+  border-bottom: 0;
+}
+/* Cells wrap between tokens, never inside one, so `?max_tokens` stays one word. */
+.blog-prose .farm-markdown td code {
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+@media (max-width: 620px) {
+  /* The reading column is narrower than this table, and the page clips overflow, so the
+     table scrolls inside the article rather than losing its last column. */
+  .blog-prose .farm-markdown table {
+    display: block;
+    overflow-x: auto;
+    font-size: 13px;
+  }
+  .blog-prose .farm-markdown tbody,
+  .blog-prose .farm-markdown thead {
+    display: table;
+    width: 100%;
+    min-width: 440px;
+  }
+  .blog-prose .farm-markdown th,
+  .blog-prose .farm-markdown td {
+    padding: 11px 12px 11px 0;
+  }
+  .blog-prose .farm-markdown tbody td:first-child {
+    width: 38%;
+  }
 }
 /* Keep the source title/byline for Markdown readers; the visual header above
    presents them without duplicating the accessible title. */
@@ -1033,12 +1159,20 @@
   .blog-release-art--full-bleed {
     min-height: 240px;
   }
+  .blog-post-artwork {
+    padding: 28px 24px 32px;
+    border-left: none;
+    border-top: 1px solid var(--blog-line);
+  }
   .blog-contents {
     display: none;
   }
   .blog-reading-grid {
     display: block;
     padding: 28px 24px 48px;
+  }
+  .blog-post-list a {
+    padding: 26px 24px;
   }
   .blog-reading-column {
     padding: 0;
@@ -1100,6 +1234,9 @@
   }
   .blog-release-art--full-bleed {
     min-height: 220px;
+  }
+  .blog-post-artwork {
+    padding: 22px 16px 26px;
   }
   .blog-explore-grid {
     grid-template-columns: 1fr;

@@ -19,7 +19,9 @@ export type FigureKind =
   | "agents-site"
   | "agents-observe"
   | "landing-markdown"
-  | "landing-strata";
+  | "landing-strata"
+  | "agent-layers"
+  | "agent-authorize";
 export type IconKey =
   | "stripe"
   | "cloudflare"
@@ -1776,6 +1778,184 @@ agentsCode.narrow = {
   },
 };
 
+/* ---------- agent-native post: the four layers, and who a tool call runs as ---------- */
+
+// One request, both halves of the answer: what an agent can read, and what it can call. Lines
+// stream in as each pulse lands, so the card shows the exchange rather than a list of features.
+const READ_LINES: [string, string][] = [
+  ["bf-dim", "200 text/markdown"],
+  ["bf-hi", "# Pricing"],
+  ["", "- Hobby: free"],
+  ["", "- Pro: $20 / month"],
+];
+const ACT_LINES: [string, string][] = [
+  ["bf-dim", "tools/list -> 2 tools"],
+  ["bf-hi", "create_project"],
+  ["", 'name: "Invoice redesign"'],
+  ["bf-dim", "201 project-3"],
+];
+const agentLayers: FigureSpec = {
+  duration: 0.5 + BEAT * 0.6 + PULSE + 4 * 0.3 + 0.6 + HOLD,
+  stage: { w: 440, h: 258 },
+  label:
+    "One origin answers an agent twice: the page as Markdown it can read, and a typed tool it can call",
+  panels: [
+    {
+      id: "agent",
+      x: 120,
+      y: 0,
+      w: 200,
+      h: 48,
+      flow: true,
+      icon: "agent",
+      kicker: "Agent",
+      label: "acme.test",
+    },
+    { id: "read", x: 0, y: 96, w: 205, h: 162, title: "Reads" },
+    { id: "act", x: 235, y: 96, w: 205, h: 162, title: "Calls" },
+  ],
+  wires: {
+    read: [
+      [170, 48],
+      [170, 72],
+      [102, 72],
+      [102, 96],
+    ],
+    act: [
+      [270, 48],
+      [270, 72],
+      [337, 72],
+      [337, 96],
+    ],
+  },
+  frame(t) {
+    const asked = 0.5;
+    const acted = asked + BEAT * 0.6;
+    const readAt = asked + PULSE;
+    const actAt = acted + PULSE;
+    const stream = (lines: [string, string][], at: number) =>
+      lines
+        .map(
+          ([cls, text], i) =>
+            `<span class="bf-line${cls ? ` ${cls}` : ""}" style="opacity:${ease(
+              prog(t, at + i * 0.3, 0.3),
+            ).toFixed(3)}">${esc(text)}</span>`,
+        )
+        .join("");
+    const settled = actAt + ACT_LINES.length * 0.3;
+    return {
+      slots: {
+        agent: step(t, 0.2, settled),
+        read: stream(READ_LINES, readAt),
+        "read:meta": t >= readAt ? "/pricing.md" : "",
+        act: stream(ACT_LINES, actAt),
+        "act:meta": t >= actAt ? "/api/mcp" : "",
+      },
+      wires: {
+        read: wire(t, 0.1, [[asked]]),
+        act: wire(t, 0.2, [[acted]]),
+      },
+      states: {
+        agent: busy(t, 0.2, acted),
+        read: busy(t, readAt, readAt + READ_LINES.length * 0.3),
+        act: busy(t, actAt, settled),
+      },
+    };
+  },
+};
+
+// The same tools/call, from two callers, through the one pipeline the HTTP route already had.
+// The reader never reaches the handler: its catalog does not contain the tool.
+const CALL_STEPS: [GlyphKey, string, string][] = [
+  ["swap", "authorize", "per-caller catalog"],
+  ["server", "middleware", "the route's own"],
+  ["file", "schema", "the route's zod"],
+  ["model", "handler", "creates the project"],
+];
+const READER_RESULTS = ["not found", "", "", ""];
+const WRITER_RESULTS = ["2 tools", "demo-writer", "valid", "project-3"];
+const agentAuthorize: FigureSpec = {
+  duration: 0.6 + PULSE + CALL_STEPS.length * BEAT + HOLD,
+  label:
+    "One tools/call for create_project: the reader is refused at authorization, and the writer runs the route's own middleware, schema, and handler",
+  panels: [
+    {
+      id: "call",
+      x: 205,
+      y: 0,
+      w: 350,
+      h: 48,
+      flow: true,
+      icon: "tool",
+      kicker: "tools/call",
+      label: "create_project",
+    },
+    { id: "reader", x: 0, y: 112, w: 365, h: 288, title: "Bearer demo-reader" },
+    { id: "writer", x: 395, y: 112, w: 365, h: 288, title: "Bearer demo-writer" },
+  ],
+  wires: {
+    read: [
+      [330, 48],
+      [330, 80],
+      [182, 80],
+      [182, 112],
+    ],
+    write: [
+      [430, 48],
+      [430, 80],
+      [577, 80],
+      [577, 112],
+    ],
+  },
+  frame(t) {
+    const sent = 0.6;
+    const begin = sent + PULSE;
+    // The reader is stopped by the first step, so only that row ever runs.
+    const rows = (results: string[], stops: boolean) =>
+      CALL_STEPS.map(([icon, name, sub], i) => {
+        const start = begin + i * BEAT;
+        const end = start + BEAT * 0.75;
+        const blocked = stops && i > 0;
+        const finished = t >= end;
+        const last = i === CALL_STEPS.length - 1;
+        if (blocked)
+          return row(icon, name, esc(sub), "", '<span class="bf-st"></span>', "bf-item--wait");
+        const status = stops
+          ? t >= end
+            ? '<span class="bf-st bf-st--no">✕</span>'
+            : step(t, start, end)
+          : step(t, start, end);
+        return row(
+          icon,
+          name,
+          esc(sub),
+          finished ? results[i] : "",
+          status,
+          t >= start && (!finished || last) ? "bf-von" : t < start ? "bf-item--wait" : "",
+        );
+      }).join("");
+    const settled = begin + CALL_STEPS.length * BEAT;
+    return {
+      slots: {
+        call: step(t, 0.2, settled),
+        reader: rows(READER_RESULTS, true),
+        "reader:meta": t >= begin + BEAT * 0.75 ? "refused" : "",
+        writer: rows(WRITER_RESULTS, false),
+        "writer:meta": t >= settled ? "created" : "",
+      },
+      wires: {
+        read: wire(t, 0.1, [[sent]]),
+        write: wire(t, 0.2, [[sent]]),
+      },
+      states: {
+        call: busy(t, 0.2, sent),
+        reader: busy(t, begin, begin + BEAT * 0.75),
+        writer: busy(t, begin, settled),
+      },
+    };
+  },
+};
+
 export const FIGURES: Record<FigureKind, FigureSpec> = {
   integration,
   agents,
@@ -1794,6 +1974,38 @@ export const FIGURES: Record<FigureKind, FigureSpec> = {
   "agents-observe": agentsObserve,
   "landing-markdown": landingMarkdown,
   "landing-strata": landingStrata,
+  "agent-layers": agentLayers,
+  "agent-authorize": agentAuthorize,
+};
+
+// The two callers stack, so a phone reads the refused run above the one that completes.
+agentAuthorize.narrow = {
+  stage: { w: 360, h: 660 },
+  panels: [
+    {
+      id: "call",
+      x: 10,
+      y: 0,
+      w: 340,
+      h: 48,
+      flow: true,
+      icon: "tool",
+      kicker: "tools/call",
+      label: "create_project",
+    },
+    { id: "reader", x: 10, y: 96, w: 340, h: 250, title: "Bearer demo-reader" },
+    { id: "writer", x: 10, y: 382, w: 340, h: 250, title: "Bearer demo-writer" },
+  ],
+  wires: {
+    read: [
+      [180, 48],
+      [180, 96],
+    ],
+    write: [
+      [180, 346],
+      [180, 382],
+    ],
+  },
 };
 
 /** SVG path with rounded elbows through the given stage points. */
