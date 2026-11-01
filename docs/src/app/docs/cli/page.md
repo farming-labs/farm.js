@@ -59,6 +59,7 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 | farm add integration stripe --ui | Add integration wiring and optional UI.                              |
 | farm cron list                   | List configured UTC schedules and target routes.                     |
 | farm cron run dailyCleanup       | Invoke one cron route on a running app.                              |
+| farm dev --host                  | Listen on every interface, for a phone, emulator, or LAN device.     |
 | farm dev --cron                  | Start the dev server with the opt-in in-memory cron scheduler.       |
 | farm dev --desktop               | Open the app in its desktop shell, guarded like the packaged app.    |
 | farm build --desktop             | Build a packaged desktop app ([Desktop Apps](/docs/desktop)).        |
@@ -110,6 +111,11 @@ package versions follow the app's installed `@farm.js/core` version, including b
 farm generate
 farm generate --check
 ```
+
+`farm dev` listens on loopback only, on both `127.0.0.1` and `::1`, so an Android emulator
+(`10.0.2.2`) and `adb reverse` reach it without exposing it. `farm dev --host` listens on every
+interface and prints the LAN URLs; `--host <address>` binds one address. `vite.server.host` sets
+the same option in `farm.config.ts`, and the flag wins over it.
 
 `farm dev` refreshes generated route/API types automatically when page and API route files change. Use `farm generate` when you want to refresh the same files outside the dev server, such as in CI, before publishing a package, or after moving files while the dev server was stopped.
 

@@ -98,6 +98,7 @@ program
   .command("dev")
   .description("Start development server")
   .option("-p, --port <port>", "Override the port to run the server on")
+  .option("-H, --host [host]", "Listen on every interface, or on the given address")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("--cron", "Run configured cron routes in-process during development")
   .option("--desktop", "Open the app in its desktop shell, guarded like the packaged app")
@@ -108,6 +109,9 @@ program
       const platform = resolvePlatformOption(options);
       if (platform === "desktop") {
         if (options.cron) throw new Error("--cron is not available with --desktop.");
+        if (options.host !== undefined) {
+          throw new Error("--host is not available with --desktop; the desktop app is local only.");
+        }
         const { devFarmDesktop } = require("../dist/desktop.js");
         await devFarmDesktop({
           root: options.root,
@@ -124,6 +128,7 @@ program
           root: options.root,
         },
         options.port === undefined ? undefined : parsePortOption(options.port),
+        options.host,
       );
       if (options.cron) {
         const { startFarmCronScheduler } = require("../dist/index.js");

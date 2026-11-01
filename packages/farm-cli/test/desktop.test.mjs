@@ -151,6 +151,14 @@ test("--web and --desktop are exclusive", async () => {
   assert.match(result.output, /Choose one platform: --web or --desktop/);
 });
 
+test("farm dev --desktop refuses --host; the desktop app stays local", async () => {
+  for (const host of [["--host"], ["--host", "0.0.0.0"]]) {
+    const result = await runFarm(["dev", "--desktop", ...host, "--root", testDir]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.output, /--host is not available with --desktop/);
+  }
+});
+
 test("--desktop needs a desktop config entry", async (t) => {
   const root = await createApp(t, { config: "export default { telemetry: false };" });
   const result = await runFarm(["build", "--desktop", "--root", root]);
