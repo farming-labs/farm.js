@@ -137,6 +137,7 @@ import {
 import { generateFarmDevIndicatorsClientRuntime } from "./dev-indicators";
 import { createFarmDevPreviewGuard, getFarmDevFsDeny } from "./dev-preview-guard";
 import { resolveFarmPlatform } from "./desktop/config";
+import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
 import * as fs from "fs";
 import * as path from "path";
 import { pathToFileURL } from "node:url";
@@ -1298,13 +1299,6 @@ export function farmPlugin(
     },
 
     async configureServer(viteServer) {
-      // `farm dev --desktop`: only the desktop window gets an answer, as in the packaged app.
-      if (resolveFarmPlatform() === "desktop") {
-        const { createFarmDesktopDevGuard } = await import("./desktop/dev-guard");
-        viteServer.middlewares.use(
-          createFarmDesktopDevGuard(viteServer, { basePath: options.basePath || "" }),
-        );
-      }
       // First, so a tunnelled request is checked before Farm's routes and Vite's file serving.
       viteServer.middlewares.use(
         createFarmDevPreviewGuard(viteServer, {
@@ -6839,6 +6833,8 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
 
   return {
     plugins: [
+      // `farm dev --desktop`: only the desktop window gets an answer, as in the packaged app.
+      farmDesktopDevGuardPlugin(config.basePath),
       createFarmThemeCssPlugin(config.theme, config.basePath),
       tailwindVitePlugin,
       ...(rendererVitePlugins as any[]),

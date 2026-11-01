@@ -1,6 +1,7 @@
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import type { ViteDevServer } from "vite";
 import { resolveFarmPlatform, validateFarmDesktopConfig } from "../desktop/config";
+import { farmDesktopDevGuardPlugin } from "../desktop/dev-guard-plugin";
 import type { FarmConfig } from "../types";
 import { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
 import { logger } from "../utils";
@@ -361,6 +362,7 @@ export async function createServer(
           root: projectRoot,
           css: shouldUseProjectPostcss ? undefined : { postcss: { plugins: [] } },
           plugins: [
+            farmDesktopDevGuardPlugin(finalConfig.basePath),
             createFarmThemeCssPlugin(finalConfig.theme, finalConfig.basePath),
             ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
             ...(rendererVitePlugins as any[]),
