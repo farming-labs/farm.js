@@ -23,6 +23,7 @@ export type RoutePath =
   | "/meta"
   | "/nav/a"
   | "/nav/b"
+  | "/promise"
   | `/static/${string}`
   | "/stream"
   | "/types"
@@ -41,6 +42,7 @@ export type RoutePattern =
   | "/meta"
   | "/nav/a"
   | "/nav/b"
+  | "/promise"
   | "/static/[slug]"
   | "/stream"
   | "/types"
@@ -60,6 +62,7 @@ export type RouteModulePattern =
   | "/nav"
   | "/nav/a"
   | "/nav/b"
+  | "/promise"
   | "/static/[slug]"
   | "/stream"
   | "/types"
