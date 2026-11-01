@@ -68,8 +68,8 @@ export const agentNativePost: BlogPost = {
   title: "Making your site agent-native",
   description: "Four layers an agent meets at your origin, and the two most sites never reach.",
   ...AUTHOR,
-  date: "Oct 2026",
-  dateTime: "2026-10-31",
+  date: "Nov 2026",
+  dateTime: "2026-11-01",
   category: "Engineering",
 };
 
@@ -79,6 +79,7 @@ export const agentNativeSections = [
   ["layer-2-discoverable", "2 · Discoverable"],
   ["layer-3-governed", "3 · Governed"],
   ["layer-4-actionable", "4 · Actionable"],
+  ["when-an-action-outlives-its-request", "Durable actions"],
   ["your-forms-are-already-actions", "Forms as actions"],
   ["where-frameworks-stop", "Where frameworks stop"],
   ["what-it-costs", "What it costs"],

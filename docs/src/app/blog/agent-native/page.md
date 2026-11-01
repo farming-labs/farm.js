@@ -5,7 +5,7 @@ description: "Four layers an agent meets at your origin, and the two most sites 
 
 # Making your site agent-native
 
-KinfeMichael Tariku · Oct 2026
+KinfeMichael Tariku · Nov 2026
 
 Something is reading your site that is not a person and not Googlebot. It arrives with a token budget, no patience for a hydration wait, and a user who asked it to do something rather than to browse.
 
@@ -268,6 +268,43 @@ That error is the point of the whole design. The agent hit the same wall a buggy
 
 API MCP is experimental, and so is [WebMCP](/docs/plugins/webmcp), its browser-side counterpart, where a component registers tools that live only while the page is open and call your APIs with the user's own session. Without either, every app still serves a read-only MCP server at `/mcp` over its public pages — the floor is "agents can read you", not "agents can act".
 
+<span id="when-an-action-outlives-its-request" className="blog-heading-anchor" />
+
+## When an action outlives its request
+
+Everything above assumes an action finishes inside one request. Plenty don't. "Issue the refund" is a database write, a payment-provider call, and a human who has to say yes, possibly tomorrow. Exposing that as a plain tool gives an agent a call that either blocks for an hour or returns before the work is real.
+
+So the fourth layer has a second half: operations that outlive the request that started them. `@farm.js/agent` serves the agents in `src/agents` as durable runs, built on [agent-unit](https://github.com/farming-labs/agent-unit), which is a separate open-source project rather than a Farm-only feature.
+
+```ts title="src/agents/refund.ts"
+import { defineAgent } from "agent-unit";
+
+export default defineAgent(async (input: { orderId: string }, run) => {
+  const order = await run.step("look up order", () => findOrder(input.orderId));
+  const { approved } = await run.interrupt<{ approved: boolean }>("approve-refund", order);
+  return approved ? await refund(order) : "kept";
+});
+```
+
+Two primitives carry the weight. `run.step` runs once and is replayed from the run's journal afterwards, so a restart does not charge the card twice. `run.interrupt` pauses the run until an answer arrives, across restarts and deploys — the human approval is part of the program, not a callback you wire up around it.
+
+The surfaces this exposes are the same idea as the rest of the post, which is the point:
+
+| Request                                  | Does                                                           |
+| ---------------------------------------- | -------------------------------------------------------------- |
+| `POST /api/agent/agents/:name/runs`      | Starts a run. `Accept: text/event-stream` streams it           |
+| `GET /api/agent/runs/:id/events`         | Streams its events, resuming from `?after=` or `Last-Event-ID` |
+| `POST /api/agent/runs/:id/resume`        | Answers the interrupt                                          |
+| `GET /api/agent/runs?status=interrupted` | Lists runs, for an approvals inbox                             |
+| `GET /api/agent/manifest.json`           | Lists the agents                                               |
+| `POST /api/agent/mcp`                    | The same agents, as MCP tools                                  |
+
+That last row matters for an agent-native site. A caller that speaks MCP gets the durable agents in the same vocabulary as the endpoint-backed tools from the previous section, and the same app authorizes both. The agents are also served as an A2A agent, and the event stream follows [AG-UI](https://docs.ag-ui.com), so a client reconnecting after a dropped connection picks up from the last event it saw instead of starting over.
+
+Agents written with the AI SDK, Mastra, LangGraph, or the OpenAI Agents SDK work unchanged, and their own pauses become interrupts: tool approvals, Mastra's `suspend()`, LangGraph's `interrupt()`. [`examples/agent`](https://github.com/farming-labs/farm.js/tree/main/examples/agent) runs the approval flow end to end, and the [durable agents guide](/docs/integrations/agent) covers storage drivers, the sweep that wakes sleeping runs, and per-target budgets.
+
+The honest framing: a tool call is the right shape for "what are my active projects", and a durable run is the right shape for "refund this order". A site that is agent-native for real needs both, because the second category is where the money and the mistakes are.
+
 <span id="your-forms-are-already-actions" className="blog-heading-anchor" />
 
 ## Your forms are already actions
@@ -317,6 +354,7 @@ The difference is not capability. It is what you have to keep correct by hand:
 | MCP tool schemas                      | Write them beside your route schemas      | Derived from the route                            |
 | MCP authorization                     | A second auth path                        | The route's middleware, plus a per-caller catalog |
 | Form descriptions for agents          | —                                         | `?actions`                                        |
+| Actions that outlive a request        | A queue, a journal, and resume logic      | `run.step` / `run.interrupt`, served as MCP       |
 
 Every row in the first column is a place where two descriptions of one operation can disagree. The failure mode is not an error page; it is an agent confidently calling a tool whose schema is a release behind, or a Markdown mirror still serving a page you put behind a paywall last month.
 
