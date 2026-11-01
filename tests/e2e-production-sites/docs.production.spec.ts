@@ -409,6 +409,9 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
     if (where === "index") {
       await expect(page.locator(".blog-featured [data-figure]")).toHaveAttribute("data-ready", "");
     } else {
+      // The reel pauses when it scrolls out of view, and the post list sits below the fold, so
+      // bring it on screen before asking whether it is running.
+      await page.locator(".blog-release-art").scrollIntoViewIfNeeded();
       await expect(page.locator(".blog-release-art")).toHaveAttribute("data-motion", "running");
       await expect(page.locator(".blog-art-reel").first()).toHaveCSS(
         "animation-name",
