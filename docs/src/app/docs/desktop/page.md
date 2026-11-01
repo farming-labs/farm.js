@@ -164,6 +164,7 @@ Bun, and uses the system WebView (WKWebView on macOS), so no Chromium ships with
 - `appDataDir()` is Electrobun's `Utils.paths.userData`, for example
   `~/Library/Application Support/<desktop.id>/stable` on macOS.
 - Quitting the app drains requests and runs Farm's shutdown hooks before the process exits.
+- The window is sandboxed: page scripts and frames get no Electrobun RPC bridge.
 - `desktop.icon` (or the Farm icon) becomes the app's `AppIcon.icns` on macOS.
 - Known limit: the first launch after an install or update leaves Electrobun's hidden unpacking
   process running until logout. Later launches don't.

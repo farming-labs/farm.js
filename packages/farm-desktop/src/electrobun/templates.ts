@@ -104,10 +104,13 @@ async function startFarm() {
 }
 
 const farm = await startFarm();
+// sandbox: page scripts, and every frame in the page, get no Electrobun RPC bridge. Unsandboxed,
+// they could load URLs or run JavaScript in any webview by its numeric id.
 const win = new BrowserWindow({
   title: options.title,
   url: farm.origin + options.basePath + HANDSHAKE_PATH + "?t=" + encodeURIComponent(farm.handshakeToken),
   frame: { width: options.width, height: options.height },
+  sandbox: true,
 });
 
 // The window stays on the app's origin (the last matching rule wins). Links elsewhere open
