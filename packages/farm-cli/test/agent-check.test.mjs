@@ -45,8 +45,11 @@ const page = `<!doctype html><html lang="en"><head><title>Acme</title>
 const article = (title) =>
   `<!doctype html><html><body><main><h1>${title}</h1><p>${prose}</p></main></body></html>`;
 
-/** A complete Farm app, served under `base`. */
-function completeApp(base = "") {
+/**
+ * A complete Farm app, served under `base`. `mcpInLlms` controls whether llms.txt carries the
+ * "MCP" section core generates beside the pages, which also makes the endpoint discoverable.
+ */
+function completeApp(base = "", { mcpInLlms = true } = {}) {
   return async (input, init = {}) => {
     const url = new URL(String(input));
     const accept = new Headers(init.headers).get("accept") ?? "";
@@ -85,8 +88,14 @@ function completeApp(base = "") {
           ],
         });
       case "GET /llms.txt":
+        // Core lists its MCP endpoint and AI catalog in an "MCP" section beside the pages.
+        // Those links are endpoints an agent calls, not pages it reads.
         return text(
-          "# Acme\n\n## Pages\n\n- [Home](https://acme.test/index.md)\n- [Pricing](https://acme.test/pricing.md)\n",
+          "# Acme\n\n## Pages\n\n- [Home](https://acme.test/index.md)\n- [Pricing](https://acme.test/pricing.md)\n" +
+            (mcpInLlms
+              ? `\n## MCP\n\n- [acme](${base}/api/mcp): Streamable HTTP MCP endpoint\n` +
+                `- [AI catalog](${base}/.well-known/ai-catalog.json): MCP server cards for this site\n`
+              : ""),
         );
       case "HEAD /llms-full.txt":
         return new Response(null, { status: 200 });
@@ -323,7 +332,8 @@ test("finds the MCP endpoint in another catalog by its title, or at --mcp", asyn
 });
 
 test("checks agent-facing site gaps the way the farmjs.dev agent check does", async () => {
-  const app = completeApp();
+  // Nothing advertises the MCP endpoint here, so llms.txt does not list it either.
+  const app = completeApp("", { mcpInLlms: false });
   // A heading level skipped, and an Organization without an address.
   const home = page
     .replace("<h2>Pricing</h2>", "<h3>Pricing</h3>")
@@ -367,6 +377,33 @@ test("checks agent-facing site gaps the way the farmjs.dev agent check does", as
   assert.match(byCode.AGENT_TRUST_PAGES.message, /\/contact\.$/);
   assert.equal(byCode.AGENT_MCP_DISCOVERY.status, "info");
   assert.equal(report.health, "error");
+});
+
+test("counts the pages an llms.txt lists, not the endpoints beside them", async () => {
+  const app = completeApp();
+  const count = async (body) => {
+    const report = await runFarmAgentCheck({
+      url: "https://acme.test",
+      fetch: async (input, init) =>
+        new URL(String(input)).pathname === "/llms.txt"
+          ? new Response(body, { headers: { "content-type": "text/plain; charset=utf-8" } })
+          : app(input, init),
+    });
+    return report.checks.find((check) => check.code === "AGENT_LLMS_TXT").message;
+  };
+
+  // The "MCP" section lists endpoints an agent calls, so they are not pages.
+  assert.equal(
+    await count("# Acme\n\n## Pages\n\n- [Home](/index.md)\n\n## MCP\n\n- [acme](/api/mcp)\n"),
+    "Lists 1 pages.",
+  );
+  // Every other section is pages, whatever an app's own llms.ts calls it.
+  assert.equal(
+    await count("# Acme\n\n## Docs\n\n- [A](/a.md)\n\n## Optional\n\n- [B](/b.md)\n"),
+    "Lists 2 pages.",
+  );
+  // Links before any section still count.
+  assert.equal(await count("# Acme\n\n- [Home](/index.md)\n"), "Lists 1 pages.");
 });
 
 test("fails clearly when nothing answers", async () => {

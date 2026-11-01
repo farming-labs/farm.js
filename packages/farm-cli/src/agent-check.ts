@@ -543,6 +543,22 @@ async function checkMarkdownViews(
   );
 }
 
+/**
+ * The pages an llms.txt lists. The file groups `- [title](url)` links under `## H2` sections, and
+ * Farm puts its MCP endpoint and AI catalog in an "MCP" section. Those are endpoints an agent
+ * calls, not pages it reads, so counting every bullet reported them as pages.
+ */
+function countLlmsPages(body: string): number {
+  let section = "";
+  let pages = 0;
+  for (const line of body.split("\n")) {
+    const heading = /^##\s+(.+)$/.exec(line);
+    if (heading) section = heading[1].trim().toLowerCase();
+    else if (line.startsWith("- [") && section !== "mcp") pages++;
+  }
+  return pages;
+}
+
 async function checkLlms(
   at: (pathname: string) => string,
   probe: (url: string, init?: RequestInit) => Promise<Probe>,
@@ -556,7 +572,7 @@ async function checkLlms(
           status: "pass",
           code: "AGENT_LLMS_TXT",
           title: "llms.txt",
-          message: `Lists ${(llms.body.match(/^- \[/gm) ?? []).length} pages.`,
+          message: `Lists ${countLlmsPages(llms.body)} pages.`,
         }
       : {
           status: "warn",
