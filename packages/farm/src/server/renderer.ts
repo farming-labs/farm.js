@@ -19,7 +19,9 @@ import { collectDevStylesheetUrls, resolveDevGlobalStylesheetHref } from "./dev-
 import {
   composeFarmFullDocument,
   classifyFarmDocumentPrefix,
+  createFarmStreamedDocumentTransform,
   extractFarmFullDocument,
+  openFarmStreamedDocument,
   removeFarmDocumentTitles,
 } from "./full-document";
 import {
@@ -471,8 +473,10 @@ function createDocumentFooter(options: {
   deferredHydrationScript?: string;
   /** The client entry already started from the top of the body. */
   earlyClient?: boolean;
+  /** Close Farm's #root. A streamed full document closes it only when Farm opened it. */
+  closeRoot?: boolean;
 }): string {
-  return `</div>
+  return `${options.closeRoot === false ? "" : "</div>"}
   ${options.suspenseRevealFallback}
   ${options.refreshPPR ? createPPRRefreshScript() : ""}
   ${options.deferredHydrationScript || ""}
@@ -3342,15 +3346,17 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     const renderToPipeableStream = this.rendererRuntime.renderToPipeableStream;
     const fullDocumentRouteKey =
       options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
-    // A full-document layout can't be composed once the stream's shell is
-    // flushed, so a route known to render one is served through the buffered
-    // path, which produces a valid single document. So is the anonymous check behind
-    // a page's Markdown source, where a late redirect() must still set the status.
+    // A route known to render a full-document layout streams that document: React's output is
+    // held until its <body>, so Farm's head assets go into the layout's head, as production
+    // does. A static-shell capture and other renderers take the buffered path, which composes
+    // the whole document. So does the anonymous check behind a page's Markdown source, where a
+    // late redirect() must still set the status.
+    const streamDocument =
+      fullDocumentRoutes.has(fullDocumentRouteKey) || (await this.rootLayoutRendersDocument());
     if (
       !renderToPipeableStream ||
       _isFarmMarkdownPageCheck(req.headers?.[FARM_MARKDOWN_PAGE_CHECK_HEADER]) ||
-      fullDocumentRoutes.has(fullDocumentRouteKey) ||
-      (await this.rootLayoutRendersDocument())
+      (streamDocument && (options.captureStaticShell || !isReactRenderer(this.config.renderer)))
     ) {
       return this.renderBufferedSSR(element, req, res, clearMiddlewareData, options);
     }
@@ -3502,6 +3508,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         title,
         tags: metaTags,
         hasFavicon,
+        hasExplicitTitle,
         viewport: viewportTags,
       } = renderMetadataHead((req as any).__FARM_METADATA__, {
         pathname: getFarmMetadataPathname(req),
@@ -3581,26 +3588,91 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 </head>
 <body class="">${earlyClient ? `\n  ${FARM_DEV_EARLY_CLIENT_SCRIPT}` : ""}
   <div id="root">`;
-          const securedShell = stampDocumentHTML(shell);
-          htmlParts.push(securedShell);
-          staticShellParts?.push(securedShell);
+          // A full document opens from React's own <html> instead (documentTransform).
+          const securedShell = streamDocument ? "" : stampDocumentHTML(shell);
+          if (securedShell) {
+            htmlParts.push(securedShell);
+            staticShellParts?.push(securedShell);
+          }
+
+          // A full document: its head gets the assets the buffered path composes in. They are
+          // Farm's own markup, so they carry the nonce; the layout's markup kept only the nonces
+          // the renderer or the app gave it (cspNonceRewriter).
+          // Islands mode: the early client entry goes right after the layout's own <body>.
+          const withEarlyClient = (document: { html: string; rootOpened: boolean }) =>
+            earlyClient
+              ? {
+                  ...document,
+                  html: document.html.replace(
+                    /<body\b[^>]*>/i,
+                    (open) => `${open}\n  ${stampDocumentHTML(FARM_DEV_EARLY_CLIENT_SCRIPT)}`,
+                  ),
+                }
+              : document;
+          const documentTransform = streamDocument
+            ? createFarmStreamedDocumentTransform(
+                (opening) =>
+                  withEarlyClient(
+                    openFarmStreamedDocument(
+                      hasExplicitTitle ? removeFarmDocumentTitles(opening) : opening,
+                      {
+                        fallbackIcon: !hasFavicon,
+                        viewport: viewportTags,
+                        htmlAttributes: `${
+                          i18nSnapshot
+                            ? ` lang="${escapeHtmlAttribute(i18nSnapshot.locale)}" dir="${escapeHtmlAttribute(i18nSnapshot.direction)}"`
+                            : ""
+                        }${themeDocument.attributes}`,
+                        replaceHtmlAttributes: [
+                          ...(i18nSnapshot ? ["lang", "dir"] : []),
+                          ...(themeDocument.attributes ? ["data-theme"] : []),
+                        ],
+                        headAssets: stampDocumentHTML(
+                          [
+                            themeDocument.head,
+                            `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">`,
+                            hasExplicitTitle ? `<title>${title}</title>` : "",
+                            metaTags,
+                            i18nAlternateTags,
+                            fontHead,
+                            globalStylesheetLink,
+                            ...devStyleLinks,
+                            `<script type="module" src="/@vite/client"></script>`,
+                            propsScript,
+                            hydrationClickQueueScript,
+                          ]
+                            .filter(Boolean)
+                            .join("\n  "),
+                        ),
+                        // The footer follows the streamed body.
+                        bodyFooter: "",
+                      },
+                    ),
+                  ),
+                stampDocumentHTML(shell),
+              )
+            : undefined;
 
           let firstChunk = true;
           let checkedFullDocument = false;
           let documentPrefix = "";
           const cspNonceRewriter = cspNonce ? createFarmCspNonceRewriter(cspNonce) : undefined;
           const cspStreamDecoder = cspNonceRewriter ? new TextDecoder() : undefined;
-          const recordRenderedChunk = (chunkText: string) => {
-            if (!chunkText) return;
-            if (!checkedFullDocument) {
-              documentPrefix += chunkText;
+          // `renderedText` is React's output, which tells whether the route renders a document;
+          // `chunkText` is what the response sends.
+          const recordRenderedChunk = (chunkText: string, renderedText = chunkText) => {
+            if (!checkedFullDocument && renderedText) {
+              documentPrefix += renderedText;
               const prefix = classifyFarmDocumentPrefix(documentPrefix);
               if (prefix !== "pending") {
                 checkedFullDocument = true;
                 documentPrefix = "";
                 if (prefix === "document") fullDocumentRoutes.add(fullDocumentRouteKey);
+                // A route that no longer renders one streams in Farm's shell again.
+                else fullDocumentRoutes.delete(fullDocumentRouteKey);
               }
             }
+            if (!chunkText) return;
             htmlParts.push(chunkText);
 
             if (staticShellParts && findStaticShellBoundary && !staticShellClosed) {
@@ -3633,16 +3705,21 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
               const securedChunkText = cspNonceRewriter
                 ? cspNonceRewriter.write(chunkText)
                 : chunkText;
-              // The shell was already flushed, so this response still nests the
-              // document; record the route so later requests take the buffered
-              // path (which composes it correctly) and warn the developer once.
-              recordRenderedChunk(securedChunkText);
+              const outputText = documentTransform
+                ? documentTransform.write(securedChunkText)
+                : securedChunkText;
+              // A shell already flushed nests a document this request found; record the route
+              // so later requests stream it as a document.
+              recordRenderedChunk(outputText, securedChunkText);
 
               const onWrite = () => {
                 if (typeof (res as any).flush === "function") (res as any).flush();
                 callback();
               };
-              if (cspNonceRewriter) res.write(securedChunkText, onWrite);
+              if (documentTransform) {
+                if (outputText) res.write(outputText, onWrite);
+                else callback();
+              } else if (cspNonceRewriter) res.write(securedChunkText, onWrite);
               else res.write(chunk, encoding, onWrite);
             },
             final: (callback) => {
@@ -3651,7 +3728,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                 lateNavigationError = null;
                 createLateNavigationRecovery(navigationError).then(
                   (recovery: string) => {
-                    const secured = filterDocumentHTML(recovery);
+                    const filtered = filterDocumentHTML(recovery);
+                    const secured = documentTransform
+                      ? documentTransform.write(filtered)
+                      : filtered;
                     htmlParts.push(secured);
                     res.write(secured);
                     finishStream(callback);
@@ -3668,9 +3748,15 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           });
           const finishStream = (callback: (error?: Error | null) => void) => {
             if (cspNonceRewriter) {
-              const tail = cspNonceRewriter.write(cspStreamDecoder!.decode(), true);
-              recordRenderedChunk(tail);
+              const rewritten = cspNonceRewriter.write(cspStreamDecoder!.decode(), true);
+              const tail = documentTransform ? documentTransform.write(rewritten) : rewritten;
+              recordRenderedChunk(tail, rewritten);
               if (tail) res.write(tail);
+            }
+            const documentEnd = documentTransform?.end();
+            if (documentEnd?.text) {
+              recordRenderedChunk(documentEnd.text, "");
+              res.write(documentEnd.text);
             }
             const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
             const footer = stampDocumentHTML(
@@ -3678,6 +3764,8 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                 suspenseRevealFallback,
                 deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
                 earlyClient,
+                // A full document: Farm's #root closes only where Farm opened it.
+                ...(documentEnd?.document ? { closeRoot: documentEnd.rootOpened } : {}),
               }),
             );
             htmlParts.push(footer);

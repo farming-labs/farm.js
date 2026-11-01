@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 import {
   classifyFarmDocumentPrefix,
   composeFarmFullDocument,
+  createFarmStreamedDocumentTransform,
+  openFarmStreamedDocument,
   ensureFarmDocumentHead,
   ensureFarmDocumentRoot,
   extractFarmFullDocument,
@@ -553,5 +555,60 @@ describe("full-document composition", () => {
     expect(html.match(/\slang=/gi)).toHaveLength(1);
     expect(html.match(/\sdir=/gi)).toHaveLength(1);
     expect(html.match(/\sdata-theme=/gi)).toHaveLength(1);
+  });
+});
+
+describe("streamed full documents", () => {
+  const assets = {
+    fallbackIcon: true,
+    viewport: "",
+    headAssets: '<script type="module" src="/@vite/client"></script>',
+    bodyFooter: "",
+  };
+  const transform = () =>
+    createFarmStreamedDocumentTransform(
+      (opening) => openFarmStreamedDocument(opening, assets),
+      '<!DOCTYPE html><html><head></head><body><div id="root">',
+    );
+
+  it("opens the layout's document at <body> and streams the rest of its body", () => {
+    const stream = transform();
+    const out = [
+      '<div style="display:contents"><html lang="en"><head><ti',
+      'tle>App</title></head><body class="app"><header>top</header><p>',
+      "fallback</p></body></html></div>",
+      "<script>/* a Suspense reveal */</script>",
+    ].map((chunk) => stream.write(chunk));
+    // Nothing goes out before the opening <body>.
+    expect(out[0]).toBe("");
+    expect(out[1]).toMatch(
+      /^<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8"><title>App<\/title>/,
+    );
+    expect(out[1]).toContain('<script type="module" src="/@vite/client"></script>');
+    expect(out[1]).toContain('<link rel="icon" href="data:,">');
+    expect(out[1]).toMatch(/<body class="app"><div id="root"><header>top<\/header><p>$/);
+    // React's closing tags and Farm's wrapper go; what React streams after stays in the body.
+    expect(out[2]).toBe("fallback</p>");
+    expect(out[3]).toBe("<script>/* a Suspense reveal */</script>");
+    expect(stream.end()).toEqual({ text: "", document: true, rootOpened: true });
+  });
+
+  it("keeps a body that opens #root itself", () => {
+    const stream = transform();
+    stream.write('<html><head></head><body><div id="root"><p>x</p></div></body></html>');
+    expect(stream.end().rootOpened).toBe(false);
+  });
+
+  it("streams a fragment after Farm's shell when the layout renders no document", () => {
+    const stream = transform();
+    expect(stream.write('<div style="display:contents"><main>page</main></div>')).toBe(
+      '<!DOCTYPE html><html><head></head><body><div id="root"><div style="display:contents"><main>page</main></div>',
+    );
+    expect(stream.write("<p>more</p>")).toBe("<p>more</p>");
+    expect(stream.end()).toEqual({ text: "", document: false, rootOpened: false });
+    // Too little output to tell is no document either.
+    const empty = transform();
+    expect(empty.write("")).toBe("");
+    expect(empty.end()).toMatchObject({ document: false });
   });
 });
