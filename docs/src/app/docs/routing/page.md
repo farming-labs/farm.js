@@ -392,6 +392,48 @@ export function ProductForm({ isDirty }: { isDirty: boolean }) {
 
 Blockers apply to Farm SPA navigation and browser unload prompts. They improve UX, but they do not replace server-side validation or persistence checks.
 
+## Navigation delegates
+
+A host that shows each page on its own screen, such as a native mobile or desktop shell, can take
+in-app navigations instead of letting the router navigate in place. Register a delegate in the
+app's client entry; return `true` to take the navigation, anything else to let the router go ahead.
+
+```ts
+// src/client.ts
+import { defineClient } from "@farm.js/core/client/lifecycle";
+import { delegateNavigation } from "@farm.js/core/renderer-client";
+
+declare global {
+  interface Window {
+    nativeShell?: { postMessage(message: unknown): void };
+  }
+}
+
+export default defineClient({
+  setup() {
+    const shell = window.nativeShell;
+    if (!shell) return;
+    delegateNavigation(({ url, action }) => {
+      shell.postMessage({ type: "visit", url, action });
+      return true;
+    });
+  },
+});
+```
+
+The delegate gets the resolved absolute `url`, `from` and `to` paths as blockers see them, and
+`action` (`"push"`, or `"replace"` for `Link replace`, `router.replace()` and `{ replace: true }`).
+It runs after blockers, for `Link`, plain same-origin anchors, `navigateTo`, router `push` and
+`replace`, and redirects after an islands-mode server action. A taken navigation leaves the page,
+URL and navigation state untouched and fires no navigation events.
+
+These are not offered: back/forward (the host owns its own stack), `router.refresh()` and the
+refresh after a server action, same-page hash links, and document navigations (other origins,
+locale switches, routes that need a full page load), which a WebView's own navigation callback
+sees. A delegate that throws is logged and treated as declining. `delegateNavigation` returns a
+function that removes the delegate, and it is also exported from `@farm.js/core/client`. Apps
+with `experimental.serverComponents` run the RSC router, which does not consult delegates yet.
+
 ## Page state
 
 Use page state for shallow UI state that belongs in browser history but should not reload route data: modals, drawers, selected panels, or temporary filters.

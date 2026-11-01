@@ -167,6 +167,11 @@ export {
   readPageState,
   replaceState,
 } from "./client/spa-router";
+export { delegateNavigation } from "./client/navigation-delegate";
+export type {
+  FarmNavigationDelegate,
+  FarmNavigationDelegateContext,
+} from "./client/navigation-delegate";
 export { installChunkErrorRecovery, isChunkLoadError } from "./client/chunk-recovery";
 export { createClientPluginManager, FarmClientPluginManager } from "./client/plugin";
 export type {
