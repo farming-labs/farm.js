@@ -3,7 +3,7 @@ import path from "node:path";
 import type { Plugin } from "vite";
 
 /** Config keys that only the CLI reads. Their values never belong in a server bundle. */
-const PLATFORM_CONFIG_KEYS = new Set(["desktop"]);
+const PLATFORM_CONFIG_KEYS = new Set(["desktop", "mobile"]);
 const CONFIG_FACTORIES = new Set(["defineConfig", "defineFarmConfig"]);
 
 interface Node {
@@ -50,33 +50,45 @@ function collectConfigObjects(node: unknown, found: Node[]): void {
 }
 
 /**
- * Remove the `desktop` entry from the farm.config modules a server build imports. A server needs
- * the config's plugins, middleware, and integrations at runtime, but a desktop block (or the
- * function that returns one, with whatever it imports) is CLI input. Without the entry, a web
- * build is byte-identical whether or not the app has one. Configs built some other way keep it.
+ * Remove the `desktop` and `mobile` entries from the farm.config modules a server build imports.
+ * A server needs the config's plugins, middleware, and integrations at runtime, but a platform
+ * block (or the function that returns one, with whatever it imports) is CLI input. Without the
+ * entries, a web build is byte-identical whether or not the app has them. Configs built some
+ * other way keep them.
  */
 export function stripPlatformConfigSource(
   code: string,
   parse: (code: string) => unknown,
 ): string | null {
-  if (!code.includes("desktop")) return null;
+  if (!code.includes("desktop") && !code.includes("mobile")) return null;
   const objects: Node[] = [];
   collectConfigObjects(parse(code), objects);
   const removals: Array<[number, number]> = [];
   for (const object of objects) {
     const properties = (object as Node & { properties: Node[] }).properties;
-    properties.forEach((property, index) => {
+    const removed = properties.map((property) => {
       const name = propertyName(property);
-      if (!name || !PLATFORM_CONFIG_KEYS.has(name)) return;
-      // Take the separating comma with it, so the literal stays valid.
-      if (index < properties.length - 1)
-        removals.push([property.start, properties[index + 1].start]);
-      else if (index > 0) removals.push([properties[index - 1].end, property.end]);
-      else {
-        const trailingComma = /^\s*,/.exec(code.slice(property.end));
-        removals.push([property.start, property.end + (trailingComma?.[0].length ?? 0)]);
-      }
+      return !!name && PLATFORM_CONFIG_KEYS.has(name);
     });
+    // One removal per run of adjacent entries (`desktop` next to `mobile`), taking the
+    // separating comma with it, so ranges never overlap and the literal stays valid.
+    for (let first = 0; first < properties.length; first++) {
+      if (!removed[first]) continue;
+      let last = first;
+      while (last + 1 < properties.length && removed[last + 1]) last++;
+      if (last < properties.length - 1) {
+        removals.push([properties[first].start, properties[last + 1].start]);
+      } else if (first > 0) {
+        removals.push([properties[first - 1].end, properties[last].end]);
+      } else {
+        const trailingComma = /^\s*,/.exec(code.slice(properties[last].end));
+        removals.push([
+          properties[first].start,
+          properties[last].end + (trailingComma?.[0].length ?? 0),
+        ]);
+      }
+      first = last;
+    }
   }
   if (removals.length === 0) return null;
   removals.sort((left, right) => right[0] - left[0]);

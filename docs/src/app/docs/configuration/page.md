@@ -300,6 +300,7 @@ mount, and shortcut together.
 | analytics     | Turning off request and MCP analytics for an app linked to a Farm Infra project.       |
 | deploy        | Selecting a target, preset, and output directory.                                      |
 | desktop       | The native desktop app `--desktop` builds ([Desktop Apps](/docs/desktop)).             |
+| mobile        | Preview: the mobile app config ([Mobile](/docs/desktop#mobile-preview)).               |
 | deploymentId  | Detecting stale browser requests during rolling deployments.                           |
 | trailingSlash | Choosing the canonical URL shape for application page routes and links.                |
 | routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns.      |

@@ -46,9 +46,11 @@ function parsePortOption(value) {
   return port;
 }
 
-// Expected desktop failures (missing config or shell package) carry their own fix; skip the stack.
+// Expected platform failures (missing config or shell package) carry their own fix; skip the stack.
 function formatCommandError(error) {
-  return error?.name === "FarmDesktopError" ? error.message : error;
+  return error?.name === "FarmDesktopError" || error?.name === "FarmMobileError"
+    ? error.message
+    : error;
 }
 
 function resolvePlatformOption(options) {
@@ -186,13 +188,17 @@ configCommand
   .description("Print a resolved platform block, such as farm config inspect --desktop")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("--desktop", "Print the desktop block")
-  .option("--os <os>", "Target OS for the desktop block (macos, windows, linux)")
+  .option("--mobile", "Print the mobile block and its farm-routes.json (preview)")
+  .option("--os <os>", "Target OS: macos, windows, linux (--desktop) or android, ios (--mobile)")
   .option("--profile <name>", "Profile passed to a function-valued block")
   .option("--command <command>", "Resolve as for dev or build (default: build)")
   .action(async (options) => {
     try {
-      if (!options.desktop) {
-        throw new Error("Choose a block to inspect: farm config inspect --desktop.");
+      if (options.desktop && options.mobile) {
+        throw new Error("Choose one block: --desktop or --mobile.");
+      }
+      if (!options.desktop && !options.mobile) {
+        throw new Error("Choose a block to inspect: farm config inspect --desktop or --mobile.");
       }
       if (
         options.command !== undefined &&
@@ -200,6 +206,17 @@ configCommand
         options.command !== "build"
       ) {
         throw new Error("--command must be dev or build.");
+      }
+      if (options.mobile) {
+        const { inspectFarmMobileConfig } = require("../dist/mobile.js");
+        const result = await inspectFarmMobileConfig({
+          root: options.root,
+          os: options.os,
+          profile: options.profile,
+          command: options.command,
+        });
+        console.log(JSON.stringify(result, null, 2));
+        return;
       }
       const { inspectFarmDesktopConfig } = require("../dist/desktop.js");
       const result = await inspectFarmDesktopConfig({
