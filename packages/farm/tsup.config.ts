@@ -34,6 +34,7 @@ const entry = {
   after: "src/after.ts",
   platform: "src/platform.ts",
   desktop: "src/desktop/index.ts",
+  mobile: "src/mobile/index.ts",
   "internal/desktop-guard": "src/desktop/guard.ts",
   navigation: "src/navigation.ts",
   headers: "src/headers.ts",

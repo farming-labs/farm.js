@@ -38,9 +38,26 @@ export class FarmMobileError extends Error {
 }
 
 /** Where mobile outputs go, relative to the app root. */
-export function getFarmMobileOutputDirs(distDir: string): { root: string; routes: string } {
+export function getFarmMobileOutputDirs(distDir: string): {
+  root: string;
+  routes: string;
+  /** The `--mobile` client build (with its server), kept apart from the web build's output. */
+  www: string;
+  /** Generated native projects, one per OS. */
+  android: string;
+  ios: string;
+  /** Built apps, such as the debug APK. */
+  dist: string;
+} {
   const root = path.join(distDir, "output", "mobile");
-  return { root, routes: path.join(root, "farm-routes.json") };
+  return {
+    root,
+    routes: path.join(root, "farm-routes.json"),
+    www: path.join(root, "www"),
+    android: path.join(root, "android"),
+    ios: path.join(root, "ios"),
+    dist: path.join(root, "dist"),
+  };
 }
 
 export interface FarmMobileAppOptions {

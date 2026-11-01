@@ -63,6 +63,9 @@
       "desktop": [
         "./dist/desktop.d.ts"
       ],
+      "mobile": [
+        "./dist/mobile.d.ts"
+      ],
       "internal/desktop-guard": [
         "./dist/internal/desktop-guard.d.ts"
       ],
@@ -369,6 +372,11 @@
       "types": "./dist/desktop.d.ts",
       "import": "./dist/desktop.mjs",
       "require": "./dist/desktop.cjs"
+    },
+    "./mobile": {
+      "types": "./dist/mobile.d.ts",
+      "import": "./dist/mobile.mjs",
+      "require": "./dist/mobile.cjs"
     },
     "./internal/desktop-guard": {
       "types": "./dist/internal/desktop-guard.d.ts",
