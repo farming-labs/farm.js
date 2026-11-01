@@ -161,7 +161,7 @@ import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
 import { handleFarmFormActionRequest } from "../form-actions";
-import { installFarmIslandValues } from "../client/island-values";
+import { installFarmIslandValues, uninstallFarmIslandValues } from "../client/island-values";
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
@@ -174,11 +174,37 @@ import {
   type ResolvedFarmSecurityConfig,
 } from "../security";
 
-// Islands mode: boundaries this server renders address their large prop values.
-installFarmIslandValues();
-
 // Islands mode renders on islx, which loads React: only an islands app loads it (`initialize`).
 let islands: typeof import("../client/islands-runtime") | undefined;
+
+/** Islands mode: every render of the runtime is one islands render (`withFarmIslandsRender`). */
+function withFarmIslandsRenders(
+  runtime: FarmServerRendererRuntime,
+  islandsRuntime: typeof import("../client/islands-runtime"),
+): FarmServerRendererRuntime {
+  const wrap = (element: unknown) =>
+    islandsRuntime.withFarmIslandsRender(
+      element as Parameters<typeof islandsRuntime.withFarmIslandsRender>[0],
+    );
+  const wrapped: FarmServerRendererRuntime = {
+    ...runtime,
+    renderToString: (element, ...rest) => runtime.renderToString(wrap(element), ...rest),
+  };
+  for (const name of [
+    "renderToStringWithHead",
+    "renderToPipeableStream",
+    "renderToReadableStream",
+  ] as const) {
+    const render = runtime[name] as ((element: unknown, ...rest: unknown[]) => unknown) | undefined;
+    if (render) {
+      (wrapped as unknown as Record<string, unknown>)[name] = (
+        element: unknown,
+        ...rest: unknown[]
+      ) => render(wrap(element), ...rest);
+    }
+  }
+  return wrapped;
+}
 
 let cachedClerkProvider: { ClerkProvider: any } | null = null;
 
@@ -433,16 +459,24 @@ function rendererRenderOptions(): FarmRendererRenderOptions | undefined {
   return nonce ? { nonce } : undefined;
 }
 
+/**
+ * Islands mode starts the client while the body streams, as production does: an async entry
+ * right after `<body>` hydrates islands as they arrive, and waits for the document otherwise.
+ */
+const FARM_DEV_EARLY_CLIENT_SCRIPT = `<script type="module" async src="/@farm/client.js"></script>`;
+
 function createDocumentFooter(options: {
   suspenseRevealFallback: string;
   refreshPPR?: boolean;
   deferredHydrationScript?: string;
+  /** The client entry already started from the top of the body. */
+  earlyClient?: boolean;
 }): string {
   return `</div>
   ${options.suspenseRevealFallback}
   ${options.refreshPPR ? createPPRRefreshScript() : ""}
   ${options.deferredHydrationScript || ""}
-  <script type="module" src="/@farm/client.js"></script>
+  ${options.earlyClient ? "" : '<script type="module" src="/@farm/client.js"></script>'}
 </body>
 </html>`;
 }
@@ -642,9 +676,14 @@ export class ServerRenderer {
   async initialize(): Promise<void> {
     if (this.rendererRuntime) return;
 
+    // Islands mode: boundaries this server renders address their large prop values. Without it
+    // props stay plain JSON, so a dev server restarted with islands mode off stops encoding them.
     if (this.islandValues()) {
+      installFarmIslandValues();
       (await import("../client/islands-server")).installFarmIslandsServer();
       islands ??= await import("../client/islands-runtime");
+    } else {
+      uninstallFarmIslandValues();
     }
 
     if (this.config.notFound?.component?.trim()) {
@@ -680,7 +719,10 @@ export class ServerRenderer {
       "node",
     );
 
-    this.rendererRuntime = runtime as FarmServerRendererRuntime;
+    this.rendererRuntime =
+      islands && this.islandValues()
+        ? withFarmIslandsRenders(runtime as FarmServerRendererRuntime, islands)
+        : (runtime as FarmServerRendererRuntime);
     this.routeManager.setRendererRuntime?.(this.rendererRuntime);
     await this.applyRendererAppSetup();
   }
@@ -1772,6 +1814,7 @@ export class ServerRenderer {
               hasIsolatedClientBoundaries?: boolean;
               suppressedAsyncHydration?: true;
               suppressedAsyncHydrationReason?: string;
+              serverTree?: true;
             }
           | undefined;
         if (manifestEntry?.suppressedAsyncHydration) {
@@ -1788,6 +1831,7 @@ export class ServerRenderer {
             ...(manifestEntry.hasIsolatedClientBoundaries === true
               ? { hasIsolatedClientBoundaries: true }
               : {}),
+            ...(manifestEntry.serverTree === true ? { serverTree: true } : {}),
           };
         }
         return {
@@ -1806,6 +1850,10 @@ export class ServerRenderer {
         islandStrategy: layoutHydrationMetadata[index]?.islandStrategy ?? null,
         ...(layoutHydrationMetadata[index]?.hasIsolatedClientBoundaries === true
           ? { hasIsolatedClientBoundaries: true }
+          : {}),
+        // Islands mode: the browser rebuilds this layout from its tree, not its module.
+        ...(shouldHydrateLayout && layoutHydrationMetadata[index]?.serverTree === true
+          ? { serverTree: true }
           : {}),
       }));
       const hydrationStrategies = [
@@ -1985,11 +2033,22 @@ export class ServerRenderer {
                 );
                 slotProps[slot.name] = slotElement;
               }
-              wrappedElement = this.rendererRuntime.createElement(LayoutComponent, {
-                children: wrappedElement,
-                params,
-                ...slotProps,
-              });
+              wrappedElement =
+                shouldHydrateLayout &&
+                layoutHydrationMetadata[i]?.serverTree === true &&
+                islands &&
+                this.islandValues()
+                  ? await islands.renderFarmServerTreeLayout(
+                      LayoutComponent,
+                      { params },
+                      { children: wrappedElement, ...slotProps },
+                      layoutEntry.pattern,
+                    )
+                  : this.rendererRuntime.createElement(LayoutComponent, {
+                      children: wrappedElement,
+                      params,
+                      ...slotProps,
+                    });
               wrappedElement = this.createLayoutBoundary(layoutEntry.pattern, wrappedElement);
             }
 
@@ -2836,6 +2895,7 @@ export class ServerRenderer {
     const response = await createFarmMetadataImageResponse(value, imageModule, {
       method: req.method,
       ifNoneMatch: Array.isArray(ifNoneMatch) ? ifNoneMatch[0] : ifNoneMatch,
+      renderer: isReactRenderer(this.config.renderer) ? undefined : this.rendererRuntime,
     });
     await sendWebResponse(res as any, response);
   }
@@ -3028,7 +3088,9 @@ export class ServerRenderer {
           pattern: layoutEntry.pattern,
           shouldHydrate: layoutEntry.shouldHydrate,
           islandStrategy: layoutEntry.islandStrategy,
-          preloads: [layoutEntry.modulePath],
+          // Islands mode: rebuilt from its server tree, so its module is never preloaded.
+          ...(layoutEntry.serverTree ? { serverTree: true } : {}),
+          preloads: layoutEntry.serverTree ? [] : [layoutEntry.modulePath],
           assets: [],
         };
       }
@@ -3373,7 +3435,9 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           pattern: layoutEntry.pattern,
           shouldHydrate: layoutEntry.shouldHydrate,
           islandStrategy: layoutEntry.islandStrategy,
-          preloads: [layoutEntry.modulePath],
+          // Islands mode: rebuilt from its server tree, so its module is never preloaded.
+          ...(layoutEntry.serverTree ? { serverTree: true } : {}),
+          preloads: layoutEntry.serverTree ? [] : [layoutEntry.modulePath],
           assets: [],
         };
       }
@@ -3476,6 +3540,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         cspNonce ? filterFarmCspNonces(html, cspNonce) : html;
       const createLateNavigationRecovery = (navigationError: unknown) =>
         this.createLateNavigationRecoveryHTML(req, navigationError);
+      const earlyClient = this.islandValues();
       const { pipe, abort } = renderToPipeableStream(streamRoot, {
         nonce: cspNonce,
         onShellReady() {
@@ -3514,7 +3579,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
   ${propsScript}
   ${hydrationClickQueueScript}
 </head>
-<body class="">
+<body class="">${earlyClient ? `\n  ${FARM_DEV_EARLY_CLIENT_SCRIPT}` : ""}
   <div id="root">`;
           const securedShell = stampDocumentHTML(shell);
           htmlParts.push(securedShell);
@@ -3612,6 +3677,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
               createDocumentFooter({
                 suspenseRevealFallback,
                 deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
+                earlyClient,
               }),
             );
             htmlParts.push(footer);
@@ -3635,6 +3701,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                   createDocumentFooter({
                     suspenseRevealFallback,
                     refreshPPR: staticShellClosed,
+                    earlyClient,
                   }),
                 );
               }

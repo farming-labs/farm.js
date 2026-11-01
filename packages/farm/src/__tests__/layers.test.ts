@@ -17,6 +17,7 @@ import { discoverMiddlewareRoutes, hasFarmRuntimeConfigModule } from "../nitro/u
 import { RouteManager } from "../routing/route-manager";
 import { createProgrammaticRouteModuleId } from "../routes-shared";
 import { toViteModuleId } from "../utils";
+import { farmAppUsesRscPipeline, resolveFarmRscCheckConfig } from "../server-components-status";
 import { farmPlugin } from "../vite";
 
 const temporaryRoots: string[] = [];
@@ -28,6 +29,29 @@ afterEach(() => {
 });
 
 describe("Farm layers", () => {
+  it("lets the RSC check see the protections a layer adds", async () => {
+    const root = createProject();
+    createLayer(root, "admin", {
+      config: `export default { auth: { protectedRoutes: ["/admin/**"] }, headers: [{ source: "/admin/:path*", headers: [{ key: "X-Frame-Options", value: "DENY" }] }] };`,
+    });
+    // The RSC packages, so the check does not fall back for missing ones.
+    for (const name of ["@farm.js/plugin", "@vitejs/plugin-rsc", "react-server-dom-webpack"]) {
+      const dir = path.join(root, "node_modules", ...name.split("/"));
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name }));
+    }
+    const config = { extends: ["./layers/admin"], experimental: { serverComponents: true } };
+    // The project config alone sets neither.
+    expect(farmAppUsesRscPipeline(config, root)).toBe(true);
+    const merged = await resolveFarmRscCheckConfig(config, root, "production");
+    expect(() => farmAppUsesRscPipeline(merged, root)).toThrow(
+      "does not run `auth`, `headers` yet",
+    );
+    // Without layers it reads the config as it is.
+    const plain = { experimental: { serverComponents: true } };
+    expect(await resolveFarmRscCheckConfig(plain, root, "development")).toBe(plain);
+  });
+
   it("consumes layers directly from an application's farm.config.ts", async () => {
     const root = createProject();
     createLayer(root, "commerce", {

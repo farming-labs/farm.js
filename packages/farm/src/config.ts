@@ -101,6 +101,11 @@ import {
 import { isFarmRedirectStatus } from "./navigation-errors";
 import { resolveFarmThemeConfig } from "./theme/config";
 import { resolveFarmAgentConfig, type ResolvedFarmAgentConfig } from "./agent-config";
+import type {
+  FarmDesktopConfigInput,
+  FarmDesktopSetupHost,
+  ResolvedFarmDesktopConfig,
+} from "./desktop/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import type { OpenAPISecurityMode } from "./openapi/types";
 import { isReactRenderer, resolveFarmRenderer } from "./renderer";
@@ -134,6 +139,13 @@ export type {
   ResolvedFarmMigrationsConfig,
 } from "./types";
 export type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./workflows";
+export type {
+  FarmDesktopConfigInput,
+  FarmDesktopContext,
+  FarmDesktopUserConfig,
+  FarmDesktopWindowConfig,
+  ResolvedFarmDesktopConfig,
+} from "./desktop/config";
 export type { FarmCronJobConfig, FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
 export type {
   FarmRouteRule,
@@ -356,6 +368,12 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   workflows?: FarmWorkflowsUserConfig | boolean;
   preset?: BaseFarmConfig["preset"];
   deploy?: FarmDeployConfig;
+  /**
+   * The native desktop app `farm dev --desktop` and `farm build --desktop` produce: a block, or a
+   * function of `{ os, mode, command, profile, env, root }` that returns one. A web build checks
+   * a static block's shape, never calls the function, and ships neither.
+   */
+  desktop?: FarmDesktopConfigInput;
   docs?: FarmDocsUserConfig;
   md?: FarmMarkdownUserConfig | boolean;
   mdx?: FarmMdxUserConfig;
@@ -451,9 +469,12 @@ export interface ResolvedFarmConfig extends Required<
     | "theme"
     | "renderer"
     | "agent"
+    | "desktop"
   >
 > {
   agent: ResolvedFarmAgentConfig;
+  /** Set only in a desktop dev session or build (`--desktop`); `null` on the web. */
+  desktop: ResolvedFarmDesktopConfig | null;
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
   [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
   root: string;
@@ -1059,8 +1080,13 @@ export async function resolveConfig(
     );
   }
 
-  const deploy = resolveDeployConfig(userConfig);
   const root = userConfig.root || process.cwd();
+  // `farm dev|build --desktop` installs this (desktop/config.ts); a web build never loads it.
+  const desktopSetup = await (globalThis as FarmDesktopSetupHost)[
+    Symbol.for("@farm.js/core/desktop-setup")
+  ]?.(userConfig, root, mode);
+  if (desktopSetup) userConfig = desktopSetup.userConfig;
+  const deploy = resolveDeployConfig(userConfig, desktopSetup?.deploy);
   const srcDir = userConfig.srcDir || "src";
   setFarmProjectSourceDir(root, srcDir);
   const docs = await resolveDocsConfig(userConfig.docs, { root, srcDir });
@@ -1151,6 +1177,7 @@ export async function resolveConfig(
       ...userConfig.experimental,
     },
     agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled }),
+    desktop: desktopSetup?.desktop ?? null,
     plugins: [
       ...resolveIntegrationPlugins(integrations),
       ...(nativeMCPPlugin ? [nativeMCPPlugin] : []),

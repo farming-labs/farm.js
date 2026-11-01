@@ -373,8 +373,7 @@ export default function Button() { return <button>count</button>; }`,
       await writeFile(
         path.join(root, "src", "app", "widget.tsx"),
         `"use client";
-function Widget() { return <button>count</button>; }
-export { Widget };`,
+export * from "./widget-implementation";`,
       );
       await writeFile(
         layoutFile,
@@ -407,6 +406,43 @@ export default async function Layout({ children }) {
       });
     });
 
+    it("reports islands-mode pages whose client components cannot become islands", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-islands-error-"));
+      temporaryDirectories.push(root);
+      await mkdir(path.join(root, "src", "app"), { recursive: true });
+      await writeFile(
+        path.join(root, "src", "app", "row.tsx"),
+        `"use client";\nexport function Row() { return <tr><td>row</td></tr>; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `import { Row } from "./row";\nexport default function Page() { return <table><tbody><Row /></tbody></table>; }`,
+      );
+      const { globFiles, logger } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) =>
+        pattern.includes("page") ? ["page.tsx"] : [],
+      );
+      vi.mocked(logger.error).mockClear();
+      mockConfig.root = root;
+      mockConfig.renderer = REACT_RENDERER;
+      mockConfig.experimental = { serverComponents: { mode: "islands" } };
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      // The page renders without client JavaScript instead of shipping its module to the browser.
+      expect(routeManager.generateClientManifest(root).routes[0]).toMatchObject({
+        shouldHydrate: false,
+      });
+      expect(routeManager.getIslandsErrors(root)).toEqual([
+        expect.stringMatching(
+          /^\/: the client boundary imported from \.\/row renders inside <table>/,
+        ),
+      ]);
+      routeManager.regenerateClientManifest(root);
+      // Development logs it once, not on every plan refresh.
+      expect(logger.error).toHaveBeenCalledTimes(1);
+    });
+
     it("keeps an isolated layout when a sibling page needs route-wide hydration", async () => {
       const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-local-hydration-"));
       temporaryDirectories.push(root);
@@ -418,7 +454,7 @@ export default async function Layout({ children }) {
       );
       await writeFile(
         path.join(root, "src", "components", "fallback.tsx"),
-        `'use client';\nfunction Fallback() { return null; }\nexport { Fallback };`,
+        `'use client';\nexport * from "./fallback-implementation";`,
       );
       await writeFile(
         path.join(root, "src", "app", "layout.tsx"),

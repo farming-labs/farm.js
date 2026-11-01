@@ -60,6 +60,9 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 | farm cron list                   | List configured UTC schedules and target routes.                     |
 | farm cron run dailyCleanup       | Invoke one cron route on a running app.                              |
 | farm dev --cron                  | Start the dev server with the opt-in in-memory cron scheduler.       |
+| farm dev --desktop               | Open the app in its desktop shell, guarded like the packaged app.    |
+| farm build --desktop             | Build a packaged desktop app ([Desktop Apps](/docs/desktop)).        |
+| farm config inspect --desktop    | Print the resolved desktop block for an `--os` and `--profile`.      |
 | farm telemetry status            | Show the anonymous product-telemetry preference.                     |
 | farm telemetry enable            | Enable anonymous Farm.js product telemetry.                          |
 | farm telemetry disable           | Opt out and delete the local anonymous installation ID.              |

@@ -115,6 +115,56 @@ describe("built-in Farm Infra analytics in development", () => {
     ]);
   }, 30_000);
 
+  it("reports built-in endpoints and Markdown mirrors by a route template", async () => {
+    const port = await listen(receiver);
+    const root = await createFixture(
+      `FARMJS_API_KEY=fti_${"l".repeat(43)}\nFARMJS_API_URL=http://127.0.0.1:${port}\n`,
+    );
+    const server = await createServer({ root, images: { provider: "none" } });
+    servers.add(server);
+    await server.listen(0);
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+    const status = async (pathname: string, init?: RequestInit) => {
+      const response = await fetch(`http://localhost:${address.port}${pathname}`, init);
+      await response.arrayBuffer();
+      return response.status;
+    };
+
+    expect(
+      await status("/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      }),
+    ).toBe(200);
+    expect(await status("/llms.txt")).toBe(200);
+    expect(await status("/users/private-customer.md")).toBe(200);
+    expect(await status("/.well-known/farmjs.json")).toBe(200);
+    expect(await status("/private-missing")).toBe(404);
+    // Closing the server flushes every queued event.
+    await Promise.all([...servers].map((value) => value.close()));
+    servers.clear();
+
+    const requests = received
+      .flatMap(({ body }) => JSON.parse(body).events)
+      .filter(({ kind }) => kind === "request")
+      .map(({ method, route, status }) => `${method} ${route} ${status}`);
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        "POST /mcp 200",
+        "GET /llms.txt 200",
+        "GET /users/[id].md 200",
+        "GET /.well-known/farmjs.json 200",
+        "GET /[unmatched] 404",
+      ]),
+    );
+    expect(requests.filter((line) => line.includes("/[unmatched]"))).toEqual([
+      "GET /[unmatched] 404",
+    ]);
+    expect(received.map(({ body }) => body).join("")).not.toContain("private");
+  }, 30_000);
+
   it("sends nothing when the config sets analytics to false", async () => {
     const port = await listen(receiver);
     const root = await createFixture(

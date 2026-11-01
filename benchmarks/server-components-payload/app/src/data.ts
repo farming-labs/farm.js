@@ -103,3 +103,46 @@ export const catalog: Product[] = Array.from({ length: 150 }, (_, index) => ({
   price: 5 + ((index * 37) % 200),
   href: `/shop/s${index}`,
 }));
+
+export interface Token {
+  kind: "keyword" | "name" | "string" | "punctuation";
+  text: string;
+}
+
+export interface Post {
+  title: string;
+  sections: { text: string; paragraphs: string[]; code: Token[][] }[];
+}
+
+const KEYWORDS = ["const", "export", "return", "await", "import", "function"];
+
+// A blog or long docs page: mostly server-rendered prose and highlighted code (a highlighter
+// emits a span per token), with one small client component.
+export function getPost(slug: string): Post | undefined {
+  const n = Number(slug.slice(1));
+  if (!slug.startsWith("b") || !Number.isInteger(n) || n < 0 || n >= 100) return undefined;
+  return {
+    title: title(n + 7000, 4),
+    sections: Array.from({ length: 10 }, (_, s) => ({
+      text: title(n * 13 + s + 7100, 3),
+      paragraphs: Array.from(
+        { length: 3 },
+        (_, p) => `${title(n * 29 + s * 5 + p + 7200, 14)}. ${title(n * 7 + s + p + 7300, 11)}.`,
+      ),
+      code: Array.from({ length: 30 }, (_, line) => {
+        const seed = n * 1000 + s * 50 + line;
+        return [
+          { kind: "keyword", text: KEYWORDS[seed % KEYWORDS.length]! },
+          { kind: "name", text: ` ${word(seed + 7400)}` },
+          { kind: "punctuation", text: " = " },
+          { kind: "name", text: word(seed + 7500) },
+          { kind: "punctuation", text: "(" },
+          { kind: "string", text: `"${word(seed + 7600)}"` },
+          { kind: "punctuation", text: ", " },
+          { kind: "string", text: `"${word(seed + 7700)}"` },
+          { kind: "punctuation", text: ");" },
+        ] as Token[];
+      }),
+    })),
+  };
+}

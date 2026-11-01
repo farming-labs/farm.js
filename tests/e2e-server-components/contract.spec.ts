@@ -82,6 +82,33 @@ test("a client component reads context from a client provider in a server layout
   expect(errors).toEqual([]);
 });
 
+test("a server layout around a client provider keeps its code on the server", async ({ page }) => {
+  const scripts: string[] = [];
+  page.on("response", async (response) => {
+    if (response.request().resourceType() === "script") scripts.push(await response.text());
+  });
+  const errors = collectErrors(page);
+  // Into the provider's layout from a page whose layouts render on the server only, and back.
+  await page.goto("/");
+  await hydrated(page);
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("link", { name: "Context" }).click();
+  await expect(page.getByRole("heading", { name: "Context" })).toBeVisible();
+  await expect(page.getByText("Layout note: contract-layout-server-only-2b7e1d")).toBeVisible();
+  await hydrated(page);
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
+  await page.getByRole("link", { name: "Home" }).click();
+  await page.getByRole("link", { name: "Context" }).click();
+  await hydrated(page);
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await expect(page.getByTestId("theme-label")).not.toHaveText("Theme: none");
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  expect(scripts.length).toBeGreaterThan(0);
+  for (const source of scripts) expect(source).not.toContain("contract-layout-server-only-2b7e1d");
+  expect(errors).toEqual([]);
+});
+
 test("async server components resolve before the HTML is sent", async ({ request }) => {
   const html = await (await request.get("/async")).text();
   expect(html).toContain("Loaded first");
@@ -114,6 +141,28 @@ test("a Suspense boundary streams its fallback first, then the content", async (
 
   await page.goto("/stream");
   await expect(page.getByTestId("slow-content")).toBeVisible();
+});
+
+test("client components before and inside slow Suspense content both hydrate", async ({ page }) => {
+  await page.goto("/stream", { waitUntil: "commit" });
+  const early = page.getByRole("button", { name: /^Early: / });
+  // Click until the Early counter responds, and note whether the slow content had arrived then.
+  let slowArrivedFirst = true;
+  await expect(async () => {
+    await early.click({ timeout: 100 });
+    await expect(early).toHaveText(/^Early: [1-9]/, { timeout: 50 });
+    slowArrivedFirst = (await page.getByTestId("slow-content").count()) > 0;
+  }).toPass({ intervals: [20], timeout: 10_000 });
+  // Islands mode starts the client while the body streams, in development too. The RSC client
+  // starts once the stream ends.
+  if (mode === "islands") expect(slowArrivedFirst).toBe(false);
+
+  const late = page.getByRole("button", { name: /^Late: / });
+  await expect(page.getByTestId("slow-content")).toBeVisible();
+  await expect(async () => {
+    await late.click({ timeout: 200 });
+    await expect(late).toHaveText(/^Late: [1-9]/, { timeout: 100 });
+  }).toPass({ timeout: 10_000 });
 });
 
 test("generateMetadata sets the head", async ({ request }) => {
@@ -208,6 +257,30 @@ test("a large value shared by two client components survives client navigation",
       expect(body).not.toContain('type="f/value"');
       expect(body).not.toContain("Catalog entry 7 with");
     }
+  }
+});
+
+test("a request that renders twice still sends every value its islands reference", async ({
+  request,
+}) => {
+  test.skip(mode !== "islands", "values are islands mode's wire format");
+  const valuesOf = (html: string) => ({
+    referenced: new Set(
+      [...html.matchAll(/\{"\$":"r","v":"([0-9a-z]{14})"\}/g)].map((match) => match[1]),
+    ),
+    sent: new Set(
+      [...html.matchAll(/<script type="f\/value" name="([0-9a-z]{14})">/g)].map(
+        (match) => match[1],
+      ),
+    ),
+  });
+  // Renders that do not suspend teach the route to render synchronously first; a request that
+  // suspends then renders twice, and the second render is the one the browser receives.
+  for (const query of ["", "", `?slow=${Date.now()}`]) {
+    const html = await (await request.get(`/values/slow${query}`)).text();
+    const { referenced, sent } = valuesOf(html);
+    expect(referenced.size).toBeGreaterThan(0);
+    for (const key of referenced) expect(sent).toContain(key);
   }
 });
 

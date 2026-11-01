@@ -124,6 +124,8 @@ Common config fields:
 - `cron`: named portable UTC schedules mapped to GET API routes
 - `docs`, `md`, `mdx`: docs runtime, markdown mirrors, and MDX components
 - `deploy`: first-class target, Nitro preset, and output
+- `desktop`: native desktop app for `farm dev|build --desktop` (`name`, `id`, `icon`, `window`, `shell`; install `@farm.js/desktop electrobun`);
+  use `platform()` and `appDataDir()` from `@farm.js/core/platform` for platform-specific server code
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits

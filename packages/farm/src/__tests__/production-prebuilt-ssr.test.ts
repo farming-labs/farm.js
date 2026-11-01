@@ -108,19 +108,26 @@ export default function StableCounter() {
 }
 `.trim(),
   );
+  // `export *` keeps this boundary route-wide: its export names live in another module.
   await fs.writeFile(
     path.join(root, "src", "components", "fallback-counter.tsx"),
     `
 "use client";
 
+export * from "./fallback-counter-implementation";
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "components", "fallback-counter-implementation.tsx"),
+    `
+"use client";
+
 import { useState } from "react";
 
-function FallbackCounter() {
+export function FallbackCounter() {
   const [count, setCount] = useState(0);
   return <button data-fallback-counter onClick={() => setCount((value) => value + 1)}>fallback:{count}</button>;
 }
-
-export { FallbackCounter };
 `.trim(),
   );
   await fs.writeFile(
@@ -2689,6 +2696,131 @@ export default {
           agent: request.agent,
         })),
       );
+    } finally {
+      await new Promise((resolve) => receiver.close(resolve));
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("reports built-in endpoints, Markdown mirrors, and docs pages by a route template", async () => {
+    const root = await createProductionFixture();
+    const received: string[] = [];
+    const receiver = createHttpServer((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => {
+        received.push(body);
+        response.writeHead(202).end();
+      });
+    });
+    await new Promise<void>((resolve) => receiver.listen(0, "127.0.0.1", resolve));
+    const receiverPort = (receiver.address() as { port: number }).port;
+    const requests = () =>
+      received
+        .flatMap((body) => JSON.parse(body).events)
+        .filter(({ kind }) => kind === "request")
+        .map(({ method, route, status }) => `${method} ${route} ${status}`);
+
+    try {
+      await fs.mkdir(path.join(root, "src", "app", "blog", "[slug]"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "blog", "[slug]", "page.tsx"),
+        `export default function Post({ params }) { return <main>post {params.slug}</main>; }`,
+      );
+      await fs.mkdir(path.join(root, "src", "app", "about"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "about", "page.tsx"),
+        `export default function About() { return <main>about</main>; }`,
+      );
+      await fs.mkdir(path.join(root, "src", "app", "docs", "routing"), { recursive: true });
+      await fs.writeFile(path.join(root, "src", "app", "docs", "page.md"), "# Docs\n\nHome.");
+      await fs.writeFile(
+        path.join(root, "src", "app", "docs", "routing", "page.md"),
+        "# Routing\n\nFile routes.",
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          docs: { entry: "/docs", search: false },
+          agent: { mcp: true, llmsTxt: { enabled: true, full: false } },
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "infra-route-labels-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const origin = new URL(response.url).origin;
+          const status = async (pathname: string, init?: RequestInit) => {
+            const answer = await fetch(origin + pathname, init);
+            await answer.arrayBuffer();
+            return answer.status;
+          };
+          const initialize = JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "fixture", version: "1.0.0" },
+            },
+          });
+          expect(
+            await status("/mcp", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                accept: "application/json, text/event-stream",
+              },
+              body: initialize,
+            }),
+          ).toBe(200);
+          expect(await status("/mcp")).toBe(405);
+          expect(await status("/llms.txt")).toBe(200);
+          expect(await status("/blog/private-post.md")).toBe(200);
+          expect(await status("/about.md")).toBe(200);
+          expect(await status("/.well-known/farmjs.json")).toBe(200);
+          expect(await status("/docs/routing")).toBe(200);
+          expect(await status("/blog/private-post?secret=private-query")).toBe(200);
+          expect(await status("/private-missing")).toBe(404);
+          await vi.waitFor(
+            () =>
+              expect(requests()).toEqual(
+                expect.arrayContaining([
+                  "GET / 200",
+                  "POST /mcp 200",
+                  "GET /mcp 405",
+                  "GET /llms.txt 200",
+                  "GET /blog/[slug].md 200",
+                  "GET /about.md 200",
+                  "GET /.well-known/farmjs.json 200",
+                  "GET /docs/[...slug] 200",
+                  "GET /blog/[slug] 200",
+                  "GET /[unmatched] 404",
+                ]),
+              ),
+            { timeout: 5_000 },
+          );
+        },
+        "/",
+        undefined,
+        {
+          FARMJS_API_KEY: `fti_${"l".repeat(43)}`,
+          FARMJS_API_URL: `http://127.0.0.1:${receiverPort}`,
+        },
+      );
+      // Only the request nothing answered is unmatched, and no label carries the path.
+      expect(requests().filter((line) => line.includes("/[unmatched]"))).toEqual([
+        "GET /[unmatched] 404",
+      ]);
+      expect(received.join("")).not.toContain("private");
     } finally {
       await new Promise((resolve) => receiver.close(resolve));
       await fs.rm(root, { recursive: true, force: true });

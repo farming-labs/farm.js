@@ -340,6 +340,7 @@ const sidebar = [
       { label: "Cron", slug: "cron", icon: "timer" },
       { label: "Instant Preview", slug: "preview", icon: "terminal" },
       { label: "Deployment", slug: "deployment", icon: "cloud" },
+      { label: "Desktop Apps", slug: "desktop", icon: "monitor" },
     ],
   },
   {

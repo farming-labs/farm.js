@@ -6,6 +6,7 @@
  */
 
 import type { POST as POST_agents_check } from "../app/api/agents/check/route";
+import type { GET as GET_stats } from "../app/api/stats/route";
 import type { POST as POST_telemetry_dashboard_session } from "../app/api/telemetry/dashboard/session/route";
 import type { POST as POST_telemetry_v1_events } from "../app/api/telemetry/v1/events/route";
 import type { POST as POST_telemetry_v1_sites } from "../app/api/telemetry/v1/sites/route";
@@ -17,6 +18,9 @@ export type APIRouter = {
     check: {
       post: typeof POST_agents_check;
     };
+  };
+  stats: {
+    get: typeof GET_stats;
   };
   telemetry: {
     dashboard: {
@@ -43,6 +47,10 @@ export const apiRoutes = [
   {
     path: "/api/agents/check",
     methods: ["POST"],
+  },
+  {
+    path: "/api/stats",
+    methods: ["GET"],
   },
   {
     path: "/api/telemetry/dashboard/session",

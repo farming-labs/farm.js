@@ -1,0 +1,5 @@
+node_modules/
+.farm/
+.output/
+# Notes saved by `pnpm dev:web`
+.data/

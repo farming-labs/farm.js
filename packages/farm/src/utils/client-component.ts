@@ -99,6 +99,17 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
   asyncOwnerIslands?: true;
   /** Packages whose client components a Markdown page or async owner renders as static server HTML. */
   staticPackageBoundaries?: string[];
+  /**
+   * Islands mode could not turn a client component into an island. The page does not hydrate
+   * route-wide instead, which would ship its server code to the browser: builds fail with this
+   * message, and development renders the page without client JavaScript.
+   */
+  islandsError?: string;
+  /**
+   * Islands mode: the layout hydrates as one root rebuilt from its server tree. Its module stays
+   * on the server; `isolatedBoundaries` are the client components the tree loads.
+   */
+  serverTreeLayout?: true;
 }
 
 export interface FarmClientHydrationPlanOptions {
@@ -118,6 +129,13 @@ export interface FarmClientHydrationPlanOptions {
    * context. Requires `asyncOwnerIslands`. Pass it for pages only.
    */
   serverOwners?: boolean;
+  /**
+   * Islands mode, for layouts: a synchronous layout whose client components need one React root
+   * (a provider around the pages) renders as a server tree instead of shipping its module. The
+   * browser rebuilds it from the tree and renders the page at its outlet. Requires
+   * `asyncOwnerIslands`.
+   */
+  serverTreeLayouts?: boolean;
 }
 
 /**
@@ -611,6 +629,52 @@ export function getClientModuleHydrationPlan(
   mode: FarmIsolatedClientHydrationMode = "off",
   options: FarmClientHydrationPlanOptions = {},
 ): ClientModuleHydrationPlan {
+  const plan = planClientModuleHydration(modulePath, root, mode, options);
+  // Islands mode: a layout that would still hydrate as one root renders as a server tree.
+  if (
+    options.serverTreeLayouts !== true ||
+    options.asyncOwnerIslands !== true ||
+    !plan.shouldHydrate ||
+    plan.isClientComponent ||
+    plan.asyncOwnerIslands
+  ) {
+    return plan;
+  }
+  const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
+  const owner = parseClientModuleMetadata(readIfExists(resolvedPath ?? ""), true);
+  // An owner that is a client component, or opts into hydrating whole, keeps its root.
+  if (!resolvedPath || owner.isClientComponent || owner.hasHydrateExport) return plan;
+  const layout = collectIsolatedClientBoundaries(resolvedPath, root, {
+    allowDynamicCardinality: true,
+    allowElementProps: true,
+  });
+  const routeWide = {
+    ...plan,
+    shouldHydrate: plan.legacyShouldHydrate,
+    islandStrategy: plan.legacyIslandStrategy,
+    hasIsolatedClientBoundaries: false,
+    isolatedBoundaries: [],
+  };
+  if (layout.fallbackReason) {
+    return {
+      ...routeWide,
+      shouldHydrate: false,
+      islandStrategy: null,
+      fallbackReason: layout.fallbackReason,
+      islandsError: layout.fallbackHint
+        ? `${layout.fallbackReason}. ${layout.fallbackHint}`
+        : layout.fallbackReason,
+    };
+  }
+  return { ...routeWide, serverTreeLayout: true, isolatedBoundaries: layout.boundaries };
+}
+
+function planClientModuleHydration(
+  modulePath: string,
+  root: string | undefined,
+  mode: FarmIsolatedClientHydrationMode,
+  options: FarmClientHydrationPlanOptions,
+): ClientModuleHydrationPlan {
   const metadata = getClientModuleMetadata(modulePath, root);
   const emptyPlan = (
     fallbackReason?: string,
@@ -658,6 +722,18 @@ export function getClientModuleHydrationPlan(
     allowElementProps: asyncOwner,
     staticPackageBoundaries: asyncOwner,
   });
+  if (inspection.fallbackReason && asyncOwner && options.serverOwners === true) {
+    // A server page in islands mode never hydrates as a whole: that bundles the page module and
+    // its server-only imports into public JavaScript.
+    return {
+      ...emptyPlan(inspection.fallbackReason),
+      shouldHydrate: false,
+      islandStrategy: null,
+      islandsError: inspection.fallbackHint
+        ? `${inspection.fallbackReason}. ${inspection.fallbackHint}`
+        : inspection.fallbackReason,
+    };
+  }
   if (inspection.boundaries.length === 0) {
     return emptyPlan(inspection.fallbackReason);
   }
@@ -908,12 +984,28 @@ export function enforceFarmIsolatedHydrationRouteBudget(
  */
 export function isIsolatableClientBoundarySource(content: string | null): boolean {
   if (!content || !hasUseClientDirective(content)) return false;
-  if (/\bexport\s*\{/.test(content) || /\bexport\s*\*/.test(content)) return false;
+  // `export *` names its exports only in another module.
+  if (/\bexport\s*\*/.test(content)) return false;
   return (
     /\bexport\s+default\s+(?!(?:type|interface)\b)/.test(content) ||
     /\bexport\s+(?:async\s+)?function\s+[A-Z][$\w]*/.test(content) ||
-    /\bexport\s+(?:const|let|var|class)\s+[A-Z][$\w]*/.test(content)
+    /\bexport\s+(?:const|let|var|class)\s+[A-Z][$\w]*/.test(content) ||
+    exportListNames(content).some((name) => name === "default" || /^[A-Z]/.test(name))
   );
+}
+
+/** The exported names of `export { ... }` lists, re-exports included, type-only entries excluded. */
+function exportListNames(content: string): string[] {
+  const names: string[] = [];
+  for (const match of content.matchAll(/\bexport\s*(type\s*)?\{([^}]*)\}/g)) {
+    if (match[1]) continue;
+    for (const entry of match[2].split(",")) {
+      const parts = entry.trim().split(/\s+/);
+      if (parts[0] === "type" || !parts[0]) continue;
+      names.push(parts[parts.length - 1].replace(/^["']|["']$/g, ""));
+    }
+  }
+  return names;
 }
 
 function getStaticImportBindings(content: string | null): Map<string, string[]> {
@@ -996,6 +1088,18 @@ const PARSER_SENSITIVE_JSX_CONTAINERS = new Set([
   "svg",
 ]);
 
+/** Elements inside a parser-sensitive container whose content is ordinary flow content again. */
+const PARSER_FLOW_CONTENT_ELEMENTS = new Set(["td", "th", "caption", "foreignObject"]);
+
+const PARSER_SENSITIVE_FLOW_HINTS: Record<string, string> = {
+  table: ", or render it inside a <td>, <th> or <caption>",
+  thead: ", or render it inside a <td> or <th>",
+  tbody: ", or render it inside a <td> or <th>",
+  tfoot: ", or render it inside a <td> or <th>",
+  tr: ", or render it inside a <td> or <th>",
+  svg: ", or render it inside a <foreignObject>",
+};
+
 /**
  * Names a parser-sensitive element that encloses a use of one of the bindings,
  * or undefined when every use is in ordinary flow content.
@@ -1011,7 +1115,8 @@ function findParserSensitiveJsxContainer(
   if (!content || localBindings.length === 0) return undefined;
   const names = new Set(localBindings);
   const tokens = tokenizeModuleSource(content);
-  const openDepth = new Map<string, number>();
+  // Open parser-sensitive containers and the flow-content cells inside them, innermost last.
+  const open: string[] = [];
 
   const isSelfClosing = (openingIndex: number): boolean => {
     for (let index = openingIndex; index < tokens.length; index++) {
@@ -1025,21 +1130,28 @@ function findParserSensitiveJsxContainer(
 
     if (tokens[index + 1].value === "/") {
       const closing = tokens[index + 2]?.value;
-      if (closing && openDepth.has(closing)) {
-        openDepth.set(closing, Math.max(0, (openDepth.get(closing) ?? 0) - 1));
-      }
+      const at = closing ? open.lastIndexOf(closing) : -1;
+      if (at !== -1) open.length = at;
       continue;
     }
 
     const tag = tokens[index + 1].value;
     if (names.has(tag)) {
-      for (const [container, depth] of openDepth) {
-        if (depth > 0) return container;
+      // The outermost container since the innermost cell is the one the author restructures.
+      let container: string | undefined;
+      for (let depth = open.length - 1; depth >= 0; depth--) {
+        if (PARSER_FLOW_CONTENT_ELEMENTS.has(open[depth])) break;
+        container = open[depth];
       }
+      if (container) return container;
       continue;
     }
-    if (PARSER_SENSITIVE_JSX_CONTAINERS.has(tag) && !isSelfClosing(index)) {
-      openDepth.set(tag, (openDepth.get(tag) ?? 0) + 1);
+    if (
+      (PARSER_SENSITIVE_JSX_CONTAINERS.has(tag) ||
+        (open.length > 0 && PARSER_FLOW_CONTENT_ELEMENTS.has(tag))) &&
+      !isSelfClosing(index)
+    ) {
+      open.push(tag);
     }
   }
 
@@ -1316,12 +1428,15 @@ function collectIsolatedClientBoundaries(
   staticPackages: string[];
   costGuardExceeded?: boolean;
   fallbackReason?: string;
+  /** How to restructure the code so the boundary can be isolated. */
+  fallbackHint?: string;
 } {
   const boundaries = new Map<string, IsolatedClientBoundaryReference>();
   const staticPackages = new Set<string>();
   const estimates = new Map<string, number>();
   const visiting = new Set<string>();
   let fallbackReason: string | undefined;
+  let fallbackHint: string | undefined;
   let costGuardExceeded = false;
   const projectRoot = root ? path.resolve(root) : undefined;
 
@@ -1337,10 +1452,14 @@ function collectIsolatedClientBoundaries(
     if (parsed.isClientComponent) {
       if (projectRoot && !path.resolve(moduleSourcePath).startsWith(`${projectRoot}${path.sep}`)) {
         fallbackReason = `client boundary ${moduleSourcePath} is outside the application root`;
+        fallbackHint =
+          "Move the component into the application, or publish it as a package (package client components render as static HTML)";
         return 0;
       }
       if (!isIsolatableClientBoundarySource(content)) {
         fallbackReason = `client boundary ${moduleSourcePath} uses an unsupported export shape`;
+        fallbackHint =
+          "Export each component by name (`export function Name`, `export { Name }`, or `export default`) instead of `export *`";
         return 0;
       }
       boundaries.set(moduleSourcePath, {
@@ -1354,6 +1473,7 @@ function collectIsolatedClientBoundaries(
 
     if (parsed.hasHydrateExport) {
       fallbackReason = `imported module ${moduleSourcePath} explicitly exports hydrate = true`;
+      fallbackHint = "Islands mode never hydrates a whole page; remove `hydrate = true`";
       return 0;
     }
 
@@ -1371,6 +1491,7 @@ function collectIsolatedClientBoundaries(
             continue;
           }
           fallbackReason = `package client boundary ${specifier} cannot yet be isolated`;
+          fallbackHint = `Render it from a local "use client" module (a providers.tsx that renders the ${specifier} component)`;
           return 0;
         }
         continue;
@@ -1383,6 +1504,7 @@ function collectIsolatedClientBoundaries(
         const container = findParserSensitiveJsxContainer(content, localBindings);
         if (container) {
           fallbackReason = `the client boundary imported from ${specifier} renders inside <${container}>, where the HTML parser relocates its hydration marker`;
+          fallbackHint = `Move "use client" up to a component that renders the whole <${container}>${PARSER_SENSITIVE_FLOW_HINTS[container] ?? ""}`;
           return 0;
         }
         if (!options.allowElementProps && passesElementValuedProps(content, localBindings)) {
@@ -1414,6 +1536,7 @@ function collectIsolatedClientBoundaries(
     staticPackages: Array.from(staticPackages),
     costGuardExceeded,
     fallbackReason,
+    fallbackHint,
   };
 }
 

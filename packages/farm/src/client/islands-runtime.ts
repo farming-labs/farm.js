@@ -4,13 +4,20 @@
  * runtime uses, so the rest of Farm's runtime stays the same; apps on isolated hydration without
  * islands mode never load islx.
  */
-import type React from "react";
 import { enhanceForms, setActionNavigator } from "@farm.js/islx/client";
-import { isolateIslands, renderServerTree, withinClientRoot } from "@farm.js/islx/react";
+import * as React from "react";
+import {
+  IslandsProvider,
+  Outlet,
+  isolateIslands,
+  renderServerTree,
+  withinClientRoot,
+} from "@farm.js/islx/react";
 import {
   createHydrationRuntime,
   createServerHtml,
   createServerTreeElement,
+  createServerTreeLayout,
 } from "@farm.js/islx/react/client";
 import type { FarmIslandStrategy } from "../island";
 import { getFarmIslandValuesServer } from "./island-value-protocol";
@@ -110,4 +117,54 @@ export function createFarmServerTreeElement(
     ServerHtml: options.ServerHtml,
     key: options.key,
   });
+}
+
+/**
+ * A layout around a client provider, as a server tree (islands mode): its module stays on the
+ * server, and the browser rebuilds it with the page at its outlet, so the page reads its context.
+ * `outlets` are what the layout receives as elements: `children`, and its route slots.
+ */
+export function renderFarmServerTreeLayout(
+  Layout: React.ComponentType<any>,
+  props: Record<string, unknown>,
+  outlets: Record<string, React.ReactNode>,
+  scope: string,
+) {
+  const outletProps: Record<string, React.ReactNode> = {};
+  for (const name of Object.keys(outlets)) {
+    outletProps[name] = React.createElement(Outlet, name === "children" ? {} : { name });
+  }
+  return renderServerTree(React.createElement(Layout, { ...props, ...outletProps }), {
+    isolate: isolateIslands,
+    outlets,
+    scope,
+    held: getFarmIslandValuesServer()?.held() ?? null,
+  });
+}
+
+/** Rebuilds a server-tree layout in the browser; null when `source` has no tree for it. */
+export function createFarmServerTreeLayout(
+  _React: typeof React,
+  source: ParentNode | string,
+  scope: string,
+  options: {
+    load(reference: string): Promise<Record<string, unknown>>;
+    ServerHtml: React.ComponentType<any>;
+    onUpdate?(): void;
+  },
+) {
+  return createServerTreeLayout(source, scope, options);
+}
+
+/**
+ * One server render of a page. Its islands write each large value once per render: a request that
+ * renders twice (a page that calls notFound(), or a synchronous attempt that suspended and
+ * streams instead) sends the values again in the render that reaches the browser.
+ */
+export function withFarmIslandsRender(element: React.ReactNode): React.ReactElement {
+  return React.createElement(
+    IslandsProvider,
+    { held: getFarmIslandValuesServer()?.held() ?? null },
+    element,
+  );
 }

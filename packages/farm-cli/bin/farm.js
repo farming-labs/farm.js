@@ -46,6 +46,21 @@ function parsePortOption(value) {
   return port;
 }
 
+// Expected desktop failures (missing config or shell package) carry their own fix; skip the stack.
+function formatCommandError(error) {
+  return error?.name === "FarmDesktopError" ? error.message : error;
+}
+
+function resolvePlatformOption(options) {
+  if (options.desktop && options.web) {
+    throw new Error("Choose one platform: --web or --desktop.");
+  }
+  if (options.profile !== undefined && !options.desktop) {
+    throw new Error("--profile selects a desktop build profile; use it with --desktop.");
+  }
+  return options.desktop ? "desktop" : "web";
+}
+
 function telemetryCommandPath(command) {
   const segments = [];
   let current = command;
@@ -85,8 +100,24 @@ program
   .option("-p, --port <port>", "Override the port to run the server on")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("--cron", "Run configured cron routes in-process during development")
+  .option("--desktop", "Open the app in its desktop shell, guarded like the packaged app")
+  .option("--web", "Develop the web app (the default)")
+  .option("--profile <name>", "Profile passed to a function-valued desktop block", undefined)
   .action(async (options) => {
     try {
+      const platform = resolvePlatformOption(options);
+      if (platform === "desktop") {
+        if (options.cron) throw new Error("--cron is not available with --desktop.");
+        const { devFarmDesktop } = require("../dist/desktop.js");
+        await devFarmDesktop({
+          root: options.root,
+          port: options.port === undefined ? undefined : parsePortOption(options.port),
+          profile: options.profile,
+        });
+        process.exit(0);
+      }
+      // The flag alone picks the platform; a stale FARM_PLATFORM never turns a web build desktop.
+      delete process.env.FARM_PLATFORM;
       const { startDevServer } = require("../dist/dev.js");
       const server = await startDevServer(
         {
@@ -106,7 +137,7 @@ program
         server.httpServer?.once("close", () => scheduler.stop());
       }
     } catch (error) {
-      console.error("Failed to start development server:", error);
+      console.error("Failed to start development server:", formatCommandError(error));
       process.exit(1);
     }
   });
@@ -116,16 +147,66 @@ program
   .description("Build for production")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("-p, --preset <preset>", "Nitro preset (node-server, vercel, cloudflare, etc.)")
+  .option("--desktop", "Build a native desktop app with its own local server")
+  .option("--web", "Build for a web deployment (the default)")
+  .option("--profile <name>", "Profile passed to a function-valued desktop block", undefined)
   .action(async (options) => {
     try {
+      const platform = resolvePlatformOption(options);
+      if (platform === "desktop") {
+        if (options.preset) {
+          throw new Error("--preset is not available with --desktop; the desktop shell picks it.");
+        }
+        const { buildFarmDesktop } = require("../dist/desktop.js");
+        await buildFarmDesktop({ root: options.root, profile: options.profile });
+        return;
+      }
+      // The flag alone picks the platform; a stale FARM_PLATFORM never turns a web build desktop.
+      delete process.env.FARM_PLATFORM;
       const { buildFarm } = require("../dist/build.js");
       await buildFarm({
         root: options.root,
         preset: options.preset,
       });
     } catch (error) {
-      console.error("Failed to build:", error);
+      console.error("Failed to build:", formatCommandError(error));
       process.exit(1);
+    }
+  });
+
+const configCommand = program.command("config").description("Inspect resolved configuration");
+
+configCommand
+  .command("inspect")
+  .description("Print a resolved platform block, such as farm config inspect --desktop")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("--desktop", "Print the desktop block")
+  .option("--os <os>", "Target OS for the desktop block (macos, windows, linux)")
+  .option("--profile <name>", "Profile passed to a function-valued block")
+  .option("--command <command>", "Resolve as for dev or build (default: build)")
+  .action(async (options) => {
+    try {
+      if (!options.desktop) {
+        throw new Error("Choose a block to inspect: farm config inspect --desktop.");
+      }
+      if (
+        options.command !== undefined &&
+        options.command !== "dev" &&
+        options.command !== "build"
+      ) {
+        throw new Error("--command must be dev or build.");
+      }
+      const { inspectFarmDesktopConfig } = require("../dist/desktop.js");
+      const result = await inspectFarmDesktopConfig({
+        root: options.root,
+        os: options.os,
+        profile: options.profile,
+        command: options.command,
+      });
+      console.log(JSON.stringify(result, null, 2));
+    } catch (error) {
+      console.error("Failed to inspect config:", formatCommandError(error));
+      process.exitCode = 1;
     }
   });
 

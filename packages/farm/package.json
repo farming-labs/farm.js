@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.45",
+  "version": "0.1.47",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -56,6 +56,15 @@
       ],
       "after": [
         "./dist/after.d.ts"
+      ],
+      "platform": [
+        "./dist/platform.d.ts"
+      ],
+      "desktop": [
+        "./dist/desktop.d.ts"
+      ],
+      "internal/desktop-guard": [
+        "./dist/internal/desktop-guard.d.ts"
       ],
       "navigation": [
         "./dist/navigation.d.ts"
@@ -350,6 +359,21 @@
       "types": "./dist/after.d.ts",
       "import": "./dist/after.mjs",
       "require": "./dist/after.cjs"
+    },
+    "./platform": {
+      "types": "./dist/platform.d.ts",
+      "import": "./dist/platform.mjs",
+      "require": "./dist/platform.cjs"
+    },
+    "./desktop": {
+      "types": "./dist/desktop.d.ts",
+      "import": "./dist/desktop.mjs",
+      "require": "./dist/desktop.cjs"
+    },
+    "./internal/desktop-guard": {
+      "types": "./dist/internal/desktop-guard.d.ts",
+      "import": "./dist/internal/desktop-guard.mjs",
+      "require": "./dist/internal/desktop-guard.cjs"
     },
     "./navigation": {
       "types": "./dist/navigation.d.ts",
@@ -746,7 +770,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farm.js/islx": "0.0.1",
+    "@farm.js/islx": "0.0.3",
     "@farming-labs/orm": "0.0.65",
     "@farming-labs/orm-runtime": "0.0.65",
     "@formatjs/icu-messageformat-parser": "3.5.15",
@@ -771,7 +795,7 @@
     "supports-color": "^10.2.2",
     "unstorage": "2.0.0-alpha.10",
     "vite": "8.3.4",
-    "zod": "^4.1.12"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@clerk/react": "^6.4.3",

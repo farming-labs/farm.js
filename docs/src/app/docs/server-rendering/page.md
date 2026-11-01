@@ -254,8 +254,11 @@ Islands have the same limits as [isolated client leaves](#isolated-client-leaves
 - Props must be serializable. Server-rendered JSX passed as `children` or another prop
   (`<ClientShell><ServerList /></ClientShell>`) crosses only under a hydrating layout (above);
   elsewhere that one client component keeps its server HTML and Farm logs it once.
-- A client component must use a supported export shape and must not sit where the HTML parser moves
-  it, such as directly inside `<table>`.
+- A client component must export each component by name (`export function Name`,
+  `export { Name }`, `export { Name } from "./name"`, or `export default`), not through
+  `export *`, and must not sit where the HTML parser moves it: directly inside `<table>`, `<tbody>`,
+  `<tr>`, `<select>` or `<svg>`. Inside a `<td>`, `<th>`, `<caption>` or `<foreignObject>` it is
+  fine.
 - An integration provider that wraps the whole route, and does not declare
   `supportsIsolatedHydration: true`, keeps its routes route-wide.
 
@@ -263,6 +266,11 @@ When one of these applies, the route stays server-rendered, its client component
 interactive, and Farm logs a warning naming the module and the reason. Fix the reason, or render
 the interactive part from a synchronous page. Preact, Solid, Vue, and Svelte keep async pages
 server-only.
+
+In [islands mode](#react-server-components) every page is a server component, so hydrating a page whole
+would ship its module and its server-only imports to the browser. Islands mode never does that:
+`farm build` fails and names each page, the reason, and how to restructure it, and `farm dev` logs
+the same error and serves the page without client JavaScript.
 
 Client components that come from a package, such as the icons in `lucide-react`, cannot be isolated
 yet. An async page renders them as static HTML and still hydrates its own client components as
@@ -309,10 +317,15 @@ components engine. `{ mode: "islands" }` is Farm's own engine
 ([RFC 0003](https://github.com/farming-labs/farm.js/blob/main/rfcs/0003-islands-server-components.md)),
 built on [islx](https://github.com/farming-labs/islx), its renderer-agnostic wire format:
 it renders on Farm's normal pipeline, sends static output once as HTML, and hydrates only client
-components. A client component that receives server output (`children`, or any element prop) keeps
+components. Client components hydrate while the page streams: one above slow Suspense
+content is interactive before that content arrives, in `farm dev` and in production. A client component that receives server output (`children`, or any element prop) keeps
 that output as a slot of the existing HTML instead of receiving it again, and a server page under a
 layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
-components read the provider's context. A large prop value (512 bytes of JSON or more, such as a
+components read the provider's context. That layout, and the other server layouts on its pages,
+render as server trees too: the browser rebuilds them from the HTML, so their modules and their
+server-only imports never reach it, and a navigation keeps the provider's state. A provider
+imported straight from a package fails the build; render it from a local `"use client"` module
+(a `providers.tsx`) instead. A large prop value (512 bytes of JSON or more, such as a
 navigation tree) travels once, keyed by its content: client components that share it share one
 copy, and a client navigation leaves out the values the browser already holds. A client navigation
 also leaves out the layouts the browser keeps: the server renders the page and any layout that
@@ -349,9 +362,10 @@ output directory, so `farm start` and platform deploys work unchanged.
 
 The pipeline does not run every Farm feature yet:
 
-- `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, and `context` decide
-  what a request may see or receive. Running the app without them could expose what they protect,
-  so `farm dev` and `farm build` stop with an error that names them.
+- `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, `context`, and
+  `security.csp` decide what a request may see or receive. Running the app without them could
+  expose what they protect, so `farm dev` and `farm build` stop with an error that names them,
+  including when a layer (`extends`) sets them.
 - Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, and `observability`
   are ignored, with a warning.
 

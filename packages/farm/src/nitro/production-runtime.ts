@@ -35,6 +35,13 @@ export {
   createLateRedirectRecovery,
 } from "../navigation/late-navigation-recovery";
 export {
+  resolveFarmDocsEngineRouteLabel,
+  resolveFarmDocsRouteLabel,
+  resolveFarmMarkdownRouteLabel,
+  resolveFarmMCPRouteLabel,
+  setFarmRouteLabel,
+} from "../route-label";
+export {
   _getRequestReadCount,
   _runWithCurrentRequest,
   _runWithFarmCspNonce,

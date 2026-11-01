@@ -365,7 +365,7 @@ export default defineConfig({
 });
 ```
 
-Keep the Phase 2 scripts. Vite plugins and options stay under `vite`, and Tailwind is enabled as in other Farm apps. `@vitejs/plugin-react` is optional and adds Fast Refresh. The pipeline does not run `auth`, `integrations`, Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, `routeRules`, `context`, `redirects`, `rewrites`, `headers`, or `observability` yet; `farm dev` and `farm build` warn about any the app sets.
+Keep the Phase 2 scripts. Vite plugins and options stay under `vite`, and Tailwind is enabled as in other Farm apps. `@vitejs/plugin-react` is optional and adds Fast Refresh. The pipeline does not run `auth`, `integrations`, Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, `routeRules`, `context`, `redirects`, `rewrites`, `headers`, `security.csp`, or `observability` yet; `farm dev` and `farm build` warn about any the app sets.
 
 | Next.js                                           | Farm (Option B)                                                                                                                                                       | Status                                                                                                                           |
 | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |

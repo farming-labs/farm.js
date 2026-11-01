@@ -331,7 +331,10 @@ export function renderMetadataHead(
   // stable identity for the URL.
   const canonicalHref =
     explicitCanonical != null
-      ? resolveMetadataUrl(explicitCanonical, metadataBase)
+      ? resolveMetadataUrl(
+          resolvePageRelativeUrl(explicitCanonical, options.pathname),
+          metadataBase,
+        )
       : options.pathname
         ? resolveMetadataUrl(sanitizeSelfCanonicalPathname(options.pathname), metadataBase)
         : undefined;
@@ -341,9 +344,12 @@ export function renderMetadataHead(
 
   if (isRecord(alternates) && isRecord(alternates.languages)) {
     for (const [language, href] of Object.entries(alternates.languages)) {
-      appendLink(tags, "alternate", resolveMetadataUrl(href, metadataBase), {
-        hreflang: language,
-      });
+      appendLink(
+        tags,
+        "alternate",
+        resolveMetadataUrl(resolvePageRelativeUrl(href, options.pathname), metadataBase),
+        { hreflang: language },
+      );
     }
   }
 
@@ -729,6 +735,20 @@ function sanitizeSelfCanonicalPathname(pathname: string): string {
   if (typeof pathname !== "string" || pathname.length === 0) return "/";
   const collapsed = pathname.replace(/^[/\\]+/, "/");
   return collapsed.startsWith("/") ? collapsed : `/${collapsed}`;
+}
+
+/**
+ * Resolve an `alternates` URL that starts with `./` against the current page, as Next.js does:
+ * a layout's `canonical: "./"` names each page below it, not the site root. Same-origin by
+ * construction, and the request path is sanitized as for the default canonical.
+ */
+function resolvePageRelativeUrl(value: unknown, pathname: string | undefined): unknown {
+  if (typeof value !== "string" || !value.startsWith("./") || !pathname) return value;
+  const base = sanitizeSelfCanonicalPathname(pathname).replace(/\/*$/, "/");
+  const resolved = new URL(value, `http://farm.invalid${base}`);
+  const resolvedPath =
+    resolved.pathname.length > 1 ? resolved.pathname.replace(/\/+$/, "") : resolved.pathname;
+  return resolvedPath + resolved.search + resolved.hash;
 }
 
 function resolveMetadataUrl(value: unknown, metadataBase?: string): string | undefined {

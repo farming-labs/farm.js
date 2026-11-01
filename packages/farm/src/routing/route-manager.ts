@@ -1,4 +1,5 @@
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
+import { getFarmServerTreeLayoutPatterns } from "./layout-selector";
 import { loadFarmDevModule } from "../dev-module";
 import type {
   FarmConfig,
@@ -196,6 +197,8 @@ export interface FarmClientRouteManifest {
     suppressedAsyncHydration?: true;
     /** Why an async layout's client-side hydration could not become islands. */
     suppressedAsyncHydrationReason?: string;
+    /** Islands mode: the browser rebuilds this layout from its server tree, not its module. */
+    serverTree?: true;
   }>;
   slots: Array<{
     name: string;
@@ -277,7 +280,9 @@ export class RouteManager {
     projectRoot: string;
     manifest: FarmClientRouteManifest;
     isolatedClientBoundaryModules: ReadonlySet<string>;
+    islandsErrors: string[];
   };
+  private reportedIslandsErrors = new Set<string>();
 
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
     this.config = config;
@@ -719,13 +724,15 @@ export class RouteManager {
       this.config.renderer,
       Boolean(unsupportedIntegrationProvider),
     );
+    const islandsMode =
+      resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands";
     const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
       entry,
       metadata: getClientModuleHydrationPlan(
         entry.modulePath,
         normalizedProjectRoot,
         isolatedMode,
-        planOptions,
+        islandsMode ? { ...planOptions, serverTreeLayouts: true } : planOptions,
       ),
     }));
 
@@ -846,6 +853,16 @@ export class RouteManager {
       };
     });
 
+    // Islands mode: the server layouts a hydrating layout's root renders rebuild from their trees.
+    const treeLayoutPatterns = islandsMode
+      ? getFarmServerTreeLayoutPatterns(
+          layoutEntries.map(({ entry, metadata }) => ({
+            pattern: entry.pattern,
+            shouldHydrate: metadata.shouldHydrate,
+            serverTreeLayout: metadata.serverTreeLayout,
+          })),
+        )
+      : new Set<string>();
     const layouts = layoutEntries.map(({ entry, metadata }) => ({
       pattern: entry.pattern,
       modulePath: toUrlPath(entry.modulePath),
@@ -861,6 +878,7 @@ export class RouteManager {
             })),
           }
         : {}),
+      ...(treeLayoutPatterns.has(entry.pattern) ? { serverTree: true as const } : {}),
       suppressedAsyncHydration: metadata.suppressedAsyncHydration,
       ...(metadata.suppressedAsyncHydration && metadata.fallbackReason
         ? { suppressedAsyncHydrationReason: metadata.fallbackReason }
@@ -885,10 +903,26 @@ export class RouteManager {
 
     const isolatedClientBoundaryModules = new Set<string>();
     for (const { metadata } of [...layoutEntries, ...routeEntries]) {
-      if (!metadata.hasIsolatedClientBoundaries) continue;
+      // A server-tree layout's client components load from its tree, as islands do.
+      if (!metadata.hasIsolatedClientBoundaries && !metadata.serverTreeLayout) continue;
       for (const boundary of metadata.isolatedBoundaries) {
         isolatedClientBoundaryModules.add(path.resolve(boundary.modulePath));
       }
+    }
+
+    // Such a page renders without client JavaScript; `farm build` fails on it (getIslandsErrors).
+    const islandsErrors = [
+      ...layoutEntries.flatMap(({ entry, metadata }) =>
+        metadata.islandsError ? [`layout ${entry.pattern}: ${metadata.islandsError}.`] : [],
+      ),
+      ...routeEntries.flatMap(({ entry, metadata }) =>
+        metadata.islandsError ? [`${entry.pattern}: ${metadata.islandsError}.`] : [],
+      ),
+    ];
+    for (const error of islandsErrors) {
+      if (this.reportedIslandsErrors.has(error)) continue;
+      this.reportedIslandsErrors.add(error);
+      logger.error(`[Farm.js] islands mode cannot hydrate ${error}`);
     }
 
     const manifest = { routes, layouts, slots };
@@ -896,6 +930,7 @@ export class RouteManager {
       projectRoot: normalizedProjectRoot,
       manifest,
       isolatedClientBoundaryModules,
+      islandsErrors,
     };
     return manifest;
   }
@@ -931,6 +966,15 @@ export class RouteManager {
     const normalizedProjectRoot = path.resolve(projectRoot);
     this.generateClientManifest(normalizedProjectRoot);
     return this.clientManifestCache?.isolatedClientBoundaryModules ?? new Set();
+  }
+
+  /**
+   * @internal Islands-mode pages with a client component that cannot become an island. Hydrating
+   * such a page whole would ship its server code to the browser, so it stays static instead.
+   */
+  getIslandsErrors(projectRoot: string = this.config.root): readonly string[] {
+    this.generateClientManifest(path.resolve(projectRoot));
+    return this.clientManifestCache?.islandsErrors ?? [];
   }
 
   /**

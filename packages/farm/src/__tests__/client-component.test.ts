@@ -743,10 +743,7 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     const pageFile = path.join(root, "src", "app", "page.tsx");
     const clientFile = path.join(root, "src", "client.tsx");
     fs.mkdirSync(path.dirname(pageFile), { recursive: true });
-    fs.writeFileSync(
-      clientFile,
-      `'use client';\nfunction Counter() { return null; }\nexport { Counter };\n`,
-    );
+    fs.writeFileSync(clientFile, `'use client';\nexport * from "./counter-implementation";\n`);
     fs.writeFileSync(
       pageFile,
       `import { Counter } from "../client";\nexport default function Page() { return <Counter />; }\n`,
@@ -1336,7 +1333,7 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
 
       const reexport = asyncPage(
         "<StarButton count={stars} />",
-        '"use client";\nfunction StarButton() { return null; }\nexport { StarButton };\n',
+        '"use client";\nexport * from "./star-button-implementation";\n',
       );
       expect(
         getClientModuleHydrationPlan(reexport.pageFile, reexport.root, "off", islands),
@@ -1681,7 +1678,9 @@ export function Chart() {}
     const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
 
     expect(source).toContain("const layoutComponentCache = new Map();");
-    expect(source).toContain("async function loadLayoutComponents(layouts = [])");
+    expect(source).toContain(
+      "async function loadLayoutComponents(layouts = [], params = {}, source)",
+    );
     expect(source).toContain("for (const layout of layouts)");
     expect(source).toContain("function wrapWithLoadedLayouts(element, loadedLayouts, params)");
     expect(source).toContain("for (let index = loadedLayouts.length - 1; index >= 0; index--)");
@@ -1712,7 +1711,9 @@ export function Chart() {}
     expect(start).toBeGreaterThan(-1);
     const emittedFunction = source.slice(start, end);
 
-    const layoutsLoaded = emittedFunction.indexOf("await loadLayoutComponents(layouts)");
+    const layoutsLoaded = emittedFunction.indexOf(
+      "await loadLayoutComponents(layouts, params, hydrationOptions.layoutSource)",
+    );
     const pageImported = emittedFunction.indexOf(
       "import(/* @vite-ignore */ farmModuleUrl(modulePath))",
     );
@@ -1835,8 +1836,9 @@ export function Chart() {}
       isolatedBootstrap,
       developmentSource.indexOf("if (!shouldHydrate)", isolatedBootstrap),
     );
+    // Islands mode hydrates the document (so islx watches streamed islands); otherwise #root.
     const isolatedHydrate = isolatedBranch.indexOf(
-      "await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);",
+      'await hydrateFarmIsolatedClientBoundaries(${islandValues ? "document" : "rootContainer"}, hydrationController.signal);',
     );
     const abortGuard = isolatedBranch.indexOf("if (hydrationController.signal.aborted) return;");
     const release = isolatedBranch.indexOf("markFarmHydrated();");
@@ -1904,8 +1906,8 @@ export function Chart() {}
     );
 
     expect(source.match(/refresh: function\(options = \{\}\)/g)).toHaveLength(2);
-    expect(source).toContain(
-      'if (!options.refresh && matched?.route.navigation === "client-render")',
+    expect(source).toMatch(
+      /if \(\s*!options\.refresh &&\s*matched\?\.route\.navigation === "client-render" &&/,
     );
     expect(source).toContain("options.refresh ? null : matchInterceptedRouteSlot(pathname, from)");
     expect(source).toContain("fetchPage: async function(url, interceptFrom, fresh = false");
