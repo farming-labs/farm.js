@@ -2271,13 +2271,13 @@ importers:
 
   packages/farm-agent:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       agent-unit:
         specifier: ^0.3.0
         version: 0.3.0
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -2646,7 +2646,7 @@ importers:
         version: 8.3.4(@types/node@22.20.5)(esbuild@0.28.1)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-email:
     dependencies:
@@ -2768,7 +2768,7 @@ importers:
         version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-integration-utils:
     dependencies:
@@ -2995,7 +2995,7 @@ importers:
         version: 8.3.4(@types/node@22.20.5)(esbuild@0.27.3)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-preview-gateway:
     devDependencies:
@@ -3085,7 +3085,7 @@ importers:
         version: 8.3.4(@types/node@22.20.5)(esbuild@0.27.3)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-renderer-tests:
     dependencies:
@@ -3147,7 +3147,7 @@ importers:
         version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-search:
     dependencies:
@@ -3222,7 +3222,7 @@ importers:
         version: 8.3.4(@types/node@22.20.5)(esbuild@0.27.3)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-strapi:
     dependencies:
@@ -3333,7 +3333,7 @@ importers:
         version: 8.3.4(@types/node@22.20.5)(esbuild@0.27.3)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-sync:
     dependencies:
@@ -3376,7 +3376,7 @@ importers:
         version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-unkey:
     dependencies:
@@ -3419,7 +3419,7 @@ importers:
         version: 8.3.4(@types/node@22.20.5)(esbuild@0.27.3)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
       vue:
         specifier: 3.5.44
         version: 3.5.44(typescript@5.9.3)
@@ -24315,68 +24315,6 @@ packages:
       why-is-node-running: 3.2.1
     transitivePeerDependencies:
       - msw
-
-  /vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4):
-    resolution: {integrity: sha512-cPODOMF8YnkiiYtDdHo6n4wWmBrOBBbOIYH2d33M4l3CdNn72h+qMmO6uXffUN6A5AZFXNND/d+krS9mgkXRfg==}
-    engines: {node: ^22.12.0 || ^24.0.0 || >=26.0.0}
-    hasBin: true
-    peerDependencies:
-      '@edge-runtime/vm': '*'
-      '@opentelemetry/api': ^1.9.0
-      '@types/node': ^22.0.0 || >=24.0.0
-      '@vitest/browser-playwright': 5.0.5
-      '@vitest/browser-preview': 5.0.5
-      '@vitest/browser-webdriverio': ^5.0.0-beta.5 || >=5.0.0
-      '@vitest/coverage-istanbul': 5.0.5
-      '@vitest/coverage-v8': 5.0.5
-      '@vitest/ui': 5.0.5
-      happy-dom: '*'
-      jsdom: '*'
-      vite: ^6.4.0 || ^7.0.0 || ^8.0.0
-    peerDependenciesMeta:
-      '@edge-runtime/vm':
-        optional: true
-      '@opentelemetry/api':
-        optional: true
-      '@types/node':
-        optional: true
-      '@vitest/browser-playwright':
-        optional: true
-      '@vitest/browser-preview':
-        optional: true
-      '@vitest/browser-webdriverio':
-        optional: true
-      '@vitest/coverage-istanbul':
-        optional: true
-      '@vitest/coverage-v8':
-        optional: true
-      '@vitest/ui':
-        optional: true
-      happy-dom:
-        optional: true
-      jsdom:
-        optional: true
-    dependencies:
-      '@opentelemetry/api': 1.9.1
-      '@types/chai': 5.2.3
-      '@types/node': 22.20.5
-      '@vitest/mocker': 5.0.5(vite@8.3.4)
-      chai: 6.3.0
-      es-module-lexer: 2.3.2
-      expect-type: 1.4.0
-      jsdom: 25.0.1(supports-color@10.2.2)
-      magic-string: 1.4.3
-      obug: 3.0.0
-      picomatch: 4.0.7
-      std-env: 4.3.0
-      tinybench: 6.2.2
-      tinyexec: 1.3.1
-      tinyglobby: 0.2.17
-      vite: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
-      why-is-node-running: 3.2.1
-    transitivePeerDependencies:
-      - msw
-    dev: true
 
   /vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(msw@2.15.0)(vite@8.3.4):
     resolution: {integrity: sha512-cPODOMF8YnkiiYtDdHo6n4wWmBrOBBbOIYH2d33M4l3CdNn72h+qMmO6uXffUN6A5AZFXNND/d+krS9mgkXRfg==}
