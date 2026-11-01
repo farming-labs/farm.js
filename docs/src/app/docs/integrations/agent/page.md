@@ -88,7 +88,7 @@ for await (const event of agents.run("refund", { orderId: "o_1" })) {
 for await (const event of agents.resume(runId, { approved: true })) console.log(event.type);
 ```
 
-The integration owns every path under `basePath`. `farm dev` refuses to start when an API route in `src/app` sits under it; move the route or set another `basePath`.
+The agent API is made of ordinary API routes, so `basePath` sits under `/api`. Requests pass the app's [middleware](/docs/middleware), plugin `runtime.before` hooks, and integration guards such as `protectedRoutes` before they reach the agents, in `farm dev` and in every deploy target. The integration owns every path under `basePath`. `farm dev` refuses to start when an API route in `src/app` sits under it; move the route or set another `basePath`.
 
 ## Authorize requests
 
@@ -101,7 +101,9 @@ agent({
 });
 ```
 
-Without `authorize`, anyone who can reach the server can start and resume runs.
+Set `authorize` before anyone else can reach the app; a middleware or plugin guard on `basePath` works too. Without either, anyone who can reach the server can list every run with its input and output, read a run and its events, answer its interrupt, cancel or delete it, and start new runs.
+
+A guard on `basePath` also sees agent-unit's internal `__agent-unit/continue` and `__agent-unit/sweep` requests, which carry `AGENT_UNIT_SECRET` as a bearer token. Let them through so a yielded run continues in a fresh invocation and Netlify's scheduled sweep reaches the server; agent-unit checks the secret itself.
 
 ## Storage and deploy targets
 
@@ -123,7 +125,7 @@ On Redis, runs and leases change atomically, so two instances never take the sam
 
 | Option      | Default          | Description                                                                          |
 | ----------- | ---------------- | ------------------------------------------------------------------------------------ |
-| `basePath`  | `"/api/agent"`   | Where the API is mounted.                                                            |
+| `basePath`  | `"/api/agent"`   | Where the API is mounted, under `/api`.                                              |
 | `agentsDir` | `"src/agents"`   | The folder of agent files, relative to the app root (`agents` in `srcDir`).          |
 | `framework` | detected         | `"ai-sdk"`, `"mastra"`, `"langgraph"`, or `"openai-agents"`.                         |
 | `storage`   | disk on Node     | Run storage, as an unstorage driver config.                                          |

@@ -5,12 +5,22 @@
  * Server modules are imported only as types. Runtime data contains paths and methods only.
  */
 
-
+import type { PluginAPIRouter } from "@farm.js/core/api";
+import type FarmPluginConfig0 from "../../farm.config";
 
 // Type-only representation of your API routes
-export type APIRouter = {
+export type APIRouter = PluginAPIRouter<typeof FarmPluginConfig0> & {
 
 };
 
 // Pass this schema-free manifest to createApiClients({ routes: apiRoutes }).
-export const apiRoutes = [] as const;
+export const apiRoutes = [
+  {
+    path: "/api/agent",
+    methods: ["DELETE", "GET", "POST"],
+  },
+  {
+    path: "/api/agent/[...path]",
+    methods: ["DELETE", "GET", "POST"],
+  },
+] as const;

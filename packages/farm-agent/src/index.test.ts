@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { mergePluginAPIRoutes } from "@farm.js/core/api/runtime";
 
 import { agent } from "./index.js";
 import agentUnitConfig from "./config.js";
@@ -23,22 +24,22 @@ describe("agent()", () => {
     });
   });
 
-  it("rejects a base path that is not absolute", () => {
+  it("rejects a base path that is not absolute or not under /api", () => {
     expect(() => agent({ basePath: "api/agents" })).toThrow(/must start with "\/"/);
-    expect(agent({ basePath: "/agents/" }).instance.basePath).toBe("/agents");
+    expect(() => agent({ basePath: "/agents" })).toThrow(/must be under \/api/);
+    expect(agent({ basePath: "/api/agents/" }).instance.basePath).toBe("/api/agents");
   });
 
-  it("serves the agents in development only through Vite", () => {
-    const plugin = pluginOf(agent());
-    const dev = plugin.configure(
-      { root: "/app", vite: { plugins: [{ name: "app" }] } },
-      { isDev: true },
-    );
-    expect(dev.vite.plugins.map((entry: { name: string }) => entry.name)).toEqual([
-      "farm:agent-dev",
-      "app",
+  it("serves the agents as API routes, with no Vite middleware of its own", () => {
+    const plugin = pluginOf(agent({ basePath: "/api/agents" }));
+    expect(
+      plugin.configure({ root: "/app", vite: { plugins: [{ name: "app" }] } }, { isDev: true }),
+    ).toBeUndefined();
+    const routes = mergePluginAPIRoutes([], [plugin as never]);
+    expect(routes.map(({ path, methods }) => ({ path, methods }))).toEqual([
+      { path: "/api/agents", methods: ["GET", "POST", "DELETE"] },
+      { path: "/api/agents/[...path]", methods: ["GET", "POST", "DELETE"] },
     ]);
-    expect(plugin.configure({ root: "/app" }, { isDev: false })).toBeUndefined();
   });
 
   it("adds agent-unit's Nitro module to the production build, reading agents from srcDir", async () => {

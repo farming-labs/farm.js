@@ -2121,10 +2121,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
 
           // The OpenAPI spec and reference, docs, raw markdown-source, the
-          // markdown mirror, and the Markdown 404 fallback expose page content
-          // or route-existence, so app middleware must pass before they are
-          // sent — matching the production entry, where these handlers run
-          // after the middleware runner.
+          // markdown mirror, the Markdown 404 fallback, and API routes expose
+          // page content, data, or route-existence, so app middleware must pass
+          // before they are sent — matching the production entry, where these
+          // handlers run after the middleware runner.
           const runAppMiddlewareForContentRoute = async (): Promise<boolean> => {
             if (!middlewareManager?.hasMiddleware()) return false;
             const middlewareRequest = createRequestFromNodeRequest(req, new URL(fullUrl));
@@ -2725,6 +2725,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");
               res.end(JSON.stringify({ error: "Internal server error" }));
+              return;
+            }
+
+            // App middleware guards API routes, including plugin routes, as the
+            // production entry does before it dispatches them. It runs before the
+            // body is read, so a middleware that reads the request still can.
+            if (await runAppMiddlewareForContentRoute()) {
+              const duration = Date.now() - startTime;
+              logResponse(method, urlPath, res.statusCode || 200, duration, "API");
               return;
             }
 
