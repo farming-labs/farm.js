@@ -81,7 +81,7 @@ FARM_PREVIEW_GATEWAY_URL=https://preview.farmjs.dev
 
 ### Managed developer login
 
-Developers preview with a Farm.js Infrastructure API key: `FARMJS_API_KEY`, or the key
+Developers preview with a Farm.js Infrastructure API key that has the `previews` permission: `FARMJS_API_KEY`, or the key
 `farm login` gets them by signing in at app.farmjs.dev. Turn managed login on with two secrets:
 
 ```txt

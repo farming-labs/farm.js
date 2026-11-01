@@ -1,52 +1,77 @@
 ---
 title: "Farm Infra analytics"
-description: "Send request and MCP tool analytics to your Farm Infra project by setting two environment variables."
+description: "Send request and MCP tool analytics to your Farm Infra project by setting one API key."
 section: "Runtime"
 ---
 
 # Farm Infra analytics
 
 Farm reports request and MCP tool activity to your [Farm Infra](https://app.farmjs.dev) project
-when the server's environment links the app to one. There's no package to install and nothing to
-add to `farm.config.ts`.
+when the server's environment has a Farm Infra API key. There's no package to install and nothing
+to add to `farm.config.ts`.
+
+```bash title=".env"
+FARMJS_API_KEY=farmjs_…
+```
+
+Create the key on the [API keys page](https://app.farmjs.dev/dashboard/settings) with the **Site
+analytics** preset: it can only send analytics, for the one project you choose, and optionally for
+one environment. Farm Infra knows the key's project, so nothing else is needed.
+
+Set the variable wherever the server runs: `.env` for `farm dev`, and your host's environment
+variables for production. Farm reads it when the server starts, so the build doesn't need it. An
+app without `FARMJS_API_KEY` sends nothing.
+
+The key `farm login` saves is for [previews](/docs/preview) only and can't send analytics.
+
+## Keys for several projects
+
+A key whose scope is a whole organization or several projects also needs the project to report
+to. Copy its ID from the project's page in Farm Infra:
 
 ```bash title=".env"
 FARMJS_API_KEY=farmjs_…
 FARMJS_PROJECT_ID=proj_…
 ```
 
-Copy the project ID from the project's page in Farm Infra. Set the variables wherever the server
-runs: `.env` for `farm dev`, and your host's environment variables for production. Farm reads them
-when the server starts, so the build doesn't need them.
+The project must be in the key's scope. With a key for one project, `FARMJS_PROJECT_ID` is
+optional; if you set it, it must be that project.
 
-An app without these variables sends nothing. `FARMJS_API_KEY` on its own isn't enough, because the
-same key also authorizes other Farm Infra APIs.
+## Environments
+
+Every event is tagged `production`, `staging` or `development`: `FARMJS_ENVIRONMENT` if set, then
+Vercel's environment (preview is staging), then `NODE_ENV`. A key restricted to one environment
+only sends for that environment. In any other, such as `farm dev` with a production-only key,
+Farm stops sending quietly instead of warning on every start.
 
 ## Write-only keys
 
-An account API key belongs to a person. It stops sending if they revoke it or leave the
-organization, and on a server it can also start previews and run site checks as them. For a key
-that can only write analytics, create a write-only key for the project and environment in Farm
-Infra and set that instead:
-
-```bash title=".env"
-FARMJS_API_KEY=fti_…
-```
-
-A write-only key names its own project and environment, so `FARMJS_PROJECT_ID` isn't needed.
+Projects that created a write-only key (`fti_…`) before API keys had permissions can keep using it
+in `FARMJS_API_KEY` until it expires. It names its own project and environment. New projects use a
+Site analytics key instead.
 
 ## Environment variables
 
 | Variable             | Purpose                                                                                                           |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `FARMJS_API_KEY`     | An account API key (`farmjs_…`) or a project's write-only key (`fti_…`).                                          |
-| `FARMJS_PROJECT_ID`  | The Farm Infra project to report to. Needed with an account API key.                                              |
+| `FARMJS_API_KEY`     | A Farm Infra API key with the `analytics:write` permission (`farmjs_…`), or an older write-only key (`fti_…`).    |
+| `FARMJS_PROJECT_ID`  | The project to report to. Only for a key that reaches more than one project.                                      |
 | `FARMJS_ENVIRONMENT` | `production`, `staging` or `development`. Defaults to Vercel's environment (preview is staging), then `NODE_ENV`. |
 | `FARMJS_API_URL`     | Farm Infra's address, if it isn't `https://app.farmjs.dev`. Must be HTTPS, except for localhost.                  |
 
 A value Farm can't use, such as a malformed key or project ID, leaves analytics off and prints one
-warning when the server starts. It never stops the app. If Farm Infra later rejects the key, Farm
-stops sending until the server restarts and prints one warning.
+warning when the server starts. It never stops the app. If Farm Infra refuses the key, Farm stops
+sending until the server restarts and prints one warning that says what to change:
+
+| Farm Infra answers                                   | Warning                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------ |
+| The key reaches several projects and none was named  | Set `FARMJS_PROJECT_ID`, or use a key scoped to one project.       |
+| The key can't send analytics, such as `farm login`'s | Create a Site analytics key and set it as `FARMJS_API_KEY`.        |
+| The key was revoked or has expired (401)             | Create a new Site analytics key.                                   |
+| The key only sends another environment               | None: Farm stops quietly.                                          |
+| Anything else that refuses the request               | The status, and to check `FARMJS_API_KEY` and `FARMJS_PROJECT_ID`. |
+
+Farm never prints the key.
 
 ## Turn it off
 
@@ -59,7 +84,7 @@ export default defineConfig({
 ```
 
 With `analytics: false`, the production server doesn't include the analytics code at all.
-Removing the environment variables also turns it off.
+Removing `FARMJS_API_KEY` also turns it off.
 
 ## What is sent
 

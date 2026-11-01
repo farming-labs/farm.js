@@ -1393,8 +1393,9 @@ retention, preview-environment, opt-out, and static-export details.
 
 ## Farm Infra analytics
 
-An app whose server environment sets `FARMJS_API_KEY` and `FARMJS_PROJECT_ID` reports request and MCP
-tool analytics to that Farm Infra project. Set `analytics: false` to never send them. See
+An app whose server environment sets `FARMJS_API_KEY` to a Site analytics key reports request and
+MCP tool analytics to that key's Farm Infra project. A key reaching several projects also needs
+`FARMJS_PROJECT_ID`. Set `analytics: false` to never send them. See
 [Farm Infra analytics](/docs/infra-analytics) for what is sent and how.
 
 ## Deployment config
