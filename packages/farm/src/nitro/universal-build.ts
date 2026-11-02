@@ -3772,7 +3772,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -3963,7 +3963,7 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, serv
       if (!serverProps || serverProps.__farmRoutePropsResolved !== true) return null;
       const props = {
         ...reviveServerPageProps(serverProps),
-        searchParams: Promise.resolve(serverProps.search ?? searchParams),
+        searchParams: createFarmSearchParams(serverProps.search ?? searchParams),
       };
       pageElement = React.createElement(Component, props);
     } else if (typeof Component === "function" && Component.constructor && Component.constructor.name === "AsyncFunction") {
@@ -3978,7 +3978,7 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, serv
       const props = {
         ...reviveServerPageProps(serverProps),
         params: params,
-        searchParams: Promise.resolve(searchParams),
+        searchParams: createFarmSearchParams(searchParams),
       };
       pageElement = React.createElement(Component, props);
     }
@@ -4668,7 +4668,7 @@ ${
         if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         const params = matched.params;
         const searchParams = searchParamsToObject(url.searchParams);
-        const props = { params: params, searchParams: Promise.resolve(searchParams) };
+        const props = { params: params, searchParams: createFarmSearchParams(searchParams) };
         let pageElement = React.createElement(Component, props);
         if (hasHydratableLayout(pathname)) {
           pageElement = createLayoutPageBoundary(matched.route, pageElement);
@@ -6607,6 +6607,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   resolveFarmPreviewDeployment,
   resolveFarmWebRequestOrigin,
   runWithFarmRequestSpan,
+  createFarmSearchParams,
   searchParamsToObject,
   setFarmBasePath,
   setFarmTrailingSlashPreference,
@@ -8358,7 +8359,7 @@ async function handleMetadataImageRequest(request, routePathname) {
     const searchParams = searchParamsToObject(url.searchParams);
     const props = {
       params: match.params,
-      searchParams: Promise.resolve(searchParams),
+      searchParams: createFarmSearchParams(searchParams),
       path: match.pagePath,
     };
     const value = typeof imageModule.default === "function"
@@ -9991,7 +9992,7 @@ ${
         const rawPageProps = withFarmRouteContext(
           {
             params,
-            searchParams: Promise.resolve(searchParamsObj),
+            searchParams: createFarmSearchParams(searchParamsObj),
             path: pathname,
             ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
           },
@@ -10032,7 +10033,7 @@ ${
                 ...rawPageProps,
                 params: parsedParams,
                 search: parsedSearch,
-                searchParams: Promise.resolve(parsedSearch),
+                searchParams: createFarmSearchParams(parsedSearch),
               };
             })();
           if (
@@ -10051,7 +10052,7 @@ ${
           const routeStateProps = {
             ...rawPageProps,
             search: searchParamsObj,
-            searchParams: Promise.resolve(searchParamsObj),
+            searchParams: createFarmSearchParams(searchParamsObj),
             error: routeStateError,
           };
           if (isFarmNotFoundError(routeStateError) && routeComponents?.notFound) {
@@ -10080,7 +10081,7 @@ ${
             const rawSlotProps = withFarmRouteContext(
               {
                 params: slot.params,
-                searchParams: Promise.resolve(searchParamsObj),
+                searchParams: createFarmSearchParams(searchParamsObj),
                 path: pathname,
                 ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
               },
@@ -10107,7 +10108,7 @@ ${
                   search: slotSchemas.search?.parse
                     ? slotSchemas.search.parse(searchParamsObj)
                     : searchParamsObj,
-                  searchParams: Promise.resolve(
+                  searchParams: createFarmSearchParams(
                     slotSchemas.search?.parse
                       ? slotSchemas.search.parse(searchParamsObj)
                       : searchParamsObj,
@@ -10787,7 +10788,7 @@ ${
             reset: function() {},
             params,
             search: searchParamsObj,
-            searchParams: Promise.resolve(searchParamsObj),
+            searchParams: createFarmSearchParams(searchParamsObj),
             path: pathname,
             ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
           });

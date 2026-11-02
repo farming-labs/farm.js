@@ -321,6 +321,7 @@ export type {
   ShutdownPayload,
 } from "./plugin";
 export type { MiddlewareProps, PagePropsWithMiddleware, PageProps } from "./types";
+export type { FarmSearchParams } from "./search-params";
 export type {
   FarmUserConfig,
   ResolvedFarmConfig,

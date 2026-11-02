@@ -31,3 +31,36 @@ export function searchParamsToObject(
 
   return output;
 }
+
+/** Page and layout `searchParams`: a promise (Farm's contract) whose query keys also read directly. */
+export type FarmSearchParams<TSearch = Record<string, string | string[] | undefined>> =
+  Promise<TSearch> & Readonly<TSearch>;
+
+// Promise members, and names an object must never own as data.
+const RESERVED_SEARCH_KEYS = new Set([
+  "then",
+  "catch",
+  "finally",
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+/**
+ * The `searchParams` a page receives: `await searchParams` (Farm's typed contract) and
+ * `searchParams.key` (as the RSC engine passes it, a plain object) both read the query, so a
+ * page works on either engine. `then`, `catch` and `finally` are read only with `await`.
+ */
+export function createFarmSearchParams<TSearch extends object>(
+  search: TSearch,
+): FarmSearchParams<TSearch> {
+  const promise = Promise.resolve(search) as unknown as FarmSearchParams<TSearch>;
+  for (const key of Object.keys(search)) {
+    if (RESERVED_SEARCH_KEYS.has(key)) continue;
+    Object.defineProperty(promise, key, {
+      value: (search as Record<string, unknown>)[key],
+      enumerable: true,
+    });
+  }
+  return promise;
+}

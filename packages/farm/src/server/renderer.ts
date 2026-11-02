@@ -78,7 +78,7 @@ import {
   type MetadataImageKind,
 } from "../metadata";
 import { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
-import { searchParamsToObject } from "../search-params";
+import { createFarmSearchParams, searchParamsToObject } from "../search-params";
 import { prepareDeferredData, snapshotDeferredData, type DeferredRecord } from "../deferred";
 import { createFarmDeploymentCookie, FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
 import type { StaticMetadataImageInfo } from "../static-metadata-image";
@@ -599,7 +599,7 @@ async function parseRouteModuleProps(
     ...input.props,
     params: params as Record<string, string>,
     search,
-    searchParams: Promise.resolve(search as Record<string, string | string[] | undefined>),
+    searchParams: createFarmSearchParams(search as Record<string, string | string[] | undefined>),
   };
 }
 
@@ -631,7 +631,7 @@ function createRouteStateProps(input: {
   return {
     params: input.params,
     search: input.searchParamsObject,
-    searchParams: Promise.resolve(input.searchParamsObject),
+    searchParams: createFarmSearchParams(input.searchParamsObject),
     path: input.path,
     middleware: input.middlewareMap.size > 0 ? { data: input.middlewareMap } : undefined,
     context: input.pluginExposedContext.size > 0 ? { data: input.pluginExposedContext } : undefined,
@@ -1237,7 +1237,7 @@ export class ServerRenderer {
           const PageComponent = mod.default;
           const pageProps = {
             params: page.params,
-            searchParams: Promise.resolve({}),
+            searchParams: createFarmSearchParams({}),
             path: page.urlPath,
           };
 
@@ -1590,7 +1590,7 @@ export class ServerRenderer {
       const rawPageProps: PageProps = withFarmRouteContext(
         {
           params,
-          searchParams: Promise.resolve(searchParamsObject),
+          searchParams: createFarmSearchParams(searchParamsObject),
           path: pathname,
           middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
           context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
@@ -1629,7 +1629,7 @@ export class ServerRenderer {
         const routeStateProps = {
           ...rawPageProps,
           search: searchParamsObject,
-          searchParams: Promise.resolve(searchParamsObject),
+          searchParams: createFarmSearchParams(searchParamsObject),
           error,
         };
 
@@ -1769,7 +1769,7 @@ export class ServerRenderer {
           const rawSlotProps = withFarmRouteContext(
             {
               params: slot.params,
-              searchParams: Promise.resolve(searchParamsObject),
+              searchParams: createFarmSearchParams(searchParamsObject),
               path: pathname,
               middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
               context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
@@ -2878,7 +2878,7 @@ export class ServerRenderer {
 
     const imageProps: PageProps = {
       params: options.params,
-      searchParams: Promise.resolve(options.searchParamsObject),
+      searchParams: createFarmSearchParams(options.searchParamsObject),
       path: options.pagePath,
     };
     const handlerResult =

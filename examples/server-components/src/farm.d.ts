@@ -26,6 +26,7 @@ export type RoutePath =
   | "/nav/a"
   | "/nav/b"
   | "/promise"
+  | "/search"
   | "/server-fn-middleware"
   | "/server-query"
   | `/static/${string}`
@@ -49,6 +50,7 @@ export type RoutePattern =
   | "/nav/a"
   | "/nav/b"
   | "/promise"
+  | "/search"
   | "/server-fn-middleware"
   | "/server-query"
   | "/static/[slug]"
@@ -73,6 +75,7 @@ export type RouteModulePattern =
   | "/nav/a"
   | "/nav/b"
   | "/promise"
+  | "/search"
   | "/server-fn-middleware"
   | "/server-query"
   | "/static/[slug]"

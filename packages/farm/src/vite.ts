@@ -203,7 +203,11 @@ import {
 } from "./server-http";
 import { createCliColors } from "./cli-colors";
 import { createFarmThemeCssPlugin } from "./theme/vite";
-import { searchParamsToObject } from "./search-params";
+import {
+  createFarmSearchParams,
+  searchParamsToObject,
+  type FarmSearchParams,
+} from "./search-params";
 import { emitFarmEvent, runWithFarmRequestSpan } from "./observability";
 import {
   getFarmRendererCapabilities,
@@ -3130,7 +3134,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   props: withFarmRouteContext(
                     {
                       params,
-                      searchParams: Promise.resolve(searchParams),
+                      searchParams: createFarmSearchParams(searchParams),
                       path: targetUrl.pathname,
                       middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
                     },
@@ -3190,7 +3194,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                       props: withFarmRouteContext(
                         {
                           params: slot.params,
-                          searchParams: Promise.resolve(searchParams),
+                          searchParams: createFarmSearchParams(searchParams),
                           path: targetUrl.pathname,
                         },
                         slotContext,
@@ -4116,7 +4120,7 @@ if (import.meta.hot) {
               const PageComponent = mod.default;
               const pageProps = {
                 params: page.params,
-                searchParams: Promise.resolve({}),
+                searchParams: createFarmSearchParams({}),
                 path: page.urlPath,
               };
 
@@ -4838,7 +4842,7 @@ type RouteModuleLike = {
   __farmRouteParsesProps?: boolean;
   __farmResolveRouteProps?: (props: {
     params: Record<string, string>;
-    searchParams: Promise<Record<string, string | string[] | undefined>>;
+    searchParams: FarmSearchParams;
     path: string;
     [key: string]: unknown;
   }) => Promise<Record<string, unknown>>;
@@ -4853,7 +4857,7 @@ async function parseRouteModuleProps(
   input: {
     props: {
       params: Record<string, string>;
-      searchParams: Promise<Record<string, string | string[] | undefined>>;
+      searchParams: FarmSearchParams;
       path: string;
       [key: string]: unknown;
     };
@@ -4885,7 +4889,7 @@ async function parseRouteModuleProps(
     ...input.props,
     params,
     search,
-    searchParams: Promise.resolve(search as Record<string, string | string[] | undefined>),
+    searchParams: createFarmSearchParams(search as Record<string, string | string[] | undefined>),
   };
 }
 
@@ -5009,7 +5013,7 @@ ${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { isFarmBlockedNavigationURL, replayFarmQueuedInteraction, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { isFarmBlockedNavigationURL, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -5834,7 +5838,7 @@ async function buildRouteComponentProps(pageModule, params, searchParams, path, 
     window.__FARM_PROPS__ = revivedProps;
     return {
       ...revivedProps,
-      searchParams: Promise.resolve(revivedProps.search ?? revivedProps.searchParams ?? {}),
+      searchParams: createFarmSearchParams(revivedProps.search ?? revivedProps.searchParams ?? {}),
       path: revivedProps.path || path,
     };
   }
@@ -5843,7 +5847,7 @@ async function buildRouteComponentProps(pageModule, params, searchParams, path, 
     const rawProps = {
       ...(existingProps || {}),
       params,
-      searchParams: Promise.resolve(searchParams),
+      searchParams: createFarmSearchParams(searchParams),
       path,
     };
     // Keep top-level route errors inside the router's navigation transaction.
