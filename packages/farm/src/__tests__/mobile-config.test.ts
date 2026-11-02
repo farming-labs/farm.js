@@ -190,6 +190,10 @@ describe("mobile config", () => {
       tabs: [],
       routes: {},
     });
+    // A default id from an app named like a Java keyword says to set one.
+    expect(() => resolve({ name: "Class" })).toThrow(
+      /"class" is a Java keyword.*set mobile\.id, such as "com\.example\.notes"/,
+    );
     expect(() => resolve({ tabs: [{ path: "/inbox", title: "Inbox", icon: "inbox" }] })).toThrow(
       /mobile \(os: android\): tabs\[0\]\.path "\/inbox" is not a page route\. Add src\/app\/inbox\/page\.tsx/,
     );
@@ -238,6 +242,9 @@ describe("mobile config", () => {
     expect(() =>
       createFarmMobileContext({ command: "build", root, mode: "production", profile: "../x" }),
     ).toThrow(/--profile must be a name/);
+    expect(() =>
+      createFarmMobileContext({ command: "serve" as never, root, mode: "production" }),
+    ).toThrow(/--command must be dev or build/);
   });
 
   it("calls a function once per OS and session, and names the OS when it returns bad values", async () => {
@@ -362,13 +369,36 @@ describe("mobile route manifest", () => {
     }
   });
 
+  it("never reads a locale as a dynamic first segment", () => {
+    // The client router strips the locale before matching, so `/fr` is the French home page.
+    const routes = ["/", "/[slug]", "/[a]/[b]"];
+    const i18n = { locales: ["en", "fr"], routing: "prefix-except-default" as const };
+    const manifest = createFarmMobileRouteManifest(
+      { name: "n", id: "a.b", server: "https://x.dev", tabs: [], routes: {} },
+      { routes, i18n },
+    );
+    const rules = manifest.rules.map((rule) => ({ ...rule, regex: new RegExp(rule.pattern) }));
+    const routeFor = (pathname: string) =>
+      rules.find((candidate) => candidate.regex.test(pathname))?.route ?? null;
+    expect(routeFor("/fr")).toBe("/");
+    expect(routeFor("/FR/")).toBe("/");
+    expect(routeFor("/fr/x")).toBe("/[slug]");
+    expect(routeFor("/x")).toBe("/[slug]");
+    expect(routeFor("/fr/fr")).toBe("/[slug]");
+    expect(routeFor("/fr/x/y")).toBe("/[a]/[b]");
+    expect(routeFor("/x/y")).toBe("/[a]/[b]");
+    expect(routeFor("/english")).toBe("/[slug]");
+  });
+
   it("puts the base path and an optional locale prefix in front of every rule", () => {
     const options = {
       basePath: "/app.v2/",
       i18n: { locales: ["en", "pt-BR"], routing: "prefix-except-default" as const },
     };
     const source = createFarmMobileRoutePattern("/notes/[id]", options);
-    expect(source).toBe("^/app\\.v2(?:/(?:[Ee][Nn]|[Pp][Tt]-[Bb][Rr]))?/notes/[^/]+/?$");
+    expect(source).toBe(
+      "^/app\\.v2(?:/(?:[Ee][Nn]|[Pp][Tt]-[Bb][Rr])|(?!/(?:[Ee][Nn]|[Pp][Tt]-[Bb][Rr])(?:/|$)))/notes/[^/]+/?$",
+    );
     const notes = new RegExp(source);
     for (const pathname of ["/app.v2/notes/1", "/app.v2/en/notes/1", "/app.v2/PT-br/notes/1/"]) {
       expect(notes.test(pathname), pathname).toBe(true);

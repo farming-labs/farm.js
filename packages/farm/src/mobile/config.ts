@@ -366,9 +366,20 @@ export function resolveFarmMobileConfig(
   const pkg = readAppPackageJson(options.root);
   const name = config.name?.trim() || resolveAppPackageName(options.root, pkg) || "Farm App";
   const idName = name.replace(/[^A-Za-z0-9]+/g, "").replace(/^[^A-Za-z]+/, "") || "app";
+  const id = config.id?.trim() || `local.farm.${idName.toLowerCase()}`;
+  // The default comes from the app's name, which can be a Java keyword ("class", "new").
+  if (!config.id?.trim()) {
+    checkAppId(id, {
+      ...check,
+      fail: (message) =>
+        fail(
+          `${message} It comes from the app's name; set mobile.id, such as "com.example.notes".`,
+        ),
+    });
+  }
   return {
     name,
-    id: config.id?.trim() || `local.farm.${idName.toLowerCase()}`,
+    id,
     ...(config.server ? { server: resolveFarmMobileServer(config.server, context) } : {}),
     tabs,
     routes,
@@ -389,6 +400,9 @@ export interface FarmMobileContextOptions {
 export function createFarmMobileContext(options: FarmMobileContextOptions): FarmMobileContext {
   const os = options.os ?? "android";
   if (!MOBILE_OS.has(os)) throw new TypeError(`--os must be android or ios, got "${os}".`);
+  if (options.command !== "dev" && options.command !== "build") {
+    throw new TypeError(`--command must be dev or build, got "${options.command}".`);
+  }
   return Object.freeze({
     os,
     mode: options.mode,

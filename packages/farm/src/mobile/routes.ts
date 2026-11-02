@@ -75,7 +75,10 @@ export function createFarmMobileRoutePattern(
   let source = `^${escapeRegex(normalizeFarmBasePath(options.basePath))}`;
   const i18n = options.i18n;
   if (i18n && i18n.routing !== "none" && i18n.locales.length > 0) {
-    source += `(?:/(?:${i18n.locales.map(caseInsensitive).join("|")}))?`;
+    // A locale prefix, or a first segment that is not a locale: the client router strips the
+    // locale before matching, so `/fr` is the French home page, never `[slug]` = "fr".
+    const locale = `/(?:${i18n.locales.map(caseInsensitive).join("|")})`;
+    source += `(?:${locale}|(?!${locale}(?:/|$)))`;
   }
   for (const segment of pattern.split("/").filter(Boolean)) {
     if (segment.startsWith("(") && segment.endsWith(")")) continue;
