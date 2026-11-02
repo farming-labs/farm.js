@@ -407,8 +407,9 @@ test("an inline server action reads its page's variables, from a form and from a
   const errors = collectErrors(page);
   await page.goto("/inline");
   await hydrated(page);
-  // The captured values travel sealed, never as readable form fields.
-  expect(await page.content()).not.toContain("Ada");
+  // The captured values travel sealed, never as readable form fields. The sealed value is
+  // base64url, so "Ada" may turn up inside it by chance: only a standalone word is a leak.
+  expect(await page.content()).not.toMatch(/(?<![\w-])Ada(?![\w-])/);
   await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
   await page.getByRole("button", { name: "Inline clicks: 0" }).click();
 
