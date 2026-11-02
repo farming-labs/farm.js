@@ -44,4 +44,4 @@ built yet, so they show a placeholder that names the module.
 The toolchain is JDK 17 or newer and the Android SDK (platform 35, build-tools 35,
 platform-tools), found through `ANDROID_HOME`.
 
-See [Mobile (preview)](https://farmjs.dev/docs/desktop#mobile-preview) in the Desktop Apps docs.
+See the [Mobile Apps](https://farmjs.dev/docs/mobile) docs.

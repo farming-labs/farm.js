@@ -342,6 +342,7 @@ const sidebar = [
       { label: "Instant Preview", slug: "preview", icon: "terminal" },
       { label: "Deployment", slug: "deployment", icon: "cloud" },
       { label: "Desktop Apps", slug: "desktop", icon: "monitor" },
+      { label: "Mobile Apps", slug: "mobile", icon: "smartphone" },
     ],
   },
   {
