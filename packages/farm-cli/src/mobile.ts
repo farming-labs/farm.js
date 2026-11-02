@@ -255,7 +255,13 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     const { build } = await import("@farm.js/core/internal/build-runtime");
     await build(config, { preset: "node-server", root, productionVite });
 
-    const app = await mobileRuntime.generateFarmMobileRoutes({ ...appOptions, config });
+    // The analyzer runs unless mobile.native.auto is "off"; it only reports.
+    const app = await mobileRuntime.generateFarmMobileRoutes({
+      ...appOptions,
+      config,
+      analyze: true,
+    });
+    if (app.table) console.log(app.table);
     // Unused native files and config ports nothing builds yet: the same as config inspect.
     for (const warning of app.warnings) runtime.logger.warn(warning);
     const context = await writeMobileProject(shell, app, "build", mobileRuntime);
@@ -268,4 +274,23 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     for (const file of files) runtime.logger.info(`📦 ${shownPath(root, file)}`);
     return files;
   });
+}
+
+/**
+ * `farm config inspect --mobile --report`: run the build-time analyzer, write
+ * `farm-routes.json` and `native-report.json`, and return the report table. Runs even when
+ * `mobile.native.auto` is `"off"`, since it was asked for.
+ */
+export async function reportFarmMobileNative(options: FarmMobileInspectOptions = {}) {
+  const root = path.resolve(options.root || process.cwd());
+  const configRuntime = await import("@farm.js/core/internal/config-runtime");
+  const { generateFarmMobileRoutes } = await configRuntime.loadFarmMobileRuntime();
+  const { table, warnings, reportFile } = await generateFarmMobileRoutes({
+    root,
+    os: options.os,
+    profile: options.profile,
+    command: options.command,
+    analyze: "always",
+  });
+  return { table: table ?? "", warnings, reportFile };
 }

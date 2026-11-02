@@ -9,6 +9,7 @@ import * as path from "node:path";
 import { loadConfig, resolveConfig, type FarmUserConfig, type ResolvedFarmConfig } from "../config";
 import { getFarmSourceRoots } from "../layers";
 import { getFarmRendererComponentExtensions } from "../renderer";
+import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { scanRoutePatterns, type PlatformRouteFiles } from "../routing/generate-route-types";
 import {
   createFarmMobileContext,
@@ -20,6 +21,12 @@ import {
   type FarmMobileOS,
   type ResolvedFarmMobileConfig,
 } from "./config";
+import type { FarmMobileAnalyzerStats } from "./analyzer";
+import {
+  createFarmMobileNativeReport,
+  formatFarmMobileNativeReport,
+  type FarmMobileNativeReport,
+} from "./report";
 import { createFarmMobileRouteManifest, type FarmMobileRouteManifest } from "./routes";
 import {
   readFarmMobilePageExport,
@@ -43,6 +50,15 @@ export {
 export type * from "./config";
 export type * from "./routes";
 export type * from "./screens";
+export type * from "./report";
+export type {
+  FarmMobileAnalyzerStats,
+  FarmMobileBlocker,
+  FarmMobileBlockerRule,
+  FarmMobileRouteAnalysis,
+  FarmUiNode,
+} from "./analyzer";
+export { formatFarmMobileNativeReport } from "./report";
 
 /** An expected failure with its own fix; the CLI prints it without a stack. */
 export class FarmMobileError extends Error {
@@ -60,6 +76,8 @@ export function getFarmMobileOutputDirs(distDir: string): {
   ios: string;
   /** Built apps, such as the debug APK. */
   dist: string;
+  report: string;
+  analyzerCache: string;
 } {
   const root = path.join(distDir, "output", "mobile");
   return {
@@ -69,6 +87,8 @@ export function getFarmMobileOutputDirs(distDir: string): {
     android: path.join(root, "android"),
     ios: path.join(root, "ios"),
     dist: path.join(root, "dist"),
+    report: path.join(root, "native-report.json"),
+    analyzerCache: path.join(distDir, "cache", "mobile", "analyzer.json"),
   };
 }
 
@@ -88,6 +108,11 @@ export interface FarmMobileAppOptions {
   config?: ResolvedFarmConfig;
   /** Shared across calls in one session so a function-valued block runs once per OS. */
   cache?: FarmMobileBlockCache;
+  /**
+   * Run the build-time analyzer: `true` when `mobile.native.auto` is not `"off"` (what
+   * `farm build --mobile` passes), `"always"` for an explicit `--report`. Never in dev.
+   */
+  analyze?: boolean | "always";
 }
 
 export interface FarmMobileApp {
@@ -103,6 +128,9 @@ export interface FarmMobileApp {
   nativeLayouts: Record<string, PlatformRouteFiles>;
   /** Absolute page file per file-based page route. */
   pageFiles: Map<string, string>;
+  /** The analyzer's report, when it ran. */
+  report?: FarmMobileNativeReport;
+  analyzerStats?: FarmMobileAnalyzerStats;
 }
 
 const SCRIPT_PAGE = /\.(?:tsx|ts|jsx|js)$/;
@@ -182,14 +210,62 @@ export async function resolveFarmMobileApp(
       );
     }
   }
-  const { screens, warnings } = resolveFarmMobileScreens({
+  const screenOptions = {
     root,
     os: context.os,
     routes,
     mobile,
     nativePages: scan.nativePages,
     pageExports,
-  });
+  };
+  let { screens, warnings } = resolveFarmMobileScreens(screenOptions);
+  let report: FarmMobileNativeReport | undefined;
+  let analyzerStats: FarmMobileAnalyzerStats | undefined;
+  const analyze =
+    options.analyze === "always" || (options.analyze === true && mobile.native.auto !== "off");
+  if (analyze) {
+    // Only routes nothing else decided, and config routes that ask for a port.
+    const candidates = routes.filter((route) => {
+      const decision = screens[route]!;
+      return decision.source === "default" || decision.requested !== undefined;
+    });
+    const { analyzeFarmMobileRoutes } = await import("./analyzer");
+    const result = await analyzeFarmMobileRoutes({
+      root,
+      srcDir: config.srcDir,
+      routes: candidates,
+      pageFiles: scan.pageFiles,
+      serverComponents:
+        resolveFarmServerComponentsMode(config.experimental?.serverComponents) !== undefined,
+      cacheFile: path.resolve(root, getFarmMobileOutputDirs(config.distDir).analyzerCache),
+    });
+    analyzerStats = result.stats;
+    ({ screens, warnings } = resolveFarmMobileScreens({
+      ...screenOptions,
+      analyzerPorts: new Set(
+        Object.values(result.routes)
+          .filter((route) => route.decision === "port")
+          .map((route) => route.route),
+      ),
+      analyzerBlockers: new Map(
+        Object.values(result.routes).map((route) => [
+          route.route,
+          route.blockers.map(
+            (blocker) =>
+              `${blocker.file ? `${blocker.file}:${blocker.line}:${blocker.column} ` : ""}${blocker.message}`,
+          ),
+        ]),
+      ),
+    }));
+    report = createFarmMobileNativeReport({
+      os: context.os,
+      engine: mobile.native.engine,
+      auto: mobile.native.auto,
+      routes,
+      screens,
+      analysis: result.routes,
+    });
+  }
   const nativeLayouts = Object.fromEntries(
     [...scan.nativeLayouts]
       .sort()
@@ -233,16 +309,28 @@ export async function resolveFarmMobileApp(
     warnings,
     nativeLayouts,
     pageFiles: scan.pageFiles,
+    ...(report ? { report, analyzerStats } : {}),
   };
 }
 
-/** Resolve the block and write `.farm/output/mobile/farm-routes.json`. */
+/**
+ * Resolve the block and write `.farm/output/mobile/farm-routes.json`, plus
+ * `native-report.json` when the analyzer ran (`analyze`). `table` is the report for a terminal.
+ */
 export async function generateFarmMobileRoutes(
   options: FarmMobileAppOptions = {},
-): Promise<FarmMobileApp & { file: string }> {
+): Promise<FarmMobileApp & { file: string; reportFile?: string; table?: string }> {
   const app = await resolveFarmMobileApp(options);
-  const file = path.resolve(app.config.root, getFarmMobileOutputDirs(app.config.distDir).routes);
+  const dirs = getFarmMobileOutputDirs(app.config.distDir);
+  const file = path.resolve(app.config.root, dirs.routes);
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, `${JSON.stringify(app.manifest, null, 2)}\n`);
-  return { ...app, file };
+  if (!app.report) return { ...app, file };
+  const reportFile = path.resolve(app.config.root, dirs.report);
+  await writeFile(reportFile, `${JSON.stringify(app.report, null, 2)}\n`);
+  const table = formatFarmMobileNativeReport(app.report, {
+    stats: app.analyzerStats,
+    file: path.relative(app.config.root, reportFile).split(path.sep).join("/"),
+  });
+  return { ...app, file, reportFile, table };
 }
