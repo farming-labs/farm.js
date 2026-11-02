@@ -51,6 +51,7 @@ import {
 } from "../instrumentation";
 import { isReactRenderer, loadFarmRendererVitePlugins, resolveFarmRenderer } from "../renderer";
 import { createFarmReactRefreshPlugins } from "../react-refresh";
+import { createFarmDevLoopbackPlugin } from "./dev-loopback";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 
@@ -86,7 +87,15 @@ function createBrandingPlugin() {
           console.log(
             `  ${pc.dim("➜")}  ${pc.bold("Local:")}   ${pc.cyan(`http://localhost:${resolvedPort}/`)}`,
           );
-          console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.dim("use --host to expose")}`);
+          const network = server.resolvedUrls?.network ?? [];
+          for (const url of network) {
+            console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.cyan(url)}`);
+          }
+          if (network.length === 0) {
+            console.log(
+              `  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.dim("use --host to expose")}`,
+            );
+          }
           console.log("");
         }
         return result;
@@ -146,6 +155,14 @@ function createDevDependencyStubsPlugin() {
  */
 function withPortFlag(vite: FarmConfig["vite"], port: number | undefined): FarmConfig["vite"] {
   return port === undefined ? vite : { ...vite, server: { ...vite?.server, port } };
+}
+
+/** A --host flag outranks the app's config, and is kept in the config for restarts like --port. */
+function withHostFlag(
+  vite: FarmConfig["vite"],
+  host: string | boolean | undefined,
+): FarmConfig["vite"] {
+  return host === undefined ? vite : { ...vite, server: { ...vite?.server, host } };
 }
 
 function inlineEnvScope(scope: Record<string, unknown> | undefined) {
@@ -231,6 +248,11 @@ export async function createServer(
   options: {
     port?: number;
     /**
+     * Vite's `server.host`: `true` or `"0.0.0.0"` listens on every interface, for an emulator or a
+     * device on the LAN. Unset, the server stays on loopback (`127.0.0.1` and `::1`).
+     */
+    host?: string | boolean;
+    /**
      * Installs what `experimental.serverComponents` needs before the server starts. The CLI passes
      * it; core stays free of package-manager orchestration.
      */
@@ -258,7 +280,11 @@ export async function createServer(
         await import("../rsc-pipeline");
       await options.ensureServerComponentsPackages?.(rscConfig, root);
       if (farmAppUsesRscPipeline(await resolveFarmRscCheckConfig(rscConfig, root, mode), root)) {
-        return await createFarmRscDevServer(rscConfig, { root, port: options.port });
+        return await createFarmRscDevServer(rscConfig, {
+          root,
+          port: options.port,
+          host: options.host,
+        });
       }
     }
 
@@ -373,6 +399,7 @@ export async function createServer(
             farmPlugin(finalConfig, pluginManager),
             farmEnvironmentFunctionsPlugin(finalConfig),
             createBrandingPlugin(),
+            createFarmDevLoopbackPlugin(),
             createFarmDevLifecyclePlugin(pluginManager, instrumentation),
           ],
           server: {
@@ -425,7 +452,7 @@ export async function createServer(
             hasWarned: false,
           },
         },
-        withPortFlag(finalConfig.vite, options.port),
+        withHostFlag(withPortFlag(finalConfig.vite, options.port), options.host),
       ),
       (candidate) => {
         pendingViteServer = candidate;

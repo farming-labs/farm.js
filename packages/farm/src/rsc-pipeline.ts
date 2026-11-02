@@ -10,6 +10,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { InlineConfig, ViteDevServer } from "vite";
+import { createFarmDevLoopbackPlugin } from "./server/dev-loopback";
 import { loadTailwindVitePlugin } from "./build/tailwind";
 import { resolveFarmPlatform } from "./desktop/config";
 import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
@@ -196,10 +197,16 @@ export async function createFarmRscViteConfig(
 /** A Vite dev server for an app with `experimental.serverComponents`, not yet listening. */
 export async function createFarmRscDevServer(
   userConfig: FarmConfigInput,
-  options: { root: string; port?: number },
+  options: { root: string; port?: number; host?: string | boolean },
 ): Promise<ViteDevServer> {
   const { createServer } = await import("vite");
-  return createServer(await createFarmRscViteConfig(userConfig, { ...options, command: "serve" }));
+  const { host, ...configOptions } = options;
+  const config = await createFarmRscViteConfig(userConfig, { ...configOptions, command: "serve" });
+  return createServer({
+    ...config,
+    plugins: [...(config.plugins ?? []), createFarmDevLoopbackPlugin()],
+    ...(host === undefined ? {} : { server: { ...config.server, host } }),
+  });
 }
 
 /** `farm build` for an app with `experimental.serverComponents`. */
