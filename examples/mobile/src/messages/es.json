@@ -1,0 +1,13 @@
+{
+  "home": {
+    "title": "Notas de campo",
+    "lede": "Una app de Farm: un sitio web en el navegador, pestañas y pilas nativas en la app móvil."
+  },
+  "settings": {
+    "title": "Ajustes",
+    "language": "Idioma",
+    "current": "Idioma actual: {locale}",
+    "english": "Inglés",
+    "spanish": "Español"
+  }
+}
