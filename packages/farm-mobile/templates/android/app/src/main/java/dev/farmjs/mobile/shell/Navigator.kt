@@ -21,7 +21,7 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 
 /**
  * The native navigator (RFC 0004, section 7.2). Every tab owns a stack of screens, every screen
- * shows one WebView (or a native view for a `screen: "native"` rule), and farm-routes.json decides
+ * shows one WebView (or a native view for a `"native"` or `"platform"` screen), and farm-routes.json decides
  * how a visit is presented: switch tab, push, present modally, or replace in place. Without tabs
  * the app is one stack starting at [startPath].
  */
@@ -74,7 +74,7 @@ class Navigator(
             return
         }
         val rule = config.match(url)
-        val shown = if (rule.native) "native ${rule.module}" else rule.presentation
+        val shown = if (rule.native) "${rule.screen} ${rule.module}" else rule.presentation
         Log.i(TAG, "visit ${url.path} -> $shown (rule ${rule.route ?: "fallback"})")
         when {
             rule.presentation == "tab" && rule.tab != null && rule.tab < stackCount -> {
@@ -119,7 +119,9 @@ class Navigator(
     fun selectTab(index: Int) {
         if (index != current || stacks[index].isEmpty()) {
             if (stacks[index].isEmpty()) {
-                val screen = newScreen(modal = false, rule = null, url = null)
+                // A tab root is a screen like any other: its rule may be native or platform.
+                val root = Uri.parse(config.url(rootPath(index)))
+                val screen = newScreen(modal = false, rule = config.match(root), url = root)
                 stacks[index] += screen
                 containers[index].addView(screen.view)
                 show(
@@ -245,9 +247,8 @@ class Navigator(
     // ---- screens ------------------------------------------------------------
 
     private fun newScreen(modal: Boolean, rule: RouteConfig.Rule?, url: Uri?): Screen {
-        val module = rule?.module
-        if (module != null && url != null) {
-            return Screen(context, null, FarmNativeScreens.create(module, context, url), module, modal, this)
+        if (rule != null && rule.native && url != null) {
+            return Screen(context, null, FarmNativeScreens.create(rule, context, url), rule.module, modal, this)
         }
         val warm = pool?.take()
         val screen = Screen(context, warm ?: newPage(), null, null, modal, this)

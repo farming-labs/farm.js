@@ -15,10 +15,12 @@ import {
   validateFarmMobileConfig,
   type FarmMobileBlockCache,
   type FarmMobileContext,
+  type ResolvedFarmMobileNativeConfig,
 } from "../mobile/config";
 import { createFarmMobileRouteManifest, createFarmMobileRoutePattern } from "../mobile/routes";
 import { platform } from "../platform";
 import { createFarmRouter } from "../router";
+import { createRouteTypeDeclarations, scanRoutePatterns } from "../routing/generate-route-types";
 import { farmServerOnlyEntriesPlugin } from "../vite";
 
 const roots: string[] = [];
@@ -56,7 +58,6 @@ async function createApp(extra: Record<string, string> = {}): Promise<string> {
       "export default function Layout({ children }) { return children; }\n",
     "src/app/feed/page.tsx": PAGE,
     "src/app/notes/@sidebar/page.tsx": PAGE,
-    "src/native/feed.tsx": "export default function Feed() { return null; }\n",
     ...extra,
   };
   for (const [file, contents] of Object.entries(files)) {
@@ -79,13 +80,21 @@ const ROUTES = [
 ];
 
 const build = { os: "android", command: "build" } as const;
+const NATIVE: ResolvedFarmMobileNativeConfig = {
+  engine: "react-native",
+  auto: "report",
+  routes: {},
+  islands: [],
+  prefetch: "intent",
+  budgets: {},
+};
 const dev = { os: "android", command: "dev" } as const;
 
 describe("mobile config", () => {
   it("rejects malformed blocks with the option name", () => {
     expect(() => validateFarmMobileConfig("Notes")).toThrow(/^mobile: must be an object/);
     expect(() => validateFarmMobileConfig({ shell: "x" })).toThrow(
-      /unknown option shell\. Supported: name, id, server, tabs, routes/,
+      /unknown option shell\. Supported: name, id, server, tabs, routes, native/,
     );
     expect(() => validateFarmMobileConfig({ id: "notes" })).toThrow(/id must be a reverse-DNS/);
     expect(() => validateFarmMobileConfig({ id: "com.my-app.notes" })).toThrow(
@@ -131,15 +140,70 @@ describe("mobile config", () => {
     expect(() =>
       validateFarmMobileConfig({ routes: { "/notes": { presentation: "sheet" } } }),
     ).toThrow(/routes\["\/notes"\]\.presentation must be "push", "modal", or "replace"/);
-    expect(() =>
-      validateFarmMobileConfig({ routes: { "/feed": { native: "./src/native/feed.tsx" } } }),
-    ).toThrow(/routes\["\/feed"\]\.native must name a module in src\/native\//);
     expect(() => validateFarmMobileConfig({ routes: { feed: {} } })).toThrow(
       /the key must be an app route/,
     );
-    expect(() => validateFarmMobileConfig({ routes: { "/feed": { tab: 1 } } })).toThrow(
-      /unknown option routes\["\/feed"\]\.tab/,
+    expect(() => validateFarmMobileConfig({ routes: { "/feed": { tab: 1 } } as never })).toThrow(
+      /unknown option routes\["\/feed"\]\.tab\. Supported: presentation/,
     );
+
+    const routes = (value: unknown) =>
+      validateFarmMobileConfig({ native: { routes: value } } as never);
+    expect(() => routes({ "/notes": { screen: "web", presentation: "sheet" } })).toThrow(
+      /native\.routes\["\/notes"\]\.presentation must be "push", "modal", or "replace"/,
+    );
+    expect(() => routes({ feed: { screen: "web" } })).toThrow(/the key must be an app route/);
+    expect(() => routes({ "/feed": { screen: "web", tab: 1 } })).toThrow(
+      /unknown option native\.routes\["\/feed"\]\.tab\. Supported: screen, android, ios, presentation/,
+    );
+    expect(() => routes({ "/feed": { ios: "web" } })).toThrow(
+      /native\.routes\["\/feed"\]\.screen is required: "web", "native", or "platform"/,
+    );
+    expect(() => routes({ "/feed": { screen: "rn" } })).toThrow(
+      /native\.routes\["\/feed"\]\.screen must be "web", "native", or "platform"/,
+    );
+    expect(() => routes({ "/feed": { screen: "native", android: "FeedScreen" } })).toThrow(
+      /native\.routes\["\/feed"\]\.android must be "web", "native", or "platform"/,
+    );
+    expect(routes({ "/feed": { screen: "native", ios: "web", android: "platform" } })).toBeTruthy();
+    const native = (value: unknown) => validateFarmMobileConfig({ native: value } as never);
+    expect(() => native("on")).toThrow(/native must be an object/);
+    expect(() => native({ engine: "flutter" })).toThrow(
+      /native\.engine must be "react-native" or "platform"/,
+    );
+    expect(() => native({ auto: true })).toThrow(/native\.auto must be "off", "report", or "on"/);
+    expect(() => native({ prefetch: false })).toThrow(/native\.prefetch must be "intent" or "off"/);
+    expect(() => native({ islands: "Map" })).toThrow(/native\.islands must be an array/);
+    expect(() => native({ islands: ["src/map.tsx"] })).toThrow(/component names/);
+    expect(() => native({ budgets: { screenOpenMs: -1 } })).toThrow(
+      /native\.budgets\.screenOpenMs must be a number of 0 or more/,
+    );
+    expect(() => native({ budgets: { fps: 60 } })).toThrow(/unknown option native\.budgets\.fps/);
+    // Device plugins will be mobile.modules, never mobile.native.
+    expect(() => native({ modules: {} })).toThrow(
+      /unknown option native\.modules\. Supported: engine, auto, routes, islands, prefetch, budgets/,
+    );
+    // One presentation per route, even when a group spells the key differently.
+    expect(() =>
+      validateFarmMobileConfig({
+        routes: { "/(account)/settings": { presentation: "modal" } },
+        native: { routes: { "/settings": { screen: "web", presentation: "push" } } },
+      }),
+    ).toThrow(
+      /routes\["\/\(account\)\/settings"\]\.presentation and native\.routes\["\/settings"\]\.presentation set the same field/,
+    );
+  });
+
+  it("explains where a route's native module name went", () => {
+    // #2420's form, never released: routes[x].native named a src/native/ module.
+    expect(() =>
+      validateFarmMobileConfig({ routes: { "/feed": { native: "feed" } } } as never),
+    ).toThrow(
+      /^mobile: routes\["\/feed"\]\.native no longer names a src\/native\/ module \(src\/native\/ is for native module specs\)\. Add src\/app\/feed\/page\.native\.tsx next to its page\.tsx, or set native: \{ routes: \{ "\/feed": \{ screen: "native" \} \} \}\./,
+    );
+    expect(() =>
+      validateFarmMobileConfig({ native: { routes: { "/feed": { native: "feed" } } } } as never),
+    ).toThrow(/native\.routes\["\/feed"\]\.native no longer names a src\/native\/ module/);
   });
 
   it("allows http:// only for loopback and LAN hosts in dev", () => {
@@ -178,7 +242,7 @@ describe("mobile config", () => {
     );
   });
 
-  it("checks tabs and routes against the app's routes and native modules", async () => {
+  it("checks tabs and routes against the app's routes", async () => {
     const root = await createApp();
     const resolve = (input: Parameters<typeof resolveFarmMobileConfig>[0]) =>
       resolveFarmMobileConfig(input, { root, routes: ROUTES }, build);
@@ -189,6 +253,7 @@ describe("mobile config", () => {
       server: "https://notes.example.com",
       tabs: [],
       routes: {},
+      native: NATIVE,
     });
     // A default id from an app named like a Java keyword says to set one.
     expect(() => resolve({ name: "Class" })).toThrow(
@@ -202,20 +267,39 @@ describe("mobile config", () => {
     );
     expect(() => resolve({ routes: { "/missing": {} } })).toThrow(/is not a page route\. Keys/);
     expect(() =>
-      resolve({
-        tabs: [{ path: "/notes", title: "Notes", icon: "notes" }],
-        routes: { "/notes": { presentation: "modal" } },
-      }),
-    ).toThrow(/presentation does not apply to a tab route/);
-    expect(() => resolve({ routes: { "/notes": { native: "notes" } } })).toThrow(
-      /routes\["\/notes"\]\.native "notes" needs src\/native\/notes\.tsx, which was not found/,
+      resolve({ native: { routes: { "/notes/[noteId]": { screen: "native" } } } }),
+    ).toThrow(
+      /native\.routes\["\/notes\/\[noteId\]"\] is not a page route; did you mean "\/notes\/\[id\]"\?/,
     );
+    const tabs = [{ path: "/notes", title: "Notes", icon: "notes" }];
+    expect(() => resolve({ tabs, routes: { "/notes": { presentation: "modal" } } })).toThrow(
+      /routes\["\/notes"\]\.presentation does not apply to a tab route/,
+    );
+    expect(() =>
+      resolve({ tabs, native: { routes: { "/notes": { screen: "web", presentation: "modal" } } } }),
+    ).toThrow(/native\.routes\["\/notes"\]\.presentation does not apply to a tab route/);
     // A group in the key is the same URL pattern.
     expect(
       resolve({ routes: { "/(account)/settings": { presentation: "modal" } } }).routes,
     ).toEqual({ "/settings": { presentation: "modal" } });
-    expect(resolve({ routes: { "/feed": { native: "feed" } } }).routes).toEqual({
-      "/feed": { native: "feed" },
+    expect(
+      resolve({
+        native: {
+          engine: "platform",
+          auto: "off",
+          routes: { "/(account)/settings": { screen: "native", ios: "web" } },
+          islands: ["Video", "Map", "Map"],
+          prefetch: "off",
+          budgets: { screenOpenMs: 300 },
+        },
+      }).native,
+    ).toEqual({
+      engine: "platform",
+      auto: "off",
+      routes: { "/settings": { screen: "native", ios: "web" } },
+      islands: ["Map", "Video"],
+      prefetch: "off",
+      budgets: { screenOpenMs: 300 },
     });
   });
 
@@ -280,7 +364,7 @@ describe("mobile config", () => {
 
 describe("mobile route manifest", () => {
   it("generates farm-routes.json from the app directory with tabs, modals, and native screens", async () => {
-    const root = await createApp();
+    const root = await createApp({ "src/app/feed/page.native.tsx": PAGE });
     const { generateFarmMobileRoutes } = await loadFarmMobileRuntime();
     const result = await generateFarmMobileRoutes({
       root,
@@ -293,11 +377,8 @@ describe("mobile route manifest", () => {
             { path: "/notes", title: "Notes", icon: "note.text" },
             { path: "/settings", title: "Settings", icon: "gear" },
           ],
-          routes: {
-            "/notes/new": { presentation: "modal" },
-            "/notes/[id]/edit": { presentation: "replace" },
-            "/feed": { native: "feed" },
-          },
+          routes: { "/notes/new": { presentation: "modal" } },
+          native: { routes: { "/notes/[id]/edit": { screen: "web", presentation: "replace" } } },
         },
       },
     });
@@ -305,6 +386,7 @@ describe("mobile route manifest", () => {
       path.join(await fs.realpath(root), ".farm", "output", "mobile", "farm-routes.json"),
     );
     const manifest = JSON.parse(await fs.readFile(result.file, "utf8"));
+    const web = { screen: "web", source: "default" };
     expect(manifest).toEqual({
       version: 1,
       server: "https://notes.example.com",
@@ -312,28 +394,42 @@ describe("mobile route manifest", () => {
         { path: "/notes", title: "Notes", icon: "note.text" },
         { path: "/settings", title: "Settings", icon: "gear" },
       ],
+      prefetch: "intent",
       // Most specific first, as the client router orders routes.
       rules: [
-        { route: "/notes/new", pattern: "^/notes/new/?$", presentation: "modal" },
+        { route: "/notes/new", pattern: "^/notes/new/?$", presentation: "modal", ...web },
         {
           route: "/notes/[id]/edit",
           pattern: "^/notes/[^/]+/edit/?$",
           presentation: "replace",
+          screen: "web",
+          source: "config",
         },
-        { route: "/notes/[id]", pattern: "^/notes/[^/]+/?$", presentation: "push" },
+        { route: "/notes/[id]", pattern: "^/notes/[^/]+/?$", presentation: "push", ...web },
         {
           route: "/feed",
           pattern: "^/feed/?$",
           presentation: "push",
           screen: "native",
-          module: "feed",
+          source: "file",
+          module: "app/feed",
         },
-        { route: "/notes", pattern: "^/notes/?$", presentation: "tab", tab: 0 },
-        { route: "/settings", pattern: "^/settings/?$", presentation: "tab", tab: 1 },
-        { route: "/docs/[...slug]", pattern: "^/docs(?:/[^/]+)+/?$", presentation: "push" },
-        { route: "/shop/[[...filters]]", pattern: "^/shop(?:/[^/]+)*/?$", presentation: "push" },
-        { route: "/", pattern: "^/?$", presentation: "push" },
-        { pattern: "^/", presentation: "push" },
+        { route: "/notes", pattern: "^/notes/?$", presentation: "tab", tab: 0, ...web },
+        { route: "/settings", pattern: "^/settings/?$", presentation: "tab", tab: 1, ...web },
+        {
+          route: "/docs/[...slug]",
+          pattern: "^/docs(?:/[^/]+)+/?$",
+          presentation: "push",
+          ...web,
+        },
+        {
+          route: "/shop/[[...filters]]",
+          pattern: "^/shop(?:/[^/]+)*/?$",
+          presentation: "push",
+          ...web,
+        },
+        { route: "/", pattern: "^/?$", presentation: "push", ...web },
+        { pattern: "^/", presentation: "push", screen: "web" },
       ],
     });
     // The slot page and the route group add no rule.
@@ -342,7 +438,7 @@ describe("mobile route manifest", () => {
 
   it("picks the same route as the client router for every path", () => {
     const manifest = createFarmMobileRouteManifest(
-      { name: "n", id: "a.b", server: "https://x.dev", tabs: [], routes: {} },
+      { name: "n", id: "a.b", server: "https://x.dev", tabs: [], routes: {}, native: NATIVE },
       { routes: ROUTES },
     );
     const router = createFarmRouter(ROUTES);
@@ -374,7 +470,7 @@ describe("mobile route manifest", () => {
     const routes = ["/", "/[slug]", "/[a]/[b]"];
     const i18n = { locales: ["en", "fr"], routing: "prefix-except-default" as const };
     const manifest = createFarmMobileRouteManifest(
-      { name: "n", id: "a.b", server: "https://x.dev", tabs: [], routes: {} },
+      { name: "n", id: "a.b", server: "https://x.dev", tabs: [], routes: {}, native: NATIVE },
       { routes, i18n },
     );
     const rules = manifest.rules.map((rule) => ({ ...rule, regex: new RegExp(rule.pattern) }));
@@ -425,6 +521,7 @@ describe("mobile route manifest", () => {
           { path: "/notes", title: "Notes", icon: "notes" },
         ],
         routes: {},
+        native: NATIVE,
       },
       { routes: ["/", "/notes"], server: "http://10.0.2.2:3000", basePath: "/app" },
     );
@@ -456,6 +553,269 @@ describe("mobile route manifest", () => {
         userConfig: { mobile: { id: "a.b" } },
       }),
     ).rejects.toThrow(/the server URL must use https:\/\/ in a build/);
+  });
+});
+
+describe("mobile screens", () => {
+  const userConfig = (native: object = {}, extra: object = {}): FarmUserConfig => ({
+    telemetry: false,
+    mobile: { id: "com.example.notes", server: "https://notes.example.com", native, ...extra },
+  });
+  const appFor = async (
+    root: string,
+    config: FarmUserConfig,
+    os: "android" | "ios" = "android",
+  ) => {
+    const { resolveFarmMobileApp } = await loadFarmMobileRuntime();
+    return resolveFarmMobileApp({ root, os, userConfig: config });
+  };
+  const screensOf = async (...args: Parameters<typeof appFor>) => (await appFor(...args)).screens;
+  const base = { presentation: "push", prefetch: "intent" } as const;
+
+  it("picks a screen per route and OS: page export, config, files, then web", async () => {
+    const root = await createApp({
+      // A native file the page turns off, with config asking for native too.
+      "src/app/notes/[id]/page.native.tsx": PAGE,
+      "src/app/notes/[id]/page.tsx": `export const mobile = { native: false, presentation: "modal" } as const;\n${PAGE}`,
+      // A native file plus an iOS one; config keeps Android web while it is in progress.
+      "src/app/feed/page.native.tsx": PAGE,
+      "src/app/feed/page.ios.tsx": PAGE,
+      // Only an Android file: iOS stays web.
+      "src/app/(account)/settings/page.android.tsx": PAGE,
+      // Platform screens by file location.
+      "src/app/docs/[...slug]/page.kt": "",
+      "src/app/docs/[...slug]/page.swift": "",
+    });
+    const config = userConfig({
+      routes: {
+        "/feed": { screen: "native", android: "web" },
+        "/notes/[id]": { screen: "native" },
+        "/notes/new": { screen: "web", presentation: "modal" },
+        "/shop/[[...filters]]": { screen: "web", ios: "native" },
+      },
+    });
+    const android = await appFor(root, config);
+    expect(android.screens["/notes/[id]"]).toEqual({
+      screen: "web",
+      source: "page",
+      file: "src/app/notes/[id]/page.tsx",
+      presentation: "modal",
+      prefetch: "intent",
+    });
+    expect(android.screens["/feed"]).toEqual({ screen: "web", source: "config", ...base });
+    expect(android.screens["/settings"]).toEqual({
+      screen: "native",
+      source: "file",
+      file: "src/app/(account)/settings/page.android.tsx",
+      module: "app/settings",
+      ...base,
+    });
+    expect(android.screens["/docs/[...slug]"]).toEqual({
+      screen: "platform",
+      source: "file",
+      file: "src/app/docs/[...slug]/page.kt",
+      module: "app/docs/[...slug]",
+      ...base,
+    });
+    expect(android.screens["/notes/new"]).toEqual({
+      screen: "web",
+      source: "config",
+      presentation: "modal",
+      prefetch: "intent",
+    });
+    expect(android.screens["/shop/[[...filters]]"]).toMatchObject({
+      screen: "web",
+      source: "config",
+    });
+    expect(android.screens["/"]).toEqual({ screen: "web", source: "default", ...base });
+    // The page export wins over config and the native file, and says so.
+    expect(android.warnings).toEqual([
+      'src/app/notes/[id]/page.tsx: mobile.native false overrides native.routes["/notes/[id]"].screen "native"; the route stays web.',
+      "src/app/notes/[id]/page.native.tsx is unused: src/app/notes/[id]/page.tsx sets mobile.native to false.",
+    ]);
+
+    const ios = await appFor(root, config, "ios");
+    expect(ios.screens["/feed"]).toEqual({
+      screen: "native",
+      source: "config",
+      file: "src/app/feed/page.ios.tsx",
+      module: "app/feed",
+      ...base,
+    });
+    expect(ios.screens["/settings"]).toEqual({ screen: "web", source: "default", ...base });
+    expect(ios.screens["/docs/[...slug]"]).toMatchObject({
+      screen: "platform",
+      file: "src/app/docs/[...slug]/page.swift",
+    });
+    // Config asks for a port nothing can build yet: the route stays web, with a warning.
+    expect(ios.screens["/shop/[[...filters]]"]).toEqual({
+      screen: "web",
+      source: "config",
+      requested: "native",
+      ...base,
+    });
+    expect(ios.warnings).toEqual([
+      ...android.warnings,
+      'native.routes["/shop/[[...filters]]"].ios is "native", but "/shop/[[...filters]]" has no page.native.tsx and Farm cannot port pages yet, so it stays web. This fails the build once native screens ship.',
+    ]);
+
+    const manifest = android.manifest.rules;
+    expect(manifest.find((rule) => rule.route === "/docs/[...slug]")).toMatchObject({
+      screen: "platform",
+      source: "file",
+      module: "app/docs/[...slug]",
+    });
+    expect(manifest.find((rule) => rule.route === "/feed")).toEqual({
+      route: "/feed",
+      pattern: "^/feed/?$",
+      presentation: "push",
+      screen: "web",
+      source: "config",
+    });
+  });
+
+  it("checks platform screens and the engine", async () => {
+    const root = await createApp({
+      "src/app/feed/page.native.tsx": PAGE,
+      "src/app/feed/page.kt": "",
+    });
+    await expect(screensOf(root, userConfig())).rejects.toThrow(
+      /mobile \(os: android\): "\/feed" has two screens on android: src\/app\/feed\/page\.native\.tsx and src\/app\/feed\/page\.kt\. Keep one\./,
+    );
+    // iOS has only the React Native file.
+    expect((await screensOf(root, userConfig(), "ios"))["/feed"]).toMatchObject({
+      screen: "native",
+      source: "file",
+    });
+    await expect(screensOf(root, userConfig({ engine: "platform" }), "ios")).rejects.toThrow(
+      /src\/app\/feed\/page\.native\.tsx is a React Native screen, but native\.engine is "platform"/,
+    );
+    await expect(
+      screensOf(root, userConfig({ routes: { "/notes": { screen: "platform" } } }), "ios"),
+    ).rejects.toThrow(
+      /native\.routes\["\/notes"\]\.screen is "platform", which needs page\.swift next to the route's page\.tsx/,
+    );
+
+    const platformApp = await createApp({ "src/app/feed/page.swift": "" });
+    const platform = userConfig({
+      engine: "platform",
+      routes: { "/feed": { screen: "native" }, "/notes": { screen: "native" } },
+    });
+    const ios = await appFor(platformApp, platform, "ios");
+    expect(ios.screens["/feed"]).toMatchObject({ screen: "platform", source: "config" });
+    expect(ios.screens["/notes"]).toMatchObject({ screen: "web", requested: "platform" });
+    expect(ios.warnings[0]).toMatch(/has no page\.swift and Farm cannot port pages yet/);
+  });
+
+  it("reads a page's mobile export without running it", async () => {
+    const root = await createApp({
+      "src/app/notes/new/page.tsx": `import type { FarmMobilePageConfig } from "@farm.js/core/config";
+throw new Error("never runs");
+export const mobile = { presentation: "modal", prefetch: "off" } satisfies FarmMobilePageConfig;
+${PAGE}`,
+      // "mobile" in a string is not an export.
+      "src/app/notes/page.tsx": `const label = "mobile";\n${PAGE}`,
+      // A .js page with JSX.
+      "src/app/about/page.js": `export const mobile = { prefetch: "off" };\nexport default function Feed() { return <p>feed</p>; }\n`,
+    });
+    const { resolveFarmMobileApp } = await loadFarmMobileRuntime();
+    const app = await resolveFarmMobileApp({ root, userConfig: userConfig() });
+    expect(app.screens["/notes/new"]).toEqual({
+      screen: "web",
+      source: "default",
+      presentation: "modal",
+      prefetch: "off",
+    });
+    expect(app.manifest.rules.find((rule) => rule.route === "/notes/new")).toMatchObject({
+      presentation: "modal",
+      prefetch: "off",
+    });
+    expect(app.screens["/about"]).toMatchObject({ prefetch: "off" });
+    expect(app.warnings).toEqual([]);
+    // A page presentation over a config one warns with both.
+    const overridden = await resolveFarmMobileApp({
+      root,
+      userConfig: userConfig({}, { routes: { "/notes/new": { presentation: "replace" } } }),
+    });
+    expect(overridden.warnings).toEqual([
+      'src/app/notes/new/page.tsx: mobile.presentation "modal" overrides the config\'s "replace" for "/notes/new".',
+    ]);
+    expect(app.manifest.rules.find((rule) => rule.route === "/notes")).not.toHaveProperty(
+      "prefetch",
+    );
+
+    for (const [source, message] of [
+      [`export const mobile = { presentation: getPresentation() };`, /must use literal values/],
+      [`export let mobile = { native: false };`, /must be a const/],
+      [`const mobile = {}; export { mobile };`, /must be declared in place/],
+      [`export const mobile = { ...base };`, /without spreads/],
+      [`export const mobile = { native: true };`, /mobile\.native can only be false/],
+      [
+        `export const mobile = { tab: 1 };`,
+        /unknown option src\/app\/notes\/page\.tsx: mobile\.tab/,
+      ],
+      [`export const mobile = { presentation: "sheet" };`, /mobile\.presentation must be "push"/],
+    ] as const) {
+      await fs.writeFile(path.join(root, "src/app/notes/page.tsx"), `${source}\n${PAGE}`);
+      await expect(
+        resolveFarmMobileApp({ root, userConfig: userConfig() }),
+        source,
+      ).rejects.toThrow(message);
+    }
+    await fs.writeFile(
+      path.join(root, "src/app/notes/page.tsx"),
+      `export const mobile = { presentation: "modal" };\n${PAGE}`,
+    );
+    await expect(
+      resolveFarmMobileApp({
+        root,
+        userConfig: userConfig({}, { tabs: [{ path: "/notes", title: "Notes", icon: "notes" }] }),
+      }),
+    ).rejects.toThrow(/src\/app\/notes\/page\.tsx: mobile\.presentation does not apply to a tab/);
+  });
+
+  it("needs a web page next to every native page and one file per platform", async () => {
+    const lonely = await createApp({ "src/app/inbox/page.native.tsx": PAGE });
+    await expect(screensOf(lonely, userConfig())).rejects.toThrow(
+      /src\/app\/inbox\/page\.native\.tsx has no web page next to it\. Add src\/app\/inbox\/page\.tsx/,
+    );
+    const swift = await createApp({ "src/app/inbox/page.swift": "" });
+    await expect(screensOf(swift, userConfig())).rejects.toThrow(
+      /src\/app\/inbox\/page\.swift has no web page next to it/,
+    );
+    const twice = await createApp({
+      "src/app/feed/page.native.tsx": PAGE,
+      "src/app/feed/page.native.jsx": PAGE,
+    });
+    await expect(screensOf(twice, userConfig())).rejects.toThrow(
+      /Duplicate native page for "\/feed"/,
+    );
+  });
+
+  it("lists reserved native layouts and leaves the web route scan alone", async () => {
+    const root = await createApp({
+      "src/app/feed/page.native.tsx": PAGE,
+      "src/app/notes/layout.tsx": PAGE,
+      "src/app/notes/layout.native.tsx": PAGE,
+      "src/app/(account)/layout.ios.tsx": PAGE,
+      "src/app/layout.native.tsx": PAGE,
+    });
+    const { resolveFarmMobileApp } = await loadFarmMobileRuntime();
+    const app = await resolveFarmMobileApp({ root, userConfig: userConfig() });
+    expect(app.nativeLayouts).toEqual({
+      "/": { native: "src/app/layout.native.tsx" },
+      "/(account)": { ios: "src/app/(account)/layout.ios.tsx" },
+      "/notes": { native: "src/app/notes/layout.native.tsx" },
+    });
+    const web = await scanRoutePatterns({ root });
+    expect(Object.keys(web).sort()).toEqual(["modules", "pages"]);
+    expect([...web.pages].sort()).toEqual([...ROUTES].sort());
+    // Generated route types don't change with mobile files present.
+    const plain = await createApp();
+    const outPath = path.join(root, "src", "farm-routes.d.ts");
+    expect(await createRouteTypeDeclarations({ root }, outPath)).toBe(
+      await createRouteTypeDeclarations({ root: plain }, outPath),
+    );
   });
 });
 

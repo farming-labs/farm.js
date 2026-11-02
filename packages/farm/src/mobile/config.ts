@@ -1,6 +1,3 @@
-import { existsSync } from "node:fs";
-import * as path from "node:path";
-
 import {
   createPlatformBlockChecker,
   isPlainObject,
@@ -27,13 +24,79 @@ export interface FarmMobileTab {
 }
 
 export interface FarmMobileRouteConfig {
-  /** Defaults to `"push"`. */
+  /** Defaults to `"push"`. A page's `export const mobile` wins. */
   presentation?: FarmMobilePresentation;
+}
+
+/**
+ * What a route shows on mobile: a WebView of the web page (`"web"`), a screen from the
+ * `mobile.native.engine` (`"native"`), or a Compose or SwiftUI screen from `page.kt` or
+ * `page.swift` (`"platform"`).
+ */
+export type FarmMobileScreen = "web" | "native" | "platform";
+
+/** What builds native screens. Only the decision is recorded for now; no engine ships yet. */
+export type FarmMobileNativeEngine = "react-native" | "platform";
+
+/**
+ * The build-time analyzer that finds pages a native screen could replace. `"report"` writes
+ * `native-report.json`; `"on"` also records its decisions in the route manifest.
+ */
+export type FarmMobileNativeAuto = "off" | "report" | "on";
+
+/** `"intent"` starts a route's data request when a link to it is pressed. */
+export type FarmMobilePrefetch = "intent" | "off";
+
+export interface FarmMobileNativeRouteConfig {
   /**
-   * Show a native screen instead of a WebView: the name of a module in `src/native/`, such as
-   * `"feed"` for `src/native/feed.tsx`.
+   * Wins over the route's native files and the analyzer. `"native"` uses `page.native.tsx` (or
+   * the OS file) and otherwise asks the analyzer to port the page; `"platform"` needs `page.kt`
+   * or `page.swift`; `"web"` keeps the route web even when native files exist.
    */
-  native?: string;
+  screen: FarmMobileScreen;
+  /** Overrides `screen` on Android. */
+  android?: FarmMobileScreen;
+  /** Overrides `screen` on iOS. */
+  ios?: FarmMobileScreen;
+  /** Defaults to `"push"`. Set it here or in `mobile.routes`, not both. */
+  presentation?: FarmMobilePresentation;
+}
+
+export interface FarmMobileBudgets {
+  /** Installed app size, in MB. */
+  appSizeMb?: number;
+  /** Time from a tap to the next screen's first frame, in ms. */
+  screenOpenMs?: number;
+  /** Dropped frames allowed per screen open. */
+  droppedFrames?: number;
+}
+
+export interface FarmMobileNativeConfig {
+  /** Defaults to `"react-native"`. */
+  engine?: FarmMobileNativeEngine;
+  /** Defaults to `"report"`. */
+  auto?: FarmMobileNativeAuto;
+  /** Per-route screens and navigation, keyed by app route pattern such as `"/notes/[id]"`. */
+  routes?: Record<string, FarmMobileNativeRouteConfig>;
+  /**
+   * Components that may render as native views inside web screens, such as `"Map"`. Reserved:
+   * no islands render yet.
+   */
+  islands?: string[];
+  /** Default for every route; a page's `export const mobile` wins. Defaults to `"intent"`. */
+  prefetch?: FarmMobilePrefetch;
+  budgets?: FarmMobileBudgets;
+}
+
+/**
+ * A page's `export const mobile = { ... }`, read from `page.tsx` without running it, so its
+ * values must be literals.
+ */
+export interface FarmMobilePageConfig {
+  presentation?: FarmMobilePresentation;
+  prefetch?: FarmMobilePrefetch;
+  /** `false` keeps the route a web screen, even with a `page.native.tsx`. */
+  native?: false;
 }
 
 export interface FarmMobileUserConfig {
@@ -53,6 +116,8 @@ export interface FarmMobileUserConfig {
   tabs?: FarmMobileTab[];
   /** Per-route navigation, keyed by app route pattern such as `"/notes/[id]"`. */
   routes?: Record<string, FarmMobileRouteConfig>;
+  /** Screen tiers per route, the native engine, and the analyzer. */
+  native?: FarmMobileNativeConfig;
 }
 
 /** What a function-valued `mobile` block receives. Resolved once per OS per dev start or build. */
@@ -75,19 +140,38 @@ export type FarmMobileConfigInput =
   | FarmMobileUserConfig
   | ((context: FarmMobileContext) => FarmMobileUserConfig | Promise<FarmMobileUserConfig>);
 
+export interface ResolvedFarmMobileNativeConfig {
+  engine: FarmMobileNativeEngine;
+  auto: FarmMobileNativeAuto;
+  /** Keyed by route pattern with route groups removed. */
+  routes: Record<string, FarmMobileNativeRouteConfig>;
+  islands: string[];
+  prefetch: FarmMobilePrefetch;
+  budgets: FarmMobileBudgets;
+}
+
 export interface ResolvedFarmMobileConfig {
   name: string;
   id: string;
   /** Origin, without a trailing slash. Undefined only when the CLI supplies one (dev). */
   server?: string;
   tabs: FarmMobileTab[];
+  /** `mobile.routes`, keyed by route pattern with route groups removed. */
   routes: Record<string, FarmMobileRouteConfig>;
+  native: ResolvedFarmMobileNativeConfig;
 }
 
-const MOBILE_KEYS = new Set(["name", "id", "server", "tabs", "routes"]);
+const MOBILE_KEYS = new Set(["name", "id", "server", "tabs", "routes", "native"]);
+const ROUTE_KEYS = new Set(["presentation"]);
 const TAB_KEYS = new Set(["path", "title", "icon"]);
-const ROUTE_KEYS = new Set(["presentation", "native"]);
+const NATIVE_KEYS = new Set(["engine", "auto", "routes", "islands", "prefetch", "budgets"]);
+const NATIVE_ROUTE_KEYS = new Set(["screen", "android", "ios", "presentation"]);
+const BUDGET_KEYS = new Set(["appSizeMb", "screenOpenMs", "droppedFrames"]);
+const PAGE_KEYS = new Set(["presentation", "prefetch", "native"]);
 const PRESENTATIONS = new Set(["push", "modal", "replace"]);
+const SCREENS = new Set(["web", "native", "platform"]);
+const ENGINES = new Set(["react-native", "platform"]);
+const AUTO_MODES = new Set(["off", "report", "on"]);
 const MOBILE_OS = new Set(["android", "ios"]);
 const MAX_TABS = 5;
 /** Valid as an Android application ID and an iOS bundle ID: letters and digits per segment. */
@@ -102,8 +186,7 @@ const JAVA_KEYWORDS = new Set(
   ).split(" "),
 );
 const ICON_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const NATIVE_MODULE = /^[A-Za-z][A-Za-z0-9_-]*$/;
-const NATIVE_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js"];
+const ISLAND_NAME = /^[A-Z][A-Za-z0-9]*$/;
 
 function mobileChecker(context?: Pick<FarmMobileContext, "os">): PlatformBlockChecker {
   return createPlatformBlockChecker(context ? `mobile (os: ${context.os})` : "mobile");
@@ -176,6 +259,121 @@ function checkAppId(id: string, { fail }: PlatformBlockChecker): void {
   }
   const keyword = segments.find((segment) => JAVA_KEYWORDS.has(segment.toLowerCase()));
   if (keyword) fail(`id segment "${keyword}" is a Java keyword, which Android rejects.`);
+}
+
+/** #2420's `routes[x].native: "<module>"`, replaced by `page.native.tsx` before release. */
+function nativeModuleMovedMessage(where: string, pattern: string): string {
+  const dir = pattern === "/" ? "" : stripRouteGroupsFromPattern(pattern);
+  return (
+    `${where}.native no longer names a src/native/ module (src/native/ is for native module ` +
+    `specs). Add src/app${dir}/page.native.tsx next to its page.tsx, or set ` +
+    `native: { routes: { "${pattern}": { screen: "native" } } }.`
+  );
+}
+
+function checkRouteKey(pattern: string, where: string, { fail }: PlatformBlockChecker): void {
+  if (!pattern.startsWith("/")) fail(`${where}: the key must be an app route such as "/notes".`);
+}
+
+function checkPresentation(value: unknown, where: string, { fail }: PlatformBlockChecker): void {
+  if (value !== undefined && !PRESENTATIONS.has(value as string)) {
+    fail(`${where}.presentation must be "push", "modal", or "replace".`);
+  }
+}
+
+function checkPrefetch(value: unknown, where: string, { fail }: PlatformBlockChecker): void {
+  if (value !== undefined && value !== "intent" && value !== "off") {
+    fail(`${where}prefetch must be "intent" or "off".`);
+  }
+}
+
+function validateNativeConfig(native: unknown, check: PlatformBlockChecker): void {
+  const { checkKeys } = check;
+  function fail(message: string): never {
+    return check.fail(message);
+  }
+  if (!isPlainObject(native)) {
+    fail('native must be an object, such as { routes: { "/feed": { screen: "native" } } }.');
+  }
+  checkKeys(native, NATIVE_KEYS, "native.");
+  if (native.engine !== undefined && !ENGINES.has(native.engine as string)) {
+    fail('native.engine must be "react-native" or "platform".');
+  }
+  if (native.auto !== undefined && !AUTO_MODES.has(native.auto as string)) {
+    fail('native.auto must be "off", "report", or "on".');
+  }
+  checkPrefetch(native.prefetch, "native.", check);
+  if (native.islands !== undefined) {
+    if (
+      !Array.isArray(native.islands) ||
+      !native.islands.every((entry) => typeof entry === "string" && ISLAND_NAME.test(entry))
+    ) {
+      fail('native.islands must be an array of component names, such as ["Map", "Video"].');
+    }
+  }
+  if (native.budgets !== undefined) {
+    if (!isPlainObject(native.budgets)) {
+      fail("native.budgets must be an object, such as { screenOpenMs: 300 }.");
+    }
+    checkKeys(native.budgets, BUDGET_KEYS, "native.budgets.");
+    for (const [key, value] of Object.entries(native.budgets)) {
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+        fail(`native.budgets.${key} must be a number of 0 or more.`);
+      }
+    }
+  }
+  if (native.routes === undefined) return;
+  if (!isPlainObject(native.routes)) {
+    fail(
+      "native.routes must be an object keyed by route, such as " +
+        '{ "/notes/new": { presentation: "modal" } }.',
+    );
+  }
+  for (const [pattern, route] of Object.entries(native.routes)) {
+    const where = `native.routes["${pattern}"]`;
+    checkRouteKey(pattern, where, check);
+    if (!isPlainObject(route)) fail(`${where} must be an object, such as { screen: "native" }.`);
+    if (typeof route.native === "string") fail(nativeModuleMovedMessage(where, pattern));
+    checkKeys(route, NATIVE_ROUTE_KEYS, `${where}.`);
+    if (route.screen === undefined) {
+      fail(`${where}.screen is required: "web", "native", or "platform".`);
+    }
+    for (const field of ["screen", "android", "ios"] as const) {
+      if (route[field] !== undefined && !SCREENS.has(route[field] as string)) {
+        fail(`${where}.${field} must be "web", "native", or "platform".`);
+      }
+    }
+    checkPresentation(route.presentation, where, check);
+  }
+}
+
+/**
+ * Check a page's `export const mobile` value, already read from its source. `where` names the
+ * file in errors.
+ */
+export function validateFarmMobilePageConfig(
+  value: unknown,
+  where: string,
+  context?: Pick<FarmMobileContext, "os">,
+): FarmMobilePageConfig {
+  const check = mobileChecker(context);
+  const { checkKeys } = check;
+  function fail(message: string): never {
+    return check.fail(message);
+  }
+  if (!isPlainObject(value)) {
+    fail(`${where}: export const mobile must be an object, such as { presentation: "modal" }.`);
+  }
+  checkKeys(value, PAGE_KEYS, `${where}: mobile.`);
+  checkPresentation(value.presentation, `${where}: mobile`, check);
+  checkPrefetch(value.prefetch, `${where}: mobile.`, check);
+  if (value.native !== undefined && value.native !== false) {
+    fail(
+      `${where}: mobile.native can only be false. A native screen comes from a ` +
+        "page.native.tsx next to the page.",
+    );
+  }
+  return value as FarmMobilePageConfig;
 }
 
 /**
@@ -251,20 +449,30 @@ export function validateFarmMobileConfig(
     }
     for (const [pattern, route] of Object.entries(input.routes)) {
       const where = `routes["${pattern}"]`;
-      if (!pattern.startsWith("/"))
-        fail(`${where}: the key must be an app route such as "/notes".`);
+      checkRouteKey(pattern, where, check);
       if (!isPlainObject(route)) {
         fail(`${where} must be an object, such as { presentation: "modal" }.`);
       }
+      if (route.native !== undefined) fail(nativeModuleMovedMessage(where, pattern));
       checkKeys(route, ROUTE_KEYS, `${where}.`);
-      const { presentation, native } = route;
-      if (presentation !== undefined && !PRESENTATIONS.has(presentation as string)) {
-        fail(`${where}.presentation must be "push", "modal", or "replace".`);
-      }
-      if (native !== undefined && (typeof native !== "string" || !NATIVE_MODULE.test(native))) {
+      checkPresentation(route.presentation, where, check);
+    }
+  }
+  if (input.native !== undefined) validateNativeConfig(input.native, check);
+  // One presentation per route: mobile.routes and mobile.native.routes share the field.
+  if (isPlainObject(input.routes) && isPlainObject(input.native)) {
+    const nativeRoutes = isPlainObject(input.native.routes) ? input.native.routes : {};
+    const presented = new Map(
+      Object.entries(input.routes)
+        .filter(([, route]) => isPlainObject(route) && route.presentation !== undefined)
+        .map(([pattern]) => [stripRouteGroupsFromPattern(pattern), pattern]),
+    );
+    for (const [pattern, route] of Object.entries(nativeRoutes)) {
+      const other = presented.get(stripRouteGroupsFromPattern(pattern));
+      if (other !== undefined && isPlainObject(route) && route.presentation !== undefined) {
         fail(
-          `${where}.native must name a module in src/native/, such as "feed" for ` +
-            `src/native/feed.tsx, got "${String(native)}".`,
+          `routes["${other}"].presentation and native.routes["${pattern}"].presentation set the ` +
+            "same field. Keep one.",
         );
       }
     }
@@ -296,8 +504,7 @@ export interface FarmMobileResolveOptions {
 
 /**
  * Fill in defaults for an already resolved (static or returned) `mobile` block and check it
- * against the app: every tab and `routes` key must be an app route, and every `native` module
- * must exist in `src/native/`.
+ * against the app: every tab, `routes`, and `native.routes` key must be a page route.
  */
 export function resolveFarmMobileConfig(
   input: FarmMobileUserConfig | undefined,
@@ -329,38 +536,44 @@ export function resolveFarmMobileConfig(
   });
   const tabPaths = new Set(tabs.map((tab) => tab.path));
 
-  const routes: Record<string, FarmMobileRouteConfig> = {};
-  const srcDir = options.srcDir || "src";
-  for (const [key, route] of Object.entries(config.routes ?? {})) {
+  const checkPage = (key: string, where: string): string => {
     const pattern = stripRouteGroupsFromPattern(key);
     if (!pages.has(pattern)) {
       const shape = safeShape(pattern);
       const sameShape = shape ? byShape.get(shape) : undefined;
       fail(
         sameShape
-          ? `routes["${key}"] is not a page route; did you mean "${sameShape}"?`
-          : `routes["${key}"] is not a page route. Keys are app route patterns such as "/notes/[id]".`,
+          ? `${where} is not a page route; did you mean "${sameShape}"?`
+          : `${where} is not a page route. Keys are app route patterns such as "/notes/[id]".`,
       );
     }
-    if (route.presentation !== undefined && tabPaths.has(pattern)) {
-      fail(`routes["${key}"].presentation does not apply to a tab route; tabs switch in place.`);
+    return pattern;
+  };
+  const checkTabPresentation = (pattern: string, where: string, presentation: unknown) => {
+    if (presentation !== undefined && tabPaths.has(pattern)) {
+      fail(`${where}.presentation does not apply to a tab route; tabs switch in place.`);
     }
-    if (route.native !== undefined) {
-      const base = path.join(options.root, srcDir, "native", route.native);
-      if (!NATIVE_EXTENSIONS.some((extension) => existsSync(base + extension))) {
-        fail(
-          `routes["${key}"].native "${route.native}" needs ${path.posix.join(
-            srcDir.replace(/\\/g, "/"),
-            "native",
-            `${route.native}.tsx`,
-          )}, which was not found.`,
-        );
-      }
-    }
-    routes[pattern] = {
-      ...(route.presentation ? { presentation: route.presentation } : {}),
-      ...(route.native ? { native: route.native } : {}),
-    };
+  };
+
+  const routes: Record<string, FarmMobileRouteConfig> = {};
+  for (const [key, route] of Object.entries(config.routes ?? {})) {
+    const where = `routes["${key}"]`;
+    const pattern = checkPage(key, where);
+    checkTabPresentation(pattern, where, route.presentation);
+    routes[pattern] = route.presentation ? { presentation: route.presentation } : {};
+  }
+
+  const native = config.native ?? {};
+  const nativeRoutes: Record<string, FarmMobileNativeRouteConfig> = {};
+  for (const [key, route] of Object.entries(native.routes ?? {})) {
+    const where = `native.routes["${key}"]`;
+    const pattern = checkPage(key, where);
+    checkTabPresentation(pattern, where, route.presentation);
+    nativeRoutes[pattern] = Object.fromEntries(
+      (["screen", "android", "ios", "presentation"] as const)
+        .filter((field) => route[field] !== undefined)
+        .map((field) => [field, route[field]]),
+    ) as unknown as FarmMobileNativeRouteConfig;
   }
 
   const pkg = readAppPackageJson(options.root);
@@ -383,6 +596,14 @@ export function resolveFarmMobileConfig(
     ...(config.server ? { server: resolveFarmMobileServer(config.server, context) } : {}),
     tabs,
     routes,
+    native: {
+      engine: native.engine ?? "react-native",
+      auto: native.auto ?? "report",
+      routes: nativeRoutes,
+      islands: [...new Set(native.islands ?? [])].sort(),
+      prefetch: native.prefetch ?? "intent",
+      budgets: { ...native.budgets },
+    },
   };
 }
 

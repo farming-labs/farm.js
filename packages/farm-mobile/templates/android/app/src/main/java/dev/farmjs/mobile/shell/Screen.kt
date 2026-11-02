@@ -15,7 +15,7 @@ class Screen(
     context: Context,
     val page: Page?,
     nativeContent: View?,
-    /** The `src/native/` module a native screen shows. */
+    /** The module id a native or platform screen shows, such as `app/notes/[id]`. */
     val nativeModule: String?,
     val modal: Boolean,
     private val navigator: Navigator,

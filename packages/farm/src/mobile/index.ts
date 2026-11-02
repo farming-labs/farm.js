@@ -1,16 +1,25 @@
 /**
  * `@farm.js/core/mobile`: the interface mobile shell packages (such as `@farm.js/mobile/android`)
- * implement. Types and an identity helper only; nothing here runs in a web build.
+ * implement, and the types a page's `export const mobile` and a `mobile` block use. Types and an
+ * identity helper only; nothing here runs in a web build.
  */
 import type { FarmMobileOS, ResolvedFarmMobileConfig } from "./config";
 import type { FarmMobileRouteManifest } from "./routes";
 
 export type {
+  FarmMobileBudgets,
   FarmMobileConfigInput,
   FarmMobileContext,
+  FarmMobileNativeAuto,
+  FarmMobileNativeConfig,
+  FarmMobileNativeEngine,
+  FarmMobileNativeRouteConfig,
   FarmMobileOS,
+  FarmMobilePageConfig,
+  FarmMobilePrefetch,
   FarmMobilePresentation,
   FarmMobileRouteConfig,
+  FarmMobileScreen,
   FarmMobileTab,
   FarmMobileUserConfig,
   ResolvedFarmMobileConfig,

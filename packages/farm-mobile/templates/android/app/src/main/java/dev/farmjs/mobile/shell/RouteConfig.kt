@@ -17,10 +17,13 @@ class RouteConfig(
         val pattern: Regex,
         val presentation: String,
         val tab: Int?,
-        /** The `src/native/` module of a `screen: "native"` rule. */
+        /** `"web"`, `"native"` (React Native, `page.native.tsx`), or `"platform"` (`page.kt`). */
+        val screen: String,
+        /** The screen's module id, derived from the route, such as `app/notes/[id]`. */
         val module: String?,
     ) {
-        val native: Boolean get() = module != null
+        /** Shown as a native view instead of a WebView, on any rule, including tab roots. */
+        val native: Boolean get() = screen != RouteConfig.WEB
     }
 
     /** scheme://host[:port], the only origin the bridge and link interception trust. */
@@ -36,7 +39,26 @@ class RouteConfig(
     }
 
     companion object {
-        private val FALLBACK = Rule(null, Regex("^/"), "push", null, null)
+        const val WEB = "web"
+        private val SCREENS = setOf(WEB, "native", "platform")
+        private val FALLBACK = Rule(null, Regex("^/"), "push", null, WEB, null)
+
+        /** The module id farm-routes.json derives for a route: `app` for `/`, else `app<route>`. */
+        fun moduleOf(route: String?): String? = route?.let { if (it == "/") "app" else "app$it" }
+
+        private fun rule(json: JSONObject): Rule {
+            val route = json.optString("route").ifEmpty { null }
+            // A screen tier this shell does not know is a web screen; the page always renders.
+            val screen = json.optString("screen", WEB).takeIf { it in SCREENS } ?: WEB
+            return Rule(
+                route = route,
+                pattern = Regex(json.getString("pattern")),
+                presentation = json.getString("presentation"),
+                tab = if (json.has("tab")) json.getInt("tab") else null,
+                screen = screen,
+                module = if (screen == WEB) null else json.optString("module").ifEmpty { moduleOf(route) },
+            )
+        }
 
         fun originOf(uri: Uri): String {
             val port = if (uri.port == -1) "" else ":${uri.port}"
@@ -52,16 +74,7 @@ class RouteConfig(
                 }
             }
             val rules = json.getJSONArray("rules").let { array ->
-                List(array.length()) { i ->
-                    val rule = array.getJSONObject(i)
-                    Rule(
-                        route = rule.optString("route").ifEmpty { null },
-                        pattern = Regex(rule.getString("pattern")),
-                        presentation = rule.getString("presentation"),
-                        tab = if (rule.has("tab")) rule.getInt("tab") else null,
-                        module = if (rule.optString("screen") == "native") rule.optString("module").ifEmpty { null } else null,
-                    )
-                }
+                List(array.length()) { i -> rule(array.getJSONObject(i)) }
             }
             return RouteConfig(
                 server = Uri.parse(serverOverride ?: json.getString("server")),

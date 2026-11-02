@@ -46,8 +46,18 @@ function context(overrides: Partial<MobileShellContext> = {}): MobileShellContex
         { path: "/notes", title: "Notes", icon: "note.text" },
         { path: "/settings", title: "Settings", icon: "gear" },
       ],
-      routes: { "/notes/new": { presentation: "modal" }, "/feed": { native: "feed" } },
+      routes: { "/notes/new": { presentation: "modal" } },
+      native: {
+        engine: "react-native",
+        auto: "report",
+        routes: { "/feed": { screen: "native" } },
+        islands: [],
+        prefetch: "intent",
+        budgets: {},
+      },
     },
+    // The shape createFarmMobileRouteManifest writes: `screen` on every rule, `module` derived
+    // from the route on native and platform screens.
     manifest: {
       version: 1,
       server: "http://10.0.2.2:3000",
@@ -55,19 +65,49 @@ function context(overrides: Partial<MobileShellContext> = {}): MobileShellContex
         { path: "/notes", title: "Notes", icon: "note.text" },
         { path: "/settings", title: "Settings", icon: "gear" },
       ],
+      prefetch: "intent",
       rules: [
-        { route: "/notes", pattern: "^/notes/?$", presentation: "tab", tab: 0 },
-        { route: "/settings", pattern: "^/settings/?$", presentation: "tab", tab: 1 },
+        {
+          route: "/notes",
+          pattern: "^/notes/?$",
+          presentation: "tab",
+          tab: 0,
+          screen: "web",
+          source: "default",
+        },
+        {
+          route: "/settings",
+          pattern: "^/settings/?$",
+          presentation: "tab",
+          tab: 1,
+          screen: "platform",
+          source: "file",
+          module: "app/settings",
+        },
         {
           route: "/feed",
           pattern: "^/feed/?$",
           presentation: "push",
           screen: "native",
-          module: "feed",
+          source: "config",
+          module: "app/feed",
         },
-        { route: "/notes/new", pattern: "^/notes/new/?$", presentation: "modal" },
-        { route: "/notes/[id]", pattern: "^/notes/[^/]+/?$", presentation: "push" },
-        { pattern: "^/", presentation: "push" },
+        {
+          route: "/notes/new",
+          pattern: "^/notes/new/?$",
+          presentation: "modal",
+          screen: "web",
+          source: "default",
+        },
+        {
+          route: "/notes/[id]",
+          pattern: "^/notes/[^/]+/?$",
+          presentation: "push",
+          screen: "native",
+          source: "file",
+          module: "app/notes/[id]",
+        },
+        { pattern: "^/", presentation: "push", screen: "web" },
       ],
     },
     ...overrides,
@@ -222,6 +262,34 @@ describe("@farm.js/mobile/android", () => {
     for (const line of overrides) expect(line).toMatch(/if \(dev\) intent\.get\w+Extra\(/);
     // A debuggable `farm build --mobile --apk` must not take a server from another app's intent.
     expect(activity).not.toMatch(/if \(debuggable\) intent\./);
+  });
+
+  it("reads screen on every rule, tab roots included, with module ids from the route", async () => {
+    const files = await generated(context());
+    const shellFile = (name: string) => files[`app/src/main/java/dev/farmjs/mobile/shell/${name}`];
+    const routes = shellFile("RouteConfig.kt");
+    // Every tier the manifest writes, and web for a rule without one or with an unknown one.
+    expect(routes).toContain('private val SCREENS = setOf(WEB, "native", "platform")');
+    expect(routes).toContain('json.optString("screen", WEB).takeIf { it in SCREENS } ?: WEB');
+    // A rule is native by its screen, not by the old `screen: "native"` plus module string.
+    expect(routes).toContain("val native: Boolean get() = screen != RouteConfig.WEB");
+    expect(routes).not.toContain('optString("screen") == "native"');
+    expect(routes).toContain(
+      'fun moduleOf(route: String?): String? = route?.let { if (it == "/") "app" else "app$it" }',
+    );
+    // Tab roots look up their own rule instead of always opening a WebView.
+    const navigator = shellFile("Navigator.kt");
+    expect(navigator).toContain("newScreen(modal = false, rule = config.match(root), url = root)");
+    expect(navigator).not.toContain("rule = null");
+    expect(navigator).toContain("if (rule != null && rule.native && url != null)");
+    // Platform screens get their own placeholder until page.kt screens load.
+    expect(shellFile("NativeScreens.kt")).toContain(
+      'if (screen == "platform") R.string.farm_platform_missing else R.string.farm_native_missing',
+    );
+    const strings = files["app/src/main/res/values/strings.xml"];
+    expect(strings).toContain('name="farm_native_missing"');
+    expect(strings).toContain('name="farm_platform_missing"');
+    expect(strings).not.toContain("src/native");
   });
 
   it("maps tab icons to the built-in drawables", () => {

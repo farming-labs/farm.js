@@ -116,7 +116,8 @@ export function createStrings(context: MobileShellContext): string {
     <bool name="farm_dev">${context.command === "dev"}</bool>
     <string name="back">Back</string>
     <string name="close">Close</string>
-    <string name="farm_native_missing">The native screen %1$s is not in this build. Farm does not build src/native screens yet.</string>
+    <string name="farm_native_missing">The native screen %1$s is not in this build. Farm does not build page.native.tsx screens yet.</string>
+    <string name="farm_platform_missing">The platform screen %1$s is not in this build. Farm does not build page.kt screens yet.</string>
 </resources>
 `;
 }

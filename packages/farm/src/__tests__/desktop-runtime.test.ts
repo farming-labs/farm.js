@@ -540,6 +540,38 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     );
     expect(await buildWeb()).toEqual(without);
     await expect(fs.stat(calledMarker)).rejects.toThrow();
+    // Native screens and a native block: a web build never reads, resolves, or ships them.
+    const nativeScreen = `import { View } from "react-native";
+export const marker = "MOBILE_NATIVE_FILE_MARKER";
+export default function Screen() { return <View />; }
+`;
+    for (const file of [
+      "src/app/page.native.tsx",
+      "src/app/page.ios.tsx",
+      "src/app/page.android.tsx",
+      "src/app/layout.native.tsx",
+    ]) {
+      await fs.writeFile(path.join(root, file), nativeScreen);
+    }
+    await fs.writeFile(path.join(root, "src/app/page.kt"), "// MOBILE_NATIVE_FILE_MARKER\n");
+    await fs.writeFile(path.join(root, "src/app/page.swift"), "// MOBILE_NATIVE_FILE_MARKER\n");
+    await fs.writeFile(
+      path.join(root, "farm.config.ts"),
+      webConfig(`
+  mobile: {
+    id: "com.example.notes",
+    server: "https://notes.example.com",
+    native: {
+      engine: "react-native",
+      auto: "on",
+      routes: { "/": { screen: "native", ios: "web" } },
+      islands: ["MobileNativeConfigMarker"],
+      prefetch: "off",
+      budgets: { screenOpenMs: 300 },
+    },
+  },`),
+    );
+    expect(await buildWeb()).toEqual(without);
 
     const serverDir = path.join(root, ".farm", ".output", "server");
     const offenders: string[] = [];
@@ -557,6 +589,8 @@ export function GET() { return Response.json({ platform: platform() }); }`,
         "DESKTOP_STATIC_MARKER",
         "MOBILE_STATIC_MARKER",
         "MOBILE_FN_MARKER",
+        "MOBILE_NATIVE_FILE_MARKER",
+        "MobileNativeConfigMarker",
       ]) {
         if (source.includes(marker)) offenders.push(`${path.relative(serverDir, file)}: ${marker}`);
       }

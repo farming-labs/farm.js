@@ -148,11 +148,19 @@ export type {
   ResolvedFarmDesktopConfig,
 } from "./desktop/config";
 export type {
+  FarmMobileBudgets,
   FarmMobileConfigInput,
   FarmMobileContext,
+  FarmMobileNativeAuto,
+  FarmMobileNativeConfig,
+  FarmMobileNativeEngine,
+  FarmMobileNativeRouteConfig,
   FarmMobileOS,
+  FarmMobilePageConfig,
+  FarmMobilePrefetch,
   FarmMobilePresentation,
   FarmMobileRouteConfig,
+  FarmMobileScreen,
   FarmMobileTab,
   FarmMobileUserConfig,
 } from "./mobile/config";

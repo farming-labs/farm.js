@@ -3,13 +3,13 @@
  * `mobile` block for an OS and write the navigator manifest. Loaded only through
  * `loadFarmMobileRuntime()`, so web builds never parse it.
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 import { loadConfig, resolveConfig, type FarmUserConfig, type ResolvedFarmConfig } from "../config";
 import { getFarmSourceRoots } from "../layers";
 import { getFarmRendererComponentExtensions } from "../renderer";
-import { scanRoutePatterns } from "../routing/generate-route-types";
+import { scanRoutePatterns, type PlatformRouteFiles } from "../routing/generate-route-types";
 import {
   createFarmMobileContext,
   resolveFarmMobileBlock,
@@ -21,6 +21,12 @@ import {
   type ResolvedFarmMobileConfig,
 } from "./config";
 import { createFarmMobileRouteManifest, type FarmMobileRouteManifest } from "./routes";
+import {
+  readFarmMobilePageExport,
+  resolveFarmMobileScreens,
+  type FarmMobilePageExport,
+  type FarmMobileScreenDecision,
+} from "./screens";
 
 export {
   createFarmMobileContext,
@@ -29,8 +35,14 @@ export {
   validateFarmMobileConfig,
 } from "./config";
 export { createFarmMobileRouteManifest, createFarmMobileRoutePattern } from "./routes";
+export {
+  createFarmMobileModuleId,
+  readFarmMobilePageExport,
+  resolveFarmMobileScreens,
+} from "./screens";
 export type * from "./config";
 export type * from "./routes";
+export type * from "./screens";
 
 /** An expected failure with its own fix; the CLI prints it without a stack. */
 export class FarmMobileError extends Error {
@@ -83,6 +95,49 @@ export interface FarmMobileApp {
   mobile: ResolvedFarmMobileConfig;
   manifest: FarmMobileRouteManifest;
   config: ResolvedFarmConfig;
+  /** What each page route shows on this OS, and what decided it. */
+  screens: Record<string, FarmMobileScreenDecision>;
+  /** Settings a higher-precedence source overrides, unused screen files, unported routes. */
+  warnings: string[];
+  /** Reserved `layout.{native,ios,android}.tsx` files per app directory, app-root-relative. */
+  nativeLayouts: Record<string, PlatformRouteFiles>;
+  /** Absolute page file per file-based page route. */
+  pageFiles: Map<string, string>;
+}
+
+const SCRIPT_PAGE = /\.(?:tsx|ts|jsx|js)$/;
+
+/** `.js` pages may contain JSX, as in the client build. */
+function scriptLang(file: string): "ts" | "tsx" | "jsx" {
+  return file.endsWith(".tsx") ? "tsx" : file.endsWith(".ts") ? "ts" : "jsx";
+}
+
+/** Static `export const mobile` of every script page; pages without one are not parsed. */
+async function readPageExports(
+  root: string,
+  pageFiles: ReadonlyMap<string, string>,
+  os: FarmMobileOS,
+): Promise<Map<string, FarmMobilePageExport>> {
+  const exports = new Map<string, FarmMobilePageExport>();
+  let parseSync: (typeof import("rolldown/utils"))["parseSync"] | undefined;
+  await Promise.all(
+    [...pageFiles].map(async ([route, file]) => {
+      if (!SCRIPT_PAGE.test(file)) return;
+      const source = await readFile(file, "utf8");
+      if (!/\bmobile\b/.test(source)) return;
+      parseSync ??= (await import("rolldown/utils")).parseSync;
+      const parse = parseSync;
+      const relative = path.relative(root, file).split(path.sep).join("/");
+      const config = readFarmMobilePageExport(
+        source,
+        relative,
+        (name, code) => parse(name, code, { lang: scriptLang(name) }).program as never,
+        { os },
+      );
+      if (config) exports.set(route, { file: relative, config });
+    }),
+  );
+  return exports;
 }
 
 /** Resolve the `mobile` block for one OS against the app's routes. Writes nothing. */
@@ -109,14 +164,45 @@ export async function resolveFarmMobileApp(
   });
   const block = await resolveFarmMobileBlock(userConfig.mobile, context, options.cache);
   const config = options.config ?? (await resolveConfig({ ...userConfig, root }, mode));
-  const { pages } = await scanRoutePatterns({
+  const scan = await scanRoutePatterns({
     root,
     srcDir: config.srcDir,
     sourceRoots: getFarmSourceRoots(config),
     componentExtensions: getFarmRendererComponentExtensions(config.renderer),
+    platformFiles: true,
   });
-  const routes = [...pages];
+  const routes = [...scan.pages].sort();
   const mobile = resolveFarmMobileConfig(block, { root, srcDir: config.srcDir, routes }, context);
+  const pageExports = await readPageExports(root, scan.pageFiles, context.os);
+  for (const [route, page] of pageExports) {
+    if (page.config.presentation !== undefined && mobile.tabs.some((tab) => tab.path === route)) {
+      throw new TypeError(
+        `mobile (os: ${context.os}): ${page.file}: mobile.presentation does not apply to a tab ` +
+          "route; tabs switch in place.",
+      );
+    }
+  }
+  const { screens, warnings } = resolveFarmMobileScreens({
+    root,
+    os: context.os,
+    routes,
+    mobile,
+    nativePages: scan.nativePages,
+    pageExports,
+  });
+  const nativeLayouts = Object.fromEntries(
+    [...scan.nativeLayouts]
+      .sort()
+      .map(([route, files]) => [
+        route,
+        Object.fromEntries(
+          Object.entries(files).map(([platform, file]) => [
+            platform,
+            path.relative(root, file).split(path.sep).join("/"),
+          ]),
+        ),
+      ]),
+  );
   const server =
     options.server === undefined
       ? undefined
@@ -136,8 +222,18 @@ export async function resolveFarmMobileApp(
     server,
     basePath: config.basePath,
     i18n,
+    screens,
   });
-  return { context, mobile, manifest, config };
+  return {
+    context,
+    mobile,
+    manifest,
+    config,
+    screens,
+    warnings,
+    nativeLayouts,
+    pageFiles: scan.pageFiles,
+  };
 }
 
 /** Resolve the block and write `.farm/output/mobile/farm-routes.json`. */

@@ -171,15 +171,59 @@ ${renderTypeAlias("RouteModulePattern", routeModulePatternType)}${linkAugmentati
 }
 
 /**
+ * Mobile screen files next to a route's `page.tsx`: React Native (`page.native.tsx`,
+ * `page.ios.tsx`, `page.android.tsx`) and platform (`page.kt`, `page.swift`). Layouts use the
+ * first three.
+ */
+export interface PlatformRouteFiles {
+  native?: string;
+  ios?: string;
+  android?: string;
+  kt?: string;
+  swift?: string;
+}
+
+export interface ScannedRoutePatterns {
+  pages: Set<string>;
+  modules: Set<string>;
+}
+
+export interface ScannedPlatformRoutePatterns extends ScannedRoutePatterns {
+  /** Absolute page file per file-based page pattern; a project file wins over a layer's. */
+  pageFiles: Map<string, string>;
+  /** Mobile screen files per page pattern, absolute paths. */
+  nativePages: Map<string, PlatformRouteFiles>;
+  /** Reserved `layout.native.tsx` files per app directory, such as `/(tabs)`, absolute paths. */
+  nativeLayouts: Map<string, PlatformRouteFiles>;
+}
+
+const PLATFORM_FILE =
+  /^(?:(page|layout)\.(native|ios|android)\.(?:tsx|ts|jsx|js)|page\.(kt|swift))$/;
+
+/**
  * Page and route module URL patterns from the app directory and programmatic routes files, as
  * the generated route types list them: `/notes/[id]`, route groups removed, slots skipped.
+ * With `platformFiles` (mobile commands only) it also lists page files and the
+ * `page.{native,ios,android}.tsx` screens next to them; web scans never look for them.
  */
 export async function scanRoutePatterns(
   options: Pick<
     GenerateRouteTypesOptions,
     "root" | "srcDir" | "sourceRoots" | "componentExtensions"
-  >,
-): Promise<{ pages: Set<string>; modules: Set<string> }> {
+  > & { platformFiles: true },
+): Promise<ScannedPlatformRoutePatterns>;
+export async function scanRoutePatterns(
+  options: Pick<
+    GenerateRouteTypesOptions,
+    "root" | "srcDir" | "sourceRoots" | "componentExtensions"
+  > & { platformFiles?: false },
+): Promise<ScannedRoutePatterns>;
+export async function scanRoutePatterns(
+  options: Pick<
+    GenerateRouteTypesOptions,
+    "root" | "srcDir" | "sourceRoots" | "componentExtensions"
+  > & { platformFiles?: boolean },
+): Promise<ScannedRoutePatterns | ScannedPlatformRoutePatterns> {
   const { root, srcDir = "src" } = options;
   const sourceRoots = options.sourceRoots ?? [{ name: "project", root, srcDir, layer: false }];
   const componentExtensions = resolveFarmComponentExtensions(options.componentExtensions).map(
@@ -188,6 +232,9 @@ export async function scanRoutePatterns(
 
   const pages = new Set<string>();
   const modules = new Set<string>();
+  const pageFiles = new Map<string, string>();
+  const nativePages = new Map<string, PlatformRouteFiles>();
+  const nativeLayouts = new Map<string, PlatformRouteFiles>();
 
   const glob = await import("fast-glob");
   for (const source of sourceRoots) {
@@ -208,7 +255,20 @@ export async function scanRoutePatterns(
         modules.add(pattern);
         if (route.type === "page") {
           pages.add(pattern);
+          if (options.platformFiles) pageFiles.set(pattern, path.join(appDir, file));
         }
+      }
+
+      if (options.platformFiles) {
+        scanPlatformRouteFiles(
+          appDir,
+          await glob.default(
+            ["**/{page,layout}.{native,ios,android}.{tsx,ts,jsx,js}", "**/page.{kt,swift}"],
+            { cwd: appDir, absolute: false },
+          ),
+          nativePages,
+          nativeLayouts,
+        );
       }
     }
 
@@ -218,5 +278,52 @@ export async function scanRoutePatterns(
     }
   }
 
-  return { pages, modules };
+  if (!options.platformFiles) return { pages, modules };
+  for (const [pattern, files] of nativePages) {
+    if (!pages.has(pattern)) {
+      const file = path.relative(root, Object.values(files)[0]!);
+      throw new Error(
+        `${file.replace(/\\/g, "/")} has no web page next to it. Add ${path
+          .join(path.dirname(file), "page.tsx")
+          .replace(/\\/g, "/")}: it is the route's web screen and the fallback on every platform.`,
+      );
+    }
+  }
+  return { pages, modules, pageFiles, nativePages, nativeLayouts };
+}
+
+function scanPlatformRouteFiles(
+  appDir: string,
+  files: readonly string[],
+  nativePages: Map<string, PlatformRouteFiles>,
+  nativeLayouts: Map<string, PlatformRouteFiles>,
+): void {
+  // One layer's files replace an earlier layer's per route, like page files.
+  const seen = new Map<string, string>();
+  for (const file of [...files].sort()) {
+    const normalized = file.replace(/\\/g, "/");
+    const match = PLATFORM_FILE.exec(path.posix.basename(normalized));
+    if (!match) continue;
+    const kind = (match[1] ?? "page") as "page" | "layout";
+    const platform = (match[2] ?? match[3]) as keyof PlatformRouteFiles;
+    const twin = path.posix.join(path.posix.dirname(normalized), `${kind}.tsx`);
+    if (kind === "page" && parseRouteSlotFile(twin)) continue;
+    // Layouts key by directory: a group's layout and its parent's share a URL pattern.
+    const dir = path.posix.dirname(normalized);
+    const pattern =
+      kind === "page" ? createRoutePattern(parseRoutePath(twin)) : dir === "." ? "/" : `/${dir}`;
+    const key = `${kind}\0${pattern}\0${platform}`;
+    const previous = seen.get(key);
+    if (previous) {
+      throw new Error(
+        `Duplicate ${platform} ${kind} for "${pattern}": found ${previous} and ${normalized} in ` +
+          `${appDir}. Keep one.`,
+      );
+    }
+    seen.set(key, normalized);
+    const target = kind === "page" ? nativePages : nativeLayouts;
+    const entry = { ...target.get(pattern) };
+    entry[platform] = path.join(appDir, normalized);
+    target.set(pattern, entry);
+  }
 }
