@@ -2,14 +2,15 @@ import { mkdirSync } from "node:fs";
 
 /**
  * Where this code runs: `"desktop"` in `farm dev --desktop` and `farm build --desktop`,
- * otherwise `"web"`.
+ * `"mobile"` under `FARM_PLATFORM=mobile` (the mobile shell's client build), otherwise `"web"`.
  *
  * In browser code the build replaces this module with one that returns a literal, so
- * `platform() === "desktop"` branches fold away in the client bundle.
+ * `platform() === "desktop"` branches fold away in the client bundle. A mobile app's pages
+ * render on its web deployment, whose server reports `"web"`.
  */
-export type FarmPlatform = "web" | "desktop";
+export type FarmPlatform = "web" | "desktop" | "mobile";
 
-/** @internal Set by the CLI for `--desktop` and by the desktop server entry. */
+/** @internal Set by the CLI for `--desktop` and `--mobile`, and by the desktop server entry. */
 const PLATFORM_ENV = "FARM_PLATFORM";
 /** @internal The app data directory a desktop shell passes to the server. */
 const DESKTOP_DATA_DIR_ENV = "FARM_DESKTOP_DATA_DIR";
@@ -22,7 +23,8 @@ function readEnv(name: string): string | undefined {
 }
 
 export function platform(): FarmPlatform {
-  return readEnv(PLATFORM_ENV) === "desktop" ? "desktop" : "web";
+  const value = readEnv(PLATFORM_ENV);
+  return value === "desktop" || value === "mobile" ? value : "web";
 }
 
 /**

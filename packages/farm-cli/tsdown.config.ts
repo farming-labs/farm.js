@@ -6,6 +6,7 @@ export default defineConfig({
     dev: "src/dev.ts",
     build: "src/build.ts",
     desktop: "src/desktop.ts",
+    mobile: "src/mobile.ts",
     "add-integration": "src/add-integration.ts",
     telemetry: "src/telemetry.ts",
     "ui-registry": "src/ui-registry.ts",

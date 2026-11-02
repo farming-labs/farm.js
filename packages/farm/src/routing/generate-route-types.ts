@@ -97,43 +97,8 @@ export async function createRouteTypeDeclarations(
   options: GenerateRouteTypesOptions,
   outPath: string,
 ): Promise<string> {
-  const { root, srcDir = "src", extraRoutes = [], suppressLintOnLink = false } = options;
-  const sourceRoots = options.sourceRoots ?? [{ name: "project", root, srcDir, layer: false }];
-  const componentExtensions = resolveFarmComponentExtensions(options.componentExtensions).map(
-    (extension) => extension.slice(1),
-  );
-
-  const patterns = new Set<string>();
-  const routeModulePatterns = new Set<string>();
-
-  const glob = await import("fast-glob");
-  for (const source of sourceRoots) {
-    const appDir = path.join(source.root, source.srcDir, "app");
-    if (fs.existsSync(appDir)) {
-      const routeModuleFiles = await glob.default(
-        `**/{page,layout,loading,error}.{${componentExtensions.join(",")},md,mdx}`,
-        {
-          cwd: appDir,
-          absolute: false,
-        },
-      );
-
-      for (const file of routeModuleFiles) {
-        if (parseRouteSlotFile(file)) continue;
-        const route = parseRoutePath(file);
-        const pattern = createRoutePattern(route);
-        routeModulePatterns.add(pattern);
-        if (route.type === "page") {
-          patterns.add(pattern);
-        }
-      }
-    }
-
-    for (const route of await discoverProgrammaticRoutePaths(source.root, source.srcDir)) {
-      patterns.add(route);
-      routeModulePatterns.add(route);
-    }
-  }
+  const { extraRoutes = [], suppressLintOnLink = false } = options;
+  const { pages: patterns, modules: routeModulePatterns } = await scanRoutePatterns(options);
 
   for (const route of extraRoutes) {
     if (route.startsWith("/")) {
@@ -203,4 +168,55 @@ ${renderTypeAlias("RouteModulePattern", routeModulePatternType)}${linkAugmentati
 `;
 
   return content;
+}
+
+/**
+ * Page and route module URL patterns from the app directory and programmatic routes files, as
+ * the generated route types list them: `/notes/[id]`, route groups removed, slots skipped.
+ */
+export async function scanRoutePatterns(
+  options: Pick<
+    GenerateRouteTypesOptions,
+    "root" | "srcDir" | "sourceRoots" | "componentExtensions"
+  >,
+): Promise<{ pages: Set<string>; modules: Set<string> }> {
+  const { root, srcDir = "src" } = options;
+  const sourceRoots = options.sourceRoots ?? [{ name: "project", root, srcDir, layer: false }];
+  const componentExtensions = resolveFarmComponentExtensions(options.componentExtensions).map(
+    (extension) => extension.slice(1),
+  );
+
+  const pages = new Set<string>();
+  const modules = new Set<string>();
+
+  const glob = await import("fast-glob");
+  for (const source of sourceRoots) {
+    const appDir = path.join(source.root, source.srcDir, "app");
+    if (fs.existsSync(appDir)) {
+      const routeModuleFiles = await glob.default(
+        `**/{page,layout,loading,error}.{${componentExtensions.join(",")},md,mdx}`,
+        {
+          cwd: appDir,
+          absolute: false,
+        },
+      );
+
+      for (const file of routeModuleFiles) {
+        if (parseRouteSlotFile(file)) continue;
+        const route = parseRoutePath(file);
+        const pattern = createRoutePattern(route);
+        modules.add(pattern);
+        if (route.type === "page") {
+          pages.add(pattern);
+        }
+      }
+    }
+
+    for (const route of await discoverProgrammaticRoutePaths(source.root, source.srcDir)) {
+      pages.add(route);
+      modules.add(route);
+    }
+  }
+
+  return { pages, modules };
 }

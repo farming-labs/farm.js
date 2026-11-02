@@ -472,7 +472,7 @@ async function outputManifest(dir: string): Promise<Record<string, string>> {
 }
 
 describe("a web build", () => {
-  it("is byte-identical with or without a desktop block and carries no desktop code", async () => {
+  it("is byte-identical with or without a desktop or mobile block and carries no platform code", async () => {
     // A runtime plugin, so the server bundle imports farm.config itself.
     const webConfig = (desktop: string) => `import { definePlugin } from "@farm.js/core";
 import { readFileSync } from "node:fs";
@@ -519,6 +519,27 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     expect(await buildWeb()).toEqual(without);
     // A web build never calls the function.
     await expect(fs.stat(calledMarker)).rejects.toThrow();
+    await fs.writeFile(
+      path.join(root, "farm.config.ts"),
+      webConfig(`
+  mobile: {
+    id: "com.example.mobilestaticmarker",
+    server: "https://MOBILE_STATIC_MARKER.example.com",
+    routes: { "/": { presentation: "modal" } },
+  },`),
+    );
+    expect(await buildWeb()).toEqual(without);
+    await fs.writeFile(
+      path.join(root, "farm.config.ts"),
+      webConfig(`
+  desktop: { name: "DESKTOP_STATIC_MARKER" },
+  mobile: async ({ os }) => {
+    (await import("node:fs")).writeFileSync(${JSON.stringify(calledMarker)}, "called");
+    return { id: "com.example.notes", server: "https://MOBILE_FN_MARKER." + os + ".example.com" };
+  },`),
+    );
+    expect(await buildWeb()).toEqual(without);
+    await expect(fs.stat(calledMarker)).rejects.toThrow();
 
     const serverDir = path.join(root, ".farm", ".output", "server");
     const offenders: string[] = [];
@@ -534,6 +555,8 @@ export function GET() { return Response.json({ platform: platform() }); }`,
         "farm:ready",
         "DESKTOP_FN_MARKER",
         "DESKTOP_STATIC_MARKER",
+        "MOBILE_STATIC_MARKER",
+        "MOBILE_FN_MARKER",
       ]) {
         if (source.includes(marker)) offenders.push(`${path.relative(serverDir, file)}: ${marker}`);
       }

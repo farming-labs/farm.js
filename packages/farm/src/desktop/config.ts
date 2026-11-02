@@ -1,12 +1,22 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import * as path from "node:path";
 
 import type { FarmDeployConfig, FarmUserConfig } from "../config";
 import type { FarmPlatform } from "../platform";
+import {
+  createPlatformBlockChecker,
+  isPlainObject,
+  readAppPackageJson,
+  resolveAppPackageName,
+  resolvePlatformBlock,
+  resolvePlatformProfile,
+  type PlatformBlockCache,
+  type PlatformBlockChecker,
+} from "../platform-blocks";
 
 export type { FarmPlatform };
 
-/** Environment variable the CLI sets for `--desktop`. Anything other than "desktop" means web. */
+/** Environment variable the CLI sets for `--desktop` and `--mobile`. Anything else means web. */
 export const FARM_PLATFORM_ENV = "FARM_PLATFORM";
 
 /** Where `farm dev --desktop` leaves the session for the dev server in the same process. */
@@ -27,7 +37,8 @@ export function setFarmDesktopDevSession(session: FarmDesktopDevSession | undefi
 }
 
 export function resolveFarmPlatform(env: NodeJS.ProcessEnv = process.env): FarmPlatform {
-  return env[FARM_PLATFORM_ENV] === "desktop" ? "desktop" : "web";
+  const value = env[FARM_PLATFORM_ENV];
+  return value === "desktop" || value === "mobile" ? value : "web";
 }
 
 export interface FarmDesktopWindowConfig {
@@ -103,36 +114,20 @@ const SHELL_NAME = /^[a-z][a-z0-9-]*$/;
 const SHELL_PACKAGE =
   /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/;
 
-let failPrefix = "desktop";
-
-function fail(message: string): never {
-  throw new TypeError(`${failPrefix}: ${message}`);
+function desktopChecker(context?: Pick<FarmDesktopContext, "os">): PlatformBlockChecker {
+  return createPlatformBlockChecker(context ? `desktop (os: ${context.os})` : "desktop");
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function checkKeys(value: Record<string, unknown>, allowed: Set<string>, where: string): void {
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) {
-      fail(`unknown option ${where}${key}. Supported: ${[...allowed].join(", ")}.`);
-    }
-  }
-}
-
-function optionalString(value: unknown, key: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || !value.trim()) fail(`${key} must be a non-empty string.`);
-  return value.trim();
-}
-
-function optionalSize(value: unknown, key: string): number | undefined {
+function optionalSize(
+  { fail }: PlatformBlockChecker,
+  value: unknown,
+  key: string,
+): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 100 || value > 16384) {
     fail(`${key} must be a whole number of points between 100 and 16384.`);
   }
-  return value;
+  return value as number;
 }
 
 /**
@@ -143,7 +138,11 @@ export function validateFarmDesktopConfig(
   input: unknown,
   context?: Pick<FarmDesktopContext, "os">,
 ): FarmDesktopUserConfig | undefined {
-  failPrefix = context ? `desktop (os: ${context.os})` : "desktop";
+  const check = desktopChecker(context);
+  const { checkKeys, optionalString } = check;
+  function fail(message: string): never {
+    return check.fail(message);
+  }
   if (input === undefined) return undefined;
   if (!isPlainObject(input)) {
     fail(
@@ -166,8 +165,8 @@ export function validateFarmDesktopConfig(
   if (input.window !== undefined) {
     if (!isPlainObject(input.window)) fail("window must be an object, such as { width: 1024 }.");
     checkKeys(input.window, WINDOW_KEYS, "window.");
-    optionalSize(input.window.width, "window.width");
-    optionalSize(input.window.height, "window.height");
+    optionalSize(check, input.window.width, "window.width");
+    optionalSize(check, input.window.height, "window.height");
     optionalString(input.window.title, "window.title");
   }
   const shell = optionalString(input.shell, "shell");
@@ -178,15 +177,6 @@ export function validateFarmDesktopConfig(
     fail(`shell "${shell}" is not a valid package name.`);
   }
   return input as FarmDesktopUserConfig;
-}
-
-function readPackageJson(root: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
-    return isPlainObject(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
 }
 
 function slug(value: string): string {
@@ -204,7 +194,6 @@ export function resolveFarmDesktopShellPackage(shell: string): string {
   return shell.includes("/") ? shell : `@farm.js/desktop/${shell}`;
 }
 
-/** Fill in `desktop` defaults for a desktop dev session or build. */
 /** Fill in defaults for an already resolved (static or returned) `desktop` block. */
 export function resolveFarmDesktopConfig(
   input: FarmDesktopUserConfig | undefined,
@@ -212,15 +201,13 @@ export function resolveFarmDesktopConfig(
   context?: Pick<FarmDesktopContext, "os">,
 ): ResolvedFarmDesktopConfig {
   const config = validateFarmDesktopConfig(input, context) ?? {};
-  const pkg = readPackageJson(root);
-  const packageName =
-    (typeof pkg.productName === "string" && pkg.productName.trim()) ||
-    (typeof pkg.name === "string" && pkg.name.replace(/^@[^/]+\//, "").trim()) ||
-    path.basename(root);
+  const pkg = readAppPackageJson(root);
+  const packageName = resolveAppPackageName(root, pkg);
   const name = config.name?.trim() || packageName || "Farm App";
   const shell = config.shell?.trim() || "electrobun";
   const icon = config.icon ? path.resolve(root, config.icon.trim()) : undefined;
-  if (icon && !existsSync(icon)) fail(`icon ${config.icon} was not found in ${root}.`);
+  if (icon && !existsSync(icon))
+    desktopChecker(context).fail(`icon ${config.icon} was not found in ${root}.`);
   return {
     name,
     id: config.id?.trim() || `local.farm.${slug(name)}`,
@@ -279,10 +266,7 @@ export function createFarmDesktopContext(
   if (!DESKTOP_OS.has(os)) {
     throw new TypeError(`--os must be macos, windows, or linux, got "${os}".`);
   }
-  const profile = options.profile ?? "production";
-  if (typeof profile !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(profile)) {
-    throw new TypeError(`--profile must be a name such as "beta", got "${String(profile)}".`);
-  }
+  const profile = resolvePlatformProfile(options.profile);
   return Object.freeze({
     os,
     mode: options.mode,
@@ -294,7 +278,7 @@ export function createFarmDesktopContext(
 }
 
 /** Results of function-valued blocks for one dev session or build. */
-export type FarmDesktopBlockCache = Map<string, Promise<FarmDesktopUserConfig>>;
+export type FarmDesktopBlockCache = PlatformBlockCache<FarmDesktopUserConfig>;
 
 /**
  * The plain `desktop` block for a context: the static object, or what the function returned.
@@ -309,30 +293,12 @@ export async function resolveFarmDesktopBlock(
   context: FarmDesktopContext,
   cache?: FarmDesktopBlockCache,
 ): Promise<FarmDesktopUserConfig> {
-  if (typeof input !== "function") {
-    return validateFarmDesktopConfig(input, context) ?? {};
-  }
-  const call = () =>
-    Promise.resolve()
-      .then(() => input(context))
-      .then((value) => validateFarmDesktopConfig(value, context) ?? {});
-  if (!cache) return call();
-  const key = [
-    context.os,
-    context.mode,
-    context.command,
-    context.profile,
-    context.root,
-    String(input),
-  ].join("\0");
-  let resolved = cache.get(key);
-  if (!resolved) {
-    resolved = call();
-    cache.set(key, resolved);
-    // A failed call runs again on the next resolution, after the app fixes farm.config.
-    resolved.catch(() => cache.delete(key));
-  }
-  return resolved;
+  return resolvePlatformBlock(
+    input,
+    context,
+    (value, ctx) => validateFarmDesktopConfig(value, ctx) ?? {},
+    cache,
+  );
 }
 
 /** What the desktop setup hands back to `resolveConfig`. */

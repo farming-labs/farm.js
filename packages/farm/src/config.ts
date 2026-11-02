@@ -106,6 +106,7 @@ import type {
   FarmDesktopSetupHost,
   ResolvedFarmDesktopConfig,
 } from "./desktop/config";
+import type { FarmMobileConfigInput } from "./mobile/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import type { OpenAPISecurityMode } from "./openapi/types";
 import { isReactRenderer, resolveFarmRenderer } from "./renderer";
@@ -146,6 +147,15 @@ export type {
   FarmDesktopWindowConfig,
   ResolvedFarmDesktopConfig,
 } from "./desktop/config";
+export type {
+  FarmMobileConfigInput,
+  FarmMobileContext,
+  FarmMobileOS,
+  FarmMobilePresentation,
+  FarmMobileRouteConfig,
+  FarmMobileTab,
+  FarmMobileUserConfig,
+} from "./mobile/config";
 export type { FarmCronJobConfig, FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
 export type {
   FarmRouteRule,
@@ -374,6 +384,13 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
    * a static block's shape, never calls the function, and ships neither.
    */
   desktop?: FarmDesktopConfigInput;
+  /**
+   * Preview: the native mobile app (RFC 0004), as a block or a function of
+   * `{ os, mode, command, profile, env, root }`. Config only for now: `farm config inspect
+   * --mobile` resolves it and its route manifest; there is no `--mobile` shell yet. Web builds
+   * never call the function or check the block, and ship neither.
+   */
+  mobile?: FarmMobileConfigInput;
   docs?: FarmDocsUserConfig;
   md?: FarmMarkdownUserConfig | boolean;
   mdx?: FarmMdxUserConfig;
@@ -470,6 +487,7 @@ export interface ResolvedFarmConfig extends Required<
     | "renderer"
     | "agent"
     | "desktop"
+    | "mobile"
   >
 > {
   agent: ResolvedFarmAgentConfig;

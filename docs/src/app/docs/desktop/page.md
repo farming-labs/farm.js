@@ -223,3 +223,48 @@ const server = await start({ secret, handshakeToken, dataDir });
 A shell that runs the server as its own process sets `FARM_DESKTOP_SECRET`,
 `FARM_DESKTOP_HANDSHAKE_TOKEN`, and `FARM_DESKTOP_DATA_DIR`, runs `server/index.mjs`, and waits for
 the line `farm:ready {"port":N}` on stdout.
+
+## Mobile (preview)
+
+`mobile` is config only for now: there is no `farm dev --mobile`, `farm build --mobile`, or native
+shell yet. The block takes the same static or function form as `desktop`, with `os` set to
+`"android"` or `"ios"`:
+
+```ts
+export default defineConfig({
+  mobile: ({ command }) => ({
+    id: "com.example.notes",
+    server: command === "dev" ? "http://10.0.2.2:3000" : "https://notes.example.com",
+    tabs: [
+      { path: "/notes", title: "Notes", icon: "note.text" },
+      { path: "/settings", title: "Settings", icon: "gear" },
+    ],
+    routes: {
+      "/notes/new": { presentation: "modal" },
+      "/feed": { native: "feed" },
+    },
+  }),
+});
+```
+
+| Option   | Notes                                                                                           |
+| -------- | ----------------------------------------------------------------------------------------------- |
+| `name`   | Defaults to package.json `productName` or `name`                                                |
+| `id`     | Android application ID and iOS bundle ID: letters and digits per segment, such as `com.a.notes` |
+| `server` | Origin of the web deployment. `https://`; `http://` only for loopback and LAN hosts in dev      |
+| `tabs`   | At most 5. Each `path` is a static page route                                                   |
+| `routes` | Keyed by page route pattern: `presentation` (`push`, `modal`, `replace`) and `native`           |
+
+`native` names a module in `src/native/` (`"feed"` is `src/native/feed.tsx`) to show a native
+screen instead of a WebView for that route. Tabs, route keys, and native modules are checked
+against the app.
+
+```sh
+farm config inspect --mobile --os ios --profile beta   # the resolved block and farm-routes.json
+```
+
+The navigator manifest, `farm-routes.json`, has one rule per page route in the client router's
+order, with the base path and optional locale prefixes in each pattern. A web build never calls or
+checks the block and strips it like `desktop`. `platform()` returns `"mobile"` only in the app's
+client build; its pages render on the web deployment, whose server reports `"web"`, so don't
+branch render output on it.
