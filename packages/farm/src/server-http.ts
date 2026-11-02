@@ -442,7 +442,31 @@ export async function readFarmRequestBody(request: Request, limit: number): Prom
   return body;
 }
 
+/**
+ * A Node request's body can be read once. A guard that reads it (an integration's
+ * protectedRoutes check, say) and the handler that runs next both call readNodeRequestBody,
+ * so the bytes are kept per request and the second reader gets the same ones instead of
+ * waiting on a stream that already ended.
+ */
+const nodeRequestBodies = new WeakMap<object, Promise<Buffer>>();
+
 export async function readNodeRequestBody(
+  request: Parameters<typeof readNodeRequestBodyOnce>[0],
+  limit: number,
+): Promise<Buffer> {
+  let body = nodeRequestBodies.get(request);
+  if (!body) {
+    body = readNodeRequestBodyOnce(request, limit);
+    nodeRequestBodies.set(request, body);
+  }
+  const bytes = await body;
+  if (bytes.byteLength > limit) {
+    throw new FarmRequestBodyError("BODY_TOO_LARGE", 413, "Request body is too large");
+  }
+  return bytes;
+}
+
+async function readNodeRequestBodyOnce(
   request: {
     headers: Record<string, string | string[] | undefined>;
     on(event: "data", listener: (chunk: unknown) => void): unknown;

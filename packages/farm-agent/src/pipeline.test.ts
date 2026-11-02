@@ -66,14 +66,13 @@ export default defineConfig({
   ],
   integrations: {
     // An auth integration's protectedRoutes compile to integration middleware like this one. It
-    // guards reads only: in farm dev an integration middleware that lets a POST through consumes
-    // its body before the API route reads it.
+    // guards every agent route, POSTs too: the route still reads the body the guard read first.
     auth: defineIntegration({
       category: "auth",
       type: "test-auth",
       middleware: [
         {
-          matcher: ["/api/agent/runs", "/api/agent/manifest.json"],
+          matcher: "/api/agent/:path*",
           handler(request) {
             if (request.headers.get("x-integration") !== "ok") {
               return new Response("blocked by integration", { status: 401 });
@@ -161,7 +160,6 @@ async function expectGuardedAgentAPI(origin: string) {
     const headers: Record<string, string> = { ...PASS };
     delete headers[`x-${guard}`];
     for (const [name, pathname, init] of routes) {
-      if (guard === "integration" && init?.method) continue;
       const response = await fetch(`${origin}${pathname}`, {
         ...init,
         headers: { ...JSON_BODY, ...headers },

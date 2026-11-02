@@ -167,6 +167,25 @@ describe("Farm server HTTP policy", () => {
     });
   });
 
+  it("gives a second reader of a Node request the body the first one read", async () => {
+    // A guard reads the body, then the route handler reads it again; the stream ended after
+    // the first read, so a second read of the stream itself would wait forever.
+    const request = Readable.from([Buffer.from('{"input":'), Buffer.from("{}}")]) as Readable & {
+      headers: Record<string, string>;
+    };
+    request.headers = {};
+
+    const first = await readNodeRequestBody(request as any, 1024);
+    const second = await Promise.race([
+      readNodeRequestBody(request as any, 1024),
+      new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 500)),
+    ]);
+    expect(first.toString()).toBe('{"input":{}}');
+    expect(second).not.toBe("hung");
+    expect((second as Buffer).toString()).toBe('{"input":{}}');
+    await expect(readNodeRequestBody(request as any, 5)).rejects.toMatchObject({ status: 413 });
+  });
+
   it("returns 413 before invoking an API route or upload handler", async () => {
     let invoked = false;
     const response = await invokeAPIRouteEndpoint(

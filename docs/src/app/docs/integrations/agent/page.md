@@ -103,7 +103,7 @@ agent({
 
 Set `authorize` before anyone else can reach the app; a middleware or plugin guard on `basePath` works too. Without either, anyone who can reach the server can list every run with its input and output, read a run and its events, answer its interrupt, cancel or delete it, and start new runs.
 
-A guard on `basePath` also sees agent-unit's internal `__agent-unit/continue` and `__agent-unit/sweep` requests, which carry `AGENT_UNIT_SECRET` as a bearer token. Let them through so a yielded run continues in a fresh invocation and Netlify's scheduled sweep reaches the server; agent-unit checks the secret itself.
+A guard on `basePath` also sees agent-unit's internal `__agent-unit/continue` and `__agent-unit/sweep` requests, which carry `AGENT_UNIT_SECRET` as a bearer token. Let them through, rather than redirecting them to a sign-in page, so a yielded run continues in a fresh invocation and Netlify's scheduled sweep reaches the server; agent-unit checks the secret itself. A redirect that ends on a page answering 200 looks like a delivered hand-off, so the run waits for the next sweep instead of continuing.
 
 ## Storage and deploy targets
 
