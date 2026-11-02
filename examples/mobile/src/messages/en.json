@@ -1,0 +1,13 @@
+{
+  "home": {
+    "title": "Field notes",
+    "lede": "One Farm app: a web site in the browser, native tabs and stacks in the mobile shell."
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "current": "Current language: {locale}",
+    "english": "English",
+    "spanish": "Spanish"
+  }
+}
