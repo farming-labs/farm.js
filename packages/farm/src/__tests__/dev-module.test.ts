@@ -140,4 +140,22 @@ describe("development environment module loading", () => {
     expect(load).not.toHaveBeenCalled();
     delete server.environments.rsc;
   });
+
+  it("loads modules that import CSS before the server listens", async () => {
+    // Farm loads routes files and middleware from configureServer, before httpServer.listen
+    // starts the plugin container. vite:css keeps per-config state that its buildStart creates.
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-dev-runners-"));
+    const server = await createServer({
+      root,
+      configFile: false,
+      envFile: false,
+      appType: "custom",
+      logLevel: "silent",
+      server: { ws: false },
+    });
+    projects.push({ root: server.config.root, server });
+    await writeFile(path.join(root, "page.css"), "body { margin: 0 }");
+    await writeFile(path.join(root, "page.js"), 'import "./page.css"; export const ok = true;');
+    expect((await loadFarmDevModule(server, "/page.js")).ok).toBe(true);
+  });
 });
