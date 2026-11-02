@@ -428,6 +428,15 @@ In the shell, a `--mobile` client hands each in-app navigation (`Link`, `navigat
 which pushes, presents, or switches tabs by the matching rule. Link prefetch is off inside the
 shell, since every screen has its own WebView. Links to other origins open in Custom Tabs.
 
+The shell marks each page with `data-farm-shell="android"` on `<html>` before it renders, so app
+CSS can hide chrome the shell already draws, such as web tabs:
+
+```css
+html[data-farm-shell] .web-tabs {
+  display: none;
+}
+```
+
 Current limits:
 
 - Android only. There is no iOS shell yet.

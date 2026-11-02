@@ -46,6 +46,11 @@ body {
   background: var(--surface);
 }
 
+/* The Android shell draws native tabs; hide the web ones there. */
+html[data-farm-shell] .web-tabs {
+  display: none;
+}
+
 .web-tabs a {
   padding: 6px 10px;
   border-radius: 6px;

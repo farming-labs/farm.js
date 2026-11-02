@@ -3,6 +3,8 @@
 // (evaluateJavascript -> __farmBridge._resolve), and offerNavigation, which the `--mobile` client
 // build's navigation delegate calls so link taps open native screens instead of navigating in place.
 (() => {
+  // Lets app CSS hide web-only chrome inside the shell: html[data-farm-shell] .web-tabs { display: none }
+  document.documentElement.setAttribute("data-farm-shell", "android");
   if (window.__farmBridge) return;
 
   const port = window.FarmNative;
