@@ -25,7 +25,7 @@ import {
   invokeAPIRouteEndpoint,
   resolveAPIRouteEndpoint,
 } from "./route-manager";
-import { matchAPIRouteAtBasePath } from "./runtime";
+import { isFarmAPIPathname, matchAPIRouteAtBasePath } from "./runtime";
 import { mergePluginAPIRoutes } from "./plugin-route-runtime";
 import type { PluginRoutesFactory } from "./route";
 import { sendWebResponse } from "../server/response";
@@ -499,8 +499,24 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
           if (discoveryPromise) await waitForDiscovery();
 
+          const farmMiddleware = (server as any).__farmMiddleware__;
+          let middlewareRan = false;
           if (!matchAPIRouteAtBasePath(servedRoutes(), pathname, basePath)) {
-            return next();
+            // A path under the API base with no route of its own may still be a middleware
+            // rewrite to one, as in production; nothing downstream runs middleware for it.
+            if (!farmMiddleware || !apiRouterHandler || !isFarmAPIPathname(pathname, basePath)) {
+              return next();
+            }
+            await farmMiddleware.waitForDiscovery?.();
+            if (await farmMiddleware.execute(req, res, pathname, new Map<string, any>())) return;
+            middlewareRan = true;
+            const rewrittenPathname = (req.url || url).split("?")[0];
+            if (
+              rewrittenPathname === pathname ||
+              !matchAPIRouteAtBasePath(servedRoutes(), rewrittenPathname, basePath)
+            ) {
+              return next();
+            }
           }
 
           if (!apiRouterHandler) {
@@ -511,8 +527,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
           try {
             // Execute middleware if available
-            const farmMiddleware = (server as any).__farmMiddleware__;
-            if (farmMiddleware) {
+            if (farmMiddleware && !middlewareRan) {
               await farmMiddleware.waitForDiscovery?.();
               const middlewareData = new Map<string, any>();
               const handled = await farmMiddleware.execute(req, res, pathname, middlewareData);

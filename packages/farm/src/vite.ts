@@ -2740,13 +2740,18 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // Let this request boundary observe endpoint failures before it
             // converts them into the development 500 response below.
             const apiHandler = apiRouteManager.getHandler({ throwOnError: true });
-            const hasExplicitAPIRoute =
-              hasMatchedApiRoute || Boolean(apiRouteManager.matchRoute(pathname));
+            // A middleware ctx.rewrite() changed req.url: route the rewritten request, as the
+            // production entry does.
+            const routedPathname = resolveFarmRequestURL(req as FarmRequest, {
+              trustProxy: currentServerConfig.trustProxy,
+            }).pathname;
+            const rewritten = routedPathname !== pathname;
+            const routedApiRoute = rewritten
+              ? apiRouteManager.matchRoute(routedPathname)
+              : matchedApiRoute || apiRouteManager.matchRoute(pathname);
+            const hasExplicitAPIRoute = Boolean(routedApiRoute);
             if (apiHandler && hasExplicitAPIRoute) {
-              const apiRoutePattern =
-                matchedApiRoute?.route.path ||
-                apiRouteManager.matchRoute(pathname)?.route.path ||
-                urlPath;
+              const apiRoutePattern = routedApiRoute?.route.path || urlPath;
               emitFarmEvent({
                 type: "route.matched",
                 pathname,
