@@ -327,6 +327,13 @@ test("farm build --mobile builds the mobile client apart from the web output and
   assert.match(result.output, /farm build --mobile --apk/);
   // Screen warnings print as they do for farm config inspect --mobile.
   assert.match(result.output, /"\/notes" has no page\.native\.tsx and Farm cannot port pages yet/);
+  // native.auto defaults to "report": the build prints the analyzer table and writes the report.
+  assert.match(result.output, /route\s+screen\s+decision\s+mapped\s+portable\s+reason/);
+  assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
+  assert.equal(
+    JSON.parse(await readFile(path.join(mobileDir, "native-report.json"), "utf8")).auto,
+    "report",
+  );
 
   const routes = JSON.parse(await readFile(path.join(mobileDir, "farm-routes.json"), "utf8"));
   assert.equal(routes.server, "https://notes.example.com");
@@ -448,3 +455,42 @@ async function checkMobileDev(child, root, port) {
   const client = await (await fetch(new URL(entry, `http://127.0.0.1:${port}`))).text();
   assert.match(client, /farm:mobile-shell/);
 }
+
+test("farm config inspect --mobile --report prints the analyzer table and writes native-report.json", async (t) => {
+  const root = await createApp(t, CONFIG);
+  await writeFile(
+    path.join(root, "src/app/notes/page.tsx"),
+    `export default function Notes() {
+  const notes = ["a", "b"];
+  return <ul>{notes.map((note) => <li key={note}>{note}</li>)}</ul>;
+}`,
+  );
+  await writeFile(
+    path.join(root, "src/app/notes/new/page.tsx"),
+    'export default function New() { return <form><input type="file" /></form>; }',
+  );
+  const result = await runFarm(["config", "inspect", "--mobile", "--report", "--root", root]);
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /route\s+screen\s+decision\s+mapped\s+portable\s+reason/);
+  assert.match(result.output, /\/notes\s+web\s+port\s+2\/2\s+100%\s+portable; list/);
+  assert.match(
+    result.output,
+    /\/notes\/new\s+web\s+web\s+1\/2\s+50%\s+src\/app\/notes\/new\/page\.tsx:1:40 <form> has no native mapping \(\+1 more\)/,
+  );
+  assert.match(result.output, /\/feed\s+native\s+-\s+src\/app\/feed\/page\.android\.tsx/);
+  assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
+  const report = JSON.parse(
+    await readFile(path.join(root, ".farm/output/mobile/native-report.json"), "utf8"),
+  );
+  assert.equal(report.auto, "report");
+  assert.deepEqual(
+    report.routes
+      .find((entry) => entry.route === "/notes/new")
+      .analysis.blockers.map((blocker) => blocker.rule),
+    ["unmapped-element", "unmapped-element"],
+  );
+
+  const wrong = await runFarm(["config", "inspect", "--report", "--root", root]);
+  assert.notEqual(wrong.code, 0);
+  assert.match(wrong.output, /--report needs --mobile/);
+});
