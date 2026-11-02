@@ -6,11 +6,14 @@ section: "Runtime"
 
 # Mobile Apps
 
-The same Farm app that builds for the [web](/docs/deployment) or the [desktop](/docs/desktop) can
-also build for mobile. The model is a **native shell with a native navigator, in the style of
-[Hotwire Native](https://native.hotwired.dev)**: native tabs, a stack per tab, modal sheets, and
-predictive back, with each screen showing one Farm page in a WebView. You reuse the real web pages
-instead of rebuilding the app in another UI toolkit.
+Farm can wrap the same app you already built for the [web](/docs/deployment) into a real native
+mobile app. You do not rewrite it in another UI toolkit: your existing pages become the screens,
+and Farm puts a native frame around them with native tabs, a stack per tab, modal sheets, and
+predictive back. (This is the [Hotwire Native](https://native.hotwired.dev) model.)
+
+By default, every screen is just your web page shown inside that native frame. For the few routes
+where a web page is not enough, you can opt one route at a time into a truly native screen, without
+touching the rest of the app.
 
 Mobile is a preview and is not released yet. **What runs today is the WebView shell on Android.**
 The native screen tiers (React Native and platform-native) and iOS are designed but not built:
@@ -98,6 +101,145 @@ Two rules hold the model together, and they are the reason it stays safe to adop
 An app pays for a native engine only when a route uses it. An app of web and platform screens ships
 no JS engine beyond the system WebView.
 
+## The files that make a screen
+
+Each route is a folder under `src/app/`. The files you put in that folder decide how the route's
+screen renders on mobile. You only ever need `page.tsx`; everything else is opt-in, for routes you
+want to make more native.
+
+Here is one route with every file it can have:
+
+```text
+src/app/feed/
+  page.tsx            your normal web page                    (required)
+  page.native.tsx     a native screen, written in React Native
+  page.ios.tsx        the iOS version of page.native.tsx
+  page.android.tsx    the Android version of page.native.tsx
+  page.kt             a fully native Android screen (Kotlin + Jetpack Compose)
+  page.swift          a fully native iOS screen (Swift + SwiftUI)
+  layout.native.tsx   native title and tab options for this section
+```
+
+### `page.tsx` — the web screen (what you already have)
+
+Your ordinary Farm page: React that renders HTML, styled with CSS. Every route must have one. On
+mobile it shows inside the native frame as a **web screen**, the default for every route.
+
+```tsx
+// src/app/feed/page.tsx
+export default function Feed({ posts }) {
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### `page.native.tsx` — a native screen, still written in React
+
+The same screen, but rendered as true native UI instead of a web page. It is still React, so the
+code looks familiar; what changes are the elements. Instead of HTML tags like `<div>` and `<p>`, you
+use native views like `<View>` and `<Text>` from [React Native](https://reactnative.dev). Reach for
+this on a route where a web page in a frame is not enough and you want native scrolling, native
+inputs, or native feel, while staying in React.
+
+```tsx
+// src/app/feed/page.native.tsx
+import { View, Text, FlatList } from "react-native";
+
+export default function Feed({ posts }) {
+  return (
+    <FlatList
+      data={posts}
+      renderItem={({ item }) => (
+        <View>
+          <Text>{item.title}</Text>
+        </View>
+      )}
+    />
+  );
+}
+```
+
+`page.ios.tsx` and `page.android.tsx` are optional per-OS versions: add one to override
+`page.native.tsx` on just that platform. The other OS keeps `page.native.tsx`, or stays web if there
+is none.
+
+### `page.kt` and `page.swift` — fully native screens (no React, no JavaScript)
+
+For the rare screen that must be 100% native, write it directly in the platform's own language and
+UI toolkit: Kotlin with Jetpack Compose on Android (`page.kt`), Swift with SwiftUI on iOS
+(`page.swift`). No React and no JavaScript run for these. Use them for a map, a camera view, or a
+screen that leans on platform APIs.
+
+```kotlin
+// src/app/map/page.kt — Android, Kotlin + Jetpack Compose
+@FarmScreen("/map")                         // bind this native screen to the /map route
+@Composable
+fun MapScreen(farm: FarmScreenScope) {      // Farm hands the screen a `farm` object
+  val region = farm.params["region"]        // route params, same as the web page
+  val places by farm.query(                 // call a Farm server function over HTTP,
+    FarmServer.listPlaces(region),          //   through a generated Kotlin client
+  )
+  PlacesMap(places, onSelect = {
+    farm.navigate("/places/${it.id}")       // navigate by URL; the navigator picks the next screen
+  })
+}
+```
+
+```swift
+// src/app/map/page.swift — iOS, Swift + SwiftUI
+@FarmScreen("/map")
+struct MapScreen: View {
+  @Environment(\.farm) private var farm     // the same `farm` object, on iOS
+  var body: some View { PlacesMap(region: farm.params["region"]) }
+}
+```
+
+**How a native screen connects to your app.** A native screen runs no JavaScript, so it cannot
+import your TypeScript server functions or page code. Its whole link to the rest of the app is the
+`farm` object Farm hands it:
+
+- **`farm.params`** — the route params, exactly as the web page receives them.
+- **`farm.query(...)` and server calls** — `farm build --mobile` records your server-function
+  contract (every function's input and output schema) and generates a typed **Kotlin and Swift
+  client** from it (that is what `FarmServer.listPlaces` is). The native screen calls that client,
+  which hits the **same backend** (`mobile.server`) over the **same HTTP** as your web app, so it
+  shares your exact server functions, queries, and data.
+- **`farm.navigate("/path")`** — it navigates by URL, never by naming another screen. The native
+  navigator (built from `farm-routes.json`) decides what the next screen is, web, native, or
+  platform, the same way the web router does.
+
+Auth is shared too (the shell keeps tokens in the Keychain or Keystore and native screens send
+`Authorization: Bearer`), as are your design tokens (they compile to `Theme.swift` and `themes.xml`).
+The only thing that is native is the screen's UI code; the backend, routes, auth, and theme come
+from your one Farm app.
+
+### `layout.native.tsx` — native chrome for a section
+
+Sets the native navigation options for every screen under a folder: the large title, the header
+tint, whether the tab bar shows. It styles the native frame, not the page content.
+
+### Which file should I use?
+
+| You want…                                                  | Add this                            |
+| ---------------------------------------------------------- | ----------------------------------- |
+| the normal case: one page for web and mobile               | just `page.tsx`                     |
+| a native-feeling screen, written in React                  | `page.native.tsx`                   |
+| that native screen, but different per platform             | `page.ios.tsx` / `page.android.tsx` |
+| a fully native screen (platform APIs, maximum performance) | `page.kt` / `page.swift`            |
+
+Whatever you add, `page.tsx` stays: it is the web version of the route and the fallback if the native
+screen cannot load (the "web twin"). A native file with no `page.tsx` next to it is a build error.
+
+> **Heads up:** the native screens above are designed but **not built yet**. Today a route marked
+> native shows a placeholder on the device, not real native UI (see
+> [Native screens](#native-screens) for the exact status). Web screens (`page.tsx`) are what runs
+> now; the native examples show what each file will look like so the structure is clear.
+
 ## How a web screen renders
 
 This is the part that runs today. The generated Android project (regenerated on every build, so
@@ -172,21 +314,11 @@ A route's tier is decided at build time. The first source that decides wins, per
 
 ### Files
 
-```text
-src/app/feed/
-  page.tsx            web page, mobile web screen, and the runtime fallback (required)
-  page.native.tsx     React Native screen on iOS and Android
-  page.ios.tsx        overrides page.native.tsx on iOS
-  page.android.tsx    overrides page.native.tsx on Android
-  page.kt             platform screen on Android
-  page.swift          platform screen on iOS
-  layout.native.tsx   reserved for native stack and tab options
-```
-
-`page.tsx` is required. A screen file without one is an error, and so is a React Native file and a
-platform file for the same route and OS. Web and desktop builds never resolve these files: they are
-not routes, not in the generated route types, and not in any web bundle. `src/native/` is reserved
-for native module specs.
+The files in a route folder ([The files that make a screen](#the-files-that-make-a-screen)) select
+the tier. `page.tsx` is required; a native file without one is an error, and so is a React Native
+file and a platform file for the same route and OS. Web and desktop builds never resolve these
+files: they are not routes, not in the generated route types, and not in any web bundle.
+`src/native/` is reserved for native module specs.
 
 ### Page export
 
