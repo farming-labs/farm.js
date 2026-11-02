@@ -1052,13 +1052,20 @@ async function assertInstalled(framework) {
   }
 }
 
+// Core's declaration build needs more heap than Node's default on a 16 GB machine, and the
+// sanitized environment deliberately drops an ambient NODE_OPTIONS. This sets it only for the
+// package build, which the methodology already excludes from every timed sample.
+const prepareEnv = { NODE_OPTIONS: "--max-old-space-size=12288" };
+
 async function prepareFarm() {
   console.log("Preparing local Farm packages outside timed runs...");
   await runCommand("corepack", ["pnpm", "--filter", "@farm.js/core", "build"], {
     cwd: repoRoot,
+    env: prepareEnv,
   });
   await runCommand("corepack", ["pnpm", "--filter", "@farm.js/cli", "build"], {
     cwd: repoRoot,
+    env: prepareEnv,
   });
 }
 
