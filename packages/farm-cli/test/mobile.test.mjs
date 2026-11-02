@@ -265,6 +265,7 @@ const BUILD_CONFIG = `export default {
     id: "com.example.notes",
     server: command === "dev" ? undefined : "https://notes.example.com",
     tabs: [{ path: "/notes", title: "Notes", icon: "notes" }],
+    native: { routes: { "/notes": { screen: "native" } } },
   }),
 };`;
 
@@ -324,6 +325,8 @@ test("farm build --mobile builds the mobile client apart from the web output and
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /\.farm\/output\/mobile\/android \(android project\)/);
   assert.match(result.output, /farm build --mobile --apk/);
+  // Screen warnings print as they do for farm config inspect --mobile.
+  assert.match(result.output, /"\/notes" has no page\.native\.tsx and Farm cannot port pages yet/);
 
   const routes = JSON.parse(await readFile(path.join(mobileDir, "farm-routes.json"), "utf8"));
   assert.equal(routes.server, "https://notes.example.com");

@@ -190,6 +190,7 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
       ...appOptions,
       server: formatMobileDevServer(options.host, address.port),
     });
+    for (const warning of app.warnings) runtime.logger.warn(warning);
     const context = await writeMobileProject(shell, app, "dev", mobileRuntime);
     runtime.logger.info(
       `Mobile app (${shell.os}) on ${app.manifest.server}; project in ${shownPath(root, context.projectDir)}`,
@@ -255,6 +256,8 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     await build(config, { preset: "node-server", root, productionVite });
 
     const app = await mobileRuntime.generateFarmMobileRoutes({ ...appOptions, config });
+    // Unused native files and config ports nothing builds yet: the same as config inspect.
+    for (const warning of app.warnings) runtime.logger.warn(warning);
     const context = await writeMobileProject(shell, app, "build", mobileRuntime);
     runtime.logger.info(`📱 ${shownPath(root, context.projectDir)} (${shell.os} project)`);
     if (!options.apk) {
