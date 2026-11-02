@@ -126,10 +126,17 @@ Common config fields:
 - `deploy`: first-class target, Nitro preset, and output
 - `desktop`: native desktop app for `farm dev|build --desktop` (`name`, `id`, `icon`, `window`, `shell`; install `@farm.js/desktop electrobun`);
   use `platform()` and `appDataDir()` from `@farm.js/core/platform` for platform-specific server code
-- `mobile`: preview (`name`, `id`, `server`, `tabs`, `routes` with `presentation` and `native`);
+- `mobile`: preview (`name`, `id`, `server`, `tabs`, `routes` with `presentation`, `native` with
+  `engine`, `auto`, `routes` tiers, `islands`, `prefetch`, `budgets`); a route is native with
+  `page.native.tsx` (or `page.ios.tsx`/`page.android.tsx`, `page.kt`/`page.swift`) next to its
+  required `page.tsx`; precedence: `page.tsx` `export const mobile` > `native.routes` > native
+  files > analyzer > web; `farm config inspect --mobile` prints each route's screen and source plus
+  `farm-routes.json`; `--report` runs the build-time analyzer (report only) and writes
+  `.farm/output/mobile/native-report.json` with each route's blockers as file:line:column;
   `farm dev|build --mobile` generates the Android shell into `.farm/output/mobile/android` (install
-  `@farm.js/mobile`), `farm config inspect --mobile` prints the block and `farm-routes.json`; Android
-  only, `native` routes show a placeholder screen
+  `@farm.js/mobile`) and `farm build --mobile` prints the report unless `native.auto` is `"off"`;
+  Android only, `native` and `platform` screens show a placeholder; `src/native/` is for native
+  module specs
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits

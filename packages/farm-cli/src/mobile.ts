@@ -19,18 +19,20 @@ export interface FarmMobileInspectOptions {
 
 /**
  * `farm config inspect --mobile`: the `mobile` block a dev session or build would use for an OS
- * and profile, and the `farm-routes.json` navigator manifest it produces. Writes nothing.
+ * and profile, each route's screen and what decided it, and the `farm-routes.json` navigator
+ * manifest it produces. Writes nothing.
  */
 export async function inspectFarmMobileConfig(options: FarmMobileInspectOptions = {}) {
   const root = path.resolve(options.root || process.cwd());
   const configRuntime = await import("@farm.js/core/internal/config-runtime");
   const { resolveFarmMobileApp } = await configRuntime.loadFarmMobileRuntime();
-  const { context, mobile, manifest } = await resolveFarmMobileApp({
-    root,
-    os: options.os,
-    profile: options.profile,
-    command: options.command,
-  });
+  const { context, mobile, manifest, screens, warnings, nativeLayouts } =
+    await resolveFarmMobileApp({
+      root,
+      os: options.os,
+      profile: options.profile,
+      command: options.command,
+    });
   return {
     context: {
       os: context.os,
@@ -39,6 +41,23 @@ export async function inspectFarmMobileConfig(options: FarmMobileInspectOptions 
       profile: context.profile,
     },
     mobile,
+    // What each page route shows on this OS and what decided it: page, config, file, analyzer,
+    // or default.
+    screens: Object.fromEntries(
+      Object.entries(screens).map(([route, decision]) => [
+        route,
+        {
+          screen: decision.screen,
+          source: decision.source,
+          ...(decision.file ? { file: decision.file } : {}),
+          ...(decision.module ? { module: decision.module } : {}),
+          ...(decision.requested ? { requested: decision.requested } : {}),
+          presentation: decision.presentation,
+        },
+      ]),
+    ),
+    ...(Object.keys(nativeLayouts).length > 0 ? { nativeLayouts } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
     routes: manifest,
   };
 }
@@ -171,6 +190,7 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
       ...appOptions,
       server: formatMobileDevServer(options.host, address.port),
     });
+    for (const warning of app.warnings) runtime.logger.warn(warning);
     const context = await writeMobileProject(shell, app, "dev", mobileRuntime);
     runtime.logger.info(
       `Mobile app (${shell.os}) on ${app.manifest.server}; project in ${shownPath(root, context.projectDir)}`,
@@ -235,7 +255,15 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     const { build } = await import("@farm.js/core/internal/build-runtime");
     await build(config, { preset: "node-server", root, productionVite });
 
-    const app = await mobileRuntime.generateFarmMobileRoutes({ ...appOptions, config });
+    // The analyzer runs unless mobile.native.auto is "off"; it only reports.
+    const app = await mobileRuntime.generateFarmMobileRoutes({
+      ...appOptions,
+      config,
+      analyze: true,
+    });
+    if (app.table) console.log(app.table);
+    // Unused native files and config ports nothing builds yet: the same as config inspect.
+    for (const warning of app.warnings) runtime.logger.warn(warning);
     const context = await writeMobileProject(shell, app, "build", mobileRuntime);
     runtime.logger.info(`📱 ${shownPath(root, context.projectDir)} (${shell.os} project)`);
     if (!options.apk) {
@@ -246,4 +274,23 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     for (const file of files) runtime.logger.info(`📦 ${shownPath(root, file)}`);
     return files;
   });
+}
+
+/**
+ * `farm config inspect --mobile --report`: run the build-time analyzer, write
+ * `farm-routes.json` and `native-report.json`, and return the report table. Runs even when
+ * `mobile.native.auto` is `"off"`, since it was asked for.
+ */
+export async function reportFarmMobileNative(options: FarmMobileInspectOptions = {}) {
+  const root = path.resolve(options.root || process.cwd());
+  const configRuntime = await import("@farm.js/core/internal/config-runtime");
+  const { generateFarmMobileRoutes } = await configRuntime.loadFarmMobileRuntime();
+  const { table, warnings, reportFile } = await generateFarmMobileRoutes({
+    root,
+    os: options.os,
+    profile: options.profile,
+    command: options.command,
+    analyze: "always",
+  });
+  return { table: table ?? "", warnings, reportFile };
 }
