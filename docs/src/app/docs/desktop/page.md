@@ -241,7 +241,12 @@ export default defineConfig({
     ],
     routes: {
       "/notes/new": { presentation: "modal" },
-      "/feed": { native: "feed" },
+    },
+    native: {
+      routes: {
+        // Keep Android on the web screen while its native screen is in progress.
+        "/feed": { screen: "native", android: "web" },
+      },
     },
   }),
 });
@@ -253,21 +258,96 @@ export default defineConfig({
 | `id`     | Android application ID and iOS bundle ID: letters and digits per segment, such as `com.a.notes` |
 | `server` | Origin of the web deployment. `https://`; `http://` only for loopback and LAN hosts in dev      |
 | `tabs`   | At most 5. Each `path` is a static page route                                                   |
-| `routes` | Keyed by page route pattern: `presentation` (`push`, `modal`, `replace`) and `native`           |
+| `routes` | Keyed by page route pattern: `presentation` (`push`, `modal`, `replace`)                        |
+| `native` | Screen tiers per route, the native engine, and the analyzer (below)                             |
 
-`native` names a module in `src/native/` (`"feed"` is `src/native/feed.tsx`) to show a native
-screen instead of a WebView for that route. Tabs, route keys, and native modules are checked
-against the app.
+Tabs and route keys are checked against the app.
 
 ```sh
-farm config inspect --mobile --os ios --profile beta   # the resolved block and farm-routes.json
+farm config inspect --mobile --os ios --profile beta   # block, screens, and farm-routes.json
 ```
 
+### Screens
+
+Every route is a screen in the app's native navigator. A screen is one of three tiers:
+
+- `web`, the default: the route's `page.tsx` in a WebView.
+- `native`: a React Native screen from `page.native.tsx`.
+- `platform`: a Compose screen from `page.kt` on Android or a SwiftUI screen from `page.swift` on
+  iOS.
+
+No native engine ships yet; the tier is recorded in `farm-routes.json` for the shell.
+
+```text
+src/app/feed/
+  page.tsx            web page, mobile web screen, and the fallback (required)
+  page.native.tsx     React Native screen on iOS and Android
+  page.ios.tsx        replaces page.native.tsx on iOS
+  page.android.tsx    replaces page.native.tsx on Android
+  page.kt             platform screen on Android
+  page.swift          platform screen on iOS
+  layout.native.tsx   reserved for native stack and tab options
+```
+
+A native file without a `page.tsx` next to it is an error, and so is a React Native and a platform
+file for the same route and OS. Web and desktop builds never read these files: they are not
+routes, not in the generated route types, and not in any web bundle.
+
+A page can set its own options with a static export, read at build time without running the page:
+
+```tsx
+// src/app/notes/[id]/page.tsx
+import type { FarmMobilePageConfig } from "@farm.js/core/mobile";
+
+export const mobile = { presentation: "modal", prefetch: "off" } satisfies FarmMobilePageConfig;
+```
+
+`presentation` and `prefetch` (`"intent"` or `"off"`) override the config for that route.
+`native: false` keeps the route web on every OS, whatever the config and files say. The values
+must be literals.
+
+`mobile.native`:
+
+| Option     | Notes                                                                                           |
+| ---------- | ----------------------------------------------------------------------------------------------- |
+| `engine`   | `"react-native"` (default) or `"platform"`. With `"platform"`, `.native.tsx` files are an error |
+| `auto`     | The build-time analyzer: `"off"`, `"report"` (default), or `"on"`. Reserved: no analyzer yet    |
+| `routes`   | Keyed by page route: `screen` (`web`, `native`, `platform`), `android`, `ios`, `presentation`   |
+| `islands`  | Components that may render natively inside web screens, such as `["Map"]`. Reserved             |
+| `prefetch` | `"intent"` (default) or `"off"`                                                                 |
+| `budgets`  | `appSizeMb`, `screenOpenMs`, `droppedFrames`. Reserved for the mobile CI run                    |
+
+`android` and `ios` override `screen` on that OS. `screen: "native"` uses the route's
+`page.native.tsx` (or OS file); without one the route stays web with a warning, and once native
+screens ship it fails the build. `screen: "platform"` needs `page.kt` or `page.swift`. Set
+`presentation` in `routes` or `native.routes`, not both.
+
+For each route and OS, the first source that decides wins:
+
+1. the page export (`native: false`);
+2. `mobile.native.routes[route]`, the OS key and then `screen`;
+3. the files next to `page.tsx`: the OS file, then `page.native.tsx`, or `page.kt` / `page.swift`;
+4. the analyzer, when `auto` is `"on"`;
+5. web.
+
+`farm config inspect --mobile` prints each route's `screen`, the `source` that decided it (`page`,
+`config`, `file`, `analyzer`, or `default`), and a warning when a page export overrides config or
+a native file goes unused. Native routes get a `module` id derived from the route, such as
+`app/notes/[id]`.
+
+#### Breaking change from the first preview
+
+`mobile.routes[route].native: "<module>"` is gone; `src/native/` is reserved for native module
+specs. Add `page.native.tsx` next to the route's `page.tsx`, or set
+`native: { routes: { "/feed": { screen: "native" } } }`. The old form fails with that message.
+
+### Route manifest
+
 The navigator manifest, `farm-routes.json`, has one rule per page route in the client router's
-order, with the base path and optional locale prefixes in each pattern. A web build never calls or
-checks the block and strips it like `desktop`. `platform()` returns `"mobile"` only in the app's
-client build; its pages render on the web deployment, whose server reports `"web"`, so don't
-branch render output on it.
+order, with the base path and optional locale prefixes in each pattern, and each rule's `screen`,
+`source`, and `module`. A web build never calls or checks the block and strips it like `desktop`.
+`platform()` returns `"mobile"` only in the app's client build; its pages render on the web
+deployment, whose server reports `"web"`, so don't branch render output on it.
 
 ### Run on Android
 
@@ -300,7 +380,7 @@ prints the commands. For a phone on the LAN, pass its reachable address: `farm d
 | `app/src/main/assets/farm-bridge.js`     | Bridge script injected into pages on the server origin |
 | `app/src/main/java/.../Navigator.kt`     | Tabs, stacks, push, modal, replace, predictive back    |
 | `app/src/main/java/.../WebViewPool.kt`   | Two pre-warmed WebViews that back pushes               |
-| `app/src/main/java/.../NativeScreens.kt` | The hook for `native` routes                           |
+| `app/src/main/java/.../NativeScreens.kt` | The hook for `native` and `platform` screens           |
 
 In the shell, a `--mobile` client hands each in-app navigation (`Link`, `navigateTo`, router
 `push` and `replace`) to the navigator through [`delegateNavigation`](/docs/routing#navigation-delegates),
@@ -310,9 +390,9 @@ shell, since every screen has its own WebView. Links to other origins open in Cu
 Current limits:
 
 - Android only. There is no iOS shell yet.
-- `native` routes show a placeholder screen that names the missing module. Farm does not build
-  `src/native/` screens yet; `FarmNativeScreens` in the generated project is where native screens
-  register.
+- `native` and `platform` screens show a placeholder that names the route's module id, such as
+  `app/notes/[id]`. Farm does not build `page.native.tsx`, `page.kt`, or `page.swift` yet;
+  `FarmNativeScreens` in the generated project is where native screens register.
 - The shell loads pages and client code from `server`. In production that is the web deployment,
   whose client is not a `--mobile` build, so navigations stay in the page until client assets are
   bundled into the app.
