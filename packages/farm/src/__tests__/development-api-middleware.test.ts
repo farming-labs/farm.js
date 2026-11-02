@@ -59,7 +59,7 @@ export default {
   "src/app/api/secret/route.ts": `export function GET() { return Response.json({ secret: true }); }`,
 };
 
-async function listen(): Promise<string> {
+async function listen(files: Record<string, string> = FILES): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-dev-api-mw-"));
   temporaryRoots.add(root);
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
@@ -72,7 +72,7 @@ async function listen(): Promise<string> {
     );
   }
   await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
-  for (const [file, source] of Object.entries(FILES)) {
+  for (const [file, source] of Object.entries(files)) {
     await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await fs.writeFile(path.join(root, file), source);
   }
@@ -113,5 +113,34 @@ describe("development API middleware", () => {
     // The body is still there for the route after middleware ran.
     const echoed = await echo(passed);
     expect(await echoed.json()).toEqual({ hello: "farm" });
+  }, 60_000);
+
+  it("dispatches the API route a middleware rewrite names, as production does", async () => {
+    const origin = await listen({
+      "farm.config.ts": `export default {
+  telemetry: false,
+  middleware: [
+    {
+      matcher: ["/api/:path*"],
+      handler(ctx, next) {
+        if (ctx.pathname === "/api/alias") ctx.rewrite("/api/target?from=alias");
+        return next();
+      },
+    },
+  ],
+};`,
+      "src/app/layout.tsx": `export default function Layout({ children }) { return <>{children}</>; }`,
+      "src/app/api/target/route.ts": `export function GET(request) {
+  return Response.json({ target: true, from: new URL(request.url).searchParams.get("from") });
+}`,
+    });
+    // /api/alias has no route of its own: the rewrite decides where it goes.
+    const rewritten = await fetch(`${origin}/api/alias`);
+    expect(rewritten.status).toBe(200);
+    expect(await rewritten.json()).toEqual({ target: true, from: "alias" });
+    expect(await (await fetch(`${origin}/api/target`)).json()).toEqual({
+      target: true,
+      from: null,
+    });
   }, 60_000);
 });
