@@ -10,22 +10,48 @@
 
 ## Status
 
+Updated 2026-11-02, after 0.1.50.
+
 - Desktop: merged. #2353 (core runtime primitives), #2354 (`farm dev|build --desktop`), #2355
   (Electrobun adapter), #2356 (config-only desktop example).
-- Mobile, merged: #2418 (`farm dev --host`, and the default dev server answers on both loopbacks so
-  an Android emulator can reach it), #2419 (`delegateNavigation`, which the shell uses to take
-  in-app navigations).
-- Mobile, in review: #2420 (`mobile` config block, generated `farm-routes.json`,
-  `farm config inspect --mobile`), #2422 (`@farm.js/mobile` Android shell with web screens,
-  `farm dev|build --mobile`). The Android spike #2390 stays a draft.
-- #2420 ships `mobile.routes[x].native: "<module>"` from the previous draft. This revision moves
-  native screens to `page.native.tsx` and `mobile.native.routes` (7.3), so that field changes
-  before or right after #2420 merges.
+- Mobile, released in 0.1.50 (2026-11-02), with `@farm.js/mobile` 0.1.0-beta.0 as a preview:
+  - #2418: `farm dev --host`, and the default dev server answers on both loopbacks so an Android
+    emulator can reach it.
+  - #2419: `delegateNavigation`, which the shell uses to take in-app navigations.
+  - #2420: the `mobile` config block, the generated `farm-routes.json` and
+    `farm config inspect --mobile`.
+  - #2422: the Android shell with web screens, `farm dev --mobile` and
+    `farm build --mobile [--apk]`.
+  - #2424: the `mobile.native` block, `page.native.tsx`, `page.ios.tsx`, `page.android.tsx`,
+    `page.kt`, `page.swift` and `export const mobile` (7.3). The previous draft's
+    `mobile.routes[x].native: "<module>"` was replaced before the release and now fails validation
+    with a message that names the new field.
+  - #2425: analyzer stage 0 (7.8), report only, with `native-report.json`.
+  - #2427: `data-farm-shell` on `<html>` and `examples/mobile`.
+  - Docs: the Mobile Apps page (#2434, #2436).
+- What 0.1.50 does not do: native and platform routes are recorded in `farm-routes.json` and show
+  a placeholder on device; there is no iOS shell; the analyzer changes no output; a production
+  shell loads the web client from `mobile.server`, so navigations stay in the page until client
+  assets are bundled (phase 6); no token auth or mobile origin handling.
+- Mobile, in review:
+  - #2441: the iOS shell, `farm dev|build --mobile --os ios`. Not compiled with Xcode yet. The
+    Swift is type-checked against Mac Catalyst and was run as a Catalyst app against a dev server.
+  - #2444: `@farm.js/native` (`useNavigate`, `useRouteParams`, `useServerQuery`, the `register`
+    entry with web twin fallback, the Metro and Hermes build).
+  - #2445: the React Native host in the Android shell (React Native 0.88.1). Stacked on #2444.
+  - #2446: `/map` and `/camera` in `examples/mobile` as React Native screens. Stacked on #2445.
+  - The Android spike #2390 stays a draft.
+- Verified on an Android 15 emulator so far: tabs, push, modal and back; cold start 1.75 to 2.3 s
+  (dev build, web start screen) with the React Native runtime warming after the first paint; the
+  web twin replacing a native screen that fails to start. No React Native screen has rendered on a
+  device yet (see Rollout, blocked).
 - Revised 2026-11-01: mobile screens come in tiers chosen per route (web by default, React Native
   or platform native), `page.native.tsx` selects a native screen, a `mobile.native` config block
   and an optional build-time analyzer decide the rest, and native islands are narrowed to large
   fixed components. This replaces the 2026-10-29 rule that shared components are always native
   islands on mobile.
+- Revised 2026-11-02: implementation decisions for React Native screens and the iOS shell are
+  recorded in [Decisions since the 2026-11-01 revision](#decisions-since-the-2026-11-01-revision).
 
 ## Summary
 
@@ -973,10 +999,8 @@ real routes would port.
   emulator, `droppedFrames` during a scripted scroll of each native route. A miss fails the run and
   names the route.
 
-Open: the bundler for React Native screens. Metro is what React Native libraries and Fast Refresh
-are tested against. A Rolldown-based bundle keeps one toolchain with the web build (Oxc transforms,
-Farm's plugin pipeline). A spike decides, comparing build time, bundle size, Fast Refresh, Hermes
-bytecode output and how many common React Native libraries work unchanged.
+The bundler for React Native screens is Metro. The spike and the reasons are in
+[Decisions since the 2026-11-01 revision](#decisions-since-the-2026-11-01-revision).
 
 ### 7.10 Safety
 
@@ -1042,7 +1066,8 @@ CSS-to-native compiler; the analyzer ports only the mapped subset (7.8).
     assets/              bundled content-hashed client assets
     shells/              pre-rendered page shells
   native/                only when a route is a React Native screen
-    screens.hbc          React Native screens, Hermes bytecode
+    index.js             generated entry that registers every screen by module id
+    index.android.hbc    React Native screens, Hermes bytecode (assets/farm-native.hbc in the APK)
   farm-routes.json
   native-report.json     analyzer report, when auto is not "off"
   ios/
@@ -1101,6 +1126,102 @@ Rules that hold either way:
 | Auth             | cookies             | cookies, local guard             | Keychain/Keystore tokens                                     |
 | Store acceptance | n/a                 | signing and notarization (open)  | native navigation and chrome (see 7.1)                       |
 
+## Decisions since the 2026-11-01 revision
+
+Made while building the iOS shell (#2441), `@farm.js/native` (#2444) and the Android React Native
+host (#2445). They narrow 7.2, 7.9, 7.10 and 7.12 without changing the model.
+
+### Metro bundles React Native screens
+
+Measured on `examples/mobile` (two screens), macOS arm64, Node 24, React Native 0.88.1:
+
+|                 | Metro                                  | Rolldown with a Babel Flow strip                   |
+| --------------- | -------------------------------------- | -------------------------------------------------- |
+| cold bundle     | 5.7 s                                  | 1.9 s, 1.8 s of it Babel on 474 React Native files |
+| warm bundle     | 0.4 to 3.9 s                           | not measured                                       |
+| minified JS     | 866 KB                                 | 659 KB                                             |
+| Hermes bytecode | 1.23 MB (595 KB compressed in the APK) | 1.11 MB                                            |
+
+- Rolldown cannot parse React Native's own sources: they use Flow types, Flow `as` casts and Flow
+  enums, which need React Native's Babel setup (its Flow parser and enum transform) in front of
+  Rolldown anyway.
+- A Rolldown bundle would also have to reproduce Metro's prelude (`setup-env`, the JS
+  polyfills), the asset registry, the `__d` module format that HMR relies on, and Fast Refresh.
+  That is days of work for a runtime nobody has run, and Metro is what React Native libraries are
+  tested against.
+- `@farm.js/native/build` owns the step: it writes one entry that registers every screen under its
+  module id, bundles it with Metro using React Native's own Metro config (an app
+  `metro.config.js` wins), and compiles it with the `hermesc` that ships with the app's
+  `react-native`. `farm dev --mobile` runs Metro next to the dev server for Fast Refresh.
+- Metro watches only the dependency closure a screen bundle can reach, not the workspace root. In
+  this monorepo the first Metro run went from 2 min 20 s to under 6 s.
+- A Rolldown path can come later behind the same `./build` API if its size win holds on a device.
+
+### React Native 0.88.1 from prebuilt Maven artifacts
+
+- New architecture only: Hermes, Fabric, bridgeless.
+- The generated project depends on `com.facebook.react:react-android` and
+  `com.facebook.hermes:hermes-android` from Maven. There is no React Native Gradle plugin and no
+  Codegen run; the shell's `FarmShell` module goes through the TurboModule interop layer.
+- One small native library, `libappmodules.so` (`OnLoad.cpp` and CMake against react-android's
+  prefab, NDK 27.1.12297006), sets React Native's core Java TurboModule provider. Without it core
+  modules such as `PlatformConstants` are missing and React Native fails at startup, which was seen
+  on the emulator. This is the one step that needs the NDK.
+- All of this is added only when a route resolves to a React Native screen on Android: the
+  dependencies, Kotlin 2.2.21 (React Native's artifacts carry Kotlin 2.2 metadata),
+  `abiFilters` `arm64-v8a` and `x86_64`, the CMake build and the bytecode asset. A project without
+  native routes gets the same Gradle files, manifest, resources and assets as before; its debug APK
+  grows by 4 KB for the engine-neutral hook.
+
+### Native screens are surfaces in Farm's navigator
+
+- Each React Native screen is a `ReactSurface` created from one shared `ReactHost` and placed in
+  the navigator's own screen view, the same container a web screen's WebView uses. It is not a
+  Fragment, a `ReactActivity` or a React Navigation screen. Push, pop, predictive back, modals and
+  tabs run the same code for web and native screens.
+- The shell talks to an engine-neutral hook: `FarmNativeEngine` (`warm`, `open`) and
+  `FarmNativeHost` (`visit`, `fallback`, `setTitle`, `rendered`). React Native is one
+  implementation; platform screens can use the same hook later.
+- The host is warmed after the first screen shows content, together with the WebView pool, and
+  its native libraries load on a background thread.
+- Web twin: when the engine cannot open a screen, the runtime fails at start (missing or broken
+  bundle, JS fatal), or a screen throws while loading or rendering, the navigator replaces that
+  screen's content with a WebView of the same URL and logs the reason. In a built app, after a
+  runtime failure every native screen opens as web; in dev the next open retries.
+
+### The iOS project is a generated pbxproj
+
+- `@farm.js/mobile/ios` writes `App.xcodeproj` itself: a hand-written, deterministic
+  `project.pbxproj` whose object ids are a SHA-1 of a fixed key per object, plus a shared scheme
+  and a workspace. No XcodeGen, CocoaPods or Swift package.
+- A Swift package alone cannot produce an iOS `.app` with an `Info.plist`, an asset catalog and a
+  scene manifest through `xcodebuild`.
+- The project is byte-identical across runs, so tests parse and compare it directly (every object
+  id resolves, every Swift file is in the sources phase, the scheme points at the target) and
+  regenerating it does not churn.
+- The shell is Swift and UIKit for iOS 16 and newer. Farm builds simulator apps only; device
+  builds and archives need a signing team set in Xcode.
+
+### One bridge script for both shells
+
+- `templates/shared/farm-bridge.js` is the only bridge script. Each generator fills in the OS name
+  and the message port: Android's `WebMessageListener` object, or the iOS
+  `WKScriptMessageHandler`. Both carry the same JSON messages, so `visit`, `render`, `call` and
+  the rest behave the same on both OSes.
+- On iOS the script is a document-start `WKUserScript` on the main frame, wrapped in a
+  `location.origin` check because `WKUserScript` has no origin rules, and the handler drops any
+  message that is not from the main frame of the server origin and from its own WebView. This is
+  the iOS form of the rules in 7.10.
+
+### `data-farm-shell` marks pages in a shell
+
+- The bridge script sets `data-farm-shell="android"` (or `"ios"`) on `<html>` at document start,
+  before the page renders (#2427).
+- App CSS uses it to hide web chrome the shell already draws, such as web tabs:
+  `html[data-farm-shell] .web-tabs { display: none }`.
+- `platform()` cannot do this: web screens are rendered by the web deployment, where it is
+  `"web"`. An attribute set before first paint needs no JS in the app.
+
 ## 9. Rollout
 
 Desktop:
@@ -1116,29 +1237,49 @@ Desktop:
 
 Mobile (0.2.x):
 
-5. **Android web screens.** `farm dev --host` (#2418, merged), `delegateNavigation` (#2419,
-   merged), the `mobile` block and `farm-routes.json` (#2420, in review), the `@farm.js/mobile`
-   Android shell with `farm dev|build --mobile` (#2422, in review).
+5. **Android web screens.** Released in 0.1.50: `farm dev --host` (#2418), `delegateNavigation`
+   (#2419), the `mobile` block and `farm-routes.json` (#2420), the `@farm.js/mobile` Android shell
+   with `farm dev|build --mobile [--apk]` (#2422), `data-farm-shell` and `examples/mobile` (#2427).
 6. **Production web screens.** Bundled assets and page shells, token auth, server origin handling,
-   absolute transport, the contract manifest, the remote rule override, and the iOS shell.
+   absolute transport, the contract manifest, the remote rule override, and the iOS shell. The iOS
+   shell is in review (#2441) and needs Xcode for a real build. The rest is not started; until
+   bundled client assets land, a production shell loads the web deployment's client, which is not
+   a `--mobile` build, so navigations stay in the page instead of opening native screens.
 7. **Native modules.** Spec format and codegen, the bridge transport, first-party modules,
-   `@farm.js/ui` pop-ups and chrome on web screens. Analyzer stage 0 (report only) lands here; it
-   needs no native engine.
-8. **React Native screens.** `page.native.tsx` and OS overrides, `layout.native.tsx`, the
-   `mobile.native` block, the shared pre-warmed runtime, Hermes bytecode, intent prefetch, the
-   TurboModule transport, the web twin fallback and budgets in CI. The Metro or Rolldown spike runs
-   first. Analyzer stages 1 and 2.
+   `@farm.js/ui` pop-ups and chrome on web screens. Analyzer stage 0 (report only) was released in
+   0.1.50 (#2425); the rest is not started, and `native.<module>` calls reject as unavailable.
+8. **React Native screens.** Released in 0.1.50: `page.native.tsx` and OS overrides, the
+   `mobile.native` block and `export const mobile` (#2424), which record native routes in
+   `farm-routes.json`. In review: `@farm.js/native` with Metro and Hermes builds (#2444), the
+   shared pre-warmed runtime and the web twin fallback in the Android shell (#2445), and the
+   example's `/map` and `/camera` screens (#2446). Not started: `layout.native.tsx` providers,
+   intent prefetch, the TurboModule transport for app modules, `@farm.js/ui` on native screens,
+   budgets in CI, the iOS React Native host, and analyzer stages 1 and 2.
 9. **Native islands**: `Map`, `Video`, `CameraPreview`, after the scroll-tracking experiment
-   (7.7) decides their Android placement.
-10. **Analyzer stage 3**: `auto: "on"`.
-11. **Platform screens** (`page.kt`, `page.swift`, `@FarmScreen`) and analyzer stage 4.
+   (7.7) decides their Android placement. Not started.
+10. **Analyzer stage 3**: `auto: "on"`. Today `"on"` only records ports in `farm-routes.json`;
+    the routes stay web.
+11. **Platform screens** (`page.kt`, `page.swift`, `@FarmScreen`) and analyzer stage 4. Not
+    started; platform routes show a placeholder.
 
 Both:
 
-12. **Docs and examples**, landing with each phase.
+12. **Docs and examples**, landing with each phase. The Mobile Apps page describes 0.1.50; each
+    open PR updates it for what it adds.
+
+Next, in order, and what blocks it:
+
+- Verify a React Native screen on a device (#2445, #2446). Blocked on the Android NDK and CMake
+  (about 2.5 GB) to compile `libappmodules.so`. The emulator run without it showed the web twin
+  replacing the failed screen, which is the fallback working, not the screen.
+- Build and run the iOS shell (#2441) with `xcodebuild` in a simulator. Blocked on Xcode 15 or
+  newer with a simulator runtime (about 40 GB of disk). The iOS React Native host comes after it.
+- Bundled client assets and page shells (phase 6), so a production shell navigates natively and
+  opens without a network round trip for the client.
+- Token auth and server origin handling for requests from native screens, which send no `Origin`.
 
 Managed backend hosting in Infra comes after phase 6. iOS needs macOS CI with Xcode, and Android
-needs Linux CI with the Android SDK and an emulator, before the matching phase ships.
+needs Linux CI with the Android SDK, the NDK and an emulator, before the matching phase ships.
 
 Each phase has acceptance tests on the production path:
 
@@ -1160,9 +1301,13 @@ acceptance tests in the rollout above; these are the conditions around them.
 
 ### Tooling and accounts (maintainer)
 
-- **Android SDK and emulator** are in use: #2422 was verified on an Android 15 emulator. **Xcode**
-  with iOS simulator runtimes is still needed before iOS work can start, with roughly 40 GB of free
-  disk.
+- **Android SDK and emulator** are in use: #2422 was verified on an Android 15 emulator.
+- **Android NDK and CMake** (about 2.5 GB) are needed to compile `libappmodules.so` for React
+  Native screens (#2445). They did not fit on the development machine, so no React Native screen
+  has rendered on a device yet.
+- **Xcode** 15 or newer with an iOS simulator runtime, roughly 40 GB of free disk. The iOS shell
+  (#2441) has been type-checked and run as a Mac Catalyst app with the Command Line Tools only;
+  `xcodebuild`, the asset catalog, a simulator run and every iOS React Native step need Xcode.
 - **CI runners**: macOS runners with Xcode for iOS builds and simulator tests, Linux runners with
   the Android SDK and an emulator for the shell, visual diffs and budgets. Both cost CI minutes;
   the farm.js workflows need budget for them.
@@ -1190,11 +1335,15 @@ acceptance tests in the rollout above; these are the conditions around them.
 
 - **Island placement on Android.** The scroll-tracking experiment in 7.7 decides whether islands
   can scroll with the page on Android at all.
-- **Native bundler.** Metro or a Rolldown-based React Native bundle (7.9).
-- **One runtime, many surfaces.** Hosting several Fabric surfaces in one shared runtime inside
-  Farm's own navigator, not React Navigation, with pre-warm after first paint.
-- **React Native's size.** What Hermes and Fabric add to the app, measured against
-  `budgets.appSizeMb`, since the first native route pays for it.
+- **Native bundler.** Answered: Metro (decisions below).
+- **One runtime, many surfaces.** Built in #2445: several surfaces in one shared `ReactHost`
+  inside Farm's own navigator, not React Navigation, warmed after first paint. Still to answer on
+  a device: a surface rendering at all (blocked on the NDK build), memory with several native
+  screens on the stack, and time to first content of a warm surface.
+- **React Native's size.** Measured in #2445: a debug APK with two React Native screens is 73 MB
+  with unstripped libraries for two ABIs (`libreactnative.so` 24 MB and `libhermesvm.so` 4 MB per
+  ABI), about 35 MB per ABI before stripping. A stripped release build per ABI is not measured yet
+  and is what `budgets.appSizeMb` should be checked against.
 - **WebView pool on mid-range Android.** Memory of one WebView per stacked screen, and recovery
   when the shared renderer process dies.
 - **Analyzer yield.** How many real routes port (stage 0 answers) and how faithful the IR is
@@ -1282,7 +1431,8 @@ limited, and server secrets would ship in the app binary.
    the answer.
 2. **Signing, notarization and auto-update.** Does Farm configure macOS notarization, Windows
    signing and update feeds, or document the shell's own tooling?
-3. **Native bundler.** Metro or a Rolldown-based React Native bundle. A spike decides (7.9).
+3. **Native bundler.** Decided: Metro. Revisit a Rolldown build behind the same
+   `@farm.js/native/build` API only if its size win holds on a device.
 4. **Mobile token mode across integrations.** Which auth integrations (Better Auth, Clerk, Auth0,
    WorkOS, Auth.js) can issue and accept bearer tokens today, and what the shared contract looks
    like in `@farm.js/integration-utils`.
@@ -1309,5 +1459,6 @@ config keys, the `--web`/`--desktop`/`--mobile` flags, generated-by-default nati
 `farm eject`, the desktop local guard and shell adapter interface, the mobile screen tiers (web by
 default, React Native or platform native per route), the `page.native.tsx` convention and the
 `mobile.native` block, the analyzer staged from report-only, islands limited to large fixed
-components, and the rollout order. Desktop phases 1 to 3 have landed; mobile continues with phase
-5 without changing the web path.
+components, Metro for React Native screens, and the rollout order. Desktop phases 1 to 3 have
+landed. Mobile phase 5, the phase 8 config surface and analyzer stage 0 were released in 0.1.50;
+mobile continues with the PRs in review without changing the web path.
