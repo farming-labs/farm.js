@@ -1,7 +1,19 @@
 import { normalizeFarmBasePath } from "../base-path";
 import { compareRoutePatternSpecificity } from "../routing/specificity";
 import type { FarmI18nRouting } from "../i18n/types";
-import type { FarmMobilePresentation, FarmMobileTab, ResolvedFarmMobileConfig } from "./config";
+import type {
+  FarmMobileOS,
+  FarmMobilePrefetch,
+  FarmMobilePresentation,
+  FarmMobileScreen,
+  FarmMobileTab,
+  ResolvedFarmMobileConfig,
+} from "./config";
+import {
+  resolveFarmMobileScreens,
+  type FarmMobileScreenDecision,
+  type FarmMobileScreenSource,
+} from "./screens";
 
 /**
  * One navigator rule. The shell tests `pattern` against a link's decoded URL path, top to
@@ -14,9 +26,13 @@ export interface FarmMobileRouteRule {
   /** `"tab"` switches to tab `tab` instead of presenting a screen. */
   presentation: FarmMobilePresentation | "tab";
   tab?: number;
-  screen?: "native";
-  /** The `src/native/` module for a native screen. */
+  screen: FarmMobileScreen;
+  /** What decided `screen`: the page export, config, a screen file, the analyzer, or the default. */
+  source?: FarmMobileScreenSource;
+  /** Native module id derived from the route, such as `"app/notes/[id]"`. Not on web screens. */
   module?: string;
+  /** Only when the page overrides the manifest's `prefetch`. */
+  prefetch?: FarmMobilePrefetch;
 }
 
 /** `.farm/output/mobile/farm-routes.json` (RFC 0004, 7.2). */
@@ -25,6 +41,8 @@ export interface FarmMobileRouteManifest {
   server: string;
   /** Tab roots; `path` includes the base path. */
   tabs: FarmMobileTab[];
+  /** Default for every rule; a rule's own `prefetch` wins. */
+  prefetch: FarmMobilePrefetch;
   rules: FarmMobileRouteRule[];
 }
 
@@ -35,6 +53,10 @@ export interface FarmMobileRouteManifestOptions {
   server?: string;
   basePath?: string;
   i18n?: { locales: readonly string[]; routing: FarmI18nRouting } | null;
+  /** Per-route screens; resolved from config alone (no page files) when omitted. */
+  screens?: Readonly<Record<string, FarmMobileScreenDecision>>;
+  /** The OS for the config-only fallback; defaults to `"android"`. */
+  os?: FarmMobileOS;
 }
 
 const REGEX_SPECIAL = /[\\^$.|?*+()[\]{}]/g;
@@ -117,19 +139,30 @@ export function createFarmMobileRouteManifest(
   const routes = [...new Set(options.routes.map(stripRouteGroups))]
     .sort()
     .sort((left, right) => compareRoutePatternSpecificity(left, right));
+  const screens =
+    options.screens ??
+    resolveFarmMobileScreens({ root: "", os: options.os ?? "android", routes, mobile }).screens;
   const rules: FarmMobileRouteRule[] = routes.map((route) => {
-    const config = mobile.routes[route] ?? {};
+    const decision = screens[route] ?? {
+      screen: "web" as const,
+      source: "default" as const,
+      presentation: "push" as const,
+      prefetch: mobile.native.prefetch,
+    };
     const tab = tabIndex.get(route);
     return {
       route,
       pattern: createFarmMobileRoutePattern(route, options),
-      presentation: tab !== undefined ? "tab" : (config.presentation ?? "push"),
+      presentation: tab !== undefined ? "tab" : decision.presentation,
       ...(tab !== undefined ? { tab } : {}),
-      ...(config.native ? { screen: "native" as const, module: config.native } : {}),
+      screen: decision.screen,
+      source: decision.source,
+      ...(decision.module ? { module: decision.module } : {}),
+      ...(decision.prefetch !== mobile.native.prefetch ? { prefetch: decision.prefetch } : {}),
     };
   });
   // Same-origin paths that are not page routes (API documents, server 404s) still push.
-  rules.push({ pattern: "^/", presentation: "push" });
+  rules.push({ pattern: "^/", presentation: "push", screen: "web" });
   return {
     version: 1,
     server,
@@ -137,6 +170,7 @@ export function createFarmMobileRouteManifest(
       ...tab,
       path: basePath ? (tab.path === "/" ? basePath : `${basePath}${tab.path}`) : tab.path,
     })),
+    prefetch: mobile.native.prefetch,
     rules,
   };
 }

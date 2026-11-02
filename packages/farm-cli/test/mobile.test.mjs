@@ -32,6 +32,9 @@ const APP_FILES = {
   "src/app/notes/new/page.tsx": PAGE,
   "src/app/notes/[id]/page.tsx": PAGE,
   "src/app/(account)/settings/page.tsx": PAGE,
+  "src/app/feed/page.tsx": PAGE,
+  "src/app/feed/page.native.tsx": PAGE,
+  "src/app/feed/page.android.tsx": PAGE,
 };
 
 async function createApp(t, config) {
@@ -76,6 +79,7 @@ const CONFIG = `export default {
       { path: "/settings", title: "Settings", icon: "gear" },
     ],
     routes: { "/notes/new": { presentation: "modal" } },
+    native: { routes: { "/notes/[id]": { screen: "web", ios: "native" } } },
   }),
 };`;
 
@@ -111,14 +115,59 @@ test("farm config inspect --mobile prints the block and farm-routes.json for an 
       { path: "/settings", title: "Settings", icon: "gear" },
     ],
     routes: { "/notes/new": { presentation: "modal" } },
+    native: {
+      engine: "react-native",
+      auto: "report",
+      routes: { "/notes/[id]": { screen: "web", ios: "native" } },
+      islands: [],
+      prefetch: "intent",
+      budgets: {},
+    },
   });
+  // Every route's tier on this OS and what decided it.
+  assert.deepEqual(printed.screens, {
+    "/": { screen: "web", source: "default", presentation: "push" },
+    "/feed": {
+      screen: "native",
+      source: "file",
+      file: "src/app/feed/page.native.tsx",
+      module: "app/feed",
+      presentation: "push",
+    },
+    "/notes": { screen: "web", source: "default", presentation: "push" },
+    "/notes/[id]": {
+      screen: "web",
+      source: "config",
+      requested: "native",
+      presentation: "push",
+    },
+    "/notes/new": { screen: "web", source: "default", presentation: "modal" },
+    "/settings": { screen: "web", source: "default", presentation: "push" },
+  });
+  assert.equal(printed.warnings.length, 1);
+  assert.match(printed.warnings[0], /native\.routes\["\/notes\/\[id\]"\]\.ios is "native"/);
+  const web = { screen: "web", source: "default" };
   assert.deepEqual(printed.routes.rules, [
-    { route: "/notes/new", pattern: "^/notes/new/?$", presentation: "modal" },
-    { route: "/notes/[id]", pattern: "^/notes/[^/]+/?$", presentation: "push" },
-    { route: "/notes", pattern: "^/notes/?$", presentation: "tab", tab: 0 },
-    { route: "/settings", pattern: "^/settings/?$", presentation: "tab", tab: 1 },
-    { route: "/", pattern: "^/?$", presentation: "push" },
-    { pattern: "^/", presentation: "push" },
+    { route: "/notes/new", pattern: "^/notes/new/?$", presentation: "modal", ...web },
+    {
+      route: "/notes/[id]",
+      pattern: "^/notes/[^/]+/?$",
+      presentation: "push",
+      screen: "web",
+      source: "config",
+    },
+    {
+      route: "/feed",
+      pattern: "^/feed/?$",
+      presentation: "push",
+      screen: "native",
+      source: "file",
+      module: "app/feed",
+    },
+    { route: "/notes", pattern: "^/notes/?$", presentation: "tab", tab: 0, ...web },
+    { route: "/settings", pattern: "^/settings/?$", presentation: "tab", tab: 1, ...web },
+    { route: "/", pattern: "^/?$", presentation: "push", ...web },
+    { pattern: "^/", presentation: "push", screen: "web" },
   ]);
 });
 
@@ -130,6 +179,14 @@ test("farm config inspect --mobile names the OS and field when the block is inva
   const printed = JSON.parse(build.output.slice(build.output.indexOf("{")));
   assert.equal(printed.routes.server, "https://notes.example.com");
   assert.equal(printed.mobile.tabs[0].icon, "ic_notes");
+  // On Android the OS file wins over page.native.tsx, and config keeps /notes/[id] web.
+  assert.equal(printed.screens["/feed"].file, "src/app/feed/page.android.tsx");
+  assert.deepEqual(printed.screens["/notes/[id]"], {
+    screen: "web",
+    source: "config",
+    presentation: "push",
+  });
+  assert.equal(printed.warnings, undefined);
 
   await writeFile(
     path.join(root, "farm.config.ts"),

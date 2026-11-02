@@ -19,18 +19,20 @@ export interface FarmMobileInspectOptions {
 
 /**
  * `farm config inspect --mobile`: the `mobile` block a dev session or build would use for an OS
- * and profile, and the `farm-routes.json` navigator manifest it produces. Writes nothing.
+ * and profile, each route's screen and what decided it, and the `farm-routes.json` navigator
+ * manifest it produces. Writes nothing.
  */
 export async function inspectFarmMobileConfig(options: FarmMobileInspectOptions = {}) {
   const root = path.resolve(options.root || process.cwd());
   const configRuntime = await import("@farm.js/core/internal/config-runtime");
   const { resolveFarmMobileApp } = await configRuntime.loadFarmMobileRuntime();
-  const { context, mobile, manifest } = await resolveFarmMobileApp({
-    root,
-    os: options.os,
-    profile: options.profile,
-    command: options.command,
-  });
+  const { context, mobile, manifest, screens, warnings, nativeLayouts } =
+    await resolveFarmMobileApp({
+      root,
+      os: options.os,
+      profile: options.profile,
+      command: options.command,
+    });
   return {
     context: {
       os: context.os,
@@ -39,6 +41,23 @@ export async function inspectFarmMobileConfig(options: FarmMobileInspectOptions 
       profile: context.profile,
     },
     mobile,
+    // What each page route shows on this OS and what decided it: page, config, file, analyzer,
+    // or default.
+    screens: Object.fromEntries(
+      Object.entries(screens).map(([route, decision]) => [
+        route,
+        {
+          screen: decision.screen,
+          source: decision.source,
+          ...(decision.file ? { file: decision.file } : {}),
+          ...(decision.module ? { module: decision.module } : {}),
+          ...(decision.requested ? { requested: decision.requested } : {}),
+          presentation: decision.presentation,
+        },
+      ]),
+    ),
+    ...(Object.keys(nativeLayouts).length > 0 ? { nativeLayouts } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
     routes: manifest,
   };
 }
