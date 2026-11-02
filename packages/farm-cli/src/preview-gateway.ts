@@ -67,7 +67,8 @@ export interface ForwardGatewayRequestOptions {
   maxResponseBodyBytes?: number;
 }
 
-const DEFAULT_GATEWAY_URL = "https://preview.farmjs.dev";
+/** The hosted gateway Farming Labs runs, and the only one trusted with an API key by default. */
+export const DEFAULT_GATEWAY_URL = "https://preview.farmjs.dev";
 const DEFAULT_PREVIEW_DOMAIN = "preview.farmjs.dev";
 const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_LOCAL_PROBE_INTERVAL_MS = 2000;
@@ -584,6 +585,16 @@ export function resolvePreviewGatewayUrl(gatewayUrl?: string) {
 }
 
 function normalizeGatewayUrl(value: string) {
+  const url = new URL(value);
+  // Credentials and grants travel to the gateway, so it needs TLS unless it is this machine.
+  if (
+    url.protocol !== "https:" &&
+    !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
+  ) {
+    throw new Error(
+      `The Farm Preview gateway must use https (plain http only on localhost), received ${url.protocol}//${url.host}`,
+    );
+  }
   return value.replace(/\/+$/, "");
 }
 

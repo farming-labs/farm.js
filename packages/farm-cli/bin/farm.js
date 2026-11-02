@@ -530,6 +530,12 @@ program
     }
   });
 
+// The hosted gateway is the only one sent an API key unless the developer vouches for theirs.
+const trustGatewayOption = [
+  "--trust-gateway",
+  "Send your Farm.js Infrastructure API key to a --gateway you run",
+];
+
 program
   .command("preview")
   .description("Create a public URL for a running local Farm app")
@@ -544,6 +550,7 @@ program
     "Advanced: override the hosted Farm Preview gateway URL",
     process.env.FARM_PREVIEW_GATEWAY_URL,
   )
+  .option(...trustGatewayOption)
   .option(
     "--provider <provider>",
     "Advanced: preview provider to use (farm, local)",
@@ -569,6 +576,7 @@ program
         project: options.project,
         expires: options.expires,
         login: options.login,
+        trustGateway: options.trustGateway,
         dryRun: options.dryRun,
         // Commander stores --no-probe as `probe: false`.
         noProbe: options.probe === false,
@@ -591,10 +599,15 @@ program
   .description("Sign in to Farm Preview without starting a preview")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option(...gatewayOption)
+  .option(...trustGatewayOption)
   .action(async (options) => {
     try {
       const { loginToFarmPreview } = require("../dist/index.js");
-      await loginToFarmPreview({ root: options.root, gatewayUrl: options.gateway });
+      await loginToFarmPreview({
+        root: options.root,
+        gatewayUrl: options.gateway,
+        trustGateway: options.trustGateway,
+      });
     } catch (error) {
       console.error("Failed to sign in:", error instanceof Error ? error.message : error);
       process.exit(1);
@@ -621,11 +634,17 @@ program
   .description("Show which credential farm preview uses")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option(...gatewayOption)
+  .option(...trustGatewayOption)
   .action(async (options) => {
     try {
       const { whoamiFarmPreview } = require("../dist/index.js");
       // Exits 1 when farm preview would need a browser sign-in, for scripts.
-      if (!(await whoamiFarmPreview({ root: options.root, gatewayUrl: options.gateway }))) {
+      const signedIn = await whoamiFarmPreview({
+        root: options.root,
+        gatewayUrl: options.gateway,
+        trustGateway: options.trustGateway,
+      });
+      if (!signedIn) {
         process.exit(1);
       }
     } catch (error) {

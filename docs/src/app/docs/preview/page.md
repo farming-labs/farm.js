@@ -86,7 +86,9 @@ non-interactive terminals, the hosted default is used.
    permission, the CLI signs in with it and never opens a browser. It reads the key from your shell or
    your CI secrets, and from the app's `.env` files the way `farm dev` does. Set
    `FARMJS_API_URL` too if Infrastructure isn't at `https://app.farmjs.dev`: the key is
-   only sent to a gateway that signs in through that Infrastructure.
+   only sent to a gateway that signs in through that Infrastructure. The key only goes to the
+   hosted gateway, `https://preview.farmjs.dev`, unless you pass `--trust-gateway` for a
+   gateway you run (see [Self-Hosting a Gateway](#self-hosting-a-gateway)).
 2. Without a key or saved login, the CLI opens Farm.js Infrastructure, displays a code, and waits
    for you to confirm the matching code and explicitly authorize your terminal.
 3. Return to the CLI. Choose the preview duration when prompted, or pass `--expires`.
@@ -235,6 +237,7 @@ http://localhost:4319/console` forwards the public preview root to `/console/` a
 | `--dry-run`             | Validate target detection and print the preview plan without opening a session.     |
 | `--no-probe`            | Skip the local reachability check when `--port` is provided.                        |
 | `--gateway <url>`       | Advanced: use a different Farm Preview gateway.                                     |
+| `--trust-gateway`       | Advanced: send your Farm.js Infrastructure API key to a `--gateway` you run.        |
 | `--provider <provider>` | Advanced: use `farm` for the hosted gateway or `local` for a custom local provider. |
 
 ## Readable URLs
@@ -417,6 +420,18 @@ Then point the CLI at it:
 farm preview --gateway https://preview.example.com --name checkout-test
 ```
 
+A gateway can say it signs in through Farm.js Infrastructure, but `farm preview` doesn't take
+its word for it: it only sends `FARMJS_API_KEY`, or creates a key with `farm login`, for the
+hosted gateway. For a gateway you run, pass `--trust-gateway` to `farm preview`, `farm login`,
+and `farm whoami`:
+
+```bash
+farm preview --gateway https://preview.example.com --trust-gateway
+```
+
+A key `farm login --trust-gateway` saved for that gateway is reused there without the flag.
+The gateway must use `https`; plain `http` is only accepted on `localhost`.
+
 ## Custom Tunnel Providers
 
 If you need to integrate a private tunnel provider, set `FARM_PREVIEW_TUNNEL_COMMAND` to a command template that prints the public HTTPS URL after opening the tunnel.
@@ -446,7 +461,7 @@ Use this path only when the hosted Farm gateway is not appropriate for your envi
 | `FARM_PREVIEW_PROJECT`          | Stable dashboard project slug; overridden by `--project`.                                                       |
 | `FARM_PREVIEW_PROVIDER`         | Select `farm` or `local`.                                                                                       |
 | `FARM_PREVIEW_TUNNEL_COMMAND`   | Command template for a custom local tunnel provider.                                                            |
-| `FARMJS_API_KEY`                | Farm.js Infrastructure API key. Signs previews in without a browser on a gateway that uses that Infrastructure. |
+| `FARMJS_API_KEY`                | Farm.js Infrastructure API key. Signs previews in without a browser on the hosted gateway or a trusted gateway. |
 | `FARMJS_API_URL`                | Farm.js Infrastructure's address, if it isn't `https://app.farmjs.dev`.                                         |
 | `FARM_PREVIEW_TOKEN`            | Deprecated. Use `FARMJS_API_KEY`. Still accepted, with a warning.                                               |
 | `FARM_PREVIEW_CREDENTIALS_PATH` | Override the local managed-preview credential file.                                                             |
