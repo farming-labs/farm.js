@@ -121,6 +121,8 @@ agent({
 
 On Redis, runs and leases change atomically, so two instances never take the same approval twice. Each target's scheduler runs the sweep; Netlify, AWS Lambda, and Vercel's Hobby plan need a step of their own, listed in agent-unit's [host table](https://github.com/farming-labs/agent-unit#deploy-anywhere).
 
+On Vercel, set `CRON_SECRET` in the project's environment variables. Vercel Cron runs the sweep and `tasks` through `/_vercel/cron` and sends the secret as a bearer token; the route answers `401` to any call without it, including every call while `CRON_SECRET` is unset, and the build warns when it does not see the variable.
+
 ## Options
 
 | Option      | Default          | Description                                                                          |
