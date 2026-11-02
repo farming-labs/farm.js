@@ -16,16 +16,19 @@ where a web page is not enough, you can opt one route at a time into a truly nat
 touching the rest of the app.
 
 Mobile is a preview, released in Farm 0.1.50 with `@farm.js/mobile` 0.1.0-beta.0. **What runs
-today is the WebView shell on Android.** The native screen tiers (React Native and
-platform-native) and iOS are designed but not released: routes marked native render a
-placeholder. Every section below marks the line between what ships now and what is still landing,
-so you can adopt the config surface before the runtime is complete. The design and rollout are in
+today is the WebView shell on Android.** The iOS shell generates an Xcode project but has not been
+built with `xcodebuild` yet (see [Run on iOS](#run-on-ios)). The native screen tiers (React Native
+and platform-native) are designed but not released: routes marked native render a placeholder.
+Every section below marks the line between what ships now and what is still landing, so you can
+adopt the config surface before the runtime is complete. The design and rollout are in
 [RFC 0004](https://github.com/farming-labs/farm.js/pull/2352).
 
 ```sh
-farm dev --mobile      # dev server, Android project, install and open on a device
-farm build --mobile    # mobile client build and Android project
-farm build             # --web, the default, unchanged
+farm dev --mobile             # dev server, Android project, install and open on a device
+farm build --mobile           # mobile client build and Android project
+farm dev --mobile --os ios    # dev server, Xcode project, build and open on a booted simulator
+farm build --mobile --os ios  # mobile client build and Xcode project
+farm build                    # --web, the default, unchanged
 ```
 
 ## Status
@@ -35,7 +38,7 @@ farm build             # --web, the default, unchanged
 | Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                              |
 | `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                             |
 | Native-screen analyzer                        | **Report only**                | Writes `native-report.json`; it changes no output                                                                                    |
-| iOS shell                                     | In review                      | [#2441](https://github.com/farming-labs/farm.js/pull/2441); not yet built with Xcode                                                 |
+| iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                          |
 | React Native screens                          | In review, not yet on a device | Android only: [#2444](https://github.com/farming-labs/farm.js/pull/2444), [#2445](https://github.com/farming-labs/farm.js/pull/2445) |
 | Bundled client assets and page shells         | Planned                        | A production shell loads pages and the client from `server`                                                                          |
 | Token auth and mobile origin handling         | Planned                        | No Keystore or Keychain session, no bearer tokens                                                                                    |
@@ -45,12 +48,12 @@ farm build             # --web, the default, unchanged
 
 ## Requirements
 
-| For                              | You need                                                                                                                           |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Android (shipped)                | JDK 17 or newer (tested with JDK 21), and the Android SDK with platform 35, build-tools 35, and platform-tools; set `ANDROID_HOME` |
-| Running on Android               | An emulator or a device with Android 8.0 (API 26) or newer, listed by `adb devices`                                                |
-| React Native screens (in review) | Also the Android NDK and CMake, which Gradle installs on the first build once the SDK licenses are accepted                        |
-| iOS (in review)                  | A Mac with Xcode 15 or newer and an iOS simulator runtime; the Command Line Tools alone are not enough. The app targets iOS 16     |
+| For                              | You need                                                                                                                                     |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Android (shipped)                | JDK 17 or newer (tested with JDK 21), and the Android SDK with platform 35, build-tools 35, and platform-tools; set `ANDROID_HOME`           |
+| Running on Android               | An emulator or a device with Android 8.0 (API 26) or newer, listed by `adb devices`                                                          |
+| React Native screens (in review) | Also the Android NDK and CMake, which Gradle installs on the first build once the SDK licenses are accepted                                  |
+| iOS (unreleased)                 | A Mac with Xcode, the iOS 16 or newer SDK, and an iOS simulator runtime; the Command Line Tools alone are not enough. The app targets iOS 16 |
 
 ## Setup
 
@@ -568,6 +571,64 @@ html[data-farm-shell] .web-tabs {
 Cleartext (`http://`) is allowed only under `farm dev --mobile`, for the dev server and the
 emulator loopback; builds are `https://` only.
 
+## Run on iOS
+
+`--os ios` generates the iOS shell as an Xcode project. **It has not been built with `xcodebuild`
+yet**: its Swift was type-checked against the Mac Catalyst SDK and run as a Mac Catalyst app, not in
+an iOS simulator.
+
+Building it requires a Mac with Xcode, the iOS 16 or newer SDK, and an iOS simulator runtime; the
+Command Line Tools alone are not enough. Tested with: no Xcode version yet. The app targets iOS 16.
+
+```sh
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+xcodebuild -runFirstLaunch
+xcodebuild -downloadPlatform iOS        # the simulator runtime, once
+open -a Simulator                       # boot a simulator
+
+farm dev --mobile --os ios              # dev server, Xcode project, build and open on the simulator
+farm build --mobile --os ios            # mobile client build and Xcode project
+```
+
+`farm dev --mobile --os ios` points `farm-routes.json` at `http://localhost:<port>` (a simulator
+shares the Mac's network), generates the Xcode project into `.farm/output/mobile/ios`, and, when
+`xcrun simctl` lists a booted iOS simulator, builds it with `xcodebuild`, installs it, and opens it.
+Without Xcode or a booted simulator it prints what to install and the commands to run.
+
+Farm builds and installs simulator apps only. A physical iPhone needs code signing: open
+`App.xcodeproj` in Xcode, set a signing team, and run it from there. `--host 192.168.1.20` points
+the app at a LAN address the phone can reach, but Farm does not sign or install the app for you.
+
+`farm build --mobile --os ios` writes the project with `mobile.server` and, when Xcode is
+installed, also builds the debug simulator app into `.farm/output/mobile/dist`. `--apk` is
+Android only. Archives for the App Store need the same signing team. The project is regenerated on
+every run, so don't edit it.
+
+| Path                                    | Contents                                                        |
+| --------------------------------------- | --------------------------------------------------------------- |
+| `App.xcodeproj`                         | One iOS app target, `App`, with the bundle ID `mobile.id`       |
+| `App/farm-routes.json`                  | The navigator manifest                                          |
+| `App/farm-bridge.js`                    | The same bridge script as Android, with the iOS message handler |
+| `App/Navigator.swift`                   | A tab bar with a navigation stack per tab, push, sheet, replace |
+| `App/WebViewPool.swift`                 | Two pre-warmed WKWebViews that back pushes                      |
+| `App/FarmBridge.swift`                  | The message handler and the document-start script               |
+| `App/FarmBuild.swift`                   | Build constants: dev or build, the start path, the tab symbols  |
+| `App/NativeScreens.swift`               | The hook for `native` and `platform` screens                    |
+| `App/Info.plist`, `App/Assets.xcassets` | Display name, version 1.0, a placeholder icon, the shell colors |
+
+The iOS shell matches the Android one: tabs come from `mobile.tabs` with SF Symbol icons (`notes`,
+`settings`, `gear`, `home`, `search`, and `person` map to symbols; other names are used as symbol
+names), back is the system swipe, modals are page sheets, links to other origins open in
+`SFSafariViewController`, the bar shows `document.title`, and a WebView whose web content process
+ends reloads instead of going blank. Pages get `data-farm-shell="ios"`.
+
+The bridge is a `WKScriptMessageHandler` that drops any message not sent by the main frame of the
+server's origin, and its script is a document-start `WKUserScript` that runs only on that origin.
+The `-FarmServer <url>` and `-FarmPool <n>` launch arguments
+(`xcrun simctl launch booted <id> -FarmServer http://localhost:3001`) and plain-HTTP App Transport
+Security exceptions (local networking and the dev host) exist only in projects generated by
+`farm dev --mobile`; `farm build --mobile` apps load `mobile.server` over HTTPS only.
+
 ## Design notes
 
 Mobile support is shaped by one decision: **reuse the real web pages, and spend native effort only
@@ -626,7 +687,8 @@ route into the React Native tier.
 The config surface, the route manifest, the WebView shell, and the report all work today. These
 parts are designed and still on the way:
 
-- Android runs today; there is no iOS shell yet.
+- The iOS shell has not been built with `xcodebuild` or run in a simulator yet (see
+  [Run on iOS](#run-on-ios)), and it has no Keychain session.
 - `native` and `platform` screens show a placeholder naming the module id. Farm does not build
   `page.native.tsx`, `page.kt`, or `page.swift` yet; `FarmNativeScreens` in the generated project is
   where native screens will register.

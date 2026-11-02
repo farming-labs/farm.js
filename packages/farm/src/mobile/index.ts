@@ -1,5 +1,5 @@
 /**
- * `@farm.js/core/mobile`: the interface mobile shell packages (such as `@farm.js/mobile/android`)
+ * `@farm.js/core/mobile`: the interface mobile shell packages (`@farm.js/mobile/android`, `/ios`)
  * implement, and the types a page's `export const mobile` and a `mobile` block use. Types and an
  * identity helper only; nothing here runs in a web build.
  */
@@ -72,8 +72,11 @@ export interface MobileShell {
    * connected. Resolves with `launched: false` and the next commands when none is.
    */
   run(context: MobileShellContext): Promise<MobileRunResult>;
-  /** Build an installable app from the generated project, such as a debug APK. */
-  package(context: MobilePackageContext): Promise<{ files: string[] }>;
+  /**
+   * Build an installable app from the generated project, such as a debug APK. `message` says
+   * what to do next, or why nothing was built (such as no Xcode for an iOS simulator app).
+   */
+  package(context: MobilePackageContext): Promise<{ files: string[]; message?: string }>;
 }
 
 /** Typed helper for mobile shell packages. */

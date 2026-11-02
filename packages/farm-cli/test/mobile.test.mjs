@@ -215,8 +215,10 @@ test("farm config inspect --mobile names the OS and field when the block is inva
 const FAKE_SHELL = `import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+const OS = "android";
+
 export default {
-  os: "android",
+  os: OS,
   generate(context) {
     return [
       { path: "context.json", contents: JSON.stringify({
@@ -235,6 +237,8 @@ export default {
     return { launched: false, message: "fake: nothing connected" };
   },
   async package(context) {
+    // Like the iOS shell without Xcode: nothing built, and what to do instead.
+    if (OS === "ios") return { files: [], message: "fake: install Xcode" };
     await mkdir(context.distDir, { recursive: true });
     const file = path.join(context.distDir, context.mobile.id + "-debug.apk");
     await writeFile(file, "apk");
@@ -251,10 +255,18 @@ async function installFakeShell(root) {
     JSON.stringify({
       name: "@farm.js/mobile",
       type: "module",
-      exports: { "./android": "./android.mjs", "./package.json": "./package.json" },
+      exports: {
+        "./android": "./android.mjs",
+        "./ios": "./ios.mjs",
+        "./package.json": "./package.json",
+      },
     }),
   );
   await writeFile(path.join(dir, "android.mjs"), FAKE_SHELL);
+  await writeFile(
+    path.join(dir, "ios.mjs"),
+    FAKE_SHELL.replace('const OS = "android";', 'const OS = "ios";'),
+  );
 }
 
 const LAYOUT =
@@ -292,6 +304,19 @@ test("--mobile excludes --desktop and --web, and --apk needs --mobile", async ()
   const preset = await runFarm(["build", "--mobile", "--preset", "vercel", "--root", testDir]);
   assert.notEqual(preset.code, 0);
   assert.match(preset.output, /--preset is not available with --mobile/);
+  const os = await runFarm(["build", "--os", "ios", "--root", testDir]);
+  assert.notEqual(os.code, 0);
+  assert.match(os.output, /--os needs --mobile/);
+  const devOs = await runFarm(["dev", "--os", "ios", "--root", testDir]);
+  assert.notEqual(devOs.code, 0);
+  assert.match(devOs.output, /--os needs --mobile/);
+  const unknown = await runFarm(["build", "--mobile", "--os", "windows", "--root", testDir]);
+  assert.notEqual(unknown.code, 0);
+  assert.match(unknown.output, /--os must be android or ios, not "windows"/);
+  assert.doesNotMatch(unknown.output, /\n\s+at /);
+  const iosApk = await runFarm(["build", "--mobile", "--os", "ios", "--apk", "--root", testDir]);
+  assert.notEqual(iosApk.code, 0);
+  assert.match(iosApk.output, /--apk builds the Android app; it is not available with --os ios/);
 });
 
 test("--mobile without @farm.js/mobile prints the install command", async (t) => {
@@ -368,6 +393,36 @@ test("farm build --mobile builds the mobile client apart from the web output and
   assert.match(apk.output, /📦 \.farm\/output\/mobile\/dist\/com\.example\.notes-debug\.apk/);
 });
 
+test("farm build --mobile --os ios generates the iOS project and reports what the shell could not build", async (t) => {
+  const root = await createApp(t, BUILD_CONFIG);
+  await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
+  await installFakeShell(root);
+  const mobileDir = path.join(root, ".farm", "output", "mobile");
+
+  const result = await runFarm(["build", "--mobile", "--os", "ios", "--root", root]);
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /\.farm\/output\/mobile\/ios \(ios project\)/);
+  // The iOS shell packages on every build; without Xcode it says what to install.
+  assert.match(result.output, /fake: install Xcode/);
+  assert.doesNotMatch(result.output, /--apk/);
+  assert.deepEqual(
+    JSON.parse(await readFile(path.join(mobileDir, "ios", "context.json"), "utf8")),
+    {
+      command: "build",
+      basePath: "",
+      id: "com.example.notes",
+      server: "https://notes.example.com",
+      projectDir: path.join(".farm", "output", "mobile", "ios"),
+    },
+  );
+  await assert.rejects(stat(path.join(mobileDir, "android")));
+  // Resolved for iOS: page.android.tsx is not the /feed screen there.
+  const routes = JSON.parse(await readFile(path.join(mobileDir, "farm-routes.json"), "utf8"));
+  const feed = routes.rules.find((rule) => rule.route === "/feed");
+  assert.equal(feed.screen, "native");
+  assert.equal(feed.module, "app/feed");
+});
+
 test("the mobile shell may not write outside its project", async (t) => {
   const root = await createApp(t, BUILD_CONFIG);
   await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
@@ -398,14 +453,20 @@ async function waitForFile(file, child, output) {
   throw new Error(`Timed out waiting for ${file}:\n${output()}`);
 }
 
-test("farm dev --mobile points farm-routes.json at the dev server and serves a mobile client", async (t) => {
+for (const os of ["android", "ios"]) {
+  test(`farm dev --mobile --os ${os} points farm-routes.json at the dev server and serves a mobile client`, async (t) => {
+    await checkMobileDevServer(t, os);
+  });
+}
+
+async function checkMobileDevServer(t, os) {
   const root = await createApp(t, BUILD_CONFIG);
   await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
   await installFakeShell(root);
   const port = await freePort();
   const child = spawn(
     process.execPath,
-    [cliBin, "dev", "--mobile", "--root", root, "--port", String(port)],
+    [cliBin, "dev", "--mobile", "--os", os, "--root", root, "--port", String(port)],
     {
       env: { ...process.env, FARM_TELEMETRY_DISABLED: "1" },
       stdio: ["ignore", "pipe", "pipe"],
@@ -419,13 +480,13 @@ test("farm dev --mobile points farm-routes.json at the dev server and serves a m
     await exited;
   };
   try {
-    await checkMobileDev(child, root, port);
+    await checkMobileDev(child, root, port, os);
   } finally {
     await stop();
   }
-});
+}
 
-async function checkMobileDev(child, root, port) {
+async function checkMobileDev(child, root, port, os) {
   let output = "";
   child.stdout.on("data", (chunk) => (output += chunk));
   child.stderr.on("data", (chunk) => (output += chunk));
@@ -433,11 +494,14 @@ async function checkMobileDev(child, root, port) {
   const run = JSON.parse(
     await waitForFile(path.join(root, "run-result.json"), child, () => output),
   );
-  assert.deepEqual(run, { server: `http://10.0.2.2:${port}` });
+  // The Android emulator reaches the host's loopback as 10.0.2.2; an iOS simulator shares it.
+  const server = os === "ios" ? `http://localhost:${port}` : `http://10.0.2.2:${port}`;
+  assert.deepEqual(run, { server });
   const routes = JSON.parse(
     await readFile(path.join(root, ".farm", "output", "mobile", "farm-routes.json"), "utf8"),
   );
-  assert.equal(routes.server, `http://10.0.2.2:${port}`);
+  assert.equal(routes.server, server);
+  await stat(path.join(root, ".farm", "output", "mobile", os, "context.json"));
   assert.deepEqual(routes.tabs, [{ path: "/notes", title: "Notes", icon: "notes" }]);
   for (let attempt = 0; attempt < 50 && !output.includes("fake: nothing connected"); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 100));

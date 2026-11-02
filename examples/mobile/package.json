@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "farm dev",
     "dev:mobile": "farm dev --mobile",
+    "dev:ios": "farm dev --mobile --os ios",
     "build": "farm build",
     "build:mobile": "farm build --mobile",
     "build:apk": "farm build --mobile --apk",
+    "build:ios": "farm build --mobile --os ios",
     "start": "farm start",
     "report": "farm config inspect --mobile --report",
     "smoke": "node scripts/smoke.mjs",

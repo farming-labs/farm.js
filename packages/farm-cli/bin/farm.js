@@ -109,7 +109,11 @@ program
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("--cron", "Run configured cron routes in-process during development")
   .option("--desktop", "Open the app in its desktop shell, guarded like the packaged app")
-  .option("--mobile", "Open the app in its Android shell on an emulator or device (preview)")
+  .option(
+    "--mobile",
+    "Open the app in its mobile shell on an emulator, device, or simulator (preview)",
+  )
+  .option("--os <os>", "With --mobile: android (default) or ios")
   .option("--web", "Develop the web app (the default)")
   .option(
     "--profile <name>",
@@ -119,6 +123,9 @@ program
   .action(async (options) => {
     try {
       const platform = resolvePlatformOption(options);
+      if (options.os !== undefined && platform !== "mobile") {
+        throw new Error("--os needs --mobile.");
+      }
       if (platform === "mobile") {
         if (options.cron) throw new Error("--cron is not available with --mobile.");
         const { devFarmMobile } = require("../dist/mobile.js");
@@ -127,6 +134,7 @@ program
           port: options.port === undefined ? undefined : parsePortOption(options.port),
           host: options.host,
           profile: options.profile,
+          os: options.os,
         });
         return;
       }
@@ -176,7 +184,11 @@ program
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("-p, --preset <preset>", "Nitro preset (node-server, vercel, cloudflare, etc.)")
   .option("--desktop", "Build a native desktop app with its own local server")
-  .option("--mobile", "Build the mobile client and generate the Android project (preview)")
+  .option("--mobile", "Build the mobile client and generate the native project (preview)")
+  .option(
+    "--os <os>",
+    "With --mobile: android (default) or ios (also builds the simulator app when Xcode is installed)",
+  )
   .option("--apk", "With --mobile, also build the debug APK with Gradle")
   .option("--web", "Build for a web deployment (the default)")
   .option(
@@ -188,6 +200,9 @@ program
     try {
       const platform = resolvePlatformOption(options);
       if (options.apk && platform !== "mobile") throw new Error("--apk needs --mobile.");
+      if (options.os !== undefined && platform !== "mobile") {
+        throw new Error("--os needs --mobile.");
+      }
       if (platform === "mobile") {
         if (options.preset) {
           throw new Error(
@@ -195,7 +210,12 @@ program
           );
         }
         const { buildFarmMobile } = require("../dist/mobile.js");
-        await buildFarmMobile({ root: options.root, profile: options.profile, apk: options.apk });
+        await buildFarmMobile({
+          root: options.root,
+          profile: options.profile,
+          os: options.os,
+          apk: options.apk,
+        });
         return;
       }
       if (platform === "desktop") {

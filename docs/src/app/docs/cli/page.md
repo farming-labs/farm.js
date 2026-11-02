@@ -68,6 +68,8 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 | farm config inspect --mobile --report | Report which routes could be native screens (preview).                |
 | farm dev --mobile                     | Open the app in its Android shell on an emulator or device (preview). |
 | farm build --mobile                   | Build the mobile client and the Android project; `--apk` for an APK.  |
+| farm dev --mobile --os ios            | Open the app in its iOS shell on a booted simulator (preview).        |
+| farm build --mobile --os ios          | Generate the Xcode project; builds the simulator app with Xcode.      |
 | farm telemetry status                 | Show the anonymous product-telemetry preference.                      |
 | farm telemetry enable                 | Enable anonymous Farm.js product telemetry.                           |
 | farm telemetry disable                | Opt out and delete the local anonymous installation ID.               |

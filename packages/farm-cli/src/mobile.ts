@@ -62,8 +62,15 @@ export async function inspectFarmMobileConfig(options: FarmMobileInspectOptions 
   };
 }
 
-/** Only Android has a shell so far. */
-const MOBILE_OS = "android" as const;
+export type FarmMobileShellOS = "android" | "ios";
+
+/** `--os` for `farm dev|build --mobile`; Android when omitted. */
+export function resolveMobileOS(os: string | undefined): FarmMobileShellOS {
+  if (os === undefined || os === "android") return "android";
+  if (os === "ios") return "ios";
+  throw new FarmMobileError(`--os must be android or ios, not ${JSON.stringify(os)}.`);
+}
+
 const MOBILE_SHELL_PACKAGE = "@farm.js/mobile";
 
 function isMobileShell(value: unknown): value is MobileShell {
@@ -101,15 +108,19 @@ export async function loadFarmMobileShell(os: string, root: string): Promise<Mob
 
 /**
  * The dev server URL the app loads. An Android emulator reaches the host's loopback as
- * `10.0.2.2`, which `farm dev` listens on by default; `--host <address>` picks a LAN address
- * for a device instead.
+ * `10.0.2.2`, which `farm dev` listens on by default; an iOS simulator shares the host's network,
+ * so it uses `localhost`. `--host <address>` picks a LAN address for a device instead.
  */
-export function formatMobileDevServer(host: string | boolean | undefined, port: number): string {
+export function formatMobileDevServer(
+  host: string | boolean | undefined,
+  port: number,
+  os: FarmMobileShellOS = "android",
+): string {
   const wildcard = new Set(["0.0.0.0", "::", "localhost", "127.0.0.1", "::1"]);
   if (typeof host === "string" && host && !wildcard.has(host)) {
     return `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
   }
-  return `http://10.0.2.2:${port}`;
+  return os === "ios" ? `http://localhost:${port}` : `http://10.0.2.2:${port}`;
 }
 
 type ConfigRuntime = typeof import("@farm.js/core/internal/config-runtime");
@@ -152,15 +163,18 @@ export interface FarmMobileDevOptions {
   port?: number;
   host?: string | boolean;
   profile?: string;
+  /** `"android"` (default) or `"ios"`. */
+  os?: string;
 }
 
 /**
  * `farm dev --mobile`: the dev server with a `--mobile` client, farm-routes.json pointed at it,
- * and the generated Android project, installed and opened when a device or emulator is connected.
- * The dev server keeps running after the app opens.
+ * and the generated native project for `--os`, installed and opened when a device, emulator, or
+ * booted simulator is there. The dev server keeps running after the app opens.
  */
 export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
   const root = path.resolve(options.root || process.cwd());
+  const os = resolveMobileOS(options.os);
   setFarmPlatform("mobile");
   const runtime = await import("@farm.js/core/internal/config-runtime");
   const mobileRuntime = await runtime.loadFarmMobileRuntime();
@@ -169,15 +183,15 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
     root,
     command: "dev" as const,
     profile: options.profile,
-    os: MOBILE_OS,
+    os,
     cache,
   };
   // Check the block before the server starts, so a config error is not buried under its banner.
   await mobileRuntime.resolveFarmMobileApp({
     ...appOptions,
-    server: formatMobileDevServer(options.host, options.port ?? 3000),
+    server: formatMobileDevServer(options.host, options.port ?? 3000, os),
   });
-  const shell = await loadFarmMobileShell(MOBILE_OS, root);
+  const shell = await loadFarmMobileShell(os, root);
 
   const { startDevServer } = await import("./dev");
   const server = await startDevServer({ root }, options.port, options.host);
@@ -188,7 +202,7 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
     }
     const app = await mobileRuntime.generateFarmMobileRoutes({
       ...appOptions,
-      server: formatMobileDevServer(options.host, address.port),
+      server: formatMobileDevServer(options.host, address.port, os),
     });
     for (const warning of app.warnings) runtime.logger.warn(warning);
     const context = await writeMobileProject(shell, app, "dev", mobileRuntime);
@@ -207,16 +221,23 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
 export interface FarmMobileBuildOptions {
   root?: string;
   profile?: string;
-  /** Also build the debug app from the generated project (`./gradlew assembleDebug`). */
+  /** `"android"` (default) or `"ios"`. */
+  os?: string;
+  /** Android: also build the debug app from the generated project (`./gradlew assembleDebug`). */
   apk?: boolean;
 }
 
 /**
  * `farm build --mobile`: the `--mobile` client build, farm-routes.json with `mobile.server`, and
- * the generated Android project. The web build's output is left alone.
+ * the generated native project for `--os`. The web build's output is left alone. On iOS it also
+ * builds the simulator app when Xcode is installed, and says what to install when it is not.
  */
 export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Promise<string[]> {
   const root = path.resolve(options.root || process.cwd());
+  const os = resolveMobileOS(options.os);
+  if (options.apk && os !== "android") {
+    throw new FarmMobileError("--apk builds the Android app; it is not available with --os ios.");
+  }
   return withProductionNodeEnv(async () => {
     setFarmPlatform("mobile");
     const runtime = await import("@farm.js/core/internal/config-runtime");
@@ -232,13 +253,13 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
       root,
       command: "build" as const,
       profile: options.profile,
-      os: MOBILE_OS,
+      os,
       userConfig,
       cache: new Map(),
     };
     // Fails on a missing or invalid block (such as an http server) before anything builds.
     await mobileRuntime.resolveFarmMobileApp(appOptions);
-    const shell = await loadFarmMobileShell(MOBILE_OS, root);
+    const shell = await loadFarmMobileShell(os, root);
 
     const config = await runtime.resolveConfig(
       { ...userConfig, root: userConfig?.root ?? root },
@@ -266,13 +287,17 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     for (const warning of app.warnings) runtime.logger.warn(warning);
     const context = await writeMobileProject(shell, app, "build", mobileRuntime);
     runtime.logger.info(`📱 ${shownPath(root, context.projectDir)} (${shell.os} project)`);
-    if (!options.apk) {
+    if (os === "android" && !options.apk) {
       runtime.logger.info("Run farm build --mobile --apk to build the debug app.");
       return [context.projectDir];
     }
-    const { files } = await shell.package({ ...context, distDir: path.resolve(root, dirs.dist) });
+    const { files, message } = await shell.package({
+      ...context,
+      distDir: path.resolve(root, dirs.dist),
+    });
     for (const file of files) runtime.logger.info(`📦 ${shownPath(root, file)}`);
-    return files;
+    if (message) runtime.logger.info(message);
+    return files.length > 0 ? files : [context.projectDir];
   });
 }
 
