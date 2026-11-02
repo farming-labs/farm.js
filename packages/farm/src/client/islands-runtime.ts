@@ -4,7 +4,8 @@
  * runtime uses, so the rest of Farm's runtime stays the same; apps on isolated hydration without
  * islands mode never load islx.
  */
-import { enhanceForms, setActionNavigator } from "@farm.js/islx/client";
+import { enhanceForms, setActionInterceptor, setActionNavigator } from "@farm.js/islx/client";
+import { farmIslandsActionInterceptor } from "../islands-action-client";
 import * as React from "react";
 import {
   IslandsProvider,
@@ -56,6 +57,8 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIslandsRuntimeOp
     report: options.report,
   });
   const router = () => (window as Window & { __FARM_SPA_ROUTER__?: Router }).__FARM_SPA_ROUTER__;
+  // Server functions and queries on islx's calls: their cache entries, invalidations and errors.
+  setActionInterceptor(farmIslandsActionInterceptor);
   setActionNavigator({
     refresh: () => router()?.refresh?.({ scroll: false }),
     navigate: (href) => {

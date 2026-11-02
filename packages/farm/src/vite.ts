@@ -1,6 +1,11 @@
 import { resolveFarmServerComponentsMode } from "./server-components-mode";
 import { transformFarmFormActionModule } from "./form-actions-transform";
 import {
+  createFarmServerFnBoundaryModule,
+  isFarmServerFnBoundaryId,
+  transformFarmServerFns,
+} from "./server-fn-transform";
+import {
   invalidateFailedFarmDevModules,
   invalidateFarmDevDependents,
   loadFarmDevModule,
@@ -1217,6 +1222,14 @@ export function farmPlugin(
   });
   let farmApp: FarmApp;
   let serverFnTransformActive = false;
+  // Islands mode runs server functions on islx's actions: no @farm.js/plugin/rsc needed.
+  const islandsServerFns = () => {
+    const config = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
+    return (
+      config.experimental?.serverActions === true &&
+      resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands"
+    );
+  };
   let reactRefreshActive = false;
   let server: ViteDevServer;
   let apiRouteManager: APIRouteManager;
@@ -1288,7 +1301,11 @@ export function farmPlugin(
         (plugin) => plugin.name === SERVER_FN_TRANSFORM_PLUGIN,
       );
       reactRefreshActive = isFarmReactRefreshActive(config);
-      if (options.experimental?.serverActions === true && !serverFnTransformActive) {
+      if (
+        options.experimental?.serverActions === true &&
+        !serverFnTransformActive &&
+        !islandsServerFns()
+      ) {
         logger.warn(
           "experimental.serverActions has no effect without @farm.js/plugin/rsc in the Vite " +
             "plugins. Server functions stay server-only, and importing one from client code " +
@@ -3612,6 +3629,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
     },
 
     async load(id, loadOptions) {
+      if (isFarmServerFnBoundaryId(id) && islandsServerFns()) {
+        // The "use server" boundary of a module whose server functions were found without a
+        // directive. Its exports come from the source on disk, never from the request.
+        const file = id.split("?", 1)[0]!;
+        this.addWatchFile(file);
+        const source = await fs.promises.readFile(file, "utf8");
+        return createFarmServerFnBoundaryModule(source, file) ?? "export {};\n";
+      }
+
       if (typeof fontImports.load === "function") {
         const fontModule = await fontImports.load.call(this, id);
         if (fontModule) return fontModule;
@@ -3806,6 +3832,23 @@ export const manifest = getManifest();
       // the browser (RFC 0003). The RSC engine has its own transform.
       const actionConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
       if (
+        islandsServerFns() &&
+        !isFarmServerFnBoundaryId(id) &&
+        !id.includes("/node_modules/") &&
+        /\.[cm]?[jt]sx?(?:$|\?)/.test(id)
+      ) {
+        // A module that exports createServerFn or createServerQuery: on the server its server
+        // functions register through a "use server" boundary; in the browser they become
+        // references. An explicit "use server" module keeps its directive and goes on below.
+        const serverFns = transformFarmServerFns(code, id, {
+          environment: transformOptions?.ssr === true ? "rsc" : "client",
+        });
+        if (serverFns) {
+          if (!serverFns.code.includes("use server")) return { code: serverFns.code, map: null };
+          code = serverFns.code;
+        }
+      }
+      if (
         resolveFarmServerComponentsMode(actionConfig.experimental?.serverComponents) ===
           "islands" &&
         code.includes("use server") &&
@@ -3834,7 +3877,10 @@ export const manifest = getManifest();
       }
       if (!transformOptions?.ssr) {
         const currentConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
-        if (currentConfig.experimental?.serverActions !== true || !serverFnTransformActive) {
+        if (
+          (currentConfig.experimental?.serverActions !== true || !serverFnTransformActive) &&
+          !islandsServerFns()
+        ) {
           // Without the server-function transform there is no client stub for
           // server queries: bundling the defining module into the browser
           // executes the server handler there. Fail with an actionable

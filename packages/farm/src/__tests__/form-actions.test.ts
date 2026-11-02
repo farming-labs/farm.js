@@ -106,7 +106,49 @@ describe("islands-mode server actions (run by islx)", () => {
       }),
       config,
     );
-    expect(await response?.json()).toEqual({ result: 5 });
+    // A call from JavaScript gets Farm's result: the value, and the cache keys it invalidated.
+    expect(await response?.json()).toEqual({
+      result: { __farmAction: { invalidations: [] }, value: 5 },
+    });
+  });
+
+  it("sends the cache keys an action invalidated, and a declared failure as data", async () => {
+    const { invalidate } = await import("../cache");
+    const { ServerFnFailure } = await import("../server-fn-error");
+    registerFarmFormAction(async () => {
+      invalidate(["todos", "list"]);
+      return "saved";
+    }, "rpc-invalidate");
+    registerFarmFormAction(async () => {
+      throw new ServerFnFailure("TAKEN", { field: "name" }, { status: 409, message: "Taken" });
+    }, "rpc-failure");
+    const call = (id: string) =>
+      handleFarmFormActionRequest(
+        new Request("https://app.test/todos", {
+          method: "POST",
+          headers: {
+            [FARM_FORM_ACTION_HEADER]: id,
+            "content-type": "text/plain;charset=UTF-8",
+            origin: "https://app.test",
+          },
+          body: JSON.stringify({ a: [] }),
+        }),
+        config,
+      );
+    const saved = (await (await call("rpc-invalidate"))!.json()) as {
+      result: { __farmAction: { invalidations: string[] }; value: string };
+    };
+    expect(saved.result.value).toBe("saved");
+    expect(saved.result.__farmAction.invalidations).toHaveLength(1);
+    const failed = (await (await call("rpc-failure"))!.json()) as {
+      result: { __farmAction: { error: Record<string, unknown> } };
+    };
+    expect(failed.result.__farmAction.error).toMatchObject({
+      name: "ServerFnFailure",
+      code: "TAKEN",
+      status: 409,
+      data: { field: "name" },
+    });
   });
 
   it("applies Farm's body size limit", async () => {
