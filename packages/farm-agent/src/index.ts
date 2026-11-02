@@ -14,7 +14,7 @@ export interface AgentOptions extends Omit<
   AgentUnitConfig,
   "server" | "preset" | "runtime" | "cloudflare" | "nitro"
 > {
-  /** Where the agent API is mounted. It owns every path under it. Default `/api/agent`. */
+  /** Where the agent API is mounted, under `/api`. It owns every path under it. Default `/api/agent`. */
   basePath?: string;
   /** The folder of agent files, relative to the app root. Default `agents` in `srcDir`. */
   agentsDir?: string;
@@ -31,7 +31,12 @@ function normalizeBasePath(value: string): string {
   if (!value.startsWith("/")) {
     throw new Error(`@farm.js/agent: basePath must start with "/", got "${value}".`);
   }
-  return value.replace(/\/+$/, "") || "/";
+  const basePath = value.replace(/\/+$/, "");
+  // The agents are API routes, so Farm's middleware and guards run for them.
+  if (basePath !== "/api" && !basePath.startsWith("/api/")) {
+    throw new Error(`@farm.js/agent: basePath must be under /api, got "${value}".`);
+  }
+  return basePath;
 }
 
 /**
