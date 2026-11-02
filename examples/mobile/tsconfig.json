@@ -4,7 +4,11 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ESNext",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
@@ -13,5 +17,13 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["src/**/*", "farm.config.ts"]
+  "include": [
+    "src/**/*",
+    "farm.config.ts"
+  ],
+  "exclude": [
+    "src/**/*.native.tsx",
+    "src/**/*.android.tsx",
+    "src/**/*.ios.tsx"
+  ]
 }

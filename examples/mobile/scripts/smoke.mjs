@@ -134,7 +134,10 @@ await run(["build"]);
 const leaks = [
   "MapScreen",
   "CameraScreen",
+  "AndroidCameraScreen",
   "DeviceScreen",
+  "registerFarmScreens",
+  "serverFetch",
   "farm:mobile-shell",
   "offerNavigation",
   "__farmBridge",
@@ -187,6 +190,12 @@ try {
   const feed = await (await fetch(`${origin}/feed`)).text();
   expect((feed.match(/Observation \d+/g) ?? []).length === 240, "/feed renders 240 rows");
   expect((await fetch(`${origin}/stations/nope`)).status === 404, "an unknown station is a 404");
+  // What the /map native screen lists.
+  const stations = await (await fetch(`${origin}/api/stations`)).json();
+  expect(
+    Array.isArray(stations) && stations.map((station) => station.id).join() === "north,lake,pass",
+    "GET /api/stations lists the stations",
+  );
   const created = await fetch(`${origin}/api/notes`, {
     method: "POST",
     headers: { "content-type": "application/json", origin },

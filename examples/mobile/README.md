@@ -31,14 +31,51 @@ pnpm smoke               # checks the mobile decisions and the web build
 | `/docs/[...slug]`        | A catch-all route                                                         |
 | `/feed`                  | 240 rows, for scroll and frame-time checks                                |
 | `/stations/[id]`         | A programmatic route (`src/farm.routes.tsx`) whose data comes from `data.main` |
-| `/map`                   | `page.native.tsx`; `mobile.native.routes` keeps it web on iOS             |
-| `/camera`                | `page.native.tsx` with a `page.android.tsx` override                      |
+| `/map`                   | `page.native.tsx`: a React Native list of stations from `GET /api/stations`; a row opens the web `/stations/[id]`. `mobile.native.routes` keeps it web on iOS |
+| `/camera`                | `page.native.tsx` with a `page.android.tsx` override: notes from `GET /api/notes` and a button to the web `/notes/new` modal |
 | `/settings/device`       | `page.kt`: a platform screen on Android                                   |
 | `/lab/packing`           | Only portable elements and inline styles: the analyzer says `port`        |
 | `/lab/chart`             | A canvas through a ref, a table, and `window`: the analyzer lists why it stays web |
 
-Native and platform screens show a placeholder in the shell: Farm records them in
-`farm-routes.json` but does not build `page.native.tsx` or `page.kt` yet.
+`/map` and `/camera` are React Native screens built by `@farm.js/native` (Metro in
+`pnpm dev:mobile`, Hermes bytecode in `pnpm build:apk`). They call public API routes only: native
+screens send no cookies and no `Origin` header yet. `/settings/device` (`page.kt`) still shows a
+placeholder: Farm does not build platform screens yet. Native files are type-checked on their own
+(`tsconfig.native.json`), so the web `tsconfig.json` never needs `react-native`.
+
+Verified with `pnpm dev:mobile` on an Android 15 emulator (SwiftShader software rendering, no GPU):
+
+- `/map` (`page.native.tsx`) and `/camera` (`page.android.tsx`) render as React Native, `/map`
+  with the stations from `GET /api/stations`.
+- A row on `/map` pushes the web `/stations/[id]` in 120 to 134 ms, and the back gesture returns to
+  the native list. `/camera` opens the web `/notes/new` modal, and back closes it. Tabs work.
+- Fast Refresh works. React Native 0.88 runs on the example's React 19.2.8, with one React in the
+  dev bundle.
+- Cold start takes 1.4 to 2.9 s, with 84 to 198 ms of main-thread startup work. The React Native
+  runtime warms up 1.2 to 5.0 s after the first paint, loading its bundle from Metro. The first
+  `/map` open takes 611 to 1413 ms (103 to 797 ms on later opens), the first `/camera` open 184 to
+  205 ms.
+- The Hermes bytecode build takes 18.5 s in Metro and 1.6 s in `hermesc`, for 1.23 MB of bytecode
+  and a 73.7 MB debug APK.
+
+Not verified yet: native screens in a production bytecode build (it installs and cold-starts, but
+no native screen was opened in it), and real devices, so the emulator numbers say nothing about
+smoothness on a phone.
+
+When a native screen throws while loading, a build shows its web version (`page.tsx`, the web
+twin) and logs `<module id> failed to load: <error>` (`adb logcat -s FarmShell`). In
+`pnpm dev:mobile`, React Native's error screen shows the error instead.
+
+Building the native screens needs the Android NDK 27.1.12297006 (2.4 GB) and CMake 3.22.1 (94 MB),
+which Gradle installs on the first build, for the 73 KB `libappmodules.so`.
+
+React versions: this example pins `react` and `react-dom` 19.2.8, the version Farm core is tested
+on. React Native 0.88 declares a `react@^19.3.0` peer (its renderer is built from 19.3.0), so pnpm
+warns, but the native screens run on 19.2.8 in dev; `@farm.js/native` peers on `react@>=19.2.8`.
+The web pages and the native screens share the example's one `react`. The example cannot move to
+19.3 inside this workspace: `@farm.js/core` resolves its own 19.2.8 dev dependency here, so
+`farm dev` server rendering would load two Reacts and every page fails. An app that installs Farm
+from npm has one `react` (core only peers on it), so it can use 19.3 for both.
 
 The root layout has no stylesheet, because the analyzer checks every layout above a route. Styled
 routes get `globals.css` from the `(styled)` route group's layout; `/lab` routes use inline styles.
