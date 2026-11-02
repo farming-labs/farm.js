@@ -107,6 +107,11 @@ export interface FarmMobileApp {
 
 const SCRIPT_PAGE = /\.(?:tsx|ts|jsx|js)$/;
 
+/** `.js` pages may contain JSX, as in the client build. */
+function scriptLang(file: string): "ts" | "tsx" | "jsx" {
+  return file.endsWith(".tsx") ? "tsx" : file.endsWith(".ts") ? "ts" : "jsx";
+}
+
 /** Static `export const mobile` of every script page; pages without one are not parsed. */
 async function readPageExports(
   root: string,
@@ -126,7 +131,7 @@ async function readPageExports(
       const config = readFarmMobilePageExport(
         source,
         relative,
-        (name, code) => parse(name, code).program as never,
+        (name, code) => parse(name, code, { lang: scriptLang(name) }).program as never,
         { os },
       );
       if (config) exports.set(route, { file: relative, config });

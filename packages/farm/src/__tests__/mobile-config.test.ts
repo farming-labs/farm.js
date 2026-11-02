@@ -715,6 +715,8 @@ export const mobile = { presentation: "modal", prefetch: "off" } satisfies FarmM
 ${PAGE}`,
       // "mobile" in a string is not an export.
       "src/app/notes/page.tsx": `const label = "mobile";\n${PAGE}`,
+      // A .js page with JSX.
+      "src/app/about/page.js": `export const mobile = { prefetch: "off" };\nexport default function Feed() { return <p>feed</p>; }\n`,
     });
     const { resolveFarmMobileApp } = await loadFarmMobileRuntime();
     const app = await resolveFarmMobileApp({ root, userConfig: userConfig() });
@@ -728,6 +730,7 @@ ${PAGE}`,
       presentation: "modal",
       prefetch: "off",
     });
+    expect(app.screens["/about"]).toMatchObject({ prefetch: "off" });
     expect(app.warnings).toEqual([]);
     // A page presentation over a config one warns with both.
     const overridden = await resolveFarmMobileApp({
