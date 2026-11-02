@@ -936,6 +936,86 @@ export default async function IslandsPage() {
     }
   }, 120_000);
 
+  it("marks streamed navigation flushes with a per-response token page content cannot forge", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      // A JSON-LD script with user content carrying the old fixed marker, then a Suspense
+      // boundary that streams in a later flush.
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import { Suspense } from "react";
+
+export const dynamic = "force-dynamic";
+
+async function Late() {
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  return <p>late content</p>;
+}
+
+export default async function Page() {
+  const jsonLd = { name: "<!--farm-flush--><img src=x onerror=alert(1)>" };
+  return (
+    <main>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <Suspense fallback={<p>loading</p>}><Late /></Suspense>
+    </main>
+  );
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "flush-token-test",
+          experimental: { serverComponents: { mode: "islands" } },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+
+      const tokens: string[] = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            const token = response.headers.get("F-Flush") ?? "";
+            expect(token).toMatch(/^[0-9a-f]{32}$/);
+            tokens.push(token);
+            const flushes = (await response.text()).split(`<!--farm-flush:${token}-->`);
+            expect(flushes.length).toBeGreaterThan(1);
+            // The forged marker stays inside the shell's JSON-LD script.
+            expect(flushes[0]).toContain(
+              '<script type="application/ld+json">{"name":"<!--farm-flush--><img src=x onerror=alert(1)>"}</script>',
+            );
+            expect(flushes[0]).not.toContain("late content");
+            expect(flushes.slice(1).join("")).toContain("late content");
+          },
+          "/",
+          { headers: { Accept: "text/html", "F-Stream": "flush" } },
+        );
+      }
+      expect(tokens[0]).not.toBe(tokens[1]);
+
+      // A document request gets no markers and no token.
+      await runProductionRequest(serverDir, async (response) => {
+        expect(response.status).toBe(200);
+        expect(response.headers.has("F-Flush")).toBe(false);
+        const html = await response.text();
+        expect(html).not.toContain("<!--farm-flush:");
+        expect(html).toContain("late content");
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("gives a fresh CSP nonce to Farm's scripts and opted-in app scripts only", async () => {
     const root = await createProductionFixture();
 

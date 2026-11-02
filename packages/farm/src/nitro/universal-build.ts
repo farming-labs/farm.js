@@ -2352,21 +2352,24 @@ async function fetchFarmNavigationDocument(url, headers, recover = true, signal)
 
 ${
   streamNavigations
-    ? `const FARM_FLUSH_MARKER = "<!--farm-flush-->";
-
-// Reads a streamed navigation (F-Stream) up to the end of React's shell. \`next\` then resolves
+    ? `// Reads a streamed navigation (F-Stream) up to the end of React's shell. \`next\` then resolves
 // with each later flush as it ends, and null at the end; a document without a marker is all shell.
-async function readFarmNavigationStream(body) {
+// The marker carries the random token the server sent in the F-Flush header, so page content
+// cannot forge a boundary; a response without a valid token is all shell.
+async function readFarmNavigationStream(body, flushToken) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
+  const marker = typeof flushToken === "string" && /^[0-9a-f]{32}$/.test(flushToken)
+    ? "<!--farm-flush:" + flushToken + "-->"
+    : "";
   let text = "";
   let done = false;
   const next = async function() {
     for (;;) {
-      const at = text.indexOf(FARM_FLUSH_MARKER);
+      const at = marker ? text.indexOf(marker) : -1;
       if (at !== -1) {
         const flush = text.slice(0, at);
-        text = text.slice(at + FARM_FLUSH_MARKER.length);
+        text = text.slice(at + marker.length);
         return flush;
       }
       if (done) {
@@ -2967,7 +2970,7 @@ ${
 ${
   streamNavigations
     ? `      if (streamShell && response.body) {
-        const streamed = await readFarmNavigationStream(response.body);
+        const streamed = await readFarmNavigationStream(response.body, response.headers.get("F-Flush"));
         if (!streamed.next) {
           store(streamed.shell);
           return streamed.shell;
@@ -7452,10 +7455,22 @@ function escapeFarmHtmlAttribute(value) {
     .replace(/>/g, "&gt;");
 }
 
-async function renderFarmElement(ReactDOMServer, element, routeKey, flushMarkers = false) {
-  // Written after each React flush in a streamed navigation (flushMarkers): the browser swaps in
+// A streamed navigation's flush marker token: 128 random bits, hex.
+function createFarmFlushToken() {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  let token = "";
+  for (const byte of bytes) token += byte.toString(16).padStart(2, "0");
+  return token;
+}
+
+async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken = "") {
+  // Written after each React flush in a streamed navigation (flushToken): the browser swaps in
   // the shell, then adds each Suspense boundary as soon as the flush that completed it ends.
-  const FARM_FLUSH_MARKER = "<!--farm-flush-->";
+  // The token is random per response and reaches the browser in the F-Flush header, so page
+  // content cannot forge a boundary.
+  const flushMarkers = Boolean(flushToken);
+  const FARM_FLUSH_MARKER = flushMarkers ? "<!--farm-flush:" + flushToken + "-->" : "";
   // Islands mode: each render writes its islands' values itself, so a request that renders twice
   // (notFound(), or a synchronous attempt that suspends and streams) still sends them.
   if (typeof farmIslandsRender === "function") element = farmIslandsRender(element);
@@ -10164,11 +10179,14 @@ ${
           !route.shouldHydrate &&
           request.headers.get("f-render") === "tree";
         // A navigation the browser streams marks where each React flush ends, so the browser
-        // shows the page before its Suspense content arrives (FARM_FLUSH_MARKER).
-        const farmFlushMarkers = request.headers.get("f-stream") === "flush";`
+        // shows the page before its Suspense content arrives (FARM_FLUSH_MARKER). The marker
+        // carries a random token sent in the F-Flush header: page content cannot forge one.
+        const farmFlushToken = request.headers.get("f-stream") === "flush"
+          ? createFarmFlushToken()
+          : "";`
             : `const farmLayoutKeyOf = null;
         const farmPayloadOnlyNavigation = false;
-        const farmFlushMarkers = false;`
+        const farmFlushToken = "";`
         }
         const renderPageElement = async () => {
             // First, render the page content
@@ -10291,7 +10309,7 @@ ${
           }
 
           wrappedElement = wrapWithFarmIntegrationProviders(wrappedElement);
-          return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern, farmFlushMarkers);
+          return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern, farmFlushToken);
         };
         const renderedPage = ${
           hasMiddlewareRuntime
@@ -10610,7 +10628,11 @@ ${
               );
           return applyProductionMiddlewareHeaders(farmOwnedResponse(streamedDocument, {
             status: pageStatus,
-            headers: { ...responseHeaders, "x-farm-preload-streaming": "1" },
+            headers: {
+              ...responseHeaders,
+              "x-farm-preload-streaming": "1",
+              ...(farmFlushToken ? { "F-Flush": farmFlushToken } : {}),
+            },
           }), middlewareHeaders);
         }
 
