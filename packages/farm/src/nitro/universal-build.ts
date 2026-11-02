@@ -3362,7 +3362,7 @@ function isFarmDocsPath() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientCancellation, createClientPluginManager, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
@@ -3425,6 +3425,15 @@ ${generateUniversalRouterStateProperties()}
     const from = this.currentPath;
     if (await this.shouldBlockNavigation({ from, to, action })) {
       if (action === "pop") this.revertBlockedPopState(from);
+      return;
+    }
+    // A refresh re-renders the page on screen; only a move to another page is offered.
+    if (
+      action !== "pop" &&
+      !(options.refresh && to === from) &&
+      (await runFarmNavigationDelegates({ url: url.href, from, to, action }))
+    ) {
+      this.cancelActiveNavigation();
       return;
     }
     if (action === "pop") {
@@ -3750,7 +3759,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -4565,6 +4574,15 @@ ${
     const from = this.currentPath;
     if (await this.shouldBlockNavigation({ from, to, action })) {
       if (action === "pop") this.revertBlockedPopState(from);
+      return;
+    }
+    // A refresh re-renders the page on screen; only a move to another page is offered.
+    if (
+      action !== "pop" &&
+      !(options.refresh && to === from) &&
+      (await runFarmNavigationDelegates({ url: url.href, from, to, action }))
+    ) {
+      this.cancelActiveNavigation();
       return;
     }
     if (action === "pop") {

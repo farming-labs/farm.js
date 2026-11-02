@@ -21,6 +21,7 @@ import type { FarmI18nClientSnapshot } from "../i18n/types";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmRouteRenderPlan } from "../navigation/render-plan";
 import { getFarmIslandValueHeaders } from "./island-value-protocol";
+import { runFarmNavigationDelegates } from "./navigation-delegate";
 
 export { getHashTargetElement } from "./hash-target";
 export { isFarmExternalNavigationURL } from "./navigation-url";
@@ -357,13 +358,16 @@ export class SPARouter {
     }
 
     const from = window.location.pathname + window.location.search;
+    const action = replace ? "replace" : "push";
+    if (await this.shouldBlockNavigation({ from, to: fullPath, action })) {
+      return;
+    }
+    // A refresh re-renders the page on screen; only a move to another page is offered.
     if (
-      await this.shouldBlockNavigation({
-        from,
-        to: fullPath,
-        action: replace ? "replace" : "push",
-      })
+      !(refresh && fullPath === from) &&
+      (await runFarmNavigationDelegates({ url: url.href, from, to: fullPath, action }))
     ) {
+      this.cancelActiveNavigation();
       return;
     }
 
