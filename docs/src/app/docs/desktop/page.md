@@ -297,7 +297,7 @@ A page can set its own options with a static export, read at build time without 
 
 ```tsx
 // src/app/notes/[id]/page.tsx
-import type { FarmMobilePageConfig } from "@farm.js/core/config";
+import type { FarmMobilePageConfig } from "@farm.js/core/mobile";
 
 export const mobile = { presentation: "modal", prefetch: "off" } satisfies FarmMobilePageConfig;
 ```
