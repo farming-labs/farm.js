@@ -312,7 +312,17 @@ describe("the bridge script", () => {
     const sandbox = {
       window,
       location: { href: "http://10.0.2.2:3000/notes", pathname: "/notes", search: "" },
-      document: { title: "Notes", addEventListener() {}, querySelector: () => null },
+      document: {
+        title: "Notes",
+        addEventListener() {},
+        querySelector: () => null,
+        documentElement: {
+          attributes: {} as Record<string, string>,
+          setAttribute(name: string, value: string) {
+            this.attributes[name] = value;
+          },
+        },
+      },
       performance: { now: () => 0 },
       requestAnimationFrame: (callback: () => void) => callback(),
       URL,
@@ -324,8 +334,13 @@ describe("the bridge script", () => {
       Error,
     };
     vm.runInNewContext(source, sandbox);
-    return { bridge: window.__farmBridge, window, posted };
+    return { bridge: window.__farmBridge, window, posted, root: sandbox.document.documentElement };
   }
+
+  it("marks the page as running in the shell so app CSS can hide web-only chrome", async () => {
+    const { root } = await loadBridge();
+    expect(root.attributes["data-farm-shell"]).toBe("android");
+  });
 
   it("takes in-app navigations as visits, except the ones it renders itself", async () => {
     const { bridge, window, posted } = await loadBridge();
