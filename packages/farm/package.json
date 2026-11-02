@@ -716,6 +716,11 @@
       "import": "./dist/internal/islx-client.mjs",
       "require": "./dist/internal/islx-client.cjs"
     },
+    "./internal/server-fn-transform": {
+      "types": "./dist/internal/server-fn-transform.d.ts",
+      "import": "./dist/internal/server-fn-transform.mjs",
+      "require": "./dist/internal/server-fn-transform.cjs"
+    },
     "./internal/islx-server": {
       "types": "./dist/internal/islx-server.d.ts",
       "import": "./dist/internal/islx-server.mjs",
@@ -778,7 +783,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farm.js/islx": "0.0.5",
+    "@farm.js/islx": "0.0.6",
     "@farming-labs/orm": "0.0.65",
     "@farming-labs/orm-runtime": "0.0.65",
     "@formatjs/icu-messageformat-parser": "3.5.15",

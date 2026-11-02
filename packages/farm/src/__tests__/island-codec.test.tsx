@@ -225,7 +225,8 @@ describe("typed server action calls", () => {
     expect(received[0]).toEqual(new Date("2026-01-01T00:00:00.000Z"));
     expect(received[1]).toEqual(new Map([["k", 9n]]));
     const { result } = (await response!.json()) as { result: unknown };
-    const decoded = decodeFarmJson(result) as { at: Date; ids: Set<bigint> };
+    // Farm's result for a call from JavaScript: the value is the action's, tagged.
+    const decoded = (decodeFarmJson(result) as { value: { at: Date; ids: Set<bigint> } }).value;
     expect(decoded.at).toEqual(new Date("2026-10-28T10:00:00.000Z"));
     expect(decoded.ids).toEqual(new Set([1n, 2n]));
   });

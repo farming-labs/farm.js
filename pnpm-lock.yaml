@@ -1516,6 +1516,9 @@ importers:
       react-server-dom-webpack:
         specifier: 19.2.8
         version: 19.2.8(react-dom@19.2.8)(react@19.2.8)(webpack@5.112.2)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       '@farm.js/cli':
         specifier: workspace:*
@@ -2167,8 +2170,8 @@ importers:
   packages/farm:
     dependencies:
       '@farm.js/islx':
-        specifier: 0.0.5
-        version: 0.0.5(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
+        specifier: 0.0.6
+        version: 0.0.6(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
       '@farming-labs/orm':
         specifier: 0.0.65
         version: 0.0.65
@@ -6097,8 +6100,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@farm.js/islx@0.0.5(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
-    resolution: {integrity: sha512-dAuBkKKL02AvcNpHEn3NsH9+08b2mX2cCkspS97WW1Yi2mJ6nsgbRY899Uv6oS3p2IbccFoQAdEoFGRgm7dbXQ==}
+  /@farm.js/islx@0.0.6(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
+    resolution: {integrity: sha512-4LC/+4PP1u3UgJGQsaQB2s5wOrZotPkK5iH6qw7Cqzj3AWCtvT0N+uMyfbcYqII/qfg2/dMVQsry0J/H9qfRww==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@tanstack/react-router': '>=1.170'

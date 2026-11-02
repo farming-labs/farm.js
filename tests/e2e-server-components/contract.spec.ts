@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -450,5 +453,159 @@ test("a client component receives values JSON cannot hold as their own types", a
   await page.getByRole("button", { name: "Typed clicks: 0" }).click();
   await expect(page.getByRole("button", { name: "Typed clicks: 1" })).toBeVisible();
   await expect(page.getByTestId("typed")).toHaveText(expected);
+  expect(errors).toEqual([]);
+});
+
+test("middleware runs for API routes, and API routes keep their validation", async ({
+  baseURL,
+  request,
+}) => {
+  const echo = await request.get("/api/echo?word=hi");
+  expect(echo.status()).toBe(200);
+  expect(await echo.json()).toEqual({ echo: "hi" });
+  expect(echo.headers()["x-contract-middleware"]).toBe("api");
+  // Middleware rewrites to another API route.
+  expect(await (await request.get("/api/alias")).json()).toEqual({ echo: "rewritten" });
+  const posted = await request.post("/api/echo", {
+    data: { word: "posted" },
+    headers: { Origin: baseURL! },
+  });
+  expect(await posted.json()).toEqual({ echo: "posted" });
+  const invalid = await request.post("/api/echo", {
+    data: { word: "" },
+    headers: { Origin: baseURL! },
+  });
+  expect(invalid.status()).toBe(400);
+  expect((await request.get("/api/missing")).status()).toBe(404);
+});
+
+test("after() runs once the response has finished", async ({ page }) => {
+  const token = randomUUID();
+  const marker = path.join(tmpdir(), `farm-contract-after-${token}.json`);
+  await rm(marker, { force: true });
+  const response = await page.goto(`/after?token=${token}`);
+  expect(response?.status()).toBe(200);
+  await expect(page.getByTestId("after-status")).toHaveText("scheduled");
+  expect(existsSync(marker)).toBe(false);
+  let written: { token: string; scheduledAt: number; completedAt: number } | undefined;
+  await expect
+    .poll(async () => {
+      try {
+        written = JSON.parse(await readFile(marker, "utf8"));
+        return written?.token;
+      } catch {
+        return undefined;
+      }
+    })
+    .toBe(token);
+  expect(written!.completedAt - written!.scheduledAt).toBeGreaterThanOrEqual(500);
+  await rm(marker, { force: true });
+});
+
+test("server function middleware runs in order for browser and form calls", async ({ page }) => {
+  const trace = [
+    "session:before",
+    "permission:before",
+    "audit:before",
+    "handler",
+    "audit:after",
+    "permission:after",
+    "session:after",
+  ];
+  const errors = collectErrors(page);
+  await page.goto("/server-fn-middleware");
+  await hydrated(page);
+  const output = page.getByTestId("middleware-result");
+  await page.getByRole("button", { name: "Call with middleware" }).click();
+  await expect(output).toContainText('"message":"from the browser"');
+  expect(JSON.parse((await output.textContent()) || "{}")).toMatchObject({
+    user: "contract-user",
+    permission: "notes:write",
+    method: "POST",
+    fromForm: false,
+    trace,
+  });
+  await page.getByRole("button", { name: "Submit with middleware" }).click();
+  await expect(output).toContainText('"message":"from a form"');
+  expect(JSON.parse((await output.textContent()) || "{}")).toMatchObject({ fromForm: true, trace });
+  expect(errors).toEqual([]);
+});
+
+test("server queries prefetch, dedupe, and refetch after an invalidation", async ({ page }) => {
+  const errors = collectErrors(page);
+  let calls = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.resourceType() === "fetch") calls++;
+  });
+  await page.goto("/server-query");
+  await hydrated(page);
+  await page.getByRole("button", { name: "Prefetch product" }).click();
+  await expect(page.getByTestId("prefetch-status")).toHaveText(/^prefetched:\d+:\d+$/);
+  const [, version, queried] = (await page.getByTestId("prefetch-status").textContent())!.split(
+    ":",
+  );
+  expect(calls).toBe(1);
+  // Two consumers of the prefetched key read the cache: no request.
+  await page.getByRole("button", { name: "Show products" }).click();
+  const first = page.getByTestId("product-first");
+  await expect(first).toContainText(`"version":${version}`);
+  await expect(first).toContainText(`"calls":${queried}`);
+  await expect(page.getByTestId("product-second")).toHaveText((await first.textContent())!);
+  expect(calls).toBe(1);
+  // The update invalidates the key: both consumers refetch it once.
+  await page.getByRole("button", { name: "Update product" }).click();
+  await expect(first).toContainText(`"version":${Number(version) + 1}`);
+  await expect(first).toContainText(`"calls":${Number(queried) + 1}`);
+  await expect(page.getByTestId("product-second")).toHaveText((await first.textContent())!);
+  expect(calls).toBe(3);
+  expect(errors).toEqual([]);
+});
+
+test("navigation keeps the document title in sync, and back restores it", async ({ page }) => {
+  await page.goto("/");
+  await hydrated(page);
+  await expect(page).toHaveTitle("Server components contract");
+  await page.getByRole("link", { name: "Meta", exact: true }).click();
+  await expect(page).toHaveTitle("Contract meta 42");
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    "content",
+    "Metadata from generateMetadata",
+  );
+  await page.getByRole("link", { name: "Queries", exact: true }).click();
+  await expect(page).toHaveTitle("Contract server queries");
+  await page.goBack();
+  await expect(page).toHaveTitle("Contract meta 42");
+  await page.goBack();
+  await expect(page).toHaveTitle("Server components contract");
+});
+
+test("the app's stylesheet loads", async ({ page }) => {
+  await page.goto("/");
+  const href = await page.locator('link[rel="stylesheet"]').first().getAttribute("href");
+  expect(href).toBeTruthy();
+  // As a <link> asks for it: Vite's dev server answers a bare CSS URL as a module.
+  const stylesheet = await page.request.get(href!, { headers: { Accept: "text/css,*/*;q=0.1" } });
+  expect(stylesheet.status()).toBe(200);
+  expect(stylesheet.headers()["content-type"]).toContain("text/css");
+  expect(await page.locator(".shell nav").evaluate((nav) => getComputedStyle(nav).display)).toBe(
+    "flex",
+  );
+});
+
+test("client components use Farm's router hooks, page state, blocker and Link", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/hooks");
+  await hydrated(page);
+  for (const probe of ["router", "navigation", "page-state", "blocker", "link"]) {
+    await expect(page.getByTestId(`probe-${probe}`)).toHaveAttribute("data-ready", "true");
+  }
+  await expect(page.getByTestId("probe-router")).toHaveText("router: function");
+  await expect(page.getByTestId("probe-navigation")).toHaveText("navigation: idle");
+  await page.getByRole("button", { name: "page state: none" }).click();
+  await expect(page.getByRole("button", { name: "page state: details" })).toBeVisible();
+  await page.getByRole("link", { name: "link home" }).click();
+  await expect(page).toHaveURL(/\/$/);
   expect(errors).toEqual([]);
 });
