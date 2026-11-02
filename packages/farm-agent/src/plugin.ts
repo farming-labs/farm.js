@@ -133,7 +133,12 @@ export function createAgentPlugin(config: AgentUnitConfig & { basePath: string }
               );
             }
             nitro.options.handlers.push(...added.filter((handler) => handler.handler !== entry));
-            const server = path.join(path.dirname(entry), "farm-server.mjs");
+            // Nitro writes handler paths into generated imports, so keep them in forward-slash
+            // form; a Windows `D:\…` path would lose its backslashes there.
+            const server = path.posix.join(
+              path.posix.dirname(entry.replaceAll("\\", "/")),
+              "farm-server.mjs",
+            );
             writeFileSync(server, SERVER_MODULE);
             nitro.options.handlers.push(
               { route: basePath, handler: server, middleware: true, lazy: false },
