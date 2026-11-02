@@ -5,7 +5,6 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
@@ -34,8 +33,10 @@ interface BridgeListener {
 /**
  * One bridge per WebView. Pooled WebViews keep their bridge when they move
  * into a screen; only [listener] changes. Messages in arrive through an
- * origin-scoped WebMessageListener (addJavascriptInterface as a fallback);
- * replies go out through evaluateJavascript.
+ * origin-scoped, main-frame-only WebMessageListener; replies go out through
+ * evaluateJavascript. A WebView without WebMessageListener gets no bridge at
+ * all (addJavascriptInterface reaches every frame, cross-origin iframes
+ * included), so the page runs as a plain web page there.
  */
 @SuppressLint("SetJavaScriptEnabled")
 class FarmBridge(
@@ -48,24 +49,31 @@ class FarmBridge(
     private val main = Handler(Looper.getMainLooper())
     private val fallbackScript: String?
 
+    /** True only in `farm dev --mobile` builds; gates per-call logging. */
+    private val dev = webView.context.resources.getBoolean(R.bool.farm_dev)
+
     init {
         val source = script.replace("__FARM_PLUGINS__", JSONArray(plugins.keys.toList()).toString())
         val origins = setOf(config.origin)
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+        fallbackScript = if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            if (!warnedUnsupported) {
+                warnedUnsupported = true
+                Log.w(TAG, "WebMessageListener is not supported by this WebView; pages run without the native bridge")
+            }
+            null
+        } else {
             WebViewCompat.addWebMessageListener(webView, "FarmNative", origins) {
                     _: WebView, message: WebMessageCompat, sourceOrigin: Uri, isMainFrame: Boolean, _: JavaScriptReplyProxy ->
                 if (isMainFrame && RouteConfig.originOf(sourceOrigin) == config.origin) {
                     message.data?.let(::handle)
                 }
             }
-        } else {
-            webView.addJavascriptInterface(JsInterface(), "FarmNative")
-        }
-        fallbackScript = if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            WebViewCompat.addDocumentStartJavaScript(webView, source, origins)
-            null
-        } else {
-            source
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                WebViewCompat.addDocumentStartJavaScript(webView, source, origins)
+                null
+            } else {
+                source
+            }
         }
     }
 
@@ -92,7 +100,11 @@ class FarmBridge(
             val message = runCatching { JSONObject(raw) }.getOrNull() ?: return@post
             when (message.optString("type")) {
                 "call" -> call(message)
-                "visit" -> listener?.onVisit(this, Uri.parse(message.getString("url")), message.optString("action") == "replace")
+                "visit" -> {
+                    // Malformed messages are dropped, never thrown on the main thread.
+                    val url = message.optString("url").ifEmpty { null } ?: return@post
+                    listener?.onVisit(this, Uri.parse(url), message.optString("action") == "replace")
+                }
                 "rendered" -> listener?.onRendered(
                     this,
                     message.optInt("token"),
@@ -110,7 +122,9 @@ class FarmBridge(
     }
 
     private fun call(message: JSONObject) {
-        val id = message.getInt("id")
+        // A call without a numeric id cannot be answered; drop it.
+        if (message.opt("id") !is Number) return
+        val id = message.optInt("id")
         val pluginName = message.optString("plugin")
         val method = message.optString("method")
         val started = System.nanoTime()
@@ -125,7 +139,7 @@ class FarmBridge(
             }
         }
         val ms = (System.nanoTime() - started) / 1e6
-        Log.i(TAG, "call #$id $pluginName.$method(${message.optJSONObject("args")}) ok=$ok -> $value (${"%.2f".format(ms)} ms native)")
+        if (dev) Log.i(TAG, "call #$id $pluginName.$method(${message.optJSONObject("args")}) ok=$ok -> $value (${"%.2f".format(ms)} ms native)")
         val payload = when (value) {
             null -> "null"
             is JSONObject, is JSONArray -> value.toString()
@@ -135,18 +149,10 @@ class FarmBridge(
         evaluate("window.__farmBridge._resolve($id, $ok, $payload)")
     }
 
-    private inner class JsInterface {
-        @JavascriptInterface
-        fun postMessage(raw: String) {
-            // Fallback path: addJavascriptInterface is not origin-scoped, so check the page first.
-            main.post {
-                val current = webView.url?.let(Uri::parse)
-                if (current != null && config.isAppUrl(current)) handle(raw)
-            }
-        }
-    }
-
     companion object {
         const val TAG = "FarmBridge"
+
+        /** Main thread only: one warning per process, not one per pooled WebView. */
+        private var warnedUnsupported = false
     }
 }

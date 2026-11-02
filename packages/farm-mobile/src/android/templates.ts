@@ -101,6 +101,11 @@ dependencies {
 `;
 }
 
+/**
+ * App resources. `farm_dev` is true only under `farm dev --mobile`: it enables the `-e server`
+ * and `--ei pool` launch overrides and per-call bridge logs, which a `farm build --mobile` APK
+ * (debuggable, with an exported launcher) must never honor.
+ */
 export function createStrings(context: MobileShellContext): string {
   const startPath = context.basePath || "/";
   return `<?xml version="1.0" encoding="utf-8"?>
@@ -108,6 +113,7 @@ export function createStrings(context: MobileShellContext): string {
 <resources>
     <string name="app_name">${escapeAndroidString(context.mobile.name)}</string>
     <string name="farm_start_path" translatable="false">${escapeAndroidString(startPath)}</string>
+    <bool name="farm_dev">${context.command === "dev"}</bool>
     <string name="back">Back</string>
     <string name="close">Close</string>
     <string name="farm_native_missing">The native screen %1$s is not in this build. Farm does not build src/native screens yet.</string>

@@ -158,7 +158,6 @@ describe("@farm.js/mobile/android", () => {
       if (file.endsWith(".kt"))
         expect(source.startsWith(`package ${SHELL_NAMESPACE}\n`)).toBe(true);
     }
-    expect(files["app/proguard-rules.pro"]).toContain(`${SHELL_NAMESPACE}.FarmBridge$JsInterface`);
     // aapt rejects "--" inside XML comments.
     for (const [file, source] of Object.entries(files)) {
       if (!file.endsWith(".xml")) continue;
@@ -192,6 +191,37 @@ describe("@farm.js/mobile/android", () => {
     )["app/src/main/res/xml/network_security_config.xml"];
     expect(build).toContain('<base-config cleartextTrafficPermitted="false" />');
     expect(build).not.toContain("domain-config");
+  });
+
+  it("never exposes the bridge to every frame through addJavascriptInterface", async () => {
+    const files = await generated(context());
+    for (const [file, source] of Object.entries(files)) {
+      if (!file.endsWith(".kt") && !file.endsWith(".pro")) continue;
+      expect(source).not.toContain("addJavascriptInterface(");
+      expect(source).not.toContain("@JavascriptInterface");
+    }
+    const bridge = files[`app/src/main/java/dev/farmjs/mobile/shell/FarmBridge.kt`];
+    expect(bridge).toContain("WebViewCompat.addWebMessageListener(");
+    // Malformed messages are dropped instead of throwing on the main thread.
+    expect(bridge).not.toMatch(/message\.get(String|Int)\(/);
+    expect(bridge).toContain('if (dev) Log.i(TAG, "call #');
+  });
+
+  it("sets farm_dev only under farm dev, and reads launch overrides only when it is set", async () => {
+    const strings = (command: "dev" | "build") =>
+      generated(context({ command })).then((files) => files["app/src/main/res/values/strings.xml"]);
+    expect(await strings("dev")).toContain('<bool name="farm_dev">true</bool>');
+    expect(await strings("build")).toContain('<bool name="farm_dev">false</bool>');
+
+    const activity = (await generated(context()))[
+      "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt"
+    ];
+    expect(activity).toContain("val dev = resources.getBoolean(R.bool.farm_dev)");
+    const overrides = activity.split("\n").filter((line) => /intent\.get\w+Extra\(/.test(line));
+    expect(overrides).toHaveLength(2);
+    for (const line of overrides) expect(line).toMatch(/if \(dev\) intent\.get\w+Extra\(/);
+    // A debuggable `farm build --mobile --apk` must not take a server from another app's intent.
+    expect(activity).not.toMatch(/if \(debuggable\) intent\./);
   });
 
   it("maps tab icons to the built-in drawables", () => {

@@ -16,10 +16,11 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
 /**
- * Launch options for debug builds (adb shell am start -n <id>/dev.farmjs.mobile.shell.MainActivity ...):
+ * Launch options for `farm dev --mobile` builds only (adb shell am start -n <id>/dev.farmjs.mobile.shell.MainActivity ...):
  *   -e server http://10.0.2.2:3001   load a different Farm server
  *   --ei pool 0                       disable the warm pool (every push is cold)
- * Release builds ignore them.
+ * Every other build ignores them: the launcher activity is exported, so any app could
+ * otherwise start it with its own server and have that origin trusted by the bridge.
  */
 class MainActivity : AppCompatActivity() {
     private lateinit var navigator: Navigator
@@ -27,11 +28,14 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // Remote debugging needs adb access to the device, so any debuggable build may have it.
         val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (debuggable) WebView.setWebContentsDebuggingEnabled(true)
 
-        val config = RouteConfig.load(this, if (debuggable) intent.getStringExtra("server") else null)
-        val poolSize = if (debuggable) intent.getIntExtra("pool", POOL_SIZE) else POOL_SIZE
+        // Launch overrides only under farm dev --mobile, never in a farm build --mobile APK.
+        val dev = resources.getBoolean(R.bool.farm_dev)
+        val config = RouteConfig.load(this, if (dev) intent.getStringExtra("server") else null)
+        val poolSize = if (dev) intent.getIntExtra("pool", POOL_SIZE) else POOL_SIZE
         val startPath = getString(R.string.farm_start_path)
         Log.i(Navigator.TAG, "server=${config.server} pool=$poolSize rules=${config.rules.size}")
 
