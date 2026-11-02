@@ -37,8 +37,9 @@ rule, back is predictive, two pre-warmed WebViews back pushes, and links to othe
 Custom Tabs. A small bridge script, injected only into pages on the server's origin, receives the
 navigations a `--mobile` client hands over with `delegateNavigation`.
 
-Routes with `native` in `mobile.routes` open `FarmNativeScreens` screens. None are built yet, so
-they show a placeholder that names the missing module.
+Rules whose `screen` is `"native"` (`page.native.tsx`) or `"platform"` (`page.kt`) open
+`FarmNativeScreens` screens by module id, such as `app/notes/[id]`, tab roots included. None are
+built yet, so they show a placeholder that names the module.
 
 The toolchain is JDK 17 or newer and the Android SDK (platform 35, build-tools 35,
 platform-tools), found through `ANDROID_HOME`.
