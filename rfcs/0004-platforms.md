@@ -624,7 +624,7 @@ type FarmScreenTier = "web" | "native" | "platform";
 interface FarmMobileNativeConfig {
   /** What `screen: "native"` and analyzer ports use. Default "react-native". */
   engine?: "react-native" | "platform";
-  /** The build-time analyzer (7.8). Default "off". */
+  /** The build-time analyzer (7.8). Default "report". */
   auto?: "off" | "report" | "on";
   routes?: Record<
     string,
@@ -1296,8 +1296,9 @@ limited, and server secrets would ship in the app binary.
 8. **Module and island catalog.** Which native modules and islands ship first-party, how third
    parties publish a spec with its Kotlin and Swift implementations, and whether a Capacitor plugin
    adapter is worth it.
-9. **Analyzer default.** Whether `mobile.native.auto` defaults to `"report"` once stage 0 is
-   stable, at the cost of build time on every `farm build --mobile`.
+9. **Analyzer cost.** `mobile.native.auto` defaults to `"report"`, so every `farm build --mobile`
+   runs stage 0. Its parse cache and per-route timings decide whether large apps need it off by
+   default; `farm build` for web never runs it.
 10. **Rule override document.** Its path, signing, cache lifetime, and how an app deploys it with
     its web build.
 
