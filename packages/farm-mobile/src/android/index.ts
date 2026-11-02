@@ -9,11 +9,14 @@ import { createAndroidProject, MAIN_ACTIVITY } from "./templates.js";
 export {
   createAndroidProject,
   createAppBuildGradle,
+  createNativeResources,
   createNetworkSecurityConfig,
+  createRootBuildGradle,
   createStrings,
   createTabIcons,
   resolveTabIcon,
   MAIN_ACTIVITY,
+  NATIVE_BUNDLE_ASSET,
   SHELL_NAMESPACE,
 } from "./templates.js";
 
@@ -144,6 +147,11 @@ export default defineMobileShell({
     const serial = requested && devices.includes(requested) ? requested : devices[0];
     await writeLocalProperties(context.projectDir, sdk);
     await gradle(context.projectDir, "installDebug", { ...process.env, ANDROID_SERIAL: serial });
+    const metro = context.native?.devServer?.port;
+    if (metro) {
+      // An emulator reaches Metro on the host as 10.0.2.2; a device needs the port forwarded.
+      await exec(adb, ["-s", serial, "reverse", `tcp:${metro}`, `tcp:${metro}`], { capture: true });
+    }
     const component = `${context.mobile.id}/${MAIN_ACTIVITY}`;
     const { code } = await exec(adb, ["-s", serial, "shell", "am", "start", "-n", component]);
     if (code !== 0) throw new Error(`adb shell am start exited with code ${code}.`);

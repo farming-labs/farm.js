@@ -39,12 +39,21 @@ rule, back is predictive, two pre-warmed WebViews back pushes, and links to othe
 Custom Tabs. A small bridge script, injected only into pages on the server's origin, receives the
 navigations a `--mobile` client hands over with `delegateNavigation`.
 
-Rules whose `screen` is `"native"` (`page.native.tsx`) or `"platform"` (`page.kt`) open
-`FarmNativeScreens` screens by module id, such as `app/notes/[id]`, tab roots included. None are
-built yet, so they show a placeholder that names the module.
+Rules whose `screen` is `"native"` (`page.native.tsx`) are built as React Native surfaces in one
+shared runtime by `@farm.js/native`; the project gets React Native only when such a route exists.
+They run under `farm dev --mobile` on an Android emulator; production (Hermes bytecode) builds and
+real devices are not verified yet. A screen that throws while loading shows React Native's error
+screen in dev and its web twin (`page.tsx`) in builds. They send no cookies and no `Origin` header,
+so they can only call public API routes for now. `"platform"` rules (`page.kt`)
+open `FarmNativeScreens` screens by module id, such as `app/settings/device`; none are built yet, so
+they show a placeholder that names the module.
 
 The toolchain is JDK 17 or newer and the Android SDK (platform 35, build-tools 35,
-platform-tools), found through `ANDROID_HOME`.
+platform-tools), found through `ANDROID_HOME`. Apps with React Native screens also use NDK
+27.1.12297006 (2.4 GB) and CMake 3.22.1 (94 MB), which Gradle installs on the first build for
+`libappmodules.so` (73 KB). That first build also downloads about 400 MB of React Native AARs; the
+debug APK is about 73.7 MB unstripped and targets `arm64-v8a` and `x86_64` only (no 32-bit
+devices).
 
 ## iOS
 

@@ -137,8 +137,16 @@ Common config fields:
   `@farm.js/mobile`) and `farm build --mobile` prints the report unless `native.auto` is `"off"`;
   `--os ios` generates the iOS shell (Xcode project, Swift + UIKit) into `.farm/output/mobile/ios`
   and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; not yet built with `xcodebuild`;
-  `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; `native` and
-  `platform` screens show a placeholder; `src/native/` is for native module specs
+  `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; on Android
+  `page.native.tsx`/`page.android.tsx` build as React Native screens, verified in
+  `farm dev --mobile` on an Android emulator (not in production bytecode builds or on real
+  devices), public API routes only (no cookies or Origin) (install
+  `@farm.js/native react-native @react-native/metro-config` as dev deps, React 19.2.8 or later;
+  needs NDK 27.1.12297006 and CMake 3.22.1; hooks `useNavigate`, `useRouteParams`,
+  `useServerQuery`, `serverFetch`; Metro in dev, Hermes bytecode in builds; a screen that throws
+  while loading shows the web twin `page.tsx` in builds and React Native's error screen in dev;
+  keep native files out of the web tsconfig); on iOS `native` screens show a placeholder;
+  `platform` screens show a placeholder on both; `src/native/` is for native module specs
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits

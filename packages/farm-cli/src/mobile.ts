@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { MobileShell, MobileShellContext } from "@farm.js/core/mobile";
+import { createServer } from "node:net";
+import type { MobileNativeScreens, MobileShell, MobileShellContext } from "@farm.js/core/mobile";
 import { withProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
 import { formatDesktopShellInstallCommand, setFarmPlatform, writeShellFiles } from "./desktop";
 
@@ -123,6 +124,110 @@ export function formatMobileDevServer(
   return os === "ios" ? `http://localhost:${port}` : `http://10.0.2.2:${port}`;
 }
 
+const NATIVE_PACKAGE = "@farm.js/native";
+
+interface NativeScreensOptions {
+  root: string;
+  outDir: string;
+  screens: FarmMobileNativeScreen[];
+  basePath: string;
+  locales?: string[];
+}
+
+interface ReactNativeInfo {
+  version: string;
+  hermesVersion: string;
+}
+
+/** What the CLI uses of `@farm.js/native/build`, which is loaded from the app at run time. */
+interface NativeBuildModule {
+  buildFarmNativeScreens(options: NativeScreensOptions): Promise<{
+    reactNative: ReactNativeInfo;
+    bundle: string;
+    jsBytes: number;
+    bytecodeBytes: number;
+    bundleMs: number;
+    hermesMs: number;
+  }>;
+  startFarmNativeDevServer(options: NativeScreensOptions & { port?: number }): Promise<{
+    reactNative: ReactNativeInfo;
+    port: number;
+    mainModule: string;
+    close(): Promise<void>;
+  }>;
+}
+
+/** Import `@farm.js/native/build` from the app, or say how to install it. */
+export async function loadFarmNativeBuild(root: string): Promise<NativeBuildModule> {
+  let entry: string;
+  try {
+    entry = createRequire(path.join(root, "package.json")).resolve(`${NATIVE_PACKAGE}/build`);
+  } catch {
+    throw new FarmMobileError(
+      `page.native.tsx screens need ${NATIVE_PACKAGE}, React Native, and its Metro config, ` +
+        `which are not installed in ${root}.\nInstall them:\n  ` +
+        formatDesktopShellInstallCommand(
+          root,
+          `${NATIVE_PACKAGE} react-native@^0.88 @react-native/metro-config@^0.88`,
+        ),
+    );
+  }
+  return (await import(pathToFileURL(entry).href)) as NativeBuildModule;
+}
+
+export interface FarmMobileNativeScreen {
+  module: string;
+  route: string;
+  /** Absolute screen file. */
+  file: string;
+}
+
+/**
+ * The routes that render as React Native screens on this OS. Empty for apps without any, and on
+ * iOS, whose shell does not host React Native yet and shows a placeholder; those load nothing of
+ * React Native and generate the same project as before.
+ */
+export function listFarmMobileNativeScreens(
+  app: {
+    config: { root: string };
+    screens: Record<string, { screen: string; module?: string; file?: string }>;
+  },
+  os: FarmMobileShellOS = "android",
+): FarmMobileNativeScreen[] {
+  if (os !== "android") return [];
+  return Object.entries(app.screens)
+    .filter(([, decision]) => decision.screen === "native" && decision.module && decision.file)
+    .map(([route, decision]) => ({
+      module: decision.module!,
+      route,
+      file: path.resolve(app.config.root, decision.file!),
+    }));
+}
+
+function nativeLocales(config: { i18n?: unknown }): string[] | undefined {
+  const i18n = config.i18n as
+    | { enabled?: boolean; locales?: string[]; routing?: string }
+    | undefined;
+  return i18n && typeof i18n === "object" && i18n.enabled && i18n.routing !== "none"
+    ? i18n.locales
+    : undefined;
+}
+
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createServer()
+      .once("error", () => resolve(false))
+      .once("listening", () => probe.close(() => resolve(true)))
+      .listen(port);
+  });
+}
+
+/** React Native's default Metro port, or the next free one. */
+async function findMetroPort(start = 8081): Promise<number> {
+  for (let port = start; port < start + 20; port++) if (await isPortFree(port)) return port;
+  throw new FarmMobileError(`No free port for Metro between ${start} and ${start + 19}.`);
+}
+
 type ConfigRuntime = typeof import("@farm.js/core/internal/config-runtime");
 type MobileRuntime = Awaited<ReturnType<ConfigRuntime["loadFarmMobileRuntime"]>>;
 type MobileApp = Awaited<ReturnType<MobileRuntime["generateFarmMobileRoutes"]>>;
@@ -132,6 +237,7 @@ async function writeMobileProject(
   app: MobileApp,
   command: "dev" | "build",
   runtime: MobileRuntime,
+  native?: MobileNativeScreens,
 ): Promise<MobileShellContext> {
   const { config } = app;
   const context: MobileShellContext = {
@@ -145,6 +251,7 @@ async function writeMobileProject(
       config.root,
       runtime.getFarmMobileOutputDirs(config.distDir)[app.context.os],
     ),
+    ...(native ? { native } : {}),
   };
   await writeShellFiles(
     context.projectDir,
@@ -187,11 +294,16 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
     cache,
   };
   // Check the block before the server starts, so a config error is not buried under its banner.
-  await mobileRuntime.resolveFarmMobileApp({
+  const preflight = await mobileRuntime.resolveFarmMobileApp({
     ...appOptions,
     server: formatMobileDevServer(options.host, options.port ?? 3000, os),
   });
   const shell = await loadFarmMobileShell(os, root);
+  // Only an app with React Native screens loads React Native's tooling, and before the server.
+  let nativeBuild =
+    listFarmMobileNativeScreens(preflight, os).length > 0
+      ? await loadFarmNativeBuild(root)
+      : undefined;
 
   const { startDevServer } = await import("./dev");
   const server = await startDevServer({ root }, options.port, options.host);
@@ -205,7 +317,41 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
       server: formatMobileDevServer(options.host, address.port, os),
     });
     for (const warning of app.warnings) runtime.logger.warn(warning);
-    const context = await writeMobileProject(shell, app, "dev", mobileRuntime);
+    let native: MobileNativeScreens | undefined;
+    const screens = listFarmMobileNativeScreens(app, os);
+    if (screens.length > 0) {
+      nativeBuild ??= await loadFarmNativeBuild(root);
+      const metro = await nativeBuild.startFarmNativeDevServer({
+        root,
+        outDir: path.resolve(
+          root,
+          mobileRuntime.getFarmMobileOutputDirs(app.config.distDir).root,
+          "native",
+        ),
+        screens,
+        basePath: app.config.basePath === "/" ? "" : app.config.basePath,
+        locales: nativeLocales(app.config),
+        port: await findMetroPort(),
+      });
+      // Metro stops with the dev server.
+      const close = server.close.bind(server);
+      server.close = async () => {
+        await metro.close();
+        return close();
+      };
+      native = {
+        engine: "react-native",
+        reactNativeVersion: metro.reactNative.version,
+        hermesVersion: metro.reactNative.hermesVersion,
+        modules: screens.map((screen) => screen.module),
+        devServer: { port: metro.port, mainModule: metro.mainModule },
+      };
+      runtime.logger.info(
+        `React Native ${metro.reactNative.version}: ${screens.length} native screen` +
+          `${screens.length === 1 ? "" : "s"} from Metro on port ${metro.port}`,
+      );
+    }
+    const context = await writeMobileProject(shell, app, "dev", mobileRuntime, native);
     runtime.logger.info(
       `Mobile app (${shell.os}) on ${app.manifest.server}; project in ${shownPath(root, context.projectDir)}`,
     );
@@ -258,8 +404,13 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
       cache: new Map(),
     };
     // Fails on a missing or invalid block (such as an http server) before anything builds.
-    await mobileRuntime.resolveFarmMobileApp(appOptions);
+    const preflight = await mobileRuntime.resolveFarmMobileApp(appOptions);
     const shell = await loadFarmMobileShell(os, root);
+    // Only an app with React Native screens loads React Native's tooling, and before building.
+    let nativeBuild =
+      listFarmMobileNativeScreens(preflight, os).length > 0
+        ? await loadFarmNativeBuild(root)
+        : undefined;
 
     const config = await runtime.resolveConfig(
       { ...userConfig, root: userConfig?.root ?? root },
@@ -285,7 +436,33 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     if (app.table) console.log(app.table);
     // Unused native files and config ports nothing builds yet: the same as config inspect.
     for (const warning of app.warnings) runtime.logger.warn(warning);
-    const context = await writeMobileProject(shell, app, "build", mobileRuntime);
+    let native: MobileNativeScreens | undefined;
+    const screens = listFarmMobileNativeScreens(app, os);
+    if (screens.length > 0) {
+      nativeBuild ??= await loadFarmNativeBuild(root);
+      const built = await nativeBuild.buildFarmNativeScreens({
+        root,
+        outDir: path.resolve(root, dirs.root, "native"),
+        screens,
+        basePath: config.basePath === "/" ? "" : config.basePath,
+        locales: nativeLocales(config),
+      });
+      native = {
+        engine: "react-native",
+        reactNativeVersion: built.reactNative.version,
+        hermesVersion: built.reactNative.hermesVersion,
+        modules: screens.map((screen) => screen.module),
+        bundle: built.bundle,
+      };
+      const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
+      runtime.logger.info(
+        `React Native ${built.reactNative.version}: ${screens.length} native screen` +
+          `${screens.length === 1 ? "" : "s"}, ${kb(built.jsBytes)} JS, ${kb(built.bytecodeBytes)} ` +
+          `Hermes bytecode (Metro ${Math.round(built.bundleMs)} ms, hermesc ` +
+          `${Math.round(built.hermesMs)} ms)`,
+      );
+    }
+    const context = await writeMobileProject(shell, app, "build", mobileRuntime, native);
     runtime.logger.info(`📱 ${shownPath(root, context.projectDir)} (${shell.os} project)`);
     if (os === "android" && !options.apk) {
       runtime.logger.info("Run farm build --mobile --apk to build the debug app.");
