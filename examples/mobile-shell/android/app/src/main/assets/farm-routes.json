@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "server": "http://10.0.2.2:3000",
+  "tabs": [
+    {
+      "path": "/notes",
+      "title": "Notes",
+      "icon": "notes"
+    },
+    {
+      "path": "/settings",
+      "title": "Settings",
+      "icon": "settings"
+    }
+  ],
+  "rules": [
+    {
+      "route": "/notes",
+      "pattern": "^/notes/?$",
+      "presentation": "tab",
+      "tab": 0
+    },
+    {
+      "route": "/settings",
+      "pattern": "^/settings/?$",
+      "presentation": "tab",
+      "tab": 1
+    },
+    {
+      "route": "/notes/new",
+      "pattern": "^/notes/new/?$",
+      "presentation": "modal"
+    },
+    {
+      "route": "/settings/about",
+      "pattern": "^/settings/about/?$",
+      "presentation": "push"
+    },
+    {
+      "route": "/notes/[id]",
+      "pattern": "^/notes/[^/]+/?$",
+      "presentation": "push"
+    },
+    {
+      "route": null,
+      "pattern": "^/",
+      "presentation": "push"
+    }
+  ],
+  "pool": {
+    "size": 2,
+    "warmPath": "/notes"
+  },
+  "native": [
+    "haptics"
+  ]
+}
