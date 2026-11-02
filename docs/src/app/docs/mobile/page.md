@@ -240,6 +240,49 @@ screen cannot load (the "web twin"). A native file with no `page.tsx` next to it
 > [Native screens](#native-screens) for the exact status). Web screens (`page.tsx`) are what runs
 > now; the native examples show what each file will look like so the structure is clear.
 
+## Portable components (`@farm.js/ui`)
+
+`@farm.js/ui` gives you a small set of primitives — `View`, `Text`, `Image`, `Pressable`,
+`TextInput`, and `List` — that render as **DOM on the web** and, on a mobile **native** screen, as
+**native views**. The import is the same; the screen tier decides the host. This is the recommended
+way to build a screen you want to work everywhere, because you write it once:
+
+```tsx
+// src/app/notes/page.tsx
+import { useState } from "react";
+import { View, TextInput, List } from "@farm.js/ui";
+import { useServerQuery } from "@farm.js/core";
+import { listNotes } from "./notes.server";
+
+export default function Notes() {
+  const [q, setQ] = useState("");
+  const { data: notes = [] } = useServerQuery(listNotes, { q });
+
+  return (
+    <View padding="md">
+      <TextInput value={q} onChange={setQ} placeholder="Search notes" />
+      <List
+        items={notes}
+        row={(note) => ({ title: note.title, subtitle: note.excerpt, href: `/notes/${note.id}` })}
+      />
+    </View>
+  );
+}
+```
+
+Styling is **token props** (`padding="md"`, `background="surface"`, `radius="card"`), not arbitrary
+CSS. That limit is what keeps the components portable, and it is exactly what lets the
+[analyzer](#the-native-screen-report) recognize a page built from `@farm.js/ui` as one it can port to
+a native screen automatically. Raw values still pass through (`padding={10}`, `background="#fff"`),
+and every box-like primitive takes a `style` escape hatch.
+
+**Status:** the **web rendering ships today**, so `@farm.js/ui` works on the web and on a mobile web
+screen now. Native rendering, the same components as native views on a native screen, lands with the
+native screen engine. Prefer `@farm.js/ui` over importing `react-native` directly: the raw React
+Native primitives are the lower-level escape hatch, used inside a hand-written
+[`page.native.tsx`](#the-files-that-make-a-screen) when you need something the portable set does not
+cover.
+
 ## How a web screen renders
 
 This is the part that runs today. The generated Android project (regenerated on every build, so
@@ -388,8 +431,22 @@ layer is shared. See [Design notes](#design-notes) for why native is opt-in rath
 
 ## The native-screen report
 
-The analyzer finds pages a native screen could replace without changes. It is **report only**: it
-changes no output, and every analyzed route stays a web screen today.
+Auto-porting a page to a native screen is driven by a **build-time static-analysis pass**, the
+analyzer. It parses each page's source into an **abstract syntax tree** (AST) with
+[Oxc](https://oxc.rs), walks that tree, and classifies every JSX element, class name, inline style,
+browser API, and import against a portability model. From the parts it can map, it builds a
+**platform-neutral UI tree** (an intermediate representation, or IR) that a native emitter turns into
+a React Native, Compose, or SwiftUI screen.
+
+```text
+page.tsx  ──▶  AST (Oxc)  ──▶  classify every node  ──▶  decision: port or web
+                                                    └─▶  portable UI tree (IR)  ──▶  [ native emitter ]
+```
+
+Today the pass stops at the report: it is **report only**, changes no output, and every analyzed
+route stays a web screen. The AST walk, the classification, and the IR all run now; the emitter that
+reads the IR and generates native code is the one piece not built yet, so the IR is produced but not
+yet consumed.
 
 ```sh
 farm config inspect --mobile --report   # table, plus .farm/output/mobile/native-report.json
@@ -403,8 +460,8 @@ route        screen  decision  mapped  portable  reason
 /settings    web     web       18/18   100%      portable; no win (18 elements)
 ```
 
-It parses each page, its app modules, and the layouts a `layout.native.tsx` does not replace, and
-classifies every JSX element, class name, inline style, browser API, and import:
+Walking the AST, it visits each page, its app modules, and the layouts a `layout.native.tsx` does
+not replace, and sorts what it finds into two buckets:
 
 - **Ports:** `div`/`section`/… → View, `p`/`span`/headings → Text, `img` → Image, `button`/`a` →
   Pressable, text `input`/`textarea` → TextInput, `ul`/`ol` → List; `@farm.js/ui` and
