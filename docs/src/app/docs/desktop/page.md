@@ -311,7 +311,7 @@ must be literals.
 | Option     | Notes                                                                                           |
 | ---------- | ----------------------------------------------------------------------------------------------- |
 | `engine`   | `"react-native"` (default) or `"platform"`. With `"platform"`, `.native.tsx` files are an error |
-| `auto`     | The build-time analyzer: `"off"`, `"report"` (default), or `"on"`. Reserved: no analyzer yet    |
+| `auto`     | The build-time analyzer: `"off"`, `"report"` (default), or `"on"` (records ports, see below)    |
 | `routes`   | Keyed by page route: `screen` (`web`, `native`, `platform`), `android`, `ios`, `presentation`   |
 | `islands`  | Components that may render natively inside web screens, such as `["Map"]`. Reserved             |
 | `prefetch` | `"intent"` (default) or `"off"`                                                                 |
@@ -334,6 +334,46 @@ For each route and OS, the first source that decides wins:
 `config`, `file`, `analyzer`, or `default`), and a warning when a page export overrides config or
 a native file goes unused. Native routes get a `module` id derived from the route, such as
 `app/notes/[id]`.
+
+### Native screen report
+
+The analyzer finds pages a native screen could replace without changes. It is report only: it
+changes no output, and every analyzed route stays a web screen.
+
+```sh
+farm config inspect --mobile --report   # table, plus .farm/output/mobile/native-report.json
+```
+
+```text
+route        screen  decision  mapped  portable  reason
+/feed        native  -                           src/app/feed/page.native.tsx
+/notes       web     port      12/12   100%      portable; input, list
+/notes/[id]  web     web       9/10    90%       src/app/notes/[id]/page.tsx:41:9 dangerouslySetInnerHTML
+/settings    web     web       18/18   100%      portable; no win (18 elements)
+```
+
+It looks at each page that no page export, config route, or screen file decided, plus config
+routes that ask for `screen: "native"` without a file. For each one it parses the page, its app
+modules, and the layouts a `layout.native.tsx` does not replace, and classifies every JSX element,
+class name, inline style, browser API and import:
+
+- Ports: `div`, `section`, `p`, `span`, headings, `img`, `a`, `button`, text `input`, `textarea`,
+  `ul`, `ol`, `li`; `@farm.js/ui` and `@farm.js/native`; `Link`, navigation hooks, and server
+  function hooks from `@farm.js/core`; flex, spacing, size, color, border, radius and type
+  classes from Tailwind, with `dark:`; inline styles with those properties; `onClick`, and
+  `onChange` on inputs; server function modules, which the screen calls over the network.
+- Blocks, so the route stays web: `canvas`, `iframe`, `video`, `table`, `svg`, `select`, `form`;
+  `dangerouslySetInnerHTML`, refs on elements, spread props on elements, other DOM events;
+  stylesheet imports, grid, `fixed` and `sticky`, transitions, responsive and `hover:` variants,
+  arbitrary values, class names built at runtime; `window`, `document`, storage and observer APIs,
+  `useLayoutEffect`, `createElement`; DOM packages and any package not on the list; server
+  components and async pages; Markdown pages.
+
+A portable route is `port` when native would help (a rendered list, a controlled input, a timer)
+and `web` otherwise. Every web route lists its blockers with file, line, column and rule in the
+JSON, which also holds element counts and a small UI tree (`ir`) for portable routes. With
+`auto: "on"` a `port` is recorded in `farm-routes.json` as `source: "analyzer"`, still a web
+screen until native screens ship. Results are cached by file content in `.farm/cache/mobile/`.
 
 #### Breaking change from the first preview
 
@@ -371,7 +411,8 @@ prints the commands. For a phone on the LAN, pass its reachable address: `farm d
 
 `farm build --mobile` builds the client with `platform()` set to `"mobile"` into
 `.farm/output/mobile/www` (the web build's output is left alone), writes `farm-routes.json` with
-`mobile.server`, and generates the project. `--apk` builds the debug APK into
+`mobile.server`, prints the native screen report (below) unless `native.auto` is `"off"`, and
+generates the project. `--apk` builds the debug APK into
 `.farm/output/mobile/dist`. The project is regenerated on every run, so don't edit it.
 
 | Path                                     | Contents                                               |
