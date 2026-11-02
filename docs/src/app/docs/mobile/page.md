@@ -7,12 +7,15 @@ section: "Runtime"
 # Mobile Apps
 
 The same Farm app that builds for the [web](/docs/deployment) or the [desktop](/docs/desktop) can
-also build for mobile. `mobile` wraps the app in a native shell: native tabs, a stack per tab,
-modal sheets, and predictive back, with each screen showing one Farm page in a WebView.
+also build for mobile. The model is a **native shell with a native navigator, in the style of
+[Hotwire Native](https://native.hotwired.dev)**: native tabs, a stack per tab, modal sheets, and
+predictive back, with each screen showing one Farm page in a WebView. You reuse the real web pages
+instead of rebuilding the app in another UI toolkit.
 
-Mobile is a preview and is not released yet. Android runs today; the iOS shell and the native
-screen engines are in progress. Each section below marks what ships now and what is still landing,
-so you can adopt the config surface before the runtime is complete.
+Mobile is a preview and is not released yet. **What runs today is the WebView shell on Android.**
+The native screen tiers (React Native and platform-native) and iOS are designed but not built:
+routes marked native render a placeholder. Every section below marks the line between what ships
+now and what is still landing, so you can adopt the config surface before the runtime is complete.
 
 ```sh
 farm dev --mobile      # dev server, Android project, install and open on a device
@@ -73,37 +76,122 @@ without the key.
 farm config inspect --mobile --os ios --profile beta   # block, screens, and farm-routes.json
 ```
 
-## Screens
+## The screen model
 
-Every route is a screen in the app's native navigator. A screen is one of three tiers:
+Every route is a screen in the native navigator, and each route chooses **one tier** for how its
+screen renders:
 
-- `web`, the default: the route's `page.tsx` in a WebView.
-- `native`: a React Native screen from `page.native.tsx`.
-- `platform`: a Compose screen from `page.kt` on Android or a SwiftUI screen from `page.swift` on
-  iOS.
+| Tier              | Content                                              | Added to the app                                   | Status              |
+| ----------------- | ---------------------------------------------------- | -------------------------------------------------- | ------------------- |
+| **web** (default) | a WebView showing the Farm page from `mobile.server` | nothing beyond the shell, WebView pool, and bridge | **ships today**     |
+| **native**        | a React Native surface (`page.native.tsx`)           | React Native (Hermes, Fabric), the screen bundle   | designed, not built |
+| **platform**      | a Compose (`page.kt`) or SwiftUI (`page.swift`) view | the screen's own native code, no JS engine         | designed, not built |
 
-The native engines are in progress. The tier is recorded in `farm-routes.json` for the shell, and
-every analyzed route renders as a web screen until the engines land.
+Two rules hold the model together, and they are the reason it stays safe to adopt early:
 
-A screen is declared by the file you place next to `page.tsx`, or by `mobile.native.routes`.
-`src/native/` is reserved for native module specs.
+- **A screen's content is one tier.** Free-form native views mixed into a web page break gestures,
+  accessibility order, and keyboard handling, so they are not allowed.
+- **Every route keeps its `page.tsx`.** That file is the web page, the mobile web screen, and the
+  runtime fallback for the route's native screen (the "web twin" in [Design notes](#design-notes)).
+  A native file with no `page.tsx` next to it is a build error.
+
+An app pays for a native engine only when a route uses it. An app of web and platform screens ships
+no JS engine beyond the system WebView.
+
+## How a web screen renders
+
+This is the part that runs today. The generated Android project (regenerated on every build, so
+you never hand-edit it) is a plain Android Views shell, no Compose, built around three pieces.
+
+### The native navigator
+
+The navigator owns one stack per tab. A screen is a native bar over exactly one WebView. Pushes,
+modals, replaces, and predictive back are native view transitions, not web history: tapping a tab
+keeps that tab's stack, back from a second tab's root returns to the first tab, and a held back
+gesture drags the screen with the finger. Links to another origin open in a Custom Tab rather than
+a screen, and `file:`/`content:`/`javascript:`/`intent:` URLs are never handed to other apps.
+
+### The WebView pool
+
+The shell keeps **two pre-warmed WebViews**. Each one loads a warm path and installs the Farm
+client router ahead of time, then sits behind the opaque tab containers so Chromium lays it out at
+full size and keeps rendering frames. The pool starts only after the first tab is interactive, so
+nothing competes with the first screen's cold start.
+
+When the navigator opens a screen:
+
+- A **warm** WebView already has the running client router, so the push is an **in-place client
+  navigation** (`render(url)`), capped at ~250 ms before it gives up to a document load. This is
+  what makes a push feel instant without bundled assets.
+- A **cold** WebView does a full document load and shows a progress bar until first paint.
+- If an in-place render throws, the screen **falls back to a full document load** of the same URL.
+
+The pool's real win is skipping the ~1 s first-WebView startup; truly instant pushes need bundled
+assets and page shells, which are part of the design but not built yet.
+
+### The bridge
+
+A document-start script defines `window.__farmBridge` on pages served from `mobile.server`.
+Messages travel over an **origin-scoped, main-frame-only `WebMessageListener`** (named
+`FarmNative`): the listener only accepts messages from the server origin on the page's main frame,
+so a cross-origin iframe cannot speak to the shell. The shell deliberately does **not** use
+`addJavascriptInterface`, which would reach every frame including cross-origin iframes. A WebView
+without the listener runs as a plain web page.
+
+The messages that matter:
+
+- **`visit`** — an in-app link tap. The client hands the navigation to the shell (see below); the
+  shell posts `visit`, and the native navigator decides which screen to show by the matching rule.
+- **`render`** / **`rendered`** — the shell asks a warm WebView's running router to navigate to a
+  URL in place, and the page replies when the frame has painted.
+- **`router-ready`**, **`title`**, **`error`** — lifecycle and the document-load fallback above.
+- **`call`** — a device-capability call (`native.<name>`). Reserved: no device plugins ship yet,
+  so these reject as `native_unavailable`.
+
+### Navigation delegation
+
+The bridge does not monkey-patch the router. It uses a public, renderer-neutral core API,
+[`delegateNavigation`](/docs/routing#navigation-delegates): the mobile client plugin registers a
+delegate that hands each in-app navigation (`Link`, `navigateTo`, router `push` and `replace`) to
+`window.__farmBridge`. The delegate runs **after navigation blockers**; returning `true` leaves the
+page, URL, and history untouched so the native navigator can own the transition. Back/forward,
+`refresh()`, same-page hashes, and cross-origin or locale document navigations are **not** offered,
+so the WebView handles those itself. In a plain browser there is no bridge and the delegate does
+nothing, so the web build is unaffected. Link prefetch is off inside the shell, since every screen
+has its own WebView.
+
+## Choosing a screen
+
+A route's tier is decided at build time. The first source that decides wins, per route and per OS:
+
+1. **the page export** — `export const mobile = { native: false }` forces web;
+2. **`mobile.native.routes[route]`** — the OS key (`android` / `ios`) first, then `screen`;
+3. **the files** next to `page.tsx` — the OS file, then `page.native.tsx`, or `page.kt` / `page.swift`;
+4. **the analyzer**, only when `native.auto` is `"on"`;
+5. **web.**
+
+### Files
 
 ```text
 src/app/feed/
-  page.tsx            web page, mobile web screen, and the fallback (required)
+  page.tsx            web page, mobile web screen, and the runtime fallback (required)
   page.native.tsx     React Native screen on iOS and Android
-  page.ios.tsx        replaces page.native.tsx on iOS
-  page.android.tsx    replaces page.native.tsx on Android
+  page.ios.tsx        overrides page.native.tsx on iOS
+  page.android.tsx    overrides page.native.tsx on Android
   page.kt             platform screen on Android
   page.swift          platform screen on iOS
   layout.native.tsx   reserved for native stack and tab options
 ```
 
-A native file without a `page.tsx` next to it is an error, and so is a React Native and a platform
-file for the same route and OS. Web and desktop builds never read these files: they are not
-routes, not in the generated route types, and not in any web bundle.
+`page.tsx` is required. A screen file without one is an error, and so is a React Native file and a
+platform file for the same route and OS. Web and desktop builds never resolve these files: they are
+not routes, not in the generated route types, and not in any web bundle. `src/native/` is reserved
+for native module specs.
 
-A page can set its own options with a static export, read at build time without running the page:
+### Page export
+
+A page can set its own options with a static export, read at build time with Oxc and never
+executed:
 
 ```tsx
 // src/app/notes/[id]/page.tsx
@@ -113,10 +201,10 @@ export const mobile = { presentation: "modal", prefetch: "off" } satisfies FarmM
 ```
 
 `presentation` and `prefetch` (`"intent"` or `"off"`) override the config for that route.
-`native: false` keeps the route web on every OS, whatever the config and files say. The values
-must be literals.
+`native: false` keeps the route web on every OS, whatever the config and files say, and warns if a
+native file sits unused next to it. The values must be literals.
 
-`mobile.native`:
+### `mobile.native`
 
 | Option     | Notes                                                                                           |
 | ---------- | ----------------------------------------------------------------------------------------------- |
@@ -127,28 +215,49 @@ must be literals.
 | `prefetch` | `"intent"` (default) or `"off"`                                                                 |
 | `budgets`  | `appSizeMb`, `screenOpenMs`, `droppedFrames`. Reserved for the mobile CI run                    |
 
-`android` and `ios` override `screen` on that OS. `screen: "native"` uses the route's
-`page.native.tsx` (or OS file); without one the route stays web with a warning, and once the native
-engines land it fails the build. `screen: "platform"` needs `page.kt` or `page.swift`. Set
+`android` and `ios` override `screen` on that OS. `engine` records which toolchain a native screen
+would use; `"react-native"` renders `page.native.tsx`, `"platform"` renders `page.kt` / `page.swift`
+and rejects `.native.tsx` outright (there is no React Native under `"platform"`). Only `"react-native"`
+and `"platform"` are valid; any other value, including `"flutter"`, fails validation. Set
 `presentation` in `routes` or `native.routes`, not both.
 
-For each route and OS, the first source that decides wins:
-
-1. the page export (`native: false`);
-2. `mobile.native.routes[route]`, the OS key and then `screen`;
-3. the files next to `page.tsx`: the OS file, then `page.native.tsx`, or `page.kt` / `page.swift`;
-4. the analyzer, when `auto` is `"on"`;
-5. web.
-
 `farm config inspect --mobile` prints each route's `screen`, the `source` that decided it (`page`,
-`config`, `file`, `analyzer`, or `default`), and a warning when a page export overrides config or
-a native file goes unused. Native routes get a `module` id derived from the route, such as
-`app/notes/[id]`.
+`config`, `file`, `analyzer`, or `default`), the `module` id derived from the route (such as
+`app/notes/[id]`), a `requested` tier when a route asked for native but stays web, and warnings for
+a page export overriding config or a native file going unused.
 
-## Native screen report
+## Native screens
 
-The analyzer finds pages a native screen could replace without changes. It is report only: it
-changes no output, and every analyzed route stays a web screen.
+A native screen is declared by the file next to `page.tsx` (`page.native.tsx`, `page.ios.tsx`,
+`page.android.tsx`, `page.kt`, `page.swift`) or by a `mobile.native.routes` entry with
+`screen: "native"` or `"platform"`. The generated Android project registers native screens by their
+module id in `FarmNativeScreens`, keyed like `app/notes/[id]`.
+
+**Status: no native engine ships yet.** Today a `native` or `platform` route is recorded in
+`farm-routes.json` and shown on device as a **placeholder naming the module id** — Farm does not
+build `page.native.tsx`, `page.kt`, or `page.swift` into native views. A config route that asks for
+`screen: "native"` with no file **stays web and records `requested: "native"`** with a warning that
+says it will become a hard error once a native renderer ships. An ejected project is where an app
+registers its own screens before this lands.
+
+The two engines, as designed:
+
+- **`react-native`** — the default native engine. A screen renders as a React Native surface on the
+  new architecture (Hermes bytecode, JSI, Fabric), with one shared JS runtime warmed lazily after
+  the first native screen paints, so an app whose start screen is web pays nothing at startup.
+  Screens navigate by URL, never by component, so the navigator's rules always decide the next
+  screen. React only.
+- **`platform`** — Kotlin/Compose on Android or Swift/SwiftUI on iOS, for screens that should run
+  **no JS at all**. A platform screen adds its own native code and nothing else, and does not depend
+  on the app's renderer.
+
+Both tiers call the same server functions and route-data requests as the web client, so the data
+layer is shared. See [Design notes](#design-notes) for why native is opt-in rather than the default.
+
+## The native-screen report
+
+The analyzer finds pages a native screen could replace without changes. It is **report only**: it
+changes no output, and every analyzed route stays a web screen today.
 
 ```sh
 farm config inspect --mobile --report   # table, plus .farm/output/mobile/native-report.json
@@ -162,28 +271,29 @@ route        screen  decision  mapped  portable  reason
 /settings    web     web       18/18   100%      portable; no win (18 elements)
 ```
 
-It looks at each page that no page export, config route, or screen file decided, plus config
-routes that ask for `screen: "native"` without a file. For each one it parses the page, its app
-modules, and the layouts a `layout.native.tsx` does not replace, and classifies every JSX element,
-class name, inline style, browser API and import:
+It parses each page, its app modules, and the layouts a `layout.native.tsx` does not replace, and
+classifies every JSX element, class name, inline style, browser API, and import:
 
-- Ports: `div`, `section`, `p`, `span`, headings, `img`, `a`, `button`, text `input`, `textarea`,
-  `ul`, `ol`, `li`; `@farm.js/ui` and `@farm.js/native`; `Link`, navigation hooks, and server
-  function hooks from `@farm.js/core`; flex, spacing, size, color, border, radius and type
-  classes from Tailwind, with `dark:`; inline styles with those properties; `onClick`, and
-  `onChange` on inputs; server function modules, which the screen calls over the network.
-- Blocks, so the route stays web: `canvas`, `iframe`, `video`, `table`, `svg`, `select`, `form`;
-  `dangerouslySetInnerHTML`, refs on elements, spread props on elements, other DOM events;
-  stylesheet imports, grid, `fixed` and `sticky`, transitions, responsive and `hover:` variants,
-  arbitrary values, class names built at runtime; `window`, `document`, storage and observer APIs,
-  `useLayoutEffect`, `createElement`; DOM packages and any package not on the list; server
-  components and async pages; Markdown pages.
+- **Ports:** `div`/`section`/… → View, `p`/`span`/headings → Text, `img` → Image, `button`/`a` →
+  Pressable, text `input`/`textarea` → TextInput, `ul`/`ol` → List; `@farm.js/ui` and
+  `@farm.js/native`; `Link`, navigation hooks, and server function hooks from `@farm.js/core`; the
+  flex, spacing, size, color, border, radius, and type Tailwind subset, with `dark:`; inline styles
+  with those properties; `onClick`, and input change handlers; server function modules, which the
+  screen calls over the network.
+- **Blocks, so the route stays web:** `canvas`, `iframe`, `video`, `table`, `svg`, `select`, `form`;
+  `dangerouslySetInnerHTML`, element refs, spread props, other DOM events; stylesheet imports, grid,
+  `fixed`/`sticky`, transitions, responsive and `hover:` variants, arbitrary values, runtime class
+  names; `window`, `document`, storage and observer APIs, `useLayoutEffect`, `createElement`; DOM
+  packages and any package not on the list; server components, async pages, and Markdown pages.
 
-A portable route is `port` when native would help (a rendered list, a controlled input, a timer)
-and `web` otherwise. Every web route lists its blockers with file, line, column and rule in the
-JSON, which also holds element counts and a small UI tree (`ir`) for portable routes. With
-`auto: "on"` a `port` is recorded in `farm-routes.json` as `source: "analyzer"`, still a web
-screen until the native engines land. Results are cached by file content in `.farm/cache/mobile/`.
+The decision is deliberately conservative: a route is **`port`** only when it has **zero blockers
+and at least one win** (a rendered list, a controlled input, a timer). A portable route with no win
+is reported as such and stays web, and **any doubt is web.** Every blocker is reported with its
+`file:line:column`, a rule name (such as `unmapped-element` or `unknown-package`), and a message.
+With `auto: "on"` a port is recorded in `farm-routes.json` as `source: "analyzer"` with
+`requested: "native"`, still a web screen until an emitter ships. Facts are cached by file content
+in `.farm/cache/mobile/` and keyed by the analyzer and Farm version, so the report is cheap to
+re-run.
 
 ## Route manifest
 
@@ -232,11 +342,6 @@ generates the project. `--apk` builds the debug APK into
 | `app/src/main/java/.../WebViewPool.kt`   | Two pre-warmed WebViews that back pushes               |
 | `app/src/main/java/.../NativeScreens.kt` | The hook for `native` and `platform` screens           |
 
-In the shell, a `--mobile` client hands each in-app navigation (`Link`, `navigateTo`, router
-`push` and `replace`) to the navigator through [`delegateNavigation`](/docs/routing#navigation-delegates),
-which pushes, presents, or switches tabs by the matching rule. Link prefetch is off inside the
-shell, since every screen has its own WebView. Links to other origins open in Custom Tabs.
-
 The shell marks each page with `data-farm-shell="android"` on `<html>` before it renders, so app
 CSS can hide chrome the shell already draws, such as web tabs:
 
@@ -246,20 +351,75 @@ html[data-farm-shell] .web-tabs {
 }
 ```
 
+Cleartext (`http://`) is allowed only under `farm dev --mobile`, for the dev server and the
+emulator loopback; builds are `https://` only.
+
+## Design notes
+
+Mobile support is shaped by one decision: **reuse the real web pages, and spend native effort only
+where it pays.** The whole design follows from that.
+
+### The web twin and bailout
+
+Every route keeps its `page.tsx`. It is the route's **web twin**: the web page, the mobile web
+screen, and the fallback for any native screen the route later grows. That makes native adoption
+reversible and gives "bailout" two independent layers:
+
+- **Build-time (the analyzer).** A route becomes native only when it is proven portable and native
+  actually wins. Anything the analyzer cannot map keeps the route on web, with the blocking line
+  reported. Any doubt is web.
+- **Runtime (the web twin).** A native screen that cannot be built or registered falls back to its
+  web page. Today that is the whole native path: an unbuildable native request resolves to web at
+  build time, and the shell shows a placeholder for a native rule with no registered screen.
+
+### Why this shape, and not the alternatives
+
+These were weighed and set aside (the full rationale lives in the platforms RFC, RFC 0004):
+
+- **A plain WebView wrapper.** Simplest, but navigation, back gestures, tab bars, and pickers feel
+  like a website, and app review rejects apps that are only a wrapped site. Farm draws the
+  navigation chrome natively instead.
+- **React Native for every screen** (Expo-style). One engine everywhere means every app pays React
+  Native's size and startup for routes that gain nothing, and loses streaming SSR and one
+  implementation for web and mobile. Per-route tiers keep web the default and spend native where it
+  wins.
+- **Compile all React DOM to native views.** This is the "render everything through one native
+  layer" route (the family a Flutter-style own-canvas renderer belongs to). It requires every DOM
+  and CSS feature to have a native equivalent, which does not hold for real apps and would split
+  behavior between platforms in ways Farm cannot test. The analyzer instead proves portability per
+  route and keeps the web twin.
+- **A general native-island renderer inside web screens.** Stock Android WebView cannot composite a
+  native view into the page's layers, so islands would always float above web content and could not
+  be clipped or covered. Islands are therefore limited to large fixed components, and are reserved.
+- **Reuse Capacitor's bridge and plugins.** Capacitor's Android bridge falls back to
+  `addJavascriptInterface`, which conflicts with the origin-scoped, main-frame-only rule above, and
+  a typed device spec also has to serve native screens over JSI, which a WebView-only bridge cannot.
+- **Run the server on the phone.** Mobile OSes do not allow a reliable long-running local HTTP
+  server, background execution is limited, and server secrets would ship in the app binary. The app
+  talks to `mobile.server` instead.
+
+### On the runtime
+
+There is **no Farm-built JavaScript runtime** for mobile. Web screens run in the system WebView
+(Chromium on Android, WebKit on iOS). The planned `native` tier runs on **React Native's own
+engine** — Hermes, under its new architecture — not a Farm runtime; the `platform` tier runs
+**no JS engine at all** (Compose / SwiftUI). So an app ships a JS engine on device only if it opts a
+route into the React Native tier.
+
 ## What is landing
 
-The config surface above is in place. These parts are still on the way:
+The config surface, the route manifest, the WebView shell, and the report all work today. These
+parts are designed and still on the way:
 
 - Android runs today; there is no iOS shell yet.
-- `native` and `platform` screens show a placeholder that names the route's module id, such as
-  `app/notes/[id]`. Farm does not build `page.native.tsx`, `page.kt`, or `page.swift` yet;
-  `FarmNativeScreens` in the generated project is where native screens will register.
-- The shell loads pages and client code from `server`. In production that is the web deployment,
-  whose client is not a `--mobile` build, so navigations stay in the page until client assets are
-  bundled into the app.
+- `native` and `platform` screens show a placeholder naming the module id. Farm does not build
+  `page.native.tsx`, `page.kt`, or `page.swift` yet; `FarmNativeScreens` in the generated project is
+  where native screens will register.
+- Bundled client assets and page shells (for instant pushes and an offline state) are not built;
+  the shell loads pages and client code from `server`.
+- Native islands (`mobile.native.islands`) and the theme-token pipeline are reserved.
 - Token auth is not wired yet: the shell has no Keystore session or bearer tokens, and the server
   has no mobile-origin checks.
-- `farm dev --mobile` writes `farm-routes.json` once; routes added while it runs use the default
-  push rule until the next start. Server code in the dev server sees `platform()` as `"mobile"`.
+- Device plugins (`native.<name>`) ship none, so calls reject as unavailable.
 - Apps with `experimental.serverComponents` use the RSC router, which does not hand navigations to
   the shell yet.
