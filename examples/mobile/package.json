@@ -1,0 +1,31 @@
+{
+  "name": "farm-example-mobile",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "dev:mobile": "farm dev --mobile",
+    "build": "farm build",
+    "build:mobile": "farm build --mobile",
+    "build:apk": "farm build --mobile --apk",
+    "start": "farm start",
+    "report": "farm config inspect --mobile --report",
+    "smoke": "node scripts/smoke.mjs",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "@farm.js/mobile": "workspace:*",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.3.3",
+    "vite": "8.3.4"
+  }
+}

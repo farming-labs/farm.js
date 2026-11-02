@@ -230,8 +230,15 @@ configCommand
   .option("--os <os>", "Target OS: macos, windows, linux (--desktop) or android, ios (--mobile)")
   .option("--profile <name>", "Profile passed to a function-valued block")
   .option("--command <command>", "Resolve as for dev or build (default: build)")
+  .option(
+    "--report",
+    "With --mobile: run the native screen analyzer and write .farm/output/mobile/native-report.json",
+  )
   .action(async (options) => {
     try {
+      if (options.report && !options.mobile) {
+        throw new Error("--report needs --mobile.");
+      }
       if (options.desktop && options.mobile) {
         throw new Error("Choose one block: --desktop or --mobile.");
       }
@@ -244,6 +251,18 @@ configCommand
         options.command !== "build"
       ) {
         throw new Error("--command must be dev or build.");
+      }
+      if (options.mobile && options.report) {
+        const { reportFarmMobileNative } = require("../dist/mobile.js");
+        const { table, warnings } = await reportFarmMobileNative({
+          root: options.root,
+          os: options.os,
+          profile: options.profile,
+          command: options.command,
+        });
+        console.log(table);
+        for (const warning of warnings) console.warn(`warning: ${warning}`);
+        return;
       }
       if (options.mobile) {
         const { inspectFarmMobileConfig } = require("../dist/mobile.js");

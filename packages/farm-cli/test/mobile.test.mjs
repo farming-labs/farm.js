@@ -32,6 +32,9 @@ const APP_FILES = {
   "src/app/notes/new/page.tsx": PAGE,
   "src/app/notes/[id]/page.tsx": PAGE,
   "src/app/(account)/settings/page.tsx": PAGE,
+  "src/app/feed/page.tsx": PAGE,
+  "src/app/feed/page.native.tsx": PAGE,
+  "src/app/feed/page.android.tsx": PAGE,
 };
 
 async function createApp(t, config) {
@@ -76,6 +79,7 @@ const CONFIG = `export default {
       { path: "/settings", title: "Settings", icon: "gear" },
     ],
     routes: { "/notes/new": { presentation: "modal" } },
+    native: { routes: { "/notes/[id]": { screen: "web", ios: "native" } } },
   }),
 };`;
 
@@ -111,14 +115,59 @@ test("farm config inspect --mobile prints the block and farm-routes.json for an 
       { path: "/settings", title: "Settings", icon: "gear" },
     ],
     routes: { "/notes/new": { presentation: "modal" } },
+    native: {
+      engine: "react-native",
+      auto: "report",
+      routes: { "/notes/[id]": { screen: "web", ios: "native" } },
+      islands: [],
+      prefetch: "intent",
+      budgets: {},
+    },
   });
+  // Every route's tier on this OS and what decided it.
+  assert.deepEqual(printed.screens, {
+    "/": { screen: "web", source: "default", presentation: "push" },
+    "/feed": {
+      screen: "native",
+      source: "file",
+      file: "src/app/feed/page.native.tsx",
+      module: "app/feed",
+      presentation: "push",
+    },
+    "/notes": { screen: "web", source: "default", presentation: "push" },
+    "/notes/[id]": {
+      screen: "web",
+      source: "config",
+      requested: "native",
+      presentation: "push",
+    },
+    "/notes/new": { screen: "web", source: "default", presentation: "modal" },
+    "/settings": { screen: "web", source: "default", presentation: "push" },
+  });
+  assert.equal(printed.warnings.length, 1);
+  assert.match(printed.warnings[0], /native\.routes\["\/notes\/\[id\]"\]\.ios is "native"/);
+  const web = { screen: "web", source: "default" };
   assert.deepEqual(printed.routes.rules, [
-    { route: "/notes/new", pattern: "^/notes/new/?$", presentation: "modal" },
-    { route: "/notes/[id]", pattern: "^/notes/[^/]+/?$", presentation: "push" },
-    { route: "/notes", pattern: "^/notes/?$", presentation: "tab", tab: 0 },
-    { route: "/settings", pattern: "^/settings/?$", presentation: "tab", tab: 1 },
-    { route: "/", pattern: "^/?$", presentation: "push" },
-    { pattern: "^/", presentation: "push" },
+    { route: "/notes/new", pattern: "^/notes/new/?$", presentation: "modal", ...web },
+    {
+      route: "/notes/[id]",
+      pattern: "^/notes/[^/]+/?$",
+      presentation: "push",
+      screen: "web",
+      source: "config",
+    },
+    {
+      route: "/feed",
+      pattern: "^/feed/?$",
+      presentation: "push",
+      screen: "native",
+      source: "file",
+      module: "app/feed",
+    },
+    { route: "/notes", pattern: "^/notes/?$", presentation: "tab", tab: 0, ...web },
+    { route: "/settings", pattern: "^/settings/?$", presentation: "tab", tab: 1, ...web },
+    { route: "/", pattern: "^/?$", presentation: "push", ...web },
+    { pattern: "^/", presentation: "push", screen: "web" },
   ]);
 });
 
@@ -130,6 +179,14 @@ test("farm config inspect --mobile names the OS and field when the block is inva
   const printed = JSON.parse(build.output.slice(build.output.indexOf("{")));
   assert.equal(printed.routes.server, "https://notes.example.com");
   assert.equal(printed.mobile.tabs[0].icon, "ic_notes");
+  // On Android the OS file wins over page.native.tsx, and config keeps /notes/[id] web.
+  assert.equal(printed.screens["/feed"].file, "src/app/feed/page.android.tsx");
+  assert.deepEqual(printed.screens["/notes/[id]"], {
+    screen: "web",
+    source: "config",
+    presentation: "push",
+  });
+  assert.equal(printed.warnings, undefined);
 
   await writeFile(
     path.join(root, "farm.config.ts"),
@@ -208,6 +265,7 @@ const BUILD_CONFIG = `export default {
     id: "com.example.notes",
     server: command === "dev" ? undefined : "https://notes.example.com",
     tabs: [{ path: "/notes", title: "Notes", icon: "notes" }],
+    native: { routes: { "/notes": { screen: "native" } } },
   }),
 };`;
 
@@ -267,6 +325,15 @@ test("farm build --mobile builds the mobile client apart from the web output and
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /\.farm\/output\/mobile\/android \(android project\)/);
   assert.match(result.output, /farm build --mobile --apk/);
+  // Screen warnings print as they do for farm config inspect --mobile.
+  assert.match(result.output, /"\/notes" has no page\.native\.tsx and Farm cannot port pages yet/);
+  // native.auto defaults to "report": the build prints the analyzer table and writes the report.
+  assert.match(result.output, /route\s+screen\s+decision\s+mapped\s+portable\s+reason/);
+  assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
+  assert.equal(
+    JSON.parse(await readFile(path.join(mobileDir, "native-report.json"), "utf8")).auto,
+    "report",
+  );
 
   const routes = JSON.parse(await readFile(path.join(mobileDir, "farm-routes.json"), "utf8"));
   assert.equal(routes.server, "https://notes.example.com");
@@ -388,3 +455,42 @@ async function checkMobileDev(child, root, port) {
   const client = await (await fetch(new URL(entry, `http://127.0.0.1:${port}`))).text();
   assert.match(client, /farm:mobile-shell/);
 }
+
+test("farm config inspect --mobile --report prints the analyzer table and writes native-report.json", async (t) => {
+  const root = await createApp(t, CONFIG);
+  await writeFile(
+    path.join(root, "src/app/notes/page.tsx"),
+    `export default function Notes() {
+  const notes = ["a", "b"];
+  return <ul>{notes.map((note) => <li key={note}>{note}</li>)}</ul>;
+}`,
+  );
+  await writeFile(
+    path.join(root, "src/app/notes/new/page.tsx"),
+    'export default function New() { return <form><input type="file" /></form>; }',
+  );
+  const result = await runFarm(["config", "inspect", "--mobile", "--report", "--root", root]);
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /route\s+screen\s+decision\s+mapped\s+portable\s+reason/);
+  assert.match(result.output, /\/notes\s+web\s+port\s+2\/2\s+100%\s+portable; list/);
+  assert.match(
+    result.output,
+    /\/notes\/new\s+web\s+web\s+1\/2\s+50%\s+src\/app\/notes\/new\/page\.tsx:1:40 <form> has no native mapping \(\+1 more\)/,
+  );
+  assert.match(result.output, /\/feed\s+native\s+-\s+src\/app\/feed\/page\.android\.tsx/);
+  assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
+  const report = JSON.parse(
+    await readFile(path.join(root, ".farm/output/mobile/native-report.json"), "utf8"),
+  );
+  assert.equal(report.auto, "report");
+  assert.deepEqual(
+    report.routes
+      .find((entry) => entry.route === "/notes/new")
+      .analysis.blockers.map((blocker) => blocker.rule),
+    ["unmapped-element", "unmapped-element"],
+  );
+
+  const wrong = await runFarm(["config", "inspect", "--report", "--root", root]);
+  assert.notEqual(wrong.code, 0);
+  assert.match(wrong.output, /--report needs --mobile/);
+});
