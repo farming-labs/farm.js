@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -39,10 +39,10 @@ export interface FarmDesktopCommandOptions {
 
 const HOOK_FILE_EXTENSIONS = [".ts", ".mts", ".js", ".mjs"];
 
-/** `--desktop` and `--web` are the only way the platform is chosen, so a stale env never leaks in. */
-export function setFarmPlatform(platform: "web" | "desktop"): void {
-  if (platform === "desktop") process.env.FARM_PLATFORM = "desktop";
-  else delete process.env.FARM_PLATFORM;
+/** The platform flags are the only way it is chosen, so a stale env never leaks in. */
+export function setFarmPlatform(platform: "web" | "desktop" | "mobile"): void {
+  if (platform === "web") delete process.env.FARM_PLATFORM;
+  else process.env.FARM_PLATFORM = platform;
 }
 
 function readPackageManagerField(root: string): unknown {
@@ -143,9 +143,10 @@ const GENERATED_MANIFEST = ".farm-generated.json";
  * Write the adapter's files, refusing paths that would leave the shell directory. Everything
  * else in it (the shell's own caches and build folders) is left alone.
  */
-async function writeShellFiles(
+export async function writeShellFiles(
   shellDir: string,
-  files: Array<{ path: string; contents: string | Uint8Array }>,
+  files: Array<{ path: string; contents: string | Uint8Array; executable?: boolean }>,
+  unsafe: (message: string) => Error = (message) => new FarmDesktopError("unsafe-output", message),
 ): Promise<void> {
   await mkdir(shellDir, { recursive: true });
   const written = new Set<string>();
@@ -153,13 +154,12 @@ async function writeShellFiles(
     const target = path.resolve(shellDir, file.path);
     const relative = path.relative(shellDir, target);
     if (!relative || relative.startsWith("..") || path.isAbsolute(file.path)) {
-      throw new FarmDesktopError(
-        "unsafe-output",
-        `The desktop shell tried to write ${file.path} outside ${shellDir}.`,
-      );
+      throw unsafe(`The shell tried to write ${file.path} outside ${shellDir}.`);
     }
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, file.contents);
+    // An existing file keeps its mode through writeFile.
+    if (file.executable) await chmod(target, 0o755);
     written.add(relative);
   }
   const manifestPath = path.join(shellDir, GENERATED_MANIFEST);

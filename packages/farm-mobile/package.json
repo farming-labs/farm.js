@@ -1,0 +1,50 @@
+{
+  "name": "@farm.js/mobile",
+  "version": "0.1.0-beta.0",
+  "description": "Mobile shells for Farm.js apps (farm dev --mobile, farm build --mobile). Ships the Android shell.",
+  "keywords": [
+    "android",
+    "farm.js",
+    "mobile"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-mobile"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "type": "module",
+  "exports": {
+    "./android": {
+      "types": "./dist/android/index.d.ts",
+      "import": "./dist/android/index.js",
+      "default": "./dist/android/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@farm.js/core": "workspace:*",
+    "@types/node": "^22.20.5",
+    "typescript": "^5.3.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  },
+  "peerDependencies": {
+    "@farm.js/core": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

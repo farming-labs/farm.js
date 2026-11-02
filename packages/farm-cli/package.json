@@ -39,6 +39,10 @@
       "import": "./dist/desktop.mjs",
       "require": "./dist/desktop.js"
     },
+    "./mobile": {
+      "import": "./dist/mobile.mjs",
+      "require": "./dist/mobile.js"
+    },
     "./add-integration": {
       "import": "./dist/add-integration.mjs",
       "require": "./dist/add-integration.js"

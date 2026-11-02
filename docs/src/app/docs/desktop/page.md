@@ -226,9 +226,9 @@ the line `farm:ready {"port":N}` on stdout.
 
 ## Mobile (preview)
 
-`mobile` is config only for now: there is no `farm dev --mobile`, `farm build --mobile`, or native
-shell yet. The block takes the same static or function form as `desktop`, with `os` set to
-`"android"` or `"ios"`:
+`mobile` wraps the app in a native Android shell: native tabs, a stack per tab, modal sheets, and
+predictive back, with each screen showing one Farm page in a WebView. The block takes the same
+static or function form as `desktop`, with `os` set to `"android"` or `"ios"`:
 
 ```ts
 export default defineConfig({
@@ -268,3 +268,57 @@ order, with the base path and optional locale prefixes in each pattern. A web bu
 checks the block and strips it like `desktop`. `platform()` returns `"mobile"` only in the app's
 client build; its pages render on the web deployment, whose server reports `"web"`, so don't
 branch render output on it.
+
+### Run on Android
+
+Install the shell package and the Android toolchain (JDK 17 or newer, and the Android SDK with
+platform 35, build-tools 35, and platform-tools; set `ANDROID_HOME`):
+
+```sh
+pnpm add -D @farm.js/mobile
+farm dev --mobile                  # dev server, Android project, install and open on a device
+farm build --mobile                # mobile client build and Android project
+farm build --mobile --apk          # also ./gradlew assembleDebug
+```
+
+`farm dev --mobile` starts the dev server with a `--mobile` client build, writes
+`farm-routes.json` with the dev server as `server` (`http://10.0.2.2:<port>`, the host's loopback
+as the Android emulator sees it), and generates the Gradle project into
+`.farm/output/mobile/android`. When `adb devices` lists an emulator or device, it runs
+`./gradlew installDebug` and opens the app (`ANDROID_SERIAL` picks one of several); otherwise it
+prints the commands. For a phone on the LAN, pass its reachable address: `farm dev --mobile --host
+192.168.1.20`.
+
+`farm build --mobile` builds the client with `platform()` set to `"mobile"` into
+`.farm/output/mobile/www` (the web build's output is left alone), writes `farm-routes.json` with
+`mobile.server`, and generates the project. `--apk` builds the debug APK into
+`.farm/output/mobile/dist`. The project is regenerated on every run, so don't edit it.
+
+| Path                                     | Contents                                               |
+| ---------------------------------------- | ------------------------------------------------------ |
+| `app/src/main/assets/farm-routes.json`   | The navigator manifest                                 |
+| `app/src/main/assets/farm-bridge.js`     | Bridge script injected into pages on the server origin |
+| `app/src/main/java/.../Navigator.kt`     | Tabs, stacks, push, modal, replace, predictive back    |
+| `app/src/main/java/.../WebViewPool.kt`   | Two pre-warmed WebViews that back pushes               |
+| `app/src/main/java/.../NativeScreens.kt` | The hook for `native` routes                           |
+
+In the shell, a `--mobile` client hands each in-app navigation (`Link`, `navigateTo`, router
+`push` and `replace`) to the navigator through [`delegateNavigation`](/docs/routing#navigation-delegates),
+which pushes, presents, or switches tabs by the matching rule. Link prefetch is off inside the
+shell, since every screen has its own WebView. Links to other origins open in Custom Tabs.
+
+Current limits:
+
+- Android only. There is no iOS shell yet.
+- `native` routes show a placeholder screen that names the missing module. Farm does not build
+  `src/native/` screens yet; `FarmNativeScreens` in the generated project is where native screens
+  register.
+- The shell loads pages and client code from `server`. In production that is the web deployment,
+  whose client is not a `--mobile` build, so navigations stay in the page until client assets are
+  bundled into the app.
+- No token auth: the shell has no Keystore session or bearer tokens, and the server has no
+  mobile-origin checks.
+- `farm dev --mobile` writes `farm-routes.json` once; routes added while it runs use the default
+  push rule until the next start. Server code in the dev server sees `platform()` as `"mobile"`.
+- Apps with `experimental.serverComponents` use the RSC router, which does not hand navigations to
+  the shell yet.

@@ -30,44 +30,46 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 
 ## Common commands
 
-| Command                          | Purpose                                                              |
-| -------------------------------- | -------------------------------------------------------------------- |
-| farm dev                         | Start the dev server.                                                |
-| farm build                       | Build the app for the configured target.                             |
-| farm start                       | Run the Node server produced by farm build.                          |
-| farm upgrade --latest            | Upgrade installed Farm packages to the latest stable release.        |
-| farm upgrade --beta              | Upgrade installed Farm packages to the latest beta release.          |
-| farm doctor                      | Inspect a running app, or fall back to project configuration checks. |
-| farm doctor --offline            | Check project files and config without probing a dev server.         |
-| farm doctor --registry           | Verify the public Farm beta tags against the npm registry.           |
-| farm doctor --fix                | Apply safe, additive project corrections.                            |
-| farm explain /products/42        | Explain the files and runtime behavior for one URL.                  |
-| farm agent check                 | Check how AI agents can read and use the running app.                |
-| farm preview                     | Create a public URL for a running local app.                         |
-| farm login                       | Sign in to Farm Preview without starting a preview.                  |
-| farm whoami                      | Show which credential farm preview would use.                        |
-| farm logout                      | Sign out of Farm Preview on this machine.                            |
-| farm generate                    | Generate route/API types and integration schema artifacts.           |
-| farm generate --check            | Fail when committed generated types are stale.                       |
-| farm deploy --plan               | Resolve the deployment plan without executing it.                    |
-| farm migrate inspect             | Detect supported framework migration sources.                        |
-| farm migrate next --write        | Apply a deterministic Next.js App Router migration.                  |
-| farm migrate tanstack --write    | Apply a deterministic TanStack Router file-route migration.          |
-| farm migrate                     | Run one-shot schema or provider migration commands.                  |
-| farm schema check                | Check every declared table and reference against the live database.  |
-| farm schema migrate --apply      | Create every plugin's tables, dependencies first.                    |
-| farm add integration stripe --ui | Add integration wiring and optional UI.                              |
-| farm cron list                   | List configured UTC schedules and target routes.                     |
-| farm cron run dailyCleanup       | Invoke one cron route on a running app.                              |
-| farm dev --host                  | Listen on every interface, for a phone, emulator, or LAN device.     |
-| farm dev --cron                  | Start the dev server with the opt-in in-memory cron scheduler.       |
-| farm dev --desktop               | Open the app in its desktop shell, guarded like the packaged app.    |
-| farm build --desktop             | Build a packaged desktop app ([Desktop Apps](/docs/desktop)).        |
-| farm config inspect --desktop    | Print the resolved desktop block for an `--os` and `--profile`.      |
-| farm config inspect --mobile     | Print the mobile block and its `farm-routes.json` (preview).         |
-| farm telemetry status            | Show the anonymous product-telemetry preference.                     |
-| farm telemetry enable            | Enable anonymous Farm.js product telemetry.                          |
-| farm telemetry disable           | Opt out and delete the local anonymous installation ID.              |
+| Command                          | Purpose                                                               |
+| -------------------------------- | --------------------------------------------------------------------- |
+| farm dev                         | Start the dev server.                                                 |
+| farm build                       | Build the app for the configured target.                              |
+| farm start                       | Run the Node server produced by farm build.                           |
+| farm upgrade --latest            | Upgrade installed Farm packages to the latest stable release.         |
+| farm upgrade --beta              | Upgrade installed Farm packages to the latest beta release.           |
+| farm doctor                      | Inspect a running app, or fall back to project configuration checks.  |
+| farm doctor --offline            | Check project files and config without probing a dev server.          |
+| farm doctor --registry           | Verify the public Farm beta tags against the npm registry.            |
+| farm doctor --fix                | Apply safe, additive project corrections.                             |
+| farm explain /products/42        | Explain the files and runtime behavior for one URL.                   |
+| farm agent check                 | Check how AI agents can read and use the running app.                 |
+| farm preview                     | Create a public URL for a running local app.                          |
+| farm login                       | Sign in to Farm Preview without starting a preview.                   |
+| farm whoami                      | Show which credential farm preview would use.                         |
+| farm logout                      | Sign out of Farm Preview on this machine.                             |
+| farm generate                    | Generate route/API types and integration schema artifacts.            |
+| farm generate --check            | Fail when committed generated types are stale.                        |
+| farm deploy --plan               | Resolve the deployment plan without executing it.                     |
+| farm migrate inspect             | Detect supported framework migration sources.                         |
+| farm migrate next --write        | Apply a deterministic Next.js App Router migration.                   |
+| farm migrate tanstack --write    | Apply a deterministic TanStack Router file-route migration.           |
+| farm migrate                     | Run one-shot schema or provider migration commands.                   |
+| farm schema check                | Check every declared table and reference against the live database.   |
+| farm schema migrate --apply      | Create every plugin's tables, dependencies first.                     |
+| farm add integration stripe --ui | Add integration wiring and optional UI.                               |
+| farm cron list                   | List configured UTC schedules and target routes.                      |
+| farm cron run dailyCleanup       | Invoke one cron route on a running app.                               |
+| farm dev --host                  | Listen on every interface, for a phone, emulator, or LAN device.      |
+| farm dev --cron                  | Start the dev server with the opt-in in-memory cron scheduler.        |
+| farm dev --desktop               | Open the app in its desktop shell, guarded like the packaged app.     |
+| farm build --desktop             | Build a packaged desktop app ([Desktop Apps](/docs/desktop)).         |
+| farm config inspect --desktop    | Print the resolved desktop block for an `--os` and `--profile`.       |
+| farm config inspect --mobile     | Print the mobile block and its `farm-routes.json` (preview).          |
+| farm dev --mobile                | Open the app in its Android shell on an emulator or device (preview). |
+| farm build --mobile              | Build the mobile client and the Android project; `--apk` for an APK.  |
+| farm telemetry status            | Show the anonymous product-telemetry preference.                      |
+| farm telemetry enable            | Enable anonymous Farm.js product telemetry.                           |
+| farm telemetry disable           | Opt out and delete the local anonymous installation ID.               |
 
 See [Anonymous telemetry](/docs/telemetry) for the exact event fields, environment overrides, and
 privacy guarantees. Telemetry is enabled by default for interactive local commands.

@@ -11,3 +11,4 @@ export { getFarmIslandValueHeaders } from "./island-value-protocol";
 export { createClientCancellation } from "../client-cancellation";
 export { applyFarmCacheInvalidations } from "../cache-invalidation";
 export { runFarmNavigationDelegates } from "./navigation-delegate";
+export { farmMobileShellClient } from "../mobile/client";

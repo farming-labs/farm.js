@@ -256,10 +256,13 @@ export default {
   },
 };`;
 
-test("--profile needs --desktop", async () => {
+test("--profile needs --desktop or --mobile", async () => {
   const result = await runFarm(["build", "--profile", "beta", "--root", testDir]);
   assert.notEqual(result.code, 0);
-  assert.match(result.output, /--profile selects a desktop build profile; use it with --desktop/);
+  assert.match(
+    result.output,
+    /--profile selects a desktop or mobile build profile; use it with --desktop or --mobile/,
+  );
 });
 
 test("a function-valued desktop block is called once per build with the context", async (t) => {

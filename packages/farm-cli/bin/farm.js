@@ -54,13 +54,18 @@ function formatCommandError(error) {
 }
 
 function resolvePlatformOption(options) {
-  if (options.desktop && options.web) {
-    throw new Error("Choose one platform: --web or --desktop.");
+  const chosen = ["web", "desktop", "mobile"].filter((platform) => options[platform]);
+  if (chosen.length > 1) {
+    throw new Error(
+      `Choose one platform: ${chosen.map((platform) => `--${platform}`).join(" or ")}.`,
+    );
   }
-  if (options.profile !== undefined && !options.desktop) {
-    throw new Error("--profile selects a desktop build profile; use it with --desktop.");
+  if (options.profile !== undefined && !options.desktop && !options.mobile) {
+    throw new Error(
+      "--profile selects a desktop or mobile build profile; use it with --desktop or --mobile.",
+    );
   }
-  return options.desktop ? "desktop" : "web";
+  return chosen[0] ?? "web";
 }
 
 function telemetryCommandPath(command) {
@@ -104,11 +109,27 @@ program
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("--cron", "Run configured cron routes in-process during development")
   .option("--desktop", "Open the app in its desktop shell, guarded like the packaged app")
+  .option("--mobile", "Open the app in its Android shell on an emulator or device (preview)")
   .option("--web", "Develop the web app (the default)")
-  .option("--profile <name>", "Profile passed to a function-valued desktop block", undefined)
+  .option(
+    "--profile <name>",
+    "Profile passed to a function-valued desktop or mobile block",
+    undefined,
+  )
   .action(async (options) => {
     try {
       const platform = resolvePlatformOption(options);
+      if (platform === "mobile") {
+        if (options.cron) throw new Error("--cron is not available with --mobile.");
+        const { devFarmMobile } = require("../dist/mobile.js");
+        await devFarmMobile({
+          root: options.root,
+          port: options.port === undefined ? undefined : parsePortOption(options.port),
+          host: options.host,
+          profile: options.profile,
+        });
+        return;
+      }
       if (platform === "desktop") {
         if (options.cron) throw new Error("--cron is not available with --desktop.");
         if (options.host !== undefined) {
@@ -155,11 +176,28 @@ program
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("-p, --preset <preset>", "Nitro preset (node-server, vercel, cloudflare, etc.)")
   .option("--desktop", "Build a native desktop app with its own local server")
+  .option("--mobile", "Build the mobile client and generate the Android project (preview)")
+  .option("--apk", "With --mobile, also build the debug APK with Gradle")
   .option("--web", "Build for a web deployment (the default)")
-  .option("--profile <name>", "Profile passed to a function-valued desktop block", undefined)
+  .option(
+    "--profile <name>",
+    "Profile passed to a function-valued desktop or mobile block",
+    undefined,
+  )
   .action(async (options) => {
     try {
       const platform = resolvePlatformOption(options);
+      if (options.apk && platform !== "mobile") throw new Error("--apk needs --mobile.");
+      if (platform === "mobile") {
+        if (options.preset) {
+          throw new Error(
+            "--preset is not available with --mobile; the app loads pages from mobile.server.",
+          );
+        }
+        const { buildFarmMobile } = require("../dist/mobile.js");
+        await buildFarmMobile({ root: options.root, profile: options.profile, apk: options.apk });
+        return;
+      }
       if (platform === "desktop") {
         if (options.preset) {
           throw new Error("--preset is not available with --desktop; the desktop shell picks it.");
