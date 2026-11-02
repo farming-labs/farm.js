@@ -3176,7 +3176,20 @@ function countFarmKeptLayouts(request, layouts, params) {
 }
 `;
 
-function generateClientHydrationEntry(
+// Islands mode starts the client while the body streams (an async entry): a page of islands
+// hydrates them as they arrive; anything else waits for the whole document. Both client entries
+// (with client components, and the one for server pages only) need it.
+const FARM_DOCUMENT_PARSED_RUNTIME = `function farmDocumentParsed() {
+  if (document.readyState !== "loading") return Promise.resolve();
+  return new Promise(function(resolve) {
+    document.addEventListener("DOMContentLoaded", function() { resolve(); }, { once: true });
+  });
+}
+
+`;
+
+/** @internal Exported for tests. */
+export function generateClientHydrationEntry(
   clientPages: Array<{
     pattern: string;
     directory?: string;
@@ -3609,7 +3622,7 @@ void farmClientRuntime.start();
 spaRouter.initializeHistory();
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
-${islandValues ? "void farmDocumentParsed().then(hydrateFarmDocsAdapterRuntime);" : "void hydrateFarmDocsAdapterRuntime();"}
+${islandValues ? `${FARM_DOCUMENT_PARSED_RUNTIME}void farmDocumentParsed().then(hydrateFarmDocsAdapterRuntime);` : "void hydrateFarmDocsAdapterRuntime();"}
 
 window.addEventListener("beforeunload", function(event) {
   if (spaRouter.shouldBlockUnload()) {
@@ -4215,20 +4228,7 @@ function resetReactRoot() {
   isHydrated = false;
 }
 
-${
-  islandValues
-    ? `// Islands mode starts the client while the body streams (an async entry): a page of islands
-// hydrates them as they arrive; anything else waits for the whole document.
-function farmDocumentParsed() {
-  if (document.readyState !== "loading") return Promise.resolve();
-  return new Promise(function(resolve) {
-    document.addEventListener("DOMContentLoaded", function() { resolve(); }, { once: true });
-  });
-}
-
-`
-    : ""
-}// Hydrate client components
+${islandValues ? FARM_DOCUMENT_PARSED_RUNTIME : ""}// Hydrate client components
 async function hydrate() {
   await window.__FARM_PPR_REFRESH_PROMISE__;
   // A PPR refresh that is still retrying must not replace DOM once hydration starts.
