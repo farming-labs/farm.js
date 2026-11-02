@@ -111,7 +111,7 @@ const frameworks = [
     id: "farm",
     label: "Farm.js",
     version: farmCorePackage.version,
-    stack: "React 19.2.4 · Vite 8.1.5 (Rolldown)",
+    stack: "React 19.2.4 · Vite 8.3.4 (Rolldown)",
     directory: "farm",
     devHost: "localhost",
     installedPackages: [
@@ -119,8 +119,9 @@ const frameworks = [
       { name: "@farm.js/cli", version: farmCliPackage.version },
       { name: "react", version: "19.2.4" },
       { name: "react-dom", version: "19.2.4" },
-      { name: "sharp", version: "0.34.5" },
-      { name: "vite", version: "8.1.5", from: "@farm.js/core" },
+      // sharp left the fixture in #2112; core takes it as an optional peer, so a default
+      // install does not have it and this image-free workload never calls it.
+      { name: "vite", version: "8.3.4", from: "@farm.js/core" },
     ],
     cli: "node_modules/@farm.js/cli/bin/farm.js",
     devArgs: (port) => ["dev", "--port", String(port)],
