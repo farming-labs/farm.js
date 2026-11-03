@@ -210,9 +210,9 @@ function withFarmIslandsRenders(
 
 let cachedClerkProvider: { ClerkProvider: any } | null = null;
 
-const importRuntimeModule = new Function("specifier", "return import(specifier);") as (
-  specifier: string,
-) => Promise<any>;
+function importRuntimeModule(specifier: string): Promise<any> {
+  return import(/* @vite-ignore */ specifier);
+}
 
 interface CachedSSGPage {
   html: string;
