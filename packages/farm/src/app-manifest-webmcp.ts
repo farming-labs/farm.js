@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import fg from "fast-glob";
+import { globSync } from "tinyglobby";
 
 export interface FarmAppManifestWebMCPTool {
   name: string;
@@ -214,9 +214,10 @@ export function collectFarmWebMCPTools(root: string, srcDir = "src"): FarmAppMan
   const base = path.resolve(root, srcDir);
   let files: string[];
   try {
-    files = fg.sync("**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}", {
+    files = globSync("**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}", {
       cwd: base,
       absolute: true,
+      expandDirectories: false,
       ignore: ["**/node_modules/**", "**/*.d.ts", "**/*.{test,spec}.*", "**/__tests__/**"],
     });
   } catch {

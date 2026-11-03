@@ -2202,9 +2202,6 @@ importers:
       es-module-lexer:
         specifier: 2.0.0
         version: 2.0.0
-      fast-glob:
-        specifier: ^3.3.2
-        version: 3.3.3
       h3:
         specifier: 2.0.1-rc.32
         version: 2.0.1-rc.32(crossws@0.4.12)(ocache@0.3.0)
@@ -2238,6 +2235,9 @@ importers:
       supports-color:
         specifier: ^10.2.2
         version: 10.2.2
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
       unstorage:
         specifier: 2.0.0-alpha.10
         version: 2.0.0-alpha.10
@@ -23181,14 +23181,6 @@ packages:
     resolution: {integrity: sha512-GCvB3aoys96IuDFBMcTB46JOR6mdMtAToqwiW8JlWhsoh1mhHi/xn9ss/Dg7N555GiJyEt2qzoG/NHCwM6h1EA==}
     engines: {node: '>=18'}
 
-  /tinyglobby@0.2.15:
-    resolution: {integrity: sha512-j2Zq4NyQYG5XMST4cbs02Ak8iJUdxRM0XI5QyxXuZOzKOINmWurp3smXu3y5wDcJrptwpSjgXHzIQxR0omXljQ==}
-    engines: {node: '>=12.0.0'}
-    dependencies:
-      fdir: 6.5.0(picomatch@4.0.7)
-      picomatch: 4.0.7
-    dev: true
-
   /tinyglobby@0.2.17:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
@@ -23340,7 +23332,7 @@ packages:
       rolldown-plugin-dts: 0.16.11(rolldown@1.2.16)(supports-color@10.2.2)(typescript@5.9.3)
       semver: 7.7.3
       tinyexec: 1.0.1
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.17
       tree-kill: 1.2.2
       typescript: 5.9.3
       unconfig: 7.3.3
