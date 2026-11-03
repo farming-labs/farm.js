@@ -17,13 +17,18 @@ import {
   parseFarmNativeStylesheet,
   type FarmNativeStylesheet,
 } from "./native-css";
-import { FARM_NATIVE_STYLE_PROPERTIES, farmNativeClassProblem } from "./native-style";
+import {
+  FARM_NATIVE_STYLE_PROPERTIES,
+  FARM_NATIVE_TEXT_KEYS,
+  farmNativeClassProblem,
+  resolveFarmNativeClasses,
+} from "./native-style";
 
 /**
  * Cached facts are reused only by the same analyzer: bump when facts change shape or rules
  * change between releases; a new Farm version always starts fresh.
  */
-const ANALYZER_VERSION = `4:${FARM_VERSION}`;
+const ANALYZER_VERSION = `5:${FARM_VERSION}`;
 
 export type FarmUiNodeKind = "View" | "Text" | "Image" | "Pressable" | "TextInput" | "List";
 
@@ -305,6 +310,21 @@ export const CORE_PORTABLE: Record<string, ReadonlySet<string>> = {
   "@farm.js/core/version": new Set(["FARM_VERSION"]),
   "@farm.js/core/platform": new Set(["platform"]),
 };
+
+/** Inline elements the tree reads as text runs, which cannot carry a box. */
+const INLINE_BOX_TAGS = new Set("span strong em b i small label code".split(" "));
+
+function hasBoxStyle(node: FarmUiNode): boolean {
+  const tokens = node.style ?? [];
+  const classes = tokens.filter((token) => !token.startsWith("style."));
+  const resolved = resolveFarmNativeClasses(classes.join(" "));
+  const keys = [
+    ...Object.keys(resolved.style),
+    ...Object.keys(resolved.dark ?? {}),
+    ...tokens.filter((token) => token.startsWith("style.")).map((token) => token.slice(6)),
+  ];
+  return keys.some((key) => !FARM_NATIVE_TEXT_KEYS.has(key));
+}
 
 /** Imported components with a native mapping. */
 const MAPPED_COMPONENTS: Record<string, Record<string, FarmUiNodeKind>> = {
@@ -884,6 +904,23 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
         return undefined;
       case "JSXElement": {
         const ui = classifyElement(node);
+        // The tree draws an inline element with a box (a background, padding) only as a flex item;
+        // inside text it has no native layout yet.
+        if (
+          INLINE_BOX_TAGS.has(ui.tag) &&
+          parent &&
+          parent.kind !== "Fragment" &&
+          parent.kind !== "Component" &&
+          !parent.style?.some((token) => token === "flex" || token === "inline-flex") &&
+          hasBoxStyle(ui)
+        ) {
+          block(
+            node.openingElement,
+            "class-name",
+            `<${ui.tag}> with a background, border, padding, or size inside text has no native-tier layout`,
+            "native",
+          );
+        }
         for (const attribute of node.openingElement.attributes as Node[]) {
           visit(attribute.type === "JSXSpreadAttribute" ? attribute.argument : attribute.value);
         }
