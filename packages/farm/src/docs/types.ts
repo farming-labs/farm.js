@@ -96,6 +96,24 @@ export type FarmDocsConfigInput = FarmDocsRuntimeConfig & {
   config?: FarmDocsRuntimeConfig;
   /** Path to docs.config.* or docs.json. */
   configPath?: string;
+  /**
+   * Serializable overrides for the docs roots, each served under its own route. Declare the
+   * roots in the docs config file (`roots`); an entry here applies over that file's root with
+   * the same `entry`, or adds a root. A root inherits the main docs config, and its own fields
+   * replace the main root's. Requires a docs adapter.
+   */
+  roots?: FarmDocsRootInput[];
+};
+
+/** A docs root in `docs.roots`: the root's own docs fields beside its route. */
+export type FarmDocsRootInput = Omit<
+  FarmDocsRuntimeConfig,
+  "entry" | "docsPath" | "contentDir" | "roots"
+> & {
+  /** Public route of this docs set, e.g. "/statewire/docs". */
+  entry: string;
+  /** Source content directory, relative to the project root. Defaults to `src/app/<entry>`. */
+  contentDir?: string;
 };
 
 export type FarmDocsUserConfig = boolean | FarmDocsConfigInput;
@@ -117,4 +135,14 @@ export interface FarmDocsResolvedConfig {
   runtimeConfig?: FarmDocsRuntimeConfig & Pick<DocsConfig, "entry">;
   /** The serializable docs settings from `farm.config.ts`, applied over the config file. */
   configOverrides?: Partial<DocsConfig>;
+  /**
+   * The extra docs roots, from the config file's `roots` and `docs.roots`, served alongside
+   * this root. Absent with a single root.
+   */
+  roots?: FarmDocsResolvedRoot[];
 }
+
+export type FarmDocsResolvedRoot = Pick<
+  FarmDocsResolvedConfig,
+  "entry" | "contentDir" | "config" | "runtimeConfig" | "configOverrides"
+>;

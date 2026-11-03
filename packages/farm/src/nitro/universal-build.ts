@@ -121,6 +121,7 @@ import { compileFarmDocsManifest } from "../docs/compiler";
 import {
   discoverFarmDocsPages,
   getFarmDocsMarkdownPath,
+  getFarmDocsRoots,
   resolveFarmDocsContentDir,
 } from "../docs/handler";
 import {
@@ -142,6 +143,7 @@ import {
   readFarmDocsModulePreloads,
 } from "../docs/module-preloads";
 import type { FarmDocsCompiledManifest } from "../docs/precompiled-runtime";
+import type { FarmDocsResolvedConfig } from "../docs/types";
 import {
   createFarmRouteRuntimeManifest,
   validateFarmRouteRuntimeDeployment,
@@ -1062,10 +1064,12 @@ function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
 }
 
-function resolveBuildDocsContentDir(config: ResolvedFarmConfig, root: string): string | null {
-  if (!config.docs?.enabled) return null;
-
-  const configuredContentDir = config.docs.contentDir || config.docs.config.contentDir;
+function resolveBuildDocsContentDir(
+  docs: FarmDocsResolvedConfig,
+  root: string,
+  srcDir: string | undefined,
+): string | null {
+  const configuredContentDir = docs.contentDir || docs.config.contentDir;
   if (typeof configuredContentDir === "string" && configuredContentDir.trim()) {
     const contentDir = path.isAbsolute(configuredContentDir)
       ? configuredContentDir
@@ -1073,8 +1077,8 @@ function resolveBuildDocsContentDir(config: ResolvedFarmConfig, root: string): s
     return existsSync(contentDir) ? contentDir : null;
   }
 
-  const entryDir = config.docs.config.entry || trimSlashes(config.docs.entry) || "docs";
-  const appDocsDir = path.join(root, config.srcDir || "src", "app", entryDir);
+  const entryDir = docs.config.entry || trimSlashes(docs.entry) || "docs";
+  const appDocsDir = path.join(root, srcDir || "src", "app", entryDir);
   if (existsSync(appDocsDir)) return appDocsDir;
 
   const rootDocsDir = path.join(root, entryDir);
@@ -1813,16 +1817,17 @@ async function buildClient(
     config.docs.adapter?.server &&
     config.docs.adapter.react,
   );
-  const adapterDocsEntry = config.docs?.enabled
-    ? `/${config.docs.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/"
-    : null;
+  const docsEntries = config.docs?.enabled
+    ? getFarmDocsRoots(config.docs).map(
+        (docsRoot) => `/${docsRoot.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/",
+      )
+    : [];
+  const adapterDocsEntry = docsEntries[0] ?? null;
   const isAdapterDocsRoute = (routePattern: string) =>
-    Boolean(
-      adapterOwnsDocsRuntime &&
-      adapterDocsEntry &&
-      (adapterDocsEntry === "/" ||
-        routePattern === adapterDocsEntry ||
-        routePattern.startsWith(`${adapterDocsEntry}/`)),
+    adapterOwnsDocsRuntime &&
+    docsEntries.some(
+      (docsEntry) =>
+        docsEntry === "/" || routePattern === docsEntry || routePattern.startsWith(`${docsEntry}/`),
     );
   const syntheticDocsEntry =
     config.docs?.enabled && !adapterOwnsDocsRuntime ? adapterDocsEntry : null;
@@ -1884,7 +1889,7 @@ async function buildClient(
   for (const layout of clientLayouts) {
     const matchesBuiltRoute =
       pageRoutes.some((route) => layoutAppliesToRoute(layout.pattern, routeDirectory(route))) ||
-      Boolean(adapterDocsEntry && layoutAppliesToRoute(layout.pattern, adapterDocsEntry));
+      docsEntries.some((docsEntry) => layoutAppliesToRoute(layout.pattern, docsEntry));
     if (matchesBuiltRoute && layout.suppressedAsyncHydration) {
       logger.warn(`⚠️  ${describeSuppressedAsyncHydration(layout.pattern, layout.fallbackReason)}`);
     }
@@ -2031,7 +2036,9 @@ async function buildClient(
     srcDir,
     adapterOwnsDocsRuntime ? false : isFarmDocsSearchEnabled(config.docs),
     adapterOwnsDocsRuntime ? undefined : resolveFarmDocsSearchClientModule(root),
-    config.docs?.enabled ? config.docs.entry : undefined,
+    config.docs?.enabled
+      ? getFarmDocsRoots(config.docs).map((docsRoot) => docsRoot.entry)
+      : undefined,
     adapterOwnsDocsRuntime ? config.docs.adapter?.react : undefined,
     config.i18n,
     config.plugins,
@@ -3196,7 +3203,7 @@ export function generateClientHydrationEntry(
   srcDir: string,
   docsSearchEnabled: boolean,
   docsSearchModuleId: string | undefined,
-  docsEntryPath: string | undefined,
+  docsEntryPath: string | readonly string[] | undefined,
   docsAdapterReact: string | undefined,
   i18nConfig: ResolvedFarmConfig["i18n"] = {
     enabled: false,
@@ -3327,16 +3334,30 @@ function isFarmLocaleDocumentChange() {
   return false;
 }
 `;
-  const docsNavigationRuntime = docsEntryPath
-    ? `
-const farmDocsEntryPath = ${JSON.stringify(docsEntryPath)};
+  const docsEntryPaths =
+    typeof docsEntryPath === "string" ? [docsEntryPath] : (docsEntryPath ?? []);
+  const docsNavigationRuntime =
+    docsEntryPaths.length > 1
+      ? `
+const farmDocsEntryPaths = ${JSON.stringify(docsEntryPaths)};
+function isFarmDocsPath(pathname) {
+  const routePathname = getFarmRoutePathname(pathname);
+  const normalizedPath = routePathname.length > 1 ? routePathname.replace(/\\/+$/, "") : routePathname;
+  return farmDocsEntryPaths.some(
+    (entryPath) => normalizedPath === entryPath || normalizedPath.startsWith(entryPath + "/"),
+  );
+}
+`
+      : docsEntryPaths[0]
+        ? `
+const farmDocsEntryPath = ${JSON.stringify(docsEntryPaths[0])};
 function isFarmDocsPath(pathname) {
   const routePathname = getFarmRoutePathname(pathname);
   const normalizedPath = routePathname.length > 1 ? routePathname.replace(/\\/+$/, "") : routePathname;
   return normalizedPath === farmDocsEntryPath || normalizedPath.startsWith(farmDocsEntryPath + "/");
 }
 `
-    : `
+        : `
 function isFarmDocsPath() {
   return false;
 }
@@ -5590,15 +5611,15 @@ export function getFarmDocsGuardedPaths(
   middlewareRoutes: readonly { path: string }[],
 ): string[] {
   if (!config.docs?.enabled) return [];
-  const contentDir = resolveFarmDocsContentDir(config.docs, {
-    root: config.root,
-    srcDir: config.srcDir,
-  });
+  const options = { root: config.root, srcDir: config.srcDir };
   const guards = {
     config: { middleware: config.middleware, integrations: config.integrations },
     middlewareRoutes,
   };
-  return discoverFarmDocsPages(contentDir, config.docs)
+  return getFarmDocsRoots(config.docs)
+    .flatMap((docsRoot) =>
+      discoverFarmDocsPages(resolveFarmDocsContentDir(docsRoot, options), docsRoot),
+    )
     .flatMap((page) => [page.href, getFarmDocsMarkdownPath(page.href)])
     .filter((pathname) => farmPathGuardCoversPage(guards, pathname));
 }
@@ -5633,6 +5654,39 @@ export function getFarmAppOwnedDocsEnginePaths(
 }
 
 /**
+ * The docs adapter's handler factory in the generated server, and the runtime config it is
+ * called with: one object for a single docs root, an array with the main root first for
+ * several. Both read `farmDocsResolvedConfig`, and the config module when there is one.
+ *
+ * @internal
+ */
+export function generateFarmDocsAdapterHandlerArguments(
+  docs: Pick<FarmDocsResolvedConfig, "roots"> | undefined,
+  docsConfigModulePath: string | undefined,
+): { factory: string; config: string } {
+  const runtimeConfig = (root: string) => `{
+  ${
+    docsConfigModulePath
+      ? `...getFarmDocsConfigModuleRoot(farmDocsConfigModule.default || farmDocsConfigModule, ${root}.entry),\n  ...${root}.configOverrides,`
+      : `...${root}.config,`
+  }
+  entry: ${root}.config?.entry || String(${root}.entry || "/docs").replace(/^\\/+|\\/+$/g, "") || "docs",
+  docsPath: ${root}.entry,
+  contentDir: ${root}.contentDir || ${root}.config?.contentDir,
+}`;
+  if (docs?.roots?.length) {
+    return {
+      factory: "createFarmDocsAdapterMultiRuntimeHandler",
+      config: `[farmDocsResolvedConfig, ...farmDocsResolvedConfig.roots].map((farmDocsRoot) => (${runtimeConfig("farmDocsRoot")}))`,
+    };
+  }
+  return {
+    factory: "createFarmDocsAdapterRuntimeHandler",
+    config: runtimeConfig("farmDocsResolvedConfig"),
+  };
+}
+
+/**
  * Generate virtual entry code that bundles all routes
  * This creates managers at runtime from bundled code
  */
@@ -5642,8 +5696,15 @@ export function generateFarmDocsRuntimeConfigExpression(
 ): string {
   if (!docs.enabled) return "null";
 
+  const serializableDocs = docs.roots?.length
+    ? {
+        ...docs,
+        // React elements and functions do not survive JSON; see runtimeConfig below.
+        roots: docs.roots.map((docsRoot) => ({ ...docsRoot, runtimeConfig: undefined })),
+      }
+    : docs;
   const baseConfig = {
-    ...docs,
+    ...serializableDocs,
     contentDir: undefined,
     ...(precompiled ? { configPath: undefined } : {}),
     config: undefined,
@@ -5663,7 +5724,7 @@ export function generateFarmDocsRuntimeConfigExpression(
     });
   }
 
-  return `farmDocsBundledContentDir
+  const expression = `farmDocsBundledContentDir
   ? {
       ...${JSON.stringify(baseConfig)},
       contentDir: farmDocsBundledContentDir,
@@ -5672,7 +5733,22 @@ export function generateFarmDocsRuntimeConfigExpression(
         contentDir: farmDocsBundledContentDir,
       },
     }
-  : ${JSON.stringify({ ...docs, runtimeConfig: undefined })}`;
+  : ${JSON.stringify({ ...serializableDocs, runtimeConfig: undefined })}`;
+  if (!docs.roots?.length) return expression;
+
+  // Each extra root's content is bundled under farm-docs-roots/<index>, beside the main
+  // root's, when the deployment carries the content with it.
+  return `((farmDocs) => ({
+  ...farmDocs,
+  roots: farmDocs.roots.map((farmDocsRoot, index) => {
+    const contentDir = farmDocsBundledRootsDir
+      ? farmDocsJoin(farmDocsBundledRootsDir, String(index))
+      : null;
+    return contentDir && farmDocsExistsSync(contentDir)
+      ? { ...farmDocsRoot, contentDir, config: { ...farmDocsRoot.config, contentDir } }
+      : farmDocsRoot;
+  }),
+}))(${expression})`;
 }
 
 /**
@@ -6088,6 +6164,12 @@ function generateVirtualEntryCode(
     config.docs.adapter?.server &&
     config.docs.adapter.react,
   );
+  if (config.docs?.enabled && config.docs.roots?.length && !adapterOwnsDocsRuntime) {
+    throw new Error(
+      "Several docs roots need the docs adapter, which serves the React renderer only; Farm's " +
+        "built-in docs renderer serves a single docs root.",
+    );
+  }
   // The adapter renders icons, MDX components, and callbacks from the docs config, which
   // JSON cannot carry, so the server bundle imports the config module itself.
   const docsConfigModulePath =
@@ -6097,6 +6179,7 @@ function generateVirtualEntryCode(
     !config.docs.configPath.endsWith(".json")
       ? config.docs.configPath
       : undefined;
+  const adapterHandler = generateFarmDocsAdapterHandlerArguments(config.docs, docsConfigModulePath);
   const hasIsolatedClientGraphRuntime =
     isReactRenderer(config.renderer) && isolatedClientBoundaryModules.size > 0;
   const rendererStreamingCapabilities = getFarmRendererStreamingCapabilitiesForRuntime(
@@ -6642,8 +6725,12 @@ const isFarmDocsAPIRequest = (requestOrPathname) => {
   return pathname === apiPath || pathname.startsWith(apiPath + "/");
 };`
       : adapterOwnsDocsRuntime
-        ? `import { isFarmDocsAPIRequest } from "@farm.js/core/docs";
-import { createFarmDocsRuntimeHandler as createFarmDocsAdapterRuntimeHandler } from ${JSON.stringify(config.docs.adapter!.server)};
+        ? `import { ${docsConfigModulePath ? "getFarmDocsConfigModuleRoot, " : ""}isFarmDocsAPIRequest } from "@farm.js/core/docs";
+import { ${
+            config.docs.roots?.length
+              ? "createFarmDocsMultiRuntimeHandler as createFarmDocsAdapterMultiRuntimeHandler"
+              : "createFarmDocsRuntimeHandler as createFarmDocsAdapterRuntimeHandler"
+          } } from ${JSON.stringify(config.docs.adapter!.server)};
 import * as FarmDocsAdapterReact from ${JSON.stringify(config.docs.adapter!.react)};${
             docsConfigModulePath
               ? `\nimport * as farmDocsConfigModule from ${toVirtualEntryImportSpecifier(docsConfigModulePath)};`
@@ -7167,7 +7254,24 @@ const farmDocsBundledContentDir = ${
   }
 })()`
       : "null"
-  };
+  };${
+    config.docs?.enabled && !hasPrecompiledDocs && config.docs.roots?.length
+      ? `
+const farmDocsBundledRootsDir = (() => {
+  try {
+    const currentDir = farmDocsDirname(farmDocsFileURLToPath(import.meta.url));
+    const candidates = [
+      farmDocsJoin(currentDir, "farm-docs-roots"),
+      farmDocsJoin(currentDir, "..", "farm-docs-roots"),
+      farmDocsJoin(currentDir, "..", "..", "farm-docs-roots"),
+    ];
+    return candidates.find((candidate) => farmDocsExistsSync(candidate)) || null;
+  } catch {
+    return null;
+  }
+})();`
+      : ""
+  }
 const farmDocsResolvedConfig = ${generateFarmDocsRuntimeConfigExpression(config.docs, hasPrecompiledDocs)};
 const farmDocsRuntimeRoot = ${hasPrecompiledDocs ? '"."' : `farmDocsBundledContentDir || ${JSON.stringify(config.root)}`};
 // Docs pages a path-specific guard covers, decided at build time. The docs API and the
@@ -7214,16 +7318,7 @@ const farmDocsHandler = ${
       ? hasPrecompiledDocs
         ? "farmDocsPrecompiledRuntime.handleDocsRequest"
         : adapterOwnsDocsRuntime
-          ? `createFarmDocsAdapterRuntimeHandler({
-  ${
-    docsConfigModulePath
-      ? "...(farmDocsConfigModule.default || farmDocsConfigModule),\n  ...farmDocsResolvedConfig.configOverrides,"
-      : "...farmDocsResolvedConfig.config,"
-  }
-  entry: farmDocsResolvedConfig.config?.entry || String(farmDocsResolvedConfig.entry || "/docs").replace(/^\\/+|\\/+$/g, "") || "docs",
-  docsPath: farmDocsResolvedConfig.entry,
-  contentDir: farmDocsResolvedConfig.contentDir || farmDocsResolvedConfig.config?.contentDir,
-}, {
+          ? `${adapterHandler.factory}(${adapterHandler.config}, {
   rootDir: farmDocsRuntimeRoot,
   // A production build's content cannot change, so the adapter reads its
   // navigation once instead of scanning the content directory per request.
@@ -8950,7 +9045,11 @@ ${
   config.docs?.enabled
     ? `const farmDocsRouteLabelInput = {
   path: normalizeRuntimePath(farmDocsResolvedConfig?.entry || "/docs"),
-  apiPath: ${JSON.stringify(farmDocsPrecompiledManifest?.apiPath || "/api/docs")},
+  apiPath: ${JSON.stringify(farmDocsPrecompiledManifest?.apiPath || "/api/docs")},${
+    config.docs.roots?.length
+      ? "\n  roots: farmDocsResolvedConfig.roots.map((farmDocsRoot) => farmDocsRoot.entry),"
+      : ""
+  }
 };
 `
     : ""
@@ -12565,12 +12664,38 @@ async function copyFarmDocsContentForVercel(
   nitroFuncDir: string,
   fs: typeof import("fs/promises"),
 ) {
-  const docsContentDir = resolveBuildDocsContentDir(config, root);
-  if (!docsContentDir) return;
-
+  if (!config.docs?.enabled) return;
   // Nitro v3 emits the SSR entry at the function root. Its docs lookup searches
   // beside the entry and its ancestors, not the old chunks/nitro directory.
-  const bundledContentDir = path.join(nitroFuncDir, "farm-docs-content");
+  const [mainRoot, ...extraRoots] = getFarmDocsRoots(config.docs);
+  await copyFarmDocsRootContent(
+    mainRoot!,
+    root,
+    config.srcDir,
+    path.join(nitroFuncDir, "farm-docs-content"),
+    fs,
+  );
+  for (const [index, docsRoot] of extraRoots.entries()) {
+    await copyFarmDocsRootContent(
+      docsRoot,
+      root,
+      config.srcDir,
+      path.join(nitroFuncDir, "farm-docs-roots", String(index)),
+      fs,
+    );
+  }
+}
+
+async function copyFarmDocsRootContent(
+  docs: FarmDocsResolvedConfig,
+  root: string,
+  srcDir: string | undefined,
+  bundledContentDir: string,
+  fs: typeof import("fs/promises"),
+) {
+  const docsContentDir = resolveBuildDocsContentDir(docs, root, srcDir);
+  if (!docsContentDir) return;
+
   const lastModifiedManifest = createFarmDocsLastModifiedManifest(docsContentDir, {
     fallback: "now",
   });

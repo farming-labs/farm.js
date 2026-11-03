@@ -157,4 +157,149 @@ describe("Vercel docs content", () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+
+  it("serves the docs config's roots through the adapter's multi-root handler", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-vercel-docs-roots-"));
+    try {
+      await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+      await fs.symlink(
+        packageRoot,
+        path.join(root, "node_modules", "@farm.js", "core"),
+        "junction",
+      );
+      for (const name of ["react", "react-dom"]) {
+        await fs.symlink(
+          await fs.realpath(path.join(packageRoot, "node_modules", name)),
+          path.join(root, "node_modules", name),
+          "junction",
+        );
+      }
+      const adapterDir = path.join(root, "node_modules", "fixture-docs-adapter");
+      await fs.mkdir(adapterDir, { recursive: true });
+      await fs.writeFile(
+        path.join(adapterDir, "package.json"),
+        JSON.stringify({
+          name: "fixture-docs-adapter",
+          type: "module",
+          exports: { "./server": "./server.js", "./react": "./react.js" },
+        }),
+      );
+      // Answers with the root it routed to and that root's page, read from its contentDir.
+      await fs.writeFile(
+        path.join(adapterDir, "server.js"),
+        `import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+export function createFarmDocsMultiRuntimeHandler(configs, options) {
+  return async (request) => {
+    const { pathname } = new URL(request.url);
+    const config = [...configs]
+      .sort((a, b) => b.docsPath.length - a.docsPath.length)
+      .find((c) => pathname === c.docsPath || pathname.startsWith(c.docsPath + "/"));
+    if (!config) return null;
+    const page = readFileSync(resolve(options.rootDir, config.contentDir, "page.md"), "utf8");
+    return Response.json({
+      roots: configs.map((c) => c.docsPath),
+      docsPath: config.docsPath,
+      title: config.nav && config.nav.title,
+      footer: typeof config.renderFooter === "function" ? config.renderFooter() : null,
+      description: (config.metadata && config.metadata.description) || null,
+      page,
+    });
+  };
+}
+`,
+      );
+      await fs.writeFile(
+        path.join(adapterDir, "react.js"),
+        "export function hydrateFarmDocs() {}\n",
+      );
+      await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
+      // The roots are declared once, in the docs config; a function survives to the adapter.
+      await fs.writeFile(
+        path.join(root, "docs.config.ts"),
+        `export default {
+  entry: "docs",
+  nav: { title: "Main" },
+  roots: [
+    { entry: "statewire/docs", nav: { title: "Statewire" }, renderFooter: () => "Statewire footer" },
+  ],
+};
+`,
+      );
+      const source = path.join(root, "src");
+      await fs.mkdir(path.join(source, "app", "docs"), { recursive: true });
+      await fs.mkdir(path.join(source, "app", "statewire", "docs"), { recursive: true });
+      await fs.writeFile(
+        path.join(source, "app", "layout.tsx"),
+        "export default function Layout({ children }) { return <main>{children}</main>; }",
+      );
+      await fs.writeFile(path.join(source, "app", "docs", "page.md"), "# Main docs\n");
+      await fs.writeFile(
+        path.join(source, "app", "statewire", "docs", "page.md"),
+        "# Statewire docs\n",
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          deploy: { target: "vercel" },
+          docs: {
+            adapter: {
+              id: "fixture-docs-adapter",
+              protocol: 1,
+              server: "fixture-docs-adapter/server",
+              react: "fixture-docs-adapter/react",
+            },
+            entry: "/docs",
+            // A serializable override for one root, applied over the docs config's root.
+            roots: [{ entry: "/statewire/docs", metadata: { description: "From farm.config" } }],
+          },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "vercel" });
+
+      await fs.rename(source, path.join(root, "source-not-deployed"));
+      const functionRoot = path.resolve(root, config.deploy.outputDir, "functions", "__nitro.func");
+      // The main root keeps its directory; an extra root's copy sits beside it, not inside it.
+      await expect(
+        fs.readFile(path.join(functionRoot, "farm-docs-content", "page.md"), "utf8"),
+      ).resolves.toBe("# Main docs\n");
+      await expect(
+        fs.readFile(path.join(functionRoot, "farm-docs-roots", "0", "page.md"), "utf8"),
+      ).resolves.toBe("# Statewire docs\n");
+      const { default: handler } = await import(
+        /* @vite-ignore */ pathToFileURL(path.join(functionRoot, "index.mjs")).href
+      );
+      const pages = await Promise.all(
+        ["/docs", "/statewire/docs"].map(async (pathname) => {
+          const response = await handler.fetch(new Request(`https://farm.test${pathname}`));
+          expect(response.status).toBe(200);
+          return response.json();
+        }),
+      );
+      expect(pages).toEqual([
+        {
+          roots: ["/docs", "/statewire/docs"],
+          docsPath: "/docs",
+          title: "Main",
+          footer: null,
+          description: null,
+          page: "# Main docs\n",
+        },
+        {
+          roots: ["/docs", "/statewire/docs"],
+          docsPath: "/statewire/docs",
+          title: "Statewire",
+          footer: "Statewire footer",
+          description: "From farm.config",
+          page: "# Statewire docs\n",
+        },
+      ]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
 });

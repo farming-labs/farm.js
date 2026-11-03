@@ -11,6 +11,7 @@ import {
   createFarmDocsAPIHandler,
   createFarmDocsHandler,
   getFarmDocsDocumentNavigationMatchers,
+  getFarmDocsRouteTypeEntries,
   isFarmDocsAPIRequest,
 } from "../docs";
 import type { FarmDocsAPIOptions } from "../docs/api";
@@ -38,6 +39,32 @@ describe("getFarmDocsDocumentNavigationMatchers", () => {
         config: { entry: "docs" },
       }),
     ).toEqual(["/(.*)"]);
+  });
+
+  it("routes every docs root through document navigation and route types", () => {
+    const docs = {
+      enabled: true,
+      entry: "/docs",
+      config: { entry: "docs" },
+      roots: [
+        { entry: "/statewire/docs", config: { entry: "statewire/docs" } },
+        { entry: "/pinboard/docs", config: { entry: "pinboard/docs" } },
+      ],
+    };
+
+    expect(getFarmDocsDocumentNavigationMatchers(docs)).toEqual([
+      "/docs(.*)",
+      "/statewire/docs(.*)",
+      "/pinboard/docs(.*)",
+    ]);
+    expect(getFarmDocsRouteTypeEntries(docs)).toEqual([
+      "/docs",
+      "/docs/[...docs]",
+      "/statewire/docs",
+      "/statewire/docs/[...docs]",
+      "/pinboard/docs",
+      "/pinboard/docs/[...docs]",
+    ]);
   });
 
   it("does not register document navigation for disabled docs", () => {

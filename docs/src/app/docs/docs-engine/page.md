@@ -201,6 +201,62 @@ Large documentation sites may move the serializable docs options into `docs.conf
 automatically. Values declared in `farm.config.ts` take priority, so applications can still override
 the entry or any shared setting.
 
+## Several docs roots
+
+One app can serve several independent docs sets, each under its own route, with its own content,
+navigation, and search. Declare the extra sets once, in `roots` in the docs config file; the docs
+config itself stays the first, main root.
+
+**docs.config.tsx**
+
+```tsx
+import { defineDocs } from "@farming-labs/docs";
+
+export default defineDocs({
+  entry: "docs",
+  nav: { title: "Acme Docs" },
+  roots: [
+    {
+      entry: "statewire/docs",
+      nav: { title: <span>Statewire</span> },
+      metadata: { titleTemplate: "%s – Statewire" },
+    },
+    { entry: "pinboard/docs", contentDir: "content/pinboard", nav: { title: "Pinboard" } },
+  ],
+});
+```
+
+**farm.config.ts**
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  docs: {
+    entry: "/docs",
+    // Optional: serializable overrides for one root, matched by entry.
+    roots: [{ entry: "/statewire/docs", search: { enabled: false } }],
+  },
+});
+```
+
+- Each root inherits the main root's settings and replaces the fields it sets itself.
+- `docs.roots` in `farm.config.ts` takes the same flat shape. An entry there merges over the docs
+  config's root with the same `entry`, its fields winning, or adds a root of its own. From lowest to
+  highest precedence: the docs config's main fields, the `docs` options in `farm.config.ts`, the
+  docs config's root, and that root's `docs.roots` entry.
+- `contentDir` defaults to `src/app/<entry>`, as it does for the main root, and is never inherited.
+- Icons, React elements, MDX components, and callbacks in a root's docs config reach the adapter as
+  written; Farm serializes only the plain values.
+- `/sitemap.xml`, `/robots.txt`, `/llms-full.txt`, docs MCP, and the AI catalog entry come from the
+  first root.
+- Search follows the page it is opened from: it searches that page's root. `/api/docs?root=<entry>`
+  or `?pathname=<page>` names the root explicitly.
+
+Several roots need a docs adapter such as `@farming-labs/farmjs` on a Node.js deployment target,
+Vercel included. `farm dev` and `farm build` stop with an error for the built-in renderer
+(`docs.adapter: false`) and for edge targets. Each root's `entry` must be unique and cannot be `/`.
+
 ## Agent-readable output
 
 The docs runtime can serve human pages and machine-readable output from the same markdown source:

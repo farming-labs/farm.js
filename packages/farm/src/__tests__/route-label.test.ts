@@ -85,6 +85,20 @@ describe("route labels", () => {
     expect(resolveFarmDocsRouteLabel("/routing", { path: "/" })).toBe("/[...slug]");
   });
 
+  it("names a page of any docs root by that root's routes", () => {
+    const roots = { path: "/docs", roots: ["/guides", "/guides/docs"] };
+    expect(resolveFarmDocsRouteLabel("/docs/routing", roots)).toBe("/docs/[...slug]");
+    expect(resolveFarmDocsRouteLabel("/guides/docs", roots)).toBe("/guides/docs");
+    expect(resolveFarmDocsRouteLabel("/guides/docs/setup.md", roots)).toBe(
+      "/guides/docs/[...slug].md",
+    );
+    expect(resolveFarmDocsRouteLabel("/guides/intro", roots)).toBe("/guides/[...slug]");
+    expect(resolveFarmDocsEngineRouteLabel("/guides/docs/setup", roots)).toBe(
+      "/guides/docs/[...slug]",
+    );
+    expect(resolveFarmDocsRouteLabel("/blog", roots)).toBeNull();
+  });
+
   it("names what the docs engine answered without carrying nested request input", () => {
     expect(resolveFarmDocsEngineRouteLabel("/docs/routing", docs)).toBe("/docs/[...slug]");
     expect(resolveFarmDocsEngineRouteLabel("/mcp", docs)).toBe("/mcp");

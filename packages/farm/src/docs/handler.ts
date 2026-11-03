@@ -222,19 +222,39 @@ export function resolveFarmDocsContentDir(
   return path.join(root, entryDir);
 }
 
+/** The main docs root, then each of `docs.roots`, each as a resolved config of its own. */
+export function getFarmDocsRoots(docs: FarmDocsResolvedConfig): FarmDocsResolvedConfig[] {
+  return [
+    docs,
+    ...(docs.roots ?? []).map((root) => ({
+      ...docs,
+      entry: root.entry,
+      contentDir: root.contentDir,
+      config: root.config,
+      runtimeConfig: root.runtimeConfig,
+      configOverrides: root.configOverrides,
+      roots: undefined,
+    })),
+  ];
+}
+
 export function getFarmDocsRouteTypeEntries(docs: FarmDocsResolvedConfig | undefined): string[] {
   if (!docs?.enabled) return [];
-  const entry = normalizeEntry(docs.entry);
-  if (entry === "/") return ["/", "/[...docs]"];
-  return [entry, `${entry}/[...docs]`];
+  return getFarmDocsRoots(docs).flatMap((root) => {
+    const entry = normalizeEntry(root.entry);
+    if (entry === "/") return ["/", "/[...docs]"];
+    return [entry, `${entry}/[...docs]`];
+  });
 }
 
 export function getFarmDocsDocumentNavigationMatchers(
   docs: FarmDocsResolvedConfig | undefined,
 ): string[] {
   if (!docs?.enabled) return [];
-  const entry = normalizeEntry(docs.entry);
-  return [entry === "/" ? "/(.*)" : `${entry}(.*)`];
+  return getFarmDocsRoots(docs).map((root) => {
+    const entry = normalizeEntry(root.entry);
+    return entry === "/" ? "/(.*)" : `${entry}(.*)`;
+  });
 }
 
 function getRequestSlug(docs: FarmDocsResolvedConfig, request: Request): string {

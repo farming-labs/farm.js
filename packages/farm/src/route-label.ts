@@ -104,6 +104,8 @@ export interface FarmDocsRouteLabelInput {
   path: string;
   /** The docs API base, `/api/docs` unless a precompiled runtime names another. */
   apiPath?: string;
+  /** The entries of `docs.roots`, served alongside `path`. */
+  roots?: readonly string[];
 }
 
 /**
@@ -118,14 +120,18 @@ export function resolveFarmDocsRouteLabel(
   const apiPath = normalize(docs.apiPath ?? "/api/docs");
   if (pathname === apiPath) return apiPath;
   if (pathname.startsWith(`${apiPath}/`)) return `${apiPath}/[...path]`;
-  const entry = normalize(docs.path);
-  const base = entry === "/" ? "" : entry;
   const markdown = pathname.toLowerCase().endsWith(".md");
   const page = markdown ? pathname.slice(0, -".md".length) : pathname;
-  if (page === entry || (entry === "/" && page === "/index")) {
-    return markdown ? getFarmMarkdownMirrorPath(entry) : entry;
+  const entries = [docs.path, ...(docs.roots ?? [])]
+    .map(normalize)
+    .sort((a, b) => b.length - a.length);
+  for (const entry of entries) {
+    const base = entry === "/" ? "" : entry;
+    if (page === entry || (entry === "/" && page === "/index")) {
+      return markdown ? getFarmMarkdownMirrorPath(entry) : entry;
+    }
+    if (page.startsWith(`${base}/`)) return `${base}/[...slug]${markdown ? ".md" : ""}`;
   }
-  if (page.startsWith(`${base}/`)) return `${base}/[...slug]${markdown ? ".md" : ""}`;
   return null;
 }
 
