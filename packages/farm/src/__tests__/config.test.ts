@@ -1367,6 +1367,119 @@ describe("resolveDocsConfig", () => {
     expect(docs.configPath).toBe(path.join(root, "docs.json"));
   });
 
+  it("resolves extra docs roots over the main root's merged config", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-roots-"));
+    try {
+      await fs.mkdir(path.join(root, "src", "app", "statewire", "docs"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "docs.json"),
+        JSON.stringify({ nav: { title: "Farm" }, metadata: { description: "From file" } }),
+      );
+      const adapter = {
+        id: "@farming-labs/farmjs",
+        protocol: 1,
+        server: "@farming-labs/farmjs/server",
+        react: "@farming-labs/farmjs/react",
+      };
+
+      const docs = await resolveDocsConfig(
+        {
+          adapter,
+          entry: "/docs",
+          contentDir: "content/main",
+          config: { metadata: { description: "Main" } },
+          roots: [
+            { entry: "statewire/docs/", config: { nav: { title: "Statewire" } } },
+            { entry: "/pinboard/docs", contentDir: "content/pinboard" },
+            { entry: "/drafts/docs" },
+          ],
+        },
+        { root },
+      );
+
+      expect(docs.roots).toHaveLength(3);
+      const [statewire, pinboard, drafts] = docs.roots!;
+      expect(statewire).toMatchObject({
+        entry: "/statewire/docs",
+        contentDir: "src/app/statewire/docs",
+        config: {
+          entry: "statewire/docs",
+          docsPath: "/statewire/docs",
+          contentDir: "src/app/statewire/docs",
+          nav: { title: "Statewire" },
+          metadata: { description: "Main" },
+        },
+        runtimeConfig: {
+          entry: "statewire/docs",
+          docsPath: "/statewire/docs",
+          nav: { title: "Statewire" },
+          metadata: { description: "Main" },
+        },
+        configOverrides: { nav: { title: "Statewire" }, metadata: { description: "Main" } },
+      });
+      expect(pinboard).toMatchObject({
+        entry: "/pinboard/docs",
+        contentDir: "content/pinboard",
+        config: {
+          docsPath: "/pinboard/docs",
+          contentDir: "content/pinboard",
+          nav: { title: "Farm" },
+        },
+      });
+      // A root without content of its own does not read the main root's directory.
+      expect(drafts!.contentDir).toBeUndefined();
+      expect(drafts!.config).not.toHaveProperty("contentDir");
+      expect(drafts!.runtimeConfig).not.toHaveProperty("contentDir");
+
+      expect(docs).toMatchObject({ entry: "/docs", contentDir: "content/main" });
+      for (const config of [docs.config, docs.runtimeConfig, docs.configOverrides]) {
+        expect(config).not.toHaveProperty("roots");
+      }
+      for (const docsRoot of docs.roots!) {
+        expect(docsRoot.config).not.toHaveProperty("roots");
+        expect(docsRoot.runtimeConfig).not.toHaveProperty("roots");
+      }
+
+      const single = await resolveDocsConfig(
+        { adapter, entry: "/docs", contentDir: "content/main" },
+        { root },
+      );
+      expect(single).not.toHaveProperty("roots");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects docs roots that collide with another root or take the site root", async () => {
+    const adapter = {
+      id: "@farming-labs/farmjs",
+      protocol: 1,
+      server: "@farming-labs/farmjs/server",
+      react: "@farming-labs/farmjs/react",
+    };
+    await expect(
+      resolveDocsConfig({ adapter, entry: "/docs", roots: [{ entry: "/docs/" }] }),
+    ).rejects.toThrow('docs.roots[0].entry "/docs" is already served by another docs root.');
+    await expect(
+      resolveDocsConfig({
+        adapter,
+        entry: "/docs",
+        roots: [{ entry: "/guides/docs" }, { entry: "guides/docs" }],
+      }),
+    ).rejects.toThrow('docs.roots[1].entry "/guides/docs" is already served by another docs root.');
+    await expect(
+      resolveDocsConfig({ adapter, entry: "/docs", roots: [{ entry: "/" }] }),
+    ).rejects.toThrow('docs.roots[0].entry cannot be "/"');
+  });
+
+  it("rejects docs roots for the built-in docs renderer", async () => {
+    for (const adapter of [false, undefined] as const) {
+      await expect(
+        resolveDocsConfig({ adapter, entry: "/docs", roots: [{ entry: "/guides/docs" }] }),
+      ).rejects.toThrow("docs.roots requires a docs adapter");
+    }
+  });
+
   it("lets docs false opt out even when a docs config file exists", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-disabled-"));
     await fs.writeFile(path.join(root, "docs.json"), JSON.stringify({ entry: "guides" }));

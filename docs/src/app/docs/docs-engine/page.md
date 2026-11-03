@@ -201,6 +201,45 @@ Large documentation sites may move the serializable docs options into `docs.conf
 automatically. Values declared in `farm.config.ts` take priority, so applications can still override
 the entry or any shared setting.
 
+## Several docs roots
+
+One app can serve several independent docs sets, each under its own route, with its own content and
+navigation. List the extra sets in `docs.roots`; the `docs` settings themselves stay the first, main
+root.
+
+- Each root inherits the main root's settings, from the docs config file, `docs.config`, and the
+  options beside it, then applies its own `config` over them.
+- `contentDir` defaults to `src/app/<entry>`, as it does for the main root.
+- Every root shares the main root's `docs.config.*` module for icons, MDX components, and callbacks.
+- `/sitemap.xml`, `/robots.txt`, `/llms-full.txt`, docs MCP, and the AI catalog entry come from the
+  first root.
+- Search follows the page it is opened from: it searches that page's root.
+
+**farm.config.ts**
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  docs: {
+    entry: "/docs",
+    nav: { title: "Acme Docs" },
+    roots: [
+      { entry: "/statewire/docs", config: { nav: { title: "Statewire" } } },
+      {
+        entry: "/pinboard/docs",
+        contentDir: "content/pinboard",
+        config: { nav: { title: "Pinboard" } },
+      },
+    ],
+  },
+});
+```
+
+Several roots need a docs adapter such as `@farming-labs/farmjs` on a Node.js deployment target,
+Vercel included. `farm dev` and `farm build` stop with an error for the built-in renderer
+(`docs.adapter: false`) and for edge targets. Each root's `entry` must be unique and cannot be `/`.
+
 ## Agent-readable output
 
 The docs runtime can serve human pages and machine-readable output from the same markdown source:

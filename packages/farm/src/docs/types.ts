@@ -96,7 +96,21 @@ export type FarmDocsConfigInput = FarmDocsRuntimeConfig & {
   config?: FarmDocsRuntimeConfig;
   /** Path to docs.config.* or docs.json. */
   configPath?: string;
+  /**
+   * Additional docs sets served next to this one, each under its own route. Each root
+   * inherits this config and applies its own `config` over it. Requires a docs adapter.
+   */
+  roots?: FarmDocsRootInput[];
 };
+
+export interface FarmDocsRootInput {
+  /** Public route of this docs set, e.g. "/statewire/docs". */
+  entry: string;
+  /** Source content directory, relative to the project root. Defaults to `src/app/<entry>`. */
+  contentDir?: string;
+  /** Serializable settings applied over the main docs config for this root. */
+  config?: FarmDocsRuntimeConfig;
+}
 
 export type FarmDocsUserConfig = boolean | FarmDocsConfigInput;
 
@@ -117,4 +131,11 @@ export interface FarmDocsResolvedConfig {
   runtimeConfig?: FarmDocsRuntimeConfig & Pick<DocsConfig, "entry">;
   /** The serializable docs settings from `farm.config.ts`, applied over the config file. */
   configOverrides?: Partial<DocsConfig>;
+  /** The resolved `docs.roots`, served alongside this root. Absent with a single root. */
+  roots?: FarmDocsResolvedRoot[];
 }
+
+export type FarmDocsResolvedRoot = Pick<
+  FarmDocsResolvedConfig,
+  "entry" | "contentDir" | "config" | "runtimeConfig" | "configOverrides"
+>;

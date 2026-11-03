@@ -26,6 +26,8 @@ export type {
   FarmDocsConfigInput,
   FarmDocsNavigationConfig,
   FarmDocsResolvedConfig,
+  FarmDocsResolvedRoot,
+  FarmDocsRootInput,
   FarmDocsSocialImageConfig,
   FarmDocsSocialImageFonts,
   FarmDocsSidebarItem,

@@ -2442,7 +2442,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   computed: docsResponse,
                   label: resolveFarmDocsEngineRouteLabel(
                     stripFarmBasePath(requestPathname, farmConfig.basePath),
-                    { path: farmConfig.docs?.entry || "/docs" },
+                    {
+                      path: farmConfig.docs?.entry || "/docs",
+                      roots: farmConfig.docs?.roots?.map((root) => root.entry),
+                    },
                   ),
                 },
               );
@@ -2985,6 +2988,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                         { pathname, pattern: apiLifecyclePayload.routePath },
                         resolveFarmDocsRouteLabel(pathname, {
                           path: farmConfig.docs?.entry || "/docs",
+                          roots: farmConfig.docs?.roots?.map((root) => root.entry),
                         }),
                       ),
                     })

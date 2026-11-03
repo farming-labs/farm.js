@@ -9,7 +9,12 @@ import type {
   ResolvedFarmMigrationsConfig,
 } from "./types";
 import type { DocsConfig } from "@farming-labs/docs";
-import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
+import type {
+  FarmDocsResolvedConfig,
+  FarmDocsResolvedRoot,
+  FarmDocsRootInput,
+  FarmDocsUserConfig,
+} from "./docs/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
 import type { FarmObservabilityUserConfig } from "./observability";
@@ -120,6 +125,8 @@ export type {
   FarmDocsConfigInput,
   FarmDocsNavigationConfig,
   FarmDocsResolvedConfig,
+  FarmDocsResolvedRoot,
+  FarmDocsRootInput,
   FarmDocsSidebarItem,
   FarmDocsUserConfig,
 } from "./docs/types";
@@ -953,6 +960,7 @@ export async function resolveDocsConfig(
     prerender: undefined,
     config: undefined,
     configPath: undefined,
+    roots: undefined,
   } as Partial<DocsConfig>);
   const loadedDocsConfig = sanitizeDocsConfig(loadedConfig?.config || {});
   const mergedDocsConfig: Partial<DocsConfig> = {
@@ -972,6 +980,7 @@ export async function resolveDocsConfig(
       prerender: undefined,
       config: undefined,
       configPath: undefined,
+      roots: undefined,
     }),
   };
 
@@ -992,6 +1001,24 @@ export async function resolveDocsConfig(
   );
   const contentDir =
     configuredContentDir || (await inferDocsContentDir(root, options.srcDir || "src", docsEntry));
+  const configOverrides = { ...inlineDocsConfig, ...directDocsConfig };
+  const roots = await resolveDocsRoots(docsOptions.roots, {
+    root,
+    srcDir: options.srcDir || "src",
+    mainEntry: entryRoute,
+    mergedDocsConfig,
+    runtimeDocsConfig,
+    configOverrides,
+  });
+  if (
+    roots.length > 0 &&
+    !(docsOptions.adapter && docsOptions.adapter.server && docsOptions.adapter.react)
+  ) {
+    throw new Error(
+      "docs.roots requires a docs adapter such as @farming-labs/farmjs; Farm's built-in docs " +
+        "renderer serves a single docs root. Install the adapter, or remove docs.roots.",
+    );
+  }
 
   return {
     enabled: true,
@@ -1012,8 +1039,67 @@ export async function resolveDocsConfig(
       docsPath: entryRoute,
       ...(contentDir ? { contentDir } : {}),
     },
-    configOverrides: { ...inlineDocsConfig, ...directDocsConfig },
+    configOverrides,
+    ...(roots.length > 0 ? { roots } : {}),
   };
+}
+
+async function resolveDocsRoots(
+  rootInputs: FarmDocsRootInput[] | undefined,
+  options: {
+    root: string;
+    srcDir: string;
+    mainEntry: string;
+    mergedDocsConfig: Partial<DocsConfig>;
+    runtimeDocsConfig: Partial<DocsConfig>;
+    configOverrides: Partial<DocsConfig>;
+  },
+): Promise<FarmDocsResolvedRoot[]> {
+  const seen = new Set([options.mainEntry]);
+  const roots: FarmDocsResolvedRoot[] = [];
+  for (const [index, rootInput] of (rootInputs ?? []).entries()) {
+    const field = `docs.roots[${index}].entry`;
+    if (typeof rootInput?.entry !== "string" || !rootInput.entry.trim()) {
+      throw new Error(`${field} must be a route such as "/guides/docs".`);
+    }
+    const entryRoute = normalizeDocsRoute(rootInput.entry);
+    if (entryRoute === "/") {
+      throw new Error(`${field} cannot be "/"; a docs root at "/" leaves no route for the others.`);
+    }
+    if (seen.has(entryRoute)) {
+      throw new Error(
+        `${field} ${JSON.stringify(entryRoute)} is already served by another docs root.`,
+      );
+    }
+    seen.add(entryRoute);
+
+    const rootOverrides = sanitizeDocsConfig(rootInput.config || {});
+    const docsEntry = docsRouteToEntry(entryRoute);
+    const contentDir =
+      normalizeDocsContentDir(rootInput.contentDir || rootOverrides.contentDir) ||
+      (await inferDocsContentDir(options.root, options.srcDir, docsEntry));
+    const routeConfig = {
+      entry: docsEntry,
+      docsPath: entryRoute,
+      contentDir,
+    };
+    roots.push({
+      entry: entryRoute,
+      contentDir,
+      config: omitUndefined({
+        ...options.mergedDocsConfig,
+        ...rootOverrides,
+        ...routeConfig,
+      }) as FarmDocsResolvedRoot["config"],
+      runtimeConfig: omitUndefined({
+        ...options.runtimeDocsConfig,
+        ...(isRecord(rootInput.config) ? rootInput.config : {}),
+        ...routeConfig,
+      }) as FarmDocsResolvedRoot["config"],
+      configOverrides: { ...options.configOverrides, ...rootOverrides },
+    });
+  }
+  return roots;
 }
 
 function validateRedirectConfigs(redirects: RedirectConfig[], field: string): RedirectConfig[] {
