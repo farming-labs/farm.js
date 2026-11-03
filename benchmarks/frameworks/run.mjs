@@ -971,8 +971,14 @@ async function waitForRenderedPage(child, output, url, startedAt, options) {
     } catch (error) {
       // Retry only a server that has not started listening. Bad encodings,
       // broken bodies and request deadlines are failures, not readiness signals.
+      // ECONNRESET counts as not-listening here: `localhost` resolves to both ::1 and
+      // 127.0.0.1, and a server that has not bound yet resets the IPv6 attempt on macOS
+      // instead of refusing it, so one reset inside the AggregateError aborted the run.
+      // A server that only ever resets still fails, on the 180s deadline below, and a
+      // server that dies is still caught by the hasExited check at the top of the loop.
+      const readinessCodes = new Set(["ECONNREFUSED", "ECONNRESET"]);
       const failures = error instanceof AggregateError ? error.errors : [error];
-      if (!failures.length || failures.some((failure) => failure.code !== "ECONNREFUSED"))
+      if (!failures.length || failures.some((failure) => !readinessCodes.has(failure.code)))
         throw error;
     }
     await new Promise((resolve) => setTimeout(resolve, readinessPollIntervalMs));
