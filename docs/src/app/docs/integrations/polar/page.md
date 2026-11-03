@@ -86,9 +86,9 @@ const checkout = await api.billing.checkout.post({
 });
 ```
 
-## Database-backed billing
-
-Polar callbacks can read and write relational records through `ctx.args.db`, so webhook snapshots, subscription state, and customer entitlement checks share the same database-agnostic integration layer. This path is separate from KV storage.
+Billing state lives in Polar: the routes read it through the Polar API, and Farm stores no billing
+records of its own. Webhooks verify each event and hand it to your `onEvent` handler, which is the
+place to update any records your app keeps.
 
 ## What Polar adds
 
@@ -99,7 +99,7 @@ Polar callbacks can read and write relational records through `ctx.args.db`, so 
 | Portal         | Customer sessions for billing management.                           |
 | Billing status | Current customer, plan, features, limits, and active product state. |
 | Usage          | Meter and entitlement helpers for usage-aware products.             |
-| Webhooks       | Subscription and order events that update local billing state.      |
+| Webhooks       | Verified subscription and order events for your `onEvent` handlers. |
 
 ## Common callers
 

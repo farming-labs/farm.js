@@ -171,7 +171,7 @@ workos({
 });
 ```
 
-Signed-out requests receive a `307` redirect to `/login` with the original root-relative path in `returnTo`.
+Signed-out requests receive a `303` redirect, which the browser follows with a `GET`, to `/login` with the original root-relative path in `returnTo`.
 
 ## Options
 
