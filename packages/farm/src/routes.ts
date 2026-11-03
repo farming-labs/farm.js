@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { createFarmSearchParams, type FarmSearchParams } from "./search-params";
 import {
   createFarmCacheKey,
   createRouteDataCacheTag,
@@ -128,7 +129,7 @@ export type ProgrammaticRouteComponentProps<
 > = Omit<PageProps, "params" | "searchParams"> & {
   params: TParams;
   search: TSearch;
-  searchParams: Promise<TSearch>;
+  searchParams: FarmSearchParams<TSearch>;
 } & ([TData] extends [undefined] ? { data?: undefined } : { data: TData });
 
 export type ProgrammaticRouteDataContext<
@@ -1370,7 +1371,7 @@ async function resolveProgrammaticRouteProps(
     ...props,
     params,
     search,
-    searchParams: Promise.resolve(search),
+    searchParams: createFarmSearchParams(search),
   };
   const routeContextProps = {
     ...baseProps,

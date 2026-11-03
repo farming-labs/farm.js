@@ -11,7 +11,11 @@ import type { ServerRenderer } from "../server/renderer";
 import { setEnv } from "../env";
 import { withFarmRouteContext } from "../route-context";
 import { createDeferredDataResponse } from "../deferred";
-import { searchParamsToObject } from "../search-params";
+import {
+  createFarmSearchParams,
+  searchParamsToObject,
+  type FarmSearchParams,
+} from "../search-params";
 import {
   createFarmDeploymentMismatchResponse,
   getFarmDeploymentMismatch,
@@ -230,7 +234,7 @@ async function defaultHandler({
         props: withFarmRouteContext(
           {
             params,
-            searchParams: Promise.resolve(searchParams),
+            searchParams: createFarmSearchParams(searchParams),
             path: targetUrl.pathname,
           },
           routeContext,
@@ -466,7 +470,7 @@ async function parseRouteModuleProps(
   input: {
     props: {
       params: Record<string, string>;
-      searchParams: Promise<Record<string, string | string[] | undefined>>;
+      searchParams: FarmSearchParams;
       path: string;
       [key: string]: unknown;
     };
@@ -499,7 +503,7 @@ async function parseRouteModuleProps(
     ...input.props,
     params,
     search,
-    searchParams: Promise.resolve(search as Record<string, string | string[] | undefined>),
+    searchParams: createFarmSearchParams(search as Record<string, string | string[] | undefined>),
   };
 }
 

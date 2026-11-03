@@ -1,4 +1,5 @@
 import type { FarmServerComponentsConfig } from "./server-components-mode";
+import type { FarmSearchParams } from "./search-params";
 import type { FarmRenderer } from "./renderer";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { FarmAgentUserConfig } from "./agent-config";
@@ -340,7 +341,7 @@ export interface PluginContextProps {
  */
 export interface PageProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
   params: ResolvePageRouteParams<TRoute>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: FarmSearchParams;
   path: string;
   /**
    * Data from middleware.ts in the same directory or parent directories
@@ -366,7 +367,7 @@ export interface PageProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsD
 
 export interface LoadingProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
   params: ResolvePageRouteParams<TRoute>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: FarmSearchParams;
   search?: Record<string, string | string[] | undefined>;
   path: string;
   middleware?: MiddlewareProps;
