@@ -2,7 +2,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   generateFarmDocsSearchClientRuntime,
@@ -82,7 +82,12 @@ describe("Farm docs search mount", () => {
       "runtime.mjs",
       `import React from "react";
 import { createRoot } from "react-dom/client";
-${generateFarmDocsSearchClientRuntime(true, searchModule)}
+${generateFarmDocsSearchClientRuntime(
+  true,
+  // Node imports a Windows path only as a file URL; Vite and the bundler resolve both.
+  pathToFileURL(searchModule).href,
+  pathToFileURL(frameworkModule!).href,
+)}
 export { mountFarmDocsSearch };`,
     );
     document.body.innerHTML = '<div data-farm-docs-search-root data-api="/api/docs"></div>';
@@ -90,7 +95,9 @@ export { mountFarmDocsSearch };`,
     const onError = (event: ErrorEvent) => errors.push(event.error);
     window.addEventListener("error", onError);
 
-    const { mountFarmDocsSearch } = await import(/* @vite-ignore */ runtimePath);
+    const { mountFarmDocsSearch } = await import(
+      /* @vite-ignore */ pathToFileURL(runtimePath).href
+    );
     expect(await mountFarmDocsSearch()).toBe(true);
     await expect
       .poll(() => document.querySelector("output")?.getAttribute("data-router"))
