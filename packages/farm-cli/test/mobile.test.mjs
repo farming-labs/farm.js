@@ -444,11 +444,15 @@ async function freePort() {
 async function waitForFile(file, child, output) {
   for (let attempt = 0; attempt < 600; attempt += 1) {
     try {
-      return await readFile(file, "utf8");
+      const contents = await readFile(file, "utf8");
+      // The fake shell may still be writing it (seen on Windows).
+      JSON.parse(contents);
+      return contents;
     } catch {
-      if (child.exitCode !== null) throw new Error(`farm dev exited early:\n${output()}`);
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Not there or not complete yet.
     }
+    if (child.exitCode !== null) throw new Error(`farm dev exited early:\n${output()}`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`Timed out waiting for ${file}:\n${output()}`);
 }
