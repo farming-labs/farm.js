@@ -1222,6 +1222,42 @@ Measured on `examples/mobile` (two screens), macOS arm64, Node 24, React Native 
 - `platform()` cannot do this: web screens are rendered by the web deployment, where it is
   `"web"`. An attribute set before first paint needs no JS in the app.
 
+### Native screens sign in with device tokens (#2470)
+
+Narrows 7.14 "Auth uses tokens" and the "Token auth" blocker: one Farm-level token, not a token
+mode per auth integration.
+
+- After a sign-in on a web screen, the shell's native code trades the WebView's cookie session for
+  a device token: `POST /__farm/mobile/session/challenge` returns a one-time nonce, and
+  `POST /__farm/mobile/session` with the nonce and the same cookies returns an access token
+  (15 minutes) and a refresh token (30 days). Refresh and revoke are
+  `POST /__farm/mobile/session/refresh` and `/revoke`, with the token as the bearer. Every field
+  travels in headers.
+- Endpoints answer only requests with `X-Farm-Mobile: <mobile.id>` and no `Origin` or
+  `Sec-Fetch-*` header, a shape no browser sends. The nonce and the refresh token never enter a
+  WebView or JS.
+- Tokens are opaque (device id, secret, key). Farm storage keeps SHA-256 hashes of the secrets and
+  the device's cookies sealed with AES-GCM under the key, which exists only in the tokens.
+- A valid bearer with the app id it was issued to and no browser headers runs as the device's
+  cookie session, with `Origin` set to the request's own origin. `auth.user()`,
+  `protectedRoutes`, server functions and integration routes need no token mode, and no origin
+  check changed. A bearer on a request with browser headers is ignored.
+- Integrations add one method, `session(request)`, that says who the cookies sign in. Issue and
+  refresh use it. Covered first: `@farm.js/auth` and `@farm.js/better-auth`; Auth0, Auth.js,
+  WorkOS and Supabase need a reader; Clerk refreshes its session cookie in browser JS and needs a
+  design of its own.
+- Refresh rotates both tokens and revokes the device when a rotated refresh token comes back. A
+  web sign-out in the shell's WebView (found through the `farm_mobile` device cookie) or an ended
+  session revokes the device.
+- Android keeps the tokens encrypted with a Keystore AES-GCM key; iOS in the Keychain,
+  this-device-only.
+- The server part is a core plugin added only for apps with a `mobile` block. Without one: no
+  route, no hook. With one, the web server differs from the same app without the block by this
+  plugin alone, and prerendered files stay static.
+- Not proven: that the caller is the app's own binary. A non-browser client holding the cookie
+  can mint a token, which gives it nothing the cookie does not. App Attest and Play Integrity
+  signing the challenge nonce are the follow-up.
+
 ## 9. Rollout
 
 Desktop:
