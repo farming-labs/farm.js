@@ -1967,6 +1967,8 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
     },
 
     async beforeRequest(req, res, context) {
+      // A rewrite to another origin leaves the app; no integration route serves it.
+      if (req.url && !req.url.startsWith("/")) return;
       const fullUrl = `http://${req.headers.host || "localhost"}${req.url || "/"}`;
       const url = new URL(fullUrl);
       const pathname = url.pathname;
