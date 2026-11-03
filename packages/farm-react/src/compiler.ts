@@ -5323,7 +5323,8 @@ function stabilizeDeferredEventCurrentTargets(
  * JSX elements inside `<svg>` or `<math>`. Compiler-owned elements are made with
  * `createElement`, which only makes HTML elements, so foreign content stays with React.
  */
-const foreignContentElements = new WeakSet<t.JSXElement>();
+// Babel preserves `extra` through cloneNode. A WeakSet of the parsed nodes loses
+// this ancestry when handler/derived-value rewrites clone the JSX before analysis.
 
 // SVG and MathML element names that HTML does not share, for rows a component
 // renders into an `<svg>` another component owns.
@@ -5352,7 +5353,7 @@ function markForeignContent(programPath: NodePath<t.Program>): void {
       if (!t.isJSXIdentifier(name) || (name.name !== "svg" && name.name !== "math")) return;
       path.traverse({
         JSXElement(inner) {
-          foreignContentElements.add(inner.node);
+          inner.node.extra = { ...inner.node.extra, farmForeignContent: true };
         },
       });
     },
@@ -5362,7 +5363,7 @@ function markForeignContent(programPath: NodePath<t.Program>): void {
 function isForeignContent(element: t.JSXElement): boolean {
   const name = element.openingElement.name;
   return (
-    foreignContentElements.has(element) ||
+    element.extra?.farmForeignContent === true ||
     (t.isJSXIdentifier(name) && FOREIGN_ELEMENT_NAMES.has(name.name))
   );
 }

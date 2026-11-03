@@ -128,6 +128,10 @@ refreshes only changed React-owned row-local branches. React still creates or hy
 DOM. Anything outside those narrow contracts uses a small React-owned boundary or the complete
 original component.
 
+Compiler-owned structural updates stay disabled inside SVG and MathML, including shared
+HTML/SVG tag names such as `a` and `title`. React retains namespace-sensitive element creation
+when rows are appended or conditional branches change; ordinary HTML rows remain eligible.
+
 For a common dedicated conditional, no new component or annotation is required:
 
 ```tsx
