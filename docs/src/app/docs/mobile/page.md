@@ -42,7 +42,7 @@ farm build                    # --web, the default, unchanged
 | iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                   |
 | React Native screens                          | Unreleased, dev only           | Android only; runs under `farm dev --mobile` on an emulator, not yet in a production build or on a device (see [React Native screens](#react-native-screens)) |
 | Bundled client assets and page shells         | Planned                        | A production shell loads pages and the client from `server`                                                                                                   |
-| Token auth and mobile origin handling         | Planned                        | No Keystore or Keychain session, no bearer tokens                                                                                                             |
+| Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                              |
 | Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                            |
 | Native islands and native `@farm.js/ui`       | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` renders on the web only (see [Portable components](#portable-components-farmjsui))                         |
 | Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                                                   |
@@ -101,9 +101,11 @@ export default defineConfig({
 | `routes` | Keyed by page route pattern: `presentation` (`push`, `modal`, `replace`)                        |
 | `native` | Screen tiers per route, the native engine, and the analyzer (below)                             |
 
-Tabs and route keys are checked against the app. A web build checks the block's shape and otherwise
-strips it, exactly as it does `desktop`, so the web output is byte-identical to the same app
-without the key.
+Tabs and route keys are checked against the app. A web build never calls a function-valued block
+and strips the block from the server bundle, as it does `desktop`. The one thing a `mobile` block
+adds to the web server is the session endpoints native screens sign in through (see
+[Auth on mobile](#auth-on-mobile)); every `mobile` block, static or a function, builds the same
+server, and an app without one gets no route and no hook.
 
 ```sh
 farm config inspect --mobile --os ios --profile beta   # block, screens, and farm-routes.json
@@ -532,18 +534,20 @@ export default function MapScreen() {
 }
 ```
 
-| `@farm.js/native`             | Notes                                                                                             |
-| ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| `useNavigate()`               | `navigate(href, { replace })` by URL; the navigator picks the next screen, web or native          |
-| `useRouteParams()`            | Route params, such as `{ id: "7" }` for `/notes/[id]`, after the base path and locale prefix      |
-| `useServerQuery(fn, input)`   | Runs any async `fn(input)` on mount and when `input` changes: `{ data, error, pending, refetch }` |
-| `serverFetch(path, init)`     | `fetch` against `mobile.server` (the dev server under `farm dev --mobile`), with the base path    |
-| `serverUrl(path)`             | The absolute URL of a path on `mobile.server`                                                     |
-| `export const metadata.title` | The native bar's title                                                                            |
+| `@farm.js/native`             | Notes                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `useNavigate()`               | `navigate(href, { replace })` by URL; the navigator picks the next screen, web or native                                             |
+| `useRouteParams()`            | Route params, such as `{ id: "7" }` for `/notes/[id]`, after the base path and locale prefix                                         |
+| `useServerQuery(fn, input)`   | Runs any async `fn(input)` on mount and when `input` changes: `{ data, error, pending, refetch }`                                    |
+| `serverFetch(path, init)`     | `fetch` against `mobile.server` (the dev server under `farm dev --mobile`), with the base path and the device session once signed in |
+| `signOut()`                   | Revoke this device's token, delete it, and clear the server's WebView cookies                                                        |
+| `serverUrl(path)`             | The absolute URL of a path on `mobile.server`                                                                                        |
+| `export const metadata.title` | The native bar's title                                                                                                               |
 
 Native screens call the same API routes as the web client, over HTTP to `mobile.server`. They send
-no cookies and no `Origin` header, so they can only call public API routes until token auth for
-native screens exists. A screen navigates by URL only, so `farm-routes.json` always decides what
+no cookies. Once the user has signed in on a web screen, `serverFetch` sends the device's session
+token, so protected routes see the same user (see [Auth on mobile](#auth-on-mobile)). A screen
+navigates by URL only, so `farm-routes.json` always decides what
 opens next: a link from a native screen can open a web screen, a modal, a tab, or another native
 screen, and back returns to it.
 
@@ -600,6 +604,119 @@ web type-check and check them on their own:
   "exclude": [],
 }
 ```
+
+## Auth on mobile
+
+Web screens sign in exactly as they do in a browser: the session cookie lives in the WebView's
+cookie store. Native screens send no cookies, so after a sign-in on a web screen the shell trades
+that cookie session for a **device token**, and `serverFetch` sends it as `Authorization: Bearer`.
+On the server, a request with a valid token runs as the same cookie session, so `auth.user()`,
+`auth.session()`, an integration's `protectedRoutes`, API routes, and server functions all see the
+signed-in user. Nothing to configure: an app with a `mobile` block and a covered auth integration
+gets it.
+
+```tsx
+// src/app/notes/page.native.tsx: a protected API route, called from a native screen
+const response = await serverFetch("/api/notes"); // 401 only if the user is signed out
+```
+
+### How the token is issued
+
+1. The user signs in on a web screen. After the page loads or renders, the shell's native code
+   (never the WebView) reads the WebView's cookies for the server.
+2. It asks `POST /__farm/mobile/session/challenge` for a one-time nonce, sending those cookies. The
+   server answers only if the cookies sign someone in.
+3. It sends the nonce to `POST /__farm/mobile/session` with the same cookies, and gets an access
+   token (15 minutes) and a refresh token (30 days). The response also sets a `farm_mobile`
+   cookie in the WebView that names the device.
+4. The shell stores the tokens: Android encrypts them with an AES-GCM key in the Android Keystore
+   (only ciphertext is in SharedPreferences); iOS keeps them in the Keychain, readable only on this
+   device after first unlock. React Native screens get the access token through the shell; the
+   refresh token never reaches JS.
+5. On a `401`, `serverFetch` asks the shell to refresh once (`POST /__farm/mobile/session/refresh`)
+   and retries the call if its body can be sent twice. Refreshes are serialized in the shell.
+
+Every endpoint takes `POST` only, needs an `X-Farm-Mobile: <mobile.id>` header, and refuses any
+request with an `Origin` or `Sec-Fetch-*` header: browsers send those on every `POST` and every
+`fetch`, so no web page, the app's own included, can mint, refresh, or use a token. Everything is
+sent in headers.
+
+### On the server
+
+- Tokens are opaque: a device id, a random secret, and a key. Farm storage
+  (`getStorage("farm-mobile")`) keeps a SHA-256 of each secret, never the secret, and the
+  device's cookies encrypted with AES-GCM under the key, which exists only inside the tokens.
+  Mount persistent storage there for production (`storage.mounts`); with the default in-memory
+  storage, tokens end when the server restarts and are not shared between instances.
+- A request with a valid access token, the `X-Farm-Mobile` id it was issued to, and no browser
+  headers runs with the device's cookies in place of its own, without the token, and with `Origin`
+  set to its own origin. Server functions, server actions, and integration routes accept it. Its
+  response is `Cache-Control: private, no-store`, and cookie changes in it are kept in the device's
+  copy instead of being sent to the phone.
+- A bearer on a request with browser headers is ignored: the request keeps today's cookie and
+  origin checks, so browser CSRF protection is unchanged.
+- Refresh rotates both tokens. A refresh token that comes back after it was rotated revokes the
+  device, both tokens.
+- Each refresh checks that the cookies behind the device still sign in the same session. A session
+  that ended or was replaced ends the device.
+
+### Signing out
+
+- **On a web screen:** a sign-out response from the shell's WebView that leaves no session
+  revokes the device on the server and clears the `farm_mobile` cookie; the shell sees it gone
+  and deletes its tokens. A sign-out called from a native screen through `serverFetch` revokes the
+  device the same way.
+- **From a native screen:** `signOut()` from `@farm.js/native` revokes the device token
+  (`POST /__farm/mobile/session/revoke`), deletes it from the Keystore or Keychain, and clears the
+  server's cookies in the WebView. Call your auth's sign-out route with `serverFetch` first to end
+  the server session as well.
+- A refresh the server refuses also deletes the tokens on the device.
+
+### Covered auth integrations
+
+The server reads sessions through an integration's `session(request)`: who the request's cookies
+sign in, as `{ id, userId?, expiresAt? }`, or `null`.
+
+| Integration                      | Mobile tokens                                                      |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `@farm.js/auth` (`auth: true`)   | Covered                                                            |
+| `@farm.js/better-auth`           | Covered, through the instance's `api.getSession`                   |
+| Auth0, Auth.js, WorkOS, Supabase | Not yet: they need a `session()` reader (follow-up)                |
+| Clerk                            | Not yet: its session cookie is refreshed by Clerk's browser script |
+| A custom integration             | Add `session(request)` to it                                       |
+
+Without an integration that reads sessions, the endpoints answer `501` and native screens stay
+signed out.
+
+`@farm.js/auth` accepts requests only from its auth URL, which is `http://localhost:3000` in
+development unless `FARM_AUTH_URL` is set. The Android emulator's WebView reaches the dev server as
+`http://10.0.2.2:<port>`, so start `farm dev --mobile` with `FARM_AUTH_URL=http://10.0.2.2:<port>`
+or web sign-in fails with `INVALID_ORIGIN`.
+
+### What this protects against, and what it does not
+
+- **Protects against:** a web page, cross-site or the app's own, minting, refreshing, reading, or
+  using a token; a forged or guessed token; a token used with another app id; an expired or revoked
+  token; a replayed refresh token; a token outliving a web sign-out or the session it came from;
+  a storage dump yielding tokens or session cookies.
+- **Does not prove** that a request comes from the app's own binary. Any non-browser client that
+  already holds the user's session cookie can mint a token with any app id. That gives it nothing
+  the cookie did not, since the token lives only as long as that cookie session. Platform
+  attestation (App Attest on iOS, Play Integrity on Android) signing the challenge nonce is the
+  follow-up that proves the binary.
+- Single use of nonces and refresh tokens is best effort across server instances: Farm storage has
+  no atomic compare-and-set.
+- The `farm_mobile` cookie names its device. Something that can set that cookie in the WebView,
+  with a signed-out session, can revoke that device.
+
+### Limits
+
+- Apps with `experimental.serverComponents` run the RSC server, which does not run Farm plugin
+  hooks in production, so native screens there stay signed out.
+- The device keeps the cookies it had when the token was issued, plus the rotations its own
+  requests receive. A cookie rotated only in the WebView is not copied; the device keeps working
+  while its own cookies sign in the same session.
+- Not yet run on a physical device, and the iOS shell has not been built with Xcode.
 
 ## The native-screen report
 
@@ -840,8 +957,6 @@ parts are designed and still on the way:
   `page.ios.tsx` is not built and `native` screens show a placeholder on iOS.
 - React Native screens are verified under `farm dev --mobile` on an Android emulator only, not in a
   production (Hermes bytecode) build or on real devices.
-- Native screens send no cookies and no `Origin` header, so they can only call public API routes
-  until token auth for native screens exists.
 - `platform` screens show a placeholder naming the module id. Farm does not build `page.kt` or
   `page.swift` yet; `FarmNativeScreens` in the generated project is where they will register.
 - React Native screens use React Native's own components. `@farm.js/ui` components, native modules
@@ -856,8 +971,10 @@ parts are designed and still on the way:
   routes stay web screens.
 - Native islands (`mobile.native.islands`), native rendering of `@farm.js/ui` (it renders on the
   web only), and the theme-token pipeline are reserved.
-- Token auth is not wired yet: the shell has no Keystore session or bearer tokens, and the server
-  has no mobile-origin checks.
+- Signed-in native screens are tested in unit, dev-server and production-build tests, and the
+  Android shell's session code on an emulator under `farm dev --mobile`. The Swift session code
+  has not been built with Xcode (it type-checks against the macOS SDK). See
+  [Auth on mobile](#auth-on-mobile) for which auth integrations are covered.
 - Device plugins (`native.<name>`) ship none, so calls reject as unavailable.
 - Apps with `experimental.serverComponents` use the RSC router, which does not hand navigations to
   the shell yet.

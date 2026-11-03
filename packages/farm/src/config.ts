@@ -400,9 +400,9 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   desktop?: FarmDesktopConfigInput;
   /**
    * Preview: the native mobile app (RFC 0004), as a block or a function of
-   * `{ os, mode, command, profile, env, root }`. Config only for now: `farm config inspect
-   * --mobile` resolves it and its route manifest; there is no `--mobile` shell yet. Web builds
-   * never call the function or check the block, and ship neither.
+   * `{ os, mode, command, profile, env, root }`, for `farm dev|build --mobile`. Web builds never
+   * call the function or check the block, and ship neither. A server of an app with the block
+   * serves `/__farm/mobile/session` so the app's native screens can sign in with device tokens.
    */
   mobile?: FarmMobileConfigInput;
   docs?: FarmDocsUserConfig;
@@ -1299,6 +1299,15 @@ export async function resolveConfig(
       (mode === "production" ? await generateBuildId() : "development"),
   );
   const basePath = normalizeFarmConfigBasePath(userConfig.basePath);
+  // Device tokens for the mobile shell's native screens (RFC 0004, 7.14), served by the web
+  // deployment of an app with a `mobile` block. Without the block, no module, route, or hook.
+  const mobileSessionPlugin =
+    userConfig.mobile !== undefined && userConfig.mobile !== null
+      ? (await import("./mobile/session")).createFarmMobileSessionPlugin({
+          basePath,
+          integrations: () => integrations,
+        })
+      : null;
   const openapi = {
     enabled: false,
     route: "/docs/reference",
@@ -1354,6 +1363,7 @@ export async function resolveConfig(
     agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled }),
     desktop: desktopSetup?.desktop ?? null,
     plugins: [
+      ...(mobileSessionPlugin ? [mobileSessionPlugin] : []),
       ...resolveIntegrationPlugins(integrations),
       ...(nativeMCPPlugin ? [nativeMCPPlugin] : []),
       ...(userConfig.plugins || []),

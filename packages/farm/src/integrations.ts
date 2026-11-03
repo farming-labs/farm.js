@@ -586,6 +586,22 @@ export interface FarmIntegration<
   documentNavigations?: readonly FarmIntegrationDocumentNavigation[];
   /** Additional Farm plugins owned and configured by this integration. */
   plugins?: readonly FarmIntegrationContributedPlugin<NoInfer<TInstance>>[];
+  /**
+   * Auth integrations: the signed-in session of a request, read from its cookies, or null when
+   * nobody is signed in. Mobile session tokens (`/__farm/mobile/session`) use it to check that a
+   * device's cookies still sign someone in when they are issued and refreshed.
+   */
+  session?: (
+    request: Request,
+  ) => FarmIntegrationSession | null | Promise<FarmIntegrationSession | null>;
+}
+
+/** What an auth integration's `session()` returns for a signed-in request. */
+export interface FarmIntegrationSession {
+  /** Stable for the life of the session: a new sign-in is a new id. */
+  id: string;
+  userId?: string;
+  expiresAt?: Date | string | number;
 }
 
 export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any, any> | undefined>;

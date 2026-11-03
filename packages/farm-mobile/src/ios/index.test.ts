@@ -238,6 +238,7 @@ describe("@farm.js/mobile/ios", () => {
       "App/FarmBridge.swift",
       "App/FarmBuild.swift",
       "App/Info.plist",
+      "App/MobileSession.swift",
       "App/NativeScreens.swift",
       "App/Navigator.swift",
       "App/Page.swift",
@@ -405,6 +406,26 @@ describe("@farm.js/mobile/ios", () => {
     // Malformed messages are dropped: no force unwraps or force casts on message fields.
     expect(bridge).not.toMatch(/message\[[^\]]+\]!|as! /);
     expect(bridge).toContain("if FarmBuild.dev {");
+  });
+
+  it("keeps the device session in the Keychain on this device only, out of every WebView", async () => {
+    const files = await generated({ ...context(), basePath: "/docs" });
+    const session = files["App/MobileSession.swift"]!;
+    expect(session).toContain("kSecClassGenericPassword");
+    expect(session).toContain("kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly");
+    expect(session).not.toMatch(/kSecAttrSynchronizable|UserDefaults/);
+    // Its own cookie-less URLSession: nothing it sends or receives lands in a shared jar.
+    expect(session).toContain("configuration.httpCookieStorage = nil");
+    expect(session).toContain("configuration.httpCookieAcceptPolicy = .never");
+    expect(session).toContain('request.setValue(appId, forHTTPHeaderField: "X-Farm-Mobile")');
+    expect(session).not.toMatch(/evaluateJavaScript|"Origin"/);
+    for (const endpoint of ["challenge", "refresh", "revoke"]) {
+      expect(session).toContain(`"/__farm/mobile/session/${endpoint}"`);
+    }
+    expect(session).toContain('private static let marker = "farm_mobile"');
+    expect(files["App/FarmBuild.swift"]).toContain('static let basePath = "/docs"');
+    expect(files["App/SceneDelegate.swift"]).toContain("MobileSession.start(config: config)");
+    expect(files["App/Page.swift"]!.match(/MobileSession\.shared\?\.sync\(\)/g)).toHaveLength(2);
   });
 
   it("sets FarmBuild.dev only under farm dev, and reads launch overrides only when it is set", async () => {

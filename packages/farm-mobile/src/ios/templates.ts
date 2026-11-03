@@ -78,6 +78,8 @@ enum FarmBuild {
     static let dev = ${context.command === "dev"}
     /// The first screen when there are no tabs: the app's base path.
     static let startPath = ${swiftString(context.basePath || "/")}
+    /// The app's base path ("" or "/base"), in front of /__farm/mobile/session.
+    static let basePath = ${swiftString(context.basePath)}
     /// SF Symbols for mobile.tabs, in order.
     static let tabIcons: [String] = [${symbols.join(", ")}]
 }

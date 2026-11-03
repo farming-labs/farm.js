@@ -66,6 +66,10 @@ class Page(
                 host?.onCommitVisible(this@Page)
             }
 
+            override fun onPageFinished(view: WebView, url: String?) {
+                if (url != null && config.isAppUrl(Uri.parse(url))) MobileSession.instance?.sync()
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (!request.isForMainFrame || request.isRedirect) return false
                 val url = request.url
@@ -111,6 +115,8 @@ class Page(
 
     override fun onRendered(bridge: FarmBridge, token: Int, title: String, pageMs: Double) {
         if (token == renderToken) renderToken = 0
+        // A sign-in or sign-out that navigated in place changed the WebView's cookies.
+        MobileSession.instance?.sync()
         host?.onRendered(this, token, title, pageMs)
     }
 

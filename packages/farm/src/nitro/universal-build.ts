@@ -3,6 +3,7 @@ import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
+import { FARM_MOBILE_SESSION_PLUGIN } from "../mobile/session";
 import { getFarmMarkdownAlternatePath } from "../markdown";
 import { _collectFarmStorageModules } from "../storage";
 import { FARM_API_CATALOG_PATH, resolveFarmApiCatalogInput } from "../api-catalog";
@@ -1170,6 +1171,9 @@ function farmServerRuntimePluginsMayHandlePath(
   return (config.plugins || []).some(
     (plugin) =>
       getFarmIntegrationPluginServerRuntime(plugin) !== false &&
+      // Mobile session tokens change only bearer requests and cookie-clearing responses, which a
+      // prerendered file never answers or sends; its endpoints live under /__farm/.
+      plugin.name !== FARM_MOBILE_SESSION_PLUGIN &&
       farmPluginMayAffectRuntimePath(plugin, pathname),
   );
 }
@@ -6799,12 +6803,18 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     : "";
   const nativeAuth = generateNativeAuthIntegrationSource(config.auth);
   const nativeMCP = generateNativeMCPPluginSource(config.mcp);
+  // Mobile session tokens: only for an app whose config had a `mobile` block (config.ts adds
+  // the plugin then). The block itself is stripped from the server bundle.
+  const mobileSession = (config.plugins || []).some(
+    (plugin) => plugin?.name === FARM_MOBILE_SESSION_PLUGIN,
+  );
   const integrationImports = `
 ${configModulePath ? `import * as FarmUserConfigModule from ${toVirtualEntryImportSpecifier(configModulePath)};` : ""}
 ${layerConfigImports}
 ${integrationRuntimeImport}
 ${nativeAuth.importSource}
 ${nativeMCP.importSource}
+${mobileSession ? `import { createFarmMobileSessionPlugin as __farmCreateMobileSessionPlugin } from "@farm.js/core/internal/production-runtime";` : ""}
 `;
   const imageRuntime = resolveFarmImageServerRuntime(config.images, preset);
   const imageRuntimeImport =
@@ -7107,6 +7117,14 @@ const configuredPlugins = [
   ${hasCompressionRuntime && hasPluginRuntime ? "createCompressionPlugin()," : ""}
   ${hasRuntimeIntegrationConfig ? "...resolveIntegrationPlugins(serverRuntimeIntegrations)," : ""}
   ${nativeMCP.pluginSource}
+  ${
+    mobileSession
+      ? `__farmCreateMobileSessionPlugin({
+    basePath: ${JSON.stringify(config.basePath)},
+    integrations: () => serverRuntimeIntegrations,
+  }),`
+      : ""
+  }
   ${
     hasConfiguredRuntimePlugins
       ? `...farmRuntimeConfigs.flatMap((runtimeConfig) =>
