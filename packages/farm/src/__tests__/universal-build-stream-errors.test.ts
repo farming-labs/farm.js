@@ -19,7 +19,7 @@ type StreamRenderer = {
     ReactDOMServer: unknown,
     element: unknown,
     routeKey?: string,
-    flushMarkers?: boolean,
+    flushToken?: string,
   ) => Promise<RenderedElement>;
 };
 
@@ -36,7 +36,7 @@ function instantiateStreamRenderer(
     "utf-8",
   );
   const start = source.indexOf(
-    "async function renderFarmElement(ReactDOMServer, element, routeKey, flushMarkers = false)",
+    'async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken = "")',
   );
   const end = source.indexOf("function createFarmDocumentStream(");
   expect(start).toBeGreaterThan(-1);
@@ -648,6 +648,8 @@ describe("generated production stream renderer control-flow errors", () => {
 
 describe("streamed navigation flush markers", () => {
   const encoder = new TextEncoder();
+  const token = "0123456789abcdef0123456789abcdef";
+  const marker = `<!--farm-flush:${token}-->`;
   const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
   it("marks the end of each React flush on the readable-stream path", async () => {
@@ -666,7 +668,7 @@ describe("streamed navigation flush markers", () => {
       },
     };
     const { renderFarmElement } = instantiateStreamRenderer({ node: false, web: true });
-    const rendered = await renderFarmElement(server, null, "/stream", true);
+    const rendered = await renderFarmElement(server, null, "/stream", token);
     void (async () => {
       await tick();
       late.enqueue(encoder.encode('<div hidden id="S:0">a</div>'));
@@ -676,8 +678,8 @@ describe("streamed navigation flush markers", () => {
       late.close();
     })();
     expect(await new Response(rendered.stream).text()).toBe(
-      "<main>shell</main><!--farm-flush-->" +
-        '<div hidden id="S:0">a</div><script>$RC(0)</script><!--farm-flush-->' +
+      `<main>shell</main>${marker}` +
+        `<div hidden id="S:0">a</div><script>$RC(0)</script>${marker}` +
         '<div hidden id="S:1">b</div>',
     );
   });
@@ -685,7 +687,7 @@ describe("streamed navigation flush markers", () => {
   it("marks the shell and each flush() React calls on the pipeable path", async () => {
     const server = controlledNodeServer(["<main>", "shell</main>"], false);
     const { renderFarmElement } = instantiateStreamRenderer({ node: true, web: false });
-    const rendered = await renderFarmElement(server, null, "/stream", true);
+    const rendered = await renderFarmElement(server, null, "/stream", token);
     const destination = server.destination as typeof server.destination & { flush(): void };
     destination.write('<div hidden id="S:0">a</div>');
     destination.flush();
@@ -694,8 +696,8 @@ describe("streamed navigation flush markers", () => {
     destination.write('<div hidden id="S:1">b</div>');
     destination.end();
     expect(await new Response(rendered.stream).text()).toBe(
-      "<main>shell</main><!--farm-flush-->" +
-        '<div hidden id="S:0">a</div><!--farm-flush-->' +
+      `<main>shell</main>${marker}` +
+        `<div hidden id="S:0">a</div>${marker}` +
         '<div hidden id="S:1">b</div>',
     );
   });
@@ -711,5 +713,27 @@ describe("streamed navigation flush markers", () => {
     destination.flush();
     destination.end();
     expect(await new Response(rendered.stream).text()).toBe("<main>shell</main><p>late</p>");
+  });
+
+  it("draws a random token per streamed navigation and sends it in F-Flush", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf-8",
+    );
+    const start = source.indexOf("function createFarmFlushToken()");
+    const end = source.indexOf("async function renderFarmElement(");
+    expect(start).toBeGreaterThan(-1);
+    const createFarmFlushToken = new Function(
+      `${source.slice(start, end)}\nreturn createFarmFlushToken;`,
+    )() as () => string;
+    const first = createFarmFlushToken();
+    // The browser accepts exactly this shape (readFarmNavigationStream).
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    expect(createFarmFlushToken()).not.toBe(first);
+    expect(source).toContain(
+      'request.headers.get("f-stream") === "flush"\n          ? createFarmFlushToken()',
+    );
+    expect(source).toContain('...(farmFlushToken ? { "F-Flush": farmFlushToken } : {})');
+    expect(source).not.toContain('"<!--farm-flush-->"');
   });
 });
