@@ -547,4 +547,21 @@ test.describe("Framework feature integration", () => {
       '"message":"browser-api"',
     );
   });
+
+  test("serves built-in docs pages without errors, with working search", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+
+    await page.goto("/docs");
+    await expect(page.getByRole("heading", { name: "Farm.js Docs", level: 1 })).toBeVisible();
+    await page.getByRole("button", { name: "Search documentation" }).first().click();
+    await page.keyboard.type("getting");
+    await expect(page.getByRole("dialog")).toContainText("Getting Started");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/docs\/getting-started$/);
+    expect(errors).toEqual([]);
+  });
 });

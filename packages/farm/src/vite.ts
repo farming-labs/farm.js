@@ -6437,7 +6437,10 @@ function farmIslandsOnlyDocument() {
   const rootContainer = document.getElementById('root')
   
   if (!rootContainer) {
-    console.error('[Farm.js] Root container not found')
+    // A document Farm did not render as a page (the docs renderer's) has nothing to hydrate.
+    if (window.__FARM_PAGE_MODULE__ !== undefined) {
+      console.error('[Farm.js] Root container not found')
+    }
     return
   }
 
