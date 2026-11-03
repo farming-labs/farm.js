@@ -5319,6 +5319,64 @@ function stabilizeDeferredEventCurrentTargets(
   return t.isJSXElement(expression) ? expression : t.cloneNode(root, true);
 }
 
+/**
+ * JSX elements inside `<svg>` or `<math>`. Compiler-owned elements are made with
+ * `createElement`, which only makes HTML elements, so foreign content stays with React.
+ */
+const foreignContentElements = new WeakSet<t.JSXElement>();
+
+// SVG and MathML element names that HTML does not share, for rows a component
+// renders into an `<svg>` another component owns.
+const FOREIGN_ELEMENT_NAMES = new Set(
+  [
+    "animate animateMotion animateTransform circle clipPath defs desc ellipse",
+    "feBlend feColorMatrix feComponentTransfer feComposite feConvolveMatrix",
+    "feDiffuseLighting feDisplacementMap feDistantLight feDropShadow feFlood",
+    "feFuncA feFuncB feFuncG feFuncR feGaussianBlur feImage feMerge feMergeNode",
+    "feMorphology feOffset fePointLight feSpecularLighting feSpotLight feTile",
+    "feTurbulence filter foreignObject g image line linearGradient marker mask",
+    "metadata mpath path pattern polygon polyline radialGradient rect set stop svg",
+    "switch symbol text textPath tspan use view",
+    "math maction menclose merror mfrac mi mmultiscripts mn mo mover mpadded",
+    "mphantom mprescripts mroot mrow ms mspace msqrt mstyle msub msubsup msup",
+    "mtable mtd mtext mtr munder munderover semantics annotation",
+  ]
+    .join(" ")
+    .split(" "),
+);
+
+function markForeignContent(programPath: NodePath<t.Program>): void {
+  programPath.traverse({
+    JSXElement(path) {
+      const name = path.node.openingElement.name;
+      if (!t.isJSXIdentifier(name) || (name.name !== "svg" && name.name !== "math")) return;
+      path.traverse({
+        JSXElement(inner) {
+          foreignContentElements.add(inner.node);
+        },
+      });
+    },
+  });
+}
+
+function isForeignContent(element: t.JSXElement): boolean {
+  const name = element.openingElement.name;
+  return (
+    foreignContentElements.has(element) ||
+    (t.isJSXIdentifier(name) && FOREIGN_ELEMENT_NAMES.has(name.name))
+  );
+}
+
+/**
+ * Props the runtime's attribute writes don't reproduce: React applies `defaultValue` and
+ * `defaultChecked` as properties, and writes booleanish `spellCheck`/`draggable` as
+ * "true"/"false" where the runtime writes "" or removes the attribute.
+ */
+function reactOwnedAttribute(name: string, attribute: t.JSXAttribute): boolean {
+  if (name === "defaultValue" || name === "defaultChecked") return true;
+  return (name === "spellCheck" || name === "draggable") && !t.isStringLiteral(attribute.value);
+}
+
 function analyzeKeyedRowTree(
   row: t.JSXElement,
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression,
@@ -5362,7 +5420,7 @@ function analyzeKeyedRowTree(
     if (!t.isJSXIdentifier(tag) || !/^[a-z]/.test(tag.name)) {
       return "compiled keyed rows support host elements only";
     }
-    if (tag.name === "svg") return "compiled keyed rows do not support SVG yet";
+    if (isForeignContent(element)) return "compiled keyed rows do not support SVG yet";
     const attributeNames = new Set(
       element.openingElement.attributes
         .filter((attribute): attribute is t.JSXAttribute => t.isJSXAttribute(attribute))
@@ -5396,7 +5454,11 @@ function analyzeKeyedRowTree(
       }
       const name = jsxAttributeName(attribute);
       if (!name) return "compiled keyed rows do not support namespaced JSX attributes";
-      if (name === "ref" || name === "dangerouslySetInnerHTML") {
+      if (
+        name === "ref" ||
+        name === "dangerouslySetInnerHTML" ||
+        reactOwnedAttribute(name, attribute)
+      ) {
         return `compiled keyed row ${name} requires React ownership`;
       }
       if (name === "key") continue;
@@ -5885,7 +5947,7 @@ function analyzeHostConditionalTree(
     if (!t.isJSXIdentifier(tag) || !/^[a-z]/.test(tag.name)) {
       return "compiler-owned conditionals support host elements only";
     }
-    if (tag.name === "svg") return "compiler-owned conditionals do not support SVG yet";
+    if (isForeignContent(element)) return "compiler-owned conditionals do not support SVG yet";
 
     for (const attribute of element.openingElement.attributes) {
       if (t.isJSXSpreadAttribute(attribute)) {
@@ -5894,6 +5956,9 @@ function analyzeHostConditionalTree(
       }
       const name = jsxAttributeName(attribute);
       if (!name) return "compiler-owned conditionals do not support namespaced JSX attributes";
+      if (reactOwnedAttribute(name, attribute)) {
+        return `compiler-owned conditional ${name} requires React ownership`;
+      }
       if (name === "ref" || name === "dangerouslySetInnerHTML" || name === "key") {
         if (
           statefulOnly &&
@@ -6046,7 +6111,9 @@ function analyzeRecursiveHostTree(
     if (!t.isJSXIdentifier(tag) || !/^[a-z]/.test(tag.name)) {
       return "recursive compiler-owned blocks support host elements only";
     }
-    if (tag.name === "svg") return "recursive compiler-owned blocks do not support SVG yet";
+    if (isForeignContent(element)) {
+      return "recursive compiler-owned blocks do not support SVG yet";
+    }
 
     for (const attribute of element.openingElement.attributes) {
       if (t.isJSXSpreadAttribute(attribute)) {
@@ -6054,6 +6121,9 @@ function analyzeRecursiveHostTree(
       }
       const name = jsxAttributeName(attribute);
       if (!name) return "recursive compiler-owned blocks do not support namespaced attributes";
+      if (reactOwnedAttribute(name, attribute)) {
+        return `recursive compiler-owned block ${name} requires React ownership`;
+      }
       if (name === "ref" || name === "dangerouslySetInnerHTML" || name === "key") {
         return `recursive compiler-owned block ${name} requires React ownership`;
       }
@@ -6480,7 +6550,7 @@ function analyzeHostConditionalContainer(
   if (
     !t.isJSXIdentifier(containerName) ||
     !/^[a-z]/.test(containerName.name) ||
-    containerName.name === "svg"
+    isForeignContent(container)
   ) {
     return undefined;
   }
@@ -6589,7 +6659,7 @@ function analyzeConditionalRangesContainer(
   if (
     !t.isJSXIdentifier(containerName) ||
     !/^[a-z]/.test(containerName.name) ||
-    containerName.name === "svg" ||
+    isForeignContent(container) ||
     container.openingElement.attributes.some(
       (attribute) =>
         t.isJSXSpreadAttribute(attribute) ||
@@ -6720,7 +6790,7 @@ function analyzeMixedRangesContainer(
   if (
     !t.isJSXIdentifier(containerName) ||
     !/^[a-z]/.test(containerName.name) ||
-    containerName.name === "svg" ||
+    isForeignContent(container) ||
     container.openingElement.attributes.some(
       (attribute) =>
         t.isJSXSpreadAttribute(attribute) ||
@@ -10521,6 +10591,7 @@ export async function compileReactModule(
     visitor: {
       Program(programPath) {
         const moduleDirectives = new Set(directiveValues(programPath.node));
+        markForeignContent(programPath);
         const useStateNames = new Set<string>();
         const reactNames = new Set<string>();
         const listNames = new Set<string>();
