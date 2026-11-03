@@ -598,11 +598,19 @@ function skipHorizontalWhitespace(source: string, start: number): number {
 export async function collectSSGPages(
   routes: RouteEntry[],
   loadModule: (filePath: string) => Promise<RouteModule>,
-  options: { suggestStaticRendering?: boolean } = {},
+  options: {
+    suggestStaticRendering?: boolean;
+    /**
+     * Routes a docs adapter renders, which ignore route config: a static candidate among them
+     * is pointed at `docs.prerender` instead of `force-static`, or not at all once it is set.
+     */
+    docsAdapterRoutes?: { owns: (routePath: string) => boolean; prerender: boolean };
+  } = {},
 ): Promise<SSGCollectionResult> {
   const ssgPages: SSGPage[] = [];
   const ssrRoutes: string[] = [];
   const staticCandidateRoutes: string[] = [];
+  let staticCandidateDocsPages = 0;
 
   for (const route of routes) {
     try {
@@ -671,7 +679,8 @@ export async function collectSSGPages(
           options.suggestStaticRendering !== false &&
           analyzeStaticRouteCandidate(mod, source, { isDynamic: route.isDynamic }).candidate
         ) {
-          staticCandidateRoutes.push(route.path);
+          if (options.docsAdapterRoutes?.owns(route.path)) staticCandidateDocsPages += 1;
+          else staticCandidateRoutes.push(route.path);
         }
       }
     } catch (error) {
@@ -692,6 +701,15 @@ export async function collectSSGPages(
       } eligible for static rendering:\n  ${visibleRoutes.join("\n  ")}${remainingSuffix}\n` +
         `Add \`export const dynamic = "force-static";\` after verifying that imported code ` +
         `does not read cookies, headers, authentication, or other request data.`,
+    );
+  }
+
+  if (staticCandidateDocsPages > 0 && !options.docsAdapterRoutes?.prerender) {
+    console.warn(
+      `[Farm.js] ${staticCandidateDocsPages} docs page${
+        staticCandidateDocsPages === 1 ? " renders" : "s render"
+      } on each request. Set \`docs.prerender: true\` in farm.config.ts to prerender docs ` +
+        `pages on Node and serverless targets.`,
     );
   }
 

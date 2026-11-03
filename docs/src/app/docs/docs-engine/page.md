@@ -251,6 +251,29 @@ export const { GET, POST } = createDocsAPI();
 Add the same exports to `src/app/api/docs/[...docs]/route.ts` when the override should also own
 path-style machine routes. Most applications do not need either wrapper.
 
+## Prerender docs pages
+
+Docs pages render on request by default. With a docs adapter such as `@farming-labs/farmjs`, set
+`docs.prerender` to have `farm build` render every page the adapter lists into a static file on
+Node and serverless targets:
+
+```ts
+export default defineConfig({
+  docs: {
+    entry: "/docs",
+    prerender: true,
+  },
+});
+```
+
+A docs page is a static file once prerendered, so it does not negotiate `Accept: text/markdown`;
+agents use the `.md` URL the page links to. Markdown, search, `llms.txt`, and MCP keep rendering on
+request. A page that middleware, a redirect, a rewrite, i18n, or a dynamic or cached route rule
+covers keeps rendering on request, as for static app pages; `routeRules: { "/docs/changelog": {
+prerender: false } }` keeps one page dynamic. Edge targets already serve docs pages from the build's
+docs snapshot. Farm's built-in renderer (`docs.adapter: false`) and adapters that do not list their
+pages keep rendering on request, with a build warning.
+
 ## Production notes
 
 - Keep docs content in markdown so human pages and agent-readable pages stay in sync.

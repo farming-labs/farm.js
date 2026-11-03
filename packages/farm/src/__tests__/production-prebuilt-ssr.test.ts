@@ -1712,6 +1712,121 @@ export default { basePath: "/workspace", plugins: [${plugin}] };`,
     }
   }, 120_000);
 
+  it("prerenders the pages a docs adapter lists and leaves its other surfaces dynamic", async () => {
+    const root = await createProductionFixture();
+    const adapterDir = path.join(root, "node_modules", "fake-docs-adapter");
+    await fs.mkdir(adapterDir, { recursive: true });
+    await fs.writeFile(
+      path.join(adapterDir, "package.json"),
+      JSON.stringify({
+        name: "fake-docs-adapter",
+        type: "module",
+        exports: { "./server": "./server.js", "./react": "./react.js" },
+      }),
+    );
+    // Each response says whether it was rendered for the build or for a visitor.
+    await fs.writeFile(
+      path.join(adapterDir, "server.js"),
+      `export function listFarmDocsPages(config) {
+  return [config.docsPath, config.docsPath + "/guide", config.docsPath + "/changelog"];
+}
+export function createFarmDocsRuntimeHandler() {
+  return async (request) => {
+    const { pathname } = new URL(request.url);
+    const renderedFor = request.headers.has("x-nitro-prerender") ? "build" : "visitor";
+    if (pathname.startsWith("/api/docs")) return Response.json({ pathname, renderedFor });
+    if (pathname.endsWith(".md")) {
+      return new Response("# " + pathname + " for " + renderedFor, {
+        headers: { "Content-Type": "text/markdown; charset=utf-8" },
+      });
+    }
+    if (!["/docs", "/docs/guide", "/docs/changelog"].includes(pathname)) return null;
+    return new Response(
+      "<!doctype html><html><head></head><body><main>" + pathname + " for " + renderedFor + "</main></body></html>",
+      { headers: { "Content-Type": "text/html; charset=utf-8", "X-Farm-Docs-Adapter": "fake" } },
+    );
+  };
+}`,
+    );
+    await fs.writeFile(path.join(adapterDir, "react.js"), "export function hydrateFarmDocs() {}");
+    // Docs content inside the app directory is also a set of dynamic page routes.
+    const docsDir = path.join(root, "src", "app", "docs");
+    await fs.mkdir(path.join(docsDir, "guide"), { recursive: true });
+    await fs.mkdir(path.join(docsDir, "changelog"), { recursive: true });
+    await fs.writeFile(path.join(docsDir, "page.md"), "# Docs\n");
+    await fs.writeFile(path.join(docsDir, "guide", "page.md"), "# Guide\n");
+    await fs.writeFile(path.join(docsDir, "changelog", "page.md"), "# Changelog\n");
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          agent: { llmsTxt: { full: false } },
+          routeRules: { "/docs/changelog": { prerender: false } },
+          docs: {
+            enabled: true,
+            entry: "/docs",
+            contentDir: "src/app/docs",
+            prerender: true,
+            adapter: {
+              id: "fake",
+              protocol: 1,
+              server: "fake-docs-adapter/server",
+              react: "fake-docs-adapter/react",
+            },
+          },
+          generateBuildId: () => "production-docs-prerender-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      const publicDir = path.join(root, ".farm", ".output", "public");
+      expect(await fs.readFile(path.join(publicDir, "docs", "index.html"), "utf8")).toContain(
+        "/docs for build",
+      );
+      expect(
+        await fs.readFile(path.join(publicDir, "docs", "guide", "index.html"), "utf8"),
+      ).toContain("/docs/guide for build");
+      const exists = (file: string) =>
+        fs.stat(path.join(publicDir, file)).then(
+          () => true,
+          () => false,
+        );
+      expect(await exists("docs/changelog")).toBe(false);
+      expect(await exists("docs/guide.md")).toBe(false);
+      expect(await exists("api")).toBe(false);
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(await response.text()).toContain("/docs/guide for build");
+          const origin = new URL(response.url).origin;
+          const text = async (pathname: string, init?: RequestInit) =>
+            (await fetch(`${origin}${pathname}`, init)).text();
+
+          expect(await text("/docs")).toContain("/docs for build");
+          expect(await text("/docs/changelog")).toContain("/docs/changelog for visitor");
+          expect(await text("/docs/guide.md")).toBe("# /docs/guide.md for visitor");
+          expect(JSON.parse(await text("/api/docs/mcp"))).toEqual({
+            pathname: "/api/docs/mcp",
+            renderedFor: "visitor",
+          });
+          expect(JSON.parse(await text("/api/docs?query=guide"))).toMatchObject({
+            renderedFor: "visitor",
+          });
+        },
+        "/docs/guide",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("reads server env where the server runs instead of storing it in the build output", async () => {
     const root = await createProductionFixture();
     const previous = process.env.FARM_TEST_DATABASE_URL;

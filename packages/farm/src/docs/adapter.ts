@@ -27,6 +27,14 @@ interface FarmDocsAdapterServerModule {
       registerMCPServer?: (server: FarmMCPServerRegistration) => () => void;
     },
   ) => (request: Request) => Promise<Response | null>;
+  /**
+   * The page paths the runtime renders as HTML, for a build that prerenders them. Older
+   * adapters do not export it, and their pages keep rendering on request.
+   */
+  listFarmDocsPages?: (
+    config: Record<string, unknown>,
+    options: { rootDir: string },
+  ) => readonly string[] | Promise<readonly string[]>;
 }
 
 interface FarmDocsAdapterEdgeCompilerModule {
@@ -192,6 +200,36 @@ export async function compileFarmDocsAdapterEdgeManifest(
     );
   }
   return manifest;
+}
+
+/**
+ * The docs page paths the adapter renders, read from its server entry during the build, or
+ * null when the adapter does not list them.
+ */
+export async function listFarmDocsAdapterPages(
+  docs: FarmDocsResolvedConfig,
+  options: { root: string; srcDir?: string },
+): Promise<string[] | null> {
+  if (!hasFarmDocsRuntimeAdapter(docs)) return null;
+  const requireFromApp = createRequire(path.join(options.root, "package.json"));
+  const serverModule = (await import(
+    /* @vite-ignore */ pathToFileURL(requireFromApp.resolve(docs.adapter.server)).href
+  )) as FarmDocsAdapterServerModule;
+  if (typeof serverModule.listFarmDocsPages !== "function") return null;
+
+  const pages = await serverModule.listFarmDocsPages(
+    createFarmDocsAdapterRuntimeConfig(docs, options),
+    { rootDir: options.root },
+  );
+  if (
+    !Array.isArray(pages) ||
+    pages.some((page) => typeof page !== "string" || !page.startsWith("/"))
+  ) {
+    throw new Error(
+      `Farm docs adapter ${JSON.stringify(docs.adapter.id)} listed docs pages that are not absolute paths.`,
+    );
+  }
+  return [...new Set(pages)];
 }
 
 /**
