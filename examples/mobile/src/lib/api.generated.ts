@@ -7,12 +7,16 @@
 
 import type { GET as GET_notes } from "../app/api/notes/route";
 import type { POST as POST_notes } from "../app/api/notes/route";
+import type { GET as GET_stations } from "../app/api/stations/route";
 
 // Type-only representation of your API routes
 export type APIRouter = {
   notes: {
     get: typeof GET_notes;
     post: typeof POST_notes;
+  };
+  stations: {
+    get: typeof GET_stations;
   };
 };
 
@@ -21,5 +25,9 @@ export const apiRoutes = [
   {
     path: "/api/notes",
     methods: ["GET", "POST"],
+  },
+  {
+    path: "/api/stations",
+    methods: ["GET"],
   },
 ] as const;
