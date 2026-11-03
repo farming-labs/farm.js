@@ -229,7 +229,7 @@ describe("Farm docs runtime adapters", () => {
         entry: "pinboard/docs",
         docsPath: "/pinboard/docs",
         // No content directory of its own: the inferred one, never the main root's.
-        contentDir: path.join("/workspace/app", "pinboard/docs"),
+        contentDir: path.resolve("/workspace/app", "pinboard/docs"),
       },
     ]);
     expect(hostOptions).toMatchObject({
