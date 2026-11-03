@@ -107,11 +107,20 @@ export const farmPackageBuildOptions = {
   entry,
   format: ["cjs", "esm"],
   // Declarations for every entry except the CLI's React-free runtime. Everything it exports
-  // is typed by index.d.ts, which package.json points it at. The declaration worker peaks
-  // around 10 GB on Node 22, so builds run with a 12 GB heap.
+  // is typed by index.d.ts, which package.json points it at.
+  // The bundled declarations are built from what `tsc -p tsconfig.dts.json` emits first in
+  // the build and dev scripts, not from source:
+  // given source entries, tsup's declaration plugin starts a TypeScript program for each run
+  // of consecutive entries in one directory, and each program parses the whole import graph
+  // again (34 programs here, about 11 GB). Given .d.ts entries, it starts none.
   dts: {
     entry: Object.fromEntries(
-      Object.entries(entry).filter(([name]) => name !== "internal/cli-runtime"),
+      Object.entries(entry)
+        .filter(([name]) => name !== "internal/cli-runtime")
+        .map(([name, source]) => [
+          name,
+          source.replace(/^src\//, ".tmp-dts/").replace(/\.tsx?$/, ".d.ts"),
+        ]),
     ),
   },
   clean: true,
