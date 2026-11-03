@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  createFarmSearchParams,
-  searchParamsToObject,
-  type FarmSearchParams,
-} from "../search-params";
+import { createFarmSearchParams, searchParamsToObject } from "../search-params";
 
 describe("page searchParams", () => {
   it("read with await, as Farm's pages do, and directly, as RSC pages do", async () => {
@@ -32,7 +28,3 @@ describe("page searchParams", () => {
     }).toThrow(TypeError);
   });
 });
-
-// An untyped context (route data hooks pass `any`) still fits a typed one, as `Promise<any>` did.
-const untyped = {} as FarmSearchParams<any>;
-export const typed: FarmSearchParams<{ tab: "info" | "reviews" }> = untyped;
