@@ -34,7 +34,9 @@ export function searchParamsToObject(
 
 /** Page and layout `searchParams`: a promise (Farm's contract) whose query keys also read directly. */
 export type FarmSearchParams<TSearch = Record<string, string | string[] | undefined>> =
-  Promise<TSearch> & Readonly<TSearch>;
+  // `any` stays `any`: an untyped context (`ProgrammaticRouteDataCacheContext<any, …>`) must still
+  // fit a typed one, as a plain `Promise<any>` did.
+  0 extends 1 & TSearch ? any : Promise<TSearch> & Readonly<TSearch>;
 
 // Promise members, and names an object must never own as data.
 const RESERVED_SEARCH_KEYS = new Set([
