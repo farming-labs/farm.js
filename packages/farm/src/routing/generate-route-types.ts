@@ -236,16 +236,13 @@ export async function scanRoutePatterns(
   const nativePages = new Map<string, PlatformRouteFiles>();
   const nativeLayouts = new Map<string, PlatformRouteFiles>();
 
-  const glob = await import("fast-glob");
+  const { glob } = await import("tinyglobby");
   for (const source of sourceRoots) {
     const appDir = path.join(source.root, source.srcDir, "app");
     if (fs.existsSync(appDir)) {
-      const routeModuleFiles = await glob.default(
+      const routeModuleFiles = await glob(
         `**/{page,layout,loading,error}.{${componentExtensions.join(",")},md,mdx}`,
-        {
-          cwd: appDir,
-          absolute: false,
-        },
+        { cwd: appDir, expandDirectories: false },
       );
 
       for (const file of routeModuleFiles) {
@@ -262,9 +259,9 @@ export async function scanRoutePatterns(
       if (options.platformFiles) {
         scanPlatformRouteFiles(
           appDir,
-          await glob.default(
+          await glob(
             ["**/{page,layout}.{native,ios,android}.{tsx,ts,jsx,js}", "**/page.{kt,swift}"],
-            { cwd: appDir, absolute: false },
+            { cwd: appDir, expandDirectories: false },
           ),
           nativePages,
           nativeLayouts,

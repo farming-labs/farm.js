@@ -794,7 +794,6 @@
     "better-call": "^1.0.19",
     "db0": "^0.3.4",
     "es-module-lexer": "2.0.0",
-    "fast-glob": "^3.3.2",
     "h3": "2.0.1-rc.32",
     "image-size": "^2.0.4",
     "intl-messageformat": "11.2.12",
@@ -806,6 +805,7 @@
     "rolldown": "^1.2.7",
     "sugar-high": "^0.9.5",
     "supports-color": "^10.2.2",
+    "tinyglobby": "^0.2.17",
     "unstorage": "2.0.0-alpha.10",
     "vite": "8.3.4",
     "zod": "^4.6.7"

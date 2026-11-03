@@ -238,8 +238,8 @@ export async function fileExists(filePath: string): Promise<boolean> {
 }
 
 export async function globFiles(pattern: string, cwd: string): Promise<string[]> {
-  const glob = await import("fast-glob");
-  return glob.default(pattern, { cwd, absolute: false });
+  const { glob } = await import("tinyglobby");
+  return glob(pattern, { cwd, expandDirectories: false });
 }
 
 export function parseSearchParams(
