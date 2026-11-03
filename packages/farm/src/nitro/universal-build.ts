@@ -127,6 +127,7 @@ import {
   assertFarmDocsAdapterServesNoGuardedPages,
   compileFarmDocsAdapterEdgeManifest,
   hasFarmDocsRuntimeAdapter,
+  listFarmDocsAdapterPages,
 } from "../docs/adapter";
 import {
   createFarmClientModulePreloadPlugin,
@@ -11385,6 +11386,38 @@ function getPhysicalPrerenderBypassReason(options: {
 }
 
 /**
+ * The docs pages `docs.prerender` asks the build to write as static files. Only a docs adapter
+ * on a Node or serverless target lists them; anything else keeps rendering them on request.
+ */
+async function getFarmDocsPrerenderPages(
+  config: ResolvedFarmConfig,
+  root: string,
+  preset: string,
+): Promise<string[]> {
+  if (!config.docs?.enabled || !config.docs.prerender) return [];
+  if (!isReactRenderer(config.renderer) || !hasFarmDocsRuntimeAdapter(config.docs)) {
+    logger.warn(
+      "docs.prerender needs a docs adapter such as @farming-labs/farmjs; Farm's built-in docs renderer keeps rendering docs pages on request.",
+    );
+    return [];
+  }
+  if (getFarmPresetRuntime(preset) === "edge") {
+    logger.info(
+      `↪ Keeping docs pages in the edge docs snapshot: docs.prerender writes static files on Node and serverless targets, not "${preset}".`,
+    );
+    return [];
+  }
+  const pages = await listFarmDocsAdapterPages(config.docs, { root, srcDir: config.srcDir });
+  if (!pages) {
+    logger.warn(
+      `The docs adapter ${JSON.stringify(config.docs.adapter.id)} does not list its pages for prerendering; upgrade it to prerender docs pages. They render on request until then.`,
+    );
+    return [];
+  }
+  return pages;
+}
+
+/**
  * Whether a route rule makes Nitro write cache headers over Farm's response: a `swr` or raw
  * `cache` rule caches through Nitro, and a `headers` rule sets its headers after Farm answered.
  */
@@ -11466,14 +11499,20 @@ async function buildNitroUniversal(
   // Resolved config callbacks close over already-loaded arrays, so this does
   // not re-run user discovery or fetch mutable external configuration.
   const configuredResponseRoutesPromise = Promise.all([config.redirects(), config.rewrites()]);
+  const docsPrerenderPagesPromise = getFarmDocsPrerenderPages(config, root, preset);
   const farmWorkflows = await prepareFarmWorkflowsForNitro(config);
   const farmCron = await prepareFarmCronForNitro(config);
-  const [{ ssg: ssgPages }, middlewareRoutes, [configuredRedirects, configuredRewrites]] =
-    await Promise.all([
-      ssgCollectionPromise,
-      middlewareRoutesPromise,
-      configuredResponseRoutesPromise,
-    ]);
+  const [
+    { ssg: ssgPages },
+    middlewareRoutes,
+    [configuredRedirects, configuredRewrites],
+    docsPrerenderPages,
+  ] = await Promise.all([
+    ssgCollectionPromise,
+    middlewareRoutesPromise,
+    configuredResponseRoutesPromise,
+    docsPrerenderPagesPromise,
+  ]);
   const redirectSources = [
     ...routeManager.getRedirects().map((route) => route.source),
     ...configuredRedirects.map((route: RedirectConfig) => route.source),
@@ -11484,7 +11523,7 @@ async function buildNitroUniversal(
   // Each middleware file's own literal `config.matcher`: a page none of them can match still
   // prerenders.
   const middlewareRoutesWithConfig =
-    ssgPages.length > 0
+    ssgPages.length > 0 || docsPrerenderPages.length > 0
       ? await Promise.all(
           middlewareRoutes.map(async (route) => ({
             ...route,
@@ -11512,6 +11551,28 @@ async function buildNitroUniversal(
       continue;
     }
     prerenderRoutes.push(page.urlPath);
+  }
+  // The docs runtime answers its paths before any page route, so a page route's rendering
+  // (a docs `page.mdx` is a dynamic page route) does not decide them.
+  const docsRouteRuntimeManifest: FarmRouteRuntimeManifest = {
+    ...routeRuntimeManifest,
+    routes: routeRuntimeManifest.routes.filter((entry) => entry.kind !== "page"),
+  };
+  for (const pathname of docsPrerenderPages) {
+    if (prerenderRoutes.includes(pathname)) continue;
+    const reason = getPhysicalPrerenderBypassReason({
+      config,
+      middlewareRoutes: middlewareRoutesWithConfig,
+      routeRuntimeManifest: docsRouteRuntimeManifest,
+      redirectSources,
+      rewriteSources,
+      pathname,
+    });
+    if (reason) {
+      skippedPrerenderRoutes.push({ pathname, reason });
+      continue;
+    }
+    prerenderRoutes.push(pathname);
   }
   for (const skipped of skippedPrerenderRoutes) {
     logger.info(`↪ Keeping SSG route ${skipped.pathname} server-handled (${skipped.reason})`);

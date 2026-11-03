@@ -950,6 +950,7 @@ export async function resolveDocsConfig(
     ...docsOptions,
     adapter: undefined,
     enabled: undefined,
+    prerender: undefined,
     config: undefined,
     configPath: undefined,
   } as Partial<DocsConfig>);
@@ -968,6 +969,7 @@ export async function resolveDocsConfig(
       ...docsOptions,
       adapter: undefined,
       enabled: undefined,
+      prerender: undefined,
       config: undefined,
       configPath: undefined,
     }),
@@ -995,6 +997,7 @@ export async function resolveDocsConfig(
     enabled: true,
     entry: entryRoute,
     ...(docsOptions.adapter ? { adapter: docsOptions.adapter } : {}),
+    ...(docsOptions.prerender === true ? { prerender: true } : {}),
     contentDir,
     configPath: loadedConfig?.configPath,
     config: {

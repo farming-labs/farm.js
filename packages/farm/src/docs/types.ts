@@ -85,6 +85,13 @@ export type FarmDocsConfigInput = FarmDocsRuntimeConfig & {
   contentDir?: string;
   /** Set to false to opt out even when a docs config file exists. */
   enabled?: boolean;
+  /**
+   * Render every page of a docs adapter during `farm build` and serve it as a
+   * static file on Node and serverless targets. A static page does not
+   * negotiate `Accept: text/markdown`; agents use the `.md` URL it links to.
+   * Markdown, search, `llms.txt`, and MCP stay server-rendered.
+   */
+  prerender?: boolean;
   /** Inline @farming-labs/docs config object. */
   config?: FarmDocsRuntimeConfig;
   /** Path to docs.config.* or docs.json. */
@@ -97,6 +104,8 @@ export interface FarmDocsResolvedConfig {
   enabled: boolean;
   entry: string;
   adapter?: FarmDocsAdapterDescriptor;
+  /** `docs.prerender` from `farm.config.ts`. */
+  prerender?: boolean;
   contentDir?: string;
   configPath?: string;
   config: FarmDocsRuntimeConfig & Pick<DocsConfig, "entry">;

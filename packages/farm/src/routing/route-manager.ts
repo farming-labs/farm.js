@@ -100,7 +100,7 @@ import {
   isInRouteGroupScope,
   routeBoundaryCoversDirectory,
 } from "./route-groups";
-import { getFarmRendererComponentExtensions } from "../renderer";
+import { getFarmRendererComponentExtensions, isReactRenderer } from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
 import {
   AmbiguousRouteError,
@@ -1542,6 +1542,30 @@ export class RouteManager {
     }
   }
 
+  /** The page routes a docs adapter answers before Farm's own page rendering. */
+  private getDocsAdapterRoutes():
+    | { owns: (routePath: string) => boolean; prerender: boolean }
+    | undefined {
+    const docs = this.config.docs;
+    if (
+      !docs ||
+      typeof docs !== "object" ||
+      !docs.enabled ||
+      !docs.adapter ||
+      !docs.adapter.server ||
+      !docs.adapter.react ||
+      !isReactRenderer(this.config.renderer)
+    ) {
+      return undefined;
+    }
+    const entry = `/${String(docs.entry || "docs").replace(/^\/+|\/+$/g, "")}`;
+    return {
+      owns: (routePath) =>
+        entry === "/" || routePath === entry || routePath.startsWith(`${entry}/`),
+      prerender: docs.prerender === true,
+    };
+  }
+
   /**
    * Collect SSG pages for static generation
    *
@@ -1557,8 +1581,10 @@ export class RouteManager {
     }));
 
     const i18n = this.getI18nConfig();
+    const docsAdapterRoutes = this.getDocsAdapterRoutes();
     const result = await collectSSGPages(routes, (filePath) => this.loadRouteModule(filePath), {
       suggestStaticRendering: shouldSuggestStaticRenderingForI18n(i18n),
+      ...(docsAdapterRoutes ? { docsAdapterRoutes } : {}),
     });
     if (!i18n) {
       return result;
