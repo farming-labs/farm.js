@@ -22,6 +22,7 @@
  */
 
 import { builtinModules } from "node:module";
+import { FARM_BROWSER_BUILTIN_PREFIX } from "./browser-builtins";
 import { fileURLToPath } from "node:url";
 import { getProgrammaticRouteDefinitionSource } from "./routes-shared";
 
@@ -447,6 +448,7 @@ function isApplicationModuleId(id: string): boolean {
 }
 
 function isNodeBuiltinId(id: string): boolean {
+  if (id.startsWith(FARM_BROWSER_BUILTIN_PREFIX)) return true;
   const external = id.indexOf("__vite-browser-external:");
   const bare = external === 0 || external === 1 ? id.slice(external + 24) : id;
   return bare.startsWith("node:") || NODE_BUILTINS.has(bare);
