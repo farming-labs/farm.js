@@ -403,7 +403,8 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
    * `{ os, mode, command, profile, env, root }`, for `farm dev|build --mobile`. Web builds never
    * call the function or check the block, and ship neither; they also build the mobile client,
    * which pages load when a mobile shell asks for them. A server of an app with the block
-   * serves `/__farm/mobile/session` so the app's native screens can sign in with device tokens.
+   * serves `/__farm/mobile/session` so the app's native screens can sign in with device tokens,
+   * and answers the app's native-tier screen requests.
    */
   mobile?: FarmMobileConfigInput;
   docs?: FarmDocsUserConfig;

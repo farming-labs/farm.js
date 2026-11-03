@@ -38,7 +38,8 @@ farm build                    # --web, the default, unchanged
 | --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                                                             |
 | `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                                                            |
-| Native-screen analyzer                        | **Report only**                | Writes `native-report.json`; it changes no output                                                                                                                   |
+| Native-screen analyzer                        | Unreleased                     | Sorts routes into tiers; proven native-tier routes become `server` screens with `native: true` or `auto: "on"`                                                      |
+| Server-rendered native screens (`server`)     | Unreleased, Android            | Drawn with Android views from the page the server renders; run on an emulator under `farm dev --mobile`, not yet on a device. iOS shows them as web screens         |
 | iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                         |
 | React Native screens                          | Unreleased, dev only           | Android only; runs under `farm dev --mobile` on an emulator, not yet in a production build or on a device (see [React Native screens](#react-native-screens))       |
 | Bundled client assets                         | Unreleased                     | Pages in a production shell run the mobile client; Android serves its files from the APK, iOS from the server (see [Bundled client assets](#bundled-client-assets)) |
@@ -478,9 +479,8 @@ mobile (os: android): src/app/page.tsx sets mobile.native to true, but "/" canno
 It needs JavaScript on the device: add page.native.tsx next to the page, or remove mobile.native.
 ```
 
-The check runs on every dev start and build, whatever `native.auto` is. The shell cannot draw a
-native-tier screen yet, so a passing route is still recorded as `requested: "native"` on a web
-screen.
+The check runs on every dev start and build, whatever `native.auto` is. A passing route becomes a
+`server` screen ([Server-rendered native screens](#server-rendered-native-screens)).
 
 ### `mobile.native`
 
@@ -503,6 +503,42 @@ and `"platform"` are valid; any other value, including `"flutter"`, fails valida
 `config`, `file`, `analyzer`, or `default`), the `module` id derived from the route (such as
 `app/notes/[id]`), a `requested` tier when a route asked for native but stays web, and warnings for
 a page export overriding config or a native file going unused.
+
+## Server-rendered native screens
+
+A route in the analyzer's **native** tier ([tiers](#tiers)) needs no JavaScript on the device, so it
+does not need React Native either. With `export const mobile = { native: true }` on the page, a
+config route with `screen: "native"` and no native file, or `native.auto: "on"`, it is recorded in
+`farm-routes.json` as `screen: "server"`, and the shell draws it with plain platform views:
+
+```text
+shell ── GET /notes, Accept: application/vnd.farm.native+json ──▶ web server
+                                                                   renders /notes as for a browser
+shell ◀── { root: { type: "View", children: [...] } } ─────────── reads the HTML into a tree
+```
+
+- **Data and auth stay on the server.** The server renders the page through its normal request
+  path, middleware and guards included, with the WebViews' cookies. Async pages and server
+  components work, since they run on the server as for the web page.
+- **Only the page.** The tree is the page's own content: the layouts are web chrome, and the native
+  shell draws the bar and tabs.
+- **Styles map at build time.** Tailwind classes resolve to native values from Tailwind's default
+  theme (colors from oklch to sRGB, spacing, type, radius); `dark:` variants follow the system
+  theme; text styles flow down as CSS inheritance does. The analyzer only lets a class through when
+  the tree can resolve it.
+- **Any doubt is web.** The response lists what it could not express in `unsupported`; the shell
+  then shows the route's web screen, as it does for a failed request or an answer that is not a
+  tree, such as a redirect to sign in.
+
+Drawn on Android: `View` (flex column or row, gap, padding, margins, width and height in px or
+`100%`, `flex-1`, alignment, `max-w-*`), `Text` with inline runs (links, `<strong>`, `<em>`,
+`<code>`), `Image`, links and buttons as pressable boxes, and borders, radii, backgrounds, and
+opacity. Not yet: percentages other than `100%`, `flex-wrap`, absolute positioning, app CSS classes
+(the most common blocker in the example app), forms, and inputs that do anything. iOS shows `server`
+routes as web screens until the iOS shell draws them.
+
+A web server answers these requests only for an app with a `mobile` block, so a web-only app's
+server is unchanged.
 
 ## Native screens
 
@@ -801,10 +837,10 @@ page.tsx  ──▶  AST (Oxc)  ──▶  classify every node  ──▶  decis
                                                     └─▶  portable UI tree (IR)  ──▶  [ native emitter ]
 ```
 
-Today the pass stops at the report: it is **report only**, changes no output, and every analyzed
-route stays a web screen. The AST walk, the classification, and the IR all run now; the emitter that
-reads the IR and generates native code is the one piece not built yet, so the IR is produced but not
-yet consumed.
+The native tier is the one that changes output today: a proven route becomes a
+[server-rendered native screen](#server-rendered-native-screens). Porting a page to React Native is
+still report only: the IR is produced, but the emitter that would read it and generate a
+`page.native.tsx` is not built yet.
 
 ```sh
 farm config inspect --mobile --report   # table, plus .farm/output/mobile/native-report.json
@@ -852,8 +888,9 @@ The decision is deliberately conservative: a route is **`port`** only when it ha
 and at least one win** (a rendered list, a controlled input, a timer). A portable route with no win
 is reported as such and stays web, and **any doubt is web.** Every blocker is reported with its
 `file:line:column`, a rule name (such as `unmapped-element` or `unknown-package`), and a message.
-With `auto: "on"` a port is recorded in `farm-routes.json` as `source: "analyzer"` with
-`requested: "native"`, still a web screen until an emitter ships. Facts are cached by file content
+With `auto: "on"`, a native-tier route is recorded in `farm-routes.json` as a `server` screen
+with `source: "analyzer"`; a React Native port is recorded with `requested: "native"`, still a web
+screen until an emitter ships. Facts are cached by file content
 in `.farm/cache/mobile/` and keyed by the analyzer and Farm version, so the report is cheap to
 re-run.
 

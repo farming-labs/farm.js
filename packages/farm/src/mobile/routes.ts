@@ -5,7 +5,7 @@ import type {
   FarmMobileOS,
   FarmMobilePrefetch,
   FarmMobilePresentation,
-  FarmMobileScreen,
+  FarmMobileRouteScreen,
   FarmMobileTab,
   ResolvedFarmMobileConfig,
 } from "./config";
@@ -26,7 +26,7 @@ export interface FarmMobileRouteRule {
   /** `"tab"` switches to tab `tab` instead of presenting a screen. */
   presentation: FarmMobilePresentation | "tab";
   tab?: number;
-  screen: FarmMobileScreen;
+  screen: FarmMobileRouteScreen;
   /** What decided `screen`: the page export, config, a screen file, the analyzer, or the default. */
   source?: FarmMobileScreenSource;
   /** Native module id derived from the route, such as `"app/notes/[id]"`. Not on web screens. */

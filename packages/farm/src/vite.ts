@@ -81,6 +81,7 @@ import {
   resolveMarkdownMirrorTarget,
 } from "./markdown";
 import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
+import { FARM_NATIVE_TREE_CONTENT_TYPE } from "./mobile/native-tree-type";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import { resolveFarmAgentCrawlers } from "./agent-crawlers";
 import { resolveFarmAgentSitemap } from "./agent-sitemap";
@@ -269,6 +270,8 @@ function farmAgentGeneratedPaths(config: {
 }
 
 interface FarmVitePluginOptions extends FarmConfig {
+  /** The resolved config's flag: the app has a `mobile` block. */
+  mobileClient?: boolean;
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
   publicDir?: FarmUserConfig["publicDir"];
@@ -2459,6 +2462,38 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               );
               return;
             }
+          }
+
+          // The mobile app's native-tier screens: the page, rendered as for a browser, read into
+          // a tree of native views. Only for apps with a `mobile` block.
+          if (
+            options.mobileClient &&
+            !viteModuleRequest &&
+            (requestMethod === "GET" || requestMethod === "HEAD") &&
+            req.headers.accept?.includes(FARM_NATIVE_TREE_CONTENT_TYPE)
+          ) {
+            const { createFarmNativeTreeResponse } = await import("./mobile/native-tree");
+            const treeResponse = await createFarmNativeTreeResponse({
+              request: new Request(fullUrl, { method: requestMethod, headers: docsHeaders }),
+              // As for the Markdown mirror: this server's own listener, redirects not followed.
+              renderPage: (request) =>
+                createFarmDevServerDispatch(server)(
+                  new Request(request, {
+                    signal: res.destroyed
+                      ? AbortSignal.abort()
+                      : createFarmNodeRequestAbortSignal(req, res),
+                  }),
+                ),
+            });
+            await serveBuiltInRoute(() => treeResponse, {
+              computed: treeResponse,
+              label:
+                farmApp
+                  .getRouteManager()
+                  .matchRoute(stripFarmBasePath(requestPathname, farmConfig.basePath)).route
+                  ?.pattern ?? null,
+            });
+            return;
           }
 
           const markdownRouteLabel = () =>

@@ -455,11 +455,15 @@ export default function Chart() { return <Sparkline data={[1, 2]} />; }
       root: passing,
       userConfig: userConfig({ auto: "off" }),
     });
+    // Proven: the shell draws it from the page the server renders.
     expect(routeOf(result, "/")).toMatchObject({
-      screen: "web",
+      screen: "server",
       source: "page",
-      requested: "native",
       analysis: { tier: "native", nativeBlockers: [] },
+    });
+    expect(result.manifest.rules.find((rule) => rule.route === "/")).toMatchObject({
+      screen: "server",
+      module: "app",
     });
 
     const failing = await createApp({

@@ -11,9 +11,10 @@
  * 4. the analyzer, with `mobile.native.auto: "on"` (`"analyzer"`);
  * 5. web (`"default"`).
  *
- * No native engine or analyzer emitter ships yet, so a route that asks for a port with no file
- * to show (config `screen: "native"` without `page.native.tsx`, or an analyzer port) stays web
- * and records the tier it asked for in `requested`.
+ * A route the analyzer puts in the native tier, asked for by the page export, the config, or
+ * `native.auto: "on"`, becomes a `"server"` screen: the shell draws it from the page the server
+ * renders. No React Native emitter ships yet, so any other route that asks for a port with no file
+ * to show stays web and records the tier it asked for in `requested`.
  */
 import * as path from "node:path";
 
@@ -25,6 +26,7 @@ import {
   type FarmMobilePageConfig,
   type FarmMobilePrefetch,
   type FarmMobilePresentation,
+  type FarmMobileRouteScreen,
   type FarmMobileScreen,
   type ResolvedFarmMobileConfig,
 } from "./config";
@@ -32,7 +34,7 @@ import {
 export type FarmMobileScreenSource = "page" | "config" | "file" | "analyzer" | "default";
 
 export interface FarmMobileScreenDecision {
-  screen: FarmMobileScreen;
+  screen: FarmMobileRouteScreen;
   source: FarmMobileScreenSource;
   /** App-root-relative file that decided (`"page"`), or the screen's file. */
   file?: string;
@@ -180,14 +182,11 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
             "remove mobile.native.",
         );
       }
-      // The shell cannot draw a server-rendered native screen yet, so the route stays web.
-      screens[route] = {
-        screen: "web",
-        source: "page",
-        file: page.file,
-        requested: "native",
-        ...base,
-      };
+      // Before the analyzer runs, ask for it; once it proves the native tier, the shell draws
+      // the screen from the page the server renders.
+      screens[route] = analysis
+        ? { screen: "server", source: "page", file: page.file, module, ...base }
+        : { screen: "web", source: "page", file: page.file, requested: "native", ...base };
       continue;
     }
 
@@ -222,6 +221,10 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
         };
         continue;
       }
+      if (options.analyzerTiers?.get(route)?.tier === "native") {
+        screens[route] = { screen: "server", source: "config", module, ...base };
+        continue;
+      }
       const blockers = options.analyzerBlockers?.get(route);
       warnings.push(
         `${where}.${tierKey} is "native", but "${route}" has no ` +
@@ -243,6 +246,10 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
         module,
         ...base,
       };
+      continue;
+    }
+    if (native.auto === "on" && options.analyzerTiers?.get(route)?.tier === "native") {
+      screens[route] = { screen: "server", source: "analyzer", module, ...base };
       continue;
     }
     if (native.auto === "on" && options.analyzerPorts?.has(route)) {

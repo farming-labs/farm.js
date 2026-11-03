@@ -12,12 +12,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 import { FARM_VERSION } from "../version";
+import { FARM_NATIVE_STYLE_PROPERTIES, farmNativeClassProblem } from "./native-style";
 
 /**
  * Cached facts are reused only by the same analyzer: bump when facts change shape or rules
  * change between releases; a new Farm version always starts fresh.
  */
-const ANALYZER_VERSION = `2:${FARM_VERSION}`;
+const ANALYZER_VERSION = `3:${FARM_VERSION}`;
 
 export type FarmUiNodeKind = "View" | "Text" | "Image" | "Pressable" | "TextInput" | "List";
 
@@ -772,7 +773,11 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
         for (const token of classes.split(/\s+/).filter(Boolean)) {
           const problem = classifyClass(token);
           if (problem) block(attribute, "class-name", problem);
-          else style.push(token);
+          else {
+            style.push(token);
+            const native = farmNativeClassProblem(token);
+            if (native) block(attribute, "class-name", native, "native");
+          }
         }
         continue;
       }
@@ -791,6 +796,9 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
           if (!STYLE_PROPERTIES.has(key)) {
             block(property, "style", `style.${key} has no native mapping`);
             continue;
+          }
+          if (!FARM_NATIVE_STYLE_PROPERTIES.has(key)) {
+            block(property, "style", `style.${key} has no native-tier style`, "native");
           }
           const literal = staticString(property.value);
           if (literal !== undefined) {

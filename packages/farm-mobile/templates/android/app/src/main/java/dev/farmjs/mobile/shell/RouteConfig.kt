@@ -40,7 +40,7 @@ class RouteConfig(
 
     companion object {
         const val WEB = "web"
-        private val SCREENS = setOf(WEB, "native", "platform")
+        private val SCREENS = setOf(WEB, "native", "platform", "server")
         private val FALLBACK = Rule(null, Regex("^/"), "push", null, WEB, null)
 
         /** The module id farm-routes.json derives for a route: `app` for `/`, else `app<route>`. */
