@@ -960,7 +960,7 @@ export async function minifyFarmServerChunk(
  * esbuild never printed module paths with backticks. Put string literals back
  * for `import()` and `require()` arguments.
  */
-function restoreLiteralModuleSpecifiers(
+export function restoreLiteralModuleSpecifiers(
   code: string,
   fileName: string,
   { parseSync, Visitor }: Pick<typeof import("rolldown/utils"), "parseSync" | "Visitor">,
@@ -979,8 +979,10 @@ function restoreLiteralModuleSpecifiers(
   // materializing the AST in JavaScript, which is most of the cost on a large
   // server chunk. A template with no escapes, line breaks or substitutions is
   // its own value. Anything else, and require() calls, which the module record
-  // does not list, take the AST path.
-  let needsAst = hasRequireTemplate;
+  // does not list, take the AST path. Rolldown's CommonJS interop helper prints
+  // as `__require(`, which the AST path leaves alone, so only a `require(` that
+  // no identifier character precedes needs it.
+  let needsAst = hasRequireTemplate && /(?<![\w$])require\(`/.test(code);
   if (!needsAst) {
     // Oxc can list one import() twice: a parenthesized destructuring such as
     // `({ a } = await import(...))` is parsed as a cover grammar first.
