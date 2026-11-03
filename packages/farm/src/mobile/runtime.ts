@@ -59,7 +59,10 @@ export type {
   FarmUiNode,
 } from "./analyzer";
 export { formatFarmMobileNativeReport } from "./report";
-export { readFarmMobileClientManifest, type FarmMobileClientManifest } from "../nitro/mobile-client";
+export {
+  readFarmMobileClientManifest,
+  type FarmMobileClientManifest,
+} from "../nitro/mobile-client";
 
 /** An expected failure with its own fix; the CLI prints it without a stack. */
 export class FarmMobileError extends Error {

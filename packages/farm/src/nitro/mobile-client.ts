@@ -66,7 +66,8 @@ export function createFarmMobileClientManifestPlugin(options: {
       bundle: Record<string, { type: string; name?: string; isEntry?: boolean }>,
     ) {
       const entry = Object.entries(bundle).find(
-        ([, output]) => output.type === "chunk" && output.isEntry && output.name === options.entryName,
+        ([, output]) =>
+          output.type === "chunk" && output.isEntry && output.name === options.entryName,
       )?.[0];
       const record: FarmMobileClientBuildRecord | null = entry
         ? {

@@ -8,7 +8,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
-import { readFarmMobileClientManifest, type FarmMobileClientManifest } from "../nitro/mobile-client";
+import {
+  readFarmMobileClientManifest,
+  type FarmMobileClientManifest,
+} from "../nitro/mobile-client";
 import { getAvailablePort } from "./dev-server-port";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -134,7 +137,9 @@ describe("the mobile client in a web build", () => {
     // Every bundled file is content-hashed and deployed with the web client.
     for (const file of manifest.files) {
       expect(file).toMatch(/-h[0-9a-f]{8,}\.[a-z0-9]+$/);
-      await expect(fs.stat(path.join(root, ".farm", ".output", "public", file))).resolves.toBeTruthy();
+      await expect(
+        fs.stat(path.join(root, ".farm", ".output", "public", file)),
+      ).resolves.toBeTruthy();
     }
     expect(manifest.files).not.toContain(manifest.webEntry);
 
@@ -185,8 +190,9 @@ describe("the mobile client in a web build", () => {
     server = await startServer(root);
     const newerHtml = await (await fetch(`${server.origin}/`, { headers: SHELL })).text();
     expect(newerHtml).toContain(`src="${newer.entry}"`);
-    const referenced = [...newerHtml.matchAll(/(?:src|href)="(\/[^"]+-h[0-9a-f]{8,}\.(?:js|css))"/g)]
-      .map((match) => match[1]!);
+    const referenced = [
+      ...newerHtml.matchAll(/(?:src|href)="(\/[^"]+-h[0-9a-f]{8,}\.(?:js|css))"/g),
+    ].map((match) => match[1]!);
     const missing = referenced.filter((file) => !manifest.files.includes(file));
     expect(missing).toContain(newer.entry);
     for (const file of missing) {

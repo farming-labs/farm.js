@@ -52,7 +52,8 @@ export async function createBundledAssetFiles(
   const types: Record<string, string> = {};
   for (const urlPath of assets.files) {
     const relative = relativeAssetPath(urlPath);
-    if (!relative) throw new Error(`Refusing to bundle the client file ${JSON.stringify(urlPath)}.`);
+    if (!relative)
+      throw new Error(`Refusing to bundle the client file ${JSON.stringify(urlPath)}.`);
     files.push({
       path: `${options.root}/${relative}`,
       contents: new Uint8Array(await readFile(path.join(assets.dir, ...relative.split("/")))),

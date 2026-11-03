@@ -409,7 +409,9 @@ test("farm build --mobile builds the mobile client apart from the web output and
   assert.match(mobileClient.entry, /^\/farm-mobile-client-h[0-9a-f]{8,}\.js$/);
   assert.match(
     result.output,
-    new RegExp(`Mobile client ${mobileClient.entry.replace(/[.]/g, "\\.")}: \\d+ files bundled into the app`),
+    new RegExp(
+      `Mobile client ${mobileClient.entry.replace(/[.]/g, "\\.")}: \\d+ files bundled into the app`,
+    ),
   );
   assert.deepEqual(
     JSON.parse(await readFile(path.join(mobileDir, "android", "context.json"), "utf8")),
@@ -527,7 +529,10 @@ test("farm build --mobile --os ios generates the iOS project and reports what th
       },
     },
   );
-  assert.match(result.output, /Mobile client \/farm-mobile-client-h[0-9a-f]+\.js: loaded from the server/);
+  assert.match(
+    result.output,
+    /Mobile client \/farm-mobile-client-h[0-9a-f]+\.js: loaded from the server/,
+  );
   await assert.rejects(stat(path.join(mobileDir, "android")));
   // Resolved for iOS: page.android.tsx is not the /feed screen there.
   const routes = JSON.parse(await readFile(path.join(mobileDir, "farm-routes.json"), "utf8"));

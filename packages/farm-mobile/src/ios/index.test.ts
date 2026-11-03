@@ -491,10 +491,16 @@ describe("@farm.js/mobile/ios", () => {
   it("loads every app document with the shell header, so it keeps the mobile client", async () => {
     // WKWebView cannot answer https requests from the app, so the iOS project bundles no client
     // files: the mobile client loads from the server and stays in WebKit's cache.
-    const assets = { dir: "/app/.farm/client", entry: "/farm-mobile-client-h1a2b3c4d.js", files: ["/farm-mobile-client-h1a2b3c4d.js"] };
+    const assets = {
+      dir: "/app/.farm/client",
+      entry: "/farm-mobile-client-h1a2b3c4d.js",
+      files: ["/farm-mobile-client-h1a2b3c4d.js"],
+    };
     const withAssets = await generated({ ...buildContext(), assets });
     expect(Object.keys(withAssets)).toEqual(Object.keys(await generated(buildContext())));
-    expect(Object.keys(withAssets).some((file) => /farm-www|farm-assets|farm-mobile-client/.test(file))).toBe(false);
+    expect(
+      Object.keys(withAssets).some((file) => /farm-www|farm-assets|farm-mobile-client/.test(file)),
+    ).toBe(false);
 
     const page = withAssets["App/Page.swift"];
     expect(page).toContain('request.setValue("ios", forHTTPHeaderField: Page.shellHeader)');

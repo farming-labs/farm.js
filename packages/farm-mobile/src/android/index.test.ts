@@ -440,9 +440,9 @@ describe("bundled client assets", () => {
       `${BUNDLED_ASSETS_DIR}/chunks/react-h5e6f7a8b.js`,
       `${BUNDLED_ASSETS_DIR}/farm-mobile-client-h1a2b3c4d.js`,
     ]);
-    expect(Buffer.from(byPath[`${BUNDLED_ASSETS_DIR}/assets/inter-h12345678.woff2`] as Uint8Array)).toEqual(
-      Buffer.from([0x77, 0x4f, 0x46, 0x32]),
-    );
+    expect(
+      Buffer.from(byPath[`${BUNDLED_ASSETS_DIR}/assets/inter-h12345678.woff2`] as Uint8Array),
+    ).toEqual(Buffer.from([0x77, 0x4f, 0x46, 0x32]));
     expect(JSON.parse(String(byPath[BUNDLED_ASSETS_MANIFEST]))).toEqual({
       version: 1,
       entry: "/farm-mobile-client-h1a2b3c4d.js",
@@ -458,7 +458,9 @@ describe("bundled client assets", () => {
   it("bundles nothing under farm dev, and refuses paths outside the client output", async () => {
     const files = await generated(context());
     expect(files[BUNDLED_ASSETS_MANIFEST]).toBeUndefined();
-    expect(Object.keys(files).some((file) => file.startsWith(`${BUNDLED_ASSETS_DIR}/`))).toBe(false);
+    expect(Object.keys(files).some((file) => file.startsWith(`${BUNDLED_ASSETS_DIR}/`))).toBe(
+      false,
+    );
     const dir = await clientOutput();
     for (const file of ["/../secret.js", "/chunks//x.js", "relative.js", "/a\\b.js"]) {
       await expect(
@@ -472,7 +474,9 @@ describe("bundled client assets", () => {
   it("answers only listed GETs on the server origin from the APK, and loads documents with the shell header", async () => {
     const files = await generated(context());
     const bundled = files["app/src/main/java/dev/farmjs/mobile/shell/BundledAssets.kt"];
-    expect(bundled).toContain('if (request.method != "GET" || !config.isAppUrl(url) || url.encodedQuery != null) return null');
+    expect(bundled).toContain(
+      'if (request.method != "GET" || !config.isAppUrl(url) || url.encodedQuery != null) return null',
+    );
     expect(bundled).toContain("val type = types[path]");
     expect(bundled).toContain('"Cache-Control" to "public, max-age=31536000, immutable"');
     // A newer deployment's names fall through to the network, and say so.
@@ -484,7 +488,9 @@ describe("bundled client assets", () => {
     // Every document load goes through load(), so it carries the header.
     for (const [file, source] of Object.entries(files)) {
       if (!file.endsWith(".kt")) continue;
-      expect(source.match(/\.loadUrl\(/g)?.length ?? 0, file).toBe(file.endsWith("/Page.kt") ? 1 : 0);
+      expect(source.match(/\.loadUrl\(/g)?.length ?? 0, file).toBe(
+        file.endsWith("/Page.kt") ? 1 : 0,
+      );
     }
     expect(files["app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt"]).toContain(
       "val bundle = BundledAssets.load(assets, config)",

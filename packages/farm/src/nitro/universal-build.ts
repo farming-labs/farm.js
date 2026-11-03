@@ -1586,9 +1586,10 @@ function shouldBuildFarmMobileClient(
   if (!config.mobileClient || config.desktop) return false;
   const mode = resolveFarmServerComponentsMode(config.experimental?.serverComponents);
   if (mode === undefined) return true;
-  if (!options.quiet) logger.info(
-    `📱 No mobile client for experimental.serverComponents (${mode}) yet; a mobile shell loads the web client.`,
-  );
+  if (!options.quiet)
+    logger.info(
+      `📱 No mobile client for experimental.serverComponents (${mode}) yet; a mobile shell loads the web client.`,
+    );
   return false;
 }
 
