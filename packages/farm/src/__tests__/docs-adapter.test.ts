@@ -164,8 +164,9 @@ describe("Farm docs runtime adapters", () => {
     ).rejects.toThrow("Upgrade the adapter to a runtime-enabled release");
   });
 
-  it("hands every docs root to the adapter's multi-root handler, main root first", async () => {
+  it("hands every docs root to the adapter's multi-root handler, each from the config module", async () => {
     const docs = { ...createMultiRootDocs(), configPath: "/workspace/app/docs.config.tsx" };
+    const renderStatewireFooter = () => "Statewire";
     const response = new Response("adapter");
     const createRuntimeHandler = vi.fn();
     const createMultiRuntimeHandler = vi.fn(() => async () => response);
@@ -178,7 +179,14 @@ describe("Farm docs runtime adapters", () => {
           createFarmDocsMultiRuntimeHandler: createMultiRuntimeHandler,
         };
       }
-      if (specifier === docs.configPath) return { default: { search: true } };
+      if (specifier === docs.configPath) {
+        return {
+          default: {
+            search: true,
+            roots: [{ entry: "statewire/docs", search: false, renderStatewireFooter }],
+          },
+        };
+      }
       if (specifier === docs.adapter?.react) return reactModule;
       throw new Error(`Unexpected module: ${specifier}`);
     });
@@ -207,7 +215,9 @@ describe("Farm docs runtime adapters", () => {
         contentDir: path.resolve("/workspace/app", "content", "docs"),
       },
       {
-        search: true,
+        // The config module's own root, functions intact, over its shared fields.
+        search: false,
+        renderStatewireFooter,
         nav: { title: "Statewire" },
         entry: "statewire/docs",
         docsPath: "/statewire/docs",
@@ -242,7 +252,7 @@ describe("Farm docs runtime adapters", () => {
     ).rejects.toThrow(
       'Farm docs adapter "@farming-labs/farmjs" does not export createFarmDocsMultiRuntimeHandler ' +
         'from "@farming-labs/farmjs/server". Upgrade the adapter to a release that serves several ' +
-        "docs roots, or remove docs.roots.",
+        "docs roots, or remove the roots.",
     );
   });
 
@@ -281,7 +291,7 @@ describe("Farm docs runtime adapters", () => {
         root: "/workspace/app",
         clientEntry: "/farm-client.js",
       }),
-    ).rejects.toThrow("docs.roots is not supported on edge deployments yet");
+    ).rejects.toThrow("Several docs roots are not supported on edge deployments yet");
   });
 
   it("loads an edge compiler capability from the application", async () => {

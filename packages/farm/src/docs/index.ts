@@ -9,6 +9,7 @@ export {
 } from "./handler";
 export {
   createFarmDocsAdapterHandler,
+  getFarmDocsConfigModuleRoot,
   hasFarmDocsRuntimeAdapter,
   type FarmDocsAdapterHandlerOptions,
 } from "./adapter";

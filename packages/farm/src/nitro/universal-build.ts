@@ -5656,7 +5656,7 @@ export function getFarmAppOwnedDocsEnginePaths(
 /**
  * The docs adapter's handler factory in the generated server, and the runtime config it is
  * called with: one object for a single docs root, an array with the main root first for
- * `docs.roots`. Both read `farmDocsResolvedConfig`.
+ * several. Both read `farmDocsResolvedConfig`, and the config module when there is one.
  *
  * @internal
  */
@@ -5667,7 +5667,7 @@ export function generateFarmDocsAdapterHandlerArguments(
   const runtimeConfig = (root: string) => `{
   ${
     docsConfigModulePath
-      ? `...(farmDocsConfigModule.default || farmDocsConfigModule),\n  ...${root}.configOverrides,`
+      ? `...getFarmDocsConfigModuleRoot(farmDocsConfigModule.default || farmDocsConfigModule, ${root}.entry),\n  ...${root}.configOverrides,`
       : `...${root}.config,`
   }
   entry: ${root}.config?.entry || String(${root}.entry || "/docs").replace(/^\\/+|\\/+$/g, "") || "docs",
@@ -6166,7 +6166,7 @@ function generateVirtualEntryCode(
   );
   if (config.docs?.enabled && config.docs.roots?.length && !adapterOwnsDocsRuntime) {
     throw new Error(
-      "docs.roots needs the docs adapter, which serves the React renderer only; Farm's " +
+      "Several docs roots need the docs adapter, which serves the React renderer only; Farm's " +
         "built-in docs renderer serves a single docs root.",
     );
   }
@@ -6725,7 +6725,7 @@ const isFarmDocsAPIRequest = (requestOrPathname) => {
   return pathname === apiPath || pathname.startsWith(apiPath + "/");
 };`
       : adapterOwnsDocsRuntime
-        ? `import { isFarmDocsAPIRequest } from "@farm.js/core/docs";
+        ? `import { ${docsConfigModulePath ? "getFarmDocsConfigModuleRoot, " : ""}isFarmDocsAPIRequest } from "@farm.js/core/docs";
 import { ${
             config.docs.roots?.length
               ? "createFarmDocsMultiRuntimeHandler as createFarmDocsAdapterMultiRuntimeHandler"

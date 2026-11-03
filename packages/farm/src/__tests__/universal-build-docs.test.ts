@@ -4,6 +4,7 @@ import path from "node:path";
 import { transform } from "esbuild";
 import { describe, expect, it } from "vitest";
 import type { FarmDocsResolvedConfig } from "../config";
+import { getFarmDocsConfigModuleRoot } from "../docs";
 import {
   generateClientHydrationEntry,
   generateFarmDocsAdapterHandlerArguments,
@@ -134,6 +135,7 @@ describe("universal docs build", () => {
         "farmDocsJoin",
         "farmDocsExistsSync",
         "farmDocsConfigModule",
+        "getFarmDocsConfigModuleRoot",
         `const farmDocsResolvedConfig = ${expression}; return ${handler.config};`,
       )(
         bundled.main,
@@ -141,6 +143,7 @@ describe("universal docs build", () => {
         path.posix.join,
         (candidate: string) => bundled.existing.includes(candidate),
         configModule,
+        getFarmDocsConfigModuleRoot,
       ) as Record<string, unknown>[];
     }
 
@@ -155,16 +158,23 @@ describe("universal docs build", () => {
         },
         { entry: "pinboard/docs", docsPath: "/pinboard/docs", contentDir: "content/pinboard" },
       ]);
-      // The config module carries what JSON cannot; each root's own overrides apply over it.
-      expect(
-        resolveAdapterConfigs({ main: null, roots: null, existing: [] }, { search: true }).map(
-          ({ search, nav, docsPath }) => ({ search, nav, docsPath }),
-        ),
-      ).toEqual([
+      // The config module carries what JSON cannot: each root reads its own root from the
+      // module's roots, and its farm.config overrides apply over it.
+      const renderStatewireFooter = () => "Statewire";
+      const configs = resolveAdapterConfigs(
+        { main: null, roots: null, existing: [] },
+        {
+          search: true,
+          roots: [{ entry: "statewire/docs", search: false, renderStatewireFooter }],
+        },
+      );
+      expect(configs.map(({ search, nav, docsPath }) => ({ search, nav, docsPath }))).toEqual([
         { search: true, nav: { title: "Farm" }, docsPath: "/docs" },
-        { search: true, nav: { title: "Statewire" }, docsPath: "/statewire/docs" },
+        { search: false, nav: { title: "Statewire" }, docsPath: "/statewire/docs" },
         { search: true, nav: { title: "Farm" }, docsPath: "/pinboard/docs" },
       ]);
+      expect(configs[1]!.renderStatewireFooter).toBe(renderStatewireFooter);
+      for (const config of configs) expect(config).not.toHaveProperty("roots");
     });
 
     it("reads each root's content from its own bundled directory", () => {

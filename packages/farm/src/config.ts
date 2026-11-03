@@ -12,7 +12,6 @@ import type { DocsConfig } from "@farming-labs/docs";
 import type {
   FarmDocsResolvedConfig,
   FarmDocsResolvedRoot,
-  FarmDocsRootInput,
   FarmDocsUserConfig,
 } from "./docs/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
@@ -952,7 +951,9 @@ export async function resolveDocsConfig(
     };
   }
 
-  const inlineDocsConfig = sanitizeDocsConfig(docsOptions.config || {});
+  const fileDocsConfig = omitDocsRoots(loadedConfig?.config);
+  const inlineRawDocsConfig = omitDocsRoots(docsOptions.config);
+  const inlineDocsConfig = sanitizeDocsConfig(inlineRawDocsConfig);
   const directDocsConfig = sanitizeDocsConfig({
     ...docsOptions,
     adapter: undefined,
@@ -962,7 +963,7 @@ export async function resolveDocsConfig(
     configPath: undefined,
     roots: undefined,
   } as Partial<DocsConfig>);
-  const loadedDocsConfig = sanitizeDocsConfig(loadedConfig?.config || {});
+  const loadedDocsConfig = sanitizeDocsConfig(fileDocsConfig);
   const mergedDocsConfig: Partial<DocsConfig> = {
     ...loadedDocsConfig,
     ...inlineDocsConfig,
@@ -971,8 +972,8 @@ export async function resolveDocsConfig(
   // The adapter runs in this process, so it gets the config as written, React elements
   // and functions included; serializing it is the adapter's call.
   const runtimeDocsConfig: Partial<DocsConfig> = {
-    ...(loadedConfig?.config || {}),
-    ...(isRecord(docsOptions.config) ? docsOptions.config : {}),
+    ...fileDocsConfig,
+    ...inlineRawDocsConfig,
     ...omitUndefined({
       ...docsOptions,
       adapter: undefined,
@@ -1002,21 +1003,32 @@ export async function resolveDocsConfig(
   const contentDir =
     configuredContentDir || (await inferDocsContentDir(root, options.srcDir || "src", docsEntry));
   const configOverrides = { ...inlineDocsConfig, ...directDocsConfig };
-  const roots = await resolveDocsRoots(docsOptions.roots, {
-    root,
-    srcDir: options.srcDir || "src",
-    mainEntry: entryRoute,
-    mergedDocsConfig,
-    runtimeDocsConfig,
-    configOverrides,
-  });
+  const configFileName = loadedConfig
+    ? path.relative(root, loadedConfig.configPath) || loadedConfig.configPath
+    : "the docs config";
+  const roots = await resolveDocsRoots(
+    [
+      { field: `roots in ${configFileName}`, roots: docsRootsOf(loadedConfig?.config), file: true },
+      { field: "docs.config.roots", roots: docsRootsOf(docsOptions.config) },
+      { field: "docs.roots", roots: docsOptions.roots },
+    ],
+    {
+      root,
+      srcDir: options.srcDir || "src",
+      mainEntry: entryRoute,
+      mergedDocsConfig,
+      runtimeDocsConfig,
+      configOverrides,
+    },
+  );
   if (
     roots.length > 0 &&
     !(docsOptions.adapter && docsOptions.adapter.server && docsOptions.adapter.react)
   ) {
     throw new Error(
-      "docs.roots requires a docs adapter such as @farming-labs/farmjs; Farm's built-in docs " +
-        "renderer serves a single docs root. Install the adapter, or remove docs.roots.",
+      "Docs roots require a docs adapter such as @farming-labs/farmjs; Farm's built-in docs " +
+        "renderer serves a single docs root. Install the adapter, or remove the roots from " +
+        `${configFileName} and docs.roots.`,
     );
   }
 
@@ -1044,8 +1056,29 @@ export async function resolveDocsConfig(
   };
 }
 
+function docsRootsOf(config: unknown): unknown {
+  return isRecord(config) ? config.roots : undefined;
+}
+
+function omitDocsRoots(config: unknown): Partial<DocsConfig> {
+  if (!isRecord(config)) return {};
+  const { roots: _roots, ...rest } = config;
+  return rest as Partial<DocsConfig>;
+}
+
+function omitKeys(value: Record<string, unknown>, keys: Iterable<string>): Record<string, unknown> {
+  const output = { ...value };
+  for (const key of keys) delete output[key];
+  return output;
+}
+
+/**
+ * Each docs root in the order first declared, with the main root's merged config under it.
+ * Lists merge by entry, and for one root `docs.roots` beats `docs.config.roots`, which beats
+ * the config file. A root's own fields beat the main root's, wherever either was set.
+ */
 async function resolveDocsRoots(
-  rootInputs: FarmDocsRootInput[] | undefined,
+  sources: Array<{ field: string; roots: unknown; file?: boolean }>,
   options: {
     root: string;
     srcDir: string;
@@ -1055,48 +1088,75 @@ async function resolveDocsRoots(
     configOverrides: Partial<DocsConfig>;
   },
 ): Promise<FarmDocsResolvedRoot[]> {
-  const seen = new Set([options.mainEntry]);
-  const roots: FarmDocsResolvedRoot[] = [];
-  for (const [index, rootInput] of (rootInputs ?? []).entries()) {
-    const field = `docs.roots[${index}].entry`;
-    if (typeof rootInput?.entry !== "string" || !rootInput.entry.trim()) {
-      throw new Error(`${field} must be a route such as "/guides/docs".`);
+  const declared = new Map<
+    string,
+    { file: Record<string, unknown>; overrides: Record<string, unknown> }
+  >();
+  for (const source of sources) {
+    if (source.roots === undefined) continue;
+    if (!Array.isArray(source.roots)) throw new Error(`${source.field} must be an array.`);
+    const seen = new Set<string>();
+    for (const [index, rootInput] of source.roots.entries()) {
+      const field = `${source.field}[${index}].entry`;
+      if (!isRecord(rootInput) || typeof rootInput.entry !== "string" || !rootInput.entry.trim()) {
+        throw new Error(`${field} must be a route such as "/guides/docs".`);
+      }
+      const entryRoute = normalizeDocsRoute(rootInput.entry);
+      if (entryRoute === "/") {
+        throw new Error(
+          `${field} cannot be "/"; a docs root at "/" leaves no route for the others.`,
+        );
+      }
+      if (entryRoute === options.mainEntry || seen.has(entryRoute)) {
+        throw new Error(
+          `${field} ${JSON.stringify(entryRoute)} is already served by another docs root.`,
+        );
+      }
+      seen.add(entryRoute);
+      const { entry: _entry, ...fields } = rootInput;
+      const layers = declared.get(entryRoute) ?? { file: {}, overrides: {} };
+      if (source.file) layers.file = fields;
+      else layers.overrides = { ...layers.overrides, ...fields };
+      declared.set(entryRoute, layers);
     }
-    const entryRoute = normalizeDocsRoute(rootInput.entry);
-    if (entryRoute === "/") {
-      throw new Error(`${field} cannot be "/"; a docs root at "/" leaves no route for the others.`);
-    }
-    if (seen.has(entryRoute)) {
-      throw new Error(
-        `${field} ${JSON.stringify(entryRoute)} is already served by another docs root.`,
-      );
-    }
-    seen.add(entryRoute);
+  }
 
-    const rootOverrides = sanitizeDocsConfig(rootInput.config || {});
+  const roots: FarmDocsResolvedRoot[] = [];
+  for (const [entryRoute, { file, overrides }] of declared) {
     const docsEntry = docsRouteToEntry(entryRoute);
     const contentDir =
-      normalizeDocsContentDir(rootInput.contentDir || rootOverrides.contentDir) ||
-      (await inferDocsContentDir(options.root, options.srcDir, docsEntry));
+      normalizeDocsContentDir(
+        (typeof overrides.contentDir === "string" && overrides.contentDir) ||
+          (typeof file.contentDir === "string" && file.contentDir) ||
+          undefined,
+      ) || (await inferDocsContentDir(options.root, options.srcDir, docsEntry));
     const routeConfig = {
       entry: docsEntry,
       docsPath: entryRoute,
       contentDir,
     };
+    const rootOverrides = sanitizeDocsConfig(overrides as Partial<DocsConfig>);
     roots.push({
       entry: entryRoute,
       contentDir,
       config: omitUndefined({
         ...options.mergedDocsConfig,
+        ...sanitizeDocsConfig(file as Partial<DocsConfig>),
         ...rootOverrides,
         ...routeConfig,
       }) as FarmDocsResolvedRoot["config"],
       runtimeConfig: omitUndefined({
         ...options.runtimeDocsConfig,
-        ...(isRecord(rootInput.config) ? rootInput.config : {}),
+        ...file,
+        ...overrides,
         ...routeConfig,
       }) as FarmDocsResolvedRoot["config"],
-      configOverrides: { ...options.configOverrides, ...rootOverrides },
+      // The adapter reads the config file's own root from the config module, so the main
+      // root's overrides leave out whatever that root sets itself.
+      configOverrides: {
+        ...omitKeys(options.configOverrides, Object.keys(file)),
+        ...rootOverrides,
+      } as Partial<DocsConfig>,
     });
   }
   return roots;

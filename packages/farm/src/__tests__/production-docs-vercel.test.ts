@@ -158,7 +158,7 @@ describe("Vercel docs content", () => {
     }
   }, 180_000);
 
-  it("bundles every docs root's content for the adapter's multi-root handler", async () => {
+  it("serves the docs config's roots through the adapter's multi-root handler", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-vercel-docs-roots-"));
     try {
       await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
@@ -201,6 +201,8 @@ export function createFarmDocsMultiRuntimeHandler(configs, options) {
       roots: configs.map((c) => c.docsPath),
       docsPath: config.docsPath,
       title: config.nav && config.nav.title,
+      footer: typeof config.renderFooter === "function" ? config.renderFooter() : null,
+      description: (config.metadata && config.metadata.description) || null,
       page,
     });
   };
@@ -212,6 +214,18 @@ export function createFarmDocsMultiRuntimeHandler(configs, options) {
         "export function hydrateFarmDocs() {}\n",
       );
       await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
+      // The roots are declared once, in the docs config; a function survives to the adapter.
+      await fs.writeFile(
+        path.join(root, "docs.config.ts"),
+        `export default {
+  entry: "docs",
+  nav: { title: "Main" },
+  roots: [
+    { entry: "statewire/docs", nav: { title: "Statewire" }, renderFooter: () => "Statewire footer" },
+  ],
+};
+`,
+      );
       const source = path.join(root, "src");
       await fs.mkdir(path.join(source, "app", "docs"), { recursive: true });
       await fs.mkdir(path.join(source, "app", "statewire", "docs"), { recursive: true });
@@ -239,8 +253,8 @@ export function createFarmDocsMultiRuntimeHandler(configs, options) {
               react: "fixture-docs-adapter/react",
             },
             entry: "/docs",
-            nav: { title: "Main" },
-            roots: [{ entry: "/statewire/docs", config: { nav: { title: "Statewire" } } }],
+            // A serializable override for one root, applied over the docs config's root.
+            roots: [{ entry: "/statewire/docs", metadata: { description: "From farm.config" } }],
           },
         },
         "production",
@@ -271,12 +285,16 @@ export function createFarmDocsMultiRuntimeHandler(configs, options) {
           roots: ["/docs", "/statewire/docs"],
           docsPath: "/docs",
           title: "Main",
+          footer: null,
+          description: null,
           page: "# Main docs\n",
         },
         {
           roots: ["/docs", "/statewire/docs"],
           docsPath: "/statewire/docs",
           title: "Statewire",
+          footer: "Statewire footer",
+          description: "From farm.config",
           page: "# Statewire docs\n",
         },
       ]);

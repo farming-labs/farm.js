@@ -130,6 +130,31 @@ async function loadFarmDocsConfigModule(
   return config && typeof config === "object" ? (config as Partial<DocsConfig>) : undefined;
 }
 
+/**
+ * The docs config module's config for the docs root at `entry`: the module's own fields, with
+ * the root of that entry from its `roots` over them. The development and production servers
+ * both read the module through it.
+ *
+ * @internal
+ */
+export function getFarmDocsConfigModuleRoot(
+  moduleConfig: object,
+  entry: string,
+): Record<string, unknown> {
+  const { roots, ...shared } = moduleConfig as Record<string, unknown>;
+  const route = entry.replace(/^\/+|\/+$/g, "");
+  const own = Array.isArray(roots)
+    ? roots.find(
+        (root): root is Record<string, unknown> =>
+          Boolean(root) &&
+          typeof root === "object" &&
+          typeof root.entry === "string" &&
+          root.entry.replace(/^\/+|\/+$/g, "") === route,
+      )
+    : undefined;
+  return own ? { ...shared, ...own } : shared;
+}
+
 function createFarmDocsAdapterRuntimeConfig(
   docs: FarmDocsResolvedConfig,
   options: { root: string; srcDir?: string },
@@ -137,7 +162,7 @@ function createFarmDocsAdapterRuntimeConfig(
 ): Record<string, unknown> {
   return {
     ...(moduleConfig
-      ? { ...moduleConfig, ...docs.configOverrides }
+      ? { ...getFarmDocsConfigModuleRoot(moduleConfig, docs.entry), ...docs.configOverrides }
       : (docs.runtimeConfig ?? docs.config)),
     entry: docs.config.entry || docs.entry.replace(/^\/+|\/+$/g, "") || "docs",
     docsPath: docs.entry,
@@ -163,7 +188,7 @@ export async function compileFarmDocsAdapterEdgeManifest(
   }
   if (docs.roots?.length) {
     throw new Error(
-      "docs.roots is not supported on edge deployments yet; several docs roots need a Node.js " +
+      "Several docs roots are not supported on edge deployments yet; they need a Node.js " +
         "deployment target.",
     );
   }
@@ -276,7 +301,7 @@ export async function createFarmDocsAdapterHandler(
     throw new Error(
       `Farm docs adapter ${adapterId} does not export ${handlerExport} from ${serverEntry}. ` +
         (multiRoot
-          ? "Upgrade the adapter to a release that serves several docs roots, or remove docs.roots."
+          ? "Upgrade the adapter to a release that serves several docs roots, or remove the roots."
           : "Upgrade the adapter to a runtime-enabled release."),
     );
   }
