@@ -16,18 +16,51 @@ fun interface FarmNativeScreen {
     fun createView(context: Context, url: Uri): View
 }
 
+/** What a native screen may ask of the navigator. Calls are safe from any thread. */
+interface FarmNativeHost {
+    /** Navigate by URL, as a link in a web page would. */
+    fun visit(url: Uri, replace: Boolean)
+
+    /** Replace this screen with the route's web screen (its web twin), after a failure. */
+    fun fallback(reason: String)
+
+    fun setTitle(title: String)
+
+    /** The screen showed its first content. */
+    fun rendered()
+}
+
+/** A native screen's content: its view, an optional initial title, and how to release it. */
+class FarmNativeContent(val view: View, val title: String? = null, val close: () -> Unit = {})
+
 /**
- * Native screens by module id, such as `app/notes/[id]`. Farm does not build `page.native.tsx`
- * or `page.kt` screens into native views yet, so a generated project registers none and every
- * native or platform rule shows [MissingNativeScreen]. Native code added to an ejected project
- * registers its screens here before the activity starts.
+ * The engine for `"native"` screens, such as React Native. There is one per app, created by
+ * [createFarmNativeEngine]; an app without native screens has none.
+ */
+interface FarmNativeEngine {
+    /** Start ahead of the first native screen. Called after the first screen shows content. */
+    fun warm()
+
+    /** The screen for [rule], or null when it cannot show; the navigator then shows the web twin. */
+    fun open(host: FarmNativeHost, rule: RouteConfig.Rule, url: Uri): FarmNativeContent?
+}
+
+/**
+ * Native screens by module id, such as `app/notes/[id]`. `"native"` rules render through
+ * [engine]; native code added to an ejected project registers its own screens in [registry]
+ * before the activity starts, and those win. Rules nothing can show get [MissingNativeScreen].
  */
 object FarmNativeScreens {
     val registry: MutableMap<String, FarmNativeScreen> = mutableMapOf()
+    var engine: FarmNativeEngine? = null
 
-    fun create(rule: RouteConfig.Rule, context: Context, url: Uri): View {
+    /** Null when the engine cannot show the screen: show the route as a web screen instead. */
+    fun create(rule: RouteConfig.Rule, context: Context, url: Uri, host: FarmNativeHost): FarmNativeContent? {
         val module = rule.module ?: url.path ?: "/"
-        return registry[module]?.createView(context, url) ?: MissingNativeScreen.create(context, rule.screen, module, url)
+        registry[module]?.let { return FarmNativeContent(it.createView(context, url)) }
+        val engine = engine
+        if (rule.screen == "native" && engine != null) return engine.open(host, rule, url)
+        return FarmNativeContent(MissingNativeScreen.create(context, rule.screen, module, url))
     }
 }
 

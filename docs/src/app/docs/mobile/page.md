@@ -17,11 +17,12 @@ touching the rest of the app.
 
 Mobile is a preview, released in Farm 0.1.50 with `@farm.js/mobile` 0.1.0-beta.0. **What runs
 today is the WebView shell on Android.** The iOS shell generates an Xcode project but has not been
-built with `xcodebuild` yet (see [Run on iOS](#run-on-ios)). The native screen tiers (React Native
-and platform-native) are designed but not released: routes marked native render a placeholder.
-Every section below marks the line between what ships now and what is still landing, so you can
-adopt the config surface before the runtime is complete. The design and rollout are in
-[RFC 0004](https://github.com/farming-labs/farm.js/pull/2352).
+built with `xcodebuild` yet (see [Run on iOS](#run-on-ios)). React Native screens (not released
+yet) run under `farm dev --mobile` on an Android emulator only; a production (Hermes bytecode) build
+and real devices are not verified yet. Platform-native screens are designed but not released:
+platform routes render a placeholder. Every section below marks the line between what ships now and
+what is still landing, so you can adopt the config surface before the runtime is complete. The
+design and rollout are in [RFC 0004](https://github.com/farming-labs/farm.js/pull/2352).
 
 ```sh
 farm dev --mobile             # dev server, Android project, install and open on a device
@@ -33,27 +34,27 @@ farm build                    # --web, the default, unchanged
 
 ## Status
 
-| Part                                          | Status                         | Notes                                                                                                                                |
-| --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                              |
-| `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                             |
-| Native-screen analyzer                        | **Report only**                | Writes `native-report.json`; it changes no output                                                                                    |
-| iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                          |
-| React Native screens                          | In review, not yet on a device | Android only: [#2444](https://github.com/farming-labs/farm.js/pull/2444), [#2445](https://github.com/farming-labs/farm.js/pull/2445) |
-| Bundled client assets and page shells         | Planned                        | A production shell loads pages and the client from `server`                                                                          |
-| Token auth and mobile origin handling         | Planned                        | No Keystore or Keychain session, no bearer tokens                                                                                    |
-| Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                   |
-| Native islands and `@farm.js/ui`              | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` does not exist yet                                                                |
-| Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                          |
+| Part                                          | Status                         | Notes                                                                                                                                                         |
+| --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                                                       |
+| `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                                                      |
+| Native-screen analyzer                        | **Report only**                | Writes `native-report.json`; it changes no output                                                                                                             |
+| iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                   |
+| React Native screens                          | Unreleased, dev only           | Android only; runs under `farm dev --mobile` on an emulator, not yet in a production build or on a device (see [React Native screens](#react-native-screens)) |
+| Bundled client assets and page shells         | Planned                        | A production shell loads pages and the client from `server`                                                                                                   |
+| Token auth and mobile origin handling         | Planned                        | No Keystore or Keychain session, no bearer tokens                                                                                                             |
+| Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                            |
+| Native islands and native `@farm.js/ui`       | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` renders on the web only (see [Portable components](#portable-components-farmjsui))                         |
+| Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                                                   |
 
 ## Requirements
 
-| For                              | You need                                                                                                                                     |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Android (shipped)                | JDK 17 or newer (tested with JDK 21), and the Android SDK with platform 35, build-tools 35, and platform-tools; set `ANDROID_HOME`           |
-| Running on Android               | An emulator or a device with Android 8.0 (API 26) or newer, listed by `adb devices`                                                          |
-| React Native screens (in review) | Also the Android NDK and CMake, which Gradle installs on the first build once the SDK licenses are accepted                                  |
-| iOS (unreleased)                 | A Mac with Xcode, the iOS 16 or newer SDK, and an iOS simulator runtime; the Command Line Tools alone are not enough. The app targets iOS 16 |
+| For                               | You need                                                                                                                                     |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Android (shipped)                 | JDK 17 or newer (tested with JDK 21), and the Android SDK with platform 35, build-tools 35, and platform-tools; set `ANDROID_HOME`           |
+| Running on Android                | An emulator or a device with Android 8.0 (API 26) or newer, listed by `adb devices`                                                          |
+| React Native screens (unreleased) | Also the Android NDK 27.1.12297006 and CMake 3.22.1, which Gradle installs on the first build once the SDK licenses are accepted             |
+| iOS (unreleased)                  | A Mac with Xcode, the iOS 16 or newer SDK, and an iOS simulator runtime; the Command Line Tools alone are not enough. The app targets iOS 16 |
 
 ## Setup
 
@@ -113,11 +114,11 @@ farm config inspect --mobile --os ios --profile beta   # block, screens, and far
 Every route is a screen in the native navigator, and each route chooses **one tier** for how its
 screen renders:
 
-| Tier              | Content                                              | Added to the app                                   | Status              |
-| ----------------- | ---------------------------------------------------- | -------------------------------------------------- | ------------------- |
-| **web** (default) | a WebView showing the Farm page from `mobile.server` | nothing beyond the shell, WebView pool, and bridge | **ships today**     |
-| **native**        | a React Native surface (`page.native.tsx`)           | React Native (Hermes, Fabric), the screen bundle   | designed, not built |
-| **platform**      | a Compose (`page.kt`) or SwiftUI (`page.swift`) view | the screen's own native code, no JS engine         | designed, not built |
+| Tier              | Content                                              | Added to the app                                   | Status                |
+| ----------------- | ---------------------------------------------------- | -------------------------------------------------- | --------------------- |
+| **web** (default) | a WebView showing the Farm page from `mobile.server` | nothing beyond the shell, WebView pool, and bridge | **ships today**       |
+| **native**        | a React Native surface (`page.native.tsx`)           | React Native (Hermes, Fabric), the screen bundle   | Android, dev verified |
+| **platform**      | a Compose (`page.kt`) or SwiftUI (`page.swift`) view | the screen's own native code, no JS engine         | designed, not built   |
 
 Two rules hold the model together, and they are the reason it stays safe to adopt early:
 
@@ -264,10 +265,11 @@ tint, whether the tab bar shows. It styles the native frame, not the page conten
 Whatever you add, `page.tsx` stays: it is the web version of the route and the fallback if the native
 screen cannot load (the "web twin"). A native file with no `page.tsx` next to it is a build error.
 
-> **Heads up:** the native screens above are designed but **not built yet**. Today a route marked
-> native shows a placeholder on the device, not real native UI (see
-> [Native screens](#native-screens) for the exact status). Web screens (`page.tsx`) are what runs
-> now; the native examples show what each file will look like so the structure is clear.
+> **Heads up:** most of the native screens above are designed but **not built yet**.
+> `page.native.tsx` runs as a React Native screen only under `farm dev --mobile` on an Android
+> emulator; `page.kt` and `page.swift` routes, and `page.native.tsx` routes on iOS, show a
+> placeholder (see [Native screens](#native-screens) for the exact status). Web screens
+> (`page.tsx`) are what runs now; the other examples show what each file will look like.
 
 ## Portable components (`@farm.js/ui`)
 
@@ -437,12 +439,13 @@ A native screen is declared by the file next to `page.tsx` (`page.native.tsx`, `
 `screen: "native"` or `"platform"`. The generated Android project registers native screens by their
 module id in `FarmNativeScreens`, keyed like `app/notes/[id]`.
 
-**Status: no native engine ships yet.** Today a `native` or `platform` route is recorded in
-`farm-routes.json` and shown on device as a **placeholder naming the module id** — Farm does not
-build `page.native.tsx`, `page.kt`, or `page.swift` into native views. A config route that asks for
-`screen: "native"` with no file **stays web and records `requested: "native"`** with a warning that
-says it will become a hard error once a native renderer ships. An ejected project is where an app
-registers its own screens before this lands.
+**Status: React Native screens run under `farm dev --mobile` on an Android emulator; production
+builds and real devices are not verified yet** ([below](#react-native-screens)). A `platform`
+route is recorded in `farm-routes.json` and shown on device as a **placeholder naming the module
+id**: Farm does not build `page.kt` or `page.swift` yet.
+A config route that asks for `screen: "native"` with no file **stays web and records
+`requested: "native"`** with a warning, since the analyzer cannot emit native code yet. An ejected
+project is where an app registers its own platform screens before they land.
 
 The two engines, as designed:
 
@@ -457,6 +460,146 @@ The two engines, as designed:
 
 Both tiers call the same server functions and route-data requests as the web client, so the data
 layer is shared. See [Design notes](#design-notes) for why native is opt-in rather than the default.
+
+### React Native screens
+
+A `page.native.tsx` (or `page.android.tsx`) next to a route's `page.tsx` is built as a React Native
+screen for the Android shell. Treat this tier as experimental. Install React Native, its Metro
+config, and `@farm.js/native` as dev dependencies; a web build never resolves any of them:
+
+```sh
+pnpm add -D @farm.js/native react-native@^0.88 @react-native/metro-config@^0.88
+pnpm add react@^19.2.8 react-dom@^19.2.8
+```
+
+`@farm.js/native` needs React 19.2.8 or later. React Native 0.88 declares a `react@^19.3.0` peer
+(its renderer is built from React 19.3.0), so on 19.2.8 your package manager warns, but the mobile
+example runs its native screens on 19.2.8 with one React in the dev bundle. That is verified in dev,
+not yet in a production build. Web pages and native screens bundle the app's one `react`, so keep
+`react` and `react-dom` on a single version.
+
+What is verified, in `examples/mobile` under `farm dev --mobile` on an Android 15 emulator
+(SwiftShader software rendering, no GPU):
+
+- `page.native.tsx` and `page.android.tsx` screens render as React Native with data from API routes.
+- A push from a native screen to a web screen takes 120 to 134 ms, and the back gesture returns to
+  the native screen. A web modal opened from a native screen closes on back. Tabs work.
+- Fast Refresh works.
+- Cold start takes 1.4 to 2.9 s, with 84 to 198 ms of main-thread startup work. The React Native
+  runtime warms up 1.2 to 5.0 s after the first paint, loading its bundle from Metro. The first
+  `/map` open takes 611 to 1413 ms (103 to 797 ms on later opens), the first `/camera` open 184 to
+  205 ms.
+
+Not verified yet: native screens in a production build (a bytecode build installs and cold-starts,
+but no native screen was opened in it), and real devices, so the emulator numbers say nothing about
+smoothness on a phone.
+
+```tsx
+// src/app/map/page.native.tsx
+import { serverFetch, useNavigate, useServerQuery } from "@farm.js/native";
+import { useState } from "react";
+import { FlatList, Pressable, Text } from "react-native";
+
+async function listStations(): Promise<Array<{ id: string; name: string }>> {
+  const response = await serverFetch("/api/stations");
+  return response.json();
+}
+
+export const metadata = { title: "Map" };
+
+export default function MapScreen() {
+  const navigate = useNavigate();
+  const { data = [], refetch } = useServerQuery(listStations, undefined);
+  // `pending` is true only for the first load, so pull-to-refresh tracks its own state.
+  const [refreshing, setRefreshing] = useState(false);
+  return (
+    <FlatList
+      data={data}
+      refreshing={refreshing}
+      onRefresh={() => {
+        setRefreshing(true);
+        refetch()
+          .catch(() => {})
+          .finally(() => setRefreshing(false));
+      }}
+      renderItem={({ item }) => (
+        <Pressable onPress={() => navigate(`/stations/${item.id}`)}>
+          <Text>{item.name}</Text>
+        </Pressable>
+      )}
+    />
+  );
+}
+```
+
+| `@farm.js/native`             | Notes                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| `useNavigate()`               | `navigate(href, { replace })` by URL; the navigator picks the next screen, web or native          |
+| `useRouteParams()`            | Route params, such as `{ id: "7" }` for `/notes/[id]`, after the base path and locale prefix      |
+| `useServerQuery(fn, input)`   | Runs any async `fn(input)` on mount and when `input` changes: `{ data, error, pending, refetch }` |
+| `serverFetch(path, init)`     | `fetch` against `mobile.server` (the dev server under `farm dev --mobile`), with the base path    |
+| `serverUrl(path)`             | The absolute URL of a path on `mobile.server`                                                     |
+| `export const metadata.title` | The native bar's title                                                                            |
+
+Native screens call the same API routes as the web client, over HTTP to `mobile.server`. They send
+no cookies and no `Origin` header, so they can only call public API routes until token auth for
+native screens exists. A screen navigates by URL only, so `farm-routes.json` always decides what
+opens next: a link from a native screen can open a web screen, a modal, a tab, or another native
+screen, and back returns to it.
+
+- **Build.** `farm build --mobile` writes one entry that registers every native screen under its
+  module id, bundles it with Metro, and compiles it to Hermes bytecode with the `hermesc` that
+  ships with the app's `react-native`. The bytecode is the only JS a release app runs; no code is
+  downloaded.
+- **Dev.** `farm dev --mobile` starts Metro next to the dev server (port 8081, or the next free
+  one) and the debug app loads the screens from it, with Fast Refresh.
+- **Runtime.** React Native's new architecture only: Hermes, Fabric, bridgeless. One runtime is
+  shared by every native screen, each its own surface. It starts after the first screen shows
+  content, so a web start screen pays nothing at launch.
+- **Web twin.** If the runtime fails to start, the bundle is missing or broken, or a screen throws
+  while loading or rendering, the navigator shows the route's `page.tsx` in a WebView instead and
+  logs the reason (`adb logcat -s FarmShell`). A screen whose module throws while loading logs
+  `<module id> failed to load: <error>`, such as
+  `app/map failed to load: ReferenceError: stations is not defined`. That is the build behavior. In
+  dev, Metro reports a module that throws while loading as fatal, so React Native's error screen
+  shows the error instead of hiding it behind the web page.
+- **Cost.** An app pays for React Native only when a route resolves to a native screen. Without
+  one, the generated project has no React Native dependency, Kotlin, or asset. With one, the
+  project adds `react-android` and `hermes-android`, compiles with Kotlin 2.2, bundles the screens'
+  bytecode, and builds one small native library (`libappmodules.so`) that React Native needs to
+  reach its core modules. In numbers:
+  - The first Gradle build downloads about 400 MB of React Native AARs.
+  - `libappmodules.so` (73 KB) needs the Android NDK 27.1.12297006 (2.4 GB) and CMake 3.22.1
+    (94 MB), which Gradle installs on the first build once the SDK licenses are accepted
+    (`sdkmanager --licenses`).
+  - The debug APK is about 73.7 MB, unstripped.
+  - The example's screen bundle compiles to 1.23 MB of Hermes bytecode (Metro 18.5 s, `hermesc`
+    1.6 s).
+  - Only the 64-bit ABIs are built (`arm64-v8a`, `x86_64`), so 32-bit devices are not supported.
+
+Native files import `react-native`, which a web-only checkout may not have. Keep them out of the
+web type-check and check them on their own:
+
+```jsonc
+// tsconfig.json
+{
+  "compilerOptions": {
+    /* ... */
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.native.tsx", "src/**/*.android.tsx", "src/**/*.ios.tsx"],
+}
+```
+
+```jsonc
+// tsconfig.native.json: tsc -p tsconfig.native.json, once react-native is installed
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "lib": ["ESNext"], "customConditions": ["react-native"] },
+  "include": ["src/**/*.native.tsx", "src/**/*.android.tsx", "src/**/*.ios.tsx"],
+  "exclude": [],
+}
+```
 
 ## The native-screen report
 
@@ -558,6 +701,8 @@ generates the project. `--apk` builds the debug APK into
 | `app/src/main/java/.../Navigator.kt`     | Tabs, stacks, push, modal, replace, predictive back    |
 | `app/src/main/java/.../WebViewPool.kt`   | Two pre-warmed WebViews that back pushes               |
 | `app/src/main/java/.../NativeScreens.kt` | The hook for `native` and `platform` screens           |
+| `app/src/main/java/.../NativeEngine.kt`  | React Native for native screens (none without them)    |
+| `app/src/main/assets/farm-native.hbc`    | The native screens' Hermes bytecode (`farm build`)     |
 
 The shell marks each page with `data-farm-shell="android"` on `<html>` before it renders, so app
 CSS can hide chrome the shell already draws, such as web tabs:
@@ -643,9 +788,11 @@ reversible and gives "bailout" two independent layers:
 - **Build-time (the analyzer).** A route becomes native only when it is proven portable and native
   actually wins. Anything the analyzer cannot map keeps the route on web, with the blocking line
   reported. Any doubt is web.
-- **Runtime (the web twin).** A native screen that cannot be built or registered falls back to its
-  web page. Today that is the whole native path: an unbuildable native request resolves to web at
-  build time, and the shell shows a placeholder for a native rule with no registered screen.
+- **Runtime (the web twin).** A native screen that cannot load or render falls back to its web
+  page: a React Native runtime that fails to start, a missing or broken bundle, or a screen that
+  throws shows the route's `page.tsx` in a WebView, and an unbuildable native request resolves to
+  web at build time. In dev, React Native's error screen shows a screen that throws while loading
+  instead.
 
 ### Why this shape, and not the alternatives
 
@@ -677,7 +824,7 @@ These were weighed and set aside (the full rationale lives in the platforms RFC,
 ### On the runtime
 
 There is **no Farm-built JavaScript runtime** for mobile. Web screens run in the system WebView
-(Chromium on Android, WebKit on iOS). The planned `native` tier runs on **React Native's own
+(Chromium on Android, WebKit on iOS). The `native` tier runs on **React Native's own
 engine** — Hermes, under its new architecture — not a Farm runtime; the `platform` tier runs
 **no JS engine at all** (Compose / SwiftUI). So an app ships a JS engine on device only if it opts a
 route into the React Native tier.
@@ -689,17 +836,26 @@ parts are designed and still on the way:
 
 - The iOS shell has not been built with `xcodebuild` or run in a simulator yet (see
   [Run on iOS](#run-on-ios)), and it has no Keychain session.
-- `native` and `platform` screens show a placeholder naming the module id. Farm does not build
-  `page.native.tsx`, `page.kt`, or `page.swift` yet; `FarmNativeScreens` in the generated project is
-  where native screens will register.
+- React Native screens run on Android only; there is no iOS React Native host yet, so
+  `page.ios.tsx` is not built and `native` screens show a placeholder on iOS.
+- React Native screens are verified under `farm dev --mobile` on an Android emulator only, not in a
+  production (Hermes bytecode) build or on real devices.
+- Native screens send no cookies and no `Origin` header, so they can only call public API routes
+  until token auth for native screens exists.
+- `platform` screens show a placeholder naming the module id. Farm does not build `page.kt` or
+  `page.swift` yet; `FarmNativeScreens` in the generated project is where they will register.
+- React Native screens use React Native's own components. `@farm.js/ui` components, native modules
+  from `src/native/`, `layout.native.tsx` providers, intent prefetch, and server functions called by
+  reference are not wired into native screens yet; `serverFetch` calls API routes. Images imported
+  by native screens are not copied into the app yet; load them by URL.
 - Bundled client assets and page shells (for instant pushes and an offline state) are not built;
   the shell loads pages and client code from `server`. In production that is the web deployment,
   whose client is not a `--mobile` build, so navigations stay in the page instead of opening
   native screens until client assets are bundled into the app.
 - The analyzer only reports. With `auto: "on"` it records ports in `farm-routes.json`, and those
   routes stay web screens.
-- Native islands (`mobile.native.islands`), `@farm.js/ui`, and the theme-token pipeline are
-  reserved.
+- Native islands (`mobile.native.islands`), native rendering of `@farm.js/ui` (it renders on the
+  web only), and the theme-token pipeline are reserved.
 - Token auth is not wired yet: the shell has no Keystore session or bearer tokens, and the server
   has no mobile-origin checks.
 - Device plugins (`native.<name>`) ship none, so calls reject as unavailable.

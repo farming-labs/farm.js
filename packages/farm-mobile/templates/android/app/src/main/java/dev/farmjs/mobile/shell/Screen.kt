@@ -13,18 +13,24 @@ import com.google.android.material.progressindicator.LinearProgressIndicator
 /** One native screen: a native bar over exactly one WebView [page], or a native view. */
 class Screen(
     context: Context,
-    val page: Page?,
-    nativeContent: View?,
+    page: Page?,
+    private var native: FarmNativeContent?,
     /** The module id a native or platform screen shows, such as `app/notes/[id]`. */
     val nativeModule: String?,
     val modal: Boolean,
     private val navigator: Navigator,
 ) : PageHost {
+    /** The screen's WebView page; set later when a native screen falls back to its web twin. */
+    var page: Page? = page
+        private set
+    var destroyed = false
+        private set
     val toolbar = MaterialToolbar(context)
     private val progress = LinearProgressIndicator(context).apply {
         isIndeterminate = true
         visibility = View.GONE
     }
+    private val content = FrameLayout(context)
     val view: LinearLayout = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setBackgroundColor(ContextCompat.getColor(context, R.color.farm_background))
@@ -43,14 +49,31 @@ class Screen(
     init {
         toolbar.setBackgroundColor(ContextCompat.getColor(context, R.color.farm_surface))
         view.addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        val content = FrameLayout(context)
-        val main = page?.webView ?: requireNotNull(nativeContent) { "A screen needs a page or a native view." }
-        (main.parent as? ViewGroup)?.removeView(main)
-        content.addView(main, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val main = page?.webView ?: requireNotNull(native?.view) { "A screen needs a page or a native view." }
+        setMain(main)
         content.addView(progress, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         view.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         page?.host = this
-        if (nativeModule != null) toolbar.title = nativeModule
+        if (nativeModule != null) toolbar.title = native?.title ?: nativeModule
+    }
+
+    private fun setMain(main: View) {
+        (main.parent as? ViewGroup)?.removeView(main)
+        content.addView(main, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    }
+
+    /** Show the route's web screen in place of this native screen (the web twin, RFC 0004 7.10). */
+    fun showWeb(page: Page, url: String) {
+        if (destroyed || this.page != null) return
+        native?.let {
+            content.removeView(it.view)
+            it.close()
+        }
+        native = null
+        this.page = page
+        setMain(page.webView)
+        page.host = this
+        load(url)
     }
 
     fun setNavigation(icon: Int?, description: Int, onClick: () -> Unit) {
@@ -112,6 +135,9 @@ class Screen(
     }
 
     fun destroy() {
+        destroyed = true
         page?.destroy()
+        native?.close()
+        native = null
     }
 }

@@ -70,8 +70,14 @@ class MainActivity : AppCompatActivity() {
         val newPage = { Page(this, config, plugins, script, ::openExternal) }
         val warmPath = config.tabs.firstOrNull()?.path ?: startPath
         val pool = if (poolSize > 0) WebViewPool(config, poolHolder, poolSize, warmPath, newPage) else null
+        // React Native when the app has page.native.tsx screens; started after the first screen shows.
+        val engine = createFarmNativeEngine(this, config)
+        FarmNativeScreens.engine = engine
         navigator = Navigator(this, config, startPath, tabsHost, bottomNav, modalLayer, pool, newPage)
-        navigator.onFirstReady = { pool?.start() }
+        navigator.onFirstReady = {
+            pool?.start()
+            engine?.warm()
+        }
 
         if (config.tabs.isEmpty()) {
             bottomNav.visibility = View.GONE

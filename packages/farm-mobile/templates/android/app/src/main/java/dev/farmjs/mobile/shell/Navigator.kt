@@ -248,12 +248,40 @@ class Navigator(
 
     private fun newScreen(modal: Boolean, rule: RouteConfig.Rule?, url: Uri?): Screen {
         if (rule != null && rule.native && url != null) {
-            return Screen(context, null, FarmNativeScreens.create(rule, context, url), rule.module, modal, this)
+            val host = NativeHost(url)
+            val content = FarmNativeScreens.create(rule, context, url, host)
+            if (content != null) {
+                return Screen(context, null, content, rule.module, modal, this).also { host.screen = it }
+            }
+            Log.w(TAG, "${rule.screen} screen ${rule.module} is unavailable; showing ${url.path} as a web screen")
         }
         val warm = pool?.take()
         val screen = Screen(context, warm ?: newPage(), null, null, modal, this)
         screen.view.tag = if (warm != null) "warm" else "cold"
         return screen
+    }
+
+    /** A native screen's link to the navigator; its calls may come from any thread. */
+    private inner class NativeHost(private val url: Uri) : FarmNativeHost {
+        var screen: Screen? = null
+        private val opened = SystemClock.uptimeMillis()
+
+        private fun onMain(block: (Screen) -> Unit) {
+            main.post { screen?.takeUnless { it.destroyed }?.let(block) }
+        }
+
+        override fun visit(url: Uri, replace: Boolean) = onMain { this@Navigator.visit(it, url, replace) }
+
+        override fun fallback(reason: String) = onMain {
+            Log.w(TAG, "native screen ${it.nativeModule} failed, showing the web screen for ${url.path}: $reason")
+            it.showWeb(newPage(), url.toString())
+        }
+
+        override fun setTitle(title: String) = onMain { it.toolbar.title = title }
+
+        override fun rendered() = onMain {
+            Log.i(TAG, "native ${it.nativeModule} open->content=${SystemClock.uptimeMillis() - opened}ms")
+        }
     }
 
     /**

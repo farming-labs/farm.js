@@ -35,6 +35,28 @@ export interface MobileGeneratedFile {
   executable?: boolean;
 }
 
+/**
+ * The React Native screens of a build (RFC 0004, 7.2). Absent when no route resolves to one, and
+ * then a shell adds no JS engine, dependency, or asset for them.
+ */
+export interface MobileNativeScreens {
+  engine: "react-native";
+  /** The app's `react-native` version, which picks the native artifacts. */
+  reactNativeVersion: string;
+  /** The Hermes version that React Native release ships. */
+  hermesVersion: string;
+  /** Module ids with a React Native screen, such as `app/map`. */
+  modules: string[];
+  /** `farm build --mobile`: the screens' Hermes bytecode, bundled into the app. */
+  bundle?: string;
+  /** `farm dev --mobile`: the Metro server the debug app loads the screens from. */
+  devServer?: {
+    port: number;
+    /** The entry's path from the app root without `.js`, such as `.farm/output/mobile/native/index`. */
+    mainModule: string;
+  };
+}
+
 export interface MobileShellContext {
   /** App root. */
   root: string;
@@ -48,6 +70,8 @@ export interface MobileShellContext {
   manifest: FarmMobileRouteManifest;
   /** Directory the native project is written to, such as `.farm/output/mobile/android`. */
   projectDir: string;
+  /** React Native screens, when at least one route resolves to one on this OS. */
+  native?: MobileNativeScreens;
 }
 
 export interface MobilePackageContext extends MobileShellContext {

@@ -227,6 +227,7 @@ export default {
         id: context.mobile.id,
         server: context.manifest.server,
         projectDir: path.relative(context.root, context.projectDir),
+        native: context.native ?? null,
       }) },
       { path: "gradlew", contents: "#!/bin/sh\\n", executable: true },
       ...(process.env.FAKE_SHELL_ESCAPE ? [{ path: "../escape.txt", contents: "x" }] : []),
@@ -246,6 +247,51 @@ export default {
   },
 };
 `;
+
+/**
+ * A stand-in for @farm.js/native/build: records what the CLI asked for and writes a bytecode
+ * file, without React Native.
+ */
+const FAKE_NATIVE_BUILD = `import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+const reactNative = { version: "0.88.1", hermesVersion: "260318099.0.5" };
+
+async function record(options, name) {
+  await mkdir(options.outDir, { recursive: true });
+  await writeFile(path.join(options.root, name), JSON.stringify({
+    outDir: path.relative(options.root, options.outDir),
+    basePath: options.basePath,
+    screens: options.screens.map((screen) => ({ ...screen, file: path.relative(options.root, screen.file) })),
+  }));
+}
+
+export async function buildFarmNativeScreens(options) {
+  await record(options, "native-build.json");
+  const bundle = path.join(options.outDir, "index.android.hbc");
+  await writeFile(bundle, "hbc");
+  return { reactNative, bundle, jsBytes: 2048, bytecodeBytes: 3072, bundleMs: 1, hermesMs: 1 };
+}
+
+export async function startFarmNativeDevServer(options) {
+  await record(options, "native-dev.json");
+  return { reactNative, port: options.port, mainModule: ".farm/output/mobile/native/index", close: async () => {} };
+}
+`;
+
+async function installFakeNativeBuild(root) {
+  const dir = path.join(root, "node_modules", "@farm.js", "native");
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    path.join(dir, "package.json"),
+    JSON.stringify({
+      name: "@farm.js/native",
+      type: "module",
+      exports: { "./build": "./build.mjs", "./package.json": "./package.json" },
+    }),
+  );
+  await writeFile(path.join(dir, "build.mjs"), FAKE_NATIVE_BUILD);
+}
 
 async function installFakeShell(root) {
   const dir = path.join(root, "node_modules", "@farm.js", "mobile");
@@ -344,6 +390,7 @@ test("farm build --mobile builds the mobile client apart from the web output and
   const root = await createApp(t, BUILD_CONFIG);
   await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
   await installFakeShell(root);
+  await installFakeNativeBuild(root);
   const mobileDir = path.join(root, ".farm", "output", "mobile");
 
   const result = await runFarm(["build", "--mobile", "--root", root], { VERCEL: "1" });
@@ -370,7 +417,30 @@ test("farm build --mobile builds the mobile client apart from the web output and
       id: "com.example.notes",
       server: "https://notes.example.com",
       projectDir: path.join(".farm", "output", "mobile", "android"),
+      // /feed has page.android.tsx: its screen is built into the app as Hermes bytecode.
+      native: {
+        engine: "react-native",
+        reactNativeVersion: "0.88.1",
+        hermesVersion: "260318099.0.5",
+        modules: ["app/feed"],
+        bundle: path.join(mobileDir, "native", "index.android.hbc"),
+      },
     },
+  );
+  assert.deepEqual(JSON.parse(await readFile(path.join(root, "native-build.json"), "utf8")), {
+    outDir: path.join(".farm", "output", "mobile", "native"),
+    basePath: "",
+    screens: [
+      {
+        module: "app/feed",
+        route: "/feed",
+        file: path.join("src", "app", "feed", "page.android.tsx"),
+      },
+    ],
+  });
+  assert.match(
+    result.output,
+    /React Native 0\.88\.1: 1 native screen, 2\.0 KB JS, 3\.0 KB Hermes bytecode/,
   );
   if (process.platform !== "win32") {
     assert.equal((await stat(path.join(mobileDir, "android", "gradlew"))).mode & 0o111, 0o111);
@@ -413,6 +483,8 @@ test("farm build --mobile --os ios generates the iOS project and reports what th
       id: "com.example.notes",
       server: "https://notes.example.com",
       projectDir: path.join(".farm", "output", "mobile", "ios"),
+      // The iOS shell has no React Native host yet, so /feed is a placeholder there.
+      native: null,
     },
   );
   await assert.rejects(stat(path.join(mobileDir, "android")));
@@ -427,10 +499,44 @@ test("the mobile shell may not write outside its project", async (t) => {
   const root = await createApp(t, BUILD_CONFIG);
   await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
   await installFakeShell(root);
+  await installFakeNativeBuild(root);
   const result = await runFarm(["build", "--mobile", "--root", root], { FAKE_SHELL_ESCAPE: "1" });
   assert.notEqual(result.code, 0);
   assert.match(result.output, /tried to write \.\.\/escape\.txt outside/);
   await assert.rejects(stat(path.join(root, ".farm", "output", "mobile", "escape.txt")));
+});
+
+test("an app without native screens never loads @farm.js/native and gets no React Native", async (t) => {
+  const root = await createApp(t, BUILD_CONFIG);
+  await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
+  await rm(path.join(root, "src/app/feed/page.native.tsx"));
+  await rm(path.join(root, "src/app/feed/page.android.tsx"));
+  await installFakeShell(root);
+  // Not installed: a build that needed it would fail with the install command.
+  const result = await runFarm(["build", "--mobile", "--root", root]);
+  assert.equal(result.code, 0, result.output);
+  assert.doesNotMatch(result.output, /React Native|@farm\.js\/native/);
+  const context = JSON.parse(
+    await readFile(path.join(root, ".farm", "output", "mobile", "android", "context.json"), "utf8"),
+  );
+  assert.equal(context.native, null);
+  await assert.rejects(stat(path.join(root, ".farm", "output", "mobile", "native")));
+});
+
+test("a native screen without @farm.js/native prints the install command", async (t) => {
+  const root = await createApp(t, BUILD_CONFIG);
+  await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
+  await installFakeShell(root);
+  const result = await runFarm(["build", "--mobile", "--root", root]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.output, /page\.native\.tsx screens need @farm\.js\/native, React Native/);
+  assert.match(
+    result.output,
+    /@farm\.js\/native react-native@\^0\.88 @react-native\/metro-config@\^0\.88/,
+  );
+  assert.doesNotMatch(result.output, /\n\s+at /);
+  // Checked before the client build.
+  await assert.rejects(stat(path.join(root, ".farm", "output", "mobile", "www")));
 });
 
 async function freePort() {
@@ -467,6 +573,7 @@ async function checkMobileDevServer(t, os) {
   const root = await createApp(t, BUILD_CONFIG);
   await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
   await installFakeShell(root);
+  await installFakeNativeBuild(root);
   const port = await freePort();
   const child = spawn(
     process.execPath,
@@ -511,6 +618,26 @@ async function checkMobileDev(child, root, port, os) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.match(output, /fake: nothing connected/);
+  const native = JSON.parse(
+    await readFile(path.join(root, ".farm", "output", "mobile", os, "context.json"), "utf8"),
+  ).native;
+  if (os === "ios") {
+    // No React Native host on iOS yet: Metro never starts and /feed stays a placeholder.
+    assert.equal(native, null);
+    assert.doesNotMatch(output, /React Native/);
+    await assert.rejects(stat(path.join(root, "native-dev.json")));
+  } else {
+    // Native screens load from Metro in dev, never from a bundled file.
+    assert.equal(native.bundle, undefined);
+    assert.equal(native.devServer.mainModule, ".farm/output/mobile/native/index");
+    assert.ok(native.devServer.port >= 8081, JSON.stringify(native));
+    assert.deepEqual(
+      JSON.parse(await readFile(path.join(root, "native-dev.json"), "utf8")).screens.map(
+        (screen) => screen.module,
+      ),
+      ["app/feed"],
+    );
+  }
 
   // The emulator reaches the host loopback as 10.0.2.2, which maps to 127.0.0.1.
   const page = await fetch(`http://127.0.0.1:${port}/notes`);
