@@ -245,12 +245,14 @@ async function listRows(
   const sameScope =
     clientScope === undefined || clientScope === null || clientScope === fingerprint;
   const incremental = Boolean(cursorField && sinceDate && sameScope);
-  const where: Record<string, unknown> = { ...scope.where };
   // `gte`, not `gt`: the cursor has millisecond precision, so a row written in
   // the same millisecond as the cursor row but after the previous list would
   // otherwise never be sent. Resending the cursor row itself is harmless, the
-  // client upserts by key.
-  if (incremental) where[cursorField!] = { gte: sinceDate };
+  // client upserts by key. ANDed with the filter, not merged into it, so a
+  // filter on the cursor field itself still applies.
+  const where = incremental
+    ? { AND: [scope.where, { [cursorField!]: { gte: sinceDate } }] }
+    : scope.where;
 
   const rows = await client.findMany({ where });
   if (!incremental) {
