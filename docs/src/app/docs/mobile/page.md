@@ -796,10 +796,55 @@ browser API, and import against a portability model. From the parts it can map, 
 **platform-neutral UI tree** (an intermediate representation, or IR) that a native emitter turns into
 a React Native, Compose, or SwiftUI screen.
 
-```text
-page.tsx  ──▶  AST (Oxc)  ──▶  classify every node  ──▶  decision: port or web
-                                                    └─▶  portable UI tree (IR)  ──▶  [ native emitter ]
-```
+<svg width="100%" viewBox="0 0 680 694" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>How Farm's mobile analyzer reads a page</title>
+<desc>A build-time pipeline: a page is parsed with Oxc into an AST, every node is classified as a port (renders native) or a block (stays web), the portable nodes become a neutral UI tree, and a conservative rule decides port or web. The emitter that turns the tree into a native screen is still being built.</desc>
+<defs><marker id="arrow-fig" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<g style="stroke:var(--color-fd-foreground);stroke-width:1;opacity:.5;fill:none">
+<line x1="340" y1="94" x2="340" y2="122" marker-end="url(#arrow-fig)"/>
+<line x1="340" y1="174" x2="340" y2="202" marker-end="url(#arrow-fig)"/>
+<line x1="270" y1="262" x2="244" y2="294" marker-end="url(#arrow-fig)"/>
+<line x1="430" y1="262" x2="512" y2="294" marker-end="url(#arrow-fig)"/>
+<line x1="240" y1="396" x2="240" y2="430" marker-end="url(#arrow-fig)"/>
+<line x1="248" y1="484" x2="318" y2="514" marker-end="url(#arrow-fig)"/>
+<line x1="512" y1="396" x2="406" y2="514" marker-end="url(#arrow-fig)"/>
+<line x1="322" y1="580" x2="232" y2="614" marker-end="url(#arrow-fig)"/>
+<line x1="398" y1="580" x2="498" y2="614" marker-end="url(#arrow-fig)"/>
+</g>
+<rect x="250" y="44" width="180" height="50" rx="8" style="fill:none;stroke:var(--color-fd-border);stroke-width:1"/>
+<text x="340" y="70" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">page.tsx</text>
+<text x="340" y="87" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">+ app modules, layouts</text>
+<rect x="250" y="124" width="180" height="50" rx="8" style="fill:rgba(56,132,255,.13);stroke:rgba(56,132,255,.5);stroke-width:1"/>
+<text x="340" y="150" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Parse with Oxc</text>
+<text x="340" y="167" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">parseSync → AST</text>
+<rect x="120" y="204" width="440" height="58" rx="8" style="fill:rgba(160,90,240,.12);stroke:rgba(160,90,240,.5);stroke-width:1"/>
+<text x="340" y="230" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Walk the AST, classify every node</text>
+<text x="340" y="248" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">JSX · class names · styles · imports · globals</text>
+<rect x="96" y="296" width="288" height="100" rx="8" style="fill:rgba(34,180,90,.14);stroke:rgba(34,180,90,.55);stroke-width:1"/>
+<text x="240" y="320" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Ports → render native</text>
+<text x="240" y="342" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">div → View · span → Text · img → Image</text>
+<text x="240" y="360" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">button/a → Pressable · input → TextInput</text>
+<text x="240" y="378" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">ul/ol → List · @farm.js/ui · Tailwind</text>
+<rect x="400" y="296" width="232" height="100" rx="8" style="fill:rgba(230,70,70,.12);stroke:rgba(230,70,70,.5);stroke-width:1"/>
+<text x="516" y="319" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Blocks → stay web</text>
+<text x="516" y="339" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">canvas · iframe · svg · table</text>
+<text x="516" y="356" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">form · dangerouslySetInnerHTML</text>
+<text x="516" y="373" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">window · document · refs</text>
+<text x="516" y="390" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">arbitrary CSS · RSC · markdown</text>
+<rect x="96" y="430" width="288" height="52" rx="8" style="fill:rgba(20,170,160,.14);stroke:rgba(20,170,160,.55);stroke-width:1"/>
+<text x="240" y="456" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Portable UI tree (IR)</text>
+<text x="240" y="473" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">FarmUiNode: View / Text / Image / List</text>
+<rect x="220" y="516" width="280" height="64" rx="8" style="fill:rgba(230,150,20,.15);stroke:rgba(230,150,20,.55);stroke-width:1"/>
+<text x="360" y="540" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Decide: port or web</text>
+<text x="360" y="558" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">port if 0 blockers + a win, else web</text>
+<text x="360" y="574" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">any doubt → web</text>
+<rect x="96" y="616" width="250" height="58" rx="8" style="fill:none;stroke:var(--color-fd-border);stroke-width:1"/>
+<text x="221" y="642" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Ships today</text>
+<text x="221" y="660" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">report · farm-routes.json · cache</text>
+<rect x="382" y="616" width="250" height="58" rx="8" style="fill:rgba(140,150,165,.1);stroke:rgba(140,150,165,.55);stroke-width:1;stroke-dasharray:6 4"/>
+<text x="507" y="642" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Emitter → native screen</text>
+<text x="507" y="660" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">being built — #2473, #2474</text>
+</svg>
 
 Today the pass stops at the report: it is **report only**, changes no output, and every analyzed
 route stays a web screen. The AST walk, the classification, and the IR all run now; the emitter that
