@@ -667,7 +667,10 @@ test("farm config inspect --mobile --report prints the analyzer table and writes
   const result = await runFarm(["config", "inspect", "--mobile", "--report", "--root", root]);
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /route\s+screen\s+tier\s+decision\s+mapped\s+portable\s+reason/);
-  assert.match(result.output, /\/notes\s+web\s+native\s+port\s+2\/2\s+100%\s+renders natively, no JavaScript on the device/);
+  assert.match(
+    result.output,
+    /\/notes\s+web\s+native\s+port\s+2\/2\s+100%\s+renders natively, no JavaScript on the device/,
+  );
   assert.match(
     result.output,
     /\/notes\/new\s+web\s+web\s+web\s+1\/2\s+50%\s+src\/app\/notes\/new\/page\.tsx:1:40 <form> has no native mapping \(\+1 more\)/,
