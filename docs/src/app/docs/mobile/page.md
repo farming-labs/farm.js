@@ -382,7 +382,8 @@ has its own WebView.
 
 A route's tier is decided at build time. The first source that decides wins, per route and per OS:
 
-1. **the page export** — `export const mobile = { native: false }` forces web;
+1. **the page export** — `export const mobile = { native: false }` forces web, and
+   `{ native: true }` requires a native screen ([below](#requiring-a-native-screen));
 2. **`mobile.native.routes[route]`** — the OS key (`android` / `ios`) first, then `screen`;
 3. **the files** next to `page.tsx` — the OS file, then `page.native.tsx`, or `page.kt` / `page.swift`;
 4. **the analyzer**, only when `native.auto` is `"on"`;
@@ -411,6 +412,23 @@ export const mobile = { presentation: "modal", prefetch: "off" } satisfies FarmM
 `presentation` and `prefetch` (`"intent"` or `"off"`) override the config for that route.
 `native: false` keeps the route web on every OS, whatever the config and files say, and warns if a
 native file sits unused next to it. The values must be literals.
+
+### Requiring a native screen
+
+`export const mobile = { native: true }` makes a native screen a requirement instead of a hope: the
+route needs a native file next to the page, or the analyzer must find the page in the **native**
+tier ([tiers](#tiers)). Otherwise `farm dev --mobile` and `farm build --mobile` fail and name every
+blocker:
+
+```text
+mobile (os: android): src/app/page.tsx sets mobile.native to true, but "/" cannot render as a native screen:
+  - src/app/page.tsx:4:19 useState() runs on the device
+It needs JavaScript on the device: add page.native.tsx next to the page, or remove mobile.native.
+```
+
+The check runs on every dev start and build, whatever `native.auto` is. The shell cannot draw a
+native-tier screen yet, so a passing route is still recorded as `requested: "native"` on a web
+screen.
 
 ### `mobile.native`
 
@@ -742,12 +760,27 @@ farm config inspect --mobile --report   # table, plus .farm/output/mobile/native
 ```
 
 ```text
-route        screen  decision  mapped  portable  reason
-/feed        native  -                           src/app/feed/page.native.tsx
-/notes       web     port      12/12   100%      portable; input, list
-/notes/[id]  web     web       9/10    90%       src/app/notes/[id]/page.tsx:41:9 dangerouslySetInnerHTML
-/settings    web     web       18/18   100%      portable; no win (18 elements)
+route        screen  tier          decision  mapped  portable  reason
+/feed        native  -             -                           src/app/feed/page.native.tsx
+/notes       web     react-native  port      12/12   100%      portable; input, list
+/notes/[id]  web     web           web       9/10    90%       src/app/notes/[id]/page.tsx:41:9 dangerouslySetInnerHTML
+/settings    web     native        web       18/18   100%      renders natively, no JavaScript on the device
 ```
+
+### Tiers
+
+Each analyzed route gets a **tier**, the first one nothing rules out:
+
+| Tier           | What it means                                                                                                                                                      | Ruled out by                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `native`       | The server renders the page into native views, with no JavaScript on the device. Async pages and server data are fine: they run on the server, as for the web page | hooks, event handlers, `"use client"` modules, package components, and the blockers below      |
+| `react-native` | A React Native screen ported from the page can run its logic on the device                                                                                         | the blockers below, async pages, server components, Node.js APIs, and packages not on the list |
+| `web`          | A WebView of the page                                                                                                                                              | —                                                                                              |
+
+The native tier looks only at the page and its app modules: the native shell draws the chrome, so
+layouts are not part of a native screen. The report keeps the two lists apart, `nativeBlockers` for
+the native tier and `blockers` for a React Native port, and the table shows the first blocker of the
+tier to aim for.
 
 Walking the AST, it visits each page, its app modules, and the layouts a `layout.native.tsx` does
 not replace, and sorts what it finds into two buckets:

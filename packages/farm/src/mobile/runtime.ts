@@ -21,7 +21,7 @@ import {
   type FarmMobileOS,
   type ResolvedFarmMobileConfig,
 } from "./config";
-import type { FarmMobileAnalyzerStats } from "./analyzer";
+import type { FarmMobileAnalyzerStats, FarmMobileBlocker } from "./analyzer";
 import {
   createFarmMobileNativeReport,
   formatFarmMobileNativeReport,
@@ -56,6 +56,7 @@ export type {
   FarmMobileBlocker,
   FarmMobileBlockerRule,
   FarmMobileRouteAnalysis,
+  FarmMobileTier,
   FarmUiNode,
 } from "./analyzer";
 export { formatFarmMobileNativeReport } from "./report";
@@ -110,7 +111,8 @@ export interface FarmMobileAppOptions {
   cache?: FarmMobileBlockCache;
   /**
    * Run the build-time analyzer: `true` when `mobile.native.auto` is not `"off"` (what
-   * `farm build --mobile` passes), `"always"` for an explicit `--report`. Never in dev.
+   * `farm build --mobile` passes), `"always"` for an explicit `--report`. Not in dev, except
+   * that a page with `export const mobile = { native: true }` is always checked.
    */
   analyze?: boolean | "always";
 }
@@ -136,6 +138,10 @@ export interface FarmMobileApp {
 const SCRIPT_PAGE = /\.(?:tsx|ts|jsx|js)$/;
 
 /** `.js` pages may contain JSX, as in the client build. */
+function describe(blocker: FarmMobileBlocker): string {
+  return `${blocker.file ? `${blocker.file}:${blocker.line}:${blocker.column} ` : ""}${blocker.message}`;
+}
+
 function scriptLang(file: string): "ts" | "tsx" | "jsx" {
   return file.endsWith(".tsx") ? "tsx" : file.endsWith(".ts") ? "ts" : "jsx";
 }
@@ -221,8 +227,12 @@ export async function resolveFarmMobileApp(
   let { screens, warnings } = resolveFarmMobileScreens(screenOptions);
   let report: FarmMobileNativeReport | undefined;
   let analyzerStats: FarmMobileAnalyzerStats | undefined;
+  // A page that requires a native screen is checked on every run, dev included.
+  const asserted = [...pageExports.values()].some((page) => page.config.native === true);
   const analyze =
-    options.analyze === "always" || (options.analyze === true && mobile.native.auto !== "off");
+    options.analyze === "always" ||
+    asserted ||
+    (options.analyze === true && mobile.native.auto !== "off");
   if (analyze) {
     // Only routes nothing else decided, and config routes that ask for a port.
     const candidates = routes.filter((route) => {
@@ -248,12 +258,12 @@ export async function resolveFarmMobileApp(
           .map((route) => route.route),
       ),
       analyzerBlockers: new Map(
+        Object.values(result.routes).map((route) => [route.route, route.blockers.map(describe)]),
+      ),
+      analyzerTiers: new Map(
         Object.values(result.routes).map((route) => [
           route.route,
-          route.blockers.map(
-            (blocker) =>
-              `${blocker.file ? `${blocker.file}:${blocker.line}:${blocker.column} ` : ""}${blocker.message}`,
-          ),
+          { tier: route.tier, nativeBlockers: route.nativeBlockers.map(describe) },
         ]),
       ),
     }));

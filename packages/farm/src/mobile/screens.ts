@@ -2,7 +2,9 @@
  * Which screen each route shows on mobile, and why. Loaded only by mobile commands.
  *
  * Per route and OS, the first source that decides wins (RFC 0004, 7.3):
- * 1. the page export, `export const mobile = { native: false }` in `page.tsx` (`"page"`);
+ * 1. the page export in `page.tsx` (`"page"`): `export const mobile = { native: false }` keeps
+ *    the route web; `{ native: true }` requires a native screen and fails the build, naming each
+ *    blocker, when the route has no native file and the analyzer rules out the native tier;
  * 2. the config route, `mobile.native.routes[route]`: the OS key, then `screen` (`"config"`);
  * 3. the files next to `page.tsx`: `page.<os>.tsx`, then `page.native.tsx`, or `page.kt` /
  *    `page.swift` (`"file"`);
@@ -16,6 +18,7 @@
 import * as path from "node:path";
 
 import type { PlatformRouteFiles } from "../routing/generate-route-types";
+import type { FarmMobileTier } from "./analyzer";
 import {
   validateFarmMobilePageConfig,
   type FarmMobileOS,
@@ -60,6 +63,8 @@ export interface FarmMobileScreensOptions {
   analyzerPorts?: ReadonlySet<string>;
   /** Why the analyzer cannot port a route, for config routes that ask for a port. */
   analyzerBlockers?: ReadonlyMap<string, readonly string[]>;
+  /** Each analyzed route's tier, and what rules out the native tier. */
+  analyzerTiers?: ReadonlyMap<string, { tier: FarmMobileTier; nativeBlockers: readonly string[] }>;
 }
 
 export interface FarmMobileScreens {
@@ -146,6 +151,43 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
         }
       }
       screens[route] = { screen: "web", source: "page", file: page.file, ...base };
+      continue;
+    }
+
+    if (page?.config.native === true) {
+      if (tier !== undefined && tier !== "native") {
+        warnings.push(`${page.file}: mobile.native true overrides ${where}.${tierKey} "${tier}".`);
+      }
+      const file = reactFile ?? platformFile;
+      if (file) {
+        screens[route] = {
+          screen: reactFile ? "native" : "platform",
+          source: "page",
+          file: relativeFile(root, file),
+          module,
+          ...base,
+        };
+        continue;
+      }
+      const analysis = options.analyzerTiers?.get(route);
+      if (analysis && analysis.tier !== "native") {
+        throw new TypeError(
+          `${prefix}: ${page.file} sets mobile.native to true, but "${route}" cannot render as a ` +
+            `native screen:\n${analysis.nativeBlockers.map((blocker) => `  - ${blocker}`).join("\n")}\n` +
+            (analysis.tier === "react-native"
+              ? "It needs JavaScript on the device: add page.native.tsx next to the page, or "
+              : "Remove the blockers, add page.native.tsx next to the page, or ") +
+            "remove mobile.native.",
+        );
+      }
+      // The shell cannot draw a server-rendered native screen yet, so the route stays web.
+      screens[route] = {
+        screen: "web",
+        source: "page",
+        file: page.file,
+        requested: "native",
+        ...base,
+      };
       continue;
     }
 

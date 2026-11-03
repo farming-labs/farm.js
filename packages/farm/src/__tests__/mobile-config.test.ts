@@ -749,7 +749,7 @@ ${PAGE}`,
       [`export let mobile = { native: false };`, /must be a const/],
       [`const mobile = {}; export { mobile };`, /must be declared in place/],
       [`export const mobile = { ...base };`, /without spreads/],
-      [`export const mobile = { native: true };`, /mobile\.native can only be false/],
+      [`export const mobile = { native: "yes" };`, /mobile\.native must be true or false/],
       [
         `export const mobile = { tab: 1 };`,
         /unknown option src\/app\/notes\/page\.tsx: mobile\.tab/,

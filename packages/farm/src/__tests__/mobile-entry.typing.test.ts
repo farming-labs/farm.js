@@ -21,11 +21,13 @@ const native = {
 } satisfies FarmMobileNativeConfig;
 const screen: FarmMobileScreen = native.routes["/map"].ios;
 const block: FarmMobileUserConfig = { id: "com.example.notes", native };
+// A page can require a native screen; the build checks it can render natively.
+const required: FarmMobilePageConfig = { native: true };
 // @ts-expect-error a page cannot pick its screen tier
-const wrong: FarmMobilePageConfig = { native: true };
+const wrong: FarmMobilePageConfig = { screen: "native" };
 // @ts-expect-error an OS override needs the route's screen
 const partial: FarmMobileNativeConfig = { routes: { "/map": { ios: "web" } } };
-void [screen, block, wrong, partial];
+void [screen, block, required, wrong, partial];
 `;
   const options: ts.CompilerOptions = {
     strict: true,

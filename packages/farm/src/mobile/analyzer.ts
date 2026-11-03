@@ -17,7 +17,7 @@ import { FARM_VERSION } from "../version";
  * Cached facts are reused only by the same analyzer: bump when facts change shape or rules
  * change between releases; a new Farm version always starts fresh.
  */
-const ANALYZER_VERSION = `1:${FARM_VERSION}`;
+const ANALYZER_VERSION = `2:${FARM_VERSION}`;
 
 export type FarmUiNodeKind = "View" | "Text" | "Image" | "Pressable" | "TextInput" | "List";
 
@@ -44,7 +44,16 @@ export interface FarmMobileBlocker {
   column: number;
   rule: FarmMobileBlockerRule;
   message: string;
+  /** Internal: the one tier this blocks. Reported blockers are split by tier instead. */
+  only?: Exclude<FarmMobileTier, "web">;
 }
+
+/**
+ * What a route can become on mobile. `"native"`: the server renders the page into a tree of
+ * native views, with no JavaScript on the device (no hooks, event handlers, or client
+ * components). `"react-native"`: a React Native screen ported from the page. `"web"`: a WebView.
+ */
+export type FarmMobileTier = "native" | "react-native" | "web";
 
 export type FarmMobileBlockerRule =
   | "parse-error"
@@ -73,7 +82,8 @@ export type FarmMobileBlockerRule =
   | "unmapped-import"
   | "unresolved-import"
   | "dynamic-import"
-  | "node-builtin";
+  | "node-builtin"
+  | "client-logic";
 
 export type FarmMobileWin = "list" | "input" | "timer";
 
@@ -87,14 +97,21 @@ export interface FarmMobileElementCounts {
 
 export interface FarmMobileRouteAnalysis {
   route: string;
+  /** The first tier no blocker rules out: `"native"`, then `"react-native"`, then `"web"`. */
+  tier: FarmMobileTier;
   /**
    * `"port"`: portable and native would help (lists, input, timers). `"web"`: blocked, or
    * portable with no win. Any doubt is web.
    */
   decision: "port" | "web";
   portable: boolean;
-  /** Every blocker, the page's module graph first, then its layouts'. */
+  /** What keeps a React Native port out: the page's module graph first, then its layouts'. */
   blockers: FarmMobileBlocker[];
+  /**
+   * What keeps the server-rendered native tier out. The page's graph only: a native screen shows
+   * the page without its layouts, since the shell draws the chrome.
+   */
+  nativeBlockers: FarmMobileBlocker[];
   wins: FarmMobileWin[];
   elements: FarmMobileElementCounts;
   /** `mapped / total`, rounded, 100 for a route with no elements. */
@@ -526,9 +543,23 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
     components: {},
   };
   const starts = lineStarts(source);
-  const block = (node: { start: number }, rule: FarmMobileBlockerRule, message: string) => {
-    facts.blockers.push({ ...locate(starts, node.start), rule, message });
+  const block = (
+    node: { start: number },
+    rule: FarmMobileBlockerRule,
+    message: string,
+    only?: FarmMobileBlocker["only"],
+  ) => {
+    facts.blockers.push({
+      ...locate(starts, node.start),
+      rule,
+      message,
+      ...(only ? { only } : {}),
+    });
   };
+  // Needs JavaScript on the device: a React Native screen can run it, a server-rendered one
+  // cannot.
+  const needsDevice = (node: { start: number }, message: string) =>
+    block(node, "client-logic", message, "native");
   const result = parseSync(file, source, { lang: scriptLang(file) });
   if (result.errors.length > 0) {
     const error = result.errors[0]!;
@@ -550,7 +581,10 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
 
   for (const statement of program.body as Node[]) {
     if (statement.type === "ExpressionStatement" && statement.directive) {
-      if (statement.directive === "use client") facts.useClient = true;
+      if (statement.directive === "use client") {
+        facts.useClient = true;
+        needsDevice(statement, 'a "use client" module renders in the browser');
+      }
       if (statement.directive === "use server") facts.serverBoundary = true;
       continue;
     }
@@ -657,6 +691,15 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
         kind = MAPPED_COMPONENTS[binding.source]?.[member];
         if (!kind) {
           const fromApp = /^(?:\.|\/|@\/|~|#)/.test(binding.source);
+          if (!fromApp) {
+            // The server would run a package component it cannot see into.
+            block(
+              opening,
+              "unmapped-element",
+              `<${tag}> from "${binding.source}" has no native mapping`,
+              "native",
+            );
+          }
           counted = !fromApp;
           // A package component maps only through a portable package; others are blocked by
           // the import table.
@@ -714,6 +757,8 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
       if (/^on[A-Z]/.test(name)) {
         if (isIntrinsic && kind && !MAPPED_EVENTS[kind as FarmUiNodeKind]?.has(name)) {
           block(attribute, "dom-event", `${name} on <${tag}> has no native event`);
+        } else {
+          needsDevice(attribute, `${name} on <${tag}> runs on the device`);
         }
         events.push(name);
         continue;
@@ -888,6 +933,8 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
               : undefined;
         if (calleeName === "useLayoutEffect" || calleeName === "useInsertionEffect") {
           block(node, "layout-effect", `${calleeName} reads layout from the DOM`);
+        } else if (calleeName && /^use(?:[A-Z0-9]|$)/.test(calleeName)) {
+          needsDevice(node, `${calleeName}() runs on the device`);
         }
         if (calleeName === "createElement" || calleeName === "cloneElement") {
           // Only JSX is classified; an element built by a call could be anything.
@@ -1086,7 +1133,13 @@ function classifyPackage(fact: ImportFact, serverBoundary: boolean): LocalBlocke
   if (specifier.startsWith("node:") || NODE_BUILTINS.has(packageName(specifier))) {
     return serverBoundary
       ? undefined
-      : { ...at, rule: "node-builtin", message: `import "${specifier}" is a Node.js API` };
+      : {
+          ...at,
+          rule: "node-builtin",
+          message: `import "${specifier}" is a Node.js API`,
+          // A server-rendered screen runs it on the server, like the web page.
+          only: "react-native",
+        };
   }
   if (specifier.startsWith("@farm.js/core")) {
     const portable = CORE_PORTABLE[specifier];
@@ -1096,6 +1149,9 @@ function classifyPackage(fact: ImportFact, serverBoundary: boolean): LocalBlocke
         ...at,
         rule: "unmapped-import",
         message: `${unmapped.join(", ") || "import"} from "${specifier}" has no native mapping`,
+        // Server APIs are fine on a server-rendered screen; components and hooks from it are
+        // checked where they are used.
+        only: "react-native",
       };
     }
     return undefined;
@@ -1106,7 +1162,12 @@ function classifyPackage(fact: ImportFact, serverBoundary: boolean): LocalBlocke
       specifier === "react/jsx-runtime" ||
       specifier === "react/jsx-dev-runtime"
       ? undefined
-      : { ...at, rule: "unknown-package", message: `import "${specifier}" has no native mapping` };
+      : {
+          ...at,
+          rule: "unknown-package",
+          message: `import "${specifier}" has no native mapping`,
+          only: "react-native",
+        };
   }
   if (PORTABLE_PACKAGES.has(name)) return undefined;
   if (
@@ -1120,6 +1181,8 @@ function classifyPackage(fact: ImportFact, serverBoundary: boolean): LocalBlocke
     ...at,
     rule: "unknown-package",
     message: `import "${specifier}" has no native mapping`,
+    // Data and utility packages run on the server; their components are blocked where used.
+    only: "react-native",
   };
 }
 
@@ -1347,31 +1410,39 @@ export async function analyzeFarmMobileRoutes(
     const seen = new Set<string>();
     const ir: FarmMobileRouteIR = { root: "", components: {} };
 
-    const walk = (file: string, entry: boolean) => {
+    // `layout`: a layout's graph, which only a React Native port includes.
+    const walk = (file: string, entry: boolean, layout: boolean) => {
       if (seen.has(file)) return;
       seen.add(file);
       const moduleFacts = settled.get(file)!;
       const label = relative(root, file);
+      const add = (blocker: FarmMobileBlocker) => {
+        if (!layout) blockers.push(blocker);
+        else if (blocker.only !== "native") blockers.push({ ...blocker, only: "react-native" });
+      };
+      // The server renders these, which a server-rendered native screen does too.
       if (entry && options.serverComponents && !moduleFacts.useClient) {
-        blockers.push({
+        add({
           file: label,
           line: 1,
           column: 1,
           rule: "server-component",
           message: 'a server component (no "use client") renders on the server',
+          only: "react-native",
         });
       }
       if (entry && moduleFacts.asyncDefault) {
-        blockers.push({
+        add({
           file: label,
           line: 1,
           column: 1,
           rule: "async-component",
           message: "an async component renders on the server",
+          only: "react-native",
         });
       }
       if (moduleFacts.serverBoundary && !entry) return;
-      for (const blocker of moduleFacts.blockers) blockers.push({ file: label, ...blocker });
+      for (const blocker of moduleFacts.blockers) add({ file: label, ...blocker });
       for (const win of moduleFacts.wins) wins.add(win);
       elements.total += moduleFacts.elements.total;
       elements.mapped += moduleFacts.elements.mapped;
@@ -1383,8 +1454,8 @@ export async function analyzeFarmMobileRoutes(
         ir.components[`${label}#${name}`] = node;
       }
       for (const entryImport of resolved.get(file) ?? []) {
-        if (entryImport.blocker) blockers.push({ file: label, ...entryImport.blocker });
-        if (entryImport.file) walk(entryImport.file, false);
+        if (entryImport.blocker) add({ file: label, ...entryImport.blocker });
+        if (entryImport.file) walk(entryImport.file, false, layout);
       }
     };
 
@@ -1405,18 +1476,25 @@ export async function analyzeFarmMobileRoutes(
         message: "a Markdown page renders HTML from Markdown",
       });
     } else {
-      walk(page, true);
+      walk(page, true, false);
       ir.root = `${relative(root, page)}#default`;
     }
-    for (const layout of layouts) walk(layout, true);
+    for (const layout of layouts) walk(layout, true, true);
 
-    const portable = blockers.length === 0;
+    const strip = ({ only: _only, ...blocker }: FarmMobileBlocker) => blocker;
+    const portBlockers = blockers.filter((blocker) => blocker.only !== "native").map(strip);
+    const nativeBlockers = blockers.filter((blocker) => blocker.only !== "react-native").map(strip);
+    const portable = portBlockers.length === 0;
+    const tier: FarmMobileTier =
+      nativeBlockers.length === 0 ? "native" : portable ? "react-native" : "web";
     const sortedWins = [...wins].sort();
     const analysis: FarmMobileRouteAnalysis = {
       route,
+      tier,
       decision: portable && sortedWins.length > 0 ? "port" : "web",
       portable,
-      blockers,
+      blockers: portBlockers,
+      nativeBlockers,
       wins: sortedWins,
       elements,
       portablePercent:

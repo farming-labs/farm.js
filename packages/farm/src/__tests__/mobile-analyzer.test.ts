@@ -153,9 +153,12 @@ export default function Notes() {
       wins: [],
     });
     expect(result.table).toMatch(
-      /\/about\s+web\s+web\s+3\/3\s+100%\s+portable; no win \(3 elements\)/,
+      /\/about\s+web\s+native\s+web\s+3\/3\s+100%\s+renders natively, no JavaScript on the device/,
     );
-    expect(result.table).toMatch(/\/notes\s+web\s+port\s+8\/8\s+100%\s+portable; input, list/);
+    expect(result.table).toMatch(
+      /\/notes\s+web\s+react-native\s+port\s+8\/8\s+100%\s+portable; input, list/,
+    );
+    expect(result.table).toContain("tiers: 2 native, 1 react-native, 0 web");
     // Report only: every route stays a web screen.
     expect(result.manifest.rules.every((rule) => rule.screen === "web")).toBe(true);
     const written = JSON.parse(await fs.readFile(result.reportFile!, "utf8"));
@@ -167,6 +170,7 @@ export default function Notes() {
       portableNoWin: 1,
       blocked: 0,
       native: 0,
+      tiers: { native: 2, "react-native": 1, web: 0 },
     });
   });
 
@@ -255,7 +259,7 @@ export default function Effect({ icon: Icon }) {
       "src/app/effect/page.tsx:10:25 dynamic-component <Icon> is a value the analyzer cannot resolve to a component",
     ]);
     expect(result.table).toMatch(
-      /\/chart\s+web\s+web\s+5\/10\s+50%\s+src\/app\/chart\/page\.tsx:4:7 <canvas> has no native mapping \(\+17 more\)/,
+      /\/chart\s+web\s+web\s+web\s+5\/10\s+50%\s+src\/app\/chart\/page\.tsx:4:7 <canvas> has no native mapping \(\+18 more\)/,
     );
   });
 
@@ -353,7 +357,7 @@ export const getNote = createServerFn({ handler: async ({ id }) => JSON.parse(aw
     expect(rules(routeOf(result, "/docs"))).toEqual([
       "src/app/docs/page.md:1:1 markdown-page a Markdown page renders HTML from Markdown",
     ]);
-    expect(result.table).toMatch(/\/feed\s+native\s+-\s+src\/app\/feed\/page\.native\.tsx/);
+    expect(result.table).toMatch(/\/feed\s+native\s+-\s+-\s+src\/app\/feed\/page\.native\.tsx/);
   });
 
   it("blocks server components and async pages", async () => {
@@ -375,6 +379,104 @@ export const getNote = createServerFn({ handler: async ({ id }) => JSON.parse(aw
     expect(rules(routeOf(plain, "/async"))).toEqual([
       "src/app/async/page.tsx:1:1 async-component an async component renders on the server",
     ]);
+  });
+
+  it("sorts routes into the native, react-native, and web tiers", async () => {
+    const root = await createApp({
+      // A layout's hooks block only a React Native port: a native screen shows the page alone.
+      "src/app/layout.tsx": `"use client";
+import { useState } from "react";
+export default function Layout({ children }) {
+  const [open] = useState(false);
+  return <div>{open ? null : children}</div>;
+}
+`,
+      "src/app/page.tsx": `import { Link } from "@farm.js/core/client";
+export default function Home() {
+  return <main className="flex flex-col gap-2"><Link href="/feed">Feed</Link></main>;
+}
+`,
+      "src/app/feed/page.tsx": `import { readFile } from "node:fs/promises";
+import { format } from "date-fns";
+export default async function Feed() {
+  const posts = JSON.parse(await readFile("posts.json", "utf8"));
+  return <ul>{posts.map((post) => <li key={post.id}>{post.title} {format(post.at, "PP")}</li>)}</ul>;
+}
+`,
+      "src/app/counter/page.tsx": `"use client";
+import { useState } from "react";
+export default function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>{count}</button>;
+}
+`,
+      "src/app/chart/page.tsx": `import { Sparkline } from "tiny-sparkline";
+export default function Chart() { return <Sparkline data={[1, 2]} />; }
+`,
+    });
+    const result = await report(root);
+    const tier = (route: string) => routeOf(result, route).analysis!.tier;
+    const native = (route: string) =>
+      routeOf(result, route).analysis!.nativeBlockers.map(
+        (blocker) => `${blocker.file}:${blocker.line} ${blocker.rule} ${blocker.message}`,
+      );
+
+    expect(tier("/")).toBe("native");
+    expect(native("/")).toEqual([]);
+    // The server loads the data and renders it, as it does for the web page.
+    expect(tier("/feed")).toBe("native");
+    expect(rules(routeOf(result, "/feed"))).toEqual(
+      expect.arrayContaining([
+        "src/app/feed/page.tsx:1:1 async-component an async component renders on the server",
+      ]),
+    );
+    expect(tier("/counter")).toBe("react-native");
+    expect(native("/counter")).toEqual([
+      'src/app/counter/page.tsx:1 client-logic a "use client" module renders in the browser',
+      "src/app/counter/page.tsx:4 client-logic useState() runs on the device",
+      "src/app/counter/page.tsx:5 client-logic onClick on <button> runs on the device",
+    ]);
+    expect(tier("/chart")).toBe("web");
+    expect(native("/chart")).toEqual([
+      'src/app/chart/page.tsx:2 unmapped-element <Sparkline> from "tiny-sparkline" has no native mapping',
+    ]);
+  });
+
+  it("checks pages that require a native screen, even with the analyzer off", async () => {
+    const page = (body: string) => `export const mobile = { native: true };\n${body}`;
+    const passing = await createApp({
+      "src/app/page.tsx": page(
+        `export default async function Home() { return <p className="text-lg">home</p>; }\n`,
+      ),
+    });
+    const { generateFarmMobileRoutes } = await loadFarmMobileRuntime();
+    // Not even asked to analyze, and `auto` is off: the requirement still runs the check.
+    const result = await generateFarmMobileRoutes({
+      root: passing,
+      userConfig: userConfig({ auto: "off" }),
+    });
+    expect(routeOf(result, "/")).toMatchObject({
+      screen: "web",
+      source: "page",
+      requested: "native",
+      analysis: { tier: "native", nativeBlockers: [] },
+    });
+
+    const failing = await createApp({
+      "src/app/page.tsx": page(`import { useState } from "react";
+export default function Home() {
+  const [count] = useState(0);
+  return <p>{count}</p>;
+}
+`),
+    });
+    await expect(
+      generateFarmMobileRoutes({ root: failing, userConfig: userConfig({ auto: "off" }) }),
+    ).rejects.toThrow(
+      'mobile (os: android): src/app/page.tsx sets mobile.native to true, but "/" cannot render as a native screen:\n' +
+        "  - src/app/page.tsx:4:19 useState() runs on the device\n" +
+        "It needs JavaScript on the device: add page.native.tsx next to the page, or remove mobile.native.",
+    );
   });
 
   it("parses each module once per run and reuses facts by content hash", async () => {
