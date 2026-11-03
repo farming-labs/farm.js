@@ -291,7 +291,8 @@ private class Renderer(private val context: Context, private val host: FarmNativ
         if (style.has("opacity")) view.alpha = style.optDouble("opacity", 1.0).toFloat()
         background(style)?.let { view.background = it }
         val radius = style.optDouble("borderTopLeftRadius", 0.0)
-        if (style.optString("overflow") == "hidden") {
+        // `overflow-hidden` clips children; an image with a radius is clipped to it, as on the web.
+        if (style.optString("overflow") == "hidden" || (view is ImageView && radius > 0)) {
             view.clipToOutline = true
             view.outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(target: View, outline: Outline) {

@@ -147,6 +147,34 @@ describe("native tier tree", () => {
     expect(JSON.stringify(tree)).not.toContain("not markup");
   });
 
+  it("makes each child of a flex container an item, as CSS does", () => {
+    const tree = createFarmNativeTree(
+      page(
+        `<a href="/notes/1" class="flex flex-col gap-1 rounded-xl p-4">` +
+          `<span class="text-lg font-semibold">Grocery run</span>` +
+          `<span class="self-start rounded-full bg-emerald-100 px-2 py-0.5 text-xs">home</span></a>`,
+      ),
+      url,
+    );
+    expect(tree.unsupported).toEqual([]);
+    const card = tree.root.children![0]!;
+    expect(card).toMatchObject({ type: "Pressable", href: "https://notes.example.com/notes/1" });
+    expect(card.children).toEqual([
+      expect.objectContaining({ type: "Text", tag: "span", children: ["Grocery run"] }),
+      expect.objectContaining({
+        type: "Text",
+        tag: "span",
+        style: expect.objectContaining({ alignSelf: "flex-start", backgroundColor: "#d0fae5" }),
+        children: ["home"],
+      }),
+    ]);
+    // Outside a flex container a box-styled span stays inline, which the tree cannot draw yet.
+    expect(
+      createFarmNativeTree(page(`<p>a <span class="rounded bg-gray-100 px-1">b</span></p>`), url)
+        .unsupported,
+    ).toEqual(["<span> inside text has box styles"]);
+  });
+
   it("puts streamed Suspense content in place", () => {
     const html = page(
       `<div><!--$?--><template id="B:0"></template><p>Loading…</p><!--/$--></div>`,

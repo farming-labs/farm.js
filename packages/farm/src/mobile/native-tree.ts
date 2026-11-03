@@ -262,8 +262,26 @@ class Converter {
     return node;
   }
 
-  /** Block content: each element a view, and each run of inline content a text block. */
-  blocks(content: Array<HtmlElement | string>, inherited: Inherited): FarmNativeNode[] {
+  /**
+   * Block content: each element a view, and each run of inline content a text block. In a flex
+   * container every child is its own item, as CSS blockifies them: a `<span>` pill there is a box.
+   */
+  blocks(
+    content: Array<HtmlElement | string>,
+    inherited: Inherited,
+    flex = false,
+  ): FarmNativeNode[] {
+    if (flex) {
+      const items: FarmNativeNode[] = [];
+      for (const child of content) {
+        const item =
+          typeof child === "string"
+            ? this.text({ tag: "#text", attributes: {}, children: [] }, [child], inherited)
+            : this.element(child, inherited, true);
+        if (item) items.push(item);
+      }
+      return items;
+    }
     const nodes: FarmNativeNode[] = [];
     let pending: Array<HtmlElement | string> = [];
     const flush = () => {
@@ -284,7 +302,11 @@ class Converter {
     return nodes;
   }
 
-  element(element: HtmlElement, inherited: Inherited): FarmNativeNode | undefined {
+  element(
+    element: HtmlElement,
+    inherited: Inherited,
+    flexItem = false,
+  ): FarmNativeNode | undefined {
     if (SKIPPED_TAGS.has(element.tag)) return undefined;
     const own = this.stylesOf(element);
     if (own.style.display === "none") return undefined;
@@ -304,7 +326,11 @@ class Converter {
     const box = current(withoutText(own.style), passed.style.color);
     const boxDark = current(withoutText(own.dark), passed.dark.color ?? passed.style.color);
 
-    if (BLOCK_TEXT_TAGS.has(element.tag)) {
+    const flex = own.style.display === "flex";
+    // A flex item that is inline on the web is a text box of its own.
+    const textBox =
+      flexItem && INLINE_TAGS.has(element.tag) && element.tag !== "a" && element.tag !== "br";
+    if (BLOCK_TEXT_TAGS.has(element.tag) || textBox) {
       if (
         element.children.some((child) => typeof child !== "string" && !INLINE_TAGS.has(child.tag))
       ) {
@@ -335,7 +361,7 @@ class Converter {
     if (element.tag === "a" || element.tag === "button") {
       const node = this.node("Pressable", element, box, boxDark);
       if (element.tag === "a") node.href = this.url(element.attributes.href);
-      node.children = this.blocks(element.children, passed);
+      node.children = this.blocks(element.children, passed, flex);
       return node;
     }
     if (element.tag === "hr") {
@@ -352,7 +378,7 @@ class Converter {
     }
     if (VIEW_TAGS.has(element.tag)) {
       const node = this.node("View", element, box, boxDark);
-      const children = this.blocks(element.children, passed);
+      const children = this.blocks(element.children, passed, flex);
       if (children.length > 0) node.children = children;
       return node;
     }
