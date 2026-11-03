@@ -9,7 +9,7 @@ import fs from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { build, loadConfig, resolveConfig } from "@farm.js/core";
 import { createServer } from "@farm.js/core/server";
@@ -31,7 +31,7 @@ beforeAll(() => {
 
 // Guards an app might put on its API: config middleware, a plugin's runtime.before, and an
 // integration's middleware (what protectedRoutes compiles to).
-const config = (dataDir: string) => `import { agent } from "@farm.js/agent";
+const config = (dataDir: string, agentOptions = "") => `import { agent } from "@farm.js/agent";
 import { defineConfig, defineIntegration } from "@farm.js/core";
 import { definePlugin } from "@farm.js/core/plugin";
 
@@ -81,7 +81,7 @@ export default defineConfig({
         },
       ],
     }),
-    agent: agent({ storage: { driver: "fs-lite", base: ${JSON.stringify(dataDir)} } }),
+    agent: agent({ storage: { driver: "fs-lite", base: ${JSON.stringify(dataDir)} }${agentOptions} }),
   },
 });
 `;
@@ -97,7 +97,7 @@ export default defineAgent(async (input: { orderId: string }, run) => {
 });`,
 };
 
-async function createApp(prefix: string): Promise<string> {
+async function createApp(prefix: string, agentOptions = ""): Promise<string> {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
   cleanups.push(() =>
     fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
@@ -120,7 +120,10 @@ async function createApp(prefix: string): Promise<string> {
     path.join(root, "package.json"),
     '{"name":"agent-guard-app","version":"0.0.0","type":"module","private":true}',
   );
-  await fs.writeFile(path.join(root, "farm.config.ts"), config(path.join(root, ".data")));
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    config(path.join(root, ".data"), agentOptions),
+  );
   for (const [file, source] of Object.entries(FILES)) {
     await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await fs.writeFile(path.join(root, file), source);
@@ -279,5 +282,95 @@ describe("the agent API runs through Farm's request pipeline", () => {
 
     await expectGuardedAgentAPI(origin);
     await expectRunsThroughGuards(origin);
+  }, 240_000);
+});
+
+// Vercel Cron calls the Nitro route that runs agent-unit's sweep and the app's tasks over public
+// HTTP. Nitro checks CRON_SECRET there only when it is set, so the route ran them for anyone.
+describe("the agent's Vercel cron route", () => {
+  it("runs the scheduled tasks only for a caller with CRON_SECRET", async () => {
+    const root = await createApp(
+      "farm-agent-vercel-",
+      `, tasks: { ping: { schedule: "* * * * *", handler: "src/tasks/ping.ts" } }`,
+    );
+    const marker = path.join(root, "ping-ran");
+    await fs.mkdir(path.join(root, "src/tasks"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src/tasks/ping.ts"),
+      `import { writeFileSync } from "node:fs";
+export default async () => { writeFileSync(${JSON.stringify(marker)}, "ran"); };`,
+    );
+    const resolved = await resolveConfig(
+      {
+        ...(await loadConfig(root, undefined, "production")),
+        root,
+        srcDir: "src",
+        deploy: { target: "vercel" },
+      },
+      "production",
+    );
+    await build(resolved, { root, preset: "vercel" });
+
+    const output = path.join(root, ".vercel/output");
+    const vercelConfig = JSON.parse(await fs.readFile(path.join(output, "config.json"), "utf8"));
+    expect(vercelConfig.crons).toContainEqual({ path: "/_vercel/cron", schedule: "* * * * *" });
+
+    // The built function as Vercel invokes it, in a production process of its own.
+    const functions = path.join(output, "functions");
+    const functionDir = (await fs.readdir(functions)).find((name) =>
+      existsSync(path.join(functions, name, "index.mjs")),
+    );
+    if (!functionDir) throw new Error("The Vercel build has no server function");
+    const entry = pathToFileURL(path.join(functions, functionDir, "index.mjs")).href;
+    const script = `
+import { existsSync, rmSync } from "node:fs";
+const { default: server } = await import(${JSON.stringify(entry)});
+const cases = [
+  ["no secret configured", undefined, {}],
+  ["no bearer", "cron-secret", {}],
+  ["wrong bearer", "cron-secret", { authorization: "Bearer nope" }],
+  ["bearer", "cron-secret", { authorization: "Bearer cron-secret" }],
+];
+const results = [];
+for (const [name, secret, headers] of cases) {
+  if (secret === undefined) delete process.env.CRON_SECRET;
+  else process.env.CRON_SECRET = secret;
+  rmSync(${JSON.stringify(marker)}, { force: true });
+  const pending = [];
+  const response = await server.fetch(
+    new Request("https://app.example/_vercel/cron", {
+      headers: { "x-vercel-cron-schedule": "* * * * *", ...headers },
+    }),
+    { waitUntil: (promise) => pending.push(promise) },
+  );
+  await Promise.allSettled(pending);
+  results.push({ name, status: response.status, ran: existsSync(${JSON.stringify(marker)}) });
+}
+console.log("RESULTS " + JSON.stringify(results));
+`;
+    const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "production" };
+    delete env.CRON_SECRET;
+    const stdout = await new Promise<string>((resolve, reject) => {
+      const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+        cwd: root,
+        env,
+        stdio: "pipe",
+      });
+      let out = "";
+      child.stdout?.on("data", (chunk) => (out += chunk));
+      child.stderr?.on("data", (chunk) => (out += chunk));
+      child.once("error", reject);
+      child.once("exit", (code) =>
+        code === 0 ? resolve(out) : reject(new Error(`exit ${code}\n${out}`)),
+      );
+    });
+    const line = stdout.split("\n").find((value) => value.startsWith("RESULTS "));
+    if (!line) throw new Error(`No results\n${stdout}`);
+    expect(JSON.parse(line.slice("RESULTS ".length))).toEqual([
+      { name: "no secret configured", status: 401, ran: false },
+      { name: "no bearer", status: 401, ran: false },
+      { name: "wrong bearer", status: 401, ran: false },
+      { name: "bearer", status: 200, ran: true },
+    ]);
   }, 240_000);
 });
