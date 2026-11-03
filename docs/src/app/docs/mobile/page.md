@@ -706,10 +706,9 @@ sign in, as `{ id, userId?, expiresAt? }`, or `null`.
 Without an integration that reads sessions, the endpoints answer `501` and native screens stay
 signed out.
 
-`@farm.js/auth` accepts requests only from its auth URL, which is `http://localhost:3000` in
-development unless `FARM_AUTH_URL` is set. The Android emulator's WebView reaches the dev server as
-`http://10.0.2.2:<port>`, so start `farm dev --mobile` with `FARM_AUTH_URL=http://10.0.2.2:<port>`
-or web sign-in fails with `INVALID_ORIGIN`.
+In `farm dev`, `@farm.js/auth` trusts the origin the dev server is serving, so web sign-in works
+from the Android emulator's `http://10.0.2.2:<port>` and from a device on the LAN under `--host`
+without setting `FARM_AUTH_URL`.
 
 ### What this protects against, and what it does not
 
