@@ -29,6 +29,10 @@ interface FarmShellModule {
   fallback(screen: number, reason: string): void;
   setTitle(screen: number, title: string): void;
   rendered(screen: number): void;
+  /** Device session (shells generated with mobile session tokens). */
+  session?(): Promise<{ appId: string; accessToken: string | null } | null>;
+  refreshSession?(failedToken: string): Promise<string | null>;
+  signOut?(): Promise<void>;
 }
 
 export const FarmScreenContext = createContext<FarmScreenState | null>(null);

@@ -6,9 +6,11 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { resolveFarmHref, type FarmRouteParams } from "./routes";
 import { farmApp, FarmScreenContext, farmShell, type FarmScreenState } from "./runtime";
+import { fetchWithFarmSession, type FarmShellSession } from "./session";
 
 export { matchFarmRoute, resolveFarmHref } from "./routes";
 export type { FarmRouteMatchOptions, FarmRouteParams } from "./routes";
+export type { FarmShellSession } from "./session";
 
 function useScreen(hook: string): FarmScreenState {
   const screen = useContext(FarmScreenContext);
@@ -57,14 +59,34 @@ export function serverUrl(path: string): string {
   return `${farmApp.server.replace(/\/$/, "")}${farmApp.basePath}${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
+/** The shell's session methods, when this shell has them. */
+function shellSession(): FarmShellSession | undefined {
+  const shell = farmShell();
+  return shell && typeof shell.session === "function" && typeof shell.refreshSession === "function"
+    ? (shell as FarmShellSession)
+    : undefined;
+}
+
 /**
  * `fetch` against `mobile.server` (the dev server under `farm dev --mobile`): the same HTTP
- * routes the web client calls, such as `serverFetch("/api/notes")`.
+ * routes the web client calls, such as `serverFetch("/api/notes")`. Once the user signed in on a
+ * web screen, it sends the device's session (`Authorization: Bearer`), so protected API routes
+ * and server functions see the same user; a 401 refreshes the token once and retries.
  */
 export function serverFetch(path: string, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers);
-  if (!headers.has("accept")) headers.set("accept", "application/json");
-  return fetch(serverUrl(path), { ...init, headers });
+  return fetchWithFarmSession(serverUrl(path), init, {
+    server: farmApp.server,
+    shell: shellSession(),
+  });
+}
+
+/**
+ * Sign this device out: the shell revokes its token on the server and deletes it, and clears the
+ * server's cookies in the WebView. To end the server session itself, call your auth's sign-out
+ * route with `serverFetch` first (`serverFetch("/api/auth/sign-out", { method: "POST" })`).
+ */
+export async function signOut(): Promise<void> {
+  await shellSession()?.signOut();
 }
 
 /** An async call, such as `() => serverFetch("/api/notes").then((r) => r.json())`. */

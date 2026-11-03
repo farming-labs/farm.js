@@ -316,7 +316,14 @@ function bearer(request: Request): string | null {
 // ---------------------------------------------------------------------------------------------
 // The plugin
 
-class SessionReadError extends Error {}
+class SessionReadError extends Error {
+  constructor(
+    message: string,
+    readonly reason: unknown,
+  ) {
+    super(message);
+  }
+}
 
 export function createFarmMobileSessionPlugin(options: FarmMobileSessionOptions): FarmPlugin {
   const basePath = options.basePath && options.basePath !== "/" ? options.basePath : "";
@@ -350,7 +357,7 @@ export function createFarmMobileSessionPlugin(options: FarmMobileSessionOptions)
     try {
       session = await reader(new Request(url, { headers: { cookie: header } }));
     } catch (error) {
-      throw new SessionReadError("The auth integration's session() failed", { cause: error });
+      throw new SessionReadError("The auth integration's session() failed", error);
     }
     const id = (session as { id?: unknown } | null)?.id;
     return typeof id === "string" && id ? (session as FarmIntegrationSession) : null;
@@ -726,7 +733,7 @@ export function createFarmMobileSessionPlugin(options: FarmMobileSessionOptions)
     handler: (event: { request: Request }) =>
       handler(event.request).catch((error: unknown) => {
         if (error instanceof SessionReadError) {
-          console.error("[Farm] Mobile session endpoint could not read the session:", error);
+          console.error("[Farm] Mobile session endpoint could not read the session:", error.reason);
           return failure(503, "session_unavailable", "Try again later.");
         }
         throw error;
