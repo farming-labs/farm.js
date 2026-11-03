@@ -1,0 +1,73 @@
+{
+  "name": "@farm.js/native",
+  "version": "0.1.0-beta.0",
+  "description": "React Native screens for Farm.js mobile apps: page.native.tsx hooks and the screen bundle build.",
+  "keywords": [
+    "android",
+    "farm.js",
+    "mobile",
+    "react-native"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-native"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "react-native": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./register": {
+      "types": "./dist/register.d.ts",
+      "react-native": "./dist/register.js",
+      "import": "./dist/register.js",
+      "default": "./dist/register.js"
+    },
+    "./build": {
+      "types": "./dist/build/index.d.ts",
+      "import": "./dist/build/index.js",
+      "default": "./dist/build/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.0.0",
+    "react": "19.3.1",
+    "typescript": "^5.3.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  },
+  "peerDependencies": {
+    "@react-native/metro-config": ">=0.88.0",
+    "react": ">=19.2.8",
+    "react-native": ">=0.88.0"
+  },
+  "peerDependenciesMeta": {
+    "@react-native/metro-config": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
