@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/wasm",
-  "version": "0.1.0-beta.47",
+  "version": "0.1.0-beta.48",
   "description": "WebAssembly imports and browser workers for Farm.js applications",
   "keywords": [
     "farm.js",
