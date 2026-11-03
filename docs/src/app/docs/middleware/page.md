@@ -256,6 +256,12 @@ A trailing slash is equivalent too: the router serves `/api/admin/users/` from t
 same handler as `/api/admin/users`, so a `/api/admin/users` matcher runs for both.
 `exclude` patterns stay exact, so a trailing slash can add a guard but never skip one.
 
+A static page prerenders unless some middleware may run for it. For a middleware file that is a
+folder above the page whose `config` has no literal `matcher` (or `exclude`) leaving the page out:
+`export const config = { matcher: "/api/:path*" }` in `src/app/middleware.ts` keeps `/about`
+prerendered. A matcher Farm cannot read at build time (a function, or a value built at runtime)
+counts as matching every path.
+
 That pathname is relative to the app's `basePath`. With `basePath: "/console"`, a request for
 `/console/dashboard` meets a `/dashboard` matcher and runs `src/app/dashboard/middleware.ts`;
 leave the base path out of matchers.

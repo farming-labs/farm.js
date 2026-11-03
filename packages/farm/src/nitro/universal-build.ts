@@ -205,6 +205,7 @@ import {
   farmPathGuardCoversPage,
   hasFarmMiddlewareConfig,
 } from "../middleware/may-handle";
+import { readMiddlewareFileConfig, type StaticMiddlewareConfig } from "../middleware/static-config";
 import {
   appendMiddlewareDirectory,
   appendMiddlewareRoutePath,
@@ -280,6 +281,8 @@ type UniversalApplicationMetadataRoute = Pick<
 type UniversalMiddlewareRoute = {
   path: string;
   filePath: string;
+  /** The file's literal `config` matcher, when the build read it (prerendering). */
+  config?: StaticMiddlewareConfig | null | "unknown";
 };
 
 function preloadFarmNitroBuilder(): Promise<PromiseSettledResult<FarmNitroBuilder>> {
@@ -11498,6 +11501,17 @@ async function buildNitroUniversal(
   const rewriteSources = configuredRewrites.map((route: RewriteConfig) => route.source);
   const prerenderRoutes: string[] = [];
   const skippedPrerenderRoutes: Array<{ pathname: string; reason: string }> = [];
+  // Each middleware file's own literal `config.matcher`: a page none of them can match still
+  // prerenders.
+  const middlewareRoutesWithConfig =
+    ssgPages.length > 0
+      ? await Promise.all(
+          middlewareRoutes.map(async (route) => ({
+            ...route,
+            config: await readMiddlewareFileConfig(route.filePath),
+          })),
+        )
+      : middlewareRoutes;
   for (const page of ssgPages) {
     // Revalidated pages keep their runtime/CDN stale-while-revalidate
     // behavior. Emitting them as public files would prevent the server from
@@ -11507,7 +11521,7 @@ async function buildNitroUniversal(
 
     const reason = getPhysicalPrerenderBypassReason({
       config,
-      middlewareRoutes,
+      middlewareRoutes: middlewareRoutesWithConfig,
       routeRuntimeManifest,
       redirectSources,
       rewriteSources,

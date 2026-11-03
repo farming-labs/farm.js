@@ -163,7 +163,19 @@ export async function middleware(_request, context) {
 }
 `.trim(),
   );
+  // Middleware whose own literal matcher never meets its folder's page: the page still prerenders.
+  await fs.mkdir(path.join(root, "src", "app", "scoped"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "src", "app", "scoped", "middleware.ts"),
+    `
+export async function middleware(_request, context) {
+  context.headers.set("x-scoped-middleware", "yes");
+}
+export const config = { matcher: "/scoped/api/:path*" };
+`.trim(),
+  );
   for (const [route, label] of [
+    ["scoped", "scoped-middleware-page"],
     ["guarded", "app-middleware-page"],
     ["configured", "configured-middleware-page"],
     ["forced-dynamic", "dynamic-rule-page"],
@@ -648,6 +660,9 @@ describe("production SSG output", () => {
       await expect(
         fs.readFile(path.join(publicDir, "rules", "safe", "index.html"), "utf8"),
       ).resolves.toContain("safe-rule-page");
+      await expect(
+        fs.readFile(path.join(publicDir, "scoped", "index.html"), "utf8"),
+      ).resolves.toContain("scoped-middleware-page");
       await expect(fs.access(path.join(publicDir, "refreshing", "index.html"))).rejects.toThrow();
       for (const route of [
         "guarded",
