@@ -374,6 +374,32 @@ function titleFromMarkdown(body: string, fallback: string): string {
   return heading || fallback;
 }
 
+/**
+ * A page's date can come from a `git log` over the whole docs history, so it is resolved
+ * on the first read of `lastModified` rather than for every listing that needs only paths.
+ */
+function createLastModifiedResolver(
+  contentDir: string,
+  sourcePath: string,
+  frontmatter: Record<string, string>,
+): { get(): string | undefined; set(value: string | undefined): void } {
+  let resolved = false;
+  let value: string | undefined;
+  return {
+    get() {
+      if (!resolved) {
+        value = resolveFarmDocsPageLastModified(contentDir, sourcePath, frontmatter);
+        resolved = true;
+      }
+      return value;
+    },
+    set(next) {
+      value = next;
+      resolved = true;
+    },
+  };
+}
+
 export function loadFarmDocsPage(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
@@ -386,6 +412,7 @@ export function loadFarmDocsPage(
   const { frontmatter, body } = parseFrontmatter(source);
   const title = frontmatter.title || titleFromMarkdown(body, titleFromSlug(slug));
   const href = createDocsHref(docs.entry, slug);
+  const lastModified = createLastModifiedResolver(contentDir, sourcePath, frontmatter);
 
   return {
     slug,
@@ -394,7 +421,12 @@ export function loadFarmDocsPage(
     section: frontmatter.section,
     href,
     sourcePath,
-    lastModified: resolveFarmDocsPageLastModified(contentDir, sourcePath, frontmatter),
+    get lastModified() {
+      return lastModified.get();
+    },
+    set lastModified(value) {
+      lastModified.set(value);
+    },
     frontmatter,
     body,
   };
@@ -457,6 +489,7 @@ export function discoverFarmDocsPages(
 
       const source = readFileSync(absolutePath, "utf8");
       const { frontmatter, body } = parseFrontmatter(source);
+      const lastModified = createLastModifiedResolver(contentDir, absolutePath, frontmatter);
       pages.push({
         slug,
         title: frontmatter.title || titleFromMarkdown(body, titleFromSlug(slug)),
@@ -464,7 +497,12 @@ export function discoverFarmDocsPages(
         section: frontmatter.section,
         href: createDocsHref(docs.entry, slug),
         sourcePath: absolutePath,
-        lastModified: resolveFarmDocsPageLastModified(contentDir, absolutePath, frontmatter),
+        get lastModified() {
+          return lastModified.get();
+        },
+        set lastModified(value) {
+          lastModified.set(value);
+        },
       });
     }
   };
@@ -595,8 +633,9 @@ function renderLastUpdatedText(
   position: "footer" | "below-title",
 ): string {
   const config = resolveLastUpdatedDisplayConfig(docs);
+  if (!config.enabled || config.position !== position) return "";
   const formatted = formatLastModifiedDate(page.lastModified);
-  if (!config.enabled || config.position !== position || !formatted) return "";
+  if (!formatted) return "";
 
   const time = `<time datetime="${escapeAttribute(page.lastModified || "")}">${escapeHtml(formatted)}</time>`;
   const label = config.label.trim();
