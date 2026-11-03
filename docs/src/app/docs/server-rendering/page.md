@@ -98,6 +98,12 @@ because request-bound work in transitive imports cannot be proven safe from the 
 Farm serves generated HTML only for `GET` and `HEAD` requests. Other request methods continue through
 the live route instead of receiving a cached page document.
 
+The build prerenders up to eight pages at once, or as many as the machine has CPU cores when that is
+fewer. Each page renders as its own request, as it would on the production server, so the output does
+not depend on this number. To lower it, for example when pages call a rate-limited API, set Nitro's
+`prerender.concurrency` from a plugin's [`build.configure`](/docs/plugins/create-plugin#extend-builds)
+hook.
+
 **src/app/about/page.tsx**
 
 ```tsx

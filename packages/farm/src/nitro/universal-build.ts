@@ -12239,6 +12239,10 @@ function toFarmNodeResponse(request, response) {
           prerender: {
             crawlLinks: false,
             failOnError: true,
+            // Nitro's default renders one route at a time. Each prerender request is
+            // answered independently, as by the production server, so keeping several
+            // in flight overlaps the worker's rendering with this thread's per-route work.
+            concurrency: Math.min(os.availableParallelism(), 8),
             routes: prerenderRoutes,
           },
         }
@@ -12377,6 +12381,25 @@ function toFarmNodeResponse(request, response) {
 
   // Build with Nitro
   const nitroInstance = await nitroBuilder.createNitro(nitroConfig);
+  // Nitro lists prerendered routes as they finish, and presets serialize that list
+  // (Vercel overrides, Azure routes). Restore the request order so concurrent
+  // prerendering writes the same output as rendering one route at a time.
+  let prerenderOrder = new Map<string, number>();
+  nitroInstance.hooks.hook("prerender:routes", (routes) => {
+    prerenderOrder = new Map(
+      Array.from(routes, (route, index): [string, number] => {
+        try {
+          return [decodeURI(route), index];
+        } catch {
+          return [route, index];
+        }
+      }),
+    );
+  });
+  nitroInstance.hooks.hook("prerender:done", ({ prerenderedRoutes }) => {
+    const orderOf = (route: string) => prerenderOrder.get(route) ?? Number.MAX_SAFE_INTEGER;
+    prerenderedRoutes.sort((a, b) => orderOf(a.route) - orderOf(b.route));
+  });
   if (config.md?.enabled) {
     // A prerendered page is served as a static file, so it cannot negotiate
     // `Accept: text/markdown`. Send the same Link header dynamic pages send, so
