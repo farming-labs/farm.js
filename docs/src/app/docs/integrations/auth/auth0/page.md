@@ -170,7 +170,7 @@ auth0({
 });
 ```
 
-A signed-out request is redirected with status `307` to:
+A signed-out request is redirected with status `303`, so the browser follows it with a `GET`, to:
 
 ```text
 /auth/login?returnTo=/the/original/path

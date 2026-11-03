@@ -169,7 +169,9 @@ whoever presents the session id.
 
 ## Billing owner
 
-Production billing usually needs an owner resolver. That resolver decides whether the billing account belongs to a user, organization, workspace, or team.
+Production billing usually needs an owner resolver. It returns the billing owner for the request: a
+user (`kind: "user"`) or an organization (`kind: "organization"`), or `null` when nobody is signed in.
+Model workspaces and teams as organizations.
 
 ```ts
 stripe({
@@ -186,7 +188,7 @@ stripe({
       return {
         id: userId,
         kind: "user",
-        email: ctx.req.get<string>("user.email") ?? null,
+        email: ctx.req.get<string>("user.email"),
       };
     },
   },
