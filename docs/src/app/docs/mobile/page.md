@@ -34,18 +34,19 @@ farm build                    # --web, the default, unchanged
 
 ## Status
 
-| Part                                          | Status                         | Notes                                                                                                                                                         |
-| --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                                                       |
-| `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                                                      |
-| Native-screen analyzer                        | **Report only**                | Writes `native-report.json`; it changes no output                                                                                                             |
-| iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                   |
-| React Native screens                          | Unreleased, dev only           | Android only; runs under `farm dev --mobile` on an emulator, not yet in a production build or on a device (see [React Native screens](#react-native-screens)) |
-| Bundled client assets and page shells         | Planned                        | A production shell loads pages and the client from `server`                                                                                                   |
-| Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                              |
-| Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                            |
-| Native islands and native `@farm.js/ui`       | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` renders on the web only (see [Portable components](#portable-components-farmjsui))                         |
-| Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                                                   |
+| Part                                          | Status                         | Notes                                                                                                                                                               |
+| --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                                                             |
+| `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                                                            |
+| Native-screen analyzer                        | **Report only**                | Writes `native-report.json`; it changes no output                                                                                                                   |
+| iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                         |
+| React Native screens                          | Unreleased, dev only           | Android only; runs under `farm dev --mobile` on an emulator, not yet in a production build or on a device (see [React Native screens](#react-native-screens))       |
+| Bundled client assets                         | Unreleased                     | Pages in a production shell run the mobile client; Android serves its files from the APK, iOS from the server (see [Bundled client assets](#bundled-client-assets)) |
+| Page shells                                   | Planned                        | No bundled layout or offline state yet; a push waits for the server's document                                                                                      |
+| Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                                    |
+| Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                                  |
+| Native islands and native `@farm.js/ui`       | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` renders on the web only (see [Portable components](#portable-components-farmjsui))                               |
+| Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                                                         |
 
 ## Requirements
 
@@ -101,11 +102,14 @@ export default defineConfig({
 | `routes` | Keyed by page route pattern: `presentation` (`push`, `modal`, `replace`)                        |
 | `native` | Screen tiers per route, the native engine, and the analyzer (below)                             |
 
-Tabs and route keys are checked against the app. A web build never calls a function-valued block
-and strips the block from the server bundle, as it does `desktop`. The one thing a `mobile` block
-adds to the web server is the session endpoints native screens sign in through (see
-[Auth on mobile](#auth-on-mobile)); every `mobile` block, static or a function, builds the same
-server, and an app without one gets no route and no hook.
+Tabs and route keys are checked against the app. A web build never calls or checks the block and
+strips it from the server, as it does `desktop`. It also builds the
+[mobile client](#bundled-client-assets): the web client and the other public files stay
+byte-identical to the same app without the key, and the build adds the mobile client's files. The
+web server gains the session endpoints native screens sign in through (see
+[Auth on mobile](#auth-on-mobile)). Every `mobile` block, static or a function, builds the same
+output, and an app without one gets no mobile client, no shell handling, no session route, and no
+hook.
 
 ```sh
 farm config inspect --mobile --os ios --profile beta   # block, screens, and farm-routes.json
@@ -344,8 +348,9 @@ When the navigator opens a screen:
 - A **cold** WebView does a full document load and shows a progress bar until first paint.
 - If an in-place render throws, the screen **falls back to a full document load** of the same URL.
 
-The pool's real win is skipping the ~1 s first-WebView startup; truly instant pushes need bundled
-assets and page shells, which are part of the design but not built yet.
+The pool's real win is skipping the ~1 s first-WebView startup. In a `farm build --mobile` app the
+client JS also comes from the APK ([below](#bundled-client-assets)); page shells, which would show a
+layout before the server answers, are not built yet.
 
 ### The bridge
 
@@ -365,6 +370,52 @@ The messages that matter:
 - **`router-ready`**, **`title`**, **`error`** — lifecycle and the document-load fallback above.
 - **`call`** — a device-capability call (`native.<name>`). Reserved: no device plugins ship yet,
   so these reject as `native_unavailable`.
+
+### Bundled client assets
+
+Pages always come from `mobile.server`, so server rendering, auth, and data work as on the web.
+What a page loads decides how it behaves in the shell: the **mobile client** (`platform()` is
+`"mobile"`, and its router hands navigations to the native navigator) or the web client (links
+navigate inside the WebView).
+
+- **The web build adds the mobile client.** `farm build` of an app with a `mobile` block builds
+  the client a second time for mobile and deploys it next to the web client. An app without a
+  `mobile` block builds exactly what it did before.
+- **The shell asks for it.** Every document load the shell starts carries `X-Farm-Shell: android`
+  (or `ios`). For such a request the server points the page at the mobile client, sends it
+  `Cache-Control: private, no-store`, and every HTML response gets `Vary: X-Farm-Shell`, so a
+  cache never hands one variant to the other.
+- **Android serves the files from the APK.** `farm build --mobile` makes the same build and
+  copies the mobile client's content-hashed files into the app (`assets/farm-www`, listed in
+  `assets/farm-assets.json`). The shell answers a request on the server's origin from the APK only
+  when its exact path is listed; a hashed name only ever has those bytes, so the copy is the file
+  the server would send. Only the document and data cross the network.
+- **A newer deployment still works.** Its documents reference new hashed names that the installed
+  app does not have, and those load from the server (logged as
+  `assets: /chunks/... is not bundled; loading it from the server`). The page always runs the
+  client its own deployment built, so an old app never runs an old client against a new server.
+- **iOS loads the mobile client from the server.** `WKWebView` cannot answer `https` requests
+  from the app (a `WKURLSchemeHandler` only takes custom schemes), so iOS gets native navigation
+  but not bundled files; WebKit caches them after the first load.
+
+```sh
+farm build                       # deploy this: web client + mobile client
+farm build --mobile --apk        # the same build; its mobile client goes into the APK
+```
+
+Build the app from the same source and environment as the deployment, and the names match. When
+they don't, the app still works and loads every file from the server.
+
+Limits:
+
+- Prerendered pages (`"use ssg"`) are static files the server never sees, so in a shell they load
+  the web client, and their links navigate in place.
+- Apps with `experimental.serverComponents` get no mobile client yet; their routers do not hand
+  navigations to the shell.
+- Both clients share the web build's stylesheet.
+- A document the WebView loads by itself has no header and gets the web client. The shells load
+  router fallbacks and reloads again with the header, and iOS also redirects; a form post's
+  response keeps the web client until the next navigation.
 
 ### Navigation delegation
 
@@ -781,9 +832,10 @@ order, with the base path and optional locale prefixes in each pattern, and each
 
 ## Platform detection
 
-`platform()` from `@farm.js/core/platform` returns `"mobile"` only in the app's client build. Its
-pages render on the web deployment, whose server reports `"web"`, so don't branch render output on
-it. See [Platform and app data](/docs/desktop#platform-and-app-data) for how `platform()` folds to
+`platform()` from `@farm.js/core/platform` returns `"mobile"` only in the mobile client, which pages
+load inside a shell. They render on the web deployment, whose server reports `"web"`, so don't
+branch render output on it (the page would not hydrate to the same markup); branch in effects and
+event handlers. See [Platform and app data](/docs/desktop#platform-and-app-data) for how `platform()` folds to
 a literal at build time.
 
 ## Run on Android
@@ -805,16 +857,18 @@ as the Android emulator sees it), and generates the Gradle project into
 prints the commands. For a phone on the LAN, pass its reachable address: `farm dev --mobile --host
 192.168.1.20`.
 
-`farm build --mobile` builds the client with `platform()` set to `"mobile"` into
-`.farm/output/mobile/www` (the web build's output is left alone), writes `farm-routes.json` with
-`mobile.server`, prints the native screen report above unless `native.auto` is `"off"`, and
-generates the project. `--apk` builds the debug APK into
+`farm build --mobile` makes the same production build as `farm build`, web client and mobile client,
+into `.farm/output/mobile/www` (the web build's output is left alone), writes `farm-routes.json`
+with `mobile.server`, prints the native screen report above unless `native.auto` is `"off"`, and
+generates the project with the mobile client's files in it. `--apk` builds the debug APK into
 `.farm/output/mobile/dist`. The project is regenerated on every run, so don't edit it.
 
 | Path                                     | Contents                                               |
 | ---------------------------------------- | ------------------------------------------------------ |
 | `app/src/main/assets/farm-routes.json`   | The navigator manifest                                 |
 | `app/src/main/assets/farm-bridge.js`     | Bridge script injected into pages on the server origin |
+| `app/src/main/assets/farm-www/`          | The mobile client's files (`farm build --mobile`)      |
+| `app/src/main/assets/farm-assets.json`   | Those files' paths and content types                   |
 | `app/src/main/java/.../Navigator.kt`     | Tabs, stacks, push, modal, replace, predictive back    |
 | `app/src/main/java/.../WebViewPool.kt`   | Two pre-warmed WebViews that back pushes               |
 | `app/src/main/java/.../NativeScreens.kt` | The hook for `native` and `platform` screens           |
@@ -963,10 +1017,9 @@ parts are designed and still on the way:
   from `src/native/`, `layout.native.tsx` providers, intent prefetch, and server functions called by
   reference are not wired into native screens yet; `serverFetch` calls API routes. Images imported
   by native screens are not copied into the app yet; load them by URL.
-- Bundled client assets and page shells (for instant pushes and an offline state) are not built;
-  the shell loads pages and client code from `server`. In production that is the web deployment,
-  whose client is not a `--mobile` build, so navigations stay in the page instead of opening
-  native screens until client assets are bundled into the app.
+- Page shells (a bundled layout and offline state per route) are not built, so a push waits for
+  the server's document. iOS loads the mobile client from the server rather than the app, and
+  prerendered pages load the web client (see [Bundled client assets](#bundled-client-assets)).
 - The analyzer only reports. With `auto: "on"` it records ports in `farm-routes.json`, and those
   routes stay web screens.
 - Native islands (`mobile.native.islands`), native rendering of `@farm.js/ui` (it renders on the
