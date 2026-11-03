@@ -152,6 +152,7 @@ import {
 import { generateFarmDevIndicatorsClientRuntime } from "./dev-indicators";
 import { createFarmDevPreviewGuard, getFarmDevFsDeny } from "./dev-preview-guard";
 import { resolveFarmPlatform } from "./desktop/config";
+import type { FarmPlatform } from "./platform";
 import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
 import * as fs from "fs";
 import * as path from "path";
@@ -368,8 +369,8 @@ const FARM_PLATFORM_CLIENT_ID = "\0farm:platform-client";
  * `@farm.js/core/platform` in browser code: `platform()` returns this build's platform as a
  * literal, so `platform() === "desktop"` branches fold away, and nothing reaches for node:fs.
  */
-function createFarmPlatformClientModule(): string {
-  return `export function platform() { return ${JSON.stringify(resolveFarmPlatform())}; }
+function createFarmPlatformClientModule(platform: FarmPlatform): string {
+  return `export function platform() { return ${JSON.stringify(platform)}; }
 export function appDataDir() {
   throw new Error("[Farm] appDataDir() is server-only. Read and write app data from a server function or API route.");
 }
@@ -383,7 +384,12 @@ export function appDataDir() {
  * without the optional `@vercel/og` peer fails with the install command.
  * A Node builtin in a browser graph resolves to Farm's browser module for it.
  */
-export function farmServerOnlyEntriesPlugin(): Plugin {
+export function farmServerOnlyEntriesPlugin(
+  options: {
+    /** The browser graph's platform; a web build's mobile client passes `"mobile"`. */
+    platform?: FarmPlatform;
+  } = {},
+): Plugin {
   let root = process.cwd();
   let vercelOgInstalled = false;
   return {
@@ -418,7 +424,9 @@ export function farmServerOnlyEntriesPlugin(): Plugin {
       return null;
     },
     load(id) {
-      if (id === FARM_PLATFORM_CLIENT_ID) return createFarmPlatformClientModule();
+      if (id === FARM_PLATFORM_CLIENT_ID) {
+        return createFarmPlatformClientModule(options.platform ?? resolveFarmPlatform());
+      }
       return loadFarmBrowserBuiltin(id) ?? null;
     },
   };

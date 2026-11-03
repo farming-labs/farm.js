@@ -401,7 +401,8 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   /**
    * Preview: the native mobile app (RFC 0004), as a block or a function of
    * `{ os, mode, command, profile, env, root }`, for `farm dev|build --mobile`. Web builds never
-   * call the function or check the block, and ship neither. A server of an app with the block
+   * call the function or check the block, and ship neither; they also build the mobile client,
+   * which pages load when a mobile shell asks for them. A server of an app with the block
    * serves `/__farm/mobile/session` so the app's native screens can sign in with device tokens.
    */
   mobile?: FarmMobileConfigInput;
@@ -507,6 +508,12 @@ export interface ResolvedFarmConfig extends Required<
   agent: ResolvedFarmAgentConfig;
   /** Set only in a desktop dev session or build (`--desktop`); `null` on the web. */
   desktop: ResolvedFarmDesktopConfig | null;
+  /**
+   * @internal True when farm.config has a `mobile` block. A production build then also builds the
+   * mobile client, which documents use when a mobile shell asks for them (RFC 0004, 7.2). The
+   * block itself is never called or checked here.
+   */
+  mobileClient?: boolean;
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
   [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
   root: string;
@@ -1362,6 +1369,7 @@ export async function resolveConfig(
     },
     agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled }),
     desktop: desktopSetup?.desktop ?? null,
+    ...(userConfig.mobile !== undefined ? { mobileClient: true } : {}),
     plugins: [
       ...(mobileSessionPlugin ? [mobileSessionPlugin] : []),
       ...resolveIntegrationPlugins(integrations),

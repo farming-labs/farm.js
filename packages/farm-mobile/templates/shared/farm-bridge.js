@@ -2,8 +2,8 @@
 // shell injects at document start, for the app's origin only (Android: origin rules on the
 // document-start script; iOS: an origin check around it). Defines window.__farmBridge: native calls
 // with request ids and Promise resolution (native evaluates __farmBridge._resolve), and
-// offerNavigation, which the `--mobile` client build's navigation delegate calls so link taps open
-// native screens instead of navigating in place. The OS name and message port are filled in when
+// offerNavigation, which the mobile client's navigation delegate calls so link taps open native
+// screens instead of navigating in place. The OS name and message port are filled in when
 // the project is generated; the plugin list is filled in by native code at launch.
 (() => {
   // Lets app CSS hide web-only chrome inside the shell: html[data-farm-shell] .web-tabs { display: none }

@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { MobileGeneratedFile, MobileShellContext } from "@farm.js/core/mobile";
+import { createBundledAssetFiles } from "../shared/assets.js";
 import { createBridgeScript } from "../shared/bridge.js";
 
 /** The Kotlin package of the shell's code. The app's `mobile.id` is only its application ID. */
@@ -15,6 +16,13 @@ export const TEMPLATE_DIR = fileURLToPath(new URL("../../templates/android/", im
 export const REACT_NATIVE_TEMPLATE_DIR = fileURLToPath(
   new URL("../../templates/android-react-native/", import.meta.url),
 );
+
+/**
+ * The mobile client's files (`farm build --mobile`), served for the server origin's paths by
+ * `BundledAssets.kt`, and the list it reads.
+ */
+export const BUNDLED_ASSETS_DIR = "app/src/main/assets/farm-www";
+export const BUNDLED_ASSETS_MANIFEST = "app/src/main/assets/farm-assets.json";
 
 /** The Hermes bytecode asset the React Native engine loads (`ReactNativeEngine.BUNDLE_ASSET`). */
 export const NATIVE_BUNDLE_ASSET = "app/src/main/assets/farm-native.hbc";
@@ -297,6 +305,12 @@ export async function createAndroidProject(
     }
   }
   const files = [...byPath.values()];
+  files.push(
+    ...(await createBundledAssetFiles(context.assets, {
+      root: BUNDLED_ASSETS_DIR,
+      manifest: BUNDLED_ASSETS_MANIFEST,
+    })),
+  );
   files.push(
     { path: "build.gradle.kts", contents: createRootBuildGradle(context) },
     { path: "app/build.gradle.kts", contents: createAppBuildGradle(context) },

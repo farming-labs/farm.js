@@ -158,6 +158,7 @@ export {
   resolveFarmSecurityConfig,
   stampFarmCspNonce,
 } from "../security";
+export { _applyFarmMobileShellClient } from "../mobile/shell-response";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");

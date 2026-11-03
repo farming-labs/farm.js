@@ -29,6 +29,15 @@ import {
   resolveHashedClientCssHref,
   resolveHashedClientJsSrc,
 } from "./client-css-href";
+import {
+  createFarmMobileClientManifestPlugin,
+  encodeFarmMobileShellClient,
+  finalizeFarmMobileClient,
+  FARM_MOBILE_CLIENT_ENTRY_NAME,
+  FARM_MOBILE_SHELL_CLIENT_PLACEHOLDER,
+  hasFarmMobileClientEntry,
+  removeFarmMobileClientManifest,
+} from "./mobile-client";
 import type { RouteManager, ApplicationMetadataRouteEntry } from "../routing/route-manager";
 import { compareRoutePatternSpecificity } from "../routing/specificity";
 import {
@@ -155,6 +164,7 @@ import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes } from "./vercel-assets";
 import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
 import { farmStripPlatformConfigPlugin } from "../build/strip-platform-config";
+import type { FarmPlatform } from "../platform";
 import {
   createFarmBunServerEntry,
   createFarmNodeServerEntry,
@@ -1410,6 +1420,7 @@ export async function buildUniversal(
     }
     const productionVite = productionViteResult.value;
     logger.info("⚡ Building application bundles with Vite Rolldown");
+    const mobileClient = shouldBuildFarmMobileClient(config);
 
     const buildClientBundle = () =>
       buildClient(
@@ -1425,6 +1436,7 @@ export async function buildUniversal(
         hydrationPlanCache,
         rendererBuildLifetime,
         routeManager.getProgrammaticClientRoutes(),
+        mobileClient,
       );
     const buildSSRBundle = () =>
       buildSSRInMemory(
@@ -1491,6 +1503,7 @@ export async function buildUniversal(
           hydrationPlanCache,
           rendererBuildLifetime,
           routeManager.getProgrammaticClientRoutes(),
+          mobileClient,
         );
       } catch (retryError) {
         if (!(retryError instanceof IncompleteClientBuildOutputError)) throw retryError;
@@ -1560,6 +1573,44 @@ export async function buildUniversal(
   } finally {
     rendererBuild?.abort();
   }
+}
+
+/**
+ * Whether this build adds the mobile client (RFC 0004, 7.2): the app has a `mobile` block, and
+ * its pages use Farm's own client router. Server components apps keep the web client in a shell
+ * for now (their routers do not hand navigations to it), and a desktop build is never loaded by
+ * a mobile shell.
+ */
+function shouldBuildFarmMobileClient(
+  config: ResolvedFarmConfig,
+  options: { quiet?: boolean } = {},
+): boolean {
+  if (!config.mobileClient || config.desktop) return false;
+  const mode = resolveFarmServerComponentsMode(config.experimental?.serverComponents);
+  if (mode === undefined) return true;
+  if (!options.quiet)
+    logger.info(
+      `📱 No mobile client for experimental.serverComponents (${mode}) yet; a mobile shell loads the web client.`,
+    );
+  return false;
+}
+
+/**
+ * Nitro's cache route rules (`swr`, `cache`) store a response by URL. A mobile shell's document
+ * loads a different client, so with a mobile client the cache keys on `X-Farm-Shell` too.
+ */
+function varyFarmNitroCacheRulesByShell(rules: Record<string, any>): Record<string, any> {
+  return Object.fromEntries(
+    Object.entries(rules).map(([source, rule]) => {
+      const cached =
+        (rule?.swr !== undefined && rule.swr !== false) ||
+        (rule?.cache !== undefined && rule.cache !== false);
+      if (!cached || rule.cache === false) return [source, rule];
+      const cache = rule.cache && typeof rule.cache === "object" ? rule.cache : {};
+      const varies = [...(Array.isArray(cache.varies) ? cache.varies : []), "x-farm-shell"];
+      return [source, { ...rule, cache: { ...cache, varies } }];
+    }),
+  );
 }
 
 async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): Promise<void> {
@@ -1702,7 +1753,14 @@ async function buildClient(
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan> = new Map(),
   rendererBuildLifetime?: AbortSignal,
   programmaticClientRoutes?: ProgrammaticClientRoutes,
+  /**
+   * Also build the mobile client into the same output (RFC 0004, 7.2): the app has a `mobile`
+   * block, and its documents use the mobile client when a shell asks for them.
+   */
+  mobile = false,
 ) {
+  // A mobile client from an earlier build must not outlive the `mobile` block.
+  if (!mobile) await removeFarmMobileClientManifest(path.dirname(outputDir));
   const viteBuild = productionVite.build;
   const { farmPlugin, farmServerOnlyEntriesPlugin } = await import("../vite");
   const { PluginManager } = await import("../plugin");
@@ -2027,253 +2085,284 @@ async function buildClient(
     `📱 Total hydratable routes detected: ${clientPages.length} pages, ${clientLayouts.filter((layout) => layout.shouldHydrate || layout.hasIsolatedClientBoundaries).length} layouts, and ${clientRouteSlots.length} slots`,
   );
 
-  // Generate client hydration entry code
-  // Keep generated entries under the project so bare imports resolve through the
-  // application's node_modules, including isolated production-build fixtures.
-  const clientEntryRoot = path.join(root, ".farm", "tmp");
-  await fs.mkdir(clientEntryRoot, { recursive: true });
-  const clientEntryDir = await fs.mkdtemp(path.join(clientEntryRoot, "client-entry-"));
-  const clientEntryPath = path.join(clientEntryDir, "farm-client-entry.tsx");
-  const clientHydrationCode = generateClientHydrationEntry(
-    clientPages,
-    clientLayouts,
-    clientRouteSlots,
-    root,
-    srcDir,
-    adapterOwnsDocsRuntime ? false : isFarmDocsSearchEnabled(config.docs),
-    adapterOwnsDocsRuntime ? undefined : resolveFarmDocsSearchClientModule(root),
-    config.docs?.enabled
-      ? getFarmDocsRoots(config.docs).map((docsRoot) => docsRoot.entry)
-      : undefined,
-    adapterOwnsDocsRuntime ? config.docs.adapter?.react : undefined,
-    config.i18n,
-    config.plugins,
-    config.renderer,
-    config.publicRuntimeConfig,
-    config.trailingSlash,
-    getIntegrationProviders(config.integrations),
-    config.basePath,
-    generateClientCachePersistenceCode(resolveFarmClientCacheAdapterEntry(root, config.cache)),
-    adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
-    resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands",
-  );
-
-  // Write the client entry to a temporary file
-  await fs.writeFile(clientEntryPath, clientHydrationCode);
-
-  // Tailwind support:
-  // - If project has explicit PostCSS config, respect it.
-  // - Otherwise enable built-in @tailwindcss/vite (out of the box).
-  const hasScopedPostcssConfig = hasProjectPostcssConfig(root);
-  let postcssSearchPath: string | undefined;
-  let tailwindVitePlugin: any = undefined;
-  const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
-    ssr: false,
-    buildLifetime: rendererBuildLifetime,
-  });
-  if (hasScopedPostcssConfig) {
-    logger.info("📦 Using project PostCSS/Tailwind configuration");
-  } else {
-    const postcssConfigPath = path.join(clientEntryDir, "postcss.config.cjs");
-    await fs.writeFile(postcssConfigPath, "module.exports = { plugins: [] };\n");
-    postcssSearchPath = clientEntryDir;
-    tailwindVitePlugin = await loadTailwindVitePlugin({
-      builder: productionVite.builder,
-      announce: true,
-    });
-  }
-
-  try {
-    const clientViteConfig: ViteUserConfig = {
+  // The web client, then (for an app with a `mobile` block) the mobile client: the same entry
+  // and graph with `platform()` as "mobile" and the shell's navigation delegate, written next to
+  // the web client. Shared chunks get the same content-hashed name and are written once.
+  const buildTarget = async (platform: "web" | "mobile") => {
+    // Generate client hydration entry code
+    // Keep generated entries under the project so bare imports resolve through the
+    // application's node_modules, including isolated production-build fixtures.
+    const clientEntryRoot = path.join(root, ".farm", "tmp");
+    await fs.mkdir(clientEntryRoot, { recursive: true });
+    const clientEntryDir = await fs.mkdtemp(path.join(clientEntryRoot, "client-entry-"));
+    const clientEntryPath = path.join(clientEntryDir, "farm-client-entry.tsx");
+    const clientHydrationCode = generateClientHydrationEntry(
+      clientPages,
+      clientLayouts,
+      clientRouteSlots,
       root,
-      // Vite otherwise falls back to <root>/public, silently dropping every
-      // asset in a custom config.publicDir from the production client output.
-      publicDir: config.publicDir,
-      esbuild: {
-        jsxDev: false,
-      },
-      build: {
-        // Preserve Farm's Vite 5 browser baseline when the production builder
-        // uses Vite 8, whose default target only covers newer browsers.
-        target: FARM_CLIENT_BUILD_TARGET,
-        outDir: outputDir,
-        emptyOutDir: true,
-        // Never public: see resolveFarmClientSourcemap.
-        sourcemap: resolveFarmClientSourcemap(config.vite?.build?.sourcemap),
-        assetsInlineLimit: 0,
-        cssCodeSplit: false, // Bundle all CSS into one file
-        rollupOptions: {
-          input: {
-            "farm-client": clientEntryPath,
-          },
-          output: {
-            entryFileNames: "[name]-h[hash].js",
-            chunkFileNames: "chunks/[name]-h[hash].js",
-            hashCharacters: "hex",
-            // Use predictable name for CSS so we can reference it in SSR HTML
-            assetFileNames: (assetInfo) => {
-              if (assetInfo.name?.endsWith(".css")) {
-                return "farm-client.css";
+      srcDir,
+      adapterOwnsDocsRuntime ? false : isFarmDocsSearchEnabled(config.docs),
+      adapterOwnsDocsRuntime ? undefined : resolveFarmDocsSearchClientModule(root),
+      config.docs?.enabled
+        ? getFarmDocsRoots(config.docs).map((docsRoot) => docsRoot.entry)
+        : undefined,
+      adapterOwnsDocsRuntime ? config.docs.adapter?.react : undefined,
+      config.i18n,
+      config.plugins,
+      config.renderer,
+      config.publicRuntimeConfig,
+      config.trailingSlash,
+      getIntegrationProviders(config.integrations),
+      config.basePath,
+      generateClientCachePersistenceCode(resolveFarmClientCacheAdapterEntry(root, config.cache)),
+      adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
+      resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands",
+      platform,
+    );
+    const entryName = platform === "mobile" ? FARM_MOBILE_CLIENT_ENTRY_NAME : "farm-client";
+
+    // Write the client entry to a temporary file
+    await fs.writeFile(clientEntryPath, clientHydrationCode);
+
+    // Tailwind support:
+    // - If project has explicit PostCSS config, respect it.
+    // - Otherwise enable built-in @tailwindcss/vite (out of the box).
+    const hasScopedPostcssConfig = hasProjectPostcssConfig(root);
+    let postcssSearchPath: string | undefined;
+    let tailwindVitePlugin: any = undefined;
+    const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
+      ssr: false,
+      buildLifetime: rendererBuildLifetime,
+    });
+    if (hasScopedPostcssConfig) {
+      logger.info("📦 Using project PostCSS/Tailwind configuration");
+    } else {
+      const postcssConfigPath = path.join(clientEntryDir, "postcss.config.cjs");
+      await fs.writeFile(postcssConfigPath, "module.exports = { plugins: [] };\n");
+      postcssSearchPath = clientEntryDir;
+      tailwindVitePlugin = await loadTailwindVitePlugin({
+        builder: productionVite.builder,
+        announce: true,
+      });
+    }
+
+    try {
+      const clientViteConfig: ViteUserConfig = {
+        root,
+        // Vite otherwise falls back to <root>/public, silently dropping every
+        // asset in a custom config.publicDir from the production client output.
+        // The mobile client adds to the web client's output; public files are copied once.
+        publicDir: platform === "mobile" ? false : config.publicDir,
+        esbuild: {
+          jsxDev: false,
+        },
+        build: {
+          // Preserve Farm's Vite 5 browser baseline when the production builder
+          // uses Vite 8, whose default target only covers newer browsers.
+          target: FARM_CLIENT_BUILD_TARGET,
+          outDir: outputDir,
+          emptyOutDir: platform === "web",
+          // Never public: see resolveFarmClientSourcemap.
+          sourcemap: resolveFarmClientSourcemap(config.vite?.build?.sourcemap),
+          assetsInlineLimit: 0,
+          cssCodeSplit: false, // Bundle all CSS into one file
+          rollupOptions: {
+            input: {
+              [entryName]: clientEntryPath,
+            },
+            output: {
+              entryFileNames: "[name]-h[hash].js",
+              chunkFileNames: "chunks/[name]-h[hash].js",
+              hashCharacters: "hex",
+              // Use predictable name for CSS so we can reference it in SSR HTML
+              assetFileNames: (assetInfo) => {
+                if (assetInfo.name?.endsWith(".css")) {
+                  return `${entryName}.css`;
+                }
+                return "assets/[name]-h[hash][extname]";
+              },
+            },
+            // A browser cannot load a Node builtin: farmServerOnlyEntriesPlugin
+            // resolves one to Farm's browser module for it instead.
+            external: (id) => {
+              // Externalize native modules that can't be bundled for browser
+              if (id === "fsevents" || id.includes("fsevents") || id.endsWith(".node")) {
+                return true;
               }
-              return "assets/[name]-h[hash][extname]";
+              return false;
             },
           },
-          // A browser cannot load a Node builtin: farmServerOnlyEntriesPlugin
-          // resolves one to Farm's browser module for it instead.
-          external: (id) => {
-            // Externalize native modules that can't be bundled for browser
-            if (id === "fsevents" || id.includes("fsevents") || id.endsWith(".node")) {
-              return true;
-            }
-            return false;
-          },
         },
-      },
-      plugins: [
-        createFarmThemeCssPlugin(config.theme, config.basePath),
-        createFarmPrivateClientSourcemapsPlugin({
-          outDir: path.join(path.dirname(outputDir), FARM_CLIENT_SOURCEMAPS_DIR),
-        }),
-        createFarmClientModulePreloadPlugin({
-          root,
-          buildDir: path.dirname(outputDir),
-          entryName: "farm-client",
-        }),
-        ...(adapterOwnsDocsRuntime
-          ? [
-              createFarmDocsModulePreloadPlugin({
+        plugins: [
+          createFarmThemeCssPlugin(config.theme, config.basePath),
+          createFarmPrivateClientSourcemapsPlugin({
+            outDir: path.join(
+              path.dirname(outputDir),
+              platform === "mobile"
+                ? `${FARM_CLIENT_SOURCEMAPS_DIR}-mobile`
+                : FARM_CLIENT_SOURCEMAPS_DIR,
+            ),
+          }),
+          // The web client's preload manifests; the mobile client records its files instead.
+          platform === "mobile"
+            ? createFarmMobileClientManifestPlugin({
+                buildDir: path.dirname(outputDir),
+                entryName,
+              })
+            : createFarmClientModulePreloadPlugin({
                 root,
                 buildDir: path.dirname(outputDir),
-                importer: clientEntryPath,
                 entryName: "farm-client",
-                modules: [
-                  config.docs.adapter!.react!,
-                  getFarmDocsAdapterConfigModule(config.docs),
-                ].filter((specifier): specifier is string => Boolean(specifier)),
               }),
-            ]
-          : []),
-        ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
-        ...(rendererVitePlugins as any[]),
-        ...(config.vite.plugins || []),
-        farmServerOnlyEntriesPlugin(),
-        farmDocsClientConfigPlugin(
-          adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
-        ),
-        // Plugin to redirect @farm.js/core imports to client-only exports
-        {
-          name: "farm-client-only-imports",
-          enforce: "pre" as const,
-          resolveId(id) {
-            // Redirect @farm.js/core to just export client-safe parts
-            // Don't redirect @farm.js/core/client - that's already client-safe
-            if (id === "@farm.js/core") {
-              return { id: "\0farm-client-exports", external: false };
-            }
-            if (id === "@farm.js/core/i18n/server") {
-              return { id: "\0farm-i18n-client-bridge", external: false };
-            }
-            // Block server-only imports completely
-            if (
-              id === "@farm.js/core/server" ||
-              id === "@farm.js/core/api" ||
-              id === "@farm.js/core/middleware" ||
-              id === "@farm.js/core/headers" ||
-              id === "@farm.js/core/config" ||
-              id.includes("@farm.js/core/middleware") ||
-              id.includes("@farm.js/core/query/server")
-            ) {
-              return { id: "\0empty-module", external: false };
-            }
-            // Block API route imports (they come from type-only imports in api.generated.ts)
-            if (id.includes("/api/") && id.includes("/route")) {
-              return { id: "\0empty-api-route", external: false };
-            }
-            // Block problematic node modules
-            if (
-              id === "fsevents" ||
-              id.includes("fsevents") ||
-              id.endsWith(".node") ||
-              id === "nitro" ||
-              id === "vite" ||
-              id === "esbuild" ||
-              id === "rolldown" ||
-              id.startsWith("rolldown/") ||
-              id === "rollup" ||
-              id.startsWith("nitro/") ||
-              id.includes("node-pre-gyp") ||
-              id.includes("nf3")
-            ) {
-              return { id: "\0empty-module", external: false };
-            }
-            return null;
+          ...(adapterOwnsDocsRuntime && platform === "web"
+            ? [
+                createFarmDocsModulePreloadPlugin({
+                  root,
+                  buildDir: path.dirname(outputDir),
+                  importer: clientEntryPath,
+                  entryName: "farm-client",
+                  modules: [
+                    config.docs.adapter!.react!,
+                    getFarmDocsAdapterConfigModule(config.docs),
+                  ].filter((specifier): specifier is string => Boolean(specifier)),
+                }),
+              ]
+            : []),
+          ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+          ...(rendererVitePlugins as any[]),
+          ...(config.vite.plugins || []),
+          farmServerOnlyEntriesPlugin({ platform }),
+          farmDocsClientConfigPlugin(
+            adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
+          ),
+          // Plugin to redirect @farm.js/core imports to client-only exports
+          {
+            name: "farm-client-only-imports",
+            enforce: "pre" as const,
+            resolveId(id) {
+              // Redirect @farm.js/core to just export client-safe parts
+              // Don't redirect @farm.js/core/client - that's already client-safe
+              if (id === "@farm.js/core") {
+                return { id: "\0farm-client-exports", external: false };
+              }
+              if (id === "@farm.js/core/i18n/server") {
+                return { id: "\0farm-i18n-client-bridge", external: false };
+              }
+              // Block server-only imports completely
+              if (
+                id === "@farm.js/core/server" ||
+                id === "@farm.js/core/api" ||
+                id === "@farm.js/core/middleware" ||
+                id === "@farm.js/core/headers" ||
+                id === "@farm.js/core/config" ||
+                id.includes("@farm.js/core/middleware") ||
+                id.includes("@farm.js/core/query/server")
+              ) {
+                return { id: "\0empty-module", external: false };
+              }
+              // Block API route imports (they come from type-only imports in api.generated.ts)
+              if (id.includes("/api/") && id.includes("/route")) {
+                return { id: "\0empty-api-route", external: false };
+              }
+              // Block problematic node modules
+              if (
+                id === "fsevents" ||
+                id.includes("fsevents") ||
+                id.endsWith(".node") ||
+                id === "nitro" ||
+                id === "vite" ||
+                id === "esbuild" ||
+                id === "rolldown" ||
+                id.startsWith("rolldown/") ||
+                id === "rollup" ||
+                id.startsWith("nitro/") ||
+                id.includes("node-pre-gyp") ||
+                id.includes("nf3")
+              ) {
+                return { id: "\0empty-module", external: false };
+              }
+              return null;
+            },
+            load(id) {
+              if (id === "\0empty-module") {
+                return "const emptyMiddlewareStore = new Map(); export default {}; export const getMiddlewareContext = () => emptyMiddlewareStore; export const getMiddlewareData = () => emptyMiddlewareStore; export const getMiddlewareValue = () => undefined; export const middleware = () => ({});";
+              }
+              if (id === "\0empty-api-route") {
+                // Stub for API routes - only used in type context, provide empty exports
+                return "export const GET = () => {}; export const HEAD = () => {}; export const QUERY = () => {}; export const POST = () => {}; export const PUT = () => {}; export const DELETE = () => {}; export const PATCH = () => {}; export const OPTIONS = () => {}; export default {};";
+              }
+              if (id === "\0farm-i18n-client-bridge") {
+                return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farm.js/core/i18n/client";';
+              }
+              if (id === "\0farm-client-exports") {
+                // Only export client-safe parts (no type exports - they're erased at compile time)
+                return [
+                  "// Farm.js Client Exports - Safe for browser bundling",
+                  'export { Link } from "@farm.js/core/client";',
+                  'export { useRouter } from "@farm.js/core/client";',
+                  'export { usePathname, useSearchParams } from "@farm.js/core/navigation";',
+                  // A page that hydrates ships to the browser with its notFound()/redirect() calls.
+                  'export { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError, notFound, permanentRedirect, redirect } from "@farm.js/core/navigation";',
+                  'export { createAPIClient } from "@farm.js/core/client";',
+                  'export { localFont, remoteFont } from "@farm.js/core/font";',
+                ].join("\n");
+              }
+              return null;
+            },
           },
-          load(id) {
-            if (id === "\0empty-module") {
-              return "const emptyMiddlewareStore = new Map(); export default {}; export const getMiddlewareContext = () => emptyMiddlewareStore; export const getMiddlewareData = () => emptyMiddlewareStore; export const getMiddlewareValue = () => undefined; export const middleware = () => ({});";
-            }
-            if (id === "\0empty-api-route") {
-              // Stub for API routes - only used in type context, provide empty exports
-              return "export const GET = () => {}; export const HEAD = () => {}; export const QUERY = () => {}; export const POST = () => {}; export const PUT = () => {}; export const DELETE = () => {}; export const PATCH = () => {}; export const OPTIONS = () => {}; export default {};";
-            }
-            if (id === "\0farm-i18n-client-bridge") {
-              return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farm.js/core/i18n/client";';
-            }
-            if (id === "\0farm-client-exports") {
-              // Only export client-safe parts (no type exports - they're erased at compile time)
-              return [
-                "// Farm.js Client Exports - Safe for browser bundling",
-                'export { Link } from "@farm.js/core/client";',
-                'export { useRouter } from "@farm.js/core/client";',
-                'export { usePathname, useSearchParams } from "@farm.js/core/navigation";',
-                // A page that hydrates ships to the browser with its notFound()/redirect() calls.
-                'export { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError, notFound, permanentRedirect, redirect } from "@farm.js/core/navigation";',
-                'export { createAPIClient } from "@farm.js/core/client";',
-                'export { localFont, remoteFont } from "@farm.js/core/font";',
-              ].join("\n");
-            }
-            return null;
-          },
-        },
-        farmPlugin(
-          { ...config, isolatedClientBoundaryModules, programmaticClientRoutes },
-          pluginManager,
-        ),
-        farmEnvironmentFunctionsPlugin(config),
-      ],
-      mode: "production",
-      css: postcssSearchPath
-        ? {
-            postcss: postcssSearchPath,
-          }
-        : undefined,
-      // Ensure React is bundled for client
-      resolve: {
-        alias: createFarmSourceAlias(root, config.srcDir),
-        dedupe: [...(config.renderer.dedupe || [])],
-      },
-      // Optimize dependencies - exclude server-side code from client bundle
-      optimizeDeps: {
-        exclude: [
-          "@farm.js/core/server",
-          "@farm.js/core/api",
-          "@farm.js/core/middleware",
-          "@farm.js/core/headers",
+          farmPlugin(
+            { ...config, isolatedClientBoundaryModules, programmaticClientRoutes },
+            pluginManager,
+          ),
+          farmEnvironmentFunctionsPlugin(config),
         ],
-      },
-    };
-    // The app's `vite` block applies to production as it does in development.
-    await viteBuild(mergeFarmProductionViteConfig(clientViteConfig, config.vite));
-    await mergeBuiltFontCss(outputDir);
-    await validateClientBuildOutput(root, srcDir, outputDir);
-  } finally {
-    // Clean up temporary entry file
-    try {
-      await fs.rm(clientEntryDir, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
+        mode: "production",
+        css: postcssSearchPath
+          ? {
+              postcss: postcssSearchPath,
+            }
+          : undefined,
+        // Ensure React is bundled for client
+        resolve: {
+          alias: createFarmSourceAlias(root, config.srcDir),
+          dedupe: [...(config.renderer.dedupe || [])],
+        },
+        // Optimize dependencies - exclude server-side code from client bundle
+        optimizeDeps: {
+          exclude: [
+            "@farm.js/core/server",
+            "@farm.js/core/api",
+            "@farm.js/core/middleware",
+            "@farm.js/core/headers",
+          ],
+        },
+      };
+      // The app's `vite` block applies to production as it does in development.
+      await viteBuild(mergeFarmProductionViteConfig(clientViteConfig, config.vite));
+      if (platform === "mobile") {
+        // Documents keep the web stylesheet: CSS does not depend on platform().
+        await fs.rm(path.join(outputDir, `${entryName}.css`), { force: true });
+        if (!(await hasFarmMobileClientEntry(path.dirname(outputDir), outputDir))) {
+          throw new IncompleteClientBuildOutputError(
+            `${FARM_MOBILE_CLIENT_ENTRY_NAME}.js is missing or empty`,
+          );
+        }
+      } else {
+        await mergeBuiltFontCss(outputDir);
+        await validateClientBuildOutput(root, srcDir, outputDir);
+      }
+    } finally {
+      // Clean up temporary entry file
+      try {
+        await fs.rm(clientEntryDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
     }
-  }
+  };
+  await buildTarget("web");
+  if (mobile) await buildTarget("mobile");
 }
 
 /**
@@ -3242,6 +3331,8 @@ export function generateClientHydrationEntry(
   clientCachePersistence: ClientCachePersistenceEntryCode = { imports: "", init: "" },
   docsConfigModule?: string,
   islandValues = false,
+  /** `"mobile"` for the mobile client a web build adds for an app with a `mobile` block. */
+  platform?: FarmPlatform,
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
@@ -3249,6 +3340,7 @@ export function generateClientHydrationEntry(
     root,
     srcDir,
     publicRuntimeConfig,
+    platform,
   );
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
   const rendererClientImports = isReactRenderer(renderer)
@@ -6137,6 +6229,7 @@ function generateVirtualEntryCode(
   // Islands mode runs `"use server"` actions posted to a page (RFC 0003).
   const farmIslandsMode =
     resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
+  const farmMobileClient = shouldBuildFarmMobileClient(config, { quiet: true });
   const hasCompressionRuntime =
     config.compress && resolveFarmInstrumentationRuntime(preset) === "nodejs";
   // agent.crawlers serves /robots.txt unless a root robots.ts owns it.
@@ -6699,6 +6792,10 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       : ""
   }
 } from "@farm.js/core/internal/production-runtime";${
+    farmMobileClient
+      ? `\nimport { _applyFarmMobileShellClient } from "@farm.js/core/internal/production-runtime";\n// The mobile client documents load when a mobile shell asks for them (RFC 0004, 7.2), filled in\n// once the client build has finished (see buildNitroUniversal). A shell's document stays out of\n// shared caches, which the adapter learns as it does for a guarded response.\nconst farmMobileShellClient = JSON.parse("${FARM_MOBILE_SHELL_CLIENT_PLACEHOLDER}");\nfunction applyFarmMobileShellResponse(request, response, context) {\n  return _applyFarmMobileShellClient(request, response, farmMobileShellClient, () =>\n    context?.onGuardedResponse?.()\n  );\n}`
+      : `\n// No mobile block: no mobile client, and documents ignore X-Farm-Shell.\nfunction applyFarmMobileShellResponse(request, response) {\n  return response;\n}`
+  }${
     farmIslandsMode
       ? `\nimport { getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
       : ""
@@ -11300,10 +11397,11 @@ async function handleFarmFetch(request, context) {
             ? getFarmRoutePathname(new URL(runtimeRequest.url).pathname)
             : undefined;
           const configured = applyConfiguredResponseHeaders(response, routePathname);
+          // Configured headers may edit the response in place, so check it either way.
+          const guarded = farmGuardedResponse ? _withFarmGuardedResponseCache(configured) : configured;
           return applyFarmPreloadBudget(
             applyFarmCspNonceToResponse(
-              // Configured headers may edit the response in place, so check it either way.
-              farmGuardedResponse ? _withFarmGuardedResponseCache(configured) : configured,
+              applyFarmMobileShellResponse(runtimeRequest, guarded, context),
               farmSecurityConfig,
               cspNonce,
             ),
@@ -11746,8 +11844,24 @@ async function buildNitroUniversal(
   ]);
   const encodedDocsModulePreloads = encodeFarmDocsModulePreloads(docsModulePreloads);
   const encodedClientModulePreloads = encodeFarmClientModulePreloads(clientModulePreloads);
+  const encodedMobileShellClient = shouldBuildFarmMobileClient(config, { quiet: true })
+    ? encodeFarmMobileShellClient(
+        await finalizeFarmMobileClient({
+          buildDir: path.join(root, distDir),
+          clientOutputDir,
+          webEntry: clientJsSrc,
+          stylesheet: clientCssHref,
+          webFiles: clientModulePreloads?.files ?? [],
+        }),
+      )
+    : null;
   for (const output of Object.values(ssrBundle)) {
     if (output.type !== "chunk") continue;
+    if (encodedMobileShellClient && output.code.includes(FARM_MOBILE_SHELL_CLIENT_PLACEHOLDER)) {
+      output.code = output.code
+        .split(FARM_MOBILE_SHELL_CLIENT_PLACEHOLDER)
+        .join(encodedMobileShellClient);
+    }
     if (output.code.includes(FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER)) {
       output.code = output.code
         .split(FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER)
@@ -12070,7 +12184,9 @@ function toFarmNodeResponse(request, response) {
     ssrOutputDir,
     ssrEntryFile,
   );
-  const configuredNitroRouteRules = routeRulesToNitroRouteRules(config.routeRules);
+  const configuredNitroRouteRules = shouldBuildFarmMobileClient(config, { quiet: true })
+    ? varyFarmNitroCacheRulesByShell(routeRulesToNitroRouteRules(config.routeRules))
+    : routeRulesToNitroRouteRules(config.routeRules);
   const prerenderNitroRouteRules = Object.fromEntries(
     prerenderRoutes.map((route) => {
       const configuredRule = configuredNitroRouteRules[route] || {};

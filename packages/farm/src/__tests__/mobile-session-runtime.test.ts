@@ -95,6 +95,7 @@ interface Reply {
   status: number;
   setCookie: string[];
   cacheControl: string | undefined;
+  vary: string | undefined;
   body: string;
 }
 
@@ -117,6 +118,7 @@ function send(
             status: res.statusCode ?? 0,
             setCookie: [res.headers["set-cookie"] ?? []].flat(),
             cacheControl: res.headers["cache-control"],
+            vary: [res.headers.vary ?? []].flat().join(", ") || undefined,
             body,
           }),
         );
@@ -128,7 +130,11 @@ function send(
 }
 
 /** The shell's flow and the bypass attempts, against a running server. */
-async function expectMobileSessions(host: string, port: number) {
+async function expectMobileSessions(
+  host: string,
+  port: number,
+  options: { mobileClient?: boolean } = {},
+) {
   const call = (pathname: string, options: Parameters<typeof send>[3] = {}) =>
     send(host, port, pathname, options);
   const native = (extra: Record<string, string> = {}) => ({
@@ -196,6 +202,34 @@ async function expectMobileSessions(host: string, port: number) {
   expect(page.status).toBe(200);
   expect(page.setCookie.filter((line) => line.startsWith("farm_mobile"))).toEqual([]);
 
+  if (options.mobileClient) {
+    // A production build of the app also serves the mobile client to the documents a shell asks
+    // for. That rewrite is for HTML only: session endpoints and bearer responses keep their own
+    // cache policy, even when a shell header reaches them.
+    const shell = { "x-farm-shell": "android" };
+    expect(page.vary?.toLowerCase().split(", ")).toContain("x-farm-shell");
+    expect(page.body).not.toContain("farm-mobile-client-");
+    const document = await call("/", { headers: { ...shell, cookie: `${cookie}; ${marker}` } });
+    expect(document.status).toBe(200);
+    expect(document.cacheControl).toBe("private, no-store");
+    expect(document.vary?.toLowerCase().split(", ")).toContain("x-farm-shell");
+    expect(document.body).toContain("farm-mobile-client-");
+    expect(document.setCookie.filter((line) => line.startsWith("farm_mobile"))).toEqual([]);
+    const shellChallenge = await call("/__farm/mobile/session/challenge", {
+      method: "POST",
+      headers: native({ ...shell, cookie }),
+    });
+    expect(shellChallenge.status, shellChallenge.body).toBe(200);
+    expect(shellChallenge.cacheControl).toBe("no-store");
+    expect(shellChallenge.vary ?? "").not.toMatch(/x-farm-shell/i);
+    const shellMe = await call("/api/me", {
+      headers: native({ ...shell, authorization: `Bearer ${accessToken}` }),
+    });
+    expect(shellMe.status, shellMe.body).toBe(200);
+    expect(shellMe.cacheControl).toBe("private, no-store");
+    expect(shellMe.vary ?? "").not.toMatch(/x-farm-shell/i);
+  }
+
   // Sign-out in the WebView, which carries the device marker, revokes the device.
   const signOut = await call("/api/sign-out", {
     method: "POST",
@@ -251,6 +285,6 @@ describe("mobile session tokens on a running server", () => {
       child.stderr!.on("data", onData);
       child.once("exit", (code) => reject(new Error(`server exited ${code}: ${output}`)));
     });
-    await expectMobileSessions("127.0.0.1", port);
+    await expectMobileSessions("127.0.0.1", port, { mobileClient: true });
   }, 240_000);
 });

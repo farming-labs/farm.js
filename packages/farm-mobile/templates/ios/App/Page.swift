@@ -87,11 +87,18 @@ final class Page: NSObject, BridgeListener, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    /// Read by the server: documents for a shell load the mobile client, whose router hands
+    /// navigations to the native navigator.
+    static let shellHeader = "X-Farm-Shell"
+
+    /// A document load the shell starts, with the shell header.
     func load(_ url: URL) {
         loadStartedAt = CACurrentMediaTime()
         lastURL = url
         shellLoad = true
-        webView.load(URLRequest(url: url))
+        var request = URLRequest(url: url)
+        request.setValue("ios", forHTTPHeaderField: Page.shellHeader)
+        webView.load(request)
     }
 
     /// Render `url` with the running Farm router. Returns the token echoed by `rendered`.
@@ -156,7 +163,31 @@ final class Page: NSObject, BridgeListener, WKNavigationDelegate, WKUIDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
-        decisionHandler(policy(for: navigationAction))
+        let decision = policy(for: navigationAction)
+        // WebKit drops a URLRequest's own headers on redirects, and loads the page started
+        // (a router fallback, a reload) never had it. Load those again from the shell, so every
+        // app document carries the header and keeps the mobile client.
+        if decision == .allow, let url = navigationAction.request.url, needsShellHeader(navigationAction, url) {
+            decisionHandler(.cancel)
+            load(url)
+            return
+        }
+        decisionHandler(decision)
+    }
+
+    private func needsShellHeader(_ action: WKNavigationAction, _ url: URL) -> Bool {
+        // Back and forward keep their history entries, whatever they load.
+        guard config.isAppURL(url), action.targetFrame?.isMainFrame == true,
+              action.navigationType != .backForward,
+              (action.request.httpMethod ?? "GET").uppercased() == "GET",
+              action.request.value(forHTTPHeaderField: Page.shellHeader) == nil
+        else { return false }
+        // A same-document fragment link never reaches the server.
+        if url.fragment != nil, let current = webView.url, current.path == url.path,
+           current.query == url.query {
+            return false
+        }
+        return true
     }
 
     private func policy(for action: WKNavigationAction) -> WKNavigationActionPolicy {

@@ -488,6 +488,34 @@ describe("@farm.js/mobile/ios", () => {
     );
   });
 
+  it("loads every app document with the shell header, so it keeps the mobile client", async () => {
+    // WKWebView cannot answer https requests from the app, so the iOS project bundles no client
+    // files: the mobile client loads from the server and stays in WebKit's cache.
+    const assets = {
+      dir: "/app/.farm/client",
+      entry: "/farm-mobile-client-h1a2b3c4d.js",
+      files: ["/farm-mobile-client-h1a2b3c4d.js"],
+    };
+    const withAssets = await generated({ ...buildContext(), assets });
+    expect(Object.keys(withAssets)).toEqual(Object.keys(await generated(buildContext())));
+    expect(
+      Object.keys(withAssets).some((file) => /farm-www|farm-assets|farm-mobile-client/.test(file)),
+    ).toBe(false);
+
+    const page = withAssets["App/Page.swift"];
+    expect(page).toContain('request.setValue("ios", forHTTPHeaderField: Page.shellHeader)');
+    expect(page).toContain('static let shellHeader = "X-Farm-Shell"');
+    // The one place documents load from, and the policy that sends header-less app documents
+    // (redirects, router fallbacks, reloads) through it.
+    expect(page.match(/webView\.load\(/g)).toHaveLength(1);
+    expect(page).toMatch(
+      /if decision == \.allow, let url = navigationAction\.request\.url, needsShellHeader\(navigationAction, url\) \{\n\s+decisionHandler\(\.cancel\)\n\s+load\(url\)/,
+    );
+    expect(page).toContain("action.navigationType != .backForward");
+    expect(page).toContain('(action.request.httpMethod ?? "GET").uppercased() == "GET"');
+    expect(page).toContain("action.request.value(forHTTPHeaderField: Page.shellHeader) == nil");
+  });
+
   it("uses the Android shell's colors", async () => {
     const theme = (await generated(context()))["App/Theme.swift"];
     const androidDir = fileURLToPath(

@@ -69,7 +69,9 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        val newPage = { Page(this, config, plugins, script, ::openExternal) }
+        // The mobile client's files, bundled by farm build --mobile; none under farm dev --mobile.
+        val bundle = BundledAssets.load(assets, config)
+        val newPage = { Page(this, config, plugins, script, ::openExternal, bundle) }
         val warmPath = config.tabs.firstOrNull()?.path ?: startPath
         val pool = if (poolSize > 0) WebViewPool(config, poolHolder, poolSize, warmPath, newPage) else null
         // React Native when the app has page.native.tsx screens; started after the first screen shows.
