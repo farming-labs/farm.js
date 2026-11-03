@@ -451,6 +451,8 @@ test("scaffolds a complete Auth.js instance with matching dependencies", async (
     assert.match(auth, /import \{ Auth \} from "@auth\/core"/);
     assert.match(auth, /GitHub\(\{/);
     assert.match(auth, /handlers:\s*\{\s*GET: handler,\s*POST: handler/s);
+    // The route @farm.js/authjs mounts; Auth.js otherwise only answers under /auth.
+    assert.match(auth, /basePath: "\/api\/auth"/);
     assert.deepEqual(result.env, ["AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"]);
   } finally {
     await rm(root, { recursive: true, force: true });

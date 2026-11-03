@@ -525,6 +525,8 @@ const config = {
   ],
   secret: process.env.AUTH_SECRET,
   trustHost: true,
+  // @farm.js/authjs serves Auth.js at /api/auth; Auth.js expects /auth otherwise.
+  basePath: "/api/auth",
 };
 
 const handler = (request: Request) => Auth(request, config);
