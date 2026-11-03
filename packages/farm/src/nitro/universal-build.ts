@@ -6788,8 +6788,8 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   }
 } from "@farm.js/core/internal/production-runtime";${
     farmMobileClient
-      ? `\nimport { _applyFarmMobileShellClient } from "@farm.js/core/internal/production-runtime";\n// The mobile client documents load when a mobile shell asks for them (RFC 0004, 7.2), filled in\n// once the client build has finished (see buildNitroUniversal).\nconst farmMobileShellClient = JSON.parse("${FARM_MOBILE_SHELL_CLIENT_PLACEHOLDER}");`
-      : ""
+      ? `\nimport { _applyFarmMobileShellClient } from "@farm.js/core/internal/production-runtime";\n// The mobile client documents load when a mobile shell asks for them (RFC 0004, 7.2), filled in\n// once the client build has finished (see buildNitroUniversal). A shell's document stays out of\n// shared caches, which the adapter learns as it does for a guarded response.\nconst farmMobileShellClient = JSON.parse("${FARM_MOBILE_SHELL_CLIENT_PLACEHOLDER}");\nfunction applyFarmMobileShellResponse(request, response, context) {\n  return _applyFarmMobileShellClient(request, response, farmMobileShellClient, () =>\n    context?.onGuardedResponse?.()\n  );\n}`
+      : `\n// No mobile block: no mobile client, and documents ignore X-Farm-Shell.\nfunction applyFarmMobileShellResponse(request, response) {\n  return response;\n}`
   }${
     farmIslandsMode
       ? `\nimport { getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
@@ -11376,16 +11376,8 @@ async function handleFarmFetch(request, context) {
           // Configured headers may edit the response in place, so check it either way.
           const guarded = farmGuardedResponse ? _withFarmGuardedResponseCache(configured) : configured;
           return applyFarmPreloadBudget(
-            applyFarmCspNonceToResponse(${
-              farmMobileClient
-                ? `
-              // A mobile shell's document loads the mobile client and stays out of shared caches.
-              _applyFarmMobileShellClient(runtimeRequest, guarded, farmMobileShellClient, () =>
-                context?.onGuardedResponse?.()
-              ),`
-                : `
-              guarded,`
-            }
+            applyFarmCspNonceToResponse(
+              applyFarmMobileShellResponse(runtimeRequest, guarded, context),
               farmSecurityConfig,
               cspNonce,
             ),
