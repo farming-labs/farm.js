@@ -57,7 +57,9 @@ other origins open in `SFSafariViewController`. The bridge script is the Android
 origin only; its `WKScriptMessageHandler` drops messages that are not from the main frame of that
 origin. Native and platform rules show the same placeholder as on Android.
 
-Building needs Xcode 15 or newer with an iOS simulator runtime. When `xcodebuild` and
+The generated project has not been built with `xcodebuild` yet: its Swift was type-checked
+against the Mac Catalyst SDK and run as a Mac Catalyst app. Building needs Xcode with the iOS 16 or
+newer SDK and an iOS simulator runtime. When `xcodebuild` and
 `xcrun simctl` are missing, as with the Command Line Tools alone, `farm dev|build --mobile --os ios`
 still writes the project and prints what to install and the commands to run.
 

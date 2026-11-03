@@ -130,12 +130,12 @@ function setupInstructions(context: MobileShellContext): string {
   if (process.platform !== "darwin") {
     return (
       `iOS apps build only on macOS with Xcode. Copy ${shown(context, context.projectDir)} to a Mac ` +
-      `with Xcode 15 or newer and run:\n${runInstructions(context)}`
+      `with Xcode and the iOS 16 or newer SDK and run:\n${runInstructions(context)}`
     );
   }
   return [
     "Xcode was not found (the Command Line Tools alone cannot build iOS apps), so the app was not built.",
-    "Install Xcode 15 or newer from the App Store, then:",
+    "Install Xcode with the iOS 16 or newer SDK from the App Store, then:",
     "  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer",
     "  xcodebuild -runFirstLaunch",
     "  xcodebuild -downloadPlatform iOS",

@@ -801,7 +801,9 @@ describe("building and running", () => {
       });
       const result = await shell.run(ctx);
       expect(result.launched).toBe(false);
-      expect(result.message).toContain("Install Xcode 15 or newer from the App Store");
+      expect(result.message).toContain(
+        "Install Xcode with the iOS 16 or newer SDK from the App Store",
+      );
       expect(result.message).toContain(
         "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer",
       );
@@ -817,7 +819,7 @@ describe("building and running", () => {
 
       const packaged = await shell.package({ ...ctx, distDir: path.join(root, "dist") });
       expect(packaged.files).toEqual([]);
-      expect(packaged.message).toContain("Install Xcode 15 or newer");
+      expect(packaged.message).toContain("Install Xcode with the iOS 16 or newer SDK");
     },
     30_000,
   );
