@@ -826,10 +826,12 @@ function fingerprint(config: ResolvedFarmConfig): string {
 }
 
 describe("mobile on the web", () => {
-  it("resolves the same web config with or without a mobile block and never calls the function", async () => {
+  it("resolves the same web config with or without a mobile block, plus the session plugin, and never calls the function", async () => {
     const root = await createApp();
     const base: FarmUserConfig = { root, deploymentId: "fixed" };
     const without = await resolveConfig(base, "production");
+    // Zero cost: no mobile block, no mobile session plugin, hook, or route.
+    expect(without.plugins.map((plugin) => plugin.name)).not.toContain("farm:mobile-session");
     let calls = 0;
     for (const mobile of [
       // Malformed on purpose: a web build does not check the block.
@@ -840,7 +842,17 @@ describe("mobile on the web", () => {
       },
     ]) {
       const withMobile = await resolveConfig({ ...base, mobile } as FarmUserConfig, "production");
-      expect(fingerprint(withMobile)).toBe(fingerprint(without));
+      // The web server of a mobile app serves the native screens' session tokens.
+      expect(withMobile.plugins.map((plugin) => plugin.name)).toEqual([
+        "farm:mobile-session",
+        ...without.plugins.map((plugin) => plugin.name),
+      ]);
+      expect(
+        fingerprint({
+          ...withMobile,
+          plugins: withMobile.plugins.filter((plugin) => plugin.name !== "farm:mobile-session"),
+        }),
+      ).toBe(fingerprint(without));
       expect(withMobile).not.toHaveProperty("mobile");
     }
     expect(calls).toBe(0);

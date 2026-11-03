@@ -471,8 +471,22 @@ async function outputManifest(dir: string): Promise<Record<string, string>> {
   return manifest;
 }
 
+/** App server code (not traced packages) in a build's output that contains `marker`. */
+async function serverFilesContaining(serverDir: string, marker: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const entry of await fs.readdir(serverDir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || !/\.m?js$/.test(entry.name)) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    if (file.includes(`${path.sep}node_modules${path.sep}`)) continue;
+    if ((await fs.readFile(file, "utf8")).includes(marker)) {
+      found.push(path.relative(serverDir, file));
+    }
+  }
+  return found;
+}
+
 describe("a web build", () => {
-  it("is byte-identical with or without a desktop or mobile block and carries no platform code", async () => {
+  it("is byte-identical with or without a desktop block, the same for every mobile block, and carries no platform code", async () => {
     // A runtime plugin, so the server bundle imports farm.config itself.
     const webConfig = (desktop: string) => `import { definePlugin } from "@farm.js/core";
 import { readFileSync } from "node:fs";
@@ -502,6 +516,9 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     // Warm build: later builds read caches the first one writes.
     await buildWeb();
     const without = await buildWeb();
+    const serverDir = path.join(root, ".farm", ".output", "server");
+    // Zero cost: without a mobile block there is no mobile session plugin or route.
+    expect(await serverFilesContaining(serverDir, "__farmCreateMobileSessionPlugin")).toEqual([]);
     await fs.writeFile(
       path.join(root, "farm.config.ts"),
       webConfig(`\n  desktop: { name: "DESKTOP_STATIC_MARKER", window: { width: 900 } },`),
@@ -528,7 +545,13 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     routes: { "/": { presentation: "modal" } },
   },`),
     );
-    expect(await buildWeb()).toEqual(without);
+    // A mobile block adds one thing to the web server: the session endpoints its native screens
+    // sign in through. Every mobile block, static or a function, builds the same server.
+    const withMobile = await buildWeb();
+    expect(withMobile).not.toEqual(without);
+    expect(await serverFilesContaining(serverDir, "__farmCreateMobileSessionPlugin")).not.toEqual(
+      [],
+    );
     await fs.writeFile(
       path.join(root, "farm.config.ts"),
       webConfig(`
@@ -538,7 +561,7 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     return { id: "com.example.notes", server: "https://MOBILE_FN_MARKER." + os + ".example.com" };
   },`),
     );
-    expect(await buildWeb()).toEqual(without);
+    expect(await buildWeb()).toEqual(withMobile);
     await expect(fs.stat(calledMarker)).rejects.toThrow();
     // Native screens and a native block: a web build never reads, resolves, or ships them.
     const nativeScreen = `import { View } from "react-native";
@@ -571,9 +594,8 @@ export default function Screen() { return <View />; }
     },
   },`),
     );
-    expect(await buildWeb()).toEqual(without);
+    expect(await buildWeb()).toEqual(withMobile);
 
-    const serverDir = path.join(root, ".farm", ".output", "server");
     const offenders: string[] = [];
     for (const entry of await fs.readdir(serverDir, { recursive: true, withFileTypes: true })) {
       if (!entry.isFile() || !/\.m?js$/.test(entry.name)) continue;
