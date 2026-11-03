@@ -5,6 +5,8 @@ import vm from "node:vm";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MobileShellContext } from "@farm.js/core/mobile";
 import shell, {
+  BUNDLED_ASSETS_DIR,
+  BUNDLED_ASSETS_MANIFEST,
   createAndroidProject,
   listAndroidDevices,
   MAIN_ACTIVITY,
@@ -138,6 +140,7 @@ describe("@farm.js/mobile/android", () => {
       "app/src/main/AndroidManifest.xml",
       "app/src/main/assets/farm-bridge.js",
       "app/src/main/assets/farm-routes.json",
+      "app/src/main/java/dev/farmjs/mobile/shell/BundledAssets.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/FarmBridge.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/MobileSession.kt",
@@ -393,6 +396,101 @@ dependencies {
 `;
 
 const ENGINE = "app/src/main/java/dev/farmjs/mobile/shell/NativeEngine.kt";
+
+describe("bundled client assets", () => {
+  async function clientOutput(): Promise<string> {
+    const dir = await tempDir();
+    const files: Record<string, string | Uint8Array> = {
+      "farm-mobile-client-h1a2b3c4d.js": 'import "./chunks/react-h5e6f7a8b.js";',
+      "chunks/react-h5e6f7a8b.js": "export {};",
+      "assets/farm-client-h0badcafe.css": "main{color:red}",
+      "assets/inter-h12345678.woff2": new Uint8Array([0x77, 0x4f, 0x46, 0x32]),
+      // In the client output but not listed: never bundled.
+      "farm-client-h99999999.js": "web client",
+    };
+    for (const [file, contents] of Object.entries(files)) {
+      await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
+      await writeFile(path.join(dir, file), contents);
+    }
+    return dir;
+  }
+
+  const assets = (dir: string) => ({
+    dir,
+    entry: "/farm-mobile-client-h1a2b3c4d.js",
+    files: [
+      "/assets/farm-client-h0badcafe.css",
+      "/assets/inter-h12345678.woff2",
+      "/chunks/react-h5e6f7a8b.js",
+      "/farm-mobile-client-h1a2b3c4d.js",
+    ],
+  });
+
+  it("copies the mobile client into the APK with each file's content type", async () => {
+    const dir = await clientOutput();
+    const files = await createAndroidProject(context({ command: "build", assets: assets(dir) }));
+    const byPath = Object.fromEntries(files.map((file) => [file.path, file.contents]));
+    expect(
+      Object.keys(byPath)
+        .filter((file) => file.startsWith(`${BUNDLED_ASSETS_DIR}/`))
+        .sort(),
+    ).toEqual([
+      `${BUNDLED_ASSETS_DIR}/assets/farm-client-h0badcafe.css`,
+      `${BUNDLED_ASSETS_DIR}/assets/inter-h12345678.woff2`,
+      `${BUNDLED_ASSETS_DIR}/chunks/react-h5e6f7a8b.js`,
+      `${BUNDLED_ASSETS_DIR}/farm-mobile-client-h1a2b3c4d.js`,
+    ]);
+    expect(Buffer.from(byPath[`${BUNDLED_ASSETS_DIR}/assets/inter-h12345678.woff2`] as Uint8Array)).toEqual(
+      Buffer.from([0x77, 0x4f, 0x46, 0x32]),
+    );
+    expect(JSON.parse(String(byPath[BUNDLED_ASSETS_MANIFEST]))).toEqual({
+      version: 1,
+      entry: "/farm-mobile-client-h1a2b3c4d.js",
+      files: {
+        "/assets/farm-client-h0badcafe.css": "text/css",
+        "/assets/inter-h12345678.woff2": "font/woff2",
+        "/chunks/react-h5e6f7a8b.js": "text/javascript",
+        "/farm-mobile-client-h1a2b3c4d.js": "text/javascript",
+      },
+    });
+  });
+
+  it("bundles nothing under farm dev, and refuses paths outside the client output", async () => {
+    const files = await generated(context());
+    expect(files[BUNDLED_ASSETS_MANIFEST]).toBeUndefined();
+    expect(Object.keys(files).some((file) => file.startsWith(`${BUNDLED_ASSETS_DIR}/`))).toBe(false);
+    const dir = await clientOutput();
+    for (const file of ["/../secret.js", "/chunks//x.js", "relative.js", "/a\\b.js"]) {
+      await expect(
+        createAndroidProject(
+          context({ command: "build", assets: { ...assets(dir), files: [file] } }),
+        ),
+      ).rejects.toThrow(/Refusing to bundle/);
+    }
+  });
+
+  it("answers only listed GETs on the server origin from the APK, and loads documents with the shell header", async () => {
+    const files = await generated(context());
+    const bundled = files["app/src/main/java/dev/farmjs/mobile/shell/BundledAssets.kt"];
+    expect(bundled).toContain('if (request.method != "GET" || !config.isAppUrl(url) || url.encodedQuery != null) return null');
+    expect(bundled).toContain("val type = types[path]");
+    expect(bundled).toContain('"Cache-Control" to "public, max-age=31536000, immutable"');
+    // A newer deployment's names fall through to the network, and say so.
+    expect(bundled).toContain("is not bundled; loading it from the server");
+    const page = files["app/src/main/java/dev/farmjs/mobile/shell/Page.kt"];
+    expect(page).toContain("bundle?.respond(request)");
+    expect(page).toContain('val SHELL_HEADERS = mapOf("X-Farm-Shell" to "android")');
+    expect(page).toContain("webView.loadUrl(url, SHELL_HEADERS)");
+    // Every document load goes through load(), so it carries the header.
+    for (const [file, source] of Object.entries(files)) {
+      if (!file.endsWith(".kt")) continue;
+      expect(source.match(/\.loadUrl\(/g)?.length ?? 0, file).toBe(file.endsWith("/Page.kt") ? 1 : 0);
+    }
+    expect(files["app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt"]).toContain(
+      "val bundle = BundledAssets.load(assets, config)",
+    );
+  });
+});
 
 describe("React Native screens", () => {
   const native = (overrides: Partial<NonNullable<MobileShellContext["native"]>> = {}) => ({
