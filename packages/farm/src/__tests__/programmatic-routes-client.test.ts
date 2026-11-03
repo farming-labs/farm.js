@@ -28,7 +28,7 @@ import {
 import { createRoute, createRouteModuleFromProgrammaticPage } from "../routes";
 import { RouteManager } from "../routing/route-manager";
 import { normalizeProgrammaticRoutePath } from "../routes-shared";
-import { farmPlugin } from "../vite";
+import { farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots: string[] = [];
@@ -552,6 +552,7 @@ async function buildClient(
         enforce: "pre",
         resolveId: (source) => (source.includes("?farm-route=") ? source : null),
       } satisfies Plugin,
+      farmServerOnlyEntriesPlugin(),
       farmPlugin({ root, srcDir: "src", programmaticClientRoutes: clientRoutes }),
       farmEnvironmentFunctionsPlugin({ root, srcDir: "src" }),
     ],

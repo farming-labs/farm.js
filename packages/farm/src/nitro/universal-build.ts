@@ -2104,32 +2104,9 @@ async function buildClient(
               return "assets/[name]-h[hash][extname]";
             },
           },
-          // Externalize Node.js built-ins and server-side modules for client build
+          // A browser cannot load a Node builtin: farmServerOnlyEntriesPlugin
+          // resolves one to Farm's browser module for it instead.
           external: (id) => {
-            // Externalize Node.js built-ins
-            if (
-              id.startsWith("node:") ||
-              [
-                "path",
-                "url",
-                "fs",
-                "fs/promises",
-                "os",
-                "crypto",
-                "http",
-                "https",
-                "net",
-                "stream",
-                "util",
-                "events",
-                "child_process",
-                "module",
-                "tty",
-                "dns",
-              ].includes(id)
-            ) {
-              return true;
-            }
             // Externalize native modules that can't be bundled for browser
             if (id === "fsevents" || id.includes("fsevents") || id.endsWith(".node")) {
               return true;

@@ -144,7 +144,7 @@ describe("formatClientBoundaryWarning", () => {
     expect(message).toContain("process.env.DATABASE_URL");
     expect(message).toContain("undefined in the browser");
     expect(message).toContain("node:fs");
-    expect(message).toContain("stubbed with an empty object");
+    expect(message).toContain("stubbed in the browser");
   });
 
   it("points public-key reads at publicEnv", () => {

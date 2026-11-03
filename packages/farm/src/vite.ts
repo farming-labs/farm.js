@@ -28,6 +28,12 @@ import { logger, toPosixPath, toViteModuleId } from "./utils";
 import { loadTailwindVitePlugin } from "./build/tailwind";
 import { resolveFarmImageProviderForRuntime } from "./image-runtime";
 import { isOptionalPeerInstalled, VERCEL_OG_INSTALL_HINT } from "./optional-peer";
+import { isBuiltin } from "node:module";
+import {
+  farmBrowserBuiltinsOptimizerPlugin,
+  loadFarmBrowserBuiltin,
+  resolveFarmBrowserBuiltin,
+} from "./browser-builtins";
 import {
   FARM_NODE_RESPONSE_END_PENDING,
   type FarmPlugin,
@@ -375,6 +381,7 @@ export function appDataDir() {
  * bundling its server runtime (for `@farm.js/core/og`, the `@vercel/og` wasm
  * renderer) into client code. A server graph that imports `@farm.js/core/og`
  * without the optional `@vercel/og` peer fails with the install command.
+ * A Node builtin in a browser graph resolves to Farm's browser module for it.
  */
 export function farmServerOnlyEntriesPlugin(): Plugin {
   let root = process.cwd();
@@ -382,11 +389,19 @@ export function farmServerOnlyEntriesPlugin(): Plugin {
   return {
     name: "farm:server-only-entries",
     enforce: "pre",
+    config() {
+      return {
+        optimizeDeps: { rolldownOptions: { plugins: [farmBrowserBuiltinsOptimizerPlugin()] } },
+      };
+    },
     configResolved(config) {
       root = config.root;
     },
     resolveId(id, importer, options) {
       if (id === FARM_PLATFORM_ENTRY) return options?.ssr ? null : FARM_PLATFORM_CLIENT_ID;
+      if (!options?.ssr && isBuiltin(id)) {
+        return resolveFarmBrowserBuiltin(this, id, importer, options);
+      }
       if (!FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
       const importedBy = importer ? ` (imported by ${importer})` : "";
       if (!options?.ssr) {
@@ -403,7 +418,8 @@ export function farmServerOnlyEntriesPlugin(): Plugin {
       return null;
     },
     load(id) {
-      return id === FARM_PLATFORM_CLIENT_ID ? createFarmPlatformClientModule() : null;
+      if (id === FARM_PLATFORM_CLIENT_ID) return createFarmPlatformClientModule();
+      return loadFarmBrowserBuiltin(id) ?? null;
     },
   };
 }
@@ -1189,7 +1205,7 @@ const warnedClientBoundaryIds = new Set<string>();
 /**
  * Warn once per module about server-only access in client-compiled code:
  * module-scope non-public process.env reads (undefined in the browser, #560)
- * and node: builtin imports (silently stubbed by farm:browser-external-stub).
+ * and node: builtin imports (stubbed by farmServerOnlyEntriesPlugin).
  * Diagnostics only; behavior is unchanged (#1065).
  */
 function warnClientBoundaryOnce(
