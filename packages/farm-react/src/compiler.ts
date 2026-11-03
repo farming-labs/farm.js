@@ -5319,12 +5319,6 @@ function stabilizeDeferredEventCurrentTargets(
   return t.isJSXElement(expression) ? expression : t.cloneNode(root, true);
 }
 
-/**
- * JSX elements inside `<svg>` or `<math>`. Compiler-owned elements are made with
- * `createElement`, which only makes HTML elements, so foreign content stays with React.
- */
-const foreignContentElements = new WeakSet<t.JSXElement>();
-
 // SVG and MathML element names that HTML does not share, for rows a component
 // renders into an `<svg>` another component owns.
 const FOREIGN_ELEMENT_NAMES = new Set(
@@ -5346,15 +5340,20 @@ const FOREIGN_ELEMENT_NAMES = new Set(
 );
 
 function markForeignContent(programPath: NodePath<t.Program>): void {
+  let depth = 0;
   programPath.traverse({
-    JSXElement(path) {
-      const name = path.node.openingElement.name;
-      if (!t.isJSXIdentifier(name) || (name.name !== "svg" && name.name !== "math")) return;
-      path.traverse({
-        JSXElement(inner) {
-          foreignContentElements.add(inner.node);
-        },
-      });
+    JSXElement: {
+      enter(path) {
+        // Babel preserves `extra` through JSX clones. Keep foreignObject conservative,
+        // just like the React-owned subtree fallback; this does not widen eligibility.
+        if (depth > 0) path.node.extra = { ...path.node.extra, farmForeignContent: true };
+        const name = path.node.openingElement.name;
+        if (t.isJSXIdentifier(name) && (name.name === "svg" || name.name === "math")) depth++;
+      },
+      exit(path) {
+        const name = path.node.openingElement.name;
+        if (t.isJSXIdentifier(name) && (name.name === "svg" || name.name === "math")) depth--;
+      },
     },
   });
 }
@@ -5362,7 +5361,7 @@ function markForeignContent(programPath: NodePath<t.Program>): void {
 function isForeignContent(element: t.JSXElement): boolean {
   const name = element.openingElement.name;
   return (
-    foreignContentElements.has(element) ||
+    element.extra?.farmForeignContent === true ||
     (t.isJSXIdentifier(name) && FOREIGN_ELEMENT_NAMES.has(name.name))
   );
 }
