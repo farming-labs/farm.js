@@ -414,8 +414,9 @@ Limits:
   navigations to the shell.
 - Both clients share the web build's stylesheet.
 - A document the WebView loads by itself has no header and gets the web client. The shells load
-  router fallbacks and reloads again with the header, and iOS also redirects; a form post's
-  response keeps the web client until the next navigation.
+  router fallbacks and reloads again with the header, iOS also redirects, and Android's WebView
+  keeps the header across a server redirect; a form post's response keeps the web client until
+  the next navigation.
 
 ### Navigation delegation
 
