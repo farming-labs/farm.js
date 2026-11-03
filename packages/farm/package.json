@@ -771,9 +771,9 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "node -e \"require('node:fs').rmSync('.tmp-dts', { recursive: true, force: true })\" && tsc -p tsconfig.dts.json && tsup",
     "build:runtime": "tsup --config tsup.runtime.config.ts",
-    "dev": "tsup --watch",
+    "dev": "node -e \"require('node:fs').rmSync('.tmp-dts', { recursive: true, force: true })\" && tsc -p tsconfig.dts.json && tsup --watch",
     "test": "vitest run",
     "test:coverage": "vitest --coverage",
     "lint": "biome lint .",
