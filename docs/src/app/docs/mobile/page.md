@@ -42,7 +42,7 @@ farm build                    # --web, the default, unchanged
 | iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                   |
 | React Native screens                          | Unreleased, dev only           | Android only; runs under `farm dev --mobile` on an emulator, not yet in a production build or on a device (see [React Native screens](#react-native-screens)) |
 | Bundled client assets and page shells         | Planned                        | A production shell loads pages and the client from `server`                                                                                                   |
-| Signed-in native screens (device tokens)      | Unreleased                     | Tested against dev and production servers; the shell code has not run on an emulator or device yet (see [Auth on mobile](#auth-on-mobile))                    |
+| Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                              |
 | Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                            |
 | Native islands and native `@farm.js/ui`       | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` renders on the web only (see [Portable components](#portable-components-farmjsui))                         |
 | Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                                                   |
@@ -688,6 +688,11 @@ sign in, as `{ id, userId?, expiresAt? }`, or `null`.
 Without an integration that reads sessions, the endpoints answer `501` and native screens stay
 signed out.
 
+`@farm.js/auth` accepts requests only from its auth URL, which is `http://localhost:3000` in
+development unless `FARM_AUTH_URL` is set. The Android emulator's WebView reaches the dev server as
+`http://10.0.2.2:<port>`, so start `farm dev --mobile` with `FARM_AUTH_URL=http://10.0.2.2:<port>`
+or web sign-in fails with `INVALID_ORIGIN`.
+
 ### What this protects against, and what it does not
 
 - **Protects against:** a web page, cross-site or the app's own, minting, refreshing, reading, or
@@ -711,7 +716,7 @@ signed out.
 - The device keeps the cookies it had when the token was issued, plus the rotations its own
   requests receive. A cookie rotated only in the WebView is not copied; the device keeps working
   while its own cookies sign in the same session.
-- Not yet run on an emulator or device.
+- Not yet run on a physical device, and the iOS shell has not been built with Xcode.
 
 ## The native-screen report
 
@@ -966,10 +971,10 @@ parts are designed and still on the way:
   routes stay web screens.
 - Native islands (`mobile.native.islands`), native rendering of `@farm.js/ui` (it renders on the
   web only), and the theme-token pipeline are reserved.
-- Signed-in native screens are tested in unit, dev-server and production-build tests, but not yet
-  on an emulator or device, and the Kotlin and Swift session code has not been compiled by Gradle
-  or Xcode (the Swift type-checks against the macOS SDK). See [Auth on mobile](#auth-on-mobile) for
-  which auth integrations are covered.
+- Signed-in native screens are tested in unit, dev-server and production-build tests, and the
+  Android shell's session code on an emulator under `farm dev --mobile`. The Swift session code
+  has not been built with Xcode (it type-checks against the macOS SDK). See
+  [Auth on mobile](#auth-on-mobile) for which auth integrations are covered.
 - Device plugins (`native.<name>`) ship none, so calls reject as unavailable.
 - Apps with `experimental.serverComponents` use the RSC router, which does not hand navigations to
   the shell yet.
