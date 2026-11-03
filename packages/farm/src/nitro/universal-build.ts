@@ -11885,12 +11885,14 @@ async function buildNitroUniversal(
   // Write SSR bundle to disk
   await fs.mkdir(ssrOutputDir, { recursive: true });
 
-  for (const [fileName, output] of Object.entries(ssrBundle)) {
-    const filePath = path.join(ssrOutputDir, fileName);
-    // Ensure parent directory exists for nested chunks and emitted assets.
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, output.type === "chunk" ? output.code : output.source);
-  }
+  await Promise.all(
+    Object.entries(ssrBundle).map(async ([fileName, output]) => {
+      const filePath = path.join(ssrOutputDir, fileName);
+      // Ensure parent directory exists for nested chunks and emitted assets.
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, output.type === "chunk" ? output.code : output.source);
+    }),
+  );
 
   // Create the Nitro event handler adapter. Nitro accepts plain event handler
   // functions, so keep this entry dependency-free for standalone output.
