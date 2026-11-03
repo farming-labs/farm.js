@@ -54,7 +54,7 @@ function snapshotFor(owner: StripeBillingOwner, customerId: string): StripeBilli
   } as unknown as StripeBillingSnapshot;
 }
 
-function createIntegration() {
+function createIntegration(sdk?: unknown) {
   const owners: Record<string, StripeBillingOwner> = {
     a: { kind: "user", id: "user_a" },
     b: { kind: "user", id: "user_b" },
@@ -68,7 +68,7 @@ function createIntegration() {
   let signedIn = owners.a!;
 
   const integration = stripe({
-    instance: {
+    instance: (sdk as never) ?? {
       async createCheckoutSession(input: { lineItems: Array<{ product: { id: string } }> }) {
         checkouts.push(input.lineItems[0]!.product.id);
         return { id: "cs_new", url: "https://example.com/checkout/cs_new" };
@@ -96,7 +96,12 @@ function createIntegration() {
       resolveOwner: () => signedIn,
       plans: { free: { features: { pro: false } }, pro: { features: { pro: true } } },
       products: {
-        proMonthly: { kind: "subscription", planId: "pro", priceId: "price_pro" },
+        proMonthly: {
+          kind: "subscription",
+          planId: "pro",
+          priceId: "price_pro",
+          ...(sdk ? { meterPriceIds: { api: "price_api" } } : {}),
+        },
         legacyPro: { public: false, kind: "subscription", planId: "pro", priceId: "price_old" },
         partnerPro: {
           public: false,
@@ -152,6 +157,51 @@ function createIntegration() {
 }
 
 describe("stripe billing scoping", () => {
+  it("bills the reporting customer for the checked quantity, whatever the properties say", async () => {
+    const payloads: Array<Record<string, string>> = [];
+    const sdk = {
+      checkout: { sessions: {} },
+      billingPortal: { sessions: {} },
+      webhooks: {},
+      subscriptions: {
+        retrieve: async () => ({
+          status: "active",
+          items: {
+            data: [
+              { id: "si_pro", price: { id: "price_pro", product: "prod_pro" } },
+              { id: "si_api", price: { id: "price_api", product: "prod_pro" } },
+            ],
+          },
+        }),
+      },
+      prices: { retrieve: async () => ({ id: "price_api", recurring: { meter: null } }) },
+      billing: {
+        meterEvents: {
+          async create(params: {
+            event_name: string;
+            identifier: string;
+            timestamp: number;
+            payload: Record<string, string>;
+          }) {
+            payloads.push(params.payload);
+            return { ...params };
+          },
+        },
+      },
+    };
+    const { call } = createIntegration(sdk);
+
+    const result = await call("/billing/report-usage", "POST", {
+      key: "api",
+      quantity: 1,
+      idempotencyKey: "evt_1",
+      properties: { stripe_customer_id: "cus_b", value: 1_000_000, region: "eu" },
+    });
+
+    expect(result.status).toBe(200);
+    expect(payloads).toEqual([{ region: "eu", stripe_customer_id: "cus_a", value: "1" }]);
+  });
+
   it("keeps a usage idempotency key to the customer reporting it", async () => {
     const { call, reportedIdentifiers, signIn } = createIntegration();
     // Stripe dedupes meter event identifiers account-wide, so B reusing A's

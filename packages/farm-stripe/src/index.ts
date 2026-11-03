@@ -260,6 +260,8 @@ function normalizeUsageProperties(value: unknown): StripeBillingUsageProperties 
 
   const properties: StripeBillingUsageProperties = {};
   for (const [key, entry] of Object.entries(value)) {
+    // Stripe meters read the customer and quantity from these payload keys.
+    if (key === "stripe_customer_id" || key === "value") continue;
     if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean") {
       properties[key] = entry;
     }
@@ -1888,14 +1890,14 @@ function createStripeAdapterFromSdk(stripe: Stripe): StripeIntegrationAdapter {
     async reportUsage(input) {
       const occurredAtDate = new Date(input.occurredAt);
       const timestamp = Math.floor(occurredAtDate.getTime() / 1000);
-      const payload: Record<string, string> = {
-        stripe_customer_id: input.customerId,
-        value: String(input.quantity),
-      };
-
+      const payload: Record<string, string> = {};
       for (const [key, value] of Object.entries(input.properties ?? {})) {
         payload[key] = String(value);
       }
+      // The meter reads the customer and quantity from these keys, so they are
+      // written last: properties never bill another customer or a larger value.
+      payload.stripe_customer_id = input.customerId;
+      payload.value = String(input.quantity);
 
       const event = await stripe.billing.meterEvents.create({
         event_name: input.meter.eventName,
