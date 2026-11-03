@@ -956,11 +956,15 @@ export function rewriteEarlySsrRelativeImports(options: {
     const sourcePath = suffixIndex === -1 ? source.value : source.value.slice(0, suffixIndex);
     const suffix = suffixIndex === -1 ? "" : source.value.slice(suffixIndex);
     const resolvedPath = path.resolve(path.dirname(cleanId), sourcePath);
+    const moduleId = toViteModuleId(resolvedPath, options.root);
+    // Vite takes a `/@fs/` id as an exact file. An absolute path gets the extension, index and
+    // `.js`-to-`.ts` resolution the relative specifier had.
+    const specifier = moduleId.startsWith("/@fs/") ? toPosixPath(resolvedPath) : moduleId;
 
     replacements.push({
       start: source.start,
       end: source.end,
-      code: JSON.stringify(`${toViteModuleId(resolvedPath, options.root)}${suffix}`),
+      code: JSON.stringify(`${specifier}${suffix}`),
     });
   });
 
