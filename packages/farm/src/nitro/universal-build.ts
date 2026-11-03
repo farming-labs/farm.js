@@ -6609,6 +6609,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   resolveFarmInstrumentationRuntime,
   resolveFarmPreviewDeployment,
   resolveFarmWebRequestOrigin,
+  fetchFarmExternalRewrite,
   runWithFarmRequestSpan,
   createFarmSearchParams,
   searchParamsToObject,
@@ -9370,7 +9371,7 @@ async function resolveFarmRequestInContext(
       if (rewriteDestination) {
         let rewrittenRequest = createRewrittenRequest(request, rewriteDestination);
         if (new URL(rewrittenRequest.url).origin !== url.origin) {
-          return globalThis.fetch(rewrittenRequest);
+          return fetchFarmExternalRewrite(rewrittenRequest);
         }
         if (farmPluginRuntime) {
           // Plugin guards ran on the requested URL. Re-run only runtime.before

@@ -86,7 +86,11 @@ import {
   isFarmMarkdownPageFile,
   normalizeFarmMarkdownRoutePath,
 } from "./app-markdown";
-import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
+import {
+  applyWebResponseHeaders,
+  fetchFarmExternalRewrite,
+  sendWebResponse,
+} from "./server/response";
 import { createFarmAiCatalogResponse } from "./ai-catalog";
 import { FARM_DEFAULT_MCP_PATH } from "./agent-mcp";
 import {
@@ -529,6 +533,27 @@ export function withFarmRequestTracing(
       res.end(JSON.stringify({ error: "Internal server error" }));
     });
   };
+}
+
+/**
+ * A config rewrite to another origin leaves `req.url` absolute. Forward the request there, as the
+ * production server does.
+ */
+async function proxyFarmExternalRewrite(
+  req: Connect.IncomingMessage,
+  res: ServerResponse,
+  bodySizeLimit: number,
+): Promise<boolean> {
+  const destination = req.url;
+  if (!destination || !/^https?:\/\//i.test(destination)) return false;
+
+  let request = createRequestFromNodeRequest(req, new URL(destination));
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    const body = await readNodeRequestBody(req as any, bodySizeLimit);
+    request = new Request(request, { body: toRequestBody(body) });
+  }
+  await sendWebResponse(res, await fetchFarmExternalRewrite(request));
+  return true;
 }
 
 function toRequestBody(body: Buffer | undefined): ArrayBuffer | undefined {
@@ -2740,7 +2765,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
               }
 
-              if (res.writableEnded) {
+              if (
+                res.writableEnded ||
+                (await proxyFarmExternalRewrite(req, res, currentServerConfig.bodySizeLimit))
+              ) {
                 const duration = Date.now() - startTime;
                 logResponse(method, urlPath, res.statusCode || 200, duration, "API");
                 return;
@@ -3579,7 +3607,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               }
             }
 
-            if (res.writableEnded || responseInterceptor?.isEnded()) {
+            if (
+              res.writableEnded ||
+              responseInterceptor?.isEnded() ||
+              (await proxyFarmExternalRewrite(req, res, currentServerConfig.bodySizeLimit))
+            ) {
               if (!responseInterceptor?.isEnded()) {
                 const duration = Date.now() - startTime;
                 logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");

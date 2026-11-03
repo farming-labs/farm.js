@@ -49,6 +49,7 @@ export {
   resolveFarmWebRequestOrigin,
 } from "../server/request";
 export { _resolveCurrentCspNonce } from "../server/request-bridge";
+export { fetchFarmExternalRewrite } from "../server/response";
 export { _runWithAPIRequestRuntime } from "../api/server-context";
 export {
   configureFarmCache,

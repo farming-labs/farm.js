@@ -1,11 +1,14 @@
 // @vitest-environment node
 
 import fs from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ViteDevServer } from "vite";
+import { defineIntegration } from "../integrations";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
 
@@ -137,5 +140,68 @@ export default function Page() { return <main>fallback page</main>; }`,
     expect(await fetch(`${origin}/api/other`).then((response) => response.json())).toEqual({
       source: "fallback",
     });
+  }, 30_000);
+
+  it("forwards rewrites to another origin, as production does", async () => {
+    const upstream = http.createServer(async (req, res) => {
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      const text = `upstream ${req.method} ${req.url} ${body}`.trim();
+      if (req.url?.startsWith("/zipped")) {
+        res.setHeader("content-encoding", "gzip");
+        res.end(gzipSync(text));
+        return;
+      }
+      res.end(text);
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const upstreamAddress = upstream.address();
+    if (!upstreamAddress || typeof upstreamAddress === "string") throw new Error("No upstream");
+    const upstreamOrigin = `http://127.0.0.1:${upstreamAddress.port}`;
+
+    try {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-rewrites-external-"));
+      temporaryRoots.add(root);
+      await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+      await writeModule(
+        root,
+        "src/app/api/local/route.ts",
+        `export function GET() { return Response.json({ source: "local" }); }`,
+      );
+
+      const server = await createServer({
+        root,
+        images: { provider: "none" },
+        rewrites: async () => [
+          { source: "/api/:path*", destination: `${upstreamOrigin}/:path*` },
+          { source: "/proxy/:path*", destination: `${upstreamOrigin}/:path*` },
+        ],
+        // An integration's request hook must not choke on the absolute destination.
+        integrations: {
+          cache: defineIntegration({ category: "cache", type: "rewrite-test", instance: {} }),
+        },
+      });
+      servers.add(server);
+      await server.listen(await getAvailablePort());
+      const address = server.httpServer?.address();
+      if (!address || typeof address === "string") throw new Error("Missing dev server address");
+      const origin = `http://localhost:${address.port}`;
+
+      const api = await fetch(`${origin}/api/items?page=2`, { method: "POST", body: "payload" });
+      expect(api.status).toBe(200);
+      expect(await api.text()).toBe("upstream POST /items?page=2 payload");
+      const page = await fetch(`${origin}/proxy/about`);
+      expect(await page.text()).toBe("upstream GET /about");
+      // fetch() decodes the body, so the upstream's encoding headers must not reach the client.
+      const zipped = await fetch(`${origin}/proxy/zipped`);
+      expect(zipped.headers.get("content-encoding")).toBeNull();
+      expect(await zipped.text()).toBe("upstream GET /zipped");
+      // Rewrites stay a fallback: the app's own route still wins.
+      expect(await fetch(`${origin}/api/local`).then((response) => response.json())).toEqual({
+        source: "local",
+      });
+    } finally {
+      await new Promise((resolve) => upstream.close(resolve));
+    }
   }, 30_000);
 });
