@@ -1118,6 +1118,20 @@ function renderCodeCopyButton(className = "code-copy"): string {
   return `<button class="${className}" type="button" data-code-copy data-copied="false" aria-label="Copy code" title="Copy code"><svg class="code-copy-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><svg class="code-copy-check" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"></path></svg></button>`;
 }
 
+const SCRIPT_URL_SCHEME = /^(?:javascript|vbscript|data):/i;
+
+/**
+ * Whether clicking the link runs script in the docs origin. GitHub drops the same schemes
+ * from Markdown links. Browsers ignore tabs and newlines anywhere in a URL and control
+ * characters or spaces before it, so `java\tscript:` still counts.
+ */
+function isScriptUrl(href: string): boolean {
+  const url = href.replace(/[\t\n\r]/g, "");
+  let start = 0;
+  while (start < url.length && url.charCodeAt(start) <= 0x20) start++;
+  return SCRIPT_URL_SCHEME.test(url.slice(start));
+}
+
 function renderMarkdownDocument(
   body: string,
   depth: number,
@@ -1161,6 +1175,7 @@ function renderMarkdownDocument(
   renderer.codespan = (code) => `<code>${escapeHtml(code)}</code>`;
 
   renderer.link = (href, title, text) => {
+    if (href && isScriptUrl(href)) return text;
     const safeHref = href || "";
     const titleAttribute = title ? ` title="${escapeAttribute(title)}"` : "";
     return `<a href="${escapeAttribute(safeHref)}"${titleAttribute}>${text}</a>`;
