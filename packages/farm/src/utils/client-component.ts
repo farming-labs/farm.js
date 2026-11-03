@@ -5,6 +5,10 @@ import { isFarmIslandStrategy, type FarmIslandStrategy } from "../island";
 import { isReactRenderer, type FarmRenderer } from "../renderer";
 import type { FarmIsolatedClientHydrationMode } from "../types";
 import { logger } from "../utils";
+import {
+  getPackageClientBoundaryCache,
+  PackageInspectionTrace,
+} from "./package-client-boundary-cache";
 import { getFarmProjectSourceDir } from "./source-dir";
 
 function readIfExists(filePath: string): string | null {
@@ -1618,12 +1622,40 @@ function inspectClientModuleMetadata(
   };
 }
 
+/**
+ * Within a production build, reuse an earlier inspection of the same package entry graph when it
+ * would read exactly what it read before: none of its files are visited yet, and every file where
+ * it stopped because an earlier inspection had visited it is visited again.
+ */
 function inspectPackageClientBoundary(
   resolvedPath: string | null,
   root: string | undefined,
   visited: Set<string>,
 ): ClientModuleMetadata {
+  const cache = getPackageClientBoundaryCache();
+  if (!cache || !resolvedPath || visited.has(resolvedPath)) {
+    return traversePackageClientBoundary(resolvedPath, root, visited);
+  }
+  const key = `${root ?? ""}\0${resolvedPath}`;
+  const cached = cache.find(key, visited);
+  if (cached) {
+    for (const file of cached.files) visited.add(file);
+    return { ...cached.result };
+  }
+  const trace = new PackageInspectionTrace();
+  const result = traversePackageClientBoundary(resolvedPath, root, visited, trace);
+  cache.add(key, trace.toEntry(result));
+  return result;
+}
+
+function traversePackageClientBoundary(
+  resolvedPath: string | null,
+  root: string | undefined,
+  visited: Set<string>,
+  trace?: PackageInspectionTrace,
+): ClientModuleMetadata {
   if (!resolvedPath || visited.has(resolvedPath)) {
+    if (resolvedPath) trace?.stop(resolvedPath);
     return {
       isClientComponent: false,
       shouldHydrate: false,
@@ -1632,6 +1664,7 @@ function inspectPackageClientBoundary(
   }
 
   visited.add(resolvedPath);
+  trace?.visit(resolvedPath);
   const content = readIfExists(resolvedPath);
   const parsed = parseClientModuleMetadata(content, false);
   let importsClientBoundary = false;
@@ -1644,7 +1677,7 @@ function inspectPackageClientBoundary(
   for (const specifier of getImportSpecifiers(content)) {
     if (!specifier.startsWith(".") && !specifier.startsWith("/")) continue;
     const importedPath = resolveImportedModuleSourcePath(resolvedPath, specifier, root);
-    const importedMetadata = inspectPackageClientBoundary(importedPath, root, visited);
+    const importedMetadata = traversePackageClientBoundary(importedPath, root, visited, trace);
     if (!importedMetadata.shouldHydrate) continue;
     importsClientBoundary = true;
     if (importedIslandStrategy === null) {
