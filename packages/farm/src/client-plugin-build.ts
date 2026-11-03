@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { FarmClientPlugin } from "./client/plugin";
 import { resolveFarmPlatform } from "./desktop/config";
+import type { FarmPlatform } from "./platform";
 import type { FarmPlugin, FarmPluginClientConfig } from "./plugin";
 
 export interface ResolvedFarmClientPlugin {
@@ -79,14 +80,16 @@ export function generateFarmClientPluginEntryCode(
   root?: string,
   srcDir = "src",
   appPublicData?: unknown,
+  /** The client build's platform; a web build's mobile client passes `"mobile"`. */
+  platform: FarmPlatform = resolveFarmPlatform(),
 ): FarmClientPluginEntryCode {
   const resolved = resolveFarmClientPlugins(plugins, root);
   const appClientEntry = root ? resolveFarmAppClientEntry(root, srcDir) : undefined;
   const appImport = appClientEntry
     ? `import farmAppClientDefinition from ${JSON.stringify(appClientEntry.replace(/\\/g, "/"))};`
     : "";
-  // `farm dev|build --mobile`: hand in-app navigations to the native shell. Web builds add nothing.
-  const mobileShell = resolveFarmPlatform() === "mobile";
+  // The mobile client hands in-app navigations to the native shell. Web clients add nothing.
+  const mobileShell = platform === "mobile";
   const imports = mobileShell
     ? [MOBILE_SHELL_CLIENT_IMPORT, appImport].filter(Boolean).join("\n")
     : appImport;
