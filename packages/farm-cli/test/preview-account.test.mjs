@@ -9,9 +9,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-const { previewSignInStatus, signInToPreviewGateway, signOutOfPreviewGateway } = createRequire(
-  import.meta.url,
-)("../dist/index.js");
+const cli = createRequire(import.meta.url)("../dist/index.js");
+const { signOutOfPreviewGateway } = cli;
+// preview.example.com stands for a gateway the developer runs, so it is trusted explicitly.
+const previewSignInStatus = (url, runtime, env, options) =>
+  cli.previewSignInStatus(url, runtime, env, { trustGateway: true, ...options });
+const signInToPreviewGateway = (url, runtime, options) =>
+  cli.signInToPreviewGateway(url, runtime, { trustGateway: true, ...options });
 const bin = path.join(path.dirname(fileURLToPath(import.meta.url)), "../bin/farm.js");
 const gatewayUrl = "https://preview.example.com";
 const infra = {
@@ -303,12 +307,18 @@ test("farm whoami and farm logout run end to end against a gateway", async () =>
 
     // On an Infrastructure gateway, the hint names whichever variable is missing.
     config = infra;
-    await assert.rejects(farm("whoami"), (error) => {
+    await assert.rejects(farm("whoami", "--trust-gateway"), (error) => {
       assert.match(error.stdout, /Not signed in\. Run farm login, or set FARMJS_API_KEY\./);
       return true;
     });
     env.FARMJS_API_KEY = key;
+    // A gateway that isn't the hosted one gets no key until the developer vouches for it.
     await assert.rejects(farm("whoami"), (error) => {
+      assert.match(error.stdout, /if you run it, run farm login --trust-gateway\./);
+      assert.match(error.stdout, /isn't the hosted one \(https:\/\/preview\.farmjs\.dev\)/);
+      return true;
+    });
+    await assert.rejects(farm("whoami", "--trust-gateway"), (error) => {
       assert.match(error.stdout, /Not signed in\. Run farm login\.\n/);
       assert.match(
         error.stdout,

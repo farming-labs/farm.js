@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createInterface } from "node:readline/promises";
 import { logger } from "@farm.js/core/internal/cli-runtime";
-import type { PreviewGatewayPlan } from "./preview-gateway";
+import { DEFAULT_GATEWAY_URL, type PreviewGatewayPlan } from "./preview-gateway";
 import { formatCompactPreviewDuration } from "./preview-duration";
 
 export const PREVIEW_EXPIRY_CLOCK_SKEW_MS = 1000 * 60 * 5;
@@ -26,6 +26,12 @@ export interface AuthorizePreviewPlanOptions {
   expiresInMs?: number;
   forceLogin?: boolean;
   runtime?: PreviewAuthRuntime;
+  /**
+   * Send a Farm.js Infrastructure API key to a gateway other than the hosted one
+   * (`--trust-gateway`). Only for a gateway you run: the gateway's own description of
+   * itself never decides this.
+   */
+  trustGateway?: boolean;
   /**
    * @deprecated Sign-in no longer writes FARMJS_PROJECT_ID to the app's .env, so this is
    * unused. Previews never read it, and analytics keys name their own project.
@@ -112,6 +118,23 @@ export function previewCredentialFromEnvironment(
   return { token: legacy, source: "FARM_PREVIEW_TOKEN" };
 }
 
+/**
+ * Whether a Farm.js Infrastructure API key may go to this gateway: the hosted gateway, or
+ * one the developer vouched for with --trust-gateway. Any gateway can claim to sign in
+ * through Infrastructure, so that claim alone never sends it a key.
+ */
+function previewGatewayTrusted(gatewayUrl: string, trustGateway = false) {
+  return trustGateway || sameOrigin(gatewayUrl, DEFAULT_GATEWAY_URL);
+}
+
+/** Why an untrusted gateway gets no API key, and how to send it one when you run it. */
+function untrustedGatewayMessage(gatewayUrl: string) {
+  return (
+    `${originOf(gatewayUrl)} isn't the hosted Farm Preview gateway (${DEFAULT_GATEWAY_URL}), ` +
+    "so farm preview won't send it a Farm.js Infrastructure API key. If you run this gateway, pass --trust-gateway."
+  );
+}
+
 function sameOrigin(left: string | undefined, right: string) {
   try {
     return !!left && new URL(left).origin === new URL(right).origin;
@@ -155,12 +178,18 @@ export async function authorizePreviewGatewayPlan(
     throw new Error("The Farm Preview gateway returned an unsupported login configuration.");
   }
 
-  const environment = options.forceLogin ? undefined : previewCredentialFromEnvironment(config);
+  // A key saved for this gateway was made for it, so only the environment's key and a new
+  // sign-in depend on trusting the gateway.
+  const trusted = previewGatewayTrusted(plan.gatewayUrl, options.trustGateway);
+  const environment =
+    options.forceLogin || (config.provider === "device" && !trusted)
+      ? undefined
+      : previewCredentialFromEnvironment(config);
   let accountToken = options.forceLogin
     ? undefined
     : environment?.token || (await runtime.credentials.get(plan.gatewayUrl));
   if (!accountToken) {
-    const account = await loginWithPreviewDeviceFlow(plan.gatewayUrl, config, runtime);
+    const account = await loginWithPreviewDeviceFlow(plan.gatewayUrl, config, runtime, trusted);
     accountToken = account.token;
     await finishPreviewSignIn(plan.gatewayUrl, account, runtime);
   }
@@ -176,7 +205,7 @@ export async function authorizePreviewGatewayPlan(
       );
     }
     await runtime.credentials.delete(plan.gatewayUrl);
-    const account = await loginWithPreviewDeviceFlow(plan.gatewayUrl, config, runtime);
+    const account = await loginWithPreviewDeviceFlow(plan.gatewayUrl, config, runtime, trusted);
     accountToken = account.token;
     await finishPreviewSignIn(plan.gatewayUrl, account, runtime);
     grant = await requestTunnelGrant(plan, accountToken, expiresInMs, runtime.fetch);
@@ -286,6 +315,8 @@ export interface PreviewSignInStatus {
   savedOverridden: boolean;
   /** Why FARMJS_API_KEY is set but not used, when it is. */
   ignoredKey?: string;
+  /** Whether farm preview would send this gateway a Farm.js Infrastructure API key. */
+  trusted: boolean;
 }
 
 /** Which credential farm preview would use for this gateway, from its public config only. */
@@ -293,24 +324,32 @@ export async function previewSignInStatus(
   gatewayUrl: string,
   runtime: PreviewAuthRuntime = createDefaultPreviewAuthRuntime(),
   env: Record<string, string | undefined> = process.env,
+  options: { trustGateway?: boolean } = {},
 ): Promise<PreviewSignInStatus> {
   const config = await loadPreviewAuthConfig(gatewayUrl, runtime.fetch);
-  if (!config.enabled) return { gatewayUrl, mode: "none", savedOverridden: false };
+  const trusted = previewGatewayTrusted(gatewayUrl, options.trustGateway);
+  if (!config.enabled) return { gatewayUrl, mode: "none", savedOverridden: false, trusted };
   const mode = config.provider === "device" ? "infrastructure" : "github";
   // whoami reports the deprecation itself rather than warning.
-  const environment = previewCredentialFromEnvironment(config, env, () => {});
+  const environment =
+    mode === "infrastructure" && !trusted
+      ? undefined
+      : previewCredentialFromEnvironment(config, env, () => {});
   const saved = await runtime.credentials.get(gatewayUrl);
   const keyIgnored = !!env.FARMJS_API_KEY?.trim() && environment?.source !== "FARMJS_API_KEY";
   const status: PreviewSignInStatus = {
     gatewayUrl,
     mode,
     savedOverridden: !!environment && !!saved,
+    trusted,
     ...(keyIgnored
       ? {
           ignoredKey:
             mode === "github"
               ? "this gateway uses GitHub sign-in, which doesn't accept API keys"
-              : `it's for ${originOf(env.FARMJS_API_URL?.trim() || DEFAULT_INFRA_URL)}, but this gateway signs in through ${originOf(config.issuer)}. If the key is from there, set FARMJS_API_URL=${originOf(config.issuer)}`,
+              : !trusted
+                ? `this gateway isn't the hosted one (${DEFAULT_GATEWAY_URL}). If you run it, pass --trust-gateway`
+                : `it's for ${originOf(env.FARMJS_API_URL?.trim() || DEFAULT_INFRA_URL)}, but this gateway signs in through ${originOf(config.issuer)}. If the key is from there, set FARMJS_API_URL=${originOf(config.issuer)}`,
         }
       : {}),
   };
@@ -334,15 +373,24 @@ export async function previewSignInStatus(
 export async function signInToPreviewGateway(
   gatewayUrl: string,
   runtime: PreviewAuthRuntime = createDefaultPreviewAuthRuntime(),
-  /** @deprecated `root` is unused: sign-in no longer writes the app's .env. */
-  _options: { root?: string } = {},
+  options: {
+    /** @deprecated Unused: sign-in no longer writes the app's .env. */
+    root?: string;
+    /** Sign in for a gateway other than the hosted one (`--trust-gateway`). */
+    trustGateway?: boolean;
+  } = {},
 ): Promise<{ login: string }> {
   const config = await loadPreviewAuthConfig(gatewayUrl, runtime.fetch);
   if (!config.enabled) throw new Error("This preview gateway doesn't use sign-in.");
   if ((config.provider !== "github" && config.provider !== "device") || !config.clientId) {
     throw new Error("The Farm Preview gateway returned an unsupported login configuration.");
   }
-  const account = await loginWithPreviewDeviceFlow(gatewayUrl, config, runtime);
+  const account = await loginWithPreviewDeviceFlow(
+    gatewayUrl,
+    config,
+    runtime,
+    previewGatewayTrusted(gatewayUrl, options.trustGateway),
+  );
   await finishPreviewSignIn(gatewayUrl, account, runtime);
   return { login: account.user.login };
 }
@@ -413,7 +461,11 @@ async function loginWithPreviewDeviceFlow(
   gatewayUrl: string,
   config: PreviewAuthPublicConfig,
   runtime: PreviewAuthRuntime,
+  trusted: boolean,
 ): Promise<PreviewAccountExchange> {
+  // The new key would go to this gateway with every preview; refuse before anyone signs in.
+  if (config.provider === "device" && !trusted)
+    throw new Error(untrustedGatewayMessage(gatewayUrl));
   if (runtime.interactive === false)
     throw new Error(
       config.provider === "device"
@@ -595,6 +647,8 @@ async function requestTunnelGrant(
     },
     body: JSON.stringify({ name: plan.requestedName, project: plan.project, expiresInMs }),
     signal: AbortSignal.timeout(10_000),
+    // The key is for this origin only; never carry it along a redirect.
+    redirect: "error",
   });
   if (response.status === 401) {
     await response.body?.cancel();
