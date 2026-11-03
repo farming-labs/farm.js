@@ -5319,13 +5319,6 @@ function stabilizeDeferredEventCurrentTargets(
   return t.isJSXElement(expression) ? expression : t.cloneNode(root, true);
 }
 
-/**
- * JSX elements inside `<svg>` or `<math>`. Compiler-owned elements are made with
- * `createElement`, which only makes HTML elements, so foreign content stays with React.
- */
-// Babel preserves `extra` through cloneNode. A WeakSet of the parsed nodes loses
-// this ancestry when handler/derived-value rewrites clone the JSX before analysis.
-
 // SVG and MathML element names that HTML does not share, for rows a component
 // renders into an `<svg>` another component owns.
 const FOREIGN_ELEMENT_NAMES = new Set(
@@ -5347,15 +5340,20 @@ const FOREIGN_ELEMENT_NAMES = new Set(
 );
 
 function markForeignContent(programPath: NodePath<t.Program>): void {
+  let depth = 0;
   programPath.traverse({
-    JSXElement(path) {
-      const name = path.node.openingElement.name;
-      if (!t.isJSXIdentifier(name) || (name.name !== "svg" && name.name !== "math")) return;
-      path.traverse({
-        JSXElement(inner) {
-          inner.node.extra = { ...inner.node.extra, farmForeignContent: true };
-        },
-      });
+    JSXElement: {
+      enter(path) {
+        // Babel preserves `extra` through JSX clones. Keep foreignObject conservative,
+        // just like the React-owned subtree fallback; this does not widen eligibility.
+        if (depth > 0) path.node.extra = { ...path.node.extra, farmForeignContent: true };
+        const name = path.node.openingElement.name;
+        if (t.isJSXIdentifier(name) && (name.name === "svg" || name.name === "math")) depth++;
+      },
+      exit(path) {
+        const name = path.node.openingElement.name;
+        if (t.isJSXIdentifier(name) && (name.name === "svg" || name.name === "math")) depth--;
+      },
     },
   });
 }

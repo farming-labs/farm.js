@@ -92,4 +92,21 @@ describe("React AOT keyed rows React keeps", () => {
     const html = await compileRows(`<a key={row.id}>{row.label}</a>`);
     expect(html.code).toMatch(KEYED_ROWS_RUNTIME);
   });
+
+  it("ends foreign ancestry before an HTML sibling after nested svg and math", async () => {
+    const result = await compileRows(
+      `<a key={row.id}>{row.label}</a>`,
+      (rows) =>
+        `<section><svg><svg><title>SVG</title></svg></svg><math><math><mi>x</mi></math></math><div>${rows}</div></section>`,
+    );
+    expect(result.code).toMatch(KEYED_ROWS_RUNTIME);
+  });
+
+  it("keeps the conservative foreignObject subtree fallback", async () => {
+    const result = await compileRows(
+      `<a key={row.id}>{row.label}</a>`,
+      (rows) => `<svg><foreignObject><div>${rows}</div></foreignObject></svg>`,
+    );
+    expect(result.code).not.toMatch(KEYED_ROWS_RUNTIME);
+  });
 });
