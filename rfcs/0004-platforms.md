@@ -40,6 +40,10 @@ Updated 2026-11-02, after 0.1.50.
     entry with web twin fallback, the Metro and Hermes build).
   - #2445: the React Native host in the Android shell (React Native 0.88.1). Stacked on #2444.
   - #2446: `/map` and `/camera` in `examples/mobile` as React Native screens. Stacked on #2445.
+  - #2472: bundled client assets. A web build of an app with a `mobile` block adds the mobile
+    client, documents the shell asks for (`X-Farm-Shell`) load it, and the Android app serves its
+    files from the APK. iOS loads them from the server. Page shells are not built. See
+    [The server picks the client; the app bundle is a cache](#the-server-picks-the-client-the-app-bundle-is-a-cache).
   - The Android spike #2390 stays a draft.
 - Verified on an Android 15 emulator so far: tabs, push, modal and back; cold start 1.75 to 2.3 s
   (dev build, web start screen) with the React Native runtime warming after the first paint; the
@@ -1258,6 +1262,43 @@ mode per auth integration.
   can mint a token, which gives it nothing the cookie does not. App Attest and Play Integrity
   signing the challenge nonce are the follow-up.
 
+### The server picks the client; the app bundle is a cache
+
+Made while building bundled client assets (#2472). Narrows 7.2 and 7.12.
+
+- `farm build` of an app with a `mobile` block builds the client twice into the same output: the
+  web client, and the mobile client (the same entry and graph with `platform()` as `"mobile"` and
+  the shell's navigation delegate). `.farm/mobile-client.json` records the mobile entry, the
+  stylesheet both use, and every content-hashed file a shell document loads. Leaf chunks are
+  shared; chunks that import the entry differ by name. `examples/mobile`: 11 files, 380 KB,
+  119 KB gzip. An app without the block builds what it did before.
+- Shells add `X-Farm-Shell: android|ios` to every document load they start. For such a request
+  the server rewrites the document on the way out: the web entry becomes the mobile entry, and
+  modulepreload links of web-only chunks go. The response is `private, no-store`, as a guarded
+  one; every HTML response of the app carries `Vary: X-Farm-Shell`, and Nitro's `swr` and `cache`
+  rules vary on it. Farm's own page caches store the web variant.
+- Rejected: the shell rewriting asset URLs to bundled files by a manifest (the shell choosing the
+  client). An app built from older source would then run its client against a newer server's
+  HTML, route table and server function ids. With the server choosing, a page always runs the
+  client its own deployment built.
+- The app bundle is a cache keyed by content hash. Android's `shouldInterceptRequest` answers a
+  GET on the server origin from `assets/farm-www` only for a path listed in `farm-assets.json`. A
+  hashed name only ever has one content, so a hit is the file the server would send, the same
+  guarantee immutable caching on the web relies on.
+- Version skew needs no handshake: a newer deployment's documents reference names the installed app
+  does not have, those miss and load from the network, and the shell logs the miss.
+  `farm build --mobile` makes the same build as `farm build`, so an app built from the deployed
+  source and environment matches it name for name.
+- 7.2 placed bundled assets on a separate https origin behind a scheme handler. Android serves them
+  on the server's own origin instead: no second origin for the bridge, cookies, CSP or CORS.
+- iOS: `WKURLSchemeHandler` cannot take `http` or `https`, and a custom-scheme asset origin would be
+  mixed content in an https page and a second origin. iOS shells send the header and run the
+  mobile client from the network, where WebKit's cache keeps it. Serving pages themselves from a
+  custom scheme would break the server's cookies and origin checks, so iOS bundling waits for a
+  measured need on a device.
+- Gaps: prerendered pages are static files the server never sees, so in a shell they load the web
+  client. Server components apps get no mobile client yet. Page shells (7.2) are not built.
+
 ## 9. Rollout
 
 Desktop:
@@ -1278,9 +1319,9 @@ Mobile (0.2.x):
    with `farm dev|build --mobile [--apk]` (#2422), `data-farm-shell` and `examples/mobile` (#2427).
 6. **Production web screens.** Bundled assets and page shells, token auth, server origin handling,
    absolute transport, the contract manifest, the remote rule override, and the iOS shell. The iOS
-   shell is in review (#2441) and needs Xcode for a real build. The rest is not started; until
-   bundled client assets land, a production shell loads the web deployment's client, which is not
-   a `--mobile` build, so navigations stay in the page instead of opening native screens.
+   shell is in review (#2441) and needs Xcode for a real build. Bundled client assets are in
+   review (#2472): production shells run the mobile client, so navigations open native screens,
+   and Android serves its files from the APK. Page shells and the rest are not started.
 7. **Native modules.** Spec format and codegen, the bridge transport, first-party modules,
    `@farm.js/ui` pop-ups and chrome on web screens. Analyzer stage 0 (report only) was released in
    0.1.50 (#2425); the rest is not started, and `native.<module>` calls reject as unavailable.
@@ -1310,8 +1351,8 @@ Next, in order, and what blocks it:
   replacing the failed screen, which is the fallback working, not the screen.
 - Build and run the iOS shell (#2441) with `xcodebuild` in a simulator. Blocked on Xcode 15 or
   newer with a simulator runtime (about 40 GB of disk). The iOS React Native host comes after it.
-- Bundled client assets and page shells (phase 6), so a production shell navigates natively and
-  opens without a network round trip for the client.
+- Page shells (phase 6), so a push shows a layout before the server answers. Bundled client
+  assets are in review (#2472); verifying them on an emulator needs the disk for Gradle.
 - Token auth and server origin handling for requests from native screens, which send no `Origin`.
 
 Managed backend hosting in Infra comes after phase 6. iOS needs macOS CI with Xcode, and Android
