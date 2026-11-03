@@ -141,6 +141,10 @@ do not run in the browser.
 | `FARM_AUTH_SECRET` | Signing secret, required in production. `AUTH_SECRET` and `BETTER_AUTH_SECRET` also work. |
 | `FARM_AUTH_URL`    | Public origin. `BETTER_AUTH_URL` is also read. Inferred on Vercel when unset.             |
 
+Without `FARM_AUTH_URL`, `farm dev` trusts the origin it is serving the request on when the host is
+`localhost`, `*.localhost`, or an IP address, so other ports, the Android emulator's `10.0.2.2`, and
+LAN devices under `--host` can sign in. Production trusts only the configured origin.
+
 Without a secret, development generates a random one in `.farm/auth-secret` and reuses it across
 restarts. Loading `farm.config.ts` and running `farm build` never connect to the database. Apply the
 production schema before serving traffic:
