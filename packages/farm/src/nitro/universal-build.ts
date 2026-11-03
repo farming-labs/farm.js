@@ -5296,7 +5296,7 @@ async function buildSSRInMemory(
                 srcDir: config.srcDir,
                 clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
                 fontStylesheetHref: "/farm-fonts.css",
-                globalStylesheetHref: "/assets/globals.css",
+                globalStylesheetHref: FARM_CLIENT_CSS_HREF_PLACEHOLDER,
               })
             : await (async () => {
                 const guardedPaths = new Set(getFarmDocsGuardedPaths(config, middlewareRoutes));
@@ -5306,7 +5306,7 @@ async function buildSSRInMemory(
                   clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
                   fontAssets: toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(root)),
                   fontStylesheetHref: "/farm-fonts.css",
-                  globalStylesheetHref: "/assets/globals.css",
+                  globalStylesheetHref: FARM_CLIENT_CSS_HREF_PLACEHOLDER,
                   isPathGuarded: (pathname) => guardedPaths.has(pathname),
                 });
               })(),
@@ -7274,7 +7274,8 @@ const farmDocsHandler = ${
       getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
     ),
   fontStylesheetHref: "/farm-fonts.css",
-  globalStylesheetHref: "/assets/globals.css",
+  // The client stylesheet carries globals.css under a content-hashed name.
+  globalStylesheetHref: ${JSON.stringify(FARM_CLIENT_CSS_HREF_PLACEHOLDER)},
   isPathGuarded: isFarmDocsPathGuarded,
 })`
       : "null"
