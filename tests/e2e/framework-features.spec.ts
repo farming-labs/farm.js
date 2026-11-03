@@ -558,9 +558,12 @@ test.describe("Framework feature integration", () => {
     await page.goto("/docs");
     await expect(page.getByRole("heading", { name: "Farm.js Docs", level: 1 })).toBeVisible();
     await page.getByRole("button", { name: "Search documentation" }).first().click();
-    await page.keyboard.type("getting");
-    await expect(page.getByRole("dialog")).toContainText("Getting Started");
-    await page.keyboard.press("Enter");
+    // The search loads after the click; type into its input, not wherever focus is.
+    const dialog = page.getByRole("dialog");
+    const input = dialog.locator("input");
+    await input.fill("getting");
+    await expect(dialog).toContainText("Getting Started");
+    await input.press("Enter");
     await expect(page).toHaveURL(/\/docs\/getting-started$/);
     expect(errors).toEqual([]);
   });
