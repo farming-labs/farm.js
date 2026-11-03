@@ -12,7 +12,9 @@ import androidx.lifecycle.LifecycleOwner
 import com.facebook.react.BaseReactPackage
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactInstanceEventListener
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.NativeModule
+import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -195,6 +197,31 @@ class FarmShellModule(context: ReactApplicationContext) : ReactContextBaseJavaMo
     @ReactMethod
     fun rendered(screen: Double) {
         screen(screen)?.rendered()
+    }
+
+    /** `{ appId, accessToken }` for `serverFetch`; the refresh token never reaches JS. */
+    @ReactMethod
+    fun session(promise: Promise) {
+        val session = MobileSession.instance ?: return promise.resolve(null)
+        promise.resolve(
+            Arguments.createMap().apply {
+                putString("appId", session.appId)
+                putString("accessToken", session.accessToken())
+            },
+        )
+    }
+
+    @ReactMethod
+    fun refreshSession(failedToken: String, promise: Promise) {
+        val session = MobileSession.instance ?: return promise.resolve(null)
+        // Network work, off the module thread.
+        Thread { promise.resolve(session.refresh(failedToken)) }.apply { name = "farm-session-refresh" }.start()
+    }
+
+    @ReactMethod
+    fun signOut(promise: Promise) {
+        val session = MobileSession.instance ?: return promise.resolve(null)
+        session.signOut { promise.resolve(null) }
     }
 
     companion object {

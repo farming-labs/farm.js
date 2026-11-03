@@ -3,7 +3,10 @@ import { fetchWithFarmSession, type FarmShellSession } from "./session";
 
 const SERVER = "https://notes.example.com";
 
-function shell(initial: string | null, refreshed: string | null = "fma1.next"): FarmShellSession & {
+function shell(
+  initial: string | null,
+  refreshed: string | null = "fma1.next",
+): FarmShellSession & {
   refreshes: string[];
 } {
   let token = initial;
@@ -111,7 +114,11 @@ describe("fetchWithFarmSession", () => {
   it("never sends the token to another origin", async () => {
     const { calls, fetch } = server();
     const device = shell("fma1.current");
-    for (const url of ["https://api.other.example/data", "https://notes.example.com.evil.example/x", "http://notes.example.com/x"]) {
+    for (const url of [
+      "https://api.other.example/data",
+      "https://notes.example.com.evil.example/x",
+      "http://notes.example.com/x",
+    ]) {
       await fetchWithFarmSession(url, undefined, { server: SERVER, shell: device, fetch });
     }
     expect(calls.map((call) => call.headers.get("authorization"))).toEqual([null, null, null]);

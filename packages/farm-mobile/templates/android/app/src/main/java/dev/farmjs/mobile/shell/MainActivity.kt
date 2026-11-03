@@ -38,6 +38,8 @@ class MainActivity : AppCompatActivity() {
         val poolSize = if (dev) intent.getIntExtra("pool", POOL_SIZE) else POOL_SIZE
         val startPath = getString(R.string.farm_start_path)
         Log.i(Navigator.TAG, "server=${config.server} pool=$poolSize rules=${config.rules.size}")
+        // The device token native screens call the server with; issued after a web sign-in.
+        MobileSession.init(this, config)
 
         // Device plugins reachable as native.<name>; none ship yet, so calls reject as unavailable.
         val plugins = emptyMap<String, FarmPlugin>()

@@ -50,7 +50,13 @@ const STATE_KEY = "farm:mobile-session";
 const MAX_BODY_BYTES = 8 * 1024;
 /** Old refresh secrets kept per device, so a replayed one revokes the device. */
 const USED_REFRESH_LIMIT = 8;
-const BROWSER_HEADERS = ["origin", "sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "sec-fetch-user"];
+const BROWSER_HEADERS = [
+  "origin",
+  "sec-fetch-site",
+  "sec-fetch-mode",
+  "sec-fetch-dest",
+  "sec-fetch-user",
+];
 /** Reverse-DNS, like `mobile.id`: `com.example.notes`. */
 const APP_ID = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
@@ -175,7 +181,9 @@ async function openJar(
     const jar: unknown = JSON.parse(decoder.decode(data));
     if (!jar || typeof jar !== "object" || Array.isArray(jar)) return null;
     return Object.fromEntries(
-      Object.entries(jar).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      Object.entries(jar).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
     );
   } catch {
     return null;
@@ -576,7 +584,13 @@ export function createFarmMobileSessionPlugin(options: FarmMobileSessionOptions)
       },
       jar,
     );
-    return json(tokens);
+    const response = json(tokens);
+    // Keep the WebView's device marker as long-lived as the refresh token it goes with.
+    response.headers.append(
+      "set-cookie",
+      markerCookie(request, token.deviceId, Math.floor(refreshTtl / 1000)),
+    );
+    return response;
   }
 
   async function revoke(request: Request): Promise<Response> {
@@ -686,7 +700,11 @@ export function createFarmMobileSessionPlugin(options: FarmMobileSessionOptions)
             );
           }
           if (signedOut) await revokeDevice(state.deviceId);
-          else await saveDevice(state.deviceId, { ...record, jar: await sealJar(next, state.key, state.deviceId) });
+          else
+            await saveDevice(state.deviceId, {
+              ...record,
+              jar: await sealJar(next, state.key, state.deviceId),
+            });
         }
       }
     }
@@ -713,7 +731,11 @@ export function createFarmMobileSessionPlugin(options: FarmMobileSessionOptions)
     const reader = sessionReader();
     if (!reader) return undefined;
     delete cookies[FARM_MOBILE_DEVICE_COOKIE];
-    const signedOut = await readSession(reader, request.url, applySetCookies(cookies, changes)).then(
+    const signedOut = await readSession(
+      reader,
+      request.url,
+      applySetCookies(cookies, changes),
+    ).then(
       (session) => !session,
       () => false,
     );

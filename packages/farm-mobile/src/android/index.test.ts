@@ -140,6 +140,7 @@ describe("@farm.js/mobile/android", () => {
       "app/src/main/assets/farm-routes.json",
       "app/src/main/java/dev/farmjs/mobile/shell/FarmBridge.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt",
+      "app/src/main/java/dev/farmjs/mobile/shell/MobileSession.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/NativeEngine.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/NativeScreens.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/Navigator.kt",
@@ -247,6 +248,42 @@ describe("@farm.js/mobile/android", () => {
     // Malformed messages are dropped instead of throwing on the main thread.
     expect(bridge).not.toMatch(/message\.get(String|Int)\(/);
     expect(bridge).toContain('if (dev) Log.i(TAG, "call #');
+  });
+
+  it("keeps the device session in a Keystore-encrypted store and never hands it to a WebView", async () => {
+    const files = await generated(context({ basePath: "/docs" }));
+    const shellFile = (name: string, from: Record<string, string>) =>
+      from[`app/src/main/java/dev/farmjs/mobile/shell/${name}`]!;
+    const session = shellFile("MobileSession.kt", files);
+    // AES-GCM with a non-exportable Keystore key; only ciphertext reaches SharedPreferences.
+    expect(session).toContain("KeyStore.getInstance(KEYSTORE)");
+    expect(session).toContain('private const val KEYSTORE = "AndroidKeyStore"');
+    expect(session).toContain('private const val TRANSFORMATION = "AES/GCM/NoPadding"');
+    expect(session).toContain("KeyProperties.BLOCK_MODE_GCM");
+    expect(session).toContain("prefs.edit().putString(KEY_TOKENS, encrypt(next))");
+    expect(session).not.toMatch(/putString\(KEY_TOKENS, (?!encrypt)/);
+    // Native requests with the app id; the nonce and the tokens never go through the bridge.
+    expect(session).toContain('setRequestProperty("X-Farm-Mobile", appId)');
+    expect(session).not.toContain("evaluateJavascript");
+    expect(session).not.toContain('"Origin"');
+    for (const endpoint of ["challenge", "refresh", "revoke"]) {
+      expect(session).toContain(`"/__farm/mobile/session/${endpoint}"`);
+    }
+    expect(session).toContain('"/__farm/mobile/session", JSONObject().put("nonce", nonce)');
+    // Web sign-out (the server cleared the marker) deletes the tokens.
+    expect(session).toContain('private const val MARKER = "farm_mobile"');
+    expect(files["app/src/main/res/values/strings.xml"]).toContain(
+      '<string name="farm_base_path" translatable="false">/docs</string>',
+    );
+    expect(shellFile("MainActivity.kt", files)).toContain("MobileSession.init(this, config)");
+    const page = shellFile("Page.kt", files);
+    expect(page).toContain("override fun onPageFinished(");
+    expect(page.match(/MobileSession\.instance\?\.sync\(\)/g)).toHaveLength(2);
+    for (const [file, source] of Object.entries(files)) {
+      if (file.endsWith(".kt") && !file.endsWith("MobileSession.kt")) {
+        expect(source, file).not.toContain("accessToken()");
+      }
+    }
   });
 
   it("sets farm_dev only under farm dev, and reads launch overrides only when it is set", async () => {
@@ -448,6 +485,20 @@ describe("React Native screens", () => {
     expect(files[ENGINE]).toContain(
       "private val dev = activity.resources.getBoolean(R.bool.farm_dev)",
     );
+  });
+
+  it("gives React Native screens the access token and refresh, never the refresh token", async () => {
+    const files = await generated(context({ native: native() }));
+    const engine = files[ENGINE]!;
+    for (const method of [
+      "fun session(promise: Promise)",
+      "fun refreshSession(failedToken: String, promise: Promise)",
+      "fun signOut(promise: Promise)",
+    ]) {
+      expect(engine).toContain(method);
+    }
+    expect(engine).toContain('putString("accessToken", session.accessToken())');
+    expect(engine).not.toMatch(/refreshToken|\.refresh\b(?!\()/);
   });
 
   it("shows the web twin when a native screen cannot open or fails", async () => {

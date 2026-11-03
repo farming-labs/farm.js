@@ -193,6 +193,7 @@ export function createStrings(context: MobileShellContext): string {
 <resources>
     <string name="app_name">${escapeAndroidString(context.mobile.name)}</string>
     <string name="farm_start_path" translatable="false">${escapeAndroidString(startPath)}</string>
+    <string name="farm_base_path" translatable="false">${escapeAndroidString(context.basePath)}</string>
     <bool name="farm_dev">${context.command === "dev"}</bool>
     <string name="back">Back</string>
     <string name="close">Close</string>

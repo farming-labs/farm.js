@@ -122,6 +122,8 @@ final class Page: NSObject, BridgeListener, WKNavigationDelegate, WKUIDelegate {
 
     func bridge(_ bridge: FarmBridge, rendered token: Int, title: String, pageMs: Double) {
         if token == renderToken { renderToken = 0 }
+        // A sign-in or sign-out that navigated in place changed the WebView's cookies.
+        MobileSession.shared?.sync()
         host?.page(self, rendered: token, title: title, pageMs: pageMs)
     }
 
@@ -205,6 +207,7 @@ final class Page: NSObject, BridgeListener, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         shellLoad = false
+        if let url = webView.url, config.isAppURL(url) { MobileSession.shared?.sync() }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
