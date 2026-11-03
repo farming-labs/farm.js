@@ -1,6 +1,7 @@
 # Farm Field Notes
 
-One Farm app that is a normal web site in the browser and an Android app in Farm's native shell.
+One Farm app that is a normal web site in the browser and an Android and iOS app in Farm's native
+shells.
 Everything mobile is config: the `mobile` block in `farm.config.ts`, a page's
 `export const mobile`, and screen files next to `page.tsx`. A web build never reads any of it.
 
@@ -10,6 +11,8 @@ pnpm build && pnpm start # web production build
 pnpm report              # farm config inspect --mobile --report
 pnpm dev:mobile          # Android shell against the dev server (needs @farm.js/mobile, the SDK)
 pnpm build:apk           # farm build --mobile --apk
+pnpm dev:ios             # iOS shell on a booted simulator (needs Xcode; prints the steps without it)
+pnpm build:ios           # farm build --mobile --os ios (Xcode project, simulator app with Xcode)
 pnpm smoke               # checks the mobile decisions and the web build
 ```
 

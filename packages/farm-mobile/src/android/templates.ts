@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { MobileGeneratedFile, MobileShellContext } from "@farm.js/core/mobile";
+import { createBridgeScript } from "../shared/bridge.js";
 
 /** The Kotlin package of the shell's code. The app's `mobile.id` is only its application ID. */
 export const SHELL_NAMESPACE = "dev.farmjs.mobile.shell";
@@ -186,6 +187,7 @@ export async function createAndroidProject(
   const files = await readTemplateFiles(TEMPLATE_DIR);
   files.push(
     { path: "app/build.gradle.kts", contents: createAppBuildGradle(context) },
+    { path: "app/src/main/assets/farm-bridge.js", contents: await createBridgeScript("android") },
     {
       path: "app/src/main/assets/farm-routes.json",
       contents: `${JSON.stringify(context.manifest, null, 2)}\n`,

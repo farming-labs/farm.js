@@ -135,8 +135,10 @@ Common config fields:
   `.farm/output/mobile/native-report.json` with each route's blockers as file:line:column;
   `farm dev|build --mobile` generates the Android shell into `.farm/output/mobile/android` (install
   `@farm.js/mobile`) and `farm build --mobile` prints the report unless `native.auto` is `"off"`;
-  Android only, `native` and `platform` screens show a placeholder; `src/native/` is for native
-  module specs
+  `--os ios` generates the iOS shell (Xcode project, Swift + UIKit) into `.farm/output/mobile/ios`
+  and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; not yet built with `xcodebuild`;
+  `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; `native` and
+  `platform` screens show a placeholder; `src/native/` is for native module specs
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits
