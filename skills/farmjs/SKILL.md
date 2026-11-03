@@ -140,7 +140,11 @@ Common config fields:
   `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; on Android
   `page.native.tsx`/`page.android.tsx` build as React Native screens, verified in
   `farm dev --mobile` on an Android emulator (not in production bytecode builds or on real
-  devices), public API routes only (no cookies or Origin) (install
+  devices), signed in through device tokens after a web-screen sign-in (`/__farm/mobile/session`:
+  the shell keeps tokens in the Keystore/Keychain, `serverFetch` sends `Authorization: Bearer` and
+  refreshes once on 401, the server runs a valid bearer as the cookie session; covered for
+  `@farm.js/auth` and `@farm.js/better-auth` through an integration's `session(request)`; mount
+  persistent storage at `farm-mobile` in production; `signOut()` revokes) (install
   `@farm.js/native react-native @react-native/metro-config` as dev deps, React 19.2.8 or later;
   needs NDK 27.1.12297006 and CMake 3.22.1; hooks `useNavigate`, `useRouteParams`,
   `useServerQuery`, `serverFetch`; Metro in dev, Hermes bytecode in builds; a screen that throws
