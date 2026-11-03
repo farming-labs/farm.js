@@ -192,6 +192,31 @@ describe("executeSyncOperation", () => {
     expect(result.full).toBe(false);
   });
 
+  it("keeps the row filter's own condition on the cursor field in a delta", async () => {
+    // The filter only shows rows changed since March; an older client cursor must not widen it.
+    const { orm } = makeOrm([
+      { id: "1", title: "hidden", listId: "list-a", updatedAt: "2026-02-01T00:00:00.000Z" },
+      { id: "2", title: "visible", listId: "list-a", updatedAt: "2026-03-15T00:00:00.000Z" },
+    ]);
+    const recent = resolveSyncModels(
+      schema as any,
+      { tasks: "read" },
+      () => ({ listId: "list-a", updatedAt: { gte: "2026-03-01T00:00:00.000Z" } }),
+      true,
+    );
+
+    const result: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "list", since: "2026-01-15T00:00:00.000Z" },
+      models: recent,
+      orm,
+      request,
+      context,
+    });
+
+    expect(result.full).toBe(false);
+    expect(result.rows.map((row: any) => row.title)).toEqual(["visible"]);
+  });
+
   it("lists every key still visible to the caller with a delta, scoped by the row filter", async () => {
     const { orm, store } = makeOrm([
       { id: "1", title: "unchanged", listId: "list-a", updatedAt: "2026-01-01T00:00:00.000Z" },
