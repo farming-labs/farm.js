@@ -104,4 +104,38 @@ export default function Page() { return <main>fallback page</main>; }`,
     expect(fallbackPage).toContain("fallback page");
     expect(localApi).toEqual({ source: "local" });
   }, 30_000);
+
+  it("keeps the docs API ahead of a catch-all API rewrite, as production does", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-rewrites-docs-"));
+    temporaryRoots.add(root);
+
+    await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+    await fs.writeFile(
+      path.join(root, "farm.config.ts"),
+      `export default {
+  docs: { enabled: true, entry: "/docs", contentDir: "docs", adapter: false },
+  rewrites: async () => [{ source: "/api/:path*", destination: "/api/fallback" }],
+};`,
+    );
+    await writeModule(root, "docs/guide.md", "# Guide\n\nRewritten routes.\n");
+    await writeModule(
+      root,
+      "src/app/api/fallback/route.ts",
+      `export function GET() { return Response.json({ source: "fallback" }); }`,
+    );
+
+    const server = await createServer({ root, images: { provider: "none" } });
+    servers.add(server);
+    await server.listen(await getAvailablePort());
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+    const origin = `http://localhost:${address.port}`;
+
+    const search = await fetch(`${origin}/api/docs?query=guide`);
+    expect(search.status).toBe(200);
+    expect(JSON.stringify(await search.json())).toContain("/docs/guide");
+    expect(await fetch(`${origin}/api/other`).then((response) => response.json())).toEqual({
+      source: "fallback",
+    });
+  }, 30_000);
 });

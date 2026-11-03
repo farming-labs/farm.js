@@ -24,11 +24,28 @@ export function resolveFarmDocsSearchClientModule(root: string): string | undefi
   return undefined;
 }
 
+/**
+ * The theme's search reads its router from fumadocs' `FrameworkProvider`. Resolve the copy the
+ * theme imports, so the provider and the component share one context.
+ */
+export function resolveFarmDocsSearchFrameworkModule(searchModule: string): string | undefined {
+  try {
+    return createRequire(searchModule).resolve("fumadocs-core/framework");
+  } catch {
+    // Older themes rendered search without a framework provider.
+    return undefined;
+  }
+}
+
 export function generateFarmDocsSearchBootstrapRuntime(): string {
   return `(()=>{if(window.__farmDocsSearchBootstrap)return;window.__farmDocsSearchBootstrap=true;const queue=(trigger,event)=>{if(window.__FARM_DOCS_SEARCH_BRIDGE_ACTIVE__)return;event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();window.__FARM_DOCS_SEARCH_PENDING__=trigger;window.__FARM_MOUNT_DOCS_SEARCH__?.()};document.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("[data-search-full]"):null;if(target)queue("button",event)},true);document.addEventListener("keydown",(event)=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k")queue("keyboard",event)},true)})();`;
 }
 
-export function generateFarmDocsSearchClientRuntime(enabled: boolean, moduleId?: string): string {
+export function generateFarmDocsSearchClientRuntime(
+  enabled: boolean,
+  moduleId?: string,
+  frameworkModuleId = moduleId ? resolveFarmDocsSearchFrameworkModule(moduleId) : undefined,
+): string {
   if (!enabled || !moduleId) {
     return `
 function isFarmDocsSearchPage() {
@@ -79,7 +96,21 @@ function replayFarmDocsSearchOpen() {
   });
 }
 
-function FarmDocsSearchBridge({ component, api }) {
+const farmDocsSearchRouter = {
+  push(url) {
+    window.location.assign(url);
+  },
+  refresh() {
+    window.location.reload();
+  },
+};
+const farmDocsSearchFramework = {
+  usePathname: () => window.location.pathname,
+  useParams: () => ({}),
+  useRouter: () => farmDocsSearchRouter,
+};
+
+function FarmDocsSearchBridge({ component, api, FrameworkProvider }) {
   React.useEffect(() => {
     farmDocsSearchReady = true;
     replayFarmDocsSearchOpen();
@@ -88,7 +119,10 @@ function FarmDocsSearchBridge({ component, api }) {
     };
   }, []);
 
-  return React.createElement(component, { api });
+  const search = React.createElement(component, { api });
+  return FrameworkProvider
+    ? React.createElement(FrameworkProvider, farmDocsSearchFramework, search)
+    : search;
 }
 
 function queueFarmDocsSearchOpen(trigger, event) {
@@ -130,8 +164,11 @@ async function mountFarmDocsSearch() {
   if (farmDocsSearchContainer === container && farmDocsSearchRoot) return true;
 
   try {
-    farmDocsSearchModulePromise ||= import(${JSON.stringify(moduleId)});
-    const { DocsCommandSearch } = await farmDocsSearchModulePromise;
+    farmDocsSearchModulePromise ||= Promise.all([
+      import(${JSON.stringify(moduleId)}),
+      ${frameworkModuleId ? `import(${JSON.stringify(frameworkModuleId)})` : "null"},
+    ]);
+    const [{ DocsCommandSearch }, framework] = await farmDocsSearchModulePromise;
     if (!container.isConnected) return false;
 
     if (farmDocsSearchRoot) {
@@ -147,6 +184,7 @@ async function mountFarmDocsSearch() {
       React.createElement(FarmDocsSearchBridge, {
         component: DocsCommandSearch,
         api: container.dataset.api || '/api/docs',
+        FrameworkProvider: framework?.FrameworkProvider,
       }),
     );
     return true;
