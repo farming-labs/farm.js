@@ -104,8 +104,8 @@ export default defineConfig({
 
 Tabs and route keys are checked against the app. A web build never calls or checks the block and
 strips it from the server, as it does `desktop`. It also builds the
-[mobile client](#bundled-client-assets): the web client and the other public files stay
-byte-identical to the same app without the key, and the build adds the mobile client's files. The
+[mobile client](#bundled-client-assets): the web client's files stay byte-identical to the same
+app without the key, and the build adds the mobile client's files. The
 web server gains the session endpoints native screens sign in through (see
 [Auth on mobile](#auth-on-mobile)). Every `mobile` block, static or a function, builds the same
 output, and an app without one gets no mobile client, no shell handling, no session route, and no

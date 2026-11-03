@@ -528,7 +528,7 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     ]) {
       expect(await serverFilesContaining(serverDir, marker), marker).toEqual([]);
     }
-    // With a mobile block the web client and every other public file stay byte-identical. The
+    // With a mobile block the web client and the other public files stay byte-identical. The
     // build adds the mobile client's files; the server learns its entry and gains the session
     // endpoints the native screens sign in through. Every mobile block, static or a function,
     // builds the same output.
@@ -540,9 +540,17 @@ export function GET() { return Response.json({ platform: platform() }); }`,
       ) as { entry: string; files: string[] };
       const mobileFiles = new Set(manifest.files.map((file) => path.join("public", file.slice(1))));
       for (const [file, hash] of Object.entries(without)) {
-        if (file.startsWith(`public${path.sep}`)) expect(withMobile[file], file).toBe(hash);
+        if (!file.startsWith(`public${path.sep}`)) continue;
+        // The SSR build also emits a farm-client-manifest.json, listing the server's chunks, and
+        // it lands in public: the session plugin changes it with the server.
+        if (/^farm-client-manifest\.json(?:\.gz)?$/.test(path.basename(file))) continue;
+        expect(withMobile[file], file).toBe(hash);
       }
-      const added = Object.keys(withMobile).filter((file) => !(file in without));
+      // The session plugin renames server chunks; every public file the build adds is the mobile
+      // client's.
+      const added = Object.keys(withMobile).filter(
+        (file) => file.startsWith(`public${path.sep}`) && !(file in without),
+      );
       expect(added.length).toBeGreaterThan(0);
       for (const file of added) {
         expect(mobileFiles.has(file.replace(/\.gz$/, "")), file).toBe(true);
