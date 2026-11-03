@@ -15,16 +15,42 @@ By default, every screen is just your web page shown inside that native frame. F
 where a web page is not enough, you can opt one route at a time into a truly native screen, without
 touching the rest of the app.
 
-Mobile is a preview and is not released yet. **What runs today is the WebView shell on Android.**
-The native screen tiers (React Native and platform-native) and iOS are designed but not built:
-routes marked native render a placeholder. Every section below marks the line between what ships
-now and what is still landing, so you can adopt the config surface before the runtime is complete.
+Mobile is a preview, released in Farm 0.1.50 with `@farm.js/mobile` 0.1.0-beta.0. **What runs
+today is the WebView shell on Android.** The native screen tiers (React Native and
+platform-native) and iOS are designed but not released: routes marked native render a
+placeholder. Every section below marks the line between what ships now and what is still landing,
+so you can adopt the config surface before the runtime is complete. The design and rollout are in
+[RFC 0004](https://github.com/farming-labs/farm.js/pull/2352).
 
 ```sh
 farm dev --mobile      # dev server, Android project, install and open on a device
 farm build --mobile    # mobile client build and Android project
 farm build             # --web, the default, unchanged
 ```
+
+## Status
+
+| Part                                          | Status                         | Notes                                                                                                                                |
+| --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                              |
+| `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                             |
+| Native-screen analyzer                        | **Report only**                | Writes `native-report.json`; it changes no output                                                                                    |
+| iOS shell                                     | In review                      | [#2441](https://github.com/farming-labs/farm.js/pull/2441); not yet built with Xcode                                                 |
+| React Native screens                          | In review, not yet on a device | Android only: [#2444](https://github.com/farming-labs/farm.js/pull/2444), [#2445](https://github.com/farming-labs/farm.js/pull/2445) |
+| Bundled client assets and page shells         | Planned                        | A production shell loads pages and the client from `server`                                                                          |
+| Token auth and mobile origin handling         | Planned                        | No Keystore or Keychain session, no bearer tokens                                                                                    |
+| Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                   |
+| Native islands and `@farm.js/ui`              | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` does not exist yet                                                                |
+| Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                          |
+
+## Requirements
+
+| For                              | You need                                                                                                                           |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Android (shipped)                | JDK 17 or newer (tested with JDK 21), and the Android SDK with platform 35, build-tools 35, and platform-tools; set `ANDROID_HOME` |
+| Running on Android               | An emulator or a device with Android 8.0 (API 26) or newer, listed by `adb devices`                                                |
+| React Native screens (in review) | Also the Android NDK and CMake, which Gradle installs on the first build once the SDK licenses are accepted                        |
+| iOS (in review)                  | A Mac with Xcode 15 or newer and an iOS simulator runtime; the Command Line Tools alone are not enough. The app targets iOS 16     |
 
 ## Setup
 
@@ -442,8 +468,7 @@ a literal at build time.
 
 ## Run on Android
 
-Install the shell package and the Android toolchain (JDK 17 or newer, and the Android SDK with
-platform 35, build-tools 35, and platform-tools; set `ANDROID_HOME`):
+Install the shell package and the Android toolchain from [Requirements](#requirements):
 
 ```sh
 pnpm add -D @farm.js/mobile
@@ -506,7 +531,8 @@ reversible and gives "bailout" two independent layers:
 
 ### Why this shape, and not the alternatives
 
-These were weighed and set aside (the full rationale lives in the platforms RFC, RFC 0004):
+These were weighed and set aside (the full rationale lives in the platforms RFC,
+[RFC 0004](https://github.com/farming-labs/farm.js/pull/2352)):
 
 - **A plain WebView wrapper.** Simplest, but navigation, back gestures, tab bars, and pickers feel
   like a website, and app review rejects apps that are only a wrapped site. Farm draws the
@@ -548,8 +574,13 @@ parts are designed and still on the way:
   `page.native.tsx`, `page.kt`, or `page.swift` yet; `FarmNativeScreens` in the generated project is
   where native screens will register.
 - Bundled client assets and page shells (for instant pushes and an offline state) are not built;
-  the shell loads pages and client code from `server`.
-- Native islands (`mobile.native.islands`) and the theme-token pipeline are reserved.
+  the shell loads pages and client code from `server`. In production that is the web deployment,
+  whose client is not a `--mobile` build, so navigations stay in the page instead of opening
+  native screens until client assets are bundled into the app.
+- The analyzer only reports. With `auto: "on"` it records ports in `farm-routes.json`, and those
+  routes stay web screens.
+- Native islands (`mobile.native.islands`), `@farm.js/ui`, and the theme-token pipeline are
+  reserved.
 - Token auth is not wired yet: the shell has no Keystore session or bearer tokens, and the server
   has no mobile-origin checks.
 - Device plugins (`native.<name>`) ship none, so calls reject as unavailable.
