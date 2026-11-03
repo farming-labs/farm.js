@@ -44,6 +44,10 @@ export const appIntegrations = {
       replyTo: process.env.RESEND_REPLY_TO_EMAIL ?? fromEmail,
     },
     templates: emailTemplates,
+    // Every send spends your Resend credits. Replace this with your session check, for
+    // example authorize: async (request) => Boolean(await getSession(request)).
+    // Until then the routes answer in development and refuse in production.
+    authorize: () => process.env.NODE_ENV === "development",
     webhooks: {
       path: "/api/email/webhook",
       secret: process.env.RESEND_WEBHOOK_SECRET,
