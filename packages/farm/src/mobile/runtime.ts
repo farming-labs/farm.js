@@ -59,6 +59,7 @@ export type {
   FarmUiNode,
 } from "./analyzer";
 export { formatFarmMobileNativeReport } from "./report";
+export { readFarmMobileClientManifest, type FarmMobileClientManifest } from "../nitro/mobile-client";
 
 /** An expected failure with its own fix; the CLI prints it without a stack. */
 export class FarmMobileError extends Error {
@@ -78,6 +79,8 @@ export function getFarmMobileOutputDirs(distDir: string): {
   dist: string;
   report: string;
   analyzerCache: string;
+  /** The production build's client output, which holds the mobile client a shell bundles. */
+  client: string;
 } {
   const root = path.join(distDir, "output", "mobile");
   return {
@@ -89,6 +92,7 @@ export function getFarmMobileOutputDirs(distDir: string): {
     dist: path.join(root, "dist"),
     report: path.join(root, "native-report.json"),
     analyzerCache: path.join(distDir, "cache", "mobile", "analyzer.json"),
+    client: path.join(distDir, "client"),
   };
 }
 

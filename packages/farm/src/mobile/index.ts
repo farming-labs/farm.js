@@ -57,6 +57,21 @@ export interface MobileNativeScreens {
   };
 }
 
+/**
+ * The mobile client's content-hashed files, which a shell answers from the app instead of the
+ * network (RFC 0004, 7.2). Documents still come from `mobile.server`, which decides which client
+ * they load; a newer deployment references names the app does not have, and those load from
+ * the network.
+ */
+export interface MobileBundledAssets {
+  /** The build's client output; each file is read from here. */
+  dir: string;
+  /** URL paths at the server origin, such as `/farm-mobile-client-h1a2b3c4d.js`, sorted. */
+  files: string[];
+  /** The mobile client entry among them. */
+  entry: string;
+}
+
 export interface MobileShellContext {
   /** App root. */
   root: string;
@@ -72,6 +87,8 @@ export interface MobileShellContext {
   projectDir: string;
   /** React Native screens, when at least one route resolves to one on this OS. */
   native?: MobileNativeScreens;
+  /** `farm build --mobile`: the mobile client's files to bundle. Absent in dev. */
+  assets?: MobileBundledAssets;
 }
 
 export interface MobilePackageContext extends MobileShellContext {

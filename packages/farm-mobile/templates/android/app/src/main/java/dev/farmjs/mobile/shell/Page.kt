@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.SystemClock
 import android.view.ViewGroup
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.content.ContextCompat
@@ -29,6 +30,8 @@ class Page(
     plugins: Map<String, FarmPlugin>,
     script: String,
     private val openExternal: (Uri) -> Unit,
+    /** The mobile client's files from the APK; null under farm dev --mobile. */
+    private val bundle: BundledAssets? = null,
 ) : BridgeListener {
     val webView = WebView(context)
     val bridge: FarmBridge
@@ -70,6 +73,9 @@ class Page(
                 if (url != null && config.isAppUrl(Uri.parse(url))) MobileSession.instance?.sync()
             }
 
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                bundle?.respond(request)
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (!request.isForMainFrame || request.isRedirect) return false
                 val url = request.url
@@ -77,11 +83,20 @@ class Page(
                     openExternal(url)
                     return true
                 }
-                // A render the navigator asked for fell back to a document load: let it through.
-                if (renderToken != 0 && config.isAppUrl(url)) return false
-                // Reloads of the current document (dev HMR does location.href = location.href).
+                // A render the navigator asked for fell back to a document load: load it here, with
+                // the shell header, so the document keeps the mobile client.
+                if (renderToken != 0 && config.isAppUrl(url)) {
+                    load(url.toString())
+                    return true
+                }
+                // Same-document fragment links stay put; reloads of the current document (dev HMR
+                // does location.href = location.href) load again with the shell header.
                 val current = view.url?.let(Uri::parse)
-                if (current != null && config.isAppUrl(url) && current.path == url.path && current.query == url.query) return false
+                if (current != null && config.isAppUrl(url) && current.path == url.path && current.query == url.query) {
+                    if (url.fragment != null) return false
+                    load(url.toString())
+                    return true
+                }
                 // Plain <a href> taps, location assignments, links to other origins.
                 host?.onVisit(this@Page, url, false) ?: return false
                 return true
@@ -89,9 +104,13 @@ class Page(
         }
     }
 
+    /**
+     * A document load the shell starts. The header tells the server this is a shell, so the page
+     * loads the mobile client, whose router hands navigations to the native navigator.
+     */
     fun load(url: String) {
         loadStartedAt = SystemClock.uptimeMillis()
-        webView.loadUrl(url)
+        webView.loadUrl(url, SHELL_HEADERS)
     }
 
     /** Render [url] with the running Farm router. Returns the token echoed by onRendered. */
@@ -136,5 +155,10 @@ class Page(
 
     override fun onTitle(bridge: FarmBridge, title: String) {
         host?.onTitle(this, title)
+    }
+
+    companion object {
+        /** Read by the server: documents for a shell load the mobile client. */
+        val SHELL_HEADERS = mapOf("X-Farm-Shell" to "android")
     }
 }

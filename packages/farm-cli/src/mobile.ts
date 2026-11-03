@@ -2,7 +2,12 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createServer } from "node:net";
-import type { MobileNativeScreens, MobileShell, MobileShellContext } from "@farm.js/core/mobile";
+import type {
+  MobileBundledAssets,
+  MobileNativeScreens,
+  MobileShell,
+  MobileShellContext,
+} from "@farm.js/core/mobile";
 import { withProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
 import { formatDesktopShellInstallCommand, setFarmPlatform, writeShellFiles } from "./desktop";
 
@@ -238,6 +243,7 @@ async function writeMobileProject(
   command: "dev" | "build",
   runtime: MobileRuntime,
   native?: MobileNativeScreens,
+  assets?: MobileBundledAssets,
 ): Promise<MobileShellContext> {
   const { config } = app;
   const context: MobileShellContext = {
@@ -252,6 +258,7 @@ async function writeMobileProject(
       runtime.getFarmMobileOutputDirs(config.distDir)[app.context.os],
     ),
     ...(native ? { native } : {}),
+    ...(assets ? { assets } : {}),
   };
   await writeShellFiles(
     context.projectDir,
@@ -374,8 +381,9 @@ export interface FarmMobileBuildOptions {
 }
 
 /**
- * `farm build --mobile`: the `--mobile` client build, farm-routes.json with `mobile.server`, and
- * the generated native project for `--os`. The web build's output is left alone. On iOS it also
+ * `farm build --mobile`: the production build a web deployment of the app makes, which includes
+ * the mobile client, written apart from the web output; farm-routes.json with `mobile.server`; and
+ * the generated native project for `--os` with the mobile client's files bundled. On iOS it also
  * builds the simulator app when Xcode is installed, and says what to install when it is not.
  */
 export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Promise<string[]> {
@@ -385,7 +393,9 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     throw new FarmMobileError("--apk builds the Android app; it is not available with --os ios.");
   }
   return withProductionNodeEnv(async () => {
-    setFarmPlatform("mobile");
+    // The same build as the web deployment's, so the mobile client's content-hashed names match
+    // the ones its documents reference. That build adds the mobile client itself.
+    setFarmPlatform("web");
     const runtime = await import("@farm.js/core/internal/config-runtime");
     const productionVite = await runtime.loadFarmProductionVite();
     const userConfig = await runtime.loadConfig(
@@ -417,7 +427,7 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
       "production",
     );
     const dirs = mobileRuntime.getFarmMobileOutputDirs(config.distDir);
-    // The mobile client build goes next to the native project, never over the web output.
+    // The build goes next to the native project, never over the web output.
     config.preset = "node-server";
     config.deploy = runtime.resolveDeployConfig(userConfig ?? {}, {
       preset: "node-server",
@@ -426,6 +436,21 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     });
     const { build } = await import("@farm.js/core/internal/build-runtime");
     await build(config, { preset: "node-server", root, productionVite });
+    const assets = await readBundledAssets(root, config.distDir, mobileRuntime);
+    if (assets) {
+      // WKWebView cannot answer https requests from the app, so iOS loads the files from the
+      // server, where WebKit's cache keeps them (RFC 0004, decisions).
+      runtime.logger.info(
+        os === "android"
+          ? `Mobile client ${assets.entry}: ${assets.files.length} files bundled into the app`
+          : `Mobile client ${assets.entry}: loaded from the server (iOS does not bundle it yet)`,
+      );
+    } else {
+      runtime.logger.warn(
+        "This build has no mobile client, so the app loads its client from the server and " +
+          "navigations stay in the page (server components apps do not get one yet).",
+      );
+    }
 
     // The analyzer runs unless mobile.native.auto is "off"; it only reports.
     const app = await mobileRuntime.generateFarmMobileRoutes({
@@ -462,7 +487,7 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
           `${Math.round(built.hermesMs)} ms)`,
       );
     }
-    const context = await writeMobileProject(shell, app, "build", mobileRuntime, native);
+    const context = await writeMobileProject(shell, app, "build", mobileRuntime, native, assets);
     runtime.logger.info(`📱 ${shownPath(root, context.projectDir)} (${shell.os} project)`);
     if (os === "android" && !options.apk) {
       runtime.logger.info("Run farm build --mobile --apk to build the debug app.");
@@ -476,6 +501,22 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     if (message) runtime.logger.info(message);
     return files.length > 0 ? files : [context.projectDir];
   });
+}
+
+/** The finished build's mobile client, as the shell bundles it; undefined when it has none. */
+async function readBundledAssets(
+  root: string,
+  distDir: string,
+  runtime: MobileRuntime,
+): Promise<MobileBundledAssets | undefined> {
+  const buildDir = path.resolve(root, distDir);
+  const manifest = await runtime.readFarmMobileClientManifest(buildDir);
+  if (!manifest) return undefined;
+  return {
+    dir: path.resolve(root, runtime.getFarmMobileOutputDirs(distDir).client),
+    files: manifest.files,
+    entry: manifest.entry,
+  };
 }
 
 /**

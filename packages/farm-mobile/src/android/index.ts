@@ -7,6 +7,8 @@ import { defineMobileShell, type MobileShellContext } from "@farm.js/core/mobile
 import { createAndroidProject, MAIN_ACTIVITY } from "./templates.js";
 
 export {
+  BUNDLED_ASSETS_DIR,
+  BUNDLED_ASSETS_MANIFEST,
   createAndroidProject,
   createAppBuildGradle,
   createNativeResources,

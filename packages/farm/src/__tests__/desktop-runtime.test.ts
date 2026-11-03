@@ -486,7 +486,7 @@ async function serverFilesContaining(serverDir: string, marker: string): Promise
 }
 
 describe("a web build", () => {
-  it("is byte-identical with or without a desktop block, the same for every mobile block, and carries no platform code", async () => {
+  it("is byte-identical with or without a desktop block, adds only the mobile client and session plugin for a mobile block, and carries no platform code", async () => {
     // A runtime plugin, so the server bundle imports farm.config itself.
     const webConfig = (desktop: string) => `import { definePlugin } from "@farm.js/core";
 import { readFileSync } from "node:fs";
@@ -517,8 +517,43 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     await buildWeb();
     const without = await buildWeb();
     const serverDir = path.join(root, ".farm", ".output", "server");
-    // Zero cost: without a mobile block there is no mobile session plugin or route.
-    expect(await serverFilesContaining(serverDir, "createFarmMobileSessionPlugin")).toEqual([]);
+    // Zero cost: an app without a mobile block gets no mobile client, no shell handling, and no
+    // mobile session plugin or route.
+    expect(Object.keys(without).filter((file) => file.includes("farm-mobile-client"))).toEqual([]);
+    await expect(fs.stat(path.join(root, ".farm", "mobile-client.json"))).rejects.toThrow();
+    for (const marker of [
+      "_applyFarmMobileShellClient",
+      "farmMobileShellClient",
+      "createFarmMobileSessionPlugin",
+    ]) {
+      expect(await serverFilesContaining(serverDir, marker), marker).toEqual([]);
+    }
+    // With a mobile block the web client and every other public file stay byte-identical. The
+    // build adds the mobile client's files; the server learns its entry and gains the session
+    // endpoints the native screens sign in through. Every mobile block, static or a function,
+    // builds the same output.
+    let firstMobile: Record<string, string> | undefined;
+    const expectMobileClientOnly = async () => {
+      const withMobile = await buildWeb();
+      const manifest = JSON.parse(
+        await fs.readFile(path.join(root, ".farm", "mobile-client.json"), "utf8"),
+      ) as { entry: string; files: string[] };
+      const mobileFiles = new Set(manifest.files.map((file) => path.join("public", file.slice(1))));
+      for (const [file, hash] of Object.entries(without)) {
+        if (file.startsWith(`public${path.sep}`)) expect(withMobile[file], file).toBe(hash);
+      }
+      const added = Object.keys(withMobile).filter((file) => !(file in without));
+      expect(added.length).toBeGreaterThan(0);
+      for (const file of added) {
+        expect(mobileFiles.has(file.replace(/\.gz$/, "")), file).toBe(true);
+      }
+      expect(await serverFilesContaining(serverDir, manifest.entry)).not.toEqual([]);
+      expect(await serverFilesContaining(serverDir, "createFarmMobileSessionPlugin")).not.toEqual(
+        [],
+      );
+      if (firstMobile) expect(withMobile).toEqual(firstMobile);
+      else firstMobile = withMobile;
+    };
     await fs.writeFile(
       path.join(root, "farm.config.ts"),
       webConfig(`\n  desktop: { name: "DESKTOP_STATIC_MARKER", window: { width: 900 } },`),
@@ -545,11 +580,7 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     routes: { "/": { presentation: "modal" } },
   },`),
     );
-    // A mobile block adds one thing to the web server: the session endpoints its native screens
-    // sign in through. Every mobile block, static or a function, builds the same server.
-    const withMobile = await buildWeb();
-    expect(withMobile).not.toEqual(without);
-    expect(await serverFilesContaining(serverDir, "createFarmMobileSessionPlugin")).not.toEqual([]);
+    await expectMobileClientOnly();
     await fs.writeFile(
       path.join(root, "farm.config.ts"),
       webConfig(`
@@ -559,7 +590,7 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     return { id: "com.example.notes", server: "https://MOBILE_FN_MARKER." + os + ".example.com" };
   },`),
     );
-    expect(await buildWeb()).toEqual(withMobile);
+    await expectMobileClientOnly();
     await expect(fs.stat(calledMarker)).rejects.toThrow();
     // Native screens and a native block: a web build never reads, resolves, or ships them.
     const nativeScreen = `import { View } from "react-native";
@@ -592,7 +623,7 @@ export default function Screen() { return <View />; }
     },
   },`),
     );
-    expect(await buildWeb()).toEqual(withMobile);
+    await expectMobileClientOnly();
 
     const offenders: string[] = [];
     for (const entry of await fs.readdir(serverDir, { recursive: true, withFileTypes: true })) {
