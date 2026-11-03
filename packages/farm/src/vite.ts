@@ -2718,9 +2718,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               trustProxy: currentServerConfig.trustProxy,
             }).pathname;
 
+            // Config rewrites never replace a route the app serves, the docs API included (as in
+            // production).
+            const servesLocalApiRoute =
+              hasMatchedApiRoute ||
+              Boolean(
+                farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(requestPathname),
+              );
+
             try {
               if (pm) {
-                if (hasMatchedApiRoute) {
+                if (servesLocalApiRoute) {
                   await pm.runHookParallelFiltered(
                     "beforeRequest",
                     (plugin) => plugin.name !== FARM_CONFIG_REWRITES_PLUGIN_NAME,
