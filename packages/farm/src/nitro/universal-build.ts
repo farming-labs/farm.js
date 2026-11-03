@@ -12234,6 +12234,12 @@ function toFarmNodeResponse(request, response) {
     // fixed top quality cost a docs app ~20 s of build CPU for a small further
     // saving. Serverless and edge targets sit behind a CDN that compresses.
     ...(preset === "node-server" ? { compressPublicAssets: { gzip: true } } : {}),
+    // Nitro gzips every server output file at level 9, node_modules included, to
+    // print sizes after the build. A self-hosted server is never shipped compressed,
+    // so list plain sizes; zipped serverless and edge bundles keep the gzip column.
+    ...(preset === "node-server" || preset === "bun"
+      ? { logging: { compressedSizes: false } }
+      : {}),
     ...(prerenderRoutes.length > 0
       ? {
           prerender: {

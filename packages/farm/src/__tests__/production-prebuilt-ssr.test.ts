@@ -5954,6 +5954,39 @@ export const GET = createEndpoint(
     }
   }, 120_000);
 
+  it("asks Nitro to list the Node server output without gzipping every file", async () => {
+    const root = await createProductionFixture();
+    let logging: unknown;
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "server-listing-test",
+          plugins: [
+            definePlugin({
+              name: "server-listing-test",
+              build: {
+                configure(nitroConfig) {
+                  logging = nitroConfig.logging;
+                },
+              },
+            }),
+          ],
+        },
+        "production",
+      );
+      // Nitro prints the listing only outside test runs, so the option it reads is the seam.
+      await build(config, { root, preset: "node-server" });
+
+      expect(logging).toEqual({ compressedSizes: false });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it.each([false, true])(
     "keeps plugin-replaced requests current during production rendering (headers: %s)",
     async (withHeaders) => {
