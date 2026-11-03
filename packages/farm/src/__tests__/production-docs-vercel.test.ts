@@ -36,6 +36,10 @@ describe("Vercel docs content", () => {
         "export default function Layout({ children }) { return <main>{children}</main>; }",
       );
       await fs.writeFile(
+        path.join(source, "app", "globals.css"),
+        ".farm-docs-globals { color: red; }\n",
+      );
+      await fs.writeFile(
         path.join(source, "app", "docs", "page.md"),
         "---\ntitle: Documentation\n---\n# Documentation\n\n[Upgrade guide](/docs/upgrading)\n",
       );
@@ -95,6 +99,17 @@ describe("Vercel docs content", () => {
         const html = await response.text();
         expect(html).toContain('id="nd-docs-layout"');
         expect(html).toContain('id="nd-sidebar"');
+        // Every stylesheet the page links ships with the deployment, globals.css included.
+        const stylesheets = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(
+          ([, href]) => href,
+        );
+        expect(stylesheets.length).toBeGreaterThan(0);
+        const css = await Promise.all(
+          stylesheets.map((href) =>
+            fs.readFile(path.resolve(root, config.deploy.outputDir, "static", `.${href}`), "utf8"),
+          ),
+        );
+        expect(css.join("")).toContain(".farm-docs-globals");
         if (pathname === "/docs/upgrading") {
           expect(html).toContain("Upgrade packages");
           expect(html).toContain("<table");
