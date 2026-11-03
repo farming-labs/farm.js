@@ -95,8 +95,12 @@ export interface FarmMobileNativeConfig {
 export interface FarmMobilePageConfig {
   presentation?: FarmMobilePresentation;
   prefetch?: FarmMobilePrefetch;
-  /** `false` keeps the route a web screen, even with a `page.native.tsx`. */
-  native?: false;
+  /**
+   * `false` keeps the route a web screen, even with a `page.native.tsx`. `true` requires a native
+   * screen: a native file next to the page, or a page the analyzer finds can render natively.
+   * The build fails, naming each blocker, when it cannot.
+   */
+  native?: boolean;
 }
 
 export interface FarmMobileUserConfig {
@@ -367,11 +371,8 @@ export function validateFarmMobilePageConfig(
   checkKeys(value, PAGE_KEYS, `${where}: mobile.`);
   checkPresentation(value.presentation, `${where}: mobile`, check);
   checkPrefetch(value.prefetch, `${where}: mobile.`, check);
-  if (value.native !== undefined && value.native !== false) {
-    fail(
-      `${where}: mobile.native can only be false. A native screen comes from a ` +
-        "page.native.tsx next to the page.",
-    );
+  if (value.native !== undefined && typeof value.native !== "boolean") {
+    fail(`${where}: mobile.native must be true or false.`);
   }
   return value as FarmMobilePageConfig;
 }

@@ -400,7 +400,7 @@ test("farm build --mobile builds the mobile client apart from the web output and
   // Screen warnings print as they do for farm config inspect --mobile.
   assert.match(result.output, /"\/notes" has no page\.native\.tsx and Farm cannot port pages yet/);
   // native.auto defaults to "report": the build prints the analyzer table and writes the report.
-  assert.match(result.output, /route\s+screen\s+decision\s+mapped\s+portable\s+reason/);
+  assert.match(result.output, /route\s+screen\s+tier\s+decision\s+mapped\s+portable\s+reason/);
   assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
   assert.equal(
     JSON.parse(await readFile(path.join(mobileDir, "native-report.json"), "utf8")).auto,
@@ -666,13 +666,13 @@ test("farm config inspect --mobile --report prints the analyzer table and writes
   );
   const result = await runFarm(["config", "inspect", "--mobile", "--report", "--root", root]);
   assert.equal(result.code, 0, result.output);
-  assert.match(result.output, /route\s+screen\s+decision\s+mapped\s+portable\s+reason/);
-  assert.match(result.output, /\/notes\s+web\s+port\s+2\/2\s+100%\s+portable; list/);
+  assert.match(result.output, /route\s+screen\s+tier\s+decision\s+mapped\s+portable\s+reason/);
+  assert.match(result.output, /\/notes\s+web\s+native\s+port\s+2\/2\s+100%\s+renders natively, no JavaScript on the device/);
   assert.match(
     result.output,
-    /\/notes\/new\s+web\s+web\s+1\/2\s+50%\s+src\/app\/notes\/new\/page\.tsx:1:40 <form> has no native mapping \(\+1 more\)/,
+    /\/notes\/new\s+web\s+web\s+web\s+1\/2\s+50%\s+src\/app\/notes\/new\/page\.tsx:1:40 <form> has no native mapping \(\+1 more\)/,
   );
-  assert.match(result.output, /\/feed\s+native\s+-\s+src\/app\/feed\/page\.android\.tsx/);
+  assert.match(result.output, /\/feed\s+native\s+-\s+-\s+src\/app\/feed\/page\.android\.tsx/);
   assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
   const report = JSON.parse(
     await readFile(path.join(root, ".farm/output/mobile/native-report.json"), "utf8"),

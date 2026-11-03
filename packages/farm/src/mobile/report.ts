@@ -8,7 +8,7 @@ import type {
   FarmMobileOS,
   FarmMobileScreen,
 } from "./config";
-import type { FarmMobileAnalyzerStats, FarmMobileRouteAnalysis } from "./analyzer";
+import type { FarmMobileAnalyzerStats, FarmMobileRouteAnalysis, FarmMobileTier } from "./analyzer";
 import type { FarmMobileScreenDecision, FarmMobileScreenSource } from "./screens";
 
 export interface FarmMobileNativeReportRoute {
@@ -39,6 +39,8 @@ export interface FarmMobileNativeReport {
     blocked: number;
     /** Native or platform screens from files or config. */
     native: number;
+    /** Analyzed routes per tier: what each could become. */
+    tiers: Record<FarmMobileTier, number>;
   };
   routes: FarmMobileNativeReportRoute[];
 }
@@ -51,7 +53,15 @@ export function createFarmMobileNativeReport(options: {
   screens: Readonly<Record<string, FarmMobileScreenDecision>>;
   analysis: Readonly<Record<string, FarmMobileRouteAnalysis>>;
 }): FarmMobileNativeReport {
-  const summary = { routes: 0, analyzed: 0, port: 0, portableNoWin: 0, blocked: 0, native: 0 };
+  const summary = {
+    routes: 0,
+    analyzed: 0,
+    port: 0,
+    portableNoWin: 0,
+    blocked: 0,
+    native: 0,
+    tiers: { native: 0, "react-native": 0, web: 0 },
+  };
   const routes = options.routes.map((route): FarmMobileNativeReportRoute => {
     const decision = options.screens[route]!;
     const analyzed = options.analysis[route];
@@ -59,6 +69,7 @@ export function createFarmMobileNativeReport(options: {
     if (decision.screen !== "web") summary.native += 1;
     if (analyzed) {
       summary.analyzed += 1;
+      summary.tiers[analyzed.tier] += 1;
       if (analyzed.decision === "port") summary.port += 1;
       else if (analyzed.portable) summary.portableNoWin += 1;
       else summary.blocked += 1;
@@ -86,19 +97,25 @@ export function createFarmMobileNativeReport(options: {
 function reasonFor(entry: FarmMobileNativeReportRoute): string {
   const analysis = entry.analysis;
   if (!analysis) {
-    if (entry.source === "page") return `${entry.file}: mobile.native false`;
+    if (entry.source === "page") {
+      return `${entry.file}: mobile.native ${entry.requested ? "true" : "false"}`;
+    }
     if (entry.source === "file") return entry.file!;
     if (entry.source === "config") {
       return entry.file ? `native.routes, ${entry.file}` : "native.routes";
     }
     return "";
   }
+  if (analysis.tier === "native") return "renders natively, no JavaScript on the device";
   if (analysis.portable) {
     return analysis.wins.length > 0
       ? `portable; ${analysis.wins.join(", ")}`
       : `portable; no win (${analysis.elements.total} elements)`;
   }
-  const [first, ...rest] = analysis.blockers;
+  // Web: what rules out the native tier first, since it is the one to aim for.
+  const [first, ...rest] = analysis.nativeBlockers.length
+    ? analysis.nativeBlockers
+    : analysis.blockers;
   const where = first!.file ? `${first!.file}:${first!.line}:${first!.column} ` : "";
   return `${where}${first!.message}${rest.length > 0 ? ` (+${rest.length} more)` : ""}`;
 }
@@ -111,12 +128,13 @@ export function formatFarmMobileNativeReport(
   const rows = report.routes.map((entry) => [
     entry.route,
     entry.screen,
+    entry.analysis ? entry.analysis.tier : "-",
     entry.analysis ? entry.analysis.decision : "-",
     entry.analysis ? `${entry.analysis.elements.mapped}/${entry.analysis.elements.total}` : "",
     entry.analysis ? `${entry.analysis.portablePercent}%` : "",
     reasonFor(entry),
   ]);
-  const header = ["route", "screen", "decision", "mapped", "portable", "reason"];
+  const header = ["route", "screen", "tier", "decision", "mapped", "portable", "reason"];
   const widths = header.map((title, column) =>
     Math.min(
       column === 0 ? 40 : 12,
@@ -139,6 +157,8 @@ export function formatFarmMobileNativeReport(
     "",
     `${summary.routes} routes: ${summary.port} port, ${summary.portableNoWin} portable without a ` +
       `win, ${summary.blocked} blocked, ${summary.native} native from files or config`,
+    `tiers: ${summary.tiers.native} native, ${summary.tiers["react-native"]} react-native, ` +
+      `${summary.tiers.web} web`,
   ];
   if (options.stats) {
     const { modules, parsed, cached, ms } = options.stats;
