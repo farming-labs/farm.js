@@ -228,6 +228,9 @@ export default {
         server: context.manifest.server,
         projectDir: path.relative(context.root, context.projectDir),
         native: context.native ?? null,
+        assets: context.assets
+          ? { dir: path.relative(context.root, context.assets.dir), entry: context.assets.entry, files: context.assets.files }
+          : null,
       }) },
       { path: "gradlew", contents: "#!/bin/sh\\n", executable: true },
       ...(process.env.FAKE_SHELL_ESCAPE ? [{ path: "../escape.txt", contents: "x" }] : []),
@@ -327,16 +330,6 @@ const BUILD_CONFIG = `export default {
   }),
 };`;
 
-async function clientSources(dir) {
-  const sources = [];
-  for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith(".js")) {
-      sources.push(await readFile(path.join(entry.parentPath, entry.name), "utf8"));
-    }
-  }
-  return sources.join("\n");
-}
-
 test("--mobile excludes --desktop and --web, and --apk needs --mobile", async () => {
   const both = await runFarm(["build", "--mobile", "--desktop", "--root", testDir]);
   assert.notEqual(both.code, 0);
@@ -409,6 +402,15 @@ test("farm build --mobile builds the mobile client apart from the web output and
 
   const routes = JSON.parse(await readFile(path.join(mobileDir, "farm-routes.json"), "utf8"));
   assert.equal(routes.server, "https://notes.example.com");
+  // The mobile client the build added, for the shell to bundle.
+  const mobileClient = JSON.parse(
+    await readFile(path.join(root, ".farm", "mobile-client.json"), "utf8"),
+  );
+  assert.match(mobileClient.entry, /^\/farm-mobile-client-h[0-9a-f]{8,}\.js$/);
+  assert.match(
+    result.output,
+    new RegExp(`Mobile client ${mobileClient.entry.replace(/[.]/g, "\\.")}: \\d+ files bundled into the app`),
+  );
   assert.deepEqual(
     JSON.parse(await readFile(path.join(mobileDir, "android", "context.json"), "utf8")),
     {
@@ -425,8 +427,19 @@ test("farm build --mobile builds the mobile client apart from the web output and
         modules: ["app/feed"],
         bundle: path.join(mobileDir, "native", "index.android.hbc"),
       },
+      assets: {
+        dir: path.join(".farm", "client"),
+        entry: mobileClient.entry,
+        files: mobileClient.files,
+      },
     },
   );
+  assert.ok(mobileClient.files.includes(mobileClient.entry));
+  for (const file of mobileClient.files) {
+    await stat(path.join(root, ".farm", "client", file));
+    // Deployed like any client file.
+    await stat(path.join(mobileDir, "www", "public", file));
+  }
   assert.deepEqual(JSON.parse(await readFile(path.join(root, "native-build.json"), "utf8")), {
     outDir: path.join(".farm", "output", "mobile", "native"),
     basePath: "",
@@ -445,18 +458,37 @@ test("farm build --mobile builds the mobile client apart from the web output and
   if (process.platform !== "win32") {
     assert.equal((await stat(path.join(mobileDir, "android", "gradlew"))).mode & 0o111, 0o111);
   }
-  // The client build hands navigations to the shell; the web output was never written.
-  const mobileClient = await clientSources(path.join(mobileDir, "www", "public"));
-  assert.match(mobileClient, /farm:mobile-shell/);
-  assert.match(mobileClient, /offerNavigation/);
+  // The mobile client hands navigations to the shell, the web client does not; the web output
+  // was never written.
+  const split = async (dir) => {
+    const mobile = [];
+    const web = [];
+    for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
+      const file = path.join(entry.parentPath, entry.name);
+      const url = `/${path.relative(dir, file).split(path.sep).join("/")}`;
+      (mobileClient.files.includes(url) ? mobile : web).push(await readFile(file, "utf8"));
+    }
+    return { mobile: mobile.join("\n"), web: web.join("\n") };
+  };
+  const built = await split(path.join(mobileDir, "www", "public"));
+  assert.match(built.mobile, /farm:mobile-shell/);
+  assert.match(built.mobile, /offerNavigation/);
+  assert.doesNotMatch(built.web, /farm:mobile-shell|offerNavigation/);
   await assert.rejects(stat(path.join(root, ".farm", ".output")));
   await assert.rejects(stat(path.join(root, ".vercel")));
 
   const web = await runFarm(["build", "--root", root], { FARM_PLATFORM: "mobile" });
   assert.equal(web.code, 0, web.output);
-  // A stale FARM_PLATFORM does not make a web build mobile.
-  const webClient = await clientSources(path.join(root, ".farm", ".output", "public"));
-  assert.doesNotMatch(webClient, /farm:mobile-shell|offerNavigation/);
+  // A web deployment has the same mobile client, and a stale FARM_PLATFORM does not make its web
+  // client mobile.
+  assert.deepEqual(
+    JSON.parse(await readFile(path.join(root, ".farm", "mobile-client.json"), "utf8")),
+    mobileClient,
+  );
+  const deployed = await split(path.join(root, ".farm", ".output", "public"));
+  assert.match(deployed.mobile, /farm:mobile-shell/);
+  assert.doesNotMatch(deployed.web, /farm:mobile-shell|offerNavigation/);
 
   const apk = await runFarm(["build", "--mobile", "--apk", "--root", root]);
   assert.equal(apk.code, 0, apk.output);
@@ -485,8 +517,17 @@ test("farm build --mobile --os ios generates the iOS project and reports what th
       projectDir: path.join(".farm", "output", "mobile", "ios"),
       // The iOS shell has no React Native host yet, so /feed is a placeholder there.
       native: null,
+      // The shell decides what to bundle; the real iOS shell loads them from the server.
+      assets: {
+        dir: path.join(".farm", "client"),
+        entry: JSON.parse(await readFile(path.join(root, ".farm", "mobile-client.json"), "utf8"))
+          .entry,
+        files: JSON.parse(await readFile(path.join(root, ".farm", "mobile-client.json"), "utf8"))
+          .files,
+      },
     },
   );
+  assert.match(result.output, /Mobile client \/farm-mobile-client-h[0-9a-f]+\.js: loaded from the server/);
   await assert.rejects(stat(path.join(mobileDir, "android")));
   // Resolved for iOS: page.android.tsx is not the /feed screen there.
   const routes = JSON.parse(await readFile(path.join(mobileDir, "farm-routes.json"), "utf8"));
