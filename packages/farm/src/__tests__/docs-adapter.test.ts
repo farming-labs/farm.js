@@ -9,6 +9,7 @@ import {
   compileFarmDocsAdapterEdgeManifest,
   createFarmDocsAdapterHandler,
   hasFarmDocsRuntimeAdapter,
+  listFarmDocsAdapterPages,
 } from "../docs/adapter";
 import type { FarmDocsResolvedConfig } from "../docs/types";
 
@@ -54,6 +55,40 @@ function createMultiRootDocs(): FarmDocsResolvedConfig {
 }
 
 describe("Farm docs runtime adapters", () => {
+  it("lists the pages of every docs root for prerendering", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-docs-adapter-roots-pages-"));
+    tempDirs.push(root);
+    const adapterDir = path.join(root, "node_modules", "fake-docs-adapter");
+    await mkdir(adapterDir, { recursive: true });
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "app" }));
+    await writeFile(
+      path.join(adapterDir, "package.json"),
+      JSON.stringify({
+        name: "fake-docs-adapter",
+        type: "module",
+        exports: { "./server": "./server.js" },
+      }),
+    );
+    await writeFile(
+      path.join(adapterDir, "server.js"),
+      `export function listFarmDocsPages(config) {
+  const base = "/" + String(config.entry).replace(/^\\/+/, "");
+  return [base, base + "/guide"];
+}`,
+    );
+    const docs = createMultiRootDocs();
+    docs.adapter = { ...docs.adapter!, server: "fake-docs-adapter/server" };
+
+    expect(await listFarmDocsAdapterPages(docs, { root })).toEqual([
+      "/docs",
+      "/docs/guide",
+      "/statewire/docs",
+      "/statewire/docs/guide",
+      "/pinboard/docs",
+      "/pinboard/docs/guide",
+    ]);
+  });
+
   it("recognizes only enabled adapters with server and React entrypoints", () => {
     const docs = createAdapterDocs();
 

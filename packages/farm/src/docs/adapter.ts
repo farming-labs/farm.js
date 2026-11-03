@@ -257,10 +257,14 @@ export async function listFarmDocsAdapterPages(
   )) as FarmDocsAdapterServerModule;
   if (typeof serverModule.listFarmDocsPages !== "function") return null;
 
-  const pages = await serverModule.listFarmDocsPages(
-    createFarmDocsAdapterRuntimeConfig(docs, options),
-    { rootDir: options.root },
-  );
+  const listPages = serverModule.listFarmDocsPages;
+  const pages = (
+    await Promise.all(
+      getFarmDocsRoots(docs).map((root) =>
+        listPages(createFarmDocsAdapterRuntimeConfig(root, options), { rootDir: options.root }),
+      ),
+    )
+  ).flat();
   if (
     !Array.isArray(pages) ||
     pages.some((page) => typeof page !== "string" || !page.startsWith("/"))
