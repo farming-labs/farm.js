@@ -110,6 +110,7 @@ function createHarness(options: { reader?: boolean } = {}) {
     path: string,
     init: {
       body?: unknown;
+      nonce?: string;
       cookie?: string;
       token?: string;
       app?: string | null;
@@ -120,6 +121,7 @@ function createHarness(options: { reader?: boolean } = {}) {
     if (init.app !== null) headers.set("x-farm-mobile", init.app ?? APP);
     if (init.cookie) headers.set("cookie", init.cookie);
     if (init.token) headers.set("authorization", `Bearer ${init.token}`);
+    if (init.nonce !== undefined) headers.set("x-farm-mobile-nonce", init.nonce);
     return new Request(`${ORIGIN}${path}`, {
       method: init.method ?? "POST",
       headers,
@@ -132,7 +134,7 @@ function createHarness(options: { reader?: boolean } = {}) {
     const challenge = await send(native("/__farm/mobile/session/challenge", { cookie }));
     expect(challenge.status).toBe(200);
     const { nonce } = (await challenge.json()) as { nonce: string };
-    const issued = await send(native("/__farm/mobile/session", { cookie, body: { nonce } }));
+    const issued = await send(native("/__farm/mobile/session", { cookie, nonce }));
     expect(issued.status).toBe(200);
     const tokens = (await issued.json()) as { accessToken: string; refreshToken: string };
     return { ...tokens, marker: issued.headers.get("set-cookie") ?? "" };
@@ -262,7 +264,7 @@ describe("mobile session tokens", () => {
     const refresh = await harness.send(
       harness.native("/__farm/mobile/session/refresh", {
         app: "com.example.other",
-        body: { refreshToken },
+        token: refreshToken,
       }),
     );
     expect(refresh.status).toBe(401);
@@ -282,10 +284,14 @@ describe("mobile session tokens", () => {
 
     const refreshed = await harness.send(
       harness.native("/__farm/mobile/session/refresh", {
-        body: { refreshToken: first.refreshToken },
+        token: first.refreshToken,
       }),
     );
     expect(refreshed.status).toBe(200);
+    // The WebView's device marker lives as long as the new refresh token.
+    expect(refreshed.headers.get("set-cookie")).toMatch(
+      /^farm_mobile=[\w-]{22}; Path=\/; Max-Age=2592000;/,
+    );
     const next = (await refreshed.json()) as { accessToken: string; refreshToken: string };
     expect(next.accessToken).not.toBe(first.accessToken);
     expect(next.refreshToken).not.toBe(first.refreshToken);
@@ -298,14 +304,14 @@ describe("mobile session tokens", () => {
     const first = await harness.signIn();
     const rotated = await harness.send(
       harness.native("/__farm/mobile/session/refresh", {
-        body: { refreshToken: first.refreshToken },
+        token: first.refreshToken,
       }),
     );
     const next = (await rotated.json()) as { accessToken: string; refreshToken: string };
 
     const replay = await harness.send(
       harness.native("/__farm/mobile/session/refresh", {
-        body: { refreshToken: first.refreshToken },
+        token: first.refreshToken,
       }),
     );
     expect(replay.status).toBe(401);
@@ -316,7 +322,7 @@ describe("mobile session tokens", () => {
     ).toBe(401);
     const after = await harness.send(
       harness.native("/__farm/mobile/session/refresh", {
-        body: { refreshToken: next.refreshToken },
+        token: next.refreshToken,
       }),
     );
     expect(after.status).toBe(401);
@@ -327,7 +333,7 @@ describe("mobile session tokens", () => {
     const { refreshToken } = await harness.signIn();
     harness.advance(30 * 24 * 60 * 60 * 1000);
     const response = await harness.send(
-      harness.native("/__farm/mobile/session/refresh", { body: { refreshToken } }),
+      harness.native("/__farm/mobile/session/refresh", { token: refreshToken }),
     );
     expect(response.status).toBe(401);
   });
@@ -345,7 +351,7 @@ describe("mobile session tokens", () => {
     ).toBe(401);
     const refresh = await harness.send(
       harness.native("/__farm/mobile/session/refresh", {
-        body: { refreshToken: byAccess.refreshToken },
+        token: byAccess.refreshToken,
       }),
     );
     expect(refresh.status).toBe(401);
@@ -353,7 +359,7 @@ describe("mobile session tokens", () => {
     const byRefresh = await harness.signIn();
     await harness.send(
       harness.native("/__farm/mobile/session/revoke", {
-        body: { refreshToken: byRefresh.refreshToken },
+        token: byRefresh.refreshToken,
       }),
     );
     expect(
@@ -380,7 +386,7 @@ describe("mobile session tokens", () => {
       401,
     );
     const refresh = await harness.send(
-      harness.native("/__farm/mobile/session/refresh", { body: { refreshToken } }),
+      harness.native("/__farm/mobile/session/refresh", { token: refreshToken }),
     );
     expect(refresh.status).toBe(401);
   });
@@ -405,7 +411,7 @@ describe("mobile session tokens", () => {
     const { refreshToken } = await harness.signIn();
     harness.sessions.delete("sid-alice");
     const response = await harness.send(
-      harness.native("/__farm/mobile/session/refresh", { body: { refreshToken } }),
+      harness.native("/__farm/mobile/session/refresh", { token: refreshToken }),
     );
     expect(response.status).toBe(401);
     expect(await response.json()).toMatchObject({ error: "signed_out" });
@@ -472,7 +478,7 @@ describe("mobile session tokens", () => {
 
     const cookie = "sid=sid-alice";
     const noChallenge = await harness.send(
-      harness.native("/__farm/mobile/session", { cookie, body: { nonce: "x".repeat(43) } }),
+      harness.native("/__farm/mobile/session", { cookie, nonce: "x".repeat(43) }),
     );
     expect(noChallenge.status).toBe(401);
 
@@ -481,20 +487,18 @@ describe("mobile session tokens", () => {
     );
     const { nonce } = (await challenge.json()) as { nonce: string };
     const wrong = await harness.send(
-      harness.native("/__farm/mobile/session", { cookie, body: { nonce: `${nonce}x` } }),
+      harness.native("/__farm/mobile/session", { cookie, nonce: `${nonce}x` }),
     );
     expect(wrong.status).toBe(401);
     // A wrong guess used it up.
-    const reused = await harness.send(
-      harness.native("/__farm/mobile/session", { cookie, body: { nonce } }),
-    );
+    const reused = await harness.send(harness.native("/__farm/mobile/session", { cookie, nonce }));
     expect(reused.status).toBe(401);
 
     const late = await harness.send(harness.native("/__farm/mobile/session/challenge", { cookie }));
     const lateNonce = ((await late.json()) as { nonce: string }).nonce;
     harness.advance(60 * 1000);
     const expired = await harness.send(
-      harness.native("/__farm/mobile/session", { cookie, body: { nonce: lateNonce } }),
+      harness.native("/__farm/mobile/session", { cookie, nonce: lateNonce }),
     );
     expect(expired.status).toBe(401);
 
@@ -507,7 +511,7 @@ describe("mobile session tokens", () => {
     const bob = await harness.send(
       harness.native("/__farm/mobile/session", {
         cookie: "sid=sid-bob",
-        body: { nonce: aliceNonce },
+        nonce: aliceNonce,
       }),
     );
     expect(bob.status).toBe(401);

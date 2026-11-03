@@ -518,7 +518,7 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     const without = await buildWeb();
     const serverDir = path.join(root, ".farm", ".output", "server");
     // Zero cost: without a mobile block there is no mobile session plugin or route.
-    expect(await serverFilesContaining(serverDir, "__farmCreateMobileSessionPlugin")).toEqual([]);
+    expect(await serverFilesContaining(serverDir, "createFarmMobileSessionPlugin")).toEqual([]);
     await fs.writeFile(
       path.join(root, "farm.config.ts"),
       webConfig(`\n  desktop: { name: "DESKTOP_STATIC_MARKER", window: { width: 900 } },`),
@@ -549,9 +549,7 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     // sign in through. Every mobile block, static or a function, builds the same server.
     const withMobile = await buildWeb();
     expect(withMobile).not.toEqual(without);
-    expect(await serverFilesContaining(serverDir, "__farmCreateMobileSessionPlugin")).not.toEqual(
-      [],
-    );
+    expect(await serverFilesContaining(serverDir, "createFarmMobileSessionPlugin")).not.toEqual([]);
     await fs.writeFile(
       path.join(root, "farm.config.ts"),
       webConfig(`

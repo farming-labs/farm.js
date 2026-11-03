@@ -269,7 +269,8 @@ describe("@farm.js/mobile/android", () => {
     for (const endpoint of ["challenge", "refresh", "revoke"]) {
       expect(session).toContain(`"/__farm/mobile/session/${endpoint}"`);
     }
-    expect(session).toContain('"/__farm/mobile/session", JSONObject().put("nonce", nonce)');
+    expect(session).toContain('post("/__farm/mobile/session", cookies = cookies, nonce = nonce)');
+    expect(session).toContain('post("/__farm/mobile/session/refresh", bearer = current.refresh)');
     // Web sign-out (the server cleared the marker) deletes the tokens.
     expect(session).toContain('private const val MARKER = "farm_mobile"');
     expect(files["app/src/main/res/values/strings.xml"]).toContain(

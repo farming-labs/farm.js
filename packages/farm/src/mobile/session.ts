@@ -6,10 +6,12 @@
  * the user signs in on a web screen, the shell's native code trades the WebView's cookie session
  * for a device token:
  *
- *   POST /__farm/mobile/session/challenge   cookie session        -> { nonce }
- *   POST /__farm/mobile/session             cookie session, nonce -> access + refresh token
- *   POST /__farm/mobile/session/refresh     refresh token         -> new access + refresh token
- *   POST /__farm/mobile/session/revoke      access or refresh     -> 204
+ *   POST /__farm/mobile/session/challenge   cookie session                -> { nonce }
+ *   POST /__farm/mobile/session             cookie session, nonce header  -> access + refresh
+ *   POST /__farm/mobile/session/refresh     Bearer <refresh token>        -> new access + refresh
+ *   POST /__farm/mobile/session/revoke      Bearer <access or refresh>    -> 204
+ *
+ * Everything travels in headers, so no endpoint reads a body.
  *
  * Every call must have the shape no browser can send: an `X-Farm-Mobile: <mobile.id>` header (a
  * cross-site page cannot add it without a CORS preflight) and no `Origin` or `Sec-Fetch-*`
@@ -40,6 +42,8 @@ import { getStorage } from "../storage";
 export const FARM_MOBILE_SESSION_PLUGIN = "farm:mobile-session";
 export const FARM_MOBILE_SESSION_PATH = "/__farm/mobile/session";
 export const FARM_MOBILE_APP_HEADER = "x-farm-mobile";
+/** The challenge nonce, sent to the issue endpoint. */
+export const FARM_MOBILE_NONCE_HEADER = "x-farm-mobile-nonce";
 /** Set in the WebView cookie store at issue time; names the device so web sign-out revokes it. */
 export const FARM_MOBILE_DEVICE_COOKIE = "farm_mobile";
 
@@ -47,7 +51,6 @@ const ACCESS_PREFIX = "fma1";
 const REFRESH_PREFIX = "fmr1";
 const STORAGE_NAMESPACE = "farm-mobile";
 const STATE_KEY = "farm:mobile-session";
-const MAX_BODY_BYTES = 8 * 1024;
 /** Old refresh secrets kept per device, so a replayed one revokes the device. */
 const USED_REFRESH_LIMIT = 8;
 const BROWSER_HEADERS = [
@@ -297,23 +300,6 @@ function readAppId(request: Request): string | null {
   return value && value.length <= 255 && APP_ID.test(value) ? value : null;
 }
 
-async function readJsonBody(request: Request): Promise<Record<string, unknown> | null> {
-  const type = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-  if (type !== "application/json") return null;
-  const length = request.headers.get("content-length");
-  if (length && Number(length) > MAX_BODY_BYTES) return null;
-  try {
-    const text = await request.text();
-    if (text.length > MAX_BODY_BYTES) return null;
-    const body: unknown = JSON.parse(text);
-    return body && typeof body === "object" && !Array.isArray(body)
-      ? (body as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 function bearer(request: Request): string | null {
   const header = request.headers.get("authorization");
   if (!header) return null;
@@ -483,8 +469,7 @@ export function createFarmMobileSessionPlugin(options: FarmMobileSessionOptions)
     if (guard instanceof Response) return guard;
     const reader = sessionReader();
     if (!reader) return noReader();
-    const body = await readJsonBody(request);
-    const nonce = typeof body?.nonce === "string" ? body.nonce : "";
+    const nonce = request.headers.get(FARM_MOBILE_NONCE_HEADER)?.trim() ?? "";
     const cookies = readCookies(request.headers.get("cookie"));
     delete cookies[FARM_MOBILE_DEVICE_COOKIE];
     const session = await readSession(reader, request.url, cookies);
@@ -529,11 +514,7 @@ export function createFarmMobileSessionPlugin(options: FarmMobileSessionOptions)
     if (guard instanceof Response) return guard;
     const reader = sessionReader();
     if (!reader) return noReader();
-    const body = await readJsonBody(request);
-    const token = parseFarmMobileToken(
-      typeof body?.refreshToken === "string" ? body.refreshToken : null,
-      "refresh",
-    );
+    const token = parseFarmMobileToken(bearer(request), "refresh");
     if (!token) return failure(401, "invalid_token", "Unknown refresh token.");
     const record = await loadDevice(token.deviceId);
     if (!record) return failure(401, "invalid_token", "Unknown refresh token.");
@@ -596,13 +577,9 @@ export function createFarmMobileSessionPlugin(options: FarmMobileSessionOptions)
   async function revoke(request: Request): Promise<Response> {
     const guard = guardEndpoint(request);
     if (guard instanceof Response) return guard;
-    const body = await readJsonBody(request);
+    // Either token of the pair, as the bearer.
     const access = parseFarmMobileToken(bearer(request), "access");
-    const refreshToken = parseFarmMobileToken(
-      typeof body?.refreshToken === "string" ? body.refreshToken : null,
-      "refresh",
-    );
-    const token = access ?? refreshToken;
+    const token = access ?? parseFarmMobileToken(bearer(request), "refresh");
     if (token) {
       const record = await loadDevice(token.deviceId);
       const hash = await sha256(token.secret);

@@ -73,7 +73,7 @@ class MobileSession private constructor(
     fun refresh(failed: String): String? = synchronized(lock) {
         val current = current() ?: return null
         if (current.access != failed) return current.access
-        val result = post("/__farm/mobile/session/refresh", JSONObject().put("refreshToken", current.refresh))
+        val result = post("/__farm/mobile/session/refresh", bearer = current.refresh)
         when {
             result.code == 200 && result.body != null -> save(result.body).access
             result.code == 401 || result.code == 400 -> {
@@ -94,7 +94,7 @@ class MobileSession private constructor(
                 current
             }
             try {
-                if (revoked != null) post("/__farm/mobile/session/revoke", JSONObject().put("refreshToken", revoked.refresh))
+                if (revoked != null) post("/__farm/mobile/session/revoke", bearer = revoked.refresh)
             } catch (error: Exception) {
                 Log.w(TAG, "revoke failed: ${error.message}")
             }
@@ -118,10 +118,10 @@ class MobileSession private constructor(
         val session = cookies.split(';').map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("$MARKER=") }
         if (session.isEmpty() || cookies == attempted) return
         attempted = cookies
-        val challenge = post("/__farm/mobile/session/challenge", null, cookies)
+        val challenge = post("/__farm/mobile/session/challenge", cookies = cookies)
         val nonce = challenge.body?.optString("nonce").orEmpty()
         if (challenge.code != 200 || nonce.isEmpty()) return
-        val issued = post("/__farm/mobile/session", JSONObject().put("nonce", nonce), cookies)
+        val issued = post("/__farm/mobile/session", cookies = cookies, nonce = nonce)
         if (issued.code == 200 && issued.body != null) {
             synchronized(lock) { save(issued.body) }
             Log.i(TAG, "device session issued")
@@ -130,8 +130,11 @@ class MobileSession private constructor(
 
     private class Reply(val code: Int, val body: JSONObject?)
 
-    /** A request no WebView can make: native, no Origin, with the app id. */
-    private fun post(path: String, body: JSONObject?, cookies: String? = null): Reply {
+    /**
+     * A request no WebView can make: native, no Origin, with the app id. Everything travels in
+     * headers; the endpoints read no body.
+     */
+    private fun post(path: String, cookies: String? = null, bearer: String? = null, nonce: String? = null): Reply {
         val connection = URL(config.url("$basePath$path")).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
@@ -142,11 +145,11 @@ class MobileSession private constructor(
             connection.setRequestProperty("X-Farm-Mobile", appId)
             connection.setRequestProperty("Accept", "application/json")
             if (cookies != null) connection.setRequestProperty("Cookie", cookies)
-            if (body != null) {
-                connection.doOutput = true
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.outputStream.use { it.write(body.toString().toByteArray()) }
-            }
+            if (bearer != null) connection.setRequestProperty("Authorization", "Bearer $bearer")
+            if (nonce != null) connection.setRequestProperty("X-Farm-Mobile-Nonce", nonce)
+            connection.setFixedLengthStreamingMode(0)
+            connection.doOutput = true
+            connection.outputStream.close()
             val code = connection.responseCode
             // The device marker goes into the WebView cookie store, where web sign-out finds it.
             connection.headerFields.entries

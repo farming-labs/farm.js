@@ -95,7 +95,7 @@ final class MobileSession {
         guard let current = tokens else { return nil }
         if current.access != failed { return current.access }
         let task = Task<String?, Never> {
-            let reply = await post("/__farm/mobile/session/refresh", body: ["refreshToken": current.refresh])
+            let reply = await post("/__farm/mobile/session/refresh", bearer: current.refresh)
             switch reply.status {
             case 200:
                 if let next = Self.tokens(from: reply.body) {
@@ -121,7 +121,7 @@ final class MobileSession {
         let revoked = tokens
         clear()
         if let revoked {
-            _ = await post("/__farm/mobile/session/revoke", body: ["refreshToken": revoked.refresh])
+            _ = await post("/__farm/mobile/session/revoke", bearer: revoked.refresh)
         }
         let store = WKWebsiteDataStore.default().httpCookieStore
         for cookie in await serverCookies() {
@@ -130,11 +130,11 @@ final class MobileSession {
     }
 
     private func issue(cookieHeader: String) async {
-        let challenge = await post("/__farm/mobile/session/challenge", body: nil, cookies: cookieHeader)
+        let challenge = await post("/__farm/mobile/session/challenge", cookies: cookieHeader)
         guard challenge.status == 200, let nonce = challenge.body?["nonce"] as? String, !nonce.isEmpty else {
             return
         }
-        let issued = await post("/__farm/mobile/session", body: ["nonce": nonce], cookies: cookieHeader)
+        let issued = await post("/__farm/mobile/session", cookies: cookieHeader, nonce: nonce)
         if issued.status == 200, let next = Self.tokens(from: issued.body) {
             save(next)
             Self.log.info("device session issued")
@@ -146,18 +146,22 @@ final class MobileSession {
         let body: [String: Any]?
     }
 
-    /// A request no WebView can make: native, no Origin, with the app id.
-    private func post(_ path: String, body: [String: String]?, cookies: String? = nil) async -> Reply {
+    /// A request no WebView can make: native, no Origin, with the app id. Everything travels in
+    /// headers; the endpoints read no body.
+    private func post(
+        _ path: String,
+        cookies: String? = nil,
+        bearer: String? = nil,
+        nonce: String? = nil
+    ) async -> Reply {
         var request = URLRequest(url: config.url(FarmBuild.basePath + path))
         request.httpMethod = "POST"
         request.httpShouldHandleCookies = false
         request.setValue(appId, forHTTPHeaderField: "X-Farm-Mobile")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let cookies { request.setValue(cookies, forHTTPHeaderField: "Cookie") }
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        }
+        if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
+        if let nonce { request.setValue(nonce, forHTTPHeaderField: "X-Farm-Mobile-Nonce") }
         do {
             let (data, response) = try await http.data(for: request)
             guard let response = response as? HTTPURLResponse else { return Reply(status: 0, body: nil) }
