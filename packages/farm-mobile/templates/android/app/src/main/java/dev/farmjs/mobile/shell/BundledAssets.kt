@@ -59,12 +59,13 @@ class BundledAssets private constructor(
         fun load(assets: AssetManager, config: RouteConfig): BundledAssets? {
             val json = try {
                 assets.open(MANIFEST).bufferedReader().use { JSONObject(it.readText()) }
-            } catch (error: IOException) {
+            } catch (error: Exception) {
+                // No manifest (farm dev --mobile, or a build without a mobile client).
                 return null
             }
             if (json.optInt("version") != 1) return null
             val files = json.optJSONObject("files") ?: return null
-            val types = buildMap { files.keys().forEach { put(it, files.getString(it)) } }
+            val types = buildMap<String, String> { files.keys().forEach { put(it, files.getString(it)) } }
             Log.i(TAG, "assets: ${types.size} bundled files, mobile client ${json.optString("entry")}")
             return BundledAssets(assets, config, types, json.optString("entry"))
         }
