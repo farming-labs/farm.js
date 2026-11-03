@@ -2182,11 +2182,11 @@ importers:
         specifier: 0.0.6
         version: 0.0.6(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
       '@farming-labs/orm':
-        specifier: 0.0.65
-        version: 0.0.65
+        specifier: 0.0.66
+        version: 0.0.66
       '@farming-labs/orm-runtime':
-        specifier: 0.0.65
-        version: 0.0.65(db0@0.3.4)
+        specifier: 0.0.66
+        version: 0.0.66(db0@0.3.4)
       '@formatjs/icu-messageformat-parser':
         specifier: 3.5.15
         version: 3.5.15
@@ -3434,11 +3434,11 @@ importers:
         version: link:../farm
     devDependencies:
       '@farming-labs/orm':
-        specifier: 0.0.65
-        version: 0.0.65
+        specifier: 0.0.66
+        version: 0.0.66
       '@farming-labs/orm-runtime':
-        specifier: 0.0.65
-        version: 0.0.65
+        specifier: 0.0.66
+        version: 0.0.66
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -6822,25 +6822,25 @@ packages:
       - waku
     dev: false
 
-  /@farming-labs/orm-d1@0.0.65:
-    resolution: {integrity: sha512-6nFfXt62qflKoUcNkvirQj16WoI9SPV39Qeob6iF88kBnWSkm6HPqCFKW5gGGcekmaijkoc/oYFm6MCx2QwbLw==}
+  /@farming-labs/orm-d1@0.0.66:
+    resolution: {integrity: sha512-bjjk9fK4BepblqoUM1ONCLf8xnlqD0/JCK13A0+M7F3e2O+/19/37qq3XtN5N0YfgeGZVi+4dSQ4RpnSJzSvRQ==}
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-sql': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-sql': 0.0.66
 
-  /@farming-labs/orm-drizzle@0.0.65:
-    resolution: {integrity: sha512-/dXo/aHawf9BVmLctFd/FB9cl8MVsh/nfiY+/HRUyG2YJKnVHxJsxV7SKPOl7dzyRf8qThKlqVapSesftMZ/gQ==}
+  /@farming-labs/orm-drizzle@0.0.66:
+    resolution: {integrity: sha512-ep15sBLS0oDZfDO/ssaQnO3lwV1dceOSq51TC7dW0ydQRk6sQYAYstTADSv9HMNykw2DaHIv19pDvK+2aIkvAg==}
     peerDependencies:
       drizzle-orm: ^0.45.2
     peerDependenciesMeta:
       drizzle-orm:
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-sql': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-sql': 0.0.66
 
-  /@farming-labs/orm-dynamodb@0.0.65:
-    resolution: {integrity: sha512-N0NBz9WMHqtvn/dVI0ZLvVLM9sdNsuAehVSnHkfmimP9aFPF9nInhELuUWaksD+Wo3uwZzErFfvGnXOu8ew6mA==}
+  /@farming-labs/orm-dynamodb@0.0.66:
+    resolution: {integrity: sha512-SrT6TGtkC8B5X7DV35typ3QxUAsTRxsU4Vuj7V/jkzNgPWM74Wr2d63KwAgotk9oc6fqOQtvsuWS4oqeQIDf9A==}
     peerDependencies:
       '@aws-sdk/client-dynamodb': ^3.1049.0
       '@aws-sdk/lib-dynamodb': ^3.1049.0
@@ -6850,118 +6850,118 @@ packages:
       '@aws-sdk/lib-dynamodb':
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
 
-  /@farming-labs/orm-edgedb@0.0.65:
-    resolution: {integrity: sha512-VfcFmPbKBFe9U4CL2MqKbL0jxRifBB+fVM5mxU2AJ6G9l/1i6AzRDtsfXhRy9Sl8swsRA4C+WXTGXXPnTCoB6w==}
+  /@farming-labs/orm-edgedb@0.0.66:
+    resolution: {integrity: sha512-nIRqdA/wrDFlRiC9+7ybMLMgSAi5lIrHj4WcxFfSBtzon0gpOI5Bk3PbwvQ3pmREfMzUyTQdsl36w1QYJBUwZw==}
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-sql': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-sql': 0.0.66
 
-  /@farming-labs/orm-firestore@0.0.65:
-    resolution: {integrity: sha512-iJB9vW/GGbWb0gXJef8pTmYcbeXXabLyRou82trWjOmrbUblRqMXX1YaErLe7FvJj+JUVhJ6YGM0QHGpFPz6NA==}
+  /@farming-labs/orm-firestore@0.0.66:
+    resolution: {integrity: sha512-TsldBM0IRMmpzJr5QMACBQTaG7iDChcn+xmFqGpcjN1lqJCTpWLW8f9KnprSxmth9Wvf8KBqQY+n6nR5Hpincg==}
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
 
-  /@farming-labs/orm-kv@0.0.65:
-    resolution: {integrity: sha512-C9uzRKhqC/xwROoZJmgZFYEtW/+hyzg0pz/VrvHLMYiAs9CpAZS7/qFlgi4o3VDMPHwwG+bIQuv+ylonhASIYw==}
+  /@farming-labs/orm-kv@0.0.66:
+    resolution: {integrity: sha512-SnBZu3RQ3Sb40IK64ngUNSueTtYIzVgGUWgKciukt1yMM26Wn8pG+nfDe9Ohna76lIs+w6vJry5uaoR7/PrHqA==}
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
 
-  /@farming-labs/orm-kysely@0.0.65:
-    resolution: {integrity: sha512-W+mcEYxuoHggPSXyjBNSzgNr+az9xZoWgP2Y7XFBnzBsGSwE3FpEL79xXzdAO9oyzAwwKYetg64ThEL5YtbLKA==}
+  /@farming-labs/orm-kysely@0.0.66:
+    resolution: {integrity: sha512-BUQvZ+tOMTTSkRZKW4tR1IsunnWbu9ZPxcxd4WyIWGE1FRkI9MQ1rbp4zvsBPtsT4ZdxIIZSW3+G1e7W1rXV6A==}
     peerDependencies:
       kysely: ^0.28.17
     peerDependenciesMeta:
       kysely:
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-sql': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-sql': 0.0.66
 
-  /@farming-labs/orm-mikroorm@0.0.65:
-    resolution: {integrity: sha512-2cylBPkAcwKOYEtl9tUw8SVui1ExkLNzJkiHBT/zrRWEF9mBu04X+YhZ94ZHkxJ2LQur67OIlHhp8fXbeLp7YA==}
+  /@farming-labs/orm-mikroorm@0.0.66:
+    resolution: {integrity: sha512-vMCu5Wtwwl+Go6fzekbcDsNkeYQzkkEjvtULaMC8mvkM9LW89HHCZz41Ttj8bdvH2Vj6j6UKy9r4Ey49ZaUzqw==}
     peerDependencies:
       '@mikro-orm/core': ^7.0.17
     peerDependenciesMeta:
       '@mikro-orm/core':
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-sql': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-sql': 0.0.66
 
-  /@farming-labs/orm-mongo@0.0.65:
-    resolution: {integrity: sha512-/6EBcsg0HHcRQF6hr+lssq2G52D0Fwyp4ZwLSibetBf+3d7jFbtNx2ahsGltYUuL64s/UZo+VBUjIZIuyFDT4A==}
+  /@farming-labs/orm-mongo@0.0.66:
+    resolution: {integrity: sha512-iaUosoV7ZR4b8EN/WUxoQkelYECBTDxh7iXfopDTr6cVJDf0CKY0HytFFHmqOpqBDrt5yMbIBqKwZz3VwZHQ+A==}
     peerDependencies:
       mongodb: ^6.0.0
     peerDependenciesMeta:
       mongodb:
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-mongoose': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-mongoose': 0.0.66
     transitivePeerDependencies:
       - mongoose
 
-  /@farming-labs/orm-mongoose@0.0.65:
-    resolution: {integrity: sha512-FlX+8oHlKz1lX6nhzim/P733dn6/F4AHomFx95gB2Xw3Yfw4frqxcFrmDE4yplUCHo/4QFS5MYbPPNXAnwz+Og==}
+  /@farming-labs/orm-mongoose@0.0.66:
+    resolution: {integrity: sha512-AK2NQVdShPYHR3KFEOWTkBZdTLg9DKZuPvKKWL/VpZKBD+w9vyl9cN3j5IDkNeeeDUhgl1MPD9Lj0/46fg7I3g==}
     peerDependencies:
       mongoose: ^8.0.0
     peerDependenciesMeta:
       mongoose:
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
 
-  /@farming-labs/orm-neo4j@0.0.65:
-    resolution: {integrity: sha512-bfxvXOO/bB+bYOhVq6w3rc0Mb8ofNyL67LfQENH31CFq7n0VR/6ufqCIAUzcrT7N3Ml1cAhbeI+tA5o8ZIfRNQ==}
+  /@farming-labs/orm-neo4j@0.0.66:
+    resolution: {integrity: sha512-XKi2RJBacP3gk9lYkrBgDf/BgPsYhGmqqAuayqWP6Q0O2pjtf7hlRH9a26Dzda9LiSEc9kgSv7fnYcc1UrfS7w==}
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
 
-  /@farming-labs/orm-prisma@0.0.65:
-    resolution: {integrity: sha512-QaQT0nSi8Yo1qkPyh0IJ0Pa8p2VXf/SCDP7GI6F4lmtG8QdCKLV8xMCOYpzyMEQ4BWRefebalaWO8wMK6kpSVA==}
+  /@farming-labs/orm-prisma@0.0.66:
+    resolution: {integrity: sha512-B6MGW3RfTmjjZvCZSVblvhBOoFVfLyS7KvGXky1Oizxmrs2fDh1TAX5OpDEOsX6uNAaJlP+GGaZ10Rnrupa2nw==}
     peerDependencies:
       '@prisma/client': ^6.0.0
     peerDependenciesMeta:
       '@prisma/client':
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
 
-  /@farming-labs/orm-redis@0.0.65:
-    resolution: {integrity: sha512-g/CaRuzZfvupKn1/LKRAOt6VPsnXroZVktiXppAgrfKIr/JtUj0xi2TfaMrA9bgbF+SWk9a+mBAn/n5ETalqLQ==}
+  /@farming-labs/orm-redis@0.0.66:
+    resolution: {integrity: sha512-k9rwcBr8Rb6wY2+g0uemYakA2rTcVyFLfl0jon4KOFbvtgVnkOxkILmGb1HAiRVs4ca9eAH1gsitfQU1M99sqg==}
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
 
-  /@farming-labs/orm-runtime@0.0.65:
-    resolution: {integrity: sha512-guidSljDw1wBgn36glxz/Lv/G2HR2iNKI33I89WuJGiiNzTqSDBk6peV4t+j5eNaqCxRKnLoc/bYlPPEUh1uuQ==}
+  /@farming-labs/orm-runtime@0.0.66:
+    resolution: {integrity: sha512-+kpkorUI5o/s64c6ostGPOkT9t+gNVSUWE1Kladv/ByjDeodttnxcOhMQGjIEW2Kbn/gejp+UfsTZ6nynRBUvA==}
     peerDependencies:
       '@aws-sdk/client-dynamodb': ^3.1049.0
     peerDependenciesMeta:
       '@aws-sdk/client-dynamodb':
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-d1': 0.0.65
-      '@farming-labs/orm-drizzle': 0.0.65
-      '@farming-labs/orm-dynamodb': 0.0.65
-      '@farming-labs/orm-edgedb': 0.0.65
-      '@farming-labs/orm-firestore': 0.0.65
-      '@farming-labs/orm-kv': 0.0.65
-      '@farming-labs/orm-kysely': 0.0.65
-      '@farming-labs/orm-mikroorm': 0.0.65
-      '@farming-labs/orm-mongo': 0.0.65
-      '@farming-labs/orm-mongoose': 0.0.65
-      '@farming-labs/orm-neo4j': 0.0.65
-      '@farming-labs/orm-prisma': 0.0.65
-      '@farming-labs/orm-redis': 0.0.65
-      '@farming-labs/orm-sequelize': 0.0.65
-      '@farming-labs/orm-sql': 0.0.65
-      '@farming-labs/orm-supabase': 0.0.65
-      '@farming-labs/orm-surrealdb': 0.0.65
-      '@farming-labs/orm-typeorm': 0.0.65
-      '@farming-labs/orm-unstorage': 0.0.65
-      '@farming-labs/orm-xata': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-d1': 0.0.66
+      '@farming-labs/orm-drizzle': 0.0.66
+      '@farming-labs/orm-dynamodb': 0.0.66
+      '@farming-labs/orm-edgedb': 0.0.66
+      '@farming-labs/orm-firestore': 0.0.66
+      '@farming-labs/orm-kv': 0.0.66
+      '@farming-labs/orm-kysely': 0.0.66
+      '@farming-labs/orm-mikroorm': 0.0.66
+      '@farming-labs/orm-mongo': 0.0.66
+      '@farming-labs/orm-mongoose': 0.0.66
+      '@farming-labs/orm-neo4j': 0.0.66
+      '@farming-labs/orm-prisma': 0.0.66
+      '@farming-labs/orm-redis': 0.0.66
+      '@farming-labs/orm-sequelize': 0.0.66
+      '@farming-labs/orm-sql': 0.0.66
+      '@farming-labs/orm-supabase': 0.0.66
+      '@farming-labs/orm-surrealdb': 0.0.66
+      '@farming-labs/orm-typeorm': 0.0.66
+      '@farming-labs/orm-unstorage': 0.0.66
+      '@farming-labs/orm-xata': 0.0.66
     transitivePeerDependencies:
       - '@aws-sdk/lib-dynamodb'
       - '@azure/app-configuration'
@@ -6995,35 +6995,35 @@ packages:
       - uploadthing
     dev: true
 
-  /@farming-labs/orm-runtime@0.0.65(db0@0.3.4):
-    resolution: {integrity: sha512-guidSljDw1wBgn36glxz/Lv/G2HR2iNKI33I89WuJGiiNzTqSDBk6peV4t+j5eNaqCxRKnLoc/bYlPPEUh1uuQ==}
+  /@farming-labs/orm-runtime@0.0.66(db0@0.3.4):
+    resolution: {integrity: sha512-+kpkorUI5o/s64c6ostGPOkT9t+gNVSUWE1Kladv/ByjDeodttnxcOhMQGjIEW2Kbn/gejp+UfsTZ6nynRBUvA==}
     peerDependencies:
       '@aws-sdk/client-dynamodb': ^3.1049.0
     peerDependenciesMeta:
       '@aws-sdk/client-dynamodb':
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-d1': 0.0.65
-      '@farming-labs/orm-drizzle': 0.0.65
-      '@farming-labs/orm-dynamodb': 0.0.65
-      '@farming-labs/orm-edgedb': 0.0.65
-      '@farming-labs/orm-firestore': 0.0.65
-      '@farming-labs/orm-kv': 0.0.65
-      '@farming-labs/orm-kysely': 0.0.65
-      '@farming-labs/orm-mikroorm': 0.0.65
-      '@farming-labs/orm-mongo': 0.0.65
-      '@farming-labs/orm-mongoose': 0.0.65
-      '@farming-labs/orm-neo4j': 0.0.65
-      '@farming-labs/orm-prisma': 0.0.65
-      '@farming-labs/orm-redis': 0.0.65
-      '@farming-labs/orm-sequelize': 0.0.65
-      '@farming-labs/orm-sql': 0.0.65
-      '@farming-labs/orm-supabase': 0.0.65
-      '@farming-labs/orm-surrealdb': 0.0.65
-      '@farming-labs/orm-typeorm': 0.0.65
-      '@farming-labs/orm-unstorage': 0.0.65(db0@0.3.4)
-      '@farming-labs/orm-xata': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-d1': 0.0.66
+      '@farming-labs/orm-drizzle': 0.0.66
+      '@farming-labs/orm-dynamodb': 0.0.66
+      '@farming-labs/orm-edgedb': 0.0.66
+      '@farming-labs/orm-firestore': 0.0.66
+      '@farming-labs/orm-kv': 0.0.66
+      '@farming-labs/orm-kysely': 0.0.66
+      '@farming-labs/orm-mikroorm': 0.0.66
+      '@farming-labs/orm-mongo': 0.0.66
+      '@farming-labs/orm-mongoose': 0.0.66
+      '@farming-labs/orm-neo4j': 0.0.66
+      '@farming-labs/orm-prisma': 0.0.66
+      '@farming-labs/orm-redis': 0.0.66
+      '@farming-labs/orm-sequelize': 0.0.66
+      '@farming-labs/orm-sql': 0.0.66
+      '@farming-labs/orm-supabase': 0.0.66
+      '@farming-labs/orm-surrealdb': 0.0.66
+      '@farming-labs/orm-typeorm': 0.0.66
+      '@farming-labs/orm-unstorage': 0.0.66(db0@0.3.4)
+      '@farming-labs/orm-xata': 0.0.66
     transitivePeerDependencies:
       - '@aws-sdk/lib-dynamodb'
       - '@azure/app-configuration'
@@ -7057,52 +7057,52 @@ packages:
       - uploadthing
     dev: false
 
-  /@farming-labs/orm-sequelize@0.0.65:
-    resolution: {integrity: sha512-mHLu2pRO3AJmuHWGux6VTKERsCPx9kRsOF/0QLU1IG2DzSU8+Sjx8x7PBBEBABLKxn+KMGEIvkFCmy5exeB5Vw==}
+  /@farming-labs/orm-sequelize@0.0.66:
+    resolution: {integrity: sha512-blZYD5E4dsCmUqxj+mA468AGzcqeZIEqZtXKdaCgZ2u7hM0OadFOe8A+cVeaCKBXryCay/0te6wpN2id5HMeGg==}
     peerDependencies:
       sequelize: ^6.37.8
     peerDependenciesMeta:
       sequelize:
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-sql': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-sql': 0.0.66
 
-  /@farming-labs/orm-sql@0.0.65:
-    resolution: {integrity: sha512-sBxzDyqiKM38Qy3js08CiydNz6YUKbKdTQnlwswGAqNiLDJU1Zd0qi+NnB3Lrbbi+2abOtyr8qe527Ri8n3Ejw==}
+  /@farming-labs/orm-sql@0.0.66:
+    resolution: {integrity: sha512-UW56Ge1oAKpg7MEkZcdpvmI0FKtQbjYSRSKvC4KkKVtgLkzp5bVZ8LPiZ6GkULVBFFLCAiRfdWkKvFR9Ca/ivA==}
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
 
-  /@farming-labs/orm-supabase@0.0.65:
-    resolution: {integrity: sha512-PIv3XmjOdSq2XEE/okZmL+EP2vbh54/y1Xv9Gx1Jayzs2g9GambcoA8SioMy+wi5g7ZXJBvFLEqJffO34tw2Xg==}
+  /@farming-labs/orm-supabase@0.0.66:
+    resolution: {integrity: sha512-D0WkCOe2XGLsUKenzSobvDY1keX9woqC0IDs+VPzyP2yglV97+MEEIGmXbzcGYn1AkLdpasM3RrH/bElgc0Q5A==}
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
 
-  /@farming-labs/orm-surrealdb@0.0.65:
-    resolution: {integrity: sha512-t7hycrzyovL3uY/e7371kW/PQTaviRzKePpvPR9tO3fVkfmJ4+AGxyeOXHoKsnyGk22rqh3JnMv4dKS9g6LFUw==}
+  /@farming-labs/orm-surrealdb@0.0.66:
+    resolution: {integrity: sha512-yxigasoK+zX/wRC7brIVRM1RSM/Jhh+p+Sw43TfLuLfpS+1vUTd2WiT3X2m1B6DpAKrGSjhwFoCqqR7ceLiVjQ==}
     peerDependencies:
       surrealdb: ^2.0.3
     peerDependenciesMeta:
       surrealdb:
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
 
-  /@farming-labs/orm-typeorm@0.0.65:
-    resolution: {integrity: sha512-TF3EEdeOHMU3DAJeceM0aUeqTFyoDh2DVu3sb5sVANCIpQwnSrfcfizqIzToOXRZpPJNr+RH/Xkw+xGs0/vfXA==}
+  /@farming-labs/orm-typeorm@0.0.66:
+    resolution: {integrity: sha512-9wcBcowume2aZjEDlkJbTbYzHz54whj7ZNnSR/X8NN1FOUS1F2gTxm5fX5tfAwGGlRwbZLxNWSINfHDbpQxxVw==}
     peerDependencies:
       typeorm: ^0.3.28
     peerDependenciesMeta:
       typeorm:
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-sql': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-sql': 0.0.66
 
-  /@farming-labs/orm-unstorage@0.0.65:
-    resolution: {integrity: sha512-ITwntwCe2VLcr0RWwYAOGX6tkNGbmcNwEFIAZaLtiiPbO9yQnB/ootCSOXhzH6lklD8BWzDy7gN2/90/12P+5w==}
+  /@farming-labs/orm-unstorage@0.0.66:
+    resolution: {integrity: sha512-TH1rboNKY621qnhPTOA0Hqm92vAQyiYbB+QhfM8e4emmGaH5AYsY3CFw+cpOt/hzIwC2+X1xjVRsX6waOj+Qeg==}
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
       unstorage: 1.17.5(@netlify/blobs@11.1.1)
     transitivePeerDependencies:
       - '@azure/app-configuration'
@@ -7126,10 +7126,10 @@ packages:
       - uploadthing
     dev: true
 
-  /@farming-labs/orm-unstorage@0.0.65(db0@0.3.4):
-    resolution: {integrity: sha512-ITwntwCe2VLcr0RWwYAOGX6tkNGbmcNwEFIAZaLtiiPbO9yQnB/ootCSOXhzH6lklD8BWzDy7gN2/90/12P+5w==}
+  /@farming-labs/orm-unstorage@0.0.66(db0@0.3.4):
+    resolution: {integrity: sha512-TH1rboNKY621qnhPTOA0Hqm92vAQyiYbB+QhfM8e4emmGaH5AYsY3CFw+cpOt/hzIwC2+X1xjVRsX6waOj+Qeg==}
     dependencies:
-      '@farming-labs/orm': 0.0.65
+      '@farming-labs/orm': 0.0.66
       unstorage: 1.17.5(db0@0.3.4)
     transitivePeerDependencies:
       - '@azure/app-configuration'
@@ -7153,19 +7153,19 @@ packages:
       - uploadthing
     dev: false
 
-  /@farming-labs/orm-xata@0.0.65:
-    resolution: {integrity: sha512-mX4BXe0Ao1EkldkVD+pL7N8JRfmQPgplNOSVCniwIOMuEYFe9RqjgglVLVF6yDfbcKG9MnDtuqeDIgsd69aA/A==}
+  /@farming-labs/orm-xata@0.0.66:
+    resolution: {integrity: sha512-abBIoJxtutAOhbNViDpyTCAaNFcpWn5u0LN15+ElZd1KXef3jAq+aQ/E4Jf2pO5F2LZPv45I5nlN6omuzmaX3w==}
     peerDependencies:
       '@xata.io/client': ^0.30.1
     peerDependenciesMeta:
       '@xata.io/client':
         optional: true
     dependencies:
-      '@farming-labs/orm': 0.0.65
-      '@farming-labs/orm-sql': 0.0.65
+      '@farming-labs/orm': 0.0.66
+      '@farming-labs/orm-sql': 0.0.66
 
-  /@farming-labs/orm@0.0.65:
-    resolution: {integrity: sha512-5lJfMrqh9nI31qV6UPNPZymMlPUHF/VIvX/qbGG5fdP1NuQFrvXe9ZU8Pu/hYMdqdia7m/LriUdQO0uqr/IhiA==}
+  /@farming-labs/orm@0.0.66:
+    resolution: {integrity: sha512-YC68T6BDN/uDdMmInRD2mi8U70XqG28Uj9O5lLWHETQSsSqNrdY2NngZd2kycdzxDk+UuGfoIno3EgWKCFT6mA==}
 
   /@farming-labs/strata-darwin-arm64@0.1.2:
     resolution: {integrity: sha512-qIl6lZbFATKg/pj0PxEmdSgIjVjXteya78k7UwiULjOdoU96Pi1iKnqTRL/esgxBqMug/afU18IvQUAhvHuh0A==}

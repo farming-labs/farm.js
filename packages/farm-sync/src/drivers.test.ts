@@ -122,6 +122,60 @@ describe.each([
     expect(deleted).toEqual({ deleted: 1 });
   });
 
+  it("lists, updates and deletes nothing for a filter with no alternatives", async () => {
+    const orm = await makeOrm();
+    await executeSyncOperation({
+      body: { model: "tasks", operation: "insert", input: { id: "o1", title: "theirs" } },
+      models: models(),
+      orm,
+      request,
+      context,
+    });
+    // A filter built from an empty list, like a caller with no memberships, allows nothing.
+    const none = resolveSyncModels(
+      farmSchema as never,
+      { tasks: "write" },
+      () => ({ OR: [] }),
+      false,
+    );
+
+    const listed: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "list" },
+      models: none,
+      orm,
+      request,
+      context,
+    });
+    expect(listed.rows).toEqual([]);
+    await expect(
+      executeSyncOperation({
+        body: { model: "tasks", operation: "update", input: { id: "o1", title: "hacked" } },
+        models: none,
+        orm,
+        request,
+        context,
+      }),
+    ).rejects.toThrow(SyncOperationError);
+    await expect(
+      executeSyncOperation({
+        body: { model: "tasks", operation: "delete", input: { id: "o1" } },
+        models: none,
+        orm,
+        request,
+        context,
+      }),
+    ).rejects.toThrow(SyncOperationError);
+
+    const owner: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "list" },
+      models: models(),
+      orm,
+      request,
+      context,
+    });
+    expect(owner.rows).toMatchObject([{ id: "o1", title: "theirs" }]);
+  });
+
   it("stamps the cursor column so incremental sync advances", async () => {
     const orm = await makeOrm();
     const resolved = models();
