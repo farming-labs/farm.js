@@ -47,7 +47,9 @@ class PageShells private constructor(
         val same = loaded.substringAfterLast('/') == client.substringAfterLast('/')
         if (same == enabled) return
         enabled = same
-        prefs.edit().apply { if (same) remove(KEY_MISMATCH) else putString(KEY_MISMATCH, client) }.apply()
+        val editor = prefs.edit()
+        if (same) editor.remove(KEY_MISMATCH) else editor.putString(KEY_MISMATCH, client)
+        editor.apply()
         Log.i(
             TAG,
             if (same) "shells: on; the server runs this app's client ($client) again"
