@@ -14,9 +14,16 @@ interface Item {
 interface Block {
   root: Element;
   mounted: boolean;
-  instances: Map<string, { element: Element; item: Item; index: number }>;
+  instances: Map<
+    string,
+    {
+      element: Element;
+      item: Item;
+      index: number;
+      conditionalValues: ReadonlyMap<number, readonly unknown[]>;
+    }
+  >;
   adopt(): boolean;
-  readConditionalValues(...args: unknown[]): ReadonlyMap<number, readonly unknown[]>;
   refresh(afterCommit?: () => void, dirtyState?: ReadonlySet<number>): void;
 }
 
@@ -67,7 +74,19 @@ describe.each([false, true])("conditional capability: %s", (conditional) => {
       expect(block.adopt()).toBe(true);
       const before = new Map(block.instances);
       read.mockClear();
-      const conditionalReads = vi.spyOn(block, "readConditionalValues");
+      // Observe the committed snapshots rather than a shared helper: the
+      // conditional-capable path now owns its refresh implementation.
+      const conditionalSnapshots = vi.fn();
+      for (const instance of block.instances.values()) {
+        let values = instance.conditionalValues;
+        Object.defineProperty(instance, "conditionalValues", {
+          get: () => values,
+          set(next) {
+            conditionalSnapshots();
+            values = next;
+          },
+        });
+      }
       const committed = vi.fn();
       items = items.map((item, index) =>
         index % 10 === 0 ? { ...item, label: `${item.label}!` } : item,
@@ -75,7 +94,7 @@ describe.each([false, true])("conditional capability: %s", (conditional) => {
       if (reorder) [items[1], items[998]] = [items[998], items[1]];
       block.refresh(committed, new Set([0]));
 
-      expect(conditionalReads).toHaveBeenCalledTimes(conditional ? items.length : 0);
+      expect(conditionalSnapshots).toHaveBeenCalledTimes(conditional ? items.length : 0);
       expect(read).toHaveBeenCalledTimes(items.length);
       expect(committed).toHaveBeenCalledTimes(1);
       expect([...block.instances.keys()]).toEqual(items.map((item) => item.id));

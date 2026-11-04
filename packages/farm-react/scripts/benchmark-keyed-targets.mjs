@@ -158,6 +158,30 @@ for (const kind of [
     savedGzip: full.gzip - specialized.gzip,
   });
 }
+
+// A combined table catches retained machinery that isolated operation fixtures can miss.
+const table = await bundle("table");
+const conditionalTable = await bundle("table", "keyedRowsConditionalFilterHintedRuntimeFeature");
+assert.ok(table.code.includes("keyed-rows:identity-filter-only"));
+assert.ok(conditionalTable.code.includes("FarmCompiledKeyedRowConditional"));
+for (const marker of [
+  "FarmCompiledKeyedRowConditional",
+  "conditionalListeners",
+  "pruneConditionalListeners",
+]) {
+  assert.ok(!table.code.includes(marker), `plain combined table must not retain ${marker}`);
+}
+assert.ok(table.gzip < conditionalTable.gzip, "plain table must omit conditional gzip payload");
+assert.ok(
+  table.brotli < conditionalTable.brotli,
+  "plain table must omit conditional Brotli payload",
+);
+results.push({
+  kind: "combined-table-conditional-ownership",
+  full: { raw: conditionalTable.raw, gzip: conditionalTable.gzip, brotli: conditionalTable.brotli },
+  specialized: { raw: table.raw, gzip: table.gzip, brotli: table.brotli },
+  savedGzip: conditionalTable.gzip - table.gzip,
+});
 console.log(
   JSON.stringify(
     { node: process.version, results, ...(chunkAccounting.length > 0 ? { chunkAccounting } : {}) },
