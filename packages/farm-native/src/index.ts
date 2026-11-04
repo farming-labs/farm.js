@@ -81,9 +81,10 @@ export function serverFetch(path: string, init?: RequestInit): Promise<Response>
 }
 
 /**
- * Sign this device out: the shell revokes its token on the server and deletes it, and clears the
- * server's cookies in the WebView. To end the server session itself, call your auth's sign-out
- * route with `serverFetch` first (`serverFetch("/api/auth/sign-out", { method: "POST" })`).
+ * Forget this device, the low-level half of signing out: the shell revokes its token on the server
+ * and deletes it, and clears the server's cookies in the WebView. It does not end the server
+ * session: with `@farm.js/auth`, `signOut()` from `@farm.js/auth/client` ends it and then calls
+ * this; with another auth, call its sign-out route with `serverFetch` first.
  */
 export async function signOut(): Promise<void> {
   await shellSession()?.signOut();

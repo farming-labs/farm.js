@@ -658,7 +658,7 @@ export default function MapScreen() {
 | `useRouteParams()`            | Route params, such as `{ id: "7" }` for `/notes/[id]`, after the base path and locale prefix                                         |
 | `useServerQuery(fn, input)`   | Runs any async `fn(input)` on mount and when `input` changes: `{ data, error, pending, refetch }`                                    |
 | `serverFetch(path, init)`     | `fetch` against `mobile.server` (the dev server under `farm dev --mobile`), with the base path and the device session once signed in |
-| `signOut()`                   | Revoke this device's token, delete it, and clear the server's WebView cookies                                                        |
+| `signOut()`                   | Low-level "forget this device": revoke its token, delete it, clear the WebView cookies                                               |
 | `serverUrl(path)`             | The absolute URL of a path on `mobile.server`                                                                                        |
 | `export const metadata.title` | The native bar's title                                                                                                               |
 
@@ -738,6 +738,33 @@ gets it.
 const response = await serverFetch("/api/notes"); // 401 only if the user is signed out
 ```
 
+With `@farm.js/auth`, native screens import `getSession`, `useAuth` and `signOut` from
+`@farm.js/auth/client`, the same as web pages. Metro resolves the package's `react-native` build,
+which calls the same auth routes through `serverFetch`; web bundles do not change.
+
+```tsx
+// src/app/account/page.native.tsx
+import { Button, Text, View } from "react-native";
+import { useAuth } from "@farm.js/auth/client";
+
+export default function Account() {
+  const { user, isPending, signOut } = useAuth();
+  if (isPending) return <Text>Loading</Text>;
+  if (!user) return <Text>Signed out</Text>;
+  return (
+    <View>
+      <Text>{user.email}</Text>
+      <Button title="Sign out" onPress={() => void signOut()} />
+    </View>
+  );
+}
+```
+
+`getSession()` and `useAuth()` return what the web client returns: signed out (no device token,
+or one the server refuses) is `{ data: null, error: null }` and `user: null`. `signIn` and `signUp`
+reject on native screens for now: sign in on a web screen, and the device token signs native
+screens in.
+
 ### How the token is issued
 
 1. The user signs in on a web screen. After the page loads or renders, the shell's native code
@@ -784,10 +811,14 @@ sent in headers.
   revokes the device on the server and clears the `farm_mobile` cookie; the shell sees it gone
   and deletes its tokens. A sign-out called from a native screen through `serverFetch` revokes the
   device the same way.
-- **From a native screen:** `signOut()` from `@farm.js/native` revokes the device token
-  (`POST /__farm/mobile/session/revoke`), deletes it from the Keystore or Keychain, and clears the
-  server's cookies in the WebView. Call your auth's sign-out route with `serverFetch` first to end
-  the server session as well.
+- **From a native screen:** `signOut()` from `@farm.js/auth/client` ends the server session
+  (`POST /api/auth/sign-out` through `serverFetch`), then forgets the device: it revokes the device
+  token (`POST /__farm/mobile/session/revoke`), deletes it from the Keystore or Keychain, and
+  clears the server's cookies in the WebView. The device step runs even when the server call fails
+  or the phone is offline, and the server's error is still returned or thrown.
+- `signOut()` from `@farm.js/native` is the low-level "forget this device" step on its own. It
+  does not end the server session; with another auth, such as `@farm.js/better-auth`, call its
+  sign-out route with `serverFetch` first.
 - A refresh the server refuses also deletes the tokens on the device.
 
 ### Covered auth integrations
