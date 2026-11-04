@@ -58,7 +58,7 @@ object FarmServerScreens {
     private val main = Handler(Looper.getMainLooper())
 
     fun open(context: Context, host: FarmNativeHost, url: Uri): FarmNativeContent {
-        val frame = FrameLayout(context)
+        val frame = TreeFrame(context)
         val spinner = ProgressBar(context)
         frame.addView(spinner, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         var closed = false
@@ -73,10 +73,13 @@ object FarmServerScreens {
                             host.fallback("the tree cannot express ${unsupported.join(", ")}")
                             return@fold
                         }
-                        runCatching { Renderer(context, host, url).screen(tree.getJSONObject("root")) }
+                        val root = tree.getJSONObject("root")
+                        runCatching { Renderer(context, host, url).screen(root) }
                             .onSuccess { view ->
                                 frame.removeView(spinner)
                                 frame.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                                // The shell handles a theme change itself: draw the tree again in the new theme.
+                                frame.render = { Renderer(context, host, url).screen(root) }
                                 tree.optString("title").takeIf { it.isNotEmpty() }?.let(host::setTitle)
                                 host.rendered()
                             }
@@ -539,5 +542,36 @@ private class FlowLayout(
             }
             y += lineHeight + rowGap
         }
+    }
+}
+
+/** A server screen's frame: redraws the tree when the system theme changes while it shows. */
+private class TreeFrame(context: Context) : FrameLayout(context) {
+    var render: (() -> View)? = null
+    private var night = night(context.resources.configuration)
+
+    private fun night(config: Configuration) = config.uiMode and Configuration.UI_MODE_NIGHT_MASK
+
+    override fun onConfigurationChanged(config: Configuration) {
+        super.onConfigurationChanged(config)
+        redrawFor(config)
+    }
+
+    /** A screen further down the stack was detached when the theme changed. */
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        redrawFor(resources.configuration)
+    }
+
+    private fun redrawFor(config: Configuration) {
+        val next = night(config)
+        if (next == night) return
+        night = next
+        val draw = render ?: return
+        val scrollY = (getChildAt(0) as? ScrollView)?.scrollY ?: 0
+        val view = runCatching(draw).getOrNull() ?: return
+        removeAllViews()
+        addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        (view as? ScrollView)?.post { view.scrollTo(0, scrollY) }
     }
 }
