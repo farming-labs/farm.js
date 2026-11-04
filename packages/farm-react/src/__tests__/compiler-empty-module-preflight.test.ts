@@ -87,13 +87,132 @@ it("still analyzes selected components and preserves unsupported diagnostics in 
 it.each([
   ['export function View() { "use no compiler"; return <div />; }', "infer"],
   ["export function View() { return <div />; }", "annotation"],
-] as const)(
-  "keeps the existing selection path for a present but unselected candidate",
-  async (source, mode) => {
+] as const)("skips helper setup for a present but unselected candidate", async (source, mode) => {
+  const requests = helperRequests();
+  const result = await compileReactModule(source, id, normalizeReactCompilerOptions({ mode }));
+  expect(requests).not.toHaveBeenCalled();
+  expect(result.compiled).toEqual([]);
+  expect(result.diagnostics).toEqual([]);
+});
+
+const unselected = [
+  { source: 'export default function View() { "use no compiler"; return <div />; }' },
+  { source: 'export const View = () => { "use no compiler"; return <div />; };' },
+  { source: 'export const View = function () { "use no compiler"; return <div />; };' },
+  {
+    source:
+      '"use compiler"; export function View() { "use compiler"; "use no compiler"; return <svg><a /></svg>; }',
+    mode: "annotation",
+  },
+  { source: "export const View = () => <div />;", mode: "annotation" },
+  { source: "export const View = function () { return <div />; };", mode: "annotation" },
+  {
+    source:
+      'export function View() { function Inner() { "use compiler"; return <p />; } return <Inner />; }',
+    mode: "annotation",
+  },
+  {
+    source:
+      'export const First = () => <div />, Second = () => { "use no compiler"; return <svg />; };',
+    mode: "annotation",
+  },
+  {
+    source:
+      'export function View() { const value = 1; "use compiler"; return <div>{value}</div>; }',
+    mode: "annotation",
+  },
+  {
+    source: '"use compiler"; export function View() { return <div />; }',
+    mode: "annotation",
+    directive: "use optimized",
+  },
+  {
+    source:
+      '"use optimized"; export function View() { "use no compiler"; return <math><mi>x</mi></math>; }',
+    mode: "annotation",
+    directive: "use optimized",
+  },
+] satisfies Array<{
+  source: string;
+  mode?: "infer" | "annotation";
+  directive?: string;
+}>;
+
+describe.each(["static", "hybrid"] as const)("unselected preflight (%s)", (reactivity) => {
+  it.each(unselected)("keeps Babel output and maps without helper setup: $source", async (test) => {
+    const reference = await transformAsync(test.source, {
+      filename: id,
+      sourceType: "module",
+      ast: false,
+      code: true,
+      sourceMaps: true,
+      sourceFileName: id,
+      configFile: false,
+      babelrc: false,
+      parserOpts: { plugins: ["jsx", "typescript"] },
+      generatorOpts: { comments: true, compact: false },
+    });
     const requests = helperRequests();
-    const result = await compileReactModule(source, id, normalizeReactCompilerOptions({ mode }));
-    expect(requests).toHaveBeenCalled();
+    const result = await compileReactModule(
+      test.source,
+      id,
+      normalizeReactCompilerOptions({ mode: test.mode, directive: test.directive, reactivity }),
+    );
+    expect(requests).not.toHaveBeenCalled();
     expect(result.compiled).toEqual([]);
     expect(result.diagnostics).toEqual([]);
-  },
-);
+    expect(Object.values(result.optimizations).every((value) => value === 0)).toBe(true);
+    expect(result.code).toBe(reference?.code);
+    expect(result.map).toEqual(reference?.map);
+  });
+
+  it.each(["infer", "annotation"] as const)(
+    "keeps selection and unsupported diagnostics in mixed %s candidates",
+    async (mode) => {
+      const result = await compileReactModule(
+        `import { useEffect, useState } from "react";
+        export function Skipped() { "use no compiler"; return <div />; }
+        export const First = () => { "use optimized"; const [value, setValue] = useState(1); return <span>{value}</span>; },
+          AlsoSkipped = () => { "use no compiler"; return <div />; },
+          Second = function () { "use optimized"; const [value, setValue] = useState(2); return <span>{value}</span>; };
+        export default function Last() { "use optimized"; const [value, setValue] = useState(3); return <span>{value}</span>; }
+        export function Unsupported() { "use optimized"; useEffect(() => {}, []); return <div />; }`,
+        id,
+        normalizeReactCompilerOptions({
+          mode,
+          ...(mode === "annotation" ? { directive: "use optimized" } : {}),
+          reactivity,
+        }),
+      );
+      expect(result.compiled).toEqual(["First", "Second", "Last"]);
+      expect(result.diagnostics).toHaveLength(1);
+      expect(result.diagnostics[0]).toMatchObject({
+        component: "Unsupported",
+        selected: mode === "annotation",
+      });
+      expect(result.diagnostics[0].reason).toBeTruthy();
+      expect(result.code).toContain('"use no compiler"');
+    },
+  );
+
+  it("keeps module-level selection for concise arrows and explicit diagnostics", async () => {
+    const result = await compileReactModule(
+      `"use optimized";
+      import { useEffect, useState } from "react";
+      export const First = () => { const [value, setValue] = useState(1); return <div>{value}</div>; };
+      export const Concise = () => <div>concise</div>;
+      export const Unsupported = function () { useEffect(() => {}, []); return <div />; };
+      export function Skipped() { "use no compiler"; useEffect(() => {}, []); return <div />; }`,
+      id,
+      normalizeReactCompilerOptions({ mode: "annotation", directive: "use optimized", reactivity }),
+    );
+    expect(result.compiled).toEqual(["First"]);
+    expect(result.diagnostics).toHaveLength(2);
+    expect(result.diagnostics[0]).toMatchObject({
+      component: "Concise",
+      reason: "components must use a block body",
+      selected: true,
+    });
+    expect(result.diagnostics[1]).toMatchObject({ component: "Unsupported", selected: true });
+  });
+});

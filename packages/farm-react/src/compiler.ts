@@ -745,6 +745,7 @@ interface Candidate {
   name: string;
   path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>;
   statementPath: NodePath;
+  explicitlySelected: boolean;
 }
 
 const SAFE_GLOBAL_CALLS = new Set(["Boolean", "Number", "String"]);
@@ -10510,8 +10511,21 @@ function compileCandidate(
   return undefined;
 }
 
-function collectCandidates(programPath: NodePath<t.Program>): Candidate[] {
+function collectCandidates(
+  programPath: NodePath<t.Program>,
+  options: NormalizedReactCompilerOptions,
+  moduleSelected: boolean,
+): Candidate[] {
   const candidates: Candidate[] = [];
+  function collect(name: string, path: Candidate["path"], statementPath: NodePath): void {
+    const functionDirectives = new Set(
+      t.isBlockStatement(path.node.body) ? directiveValues(path.node.body) : [],
+    );
+    const explicitlySelected = moduleSelected || functionDirectives.has(options.directive);
+    if (functionDirectives.has("use no compiler")) return;
+    if (options.mode === "annotation" && !explicitlySelected) return;
+    candidates.push({ name, path, statementPath, explicitlySelected });
+  }
   programPath.traverse({
     FunctionDeclaration(path) {
       if (!path.node.id || !isComponentName(path.node.id.name)) return;
@@ -10523,11 +10537,7 @@ function collectCandidates(programPath: NodePath<t.Program>): Candidate[] {
       ) {
         return;
       }
-      candidates.push({
-        name: path.node.id.name,
-        path,
-        statementPath: parent.isProgram() ? path : parent,
-      });
+      collect(path.node.id.name, path, parent.isProgram() ? path : parent);
     },
     VariableDeclarator(path) {
       if (
@@ -10546,11 +10556,7 @@ function collectCandidates(programPath: NodePath<t.Program>): Candidate[] {
           ? statement
           : null;
       if (!topLevel) return;
-      candidates.push({
-        name: path.node.id.name,
-        path: path.get("init") as Candidate["path"],
-        statementPath: topLevel,
-      });
+      collect(path.node.id.name, path.get("init") as Candidate["path"], topLevel);
     },
   });
   return candidates;
@@ -10632,7 +10638,13 @@ export async function compileReactModule(
           }
         }
 
-        const candidates = collectCandidates(programPath);
+        // Select before reserving helper names: a module with only opted-out or
+        // annotation-unselected components needs none of the compiler helpers.
+        const candidates = collectCandidates(
+          programPath,
+          options,
+          moduleDirectives.has(options.directive),
+        );
         if (candidates.length === 0) return;
         const createComponentIdentifier =
           programPath.scope.generateUidIdentifier("createCompiledComponent");
@@ -10722,16 +10734,6 @@ export async function compileReactModule(
         const runtimeFeatureIdentifiers = new Map<CompilerRuntimeFeatureName, t.Identifier>();
         const usedRuntimeFeatures = new Set<CompilerRuntimeFeatureName>();
         for (const candidate of candidates) {
-          const functionDirectives = new Set(
-            t.isBlockStatement(candidate.path.node.body)
-              ? directiveValues(candidate.path.node.body)
-              : [],
-          );
-          const explicitlySelected =
-            moduleDirectives.has(options.directive) || functionDirectives.has(options.directive);
-          if (functionDirectives.has("use no compiler")) continue;
-          if (options.mode === "annotation" && !explicitlySelected) continue;
-
           const reason = compileCandidate(
             candidate,
             createComponentIdentifier,
@@ -10774,7 +10776,7 @@ export async function compileReactModule(
             diagnostics.push({
               component: candidate.name,
               reason,
-              selected: explicitlySelected,
+              selected: candidate.explicitlySelected,
             });
           } else {
             compiled.push(candidate.name);
