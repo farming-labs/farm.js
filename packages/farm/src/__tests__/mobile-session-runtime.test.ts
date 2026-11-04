@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import type { ViteDevServer } from "vite";
 import { build } from "../build";
@@ -17,6 +17,7 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const roots = new Set<string>();
 const servers = new Set<ViteDevServer>();
 const children = new Set<ChildProcess>();
+const disposers = new Set<() => Promise<void>>();
 const APP = "com.example.notes";
 
 afterEach(async () => {
@@ -26,6 +27,11 @@ afterEach(async () => {
   servers.clear();
   // A dev server runs the app in this process: a sign-out must not end the next test's session.
   delete (globalThis as { __farmTestEnded?: Set<string> }).__farmTestEnded;
+  // Handles a closed server leaves open in this process, such as @farm.js/auth's SQLite file.
+  // Windows cannot remove an open file, and fs.rm retries at every directory level, so a leaked
+  // handle stalls the rm below for minutes instead of failing.
+  for (const dispose of disposers) await dispose();
+  disposers.clear();
   await Promise.all(
     [...roots].map((root) => fs.rm(root, { recursive: true, force: true, maxRetries: 10 })),
   );
@@ -393,7 +399,13 @@ export async function GET() {
 };
 
 describe("native sign-in against @farm.js/auth", () => {
-  it("signs in from a request shaped like the shell's, then issues and uses the device token", async () => {
+  it("signs in from a request shaped like the shell's, then issues and uses the device token", async (ctx) => {
+    // @farm.js/auth opens its dev database with node:sqlite, and Better Auth's node:sqlite dialect
+    // calls StatementSync#columns(), which Node added in 22.16.0 and 23.11.0. On Node 22.13 to
+    // 22.15 every query throws "stmt.columns is not a function", so `auth: true` cannot sign up
+    // there at all; that is a bug in @farm.js/auth, not in the native sign-in flow this tests.
+    const sqlite = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+    if (typeof sqlite.StatementSync.prototype.columns !== "function") ctx.skip();
     // Better Auth turns its origin and CSRF checks off under NODE_ENV=test or TEST, which vitest
     // sets; run it as farm dev does, with every check on.
     const env = { NODE_ENV: process.env.NODE_ENV, TEST: process.env.TEST };
@@ -405,9 +417,15 @@ describe("native sign-in against @farm.js/auth", () => {
         else process.env[key] = value;
       }
     });
-    const authPackage = path.resolve(packageRoot, "..", "farm-auth");
+    const authPackage = await fs.realpath(path.resolve(packageRoot, "..", "farm-auth"));
+    // The dev server keeps @farm.js/auth's runtime, and its open SQLite file, on globalThis after
+    // it closes, as `farm dev` does for the life of the process.
+    const { disposeFarmAuth } = (await import(
+      pathToFileURL(path.join(authPackage, "dist", "internal.js")).href
+    )) as { disposeFarmAuth: () => Promise<void> };
+    disposers.add(disposeFarmAuth);
     const root = await createApp("farm-mobile-native-sign-in-", AUTH_FILES, {
-      "@farm.js/auth": await fs.realpath(authPackage),
+      "@farm.js/auth": authPackage,
     });
     const server = await createServer({ root });
     servers.add(server);
