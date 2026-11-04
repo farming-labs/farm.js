@@ -9170,7 +9170,7 @@ function compileCandidate(
   keyedArraySliceIdentifier: t.Identifier,
   keyedCollectionUpdateIdentifier: t.Identifier,
   keyedCollectionMutationIdentifier: t.Identifier,
-  runtimeFeatureIdentifiers: ReadonlyMap<CompilerRuntimeFeatureName, t.Identifier>,
+  runtimeFeatureIdentifiers: Map<CompilerRuntimeFeatureName, t.Identifier>,
   usedRuntimeFeatures: Set<CompilerRuntimeFeatureName>,
   optimizationCounts: {
     keyedArrayAppendHints: number;
@@ -10359,6 +10359,18 @@ function compileCandidate(
     appliedKeyedMapUpdateHints > 0 || appliedKeyedArrayAppendHints > 0,
     appliedKeyedArrayAppendHints > 0 && appliedKeyedMapUpdateHints === 0,
   );
+  // Reserve only features this module actually uses, once per program. Babel
+  // still owns collision avoidance for bindings and referenced global names.
+  for (const feature of runtimeFeatures) {
+    if (!runtimeFeatureIdentifiers.has(feature)) {
+      runtimeFeatureIdentifiers.set(
+        feature,
+        path.scope
+          .getProgramParent()
+          .generateUidIdentifier(COMPILER_RUNTIME_FEATURE_EXPORTS[feature]),
+      );
+    }
+  }
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
 
@@ -10707,12 +10719,7 @@ export async function compileReactModule(
         const keyedCollectionMutationIdentifier = programPath.scope.generateUidIdentifier(
           "applyCompilerKeyedCollectionMutation",
         );
-        const runtimeFeatureIdentifiers = new Map<CompilerRuntimeFeatureName, t.Identifier>(
-          Object.entries(COMPILER_RUNTIME_FEATURE_EXPORTS).map(([feature, exportName]) => [
-            feature as CompilerRuntimeFeatureName,
-            programPath.scope.generateUidIdentifier(exportName),
-          ]),
-        );
+        const runtimeFeatureIdentifiers = new Map<CompilerRuntimeFeatureName, t.Identifier>();
         const usedRuntimeFeatures = new Set<CompilerRuntimeFeatureName>();
         for (const candidate of candidates) {
           const functionDirectives = new Set(
