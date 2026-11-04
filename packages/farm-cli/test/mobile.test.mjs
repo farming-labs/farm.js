@@ -505,20 +505,48 @@ test("farm build --mobile builds the mobile client apart from the web output and
 /**
  * Every file of a Node build output by its path, as a content hash. Nitro's build date and the
  * dates in its public asset table differ from build to build, so those two files count by name.
+ * The text of the app's own code is kept to show where two builds differ.
  */
 async function snapshot(dir) {
   const files = {};
+  const texts = {};
   for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile()) continue;
     const file = path.join(entry.parentPath, entry.name);
     const name = path.relative(dir, file).split(path.sep).join("/");
-    files[name] = ["nitro.json", "server/index.mjs"].includes(name)
-      ? "dated"
-      : createHash("sha256")
-          .update(await readFile(file))
-          .digest("hex");
+    if (["nitro.json", "server/index.mjs"].includes(name)) {
+      files[name] = "dated";
+      continue;
+    }
+    const bytes = await readFile(file);
+    files[name] = createHash("sha256").update(bytes).digest("hex");
+    if (!name.includes("node_modules/") && /\.(?:m?js|json)$/.test(name)) {
+      texts[name] = bytes.toString("utf8");
+    }
   }
-  return files;
+  return { files, texts };
+}
+
+/** Where two builds' files first differ, with some text around it. */
+function describeBuildDifference(actual, expected) {
+  const names = new Set([...Object.keys(actual.files), ...Object.keys(expected.files)]);
+  const lines = [];
+  for (const name of [...names].sort()) {
+    if (actual.files[name] === expected.files[name]) continue;
+    const a = actual.texts[name];
+    const b = expected.texts[name];
+    if (a === undefined || b === undefined) {
+      lines.push(
+        `${name}: ${actual.files[name] ?? "missing"} vs ${expected.files[name] ?? "missing"}`,
+      );
+      continue;
+    }
+    let at = 0;
+    while (at < a.length && a[at] === b[at]) at++;
+    const around = (text) => JSON.stringify(text.slice(Math.max(0, at - 160), at + 160));
+    lines.push(`${name} differs at ${at}:\n  with:    ${around(a)}\n  without: ${around(b)}`);
+  }
+  return lines.join("\n");
 }
 
 test("mobile.shells renders page shells in farm build --mobile and leaves farm build as it was", async (t) => {
@@ -545,7 +573,12 @@ test("mobile.shells renders page shells in farm build --mobile and leaves farm b
   await writeFile(path.join(root, "farm.config.ts"), config(true));
   const withShells = await runFarm(["build", "--root", root]);
   assert.equal(withShells.code, 0, withShells.output);
-  assert.deepEqual(await snapshot(path.join(root, ".farm", ".output")), without);
+  const withShellsBuild = await snapshot(path.join(root, ".farm", ".output"));
+  assert.deepEqual(
+    withShellsBuild.files,
+    without.files,
+    describeBuildDifference(withShellsBuild, without),
+  );
   assert.doesNotMatch(withShells.output, /Page shells/);
 
   const mobile = await runFarm(["build", "--mobile", "--root", root]);
