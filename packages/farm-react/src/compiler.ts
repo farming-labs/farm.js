@@ -10621,6 +10621,7 @@ export async function compileReactModule(
         }
 
         const candidates = collectCandidates(programPath);
+        if (candidates.length === 0) return;
         const createComponentIdentifier =
           programPath.scope.generateUidIdentifier("createCompiledComponent");
         const createRefreshComponentIdentifier =
