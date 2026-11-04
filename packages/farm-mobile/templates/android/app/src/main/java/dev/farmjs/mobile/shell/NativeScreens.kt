@@ -9,8 +9,9 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 
 /**
- * A native screen for a rule whose `screen` is `"native"` (`page.native.tsx`) or `"platform"`
- * (`page.kt`). The navigator shows its view instead of a WebView.
+ * A native screen for a rule whose `screen` is `"native"` (`page.native.tsx`), `"platform"`
+ * (`page.kt`), or `"server"` (drawn from the page the server renders, [FarmServerScreens]). The
+ * navigator shows its view instead of a WebView.
  */
 fun interface FarmNativeScreen {
     fun createView(context: Context, url: Uri): View
@@ -58,6 +59,7 @@ object FarmNativeScreens {
     fun create(rule: RouteConfig.Rule, context: Context, url: Uri, host: FarmNativeHost): FarmNativeContent? {
         val module = rule.module ?: url.path ?: "/"
         registry[module]?.let { return FarmNativeContent(it.createView(context, url)) }
+        if (rule.screen == "server") return FarmServerScreens.open(context, host, url)
         val engine = engine
         if (rule.screen == "native" && engine != null) return engine.open(host, rule, url)
         return FarmNativeContent(MissingNativeScreen.create(context, rule.screen, module, url))

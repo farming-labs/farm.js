@@ -150,6 +150,7 @@ describe("@farm.js/mobile/android", () => {
       "app/src/main/java/dev/farmjs/mobile/shell/Page.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/RouteConfig.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/Screen.kt",
+      "app/src/main/java/dev/farmjs/mobile/shell/ServerScreens.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/WebViewPool.kt",
       "app/src/main/res/drawable/ic_back.xml",
       "app/src/main/res/drawable/ic_close.xml",
@@ -312,7 +313,7 @@ describe("@farm.js/mobile/android", () => {
     const shellFile = (name: string) => files[`app/src/main/java/dev/farmjs/mobile/shell/${name}`];
     const routes = shellFile("RouteConfig.kt");
     // Every tier the manifest writes, and web for a rule without one or with an unknown one.
-    expect(routes).toContain('private val SCREENS = setOf(WEB, "native", "platform")');
+    expect(routes).toContain('private val SCREENS = setOf(WEB, "native", "platform", "server")');
     expect(routes).toContain('json.optString("screen", WEB).takeIf { it in SCREENS } ?: WEB');
     // A rule is native by its screen, not by the old `screen: "native"` plus module string.
     expect(routes).toContain("val native: Boolean get() = screen != RouteConfig.WEB");
@@ -615,6 +616,14 @@ describe("React Native screens", () => {
     expect(navigator).toContain("as a web screen");
     expect(navigator).toContain("it.showWeb(newPage(), url.toString())");
     expect(shellFile("Screen.kt")).toContain("fun showWeb(page: Page, url: String)");
+    // "server" rules draw the page the server renders, and fall back to the web screen.
+    expect(shellFile("RouteConfig.kt")).toContain('setOf(WEB, "native", "platform", "server")');
+    expect(shellFile("NativeScreens.kt")).toContain(
+      'if (rule.screen == "server") return FarmServerScreens.open(context, host, url)',
+    );
+    expect(shellFile("ServerScreens.kt")).toContain(
+      'const val CONTENT_TYPE = "application/vnd.farm.native+json"',
+    );
     // The shared runtime starts after the first screen shows content, with the WebView pool.
     expect(shellFile("MainActivity.kt")).toContain("engine?.warm()");
     const engine = files[ENGINE];

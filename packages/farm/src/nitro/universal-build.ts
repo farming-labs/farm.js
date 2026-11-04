@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { FARM_NATIVE_TREE_CONTENT_TYPE } from "../mobile/native-tree-type";
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
@@ -6782,7 +6783,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
   createLateNotFoundRecovery,
-  createLateRedirectRecovery,${
+  createLateRedirectRecovery,${config.mobileClient ? "\n  createFarmNativeTreeResponse," : ""}${
     hasInfraAnalyticsRuntime
       ? "\n  resolveFarmDocsEngineRouteLabel,\n  resolveFarmDocsRouteLabel,\n  resolveFarmMarkdownRouteLabel,\n  resolveFarmMCPRouteLabel,\n  setFarmRouteLabel,"
       : ""
@@ -9818,6 +9819,25 @@ ${
     return isFarmMarkdownPublicSourceResponse(markdownSourceResponse)
       ? markdownSourceResponse
       : applyProductionMiddlewareHeaders(markdownSourceResponse, middlewareHeaders);
+  }
+  `
+      : ""
+  }
+
+  ${
+    config.mobileClient
+      ? `
+  // The mobile app's native-tier screens: the page, rendered as for a browser, read into a
+  // tree of native views.
+  if (
+    (request.method === "GET" || request.method === "HEAD") &&
+    request.headers.get("accept")?.includes(${JSON.stringify(FARM_NATIVE_TREE_CONTENT_TYPE)})
+  ) {
+    const treeResponse = await createFarmNativeTreeResponse({
+      request,
+      renderPage: (targetRequest) => fetchFarmInnerRequest(targetRequest, adapterContext),
+    });
+    return applyProductionMiddlewareHeaders(treeResponse, middlewareHeaders);
   }
   `
       : ""

@@ -6,6 +6,7 @@ import type {
   FarmMobileNativeAuto,
   FarmMobileNativeEngine,
   FarmMobileOS,
+  FarmMobileRouteScreen,
   FarmMobileScreen,
 } from "./config";
 import type { FarmMobileAnalyzerStats, FarmMobileRouteAnalysis, FarmMobileTier } from "./analyzer";
@@ -14,7 +15,7 @@ import type { FarmMobileScreenDecision, FarmMobileScreenSource } from "./screens
 export interface FarmMobileNativeReportRoute {
   route: string;
   /** What `farm-routes.json` shows for the route. */
-  screen: FarmMobileScreen;
+  screen: FarmMobileRouteScreen;
   source: FarmMobileScreenSource;
   requested?: Exclude<FarmMobileScreen, "web">;
   /** The page export or screen file that decided, app-root-relative. */

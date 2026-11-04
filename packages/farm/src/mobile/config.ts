@@ -35,6 +35,14 @@ export interface FarmMobileRouteConfig {
  */
 export type FarmMobileScreen = "web" | "native" | "platform";
 
+/**
+ * What the route manifest shows for a route: a {@link FarmMobileScreen}, or `"server"`, a native
+ * screen the shell draws from the page the server renders (the analyzer's native tier). Config
+ * cannot ask for `"server"`; `export const mobile = { native: true }` or `native.auto: "on"` gets
+ * it for a page the analyzer proves. A shell that does not know a screen shows the route as web.
+ */
+export type FarmMobileRouteScreen = FarmMobileScreen | "server";
+
 /** What builds native screens. Only the decision is recorded for now; no engine ships yet. */
 export type FarmMobileNativeEngine = "react-native" | "platform";
 

@@ -19,6 +19,7 @@ export type {
   FarmMobilePrefetch,
   FarmMobilePresentation,
   FarmMobileRouteConfig,
+  FarmMobileRouteScreen,
   FarmMobileScreen,
   FarmMobileTab,
   FarmMobileUserConfig,

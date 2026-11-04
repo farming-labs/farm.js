@@ -864,17 +864,23 @@ function extractHtmlTitle(html: string): string | undefined {
  * first, while its hidden segments and boundary comments are still there.
  */
 function readHtmlContentRegion(html: string): string {
+  return extractHtmlBody(_readFarmRenderedHtml(html));
+}
+
+/**
+ * @internal A rendered page as a reader sees it, whole: streamed Suspense content in place, and
+ * scripts, styles, comments, and hidden elements removed. The native tier reads pages this way too.
+ */
+export function _readFarmRenderedHtml(html: string): string {
   const streamed = readStreamedBoundaryInstructions(html);
-  return extractHtmlBody(
-    removeHiddenElements(
-      resolveStreamedBoundaries(
-        html
-          .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-          .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-          .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ""),
-        streamed,
-      ).replace(/<!--[\s\S]*?-->/g, ""),
-    ),
+  return removeHiddenElements(
+    resolveStreamedBoundaries(
+      html
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ""),
+      streamed,
+    ).replace(/<!--[\s\S]*?-->/g, ""),
   );
 }
 
