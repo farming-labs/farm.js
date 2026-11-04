@@ -9,6 +9,7 @@ import {
   farmRscMobileClientManifestPath,
   finalizeFarmRscMobileClient,
   generateMobileClientEntry,
+  generateMobileShellNavigation,
   patchFarmRscMobileShellClient,
 } from "./mobile-client.js";
 
@@ -36,11 +37,44 @@ const entryContext = {
 describe("the RSC mobile client", () => {
   it("is an entry that installs the shell's delegate and runs the browser entry", () => {
     const source = generateMobileClientEntry("./.farm/rsc-entries/entry.browser.tsx");
-    expect(source).toContain(
-      "import { installFarmMobileShellNavigation } from '@farm.js/core/internal/client-runtime';",
-    );
     expect(source).toContain('import "./.farm/rsc-entries/entry.browser.tsx";');
-    expect(source.trim().endsWith("installFarmMobileShellNavigation();")).toBe(true);
+    // The delegate is in the entry module itself, not in a core module the browser entry also
+    // imports, which the bundler would place in the web client's chunks.
+    expect(source).toContain(generateMobileShellNavigation());
+    expect(source).not.toContain("@farm.js/core/internal/client-runtime");
+  });
+
+  it("hands navigations to the shell's bridge, and does nothing in a browser", () => {
+    const [imports, ...body] = generateMobileShellNavigation().split("\n");
+    expect(imports).toBe(
+      "import { delegateNavigation as farmDelegateNavigation } from '@farm.js/core/client';",
+    );
+    const run = (globalThisValue: object) => {
+      const delegates: ((context: unknown) => unknown)[] = [];
+      new Function("globalThis", "farmDelegateNavigation", body.join("\n"))(
+        globalThisValue,
+        (delegate: (context: unknown) => unknown) => delegates.push(delegate),
+      );
+      return delegates;
+    };
+    expect(run({})).toEqual([]);
+    expect(run({ __farmBridge: {} })).toEqual([]);
+
+    const offered: unknown[] = [];
+    const bridge = {
+      takes: true,
+      offerNavigation(this: { takes: unknown }, context: unknown) {
+        offered.push(context);
+        return this.takes;
+      },
+    };
+    const [delegate] = run({ __farmBridge: bridge });
+    const context = { url: "https://app.test/notes", from: "/", to: "/notes", action: "push" };
+    expect(delegate!(context)).toBe(true);
+    expect(offered).toEqual([context]);
+    // Only a literal true takes the navigation.
+    bridge.takes = "yes";
+    expect(delegate!(context)).toBe(false);
   });
 
   it("adds shell handling to the server entry only for a build with the mobile entry", () => {

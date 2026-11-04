@@ -13,25 +13,16 @@ interface FarmMobileShellBridge {
 }
 
 /**
- * @internal Inside the native shell, whose bridge script runs before the page, hand in-app
- * navigations to the shell's navigator. In a browser there is no bridge and it does nothing.
- * Returns the delegate's removal, or undefined when there is no bridge.
- */
-export function installFarmMobileShellNavigation(): (() => void) | undefined {
-  const bridge = (globalThis as { __farmBridge?: FarmMobileShellBridge }).__farmBridge;
-  const offer = bridge?.offerNavigation;
-  if (typeof offer !== "function") return undefined;
-  return delegateNavigation((context) => offer.call(bridge, context) === true);
-}
-
-/**
- * @internal The client plugin a mobile client build registers (see
- * `installFarmMobileShellNavigation`). The RSC pipeline, which has no client plugins, calls
- * `installFarmMobileShellNavigation` from its mobile entry instead.
+ * @internal The client plugin a `--mobile` client build registers. Inside the native shell, whose
+ * bridge script runs before the page, in-app navigations go to the shell's navigator. In a browser
+ * there is no bridge and it does nothing.
  */
 export const farmMobileShellClient: FarmClientPlugin<(() => void) | undefined> = {
   setup() {
-    return installFarmMobileShellNavigation();
+    const bridge = (globalThis as { __farmBridge?: FarmMobileShellBridge }).__farmBridge;
+    const offer = bridge?.offerNavigation;
+    if (typeof offer !== "function") return undefined;
+    return delegateNavigation((context) => offer.call(bridge, context) === true);
   },
   close({ state }) {
     state?.();

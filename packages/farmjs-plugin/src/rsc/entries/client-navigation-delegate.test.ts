@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { generateClientEntry } from "./client.js";
+import { generateMobileShellNavigation } from "../mobile-client.js";
 import type { EntryContext } from "../types.js";
 
 const context: EntryContext = {
@@ -185,13 +186,11 @@ describe("the RSC router offers in-app navigations to navigation delegates", () 
 
 describe("the RSC browser entry and the mobile shell", () => {
   it("hands navigations to the shell from the browser entry only under farm dev --mobile", () => {
-    expect(generateClientEntry(context)).not.toContain("installFarmMobileShellNavigation");
+    expect(generateClientEntry(context)).not.toContain("offerNavigation");
     expect(generateClientEntry({ ...context, mobileClient: "entry" })).not.toContain(
-      "installFarmMobileShellNavigation",
+      "offerNavigation",
     );
     const inline = generateClientEntry({ ...context, mobileClient: "inline" });
-    expect(inline).toContain(
-      "import { installFarmMobileShellNavigation } from '@farm.js/core/internal/client-runtime';\ninstallFarmMobileShellNavigation();",
-    );
+    expect(inline).toContain(generateMobileShellNavigation());
   });
 });

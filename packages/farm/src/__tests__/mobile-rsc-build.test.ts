@@ -3,6 +3,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import { request as httpRequest } from "node:http";
+import { connect } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,12 +95,20 @@ async function createApp(mobile: string): Promise<string> {
 const OUTPUT = path.join(".farm", ".output");
 
 async function buildApp(root: string) {
-  const userConfig = await loadConfig(root, undefined, "production");
-  await buildFarmRsc(userConfig as Record<string, unknown>, {
-    root,
-    preset: "node-server",
-    outputDir: OUTPUT,
-  });
+  // As `farm build` runs it: vitest sets NODE_ENV to "test", which builds React's development JSX.
+  const nodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  try {
+    const userConfig = await loadConfig(root, undefined, "production");
+    await buildFarmRsc(userConfig as Record<string, unknown>, {
+      root,
+      preset: "node-server",
+      outputDir: OUTPUT,
+    });
+  } finally {
+    if (nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = nodeEnv;
+  }
 }
 
 async function startServer(root: string): Promise<number> {
@@ -111,16 +120,24 @@ async function startServer(root: string): Promise<number> {
   });
   children.add(child);
   let output = "";
-  await new Promise<void>((resolve, reject) => {
-    const onData = (chunk: Buffer) => {
-      output += chunk.toString();
-      if (output.includes("Listening on")) resolve();
-    };
-    child.stdout!.on("data", onData);
-    child.stderr!.on("data", onData);
-    child.once("exit", (code) => reject(new Error(`server exited ${code}: ${output}`)));
-  });
-  return port;
+  child.stdout!.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  child.stderr!.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  // Ready once the port accepts a connection. The server prints no "Listening on" line under
+  // vitest, whose TEST variable the child inherits and which silences it.
+  const deadline = Date.now() + 30_000;
+  while (child.exitCode === null && Date.now() < deadline) {
+    const connected = await new Promise<boolean>((resolve) => {
+      const socket = connect(port, "127.0.0.1");
+      socket.once("connect", () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once("error", () => resolve(false));
+    });
+    if (connected) return port;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`server did not start (exit ${child.exitCode}): ${output}`);
 }
 
 interface Reply {
@@ -206,12 +223,15 @@ describe("a server components app on the RSC pipeline", () => {
       await expect(fs.stat(path.join(root, manifest.clientDir, file))).resolves.toBeTruthy();
     }
     // The mobile entry hands navigations to the shell and then runs the web entry; the web entry
-    // only consults delegates, of which a browser has none.
+    // only consults delegates, of which a browser has none, and no chunk it shares with the mobile
+    // entry carries the shell's delegate.
     const mobileEntry = await fs.readFile(path.join(publicDir, manifest.entry), "utf8");
     expect(mobileEntry).toContain("offerNavigation");
     expect(mobileEntry).toContain(path.basename(manifest.webEntry));
-    const webEntry = await fs.readFile(path.join(publicDir, manifest.webEntry), "utf8");
-    expect(webEntry).not.toContain("offerNavigation");
+    for (const file of manifest.files.filter((file) => file !== manifest.entry)) {
+      const source = await fs.readFile(path.join(publicDir, file), "utf8");
+      expect(source, file).not.toContain("offerNavigation");
+    }
 
     const port = await startServer(root);
     const web = await send(port, "/");
@@ -222,7 +242,7 @@ describe("a server components app on the RSC pipeline", () => {
 
     const shell = await send(port, "/", { headers: SHELL });
     expect(shell.status).toBe(200);
-    expect(shell.body).toContain(`import("${manifest.entry}")`);
+    expect(shell.body).toContain(`<script type="module" src="${manifest.entry}">`);
     expect(shell.body).not.toContain(manifest.webEntry);
     expect(shell.body).toContain("count 0");
     expect(shell.cacheControl).toBe("private, no-store");
@@ -276,6 +296,8 @@ describe("a server components app on the RSC pipeline", () => {
       expect(source, String(file)).not.toContain("offerNavigation");
     }
     const port = await startServer(root);
+    // The first document after a start has no modulepreload links yet: compare warm documents.
+    await send(port, "/");
     const web = await send(port, "/");
     const shell = await send(port, "/", { headers: SHELL });
     expect(web.vary).not.toMatch(/x-farm-shell/i);

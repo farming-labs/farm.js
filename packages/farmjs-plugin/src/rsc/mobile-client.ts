@@ -64,13 +64,27 @@ export function removeFarmRscMobileClientManifest(root: string): void {
   rmSync(farmRscMobileClientManifestPath(root), { force: true });
 }
 
+/**
+ * Inside the native shell, whose bridge script runs before the page, hand in-app navigations to
+ * the shell's navigator, as core's `farmMobileShellClient` does; in a browser it does nothing. It
+ * is written into the entry module rather than imported from a core module the browser entry also
+ * imports: the bundler places a shared module's code in the web client's chunks.
+ */
+export function generateMobileShellNavigation(): string {
+  return `import { delegateNavigation as farmDelegateNavigation } from '@farm.js/core/client';
+const farmMobileShellBridge = globalThis.__farmBridge;
+const farmOfferNavigation = farmMobileShellBridge?.offerNavigation;
+if (typeof farmOfferNavigation === 'function') {
+  farmDelegateNavigation((context) => farmOfferNavigation.call(farmMobileShellBridge, context) === true);
+}
+`;
+}
+
 /** The mobile entry's source: install the shell's navigation delegate, then run the browser entry. */
 export function generateMobileClientEntry(browserEntry: string): string {
   // The browser entry hydrates asynchronously, so the delegate is in place before any click.
-  return `import { installFarmMobileShellNavigation } from '@farm.js/core/internal/client-runtime';
-import ${JSON.stringify(browserEntry)};
-installFarmMobileShellNavigation();
-`;
+  return `import ${JSON.stringify(browserEntry)};
+${generateMobileShellNavigation()}`;
 }
 
 /** Client build plugin: records the mobile entry and every file the client build wrote. */

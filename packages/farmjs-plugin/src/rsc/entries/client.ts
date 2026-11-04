@@ -1,4 +1,5 @@
 import type { EntryContext } from "../types.js";
+import { generateMobileShellNavigation } from "../mobile-client.js";
 
 export const serverFnTransportErrorClientRuntime = `function createFarmServerFnTransportError(value) {
   const message = value && typeof value === 'object' && typeof value.message === 'string'
@@ -68,9 +69,7 @@ import { runFarmNavigationDelegates } from '@farm.js/core/internal/client-runtim
 
   // farm dev --mobile: every page runs in the shell's WebView, so this entry is the mobile client.
   if (ctx.mobileClient === "inline") {
-    imports += `import { installFarmMobileShellNavigation } from '@farm.js/core/internal/client-runtime';
-installFarmMobileShellNavigation();
-`;
+    imports += generateMobileShellNavigation();
   }
 
   if (ctx.actionsEnabled) {

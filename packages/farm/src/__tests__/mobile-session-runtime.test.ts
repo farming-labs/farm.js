@@ -24,6 +24,8 @@ afterEach(async () => {
   children.clear();
   await Promise.all([...servers].map((server) => server.close()));
   servers.clear();
+  // A dev server runs the app in this process: a sign-out must not end the next test's session.
+  delete (globalThis as { __farmTestEnded?: Set<string> }).__farmTestEnded;
   await Promise.all(
     [...roots].map((root) => fs.rm(root, { recursive: true, force: true, maxRetries: 10 })),
   );
