@@ -131,6 +131,8 @@ function utility(token: string): FarmNativeStyle | undefined {
       return { flexShrink: 0 };
     case "flex-nowrap":
       return {};
+    case "flex-wrap":
+      return { flexWrap: "wrap" };
     case "hidden":
       return { display: "none" };
     case "overflow-hidden":
@@ -420,6 +422,7 @@ export const FARM_NATIVE_STYLE_PROPERTIES: ReadonlySet<string> = new Set(
     "padding",
     "margin",
     "flex",
+    "flex-wrap",
   ].map((property) => property.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())),
 );
 
@@ -445,6 +448,208 @@ function cssColor(value: string): string | undefined {
     .padStart(2, "0")}`;
 }
 
+const IGNORED_PROPERTIES = new Set([
+  // No effect on a static, touch-only screen, or the shell owns it.
+  "cursor",
+  "outline",
+  "outline-offset",
+  "user-select",
+  "-webkit-user-select",
+  "-webkit-tap-highlight-color",
+  "pointer-events",
+  "box-sizing",
+  "color-scheme",
+  "appearance",
+  "-webkit-appearance",
+  "transition",
+  "transition-property",
+  "transition-duration",
+  "transition-timing-function",
+  "will-change",
+  "-webkit-font-smoothing",
+  "-moz-osx-font-smoothing",
+  "text-rendering",
+]);
+const BORDER_STYLES = new Set(["solid", "dashed", "dotted", "none"]);
+
+function sides(property: string, values: FarmNativeValue[]): FarmNativeStyle {
+  const [top, right = top, bottom = top, left = right] = values;
+  const ordered = [top, right, bottom, left];
+  return Object.fromEntries(
+    SHORTHAND_SIDES.map((side, index) => [property.replace("*", side), ordered[index]!]),
+  );
+}
+
+/** `border: 1px solid #ddd` and its per-side forms, in any order. */
+function border(value: string, side: string): FarmNativeStyle | undefined {
+  const keys = side ? [side] : SHORTHAND_SIDES;
+  if (value === "none" || value === "0")
+    return each(
+      keys.map((key) => `border${key}Width`),
+      0,
+    );
+  let width: FarmNativeValue | undefined;
+  let style: string | undefined;
+  let color: string | undefined;
+  for (const part of value.split(/\s+(?![^(]*\))/)) {
+    if (BORDER_STYLES.has(part)) style = part;
+    else if (cssLength(part) !== undefined && width === undefined) width = cssLength(part);
+    else if (part === "thin") width = 1;
+    else if (cssColor(part)) color = cssColor(part);
+    else return undefined;
+  }
+  return {
+    ...each(
+      keys.map((key) => `border${key}Width`),
+      style === "none" ? 0 : (width ?? 3),
+    ),
+    ...(color
+      ? each(
+          keys.map((key) => `border${key}Color`),
+          color,
+        )
+      : {}),
+    ...(style ? { borderStyle: style } : {}),
+  };
+}
+
+/**
+ * One CSS declaration as native style: the style, `null` when it has no effect on a native screen
+ * (`cursor`, `color: inherit`), or `undefined` when the native tier cannot draw it.
+ */
+export function resolveFarmNativeDeclaration(
+  property: string,
+  value: string,
+): FarmNativeStyle | null | undefined {
+  if (IGNORED_PROPERTIES.has(property) || value === "inherit" || value === "unset") return null;
+  switch (property) {
+    case "padding":
+    case "margin": {
+      const parts = value.split(/\s+/).map(cssLength);
+      if (parts.length > 4 || parts.some((part) => part === undefined)) return undefined;
+      if (property === "padding" && parts.includes("auto")) return undefined;
+      return sides(`${property}*`, parts as FarmNativeValue[]);
+    }
+    case "gap": {
+      const parts = value.split(/\s+/).map(cssLength);
+      if (parts.length > 2 || parts.some((part) => typeof part !== "number")) return undefined;
+      return { rowGap: parts[0]!, columnGap: parts[1] ?? parts[0]! };
+    }
+    case "border-radius": {
+      const parts = value.split(/\s+/).map(cssLength);
+      if (parts.length > 4 || parts.some((part) => typeof part !== "number")) return undefined;
+      const [a, b = a, c = a, d = b] = parts as number[];
+      return {
+        borderTopLeftRadius: a!,
+        borderTopRightRadius: b!,
+        borderBottomRightRadius: c!,
+        borderBottomLeftRadius: d!,
+      };
+    }
+    case "border":
+      return border(value, "");
+    case "border-top":
+    case "border-right":
+    case "border-bottom":
+    case "border-left":
+      return border(value, property[7]!.toUpperCase() + property.slice(8));
+    case "background":
+    case "background-color": {
+      const parsed = cssColor(value);
+      return parsed ? { backgroundColor: parsed } : value === "none" ? null : undefined;
+    }
+    case "display":
+      if (value === "flex" || value === "inline-flex") return { display: "flex" };
+      if (value === "block" || value === "flow-root") return {};
+      return value === "none" ? { display: "none" } : undefined;
+    case "flex-wrap":
+      return value === "nowrap" ? {} : value === "wrap" ? { flexWrap: "wrap" } : undefined;
+    case "flex":
+      if (/^\d+$/.test(value)) return { flexGrow: Number(value), flexShrink: 1, flexBasis: 0 };
+      if (value === "none") return { flexGrow: 0, flexShrink: 0 };
+      if (value === "auto") return { flexGrow: 1, flexShrink: 1 };
+      return undefined;
+    case "font":
+      return undefined;
+    case "font-family":
+      return {
+        fontFamily: /mono/.test(value)
+          ? "mono"
+          : /(?:^|,\s*)serif\b|georgia|times/.test(value)
+            ? "serif"
+            : "sans",
+      };
+    case "font-weight":
+      if (value === "bold") return { fontWeight: 700 };
+      if (value === "normal") return { fontWeight: 400 };
+      return /^\d{3}$/.test(value) ? { fontWeight: Number(value) } : undefined;
+    case "line-height":
+      if (/^\d*\.?\d+$/.test(value)) return { lineHeightScale: Number(value) };
+      if (value === "normal") return null;
+      return typeof cssLength(value) === "number" ? { lineHeightPx: cssLength(value)! } : undefined;
+    case "text-decoration":
+    case "text-decoration-line":
+      return CSS_KEYWORDS["text-decoration-line"]!.has(value)
+        ? { textDecorationLine: value }
+        : undefined;
+    case "list-style":
+    case "list-style-type":
+      return value === "none" ? null : undefined;
+    case "align-items":
+    case "align-self":
+    case "justify-content":
+      value = value === "start" ? "flex-start" : value === "end" ? "flex-end" : value;
+      break;
+    case "text-align":
+      value = value === "start" ? "left" : value === "end" ? "right" : value;
+      break;
+  }
+  if (CSS_LENGTHS.has(property)) {
+    const length = cssLength(value);
+    return length === undefined ? undefined : longhands({ [camel(property)]: length });
+  }
+  if (CSS_COLORS.has(property)) {
+    const parsed = cssColor(value);
+    return parsed ? longhands({ [camel(property)]: parsed }) : undefined;
+  }
+  if (CSS_NUMBERS.has(property)) {
+    return /^\d*\.?\d+$/.test(value) ? { [camel(property)]: Number(value) } : undefined;
+  }
+  if (CSS_KEYWORDS[property]?.has(value)) return { [camel(property)]: value };
+  return undefined;
+}
+
+/** Split `a: 1; b: url(x;y)` into declarations, keeping parentheses together. */
+export function splitFarmCssDeclarations(css: string): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  let depth = 0;
+  let start = 0;
+  const push = (end: number) => {
+    const text = css.slice(start, end);
+    const colon = text.indexOf(":");
+    if (colon > 0) {
+      out.push([
+        text.slice(0, colon).trim().toLowerCase(),
+        text
+          .slice(colon + 1)
+          .replace(/\s*!important\s*$/i, "")
+          .trim(),
+      ]);
+    }
+  };
+  for (let index = 0; index < css.length; index += 1) {
+    const char = css[index];
+    if (char === "(") depth += 1;
+    else if (char === ")") depth = Math.max(0, depth - 1);
+    else if (char === ";" && depth === 0) {
+      push(index);
+      start = index + 1;
+    }
+  }
+  push(css.length);
+  return out;
+}
+
 /**
  * Resolve an inline `style` attribute, as React renders a style object (`padding:12px;color:#111`).
  * `unsupported` lists the declarations that did not resolve.
@@ -455,40 +660,12 @@ export function resolveFarmNativeInlineStyle(css: string): {
 } {
   const style: FarmNativeStyle = {};
   const unsupported: string[] = [];
-  for (const declaration of css.split(";")) {
-    const colon = declaration.indexOf(":");
-    if (colon < 0) continue;
-    const property = declaration.slice(0, colon).trim().toLowerCase();
-    const value = declaration
-      .slice(colon + 1)
-      .trim()
-      .toLowerCase();
+  for (const [property, raw] of splitFarmCssDeclarations(css)) {
+    const value = raw.toLowerCase();
     if (!property) continue;
-    let resolved: FarmNativeStyle | undefined;
-    if (property === "padding" || property === "margin") {
-      const parts = value.split(/\s+/).map(cssLength);
-      if (parts.length <= 4 && parts.every((part) => part !== undefined)) {
-        const [top, right = top, bottom = top, left = right] = parts;
-        const values = [top, right, bottom, left];
-        resolved = Object.fromEntries(
-          SHORTHAND_SIDES.map((side, index) => [`${property}${side}`, values[index]!]),
-        );
-      }
-    } else if (CSS_LENGTHS.has(property)) {
-      const length = cssLength(value);
-      if (length !== undefined) resolved = { [camel(property)]: length };
-    } else if (CSS_COLORS.has(property)) {
-      const parsed = cssColor(value);
-      if (parsed) resolved = { [camel(property)]: parsed };
-    } else if (CSS_NUMBERS.has(property)) {
-      if (/^\d*\.?\d+$/.test(value)) resolved = { [camel(property)]: Number(value) };
-    } else if (CSS_KEYWORDS[property]?.has(value)) {
-      resolved = { [camel(property)]: value };
-    } else if (property === "flex" && /^\d+$/.test(value)) {
-      resolved = { flexGrow: Number(value), flexShrink: 1, flexBasis: 0 };
-    }
-    if (resolved) Object.assign(style, longhands(resolved));
-    else unsupported.push(`${property}: ${value}`);
+    const resolved = resolveFarmNativeDeclaration(property, value);
+    if (resolved) Object.assign(style, resolved);
+    else if (resolved === undefined) unsupported.push(`${property}: ${value}`);
   }
   return { style, unsupported };
 }

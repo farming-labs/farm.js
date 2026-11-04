@@ -526,6 +526,17 @@ shell ◀── { root: { type: "View", children: [...] } } ──────�
   theme (colors from oklch to sRGB, spacing, type, radius); `dark:` variants follow the system
   theme; text styles flow down as CSS inheritance does. The analyzer only lets a class through when
   the tree can resolve it.
+- **The app's own CSS applies too.** The server reads the stylesheets the page links, as the
+  browser gets them (in production, the client CSS the build embedded), and cascades their rules:
+  type, class, id, and attribute selectors, compounds, descendant, child, and sibling combinators,
+  `:first-child` and `:last-child`, specificity and source order, `:root` variables with `var()`,
+  and `@media (prefers-color-scheme: dark)`. Shorthands such as `margin: 8px 0 4px` and
+  `border: 1px solid var(--border)` expand; `:hover` and `:focus` rules never match a static
+  screen; `body` passes its text styles down and gives the screen its background. Rules in
+  `@layer` are Tailwind's and left to the table above. Another `@media`, an unknown pseudo-class,
+  or a declaration with no native style is reported in `unsupported`. The analyzer reads the plain
+  `.css` files the route imports with the same rules, so a class only passes the native tier when
+  the app's CSS styles it in a way the tree can draw.
 - **Any doubt is web.** The response lists what it could not express in `unsupported`; the shell
   then shows the route's web screen, as it does for a failed request or an answer that is not a
   tree, such as a redirect to sign in.
@@ -533,8 +544,9 @@ shell ◀── { root: { type: "View", children: [...] } } ──────�
 Drawn on Android: `View` (flex column or row, gap, padding, margins, width and height in px or
 `100%`, `flex-1`, alignment, `max-w-*`), `Text` with inline runs (links, `<strong>`, `<em>`,
 `<code>`), `Image`, links and buttons as pressable boxes, and borders, radii, backgrounds, and
-opacity. Not yet: percentages other than `100%`, `flex-wrap`, absolute positioning, app CSS classes
-(the most common blocker in the example app), forms, and inputs that do anything. iOS shows `server`
+opacity, and wrapping rows (`flex-wrap: wrap`). Not yet: percentages other than `100%`, wrapping
+columns, absolute or sticky positioning, Sass and other non-CSS stylesheet sources in the analyzer,
+forms, and inputs that do anything. iOS shows `server`
 routes as web screens until the iOS shell draws them.
 
 A web server answers these requests only for an app with a `mobile` block, so a web-only app's
