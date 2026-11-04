@@ -245,6 +245,7 @@ describe("@farm.js/mobile/ios", () => {
       "App/RouteConfig.swift",
       "App/SceneDelegate.swift",
       "App/ScreenViewController.swift",
+      "App/ServerScreens.swift",
       "App/Theme.swift",
       "App/WebViewPool.swift",
       "App/farm-bridge.js",
@@ -461,7 +462,15 @@ describe("@farm.js/mobile/ios", () => {
     const files = await generated(context());
     const routes = files["App/RouteConfig.swift"];
     expect(routes).toContain(
-      'private static let screens: Set<String> = [web, "native", "platform"]',
+      'private static let screens: Set<String> = [web, "native", "platform", "server"]',
+    );
+    // "server" rules draw the page the server renders, and fall back to the web screen.
+    expect(files["App/Navigator.swift"]).toContain('if rule.screen == "server" {');
+    expect(files["App/Navigator.swift"]).toContain(
+      "self.showWeb(replacing: screen, url: url, reason: reason)",
+    );
+    expect(files["App/ServerScreens.swift"]).toContain(
+      'static let contentType = "application/vnd.farm.native+json"',
     );
     expect(routes).toContain(
       'let screen = (json["screen"] as? String).flatMap { screens.contains($0) ? $0 : nil } ?? web',

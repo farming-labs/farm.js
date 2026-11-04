@@ -225,6 +225,32 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
     // MARK: Screens
 
     private func makeScreen(isModal: Bool, rule: RouteConfig.Rule, url: URL) -> ScreenViewController {
+        if rule.screen == "server" {
+            let holder = ScreenHolder()
+            let content = FarmServerScreen(
+                url: url,
+                visit: { [weak self] target in
+                    guard let self, let screen = holder.screen else { return }
+                    self.visit(from: screen, url: target, replace: false)
+                },
+                fallback: { [weak self] reason in
+                    guard let self, let screen = holder.screen else { return }
+                    self.showWeb(replacing: screen, url: url, reason: reason)
+                }
+            )
+            let screen = ScreenViewController(
+                page: nil,
+                nativeContent: content,
+                nativeModule: rule.module ?? url.path,
+                isModal: isModal,
+                isWarm: false,
+                navigator: self
+            )
+            // The tree's title replaces it once loaded; never show the module id.
+            screen.title = ""
+            holder.screen = screen
+            return screen
+        }
         if rule.isNative {
             return ScreenViewController(
                 page: nil,
@@ -244,6 +270,20 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
             isWarm: warm != nil,
             navigator: self
         )
+    }
+
+    /// A server screen that cannot draw its page shows the web screen in its place.
+    private func showWeb(replacing screen: ScreenViewController, url: URL, reason: String) {
+        Navigator.log.warning("server screen \(screen.nativeModule ?? "", privacy: .public) failed, showing the web screen for \(url.path, privacy: .public): \(reason, privacy: .public)")
+        guard let stack = screen.navigationController else { return }
+        let web = makeScreen(isModal: screen.isModal, rule: RouteConfig.fallback, url: url)
+        web.navigationItem.leftBarButtonItem = screen.navigationItem.leftBarButtonItem
+        show(web, url: url, label: "fallback \(url.path)") {
+            var controllers = stack.viewControllers
+            guard let index = controllers.firstIndex(of: screen) else { return }
+            controllers[index] = web
+            stack.setViewControllers(controllers, animated: false)
+        }
     }
 
     /// Fill `screen` with `url` and call `ready` when it should animate in: a warm page waits for
@@ -289,4 +329,10 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
             fire()
         }
     }
+}
+
+/// The screen a server screen's callbacks act on, set once it exists.
+@MainActor
+private final class ScreenHolder {
+    weak var screen: ScreenViewController?
 }
