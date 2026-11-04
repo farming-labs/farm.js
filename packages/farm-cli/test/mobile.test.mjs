@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -123,6 +124,7 @@ test("farm config inspect --mobile prints the block and farm-routes.json for an 
       prefetch: "intent",
       budgets: {},
     },
+    shells: false,
   });
   // Every route's tier on this OS and what decided it.
   assert.deepEqual(printed.screens, {
@@ -233,6 +235,7 @@ export default {
           : null,
       }) },
       { path: "gradlew", contents: "#!/bin/sh\\n", executable: true },
+      ...(context.shells ? [{ path: "shells.json", contents: JSON.stringify(context.shells) }] : []),
       ...(process.env.FAKE_SHELL_ESCAPE ? [{ path: "../escape.txt", contents: "x" }] : []),
     ];
   },
@@ -497,6 +500,80 @@ test("farm build --mobile builds the mobile client apart from the web output and
   const apk = await runFarm(["build", "--mobile", "--apk", "--root", root]);
   assert.equal(apk.code, 0, apk.output);
   assert.match(apk.output, /📦 \.farm\/output\/mobile\/dist\/com\.example\.notes-debug\.apk/);
+});
+
+/**
+ * Every file of a Node build output by its path, as a content hash. Nitro's build date and the
+ * dates in its public asset table differ from build to build, so those two files count by name.
+ */
+async function snapshot(dir) {
+  const files = {};
+  for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    const name = path.relative(dir, file).split(path.sep).join("/");
+    files[name] = ["nitro.json", "server/index.mjs"].includes(name)
+      ? "dated"
+      : createHash("sha256")
+          .update(await readFile(file))
+          .digest("hex");
+  }
+  return files;
+}
+
+test("mobile.shells renders page shells in farm build --mobile and leaves farm build as it was", async (t) => {
+  const root = await createApp(t, BUILD_CONFIG);
+  await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
+  await writeFile(
+    path.join(root, "src/app/notes/loading.tsx"),
+    'export default function Loading() { return <p className="skeleton">Loading notes</p>; }',
+  );
+  await installFakeShell(root);
+  await installFakeNativeBuild(root);
+  // A fixed build id: a web build is otherwise only ever new by its id and Nitro's dates.
+  const config = (shells) =>
+    BUILD_CONFIG.replace(
+      "telemetry: false,",
+      'telemetry: false,\n  generateBuildId: () => "fixed",',
+    ).replace('server: command === "dev"', `shells: ${shells},\n    server: command === "dev"`);
+
+  // The web build: the same bytes with and without shells.
+  await writeFile(path.join(root, "farm.config.ts"), config(false));
+  const plain = await runFarm(["build", "--root", root]);
+  assert.equal(plain.code, 0, plain.output);
+  const without = await snapshot(path.join(root, ".farm", ".output"));
+  await writeFile(path.join(root, "farm.config.ts"), config(true));
+  const withShells = await runFarm(["build", "--root", root]);
+  assert.equal(withShells.code, 0, withShells.output);
+  assert.deepEqual(await snapshot(path.join(root, ".farm", ".output")), without);
+  assert.doesNotMatch(withShells.output, /Page shells/);
+
+  const mobile = await runFarm(["build", "--mobile", "--root", root]);
+  assert.equal(mobile.code, 0, mobile.output);
+  // The /notes routes share notes/loading.tsx and one file; the other routes have no loading file
+  // and are not named.
+  assert.match(mobile.output, /Page shells: 3 routes in 1 file \(3 without one\)/);
+  assert.doesNotMatch(mobile.output, /Page shell \//);
+  const mobileDir = path.join(root, ".farm", "output", "mobile");
+  const routes = JSON.parse(await readFile(path.join(mobileDir, "farm-routes.json"), "utf8"));
+  const mobileClient = JSON.parse(
+    await readFile(path.join(root, ".farm", "mobile-client.json"), "utf8"),
+  );
+  const [file] = Object.values(routes.shells.routes);
+  assert.match(file, /^[0-9a-f]{16}\.html$/);
+  assert.deepEqual(routes.shells, {
+    client: mobileClient.entry,
+    routes: { "/notes": file, "/notes/[id]": file, "/notes/new": file },
+  });
+  // The shell package gets the files, named by their content: no scripts, the layout around the
+  // loading state, and the marker app CSS can use.
+  const shells = JSON.parse(await readFile(path.join(mobileDir, "android", "shells.json"), "utf8"));
+  assert.deepEqual(Object.keys(shells.files), [file]);
+  const html = shells.files[file];
+  assert.equal(`${createHash("sha256").update(html).digest("hex").slice(0, 16)}.html`, file);
+  assert.match(html, /<html data-farm-page-shell>/);
+  assert.match(html, /<p class="skeleton">Loading notes<\/p>/);
+  assert.doesNotMatch(html, /<script|modulepreload|127\.0\.0\.1|canonical/i);
 });
 
 test("farm build --mobile --os ios generates the iOS project and reports what the shell could not build", async (t) => {

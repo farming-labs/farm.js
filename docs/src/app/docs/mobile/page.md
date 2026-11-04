@@ -464,7 +464,8 @@ dynamic folder.
   page metadata. The web build's server has no such mode. Middleware and guards run as for any
   request, so a route they redirect gets no shell, and the request carries no cookies, so a shell
   shows the signed-out layout.
-- **What is kept.** Every script and script preload is removed, `<html>` gets
+- **What is kept.** Every script and script preload is removed, and so are the links that name
+  the page's URL (`canonical`, the locale and markdown alternates). `<html>` gets
   `data-farm-page-shell`, and each shell is named by its content hash, so routes with the same
   shell share one file. Android keeps the stylesheet link and serves it from the APK; iOS inlines
   the build's stylesheets, since `loadHTMLString` has no bundled files to load them from.

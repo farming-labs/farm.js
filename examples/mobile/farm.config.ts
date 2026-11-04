@@ -20,6 +20,9 @@ export default defineConfig({
       { path: "/notes", title: "Notes", icon: "note.text" },
       { path: "/settings", title: "Settings", icon: "gear" },
     ],
+    // A cold document load shows the route's layouts around src/app/(styled)/loading.tsx first,
+    // and keeps them while offline.
+    shells: true,
     routes: {
       // Each step renders in the screen that shows the wizard instead of pushing a new one.
       "/navigation/step/[n]": { presentation: "replace" },

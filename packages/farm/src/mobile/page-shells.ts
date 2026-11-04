@@ -41,6 +41,15 @@ export interface FarmMobilePageShellOptions {
 
 const SCRIPT = /<script\b[^>]*>[\s\S]*?<\/script\s*>/gi;
 const LINK = /<link\b[^>]*>/gi;
+// Stands in for a removed element until the lines left with nothing else are removed too, so
+// documents that differ only in what a shell drops (a client page's preloads) give one shell.
+const REMOVED = "\u0000";
+// eslint-disable-next-line no-control-regex -- NUL is the removed-element sentinel above.
+const REMOVED_ALL = /\u0000/g;
+// eslint-disable-next-line no-control-regex -- NUL is the removed-element sentinel above.
+const REMOVED_LINE = /\n[ \t\u0000]*\u0000[ \t\u0000]*(?=\n|$)/g;
+const HEAD = /<head\b[^>]*>[\s\S]*?<\/head\s*>/i;
+const BLANK_LINE = /\n[ \t]*(?=\n)/g;
 
 function attribute(tag: string, name: string): string | undefined {
   const match = tag.match(
@@ -62,25 +71,35 @@ function inlineStyle(css: string, media: string | undefined): string {
 
 /**
  * A rendered document as a page shell: every script and script preload removed (a shell never
- * runs code; the real document does), `data-farm-page-shell` on `<html>` so app CSS can tell,
- * and on iOS each stylesheet the build wrote inlined.
+ * runs code; the real document does), the links that name the request's URL (`canonical`,
+ * `alternate`: locale and markdown versions) removed, so a shell is the same file for every route
+ * that shares it and carries no address of the build's server, `data-farm-page-shell` on `<html>`
+ * so app CSS can tell, and on iOS each stylesheet the build wrote inlined.
  */
 export function createFarmMobilePageShell(
   html: string,
   options: FarmMobilePageShellOptions,
 ): string {
-  let shell = html.replace(SCRIPT, "");
+  // A NUL is never markup a shell needs (the HTML parser drops or replaces it).
+  let shell = html.replace(REMOVED_ALL, "").replace(SCRIPT, REMOVED);
   shell = shell.replace(LINK, (tag) => {
     const rel = relList(tag);
-    if (rel.includes("modulepreload")) return "";
-    if (rel.includes("preload") && (attribute(tag, "as") ?? "").toLowerCase() === "script") {
-      return "";
+    if (
+      rel.includes("modulepreload") ||
+      (rel.includes("preload") && (attribute(tag, "as") ?? "").toLowerCase() === "script") ||
+      (!rel.includes("stylesheet") && (rel.includes("canonical") || rel.includes("alternate")))
+    ) {
+      return REMOVED;
     }
     if (options.os !== "ios" || !rel.includes("stylesheet")) return tag;
     const href = attribute(tag, "href");
     const css = href === undefined ? undefined : options.readStylesheet?.(href);
     return css === undefined ? tag : inlineStyle(css, attribute(tag, "media"));
   });
+  shell = shell.replace(REMOVED_LINE, "").replace(REMOVED_ALL, "");
+  // The document template leaves empty lines in <head> where a client page has its client data;
+  // head whitespace never renders, so a server page and a client page get the same shell.
+  shell = shell.replace(HEAD, (head) => head.replace(BLANK_LINE, ""));
   return shell.replace(/<html\b([^>]*)>/i, (tag, attributes: string) =>
     /\sdata-farm-page-shell\b/i.test(attributes) ? tag : `<html${attributes} data-farm-page-shell>`,
   );

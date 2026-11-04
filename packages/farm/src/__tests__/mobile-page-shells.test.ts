@@ -101,6 +101,61 @@ describe("page shells", () => {
     expect(createFarmMobilePageShell(shell, { os: "android" })).toBe(shell);
   });
 
+  it("drop the links that name the request's URL, so routes share a shell", () => {
+    const document = (route: string) =>
+      [
+        '<html lang="en"><head>',
+        `<link rel="alternate" hreflang="en" href="http://127.0.0.1:64719${route}">`,
+        `<link rel="alternate" hreflang="es" href="http://127.0.0.1:64719/es${route}">`,
+        `<link rel="canonical" href="${route}">`,
+        `<link rel="alternate" href="${route}.md" type="text/markdown">`,
+        '<link rel="alternate stylesheet" href="/assets/contrast-h1a2b3c4d.css" title="contrast">',
+        "</head><body><p>Loading</p></body></html>",
+      ].join("");
+    const notes = createFarmMobilePageShell(document("/notes"), { os: "android" });
+    expect(notes).not.toMatch(/127\.0\.0\.1|canonical|hreflang|\.md"/);
+    expect(notes).toContain('href="/assets/contrast-h1a2b3c4d.css"');
+    expect(createFarmMobilePageShell(document("/settings"), { os: "android" })).toBe(notes);
+  });
+
+  it("give the same shell for documents that differ only in what a shell drops", () => {
+    const document = (scripts: string[]) =>
+      [
+        "<html><head>",
+        '  <link rel="stylesheet" href="/assets/app-h1a2b3c4d.css">',
+        ...scripts,
+        "</head><body>",
+        '  <p>Loading</p> <script src="/inline-h1.js"></script> <b>x</b>',
+        "</body></html>",
+      ].join("\n");
+    const server = createFarmMobilePageShell(document(["  "]), { os: "android" });
+    const client = createFarmMobilePageShell(
+      document([
+        '  <link rel="modulepreload" href="/chunks/form-h1a2b3c4.js">',
+        '  <link rel="modulepreload" href="/chunks/a-h1.js"><link rel="modulepreload" href="/b-h2.js">',
+        '\t<script type="module" src="/farm-client-h1.js"></script>  ',
+        "  <script>",
+        "    window.__FARM_DATA__ = {};",
+        "  </script>",
+        "  ",
+        "",
+      ]),
+      { os: "android" },
+    );
+    expect(client).toBe(server);
+    // An element that shares its line leaves the text around it as it was.
+    expect(server).toContain("  <p>Loading</p>  <b>x</b>");
+    expect(server).toBe(
+      [
+        "<html data-farm-page-shell><head>",
+        '  <link rel="stylesheet" href="/assets/app-h1a2b3c4d.css">',
+        "</head><body>",
+        "  <p>Loading</p>  <b>x</b>",
+        "</body></html>",
+      ].join("\n"),
+    );
+  });
+
   it("inline the build's stylesheets on iOS", () => {
     const read = (href: string) =>
       href === "/assets/farm-client-h1a2b3c4d.css"
