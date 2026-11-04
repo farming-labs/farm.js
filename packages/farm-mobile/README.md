@@ -72,4 +72,13 @@ newer SDK and an iOS simulator runtime. When `xcodebuild` and
 `xcrun simctl` are missing, as with the Command Line Tools alone, `farm dev|build --mobile --os ios`
 still writes the project and prints what to install and the commands to run.
 
+## Page shells
+
+With `mobile.shells: true`, `farm build --mobile` passes each route's page shell (its layouts
+around `loading.tsx`, without scripts) in the shell context, and both shells bundle them under
+`farm-shells/`. A cold document load shows the route's shell first: Android in a WebView without
+JavaScript over the page until it paints, iOS with `loadHTMLString` (stylesheets inlined) before
+the document. A warm push never shows one, and shells turn off while documents load another client
+build. Not yet run on an emulator or simulator.
+
 See the [Mobile Apps](https://farmjs.dev/docs/mobile) docs.

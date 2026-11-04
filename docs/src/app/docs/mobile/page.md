@@ -34,21 +34,21 @@ farm build                    # --web, the default, unchanged
 
 ## Status
 
-| Part                                          | Status                         | Notes                                                                                                                                                               |
-| --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                                                             |
-| `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                                                            |
-| Native-screen analyzer                        | Unreleased                     | Sorts routes into tiers; proven native-tier routes become `server` screens with `native: true` or `auto: "on"`                                                      |
-| Server-rendered native screens (`server`)     | Unreleased, Android            | Drawn with Android views from the page the server renders; run on an emulator under `farm dev --mobile`, not yet on a device. iOS shows them as web screens         |
-| iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                         |
-| React Native screens                          | Unreleased, dev only           | Android only; runs under `farm dev --mobile` on an emulator, not yet in a production build or on a device (see [React Native screens](#react-native-screens))       |
-| Bundled client assets                         | Unreleased                     | Pages in a production shell run the mobile client; Android serves its files from the APK, iOS from the server (see [Bundled client assets](#bundled-client-assets)) |
-| Page shells                                   | Planned                        | No bundled layout or offline state yet; a push waits for the server's document                                                                                      |
-| Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                                    |
-| Server components apps                        | Unreleased                     | Both engines get the mobile client; islands mode also gets device tokens, the RSC pipeline does not (see [Bundled client assets](#bundled-client-assets))           |
-| Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                                  |
-| Native islands and native `@farm.js/ui`       | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` renders on the web only (see [Portable components](#portable-components-farmjsui))                               |
-| Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                                                         |
+| Part                                          | Status                         | Notes                                                                                                                                                                         |
+| --------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                                                                       |
+| `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                                                                      |
+| Native-screen analyzer                        | Unreleased                     | Sorts routes into tiers; proven native-tier routes become `server` screens with `native: true` or `auto: "on"`                                                                |
+| Server-rendered native screens (`server`)     | Unreleased, Android            | Drawn with Android views from the page the server renders; run on an emulator under `farm dev --mobile`, not yet on a device. iOS shows them as web screens                   |
+| iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                                   |
+| React Native screens                          | Unreleased, dev only           | Android only; runs under `farm dev --mobile` on an emulator, not yet in a production build or on a device (see [React Native screens](#react-native-screens))                 |
+| Bundled client assets                         | Unreleased                     | Pages in a production shell run the mobile client; Android serves its files from the APK, iOS from the server (see [Bundled client assets](#bundled-client-assets))           |
+| Page shells                                   | Unreleased                     | `mobile.shells`: a route's layout and loading state, shown before its document and while offline; not yet run on an emulator or simulator (see [Page shells](#page-shells))   |
+| Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                                              |
+| Server components apps                        | Unreleased                     | Both engines get the mobile client; islands mode also gets device tokens, the RSC pipeline does not (see [Bundled client assets](#bundled-client-assets)); no page shells yet |
+| Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                                            |
+| Native islands and native `@farm.js/ui`       | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` renders on the web only (see [Portable components](#portable-components-farmjsui))                                         |
+| Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                                                                   |
 
 ## Requirements
 
@@ -103,6 +103,7 @@ export default defineConfig({
 | `tabs`   | At most 5. Each `path` is a static page route                                                   |
 | `routes` | Keyed by page route pattern: `presentation` (`push`, `modal`, `replace`)                        |
 | `native` | Screen tiers per route, the native engine, and the analyzer (below)                             |
+| `shells` | `true` bundles [page shells](#page-shells) in `farm build --mobile`. Defaults to `false`        |
 
 Tabs and route keys are checked against the app. A web build never calls or checks the block and
 strips it from the server, as it does `desktop`. It also builds the
@@ -351,8 +352,8 @@ When the navigator opens a screen:
 - If an in-place render throws, the screen **falls back to a full document load** of the same URL.
 
 The pool's real win is skipping the ~1 s first-WebView startup. In a `farm build --mobile` app the
-client JS also comes from the APK ([below](#bundled-client-assets)); page shells, which would show a
-layout before the server answers, are not built yet.
+client JS also comes from the APK ([below](#bundled-client-assets)), and with `mobile.shells` a cold
+load shows the route's [page shell](#page-shells) before the server answers.
 
 ### The bridge
 
@@ -424,6 +425,75 @@ Limits:
   router fallbacks and reloads again with the header, iOS also redirects, and Android's WebView
   keeps the header across a server redirect; a form post's response keeps the web client until
   the next navigation.
+
+### Page shells
+
+A cold document load (a tab's first screen, a push when the pool is empty, the web twin of a
+native screen) waits for the server's document. With `shells: true`, `farm build --mobile` bundles
+a **page shell** per route: the route's layouts around its `loading.tsx`, as HTML with no scripts.
+The shell shows at once, and stays up when the server cannot be reached.
+
+```ts
+export default defineConfig({
+  mobile: {
+    id: "com.example.notes",
+    server: "https://notes.example.com",
+    shells: true,
+  },
+});
+```
+
+```text
+src/app/layout.tsx              the app chrome
+src/app/notes/layout.tsx        the notes chrome
+src/app/notes/loading.tsx       the notes skeleton
+src/app/notes/page.tsx          /notes        shell: both layouts around the skeleton
+src/app/notes/[id]/page.tsx     /notes/[id]   the same shell file
+```
+
+Adding `src/app/notes/[id]/layout.tsx` would take `/notes/[id]`'s shell away: that layout sits in a
+dynamic folder.
+
+- **Which routes get one.** A shell is the same HTML for every URL of a route, so nothing in it may
+  depend on a param: a route gets one when its nearest `loading` file and every layout around the
+  page sit in folders without `[params]`. Routes without a loading file get none. The build prints
+  the routes that have a loading file and still get no shell, with the reason.
+- **How it is rendered.** `farm build --mobile` builds its server with a random token, starts it on
+  a loopback port, and asks it for each route. That server, and only it, answers a request with the
+  token by rendering the layouts around the loading file, with no params, route data, slots, or
+  page metadata. The web build's server has no such mode. Middleware and guards run as for any
+  request, so a route they redirect gets no shell, and the request carries no cookies, so a shell
+  shows the signed-out layout.
+- **What is kept.** Every script and script preload is removed, and so are the links that name
+  the page's URL (`canonical`, the locale and markdown alternates). `<html>` gets
+  `data-farm-page-shell`, and each shell is named by its content hash, so routes with the same
+  shell share one file. Android keeps the stylesheet link and serves it from the APK; iOS inlines
+  the build's stylesheets, since `loadHTMLString` has no bundled files to load them from.
+- **Android** shows the shell in a WebView without JavaScript over the screen's page while the
+  document loads, and removes it when the page first paints. When the server cannot be reached,
+  the shell stays instead of an error page.
+- **iOS** loads the shell into the screen's WKWebView with `loadHTMLString` at the document's URL,
+  then loads the document, which WebKit shows once it commits. When the load fails, the shell
+  stays under the retry message.
+- **A warm push never shows one.** The pooled page's running router renders the route in place,
+  which is already faster than a document load.
+- **Another client build turns them off.** The shells match the client they were built with. When a
+  document loads a different mobile client (a deployment newer or older than the app), the app
+  stops showing shells, remembers that across launches, and shows them again once a document loads
+  its own client.
+
+```css
+/* A shell renders signed out; keep its account menu from flashing "Sign in". */
+html[data-farm-page-shell] .account-menu {
+  visibility: hidden;
+}
+```
+
+Limits: only `farm build --mobile` bundles shells (`farm dev --mobile` has none); a shell renders
+the default locale; layouts that read cookies or headers render as for a signed-out visitor; on
+iOS the shell is an entry in the WebView's history, so a page that calls `history.back()` from its
+first document returns to it; apps with `experimental.serverComponents` get the mobile client but
+no shells yet, since the RSC server has no shell mode (`farm build --mobile` warns).
 
 ### Navigation delegation
 
@@ -731,6 +801,41 @@ web type-check and check them on their own:
 }
 ```
 
+## Native device features
+
+A phone has capabilities a browser does not — the camera, SMS, contacts, sensors, push. Here is the
+honest state of reaching them from a Farm app today, and where it is headed.
+
+**Nothing ships automatically.** The generated app declares only the `INTERNET` permission, and the
+WebView is given no device APIs, so there is no `native.camera` or `native.sms` to call yet.
+
+**The reserved channel.** The bridge defines a device-capability call — `window.__farmBridge.call(name,
+method, args)`, surfaced as `native.<name>` — and both the Android and iOS shells carry a `FarmPlugin`
+interface for it. But no plugins are registered (`MainActivity.kt` and `SceneDelegate.swift` ship an
+empty plugin map), so every such call returns `{ code: "native_unavailable" }`. This is the seam that
+device plugins will plug into; it is the right-hand channel in the
+[architecture figure](/blog/web-to-native#on-the-device).
+
+**Reaching a real device feature.** For something like reading SMS you drop to native code, where the
+platform SDK is in reach:
+
+- A **fully native screen** — `page.kt` (Kotlin + Jetpack Compose) or `page.swift` (Swift + SwiftUI) —
+  is where you call `SmsManager`, `CameraX`, or `CLLocationManager` and declare the matching permission
+  in the manifest. Farm hands the screen the `farm` object for route params, server calls, and
+  navigation; the device API itself is ordinary native code you write. These screens are
+  [designed but not built yet](#native-screens): Farm records the route as `platform` and shows a
+  placeholder.
+- To ship one on a real app now, **eject** the generated project and register a screen in
+  `FarmNativeScreens` — the one coded path to arbitrary platform APIs. You own that native code from
+  then on.
+
+**Web APIs are not a back door either.** The WebView enables only JavaScript and DOM storage, not
+media or geolocation grants, so a web screen cannot quietly use `getUserMedia` or the Geolocation API.
+
+In short: navigation, server data, and auth work across every screen today; device capabilities are
+**designed, not shipped** — the reserved `native.<name>` channel and the native-screen escape hatch,
+both on the roadmap.
+
 ## Auth on mobile
 
 Web screens sign in exactly as they do in a browser: the session cookie lives in the WebView's
@@ -886,58 +991,9 @@ browser API, and import against a portability model. From the parts it can map, 
 **platform-neutral UI tree** (an intermediate representation, or IR) that a native emitter turns into
 a React Native, Compose, or SwiftUI screen.
 
-For a shorter, illustrated walkthrough of how the analyzer maps your components and picks a tier, see
-the blog post [Your web app, native](/blog/web-to-native).
-
-<svg width="100%" viewBox="0 0 680 694" role="img" xmlns="http://www.w3.org/2000/svg">
-<title>How Farm's mobile analyzer reads a page</title>
-<desc>A build-time pipeline: a page is parsed with Oxc into an AST, every node is classified as a port (renders native) or a block (stays web), the portable nodes become a neutral UI tree, and a conservative rule decides port or web. The emitter that turns the tree into a native screen is still being built.</desc>
-<defs><marker id="arrow-fig" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
-<g style="stroke:var(--color-fd-foreground);stroke-width:1;opacity:.5;fill:none">
-<line x1="340" y1="94" x2="340" y2="122" marker-end="url(#arrow-fig)"/>
-<line x1="340" y1="174" x2="340" y2="202" marker-end="url(#arrow-fig)"/>
-<line x1="270" y1="262" x2="244" y2="294" marker-end="url(#arrow-fig)"/>
-<line x1="430" y1="262" x2="512" y2="294" marker-end="url(#arrow-fig)"/>
-<line x1="240" y1="396" x2="240" y2="430" marker-end="url(#arrow-fig)"/>
-<line x1="248" y1="484" x2="318" y2="514" marker-end="url(#arrow-fig)"/>
-<line x1="512" y1="396" x2="406" y2="514" marker-end="url(#arrow-fig)"/>
-<line x1="322" y1="580" x2="232" y2="614" marker-end="url(#arrow-fig)"/>
-<line x1="398" y1="580" x2="498" y2="614" marker-end="url(#arrow-fig)"/>
-</g>
-<rect x="250" y="44" width="180" height="50" rx="8" style="fill:none;stroke:var(--color-fd-border);stroke-width:1"/>
-<text x="340" y="70" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">page.tsx</text>
-<text x="340" y="87" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">+ app modules, layouts</text>
-<rect x="250" y="124" width="180" height="50" rx="8" style="fill:rgba(56,132,255,.13);stroke:rgba(56,132,255,.5);stroke-width:1"/>
-<text x="340" y="150" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Parse with Oxc</text>
-<text x="340" y="167" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">parseSync → AST</text>
-<rect x="120" y="204" width="440" height="58" rx="8" style="fill:rgba(160,90,240,.12);stroke:rgba(160,90,240,.5);stroke-width:1"/>
-<text x="340" y="230" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Walk the AST, classify every node</text>
-<text x="340" y="248" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">JSX · class names · styles · imports · globals</text>
-<rect x="96" y="296" width="288" height="100" rx="8" style="fill:rgba(34,180,90,.14);stroke:rgba(34,180,90,.55);stroke-width:1"/>
-<text x="240" y="320" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Ports → render native</text>
-<text x="240" y="342" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">div → View · span → Text · img → Image</text>
-<text x="240" y="360" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">button/a → Pressable · input → TextInput</text>
-<text x="240" y="378" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">ul/ol → List · @farm.js/ui · Tailwind</text>
-<rect x="400" y="296" width="232" height="100" rx="8" style="fill:rgba(230,70,70,.12);stroke:rgba(230,70,70,.5);stroke-width:1"/>
-<text x="516" y="319" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Blocks → stay web</text>
-<text x="516" y="339" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">canvas · iframe · svg · table</text>
-<text x="516" y="356" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">form · dangerouslySetInnerHTML</text>
-<text x="516" y="373" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">window · document · refs</text>
-<text x="516" y="390" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">arbitrary CSS · RSC · markdown</text>
-<rect x="96" y="430" width="288" height="52" rx="8" style="fill:rgba(20,170,160,.14);stroke:rgba(20,170,160,.55);stroke-width:1"/>
-<text x="240" y="456" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Portable UI tree (IR)</text>
-<text x="240" y="473" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">FarmUiNode: View / Text / Image / List</text>
-<rect x="220" y="516" width="280" height="64" rx="8" style="fill:rgba(230,150,20,.15);stroke:rgba(230,150,20,.55);stroke-width:1"/>
-<text x="360" y="540" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Decide: port or web</text>
-<text x="360" y="558" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">port if 0 blockers + a win, else web</text>
-<text x="360" y="574" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.75">any doubt → web</text>
-<rect x="96" y="616" width="250" height="58" rx="8" style="fill:none;stroke:var(--color-fd-border);stroke-width:1"/>
-<text x="221" y="642" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Ships today</text>
-<text x="221" y="660" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">report · farm-routes.json · cache</text>
-<rect x="382" y="616" width="250" height="58" rx="8" style="fill:rgba(140,150,165,.1);stroke:rgba(140,150,165,.55);stroke-width:1;stroke-dasharray:6 4"/>
-<text x="507" y="642" text-anchor="middle" style="font-family:inherit;font-size:14px;font-weight:600;fill:var(--color-fd-foreground)">Emitter → native screen</text>
-<text x="507" y="660" text-anchor="middle" style="font-family:inherit;font-size:12px;fill:var(--color-fd-foreground);opacity:.7">being built — #2473, #2474</text>
-</svg>
+_The analyzer pipeline — parse each page, classify every node as a **port** (renders native) or a
+**block** (stays web), collect the ports into the IR, then conservatively pick the tier — is animated
+in the blog post [Your web app, native](/blog/web-to-native#how-the-analyzer-decides)._
 
 The native tier is the one that changes output today: a proven route becomes a
 [server-rendered native screen](#server-rendered-native-screens). Porting a page to React Native is
@@ -1041,6 +1097,7 @@ generates the project with the mobile client's files in it. `--apk` builds the d
 | `app/src/main/assets/farm-bridge.js`     | Bridge script injected into pages on the server origin |
 | `app/src/main/assets/farm-www/`          | The mobile client's files (`farm build --mobile`)      |
 | `app/src/main/assets/farm-assets.json`   | Those files' paths and content types                   |
+| `app/src/main/assets/farm-shells/`       | Page shells (`mobile.shells`), one file per shell      |
 | `app/src/main/java/.../Navigator.kt`     | Tabs, stacks, push, modal, replace, predictive back    |
 | `app/src/main/java/.../WebViewPool.kt`   | Two pre-warmed WebViews that back pushes               |
 | `app/src/main/java/.../NativeScreens.kt` | The hook for `native` and `platform` screens           |
@@ -1097,6 +1154,7 @@ every run, so don't edit it.
 | `App.xcodeproj`                         | One iOS app target, `App`, with the bundle ID `mobile.id`       |
 | `App/farm-routes.json`                  | The navigator manifest                                          |
 | `App/farm-bridge.js`                    | The same bridge script as Android, with the iOS message handler |
+| `App/farm-shells/`                      | Page shells (`mobile.shells`), with their stylesheets inlined   |
 | `App/Navigator.swift`                   | A tab bar with a navigation stack per tab, push, sheet, replace |
 | `App/WebViewPool.swift`                 | Two pre-warmed WKWebViews that back pushes                      |
 | `App/FarmBridge.swift`                  | The message handler and the document-start script               |
@@ -1189,9 +1247,10 @@ parts are designed and still on the way:
   from `src/native/`, `layout.native.tsx` providers, intent prefetch, and server functions called by
   reference are not wired into native screens yet; `serverFetch` calls API routes. Images imported
   by native screens are not copied into the app yet; load them by URL.
-- Page shells (a bundled layout and offline state per route) are not built, so a push waits for
-  the server's document. iOS loads the mobile client from the server rather than the app, and
-  prerendered pages load the web client (see [Bundled client assets](#bundled-client-assets)).
+- Page shells are tested in unit and generator tests, and the iOS code type-checks; they have not
+  run in a production build on an Android emulator or an iOS simulator yet (see
+  [Page shells](#page-shells)). iOS loads the mobile client from the server rather than the app,
+  and prerendered pages load the web client (see [Bundled client assets](#bundled-client-assets)).
 - The analyzer only reports. With `auto: "on"` it records ports in `farm-routes.json`, and those
   routes stay web screens.
 - Native islands (`mobile.native.islands`), native rendering of `@farm.js/ui` (it renders on the

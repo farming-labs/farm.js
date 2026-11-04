@@ -130,6 +130,13 @@ export interface FarmMobileUserConfig {
   routes?: Record<string, FarmMobileRouteConfig>;
   /** Screen tiers per route, the native engine, and the analyzer. */
   native?: FarmMobileNativeConfig;
+  /**
+   * Bundle a page shell, the route's layouts around its `loading.tsx`, into the app for routes
+   * whose loading file and layouts sit in static folders. A web screen that loads a document
+   * shows its shell at once, and keeps it up while the server is unreachable. Built by
+   * `farm build --mobile`; defaults to `false`.
+   */
+  shells?: boolean;
 }
 
 /** What a function-valued `mobile` block receives. Resolved once per OS per dev start or build. */
@@ -171,9 +178,10 @@ export interface ResolvedFarmMobileConfig {
   /** `mobile.routes`, keyed by route pattern with route groups removed. */
   routes: Record<string, FarmMobileRouteConfig>;
   native: ResolvedFarmMobileNativeConfig;
+  shells: boolean;
 }
 
-const MOBILE_KEYS = new Set(["name", "id", "server", "tabs", "routes", "native"]);
+const MOBILE_KEYS = new Set(["name", "id", "server", "tabs", "routes", "native", "shells"]);
 const ROUTE_KEYS = new Set(["presentation"]);
 const TAB_KEYS = new Set(["path", "title", "icon"]);
 const NATIVE_KEYS = new Set(["engine", "auto", "routes", "islands", "prefetch", "budgets"]);
@@ -468,6 +476,9 @@ export function validateFarmMobileConfig(
     }
   }
   if (input.native !== undefined) validateNativeConfig(input.native, check);
+  if (input.shells !== undefined && typeof input.shells !== "boolean") {
+    fail("shells must be true or false.");
+  }
   // One presentation per route: mobile.routes and mobile.native.routes share the field.
   if (isPlainObject(input.routes) && isPlainObject(input.native)) {
     const nativeRoutes = isPlainObject(input.native.routes) ? input.native.routes : {};
@@ -613,6 +624,7 @@ export function resolveFarmMobileConfig(
       prefetch: native.prefetch ?? "intent",
       budgets: { ...native.budgets },
     },
+    shells: config.shells === true,
   };
 }
 

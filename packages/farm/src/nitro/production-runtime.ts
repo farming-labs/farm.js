@@ -160,6 +160,10 @@ export {
   stampFarmCspNonce,
 } from "../security";
 export { _applyFarmMobileShellClient } from "../mobile/shell-response";
+export {
+  _checkFarmMobileShellRoute,
+  _isFarmMobileShellRenderRequest,
+} from "../mobile/shell-render";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");

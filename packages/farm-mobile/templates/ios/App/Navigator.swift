@@ -19,6 +19,8 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
     private let startPath: String
     private let pool: WebViewPool?
     private let newPage: () -> Page
+    /// Page shells for cold document loads; nil without mobile.shells.
+    private let shells: PageShells?
     private let tabs: UITabBarController?
     private let stacks: [UINavigationController]
     private var modal: UINavigationController?
@@ -33,11 +35,13 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
         startPath: String,
         tabIcons: [String],
         pool: WebViewPool?,
+        shells: PageShells? = nil,
         newPage: @escaping () -> Page
     ) {
         self.config = config
         self.startPath = startPath
         self.pool = pool
+        self.shells = shells
         self.newPage = newPage
         let count = max(config.tabs.count, 1)
         stacks = (0..<count).map { index in
@@ -281,11 +285,13 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
             screen.render(url)
             DispatchQueue.main.asyncAfter(deadline: .now() + Navigator.warmWait) { fire() }
         } else {
+            // A warm render never shows a shell: the running page is already there.
+            let shell = shells?.html(for: config.match(url))
             screen.onPainted = {
                 let ms = Int((CACurrentMediaTime() - started) * 1000)
-                Navigator.log.info("\(label, privacy: .public) warm=false visit->commit=\(ms)ms")
+                Navigator.log.info("\(label, privacy: .public) warm=false shell=\(shell != nil) visit->commit=\(ms)ms")
             }
-            screen.load(url)
+            screen.load(url, shell: shell)
             fire()
         }
     }

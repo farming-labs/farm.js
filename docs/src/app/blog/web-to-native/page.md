@@ -38,6 +38,23 @@ What it can't map flags the route down a tier: `canvas`, `iframe`, `window`, `do
 
 The rule is deliberately conservative — **any doubt is web** — and every blocker is reported with its file, line, and column, so you can see exactly what keeps a screen off a tier.
 
+<span id="on-the-device" className="blog-heading-anchor" />
+
+## On the device
+
+The tier decides what a screen _is_. Here is how one _runs_. On the phone your app is a native shell — native tabs, a stack per tab — around a pool of WebViews, with a native **navigator** built from `farm-routes.json`.
+
+<BlogFigure kind="mobile-arch" caption="A tap goes to the native navigator, which picks the screen by route. A web screen is a WebView that reaches your one backend over the origin-scoped bridge; the device-capability channel is reserved but ships nothing yet." />
+
+A tap on a `Link` is handed to the shell, which asks the navigator what the route maps to:
+
+- A **web screen** is a WebView showing your page from `mobile.server` — the **same backend, SSR, auth, and data** as the web. The shell and the page talk over an origin-scoped bridge (`window.__farmBridge`, main-frame only) that carries navigation, so an in-app link becomes a native push instead of a full document load.
+- A **native screen** is React Native; a **`page.kt` / `page.swift`** screen is fully native. The navigator picks between them by route, the same way the web router does.
+
+Because every screen is served by your one backend over HTTP, there is nothing to keep in sync: your server functions, queries, auth, and theme stay the app's, whatever a screen is made of.
+
+The bridge also reserves a `native.<name>` channel for **device capabilities** — the camera, SMS, contacts. It ships no plugins yet, so those calls return `native_unavailable` today. How to reach a real device feature now, and where that channel is headed, is in [Native device features](/docs/mobile#native-device-features).
+
 <span id="try-it" className="blog-heading-anchor" />
 
 ## Try it
