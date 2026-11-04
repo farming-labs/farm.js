@@ -7,6 +7,7 @@ import {
   conditionalRuntimeFeature,
   createCompiledComponent,
   createCompiledComponentWithFeatures,
+  createCompiledComponentWithoutRefresh,
   type CompiledComponentDefinition,
 } from "../compiler-runtime";
 
@@ -66,32 +67,35 @@ function counterDefinition(
 }
 
 describe("compiled React runtime hardening", () => {
-  it("runs direct bindings with the structural runtime completely omitted", async () => {
-    let renders = 0;
-    const definition = counterDefinition("CoreOnlyCounter");
-    const Counter = createCompiledComponentWithFeatures(
-      {
-        ...definition,
-        render(props, state) {
-          renders += 1;
-          return definition.render(props, state);
+  it.each([createCompiledComponentWithFeatures, createCompiledComponentWithoutRefresh])(
+    "%s runs direct bindings with the structural runtime completely omitted",
+    async (createComponent) => {
+      let renders = 0;
+      const definition = counterDefinition("CoreOnlyCounter");
+      const Counter = createComponent(
+        {
+          ...definition,
+          render(props, state) {
+            renders += 1;
+            return definition.render(props, state);
+          },
         },
-      },
-      [],
-    );
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = trackRoot(createRoot(container));
+        [],
+      );
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = trackRoot(createRoot(container));
 
-    await act(async () => root.render(<Counter />));
-    await act(async () => {
-      container.querySelector("button")!.click();
-      await flushCompilerUpdates();
-    });
+      await act(async () => root.render(<Counter />));
+      await act(async () => {
+        container.querySelector("button")!.click();
+        await flushCompilerUpdates();
+      });
 
-    expect(container.textContent).toBe("Count: 1");
-    expect(renders).toBe(1);
-  });
+      expect(container.textContent).toBe("Count: 1");
+      expect(renders).toBe(1);
+    },
+  );
 
   it("uses runtime capabilities as part of Fast Refresh compatibility", () => {
     const hmrId = `runtime-feature-refresh-${Math.random()}`;

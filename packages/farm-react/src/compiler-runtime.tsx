@@ -3135,14 +3135,13 @@ interface CompilerHmrRegistryEntry {
 
 type CompilerHmrRegistry = Map<string, CompilerHmrRegistryEntry>;
 
-const COMPILER_HMR_REGISTRY = Symbol.for("@farm.js/react/compiler-hmr-registry");
-
 function getCompilerHmrRegistry(): CompilerHmrRegistry {
+  const registryKey = Symbol.for("@farm.js/react/compiler-hmr-registry");
   const globalTarget = globalThis as typeof globalThis & Record<symbol, unknown>;
-  const existing = globalTarget[COMPILER_HMR_REGISTRY];
+  const existing = globalTarget[registryKey];
   if (existing instanceof Map) return existing as CompilerHmrRegistry;
   const registry: CompilerHmrRegistry = new Map();
-  globalTarget[COMPILER_HMR_REGISTRY] = registry;
+  globalTarget[registryKey] = registry;
   return registry;
 }
 
@@ -12110,7 +12109,43 @@ export function createCompiledComponentWithFeatures<Props>(
     current: definition,
   };
   const refreshListeners = new Set<() => void>();
+  const component = createCompiledComponentRuntime(
+    definitionReference,
+    runtimeFeatures,
+    refreshListeners,
+  );
 
+  if (definition.hmrId) {
+    getCompilerHmrRegistry().set(definition.hmrId, {
+      component: component as React.ComponentType<unknown>,
+      definition: definitionReference as CompiledDefinitionReference<unknown>,
+      refreshListeners,
+      stateSignature,
+      runtimeSignature,
+    });
+  }
+
+  return component;
+}
+
+/**
+ * Compiler target when import.meta.hot is absent. The refresh-capable entry
+ * remains available for development and existing hand-authored definitions.
+ * Keeping that choice at the call site makes its registry tree-shakable.
+ * @internal
+ */
+export function createCompiledComponentWithoutRefresh<Props>(
+  definition: CompiledComponentDefinition<Props>,
+  runtimeFeatures: readonly CompilerRuntimeFeature[],
+): React.ComponentType<Props> {
+  return createCompiledComponentRuntime({ current: definition }, runtimeFeatures);
+}
+
+function createCompiledComponentRuntime<Props>(
+  definitionReference: CompiledDefinitionReference<Props>,
+  runtimeFeatures: readonly CompilerRuntimeFeature[],
+  refreshListeners?: Set<() => void>,
+): React.ComponentType<Props> {
   class FarmCompiledComponent extends React.Component<Props, Record<string, never>, boolean> {
     private root: Element | null = null;
     private mounted = false;
@@ -12492,7 +12527,7 @@ export function createCompiledComponentWithFeatures<Props>(
 
     componentDidMount(): void {
       this.mounted = true;
-      refreshListeners.add(this.refreshDefinition);
+      refreshListeners?.add(this.refreshDefinition);
       // React replays this lifecycle when Activity/Suspense reappears. Publish
       // the current committed props before rebuilding dependency tracking, and
       // drain state queued while hidden through the ordinary update path.
@@ -12571,7 +12606,7 @@ export function createCompiledComponentWithFeatures<Props>(
       // the global refresh listener, allowing this instance to be collected.
       this.activeBinding = null;
       this.activeDependencies = null;
-      refreshListeners.delete(this.refreshDefinition);
+      refreshListeners?.delete(this.refreshDefinition);
     }
 
     render(): React.ReactNode {
@@ -12625,20 +12660,8 @@ export function createCompiledComponentWithFeatures<Props>(
   }
 
   (FarmCompiledComponent as React.ComponentType<Props>).displayName =
-    `FarmCompiled(${definition.displayName})`;
-  const component = FarmCompiledComponent as React.ComponentType<Props>;
-
-  if (definition.hmrId) {
-    getCompilerHmrRegistry().set(definition.hmrId, {
-      component: component as React.ComponentType<unknown>,
-      definition: definitionReference as CompiledDefinitionReference<unknown>,
-      refreshListeners,
-      stateSignature,
-      runtimeSignature,
-    });
-  }
-
-  return component;
+    `FarmCompiled(${definitionReference.current.displayName})`;
+  return FarmCompiledComponent as React.ComponentType<Props>;
 }
 
 const COMPLETE_RUNTIME_FEATURES: readonly CompilerRuntimeFeature[] = [
