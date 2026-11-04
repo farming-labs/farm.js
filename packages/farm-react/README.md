@@ -1213,6 +1213,11 @@ reachable lazy chunks, not a claim that every navigation downloads them. CSS, ot
 dependencies and HTTP overhead are outside these JavaScript-only measurements. Existing single-chunk
 measurements are unchanged; concatenated code is used only for structural-marker checks.
 
+Plain keyed-row features also omit conditional-boundary subscriptions, render adapters, and
+snapshot-update loops. Conditional features retain their per-block ownership and React fallback.
+The size suite checks a combined create/append/update/select/swap/remove/clear table as well as
+isolated operations, so an isolated fixture cannot hide retained conditional machinery.
+
 Application and prototype calls, dynamic style objects, handlers outside JSX events, nested,
 computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, unsupported map
 chains, unsupported conditional roots, effects, and more advanced hook support intentionally stay
