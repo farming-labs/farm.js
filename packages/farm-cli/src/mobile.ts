@@ -441,10 +441,7 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     // `farm build`, and adds its own mobile entry.
     await ensureFarmRscPackages(userConfig, root);
     if (
-      farmAppUsesRscPipeline(
-        await resolveFarmRscCheckConfig(userConfig, root, "production"),
-        root,
-      )
+      farmAppUsesRscPipeline(await resolveFarmRscCheckConfig(userConfig, root, "production"), root)
     ) {
       await buildFarmRsc(userConfig ?? {}, { root, preset: "node-server", outputDir: dirs.www });
     } else {

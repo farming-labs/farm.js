@@ -138,7 +138,13 @@ function send(
 ): Promise<Reply> {
   return new Promise((resolve, reject) => {
     const req = httpRequest(
-      { host: "127.0.0.1", port, path: pathname, method: options.method ?? "GET", headers: options.headers },
+      {
+        host: "127.0.0.1",
+        port,
+        path: pathname,
+        method: options.method ?? "GET",
+        headers: options.headers,
+      },
       (res) => {
         let body = "";
         res.setEncoding("utf8");
@@ -180,7 +186,13 @@ describe("a server components app on the RSC pipeline", () => {
     await buildApp(root);
     const manifest = JSON.parse(
       await fs.readFile(path.join(root, ".farm", "mobile-client.json"), "utf8"),
-    ) as { webEntry: string; entry: string; files: string[]; clientDir: string; stylesheet: string };
+    ) as {
+      webEntry: string;
+      entry: string;
+      files: string[];
+      clientDir: string;
+      stylesheet: string;
+    };
     expect(manifest).toMatchObject({
       version: 1,
       webEntry: expect.stringMatching(/^\/assets\/index-[\w-]{8,}\.js$/),

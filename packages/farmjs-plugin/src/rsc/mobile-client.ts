@@ -8,7 +8,15 @@
  * `_applyFarmMobileShellClient`. `.farm/mobile-client.json` records it in core's format, which
  * `farm build --mobile` reads to bundle the client's files into the app.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import path from "path";
 
 /** The client build's input name, and so the entry file's name: `assets/farm-mobile-client-<hash>.js`. */

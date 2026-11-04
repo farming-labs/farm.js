@@ -63,7 +63,10 @@ describe("the RSC mobile client", () => {
     const root = tempRoot();
     const clientDir = path.join(root, ".nitro", "vite", "dist", "client");
     mkdirSync(path.join(clientDir, "assets"), { recursive: true });
-    writeFileSync(path.join(clientDir, "assets", "farm-mobile-client-Bx9_k2Qa.js"), "import './index-C1d2E3f4.js';");
+    writeFileSync(
+      path.join(clientDir, "assets", "farm-mobile-client-Bx9_k2Qa.js"),
+      "import './index-C1d2E3f4.js';",
+    );
     const plugin = createFarmRscMobileClientManifestPlugin(() => root);
     const bundle = {
       "assets/index-C1d2E3f4.js": { type: "chunk", name: "index", isEntry: true },
@@ -146,6 +149,8 @@ describe("the RSC mobile client", () => {
       `function read() { try { return JSON.parse("${FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER}"); } catch { return null; } } const c = read();`,
     );
     patchFarmRscMobileShellClient(rscDir, () => null);
-    expect(new Function(`${readFileSync(path.join(rscDir, "index.js"), "utf8")}; return c;`)()).toBeNull();
+    expect(
+      new Function(`${readFileSync(path.join(rscDir, "index.js"), "utf8")}; return c;`)(),
+    ).toBeNull();
   });
 });
