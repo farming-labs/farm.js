@@ -22,7 +22,8 @@ export type FigureKind =
   | "landing-strata"
   | "agent-layers"
   | "agent-authorize"
-  | "ast-native";
+  | "ast-native"
+  | "mobile-arch";
 export type IconKey =
   | "stripe"
   | "cloudflare"
@@ -2079,6 +2080,116 @@ const astNative: FigureSpec = {
   },
 };
 
+// A runtime companion to ast-native: how a screen actually runs on the device. The navigator picks
+// one of three screen kinds by route; a web screen is a WebView that reaches the one backend over
+// the origin-scoped bridge; the device-capability channel is drawn but ships nothing yet.
+const MA = { tap: 0.3, fork: 1.2, web: 2.4, server: 3.2, ret: 3.9, plug: 4.7 };
+/** A body line that fades in once t passes `at`; each is its own block so lines stack. */
+const maSub = (s: string, t: number, at: number, color = "#c6c6c6") =>
+  t < at
+    ? ""
+    : `<span style="display:block;opacity:${ease(prog(t, at, 0.3)).toFixed(
+        2,
+      )};color:${color}">${s}</span>`;
+
+const mobileArch: FigureSpec = {
+  duration: 7,
+  stage: { w: 1020, h: 600 },
+  label:
+    "A screen on the device: the native navigator picks one of three screen kinds by route; a web screen is a WebView that talks to your one backend over the origin-scoped bridge, and the device-capability channel ships no plugins yet",
+  panels: [
+    { id: "tap", x: 24, y: 252, w: 150, h: 96, title: "A tap" },
+    { id: "nav", x: 214, y: 252, w: 176, h: 96, title: "Navigator" },
+    { id: "web", x: 440, y: 60, w: 188, h: 96, title: "Web screen" },
+    { id: "native", x: 440, y: 252, w: 188, h: 96, title: "Native screen" },
+    { id: "plat", x: 440, y: 444, w: 188, h: 96, title: "page.kt · page.swift" },
+    { id: "bridge", x: 676, y: 60, w: 180, h: 96, title: "__farmBridge" },
+    { id: "server", x: 880, y: 60, w: 140, h: 96, title: "mobile.server" },
+    { id: "plug", x: 676, y: 252, w: 180, h: 96, title: "native.<name>" },
+  ],
+  wires: {
+    tn: [
+      [174, 300],
+      [214, 300],
+    ],
+    nw: [
+      [390, 300],
+      [415, 300],
+      [415, 108],
+      [440, 108],
+    ],
+    nn: [
+      [390, 300],
+      [440, 300],
+    ],
+    np: [
+      [390, 300],
+      [415, 300],
+      [415, 492],
+      [440, 492],
+    ],
+    wb: [
+      [628, 108],
+      [676, 108],
+    ],
+    bs: [
+      [856, 108],
+      [880, 108],
+    ],
+    bp: [
+      [766, 156],
+      [766, 252],
+    ],
+  },
+  frame: (t) => {
+    const hot = (a: number, b: number): PanelState | undefined =>
+      t >= a && t < b ? "hot" : undefined;
+    const dim = (at: number): PanelState | undefined => (t >= at ? "dim" : undefined);
+    return {
+      slots: {
+        tap: maSub("Link · navigateTo", t, 0),
+        nav:
+          maSub("routes &rarr; one screen", t, MA.tap) +
+          maSub("farm-routes.json", t, MA.tap + 0.15, "#7a7a7a"),
+        web: maSub("a WebView", t, MA.fork) + maSub("ships today", t, MA.fork + 0.2, "#8fb8a0"),
+        native:
+          maSub("React Native", t, MA.fork + 0.2) +
+          maSub("Android dev only", t, MA.fork + 0.35, "#c9a77a"),
+        plat:
+          maSub("fully native", t, MA.fork + 0.4) +
+          maSub("placeholder &mdash; not built", t, MA.fork + 0.55, "#9a9a9a"),
+        bridge:
+          maSub("origin-scoped", t, MA.web) + maSub("nav · call", t, MA.web + 0.15, "#7a7a7a"),
+        server:
+          maSub("SSR · auth · data", t, MA.server) +
+          maSub("your one backend", t, MA.server + 0.15, "#7a7a7a"),
+        plug:
+          maSub("device plugins", t, MA.plug) +
+          maSub("none ship yet &#x2715;", t, MA.plug + 0.15, "#9a9a9a"),
+      },
+      wires: {
+        tn: wire(t, 0.05, [[MA.tap]]),
+        nw: wire(t, MA.fork - 0.3, [[MA.fork]]),
+        nn: wire(t, MA.fork - 0.3, [[MA.fork + 0.12]]),
+        np: wire(t, MA.fork - 0.3, [[MA.fork + 0.24]]),
+        wb: wire(t, MA.web - 0.3, [[MA.web]]),
+        bs: wire(t, MA.server - 0.3, [[MA.server], [MA.ret, false]]),
+        bp: wire(t, MA.plug - 0.3, [[MA.plug]], true),
+      },
+      states: {
+        tap: hot(0, MA.tap + PULSE),
+        nav: hot(MA.tap + PULSE, MA.fork + PULSE),
+        web: hot(MA.web - 0.1, MA.ret + PULSE),
+        native: dim(MA.fork + 0.2 + PULSE),
+        plat: dim(MA.fork + 0.4 + PULSE),
+        bridge: hot(MA.web + PULSE, MA.server + PULSE),
+        server: hot(MA.server, MA.ret + PULSE),
+        plug: dim(MA.plug + PULSE),
+      },
+    };
+  },
+};
+
 export const FIGURES: Record<FigureKind, FigureSpec> = {
   integration,
   agents,
@@ -2100,6 +2211,7 @@ export const FIGURES: Record<FigureKind, FigureSpec> = {
   "agent-layers": agentLayers,
   "agent-authorize": agentAuthorize,
   "ast-native": astNative,
+  "mobile-arch": mobileArch,
 };
 
 // The two callers stack, so a phone reads the refused run above the one that completes.

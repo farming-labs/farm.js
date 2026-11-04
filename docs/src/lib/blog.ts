@@ -101,6 +101,7 @@ export const nativePost: BlogPost = {
 export const nativeSections = [
   ["the-three-tiers", "The three tiers"],
   ["how-the-analyzer-decides", "How the analyzer decides"],
+  ["on-the-device", "On the device"],
   ["try-it", "Try it"],
 ] as const satisfies BlogSections;
 
