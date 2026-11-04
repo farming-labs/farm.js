@@ -1198,6 +1198,13 @@ second component render and commit, while the compiled component remains at one 
 commit and updates its two bindings directly. This is a deterministic structural performance
 assertion; it is not presented as a cross-machine timing benchmark.
 
+`pnpm --filter @farm.js/react test:runtime-size` checks both gzip and Brotli compiler premiums
+against `RUNTIME_SIZE_RESULTS.json`, including plain keyed lists and the isolated core runtime.
+Missing or non-finite budget inputs and fixtures without an explicit budget policy fail the check.
+When intentionally adding or changing a baseline, generate it with
+`pnpm --filter @farm.js/react benchmark:runtime-size` and review the byte changes before committing;
+do not regenerate baselines just to hide a regression. These checks do not change application output.
+
 Application and prototype calls, dynamic style objects, handlers outside JSX events, nested,
 computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, unsupported map
 chains, unsupported conditional roots, effects, and more advanced hook support intentionally stay
