@@ -74,13 +74,15 @@ class MainActivity : AppCompatActivity() {
 
         // The mobile client's files, bundled by farm build --mobile; none under farm dev --mobile.
         val bundle = BundledAssets.load(assets, config)
-        val newPage = { Page(this, config, plugins, script, ::openExternal, bundle) }
+        // Page shells, bundled by farm build --mobile with mobile.shells.
+        val shells = PageShells.load(this, config)
+        val newPage = { Page(this, config, plugins, script, ::openExternal, bundle, shells) }
         val warmPath = config.tabs.firstOrNull()?.path ?: startPath
         val pool = if (poolSize > 0) WebViewPool(config, poolHolder, poolSize, warmPath, newPage) else null
         // React Native when the app has page.native.tsx screens; started after the first screen shows.
         val engine = createFarmNativeEngine(this, config)
         FarmNativeScreens.engine = engine
-        navigator = Navigator(this, config, startPath, tabsHost, bottomNav, modalLayer, pool, newPage)
+        navigator = Navigator(this, config, startPath, tabsHost, bottomNav, modalLayer, pool, newPage, shells)
         navigator.onFirstReady = {
             pool?.start()
             engine?.warm()

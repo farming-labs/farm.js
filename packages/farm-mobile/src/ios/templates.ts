@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
 import type { MobileGeneratedFile, MobileShellContext } from "@farm.js/core/mobile";
 import { createBridgeScript } from "../shared/bridge.js";
+import { createPageShellFiles } from "../shared/shells.js";
 
 /** Static project files (the Swift shell and the asset catalog), copied as they are. */
 export const TEMPLATE_DIR = fileURLToPath(new URL("../../templates/ios/", import.meta.url));
@@ -204,7 +205,11 @@ function pbxValue(value: PbxValue, indent: string, names: Map<string, string>): 
   return `{\n${keys.map((key) => `${inner}${pbxString(key)} = ${pbxValue(value[key]!, inner, names)};\n`).join("")}${indent}}`;
 }
 
+/** Page shells (`mobile.shells`), read by `PageShells.swift`; a folder reference in the bundle. */
+export const IOS_PAGE_SHELLS_DIR = "farm-shells";
+
 const FILE_TYPES: Record<string, { type: string; phase?: "sources" | "resources" }> = {
+  [IOS_PAGE_SHELLS_DIR]: { type: "folder", phase: "resources" },
   ".swift": { type: "sourcecode.swift", phase: "sources" },
   ".xcassets": { type: "folder.assetcatalog", phase: "resources" },
   ".json": { type: "text.json", phase: "resources" },
@@ -239,7 +244,7 @@ export function createProjectFile(context: MobileShellContext, files: readonly s
   const resources: string[] = [];
   const children: string[] = [];
   for (const entry of entries) {
-    const kind = FILE_TYPES[path.extname(entry)];
+    const kind = FILE_TYPES[entry] ?? FILE_TYPES[path.extname(entry)];
     if (!kind) throw new Error(`No Xcode file type for ${IOS_TARGET}/${entry}`);
     const ref = add(`file:${entry}`, entry, {
       isa: "PBXFileReference",
@@ -574,6 +579,7 @@ export async function createIosProject(
       contents: createScheme(),
     },
     { path: `${IOS_PROJECT}/project.xcworkspace/contents.xcworkspacedata`, contents: WORKSPACE },
+    ...createPageShellFiles(context.shells, `${IOS_TARGET}/${IOS_PAGE_SHELLS_DIR}`),
   );
   files.push({
     path: `${IOS_PROJECT}/project.pbxproj`,

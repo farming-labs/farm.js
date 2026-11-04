@@ -114,7 +114,15 @@
     // Every screen has its own WebView, so data prefetched for a link here never reaches the
     // screen that opens it.
     if (typeof instance.prefetch === "function") instance.prefetch = () => Promise.resolve();
-    post({ type: "router-ready", url: location.href, title: document.title });
+    // The mobile client entry this document loaded: a shell bundling page shells stops showing
+    // them when a document runs another client build.
+    const entry = document.querySelector('script[type="module"][src*="farm-mobile-client-"]');
+    post({
+      type: "router-ready",
+      url: location.href,
+      title: document.title,
+      client: entry ? entry.getAttribute("src") : null,
+    });
   };
 
   Object.defineProperty(window, "__FARM_SPA_ROUTER__", {

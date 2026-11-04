@@ -17,6 +17,7 @@ export {
   createScheme,
   createTransportSecurity,
   IOS_DEPLOYMENT_TARGET,
+  IOS_PAGE_SHELLS_DIR,
   IOS_PROJECT,
   IOS_TARGET,
   resolveTabSymbol,

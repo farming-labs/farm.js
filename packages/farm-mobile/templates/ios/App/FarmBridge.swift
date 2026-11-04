@@ -16,7 +16,8 @@ protocol FarmPlugin: AnyObject {
 protocol BridgeListener: AnyObject {
     func bridge(_ bridge: FarmBridge, visit url: URL, replace: Bool)
     func bridge(_ bridge: FarmBridge, rendered token: Int, title: String, pageMs: Double)
-    func bridgeRouterReady(_ bridge: FarmBridge, title: String)
+    /// `client` is the mobile client entry the document loaded, when it loaded one.
+    func bridgeRouterReady(_ bridge: FarmBridge, title: String, client: String?)
     func bridge(_ bridge: FarmBridge, title: String)
     func bridge(_ bridge: FarmBridge, renderError token: Int, url: String, message: String)
 }
@@ -118,7 +119,8 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
             let ms = (message["ms"] as? NSNumber)?.doubleValue ?? 0
             listener?.bridge(self, rendered: token, title: string("title"), pageMs: ms)
         case "router-ready":
-            listener?.bridgeRouterReady(self, title: string("title"))
+            let client = (message["client"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            listener?.bridgeRouterReady(self, title: string("title"), client: client)
         case "title":
             listener?.bridge(self, title: string("title"))
         case "error":
