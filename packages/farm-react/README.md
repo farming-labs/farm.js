@@ -1205,6 +1205,14 @@ When intentionally adding or changing a baseline, generate it with
 `pnpm --filter @farm.js/react benchmark:runtime-size` and review the byte changes before committing;
 do not regenerate baselines just to hide a regression. These checks do not change application output.
 
+Both runtime-size and keyed-target measurements compress each emitted JavaScript file independently,
+then sum the bytes. Multi-chunk builds also report per-file bytes and the union of entry chunks plus
+their static imports (`initial`), reachable dynamic imports and their dependencies (`deferred`), and
+any remaining emitted chunks (`unreferenced`). Shared chunks count once; deferred totals include all
+reachable lazy chunks, not a claim that every navigation downloads them. CSS, other assets, external
+dependencies and HTTP overhead are outside these JavaScript-only measurements. Existing single-chunk
+measurements are unchanged; concatenated code is used only for structural-marker checks.
+
 Application and prototype calls, dynamic style objects, handlers outside JSX events, nested,
 computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, unsupported map
 chains, unsupported conditional roots, effects, and more advanced hook support intentionally stay
