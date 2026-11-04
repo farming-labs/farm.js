@@ -483,6 +483,25 @@ export default function Home() {
     );
   });
 
+  it("keeps a boxed inline element inside text off the native tier, as the tree draws it", async () => {
+    const root = await createApp({
+      "src/app/page.tsx": `export default function Home() {
+  return <p>Tagged <span className="rounded bg-gray-100 px-1">home</span></p>;
+}
+`,
+      // A flex item is a box of its own: the tree draws it.
+      "src/app/pill/page.tsx": `export default function Pill() {
+  return <a href="/" className="flex flex-col"><span className="rounded-full bg-gray-100 px-2">home</span></a>;
+}
+`,
+    });
+    const result = await report(root);
+    expect(routeOf(result, "/").analysis!.nativeBlockers.map((blocker) => blocker.message)).toEqual(
+      ["<span> with a background, border, padding, or size inside text has no native-tier layout"],
+    );
+    expect(routeOf(result, "/pill").analysis!.tier).toBe("native");
+  });
+
   it("parses each module once per run and reuses facts by content hash", async () => {
     const files: Record<string, string> = {
       "src/components/shared.tsx": `export function Shared() { return <p>shared</p>; }\n`,
