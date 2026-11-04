@@ -696,6 +696,115 @@ describe("React Native screens", () => {
     expect(engine).not.toMatch(/refreshToken|\.refresh\b(?!\()/);
   });
 
+  it("signs native screens in only under auth.basePath on mobile.server, with no cookie or redirect", async () => {
+    const files = await generated(context({ native: native(), authBasePath: "/api/auth" }));
+    expect(files["app/src/main/res/values/strings.xml"]).toContain(
+      '<string name="farm_auth_base_path" translatable="false">/api/auth</string>',
+    );
+    const withoutAuth = await generated(context({ native: native() }));
+    expect(withoutAuth["app/src/main/res/values/strings.xml"]).toContain(
+      '<string name="farm_auth_base_path" translatable="false"></string>',
+    );
+
+    const session = files["app/src/main/java/dev/farmjs/mobile/shell/MobileSession.kt"]!;
+    const signIn = session.slice(
+      session.indexOf("    fun signIn("),
+      session.indexOf("    private fun syncNow()"),
+    );
+    // The path is checked before anything is sent, and the URL is always mobile.server's.
+    expect(signIn).toContain("if (!isAuthRoute(path, authBasePath)) {");
+    expect(signIn).toContain('URL(config.url("$basePath$path"))');
+    expect(signIn).toContain('connection.requestMethod = "POST"');
+    expect(signIn).toContain("connection.instanceFollowRedirects = false");
+    expect(signIn).not.toMatch(/"Cookie"|"Origin"|X-Farm-Mobile/);
+    // A refused sign-in or a redirect keeps no cookie and issues nothing; a success issues the
+    // device token through the same challenge and exchange a web sign-in uses.
+    const refused = signIn.indexOf(
+      "if (code !in 200..299 || cookies.isEmpty()) return reply to null",
+    );
+    expect(refused).toBeGreaterThan(0);
+    expect(signIn.indexOf("manager.setCookie(serverUrl, it)")).toBeGreaterThan(refused);
+    expect(signIn.indexOf("issue(jar)")).toBeGreaterThan(refused);
+    expect(session).toContain("        issue(cookies)\n    }");
+    expect(session.match(/post\("\/__farm\/mobile\/session\/challenge"/g)).toHaveLength(1);
+
+    // isAuthRoute, as the Kotlin runs it: a literal prefix, then safe path segments only.
+    expect(session).toContain(
+      'authBasePath.startsWith("/") &&\n                path.startsWith("$authBasePath/") &&\n                AUTH_ROUTE.matches(path.substring(authBasePath.length))',
+    );
+    const pattern = /private val AUTH_ROUTE = Regex\("([^"]+)"\)/.exec(session)![1]!;
+    const isAuthRoute = (path: string, base: string) =>
+      base.startsWith("/") &&
+      path.startsWith(`${base}/`) &&
+      new RegExp(`^(?:${pattern})$`).test(path.slice(base.length));
+    for (const path of ["/api/auth/sign-in/email", "/api/auth/sign-up/email"]) {
+      expect(isAuthRoute(path, "/api/auth"), path).toBe(true);
+    }
+    for (const path of [
+      "/api/auth",
+      "/api/auth/",
+      "/api/authx/sign-in/email",
+      "/api/notes",
+      "/api/auth/../notes",
+      "/api/auth/%2e%2e/notes",
+      "/api/auth/sign-in/email?callbackURL=https://evil.example",
+      "/api/auth/sign-in/email#x",
+      "/api/auth//evil.example/sign-in",
+      "//evil.example/api/auth/sign-in/email",
+      "https://evil.example/api/auth/sign-in/email",
+      "/api/auth/sign-in/email\n",
+    ]) {
+      expect(isAuthRoute(path, "/api/auth"), path).toBe(false);
+    }
+    // An app without auth has no native sign-in at all.
+    expect(isAuthRoute("/api/auth/sign-in/email", "")).toBe(false);
+  });
+
+  it("reaches native sign-in only from React Native JS, never from a WebView page", async () => {
+    for (const ctx of [
+      context({ authBasePath: "/api/auth" }),
+      context({ native: native(), authBasePath: "/api/auth" }),
+    ]) {
+      const files = await generated(ctx);
+      const kotlin = Object.entries(files).filter(([file]) => file.endsWith(".kt"));
+      // The only caller is the React Native module, and only when the app has native screens.
+      const callers = kotlin
+        .filter(([, source]) => /\.signIn\(/.test(source))
+        .map(([file]) => file);
+      expect(callers).toEqual(ctx.native ? [ENGINE] : []);
+      // WebView pages reach native code only through FarmBridge, whose plugin map is empty and
+      // which never touches the device session.
+      const bridge = files["app/src/main/java/dev/farmjs/mobile/shell/FarmBridge.kt"]!;
+      expect(bridge).not.toMatch(/MobileSession|signIn|session/i);
+      expect(files["app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt"]).toContain(
+        "val plugins = emptyMap<String, FarmPlugin>()",
+      );
+      for (const [file, source] of kotlin) {
+        expect(source, file).not.toMatch(/:\s*FarmPlugin\b/);
+      }
+      expect(files["app/src/main/assets/farm-bridge.js"]).not.toMatch(/signIn|session/i);
+      // Page.kt only asks the session to sync after a load, as before.
+      const page = files["app/src/main/java/dev/farmjs/mobile/shell/Page.kt"]!;
+      expect(page.match(/MobileSession\.instance\?\.\w+/g)).toEqual([
+        "MobileSession.instance?.sync",
+        "MobileSession.instance?.sync",
+      ]);
+    }
+    const engine = (await generated(context({ native: native() })))[ENGINE]!;
+    const method = engine.slice(
+      engine.indexOf("    fun signIn(path: String, body: String, promise: Promise)"),
+    );
+    expect(engine).toContain(
+      "@ReactMethod\n    fun signIn(path: String, body: String, promise: Promise)",
+    );
+    // JS gets the status and the body; never a cookie or a token.
+    expect(method.slice(0, method.indexOf("    companion object"))).not.toMatch(
+      /[Cc]ookie|[Tt]oken/,
+    );
+    expect(method).toContain('putInt("status", reply.status)');
+    expect(method).toContain('putString("body", reply.body)');
+  });
+
   it("shows the web twin when a native screen cannot open or fails", async () => {
     const files = await generated(context({ native: native() }));
     const shellFile = (name: string) => files[`app/src/main/java/dev/farmjs/mobile/shell/${name}`];

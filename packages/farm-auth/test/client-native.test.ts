@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const native = vi.hoisted(() => ({ serverFetch: vi.fn(), signOut: vi.fn() }));
-vi.mock("@farm.js/native", () => native);
+const native = vi.hoisted(() => ({ serverFetch: vi.fn(), signOut: vi.fn(), shellSignIn: vi.fn() }));
+vi.mock("@farm.js/native", () => ({ serverFetch: native.serverFetch, signOut: native.signOut }));
+vi.mock("@farm.js/native/internal", () => ({ shellSignIn: native.shellSignIn }));
 
 // useSyncExternalStore without a renderer: the test subscribes the way React does after a commit.
 const store = vi.hoisted(() => ({
@@ -51,6 +52,7 @@ beforeEach(() => {
   native.serverFetch.mockReset();
   native.signOut.mockReset();
   native.signOut.mockResolvedValue(undefined);
+  native.shellSignIn.mockReset();
   store.subscribe = undefined;
 });
 
@@ -163,17 +165,92 @@ describe("signOut on native screens", () => {
   });
 });
 
+// What the shell resolves with: the auth route's status and its body as text.
+const reply = (body: unknown, status = 200) => ({ status, body: JSON.stringify(body) });
+
+const SIGNED_IN = { redirect: false, token: "t", url: undefined, user: SESSION.user };
+
 describe("signIn and signUp on native screens", () => {
-  it("reject with an actionable error and call nothing", async () => {
+  it("signs in through the shell with the web client's route and body", async () => {
+    native.shellSignIn.mockResolvedValue(reply(SIGNED_IN));
+    native.serverFetch.mockResolvedValue(json(SESSION));
     const client = createFarmAuthClient();
-    await expect(client.signIn({ email: "ada@example.com", password: "secret" })).rejects.toThrow(
-      "sign in on a web screen; native sign-in is not supported yet",
+    const input = { email: "ada@example.com", password: "secret", rememberMe: false };
+
+    const result = await client.signIn(input);
+
+    expect(native.shellSignIn).toHaveBeenCalledWith("/api/auth/sign-in/email", input);
+    expect(result.error).toBeNull();
+    expect(result.data?.user.email).toBe("ada@example.com");
+    expect(result.data?.user.createdAt).toEqual(new Date("2026-11-01T10:00:00.000Z"));
+    expect(result.data?.token).toBe("t");
+  });
+
+  it("returns a wrong password as Better Auth's client does, and loads no session", async () => {
+    native.shellSignIn.mockResolvedValue(
+      reply({ code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" }, 401),
     );
-    await expect(
-      client.signUp({ email: "ada@example.com", password: "secret", name: "Ada" }),
-    ).rejects.toThrow("sign in on a web screen; native sign-in is not supported yet");
+    const client = createFarmAuthClient();
+
+    const result = await client.signIn({ email: "ada@example.com", password: "wrong" });
+
+    expect(result).toEqual({
+      data: null,
+      error: {
+        code: "INVALID_EMAIL_OR_PASSWORD",
+        message: "Invalid email or password",
+        status: 401,
+        statusText: "",
+      },
+    });
     expect(native.serverFetch).not.toHaveBeenCalled();
-    expect(native.signOut).not.toHaveBeenCalled();
+  });
+
+  it("signs up through the shell, and returns a taken email as the web client does", async () => {
+    native.shellSignIn.mockResolvedValueOnce(reply({ token: "t", user: SESSION.user }));
+    native.serverFetch.mockResolvedValue(json(SESSION));
+    const client = createFarmAuthClient({ basePath: "/account/auth" });
+    const input = { email: "ada@example.com", password: "secret12", name: "Ada" };
+
+    const created = await client.signUp(input);
+    expect(native.shellSignIn).toHaveBeenCalledWith("/account/auth/sign-up/email", input);
+    expect(created.error).toBeNull();
+    expect(created.data?.user.id).toBe("u1");
+
+    native.shellSignIn.mockResolvedValueOnce(
+      reply(
+        {
+          code: "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL",
+          message: "User already exists. Use another email.",
+        },
+        422,
+      ),
+    );
+    const taken = await client.signUp(input);
+    expect(taken.data).toBeNull();
+    expect(taken.error).toMatchObject({
+      code: "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL",
+      status: 422,
+    });
+  });
+
+  it("rejects with the shell's error when the phone is offline", async () => {
+    const offline = new Error("The server could not be reached: timeout");
+    native.shellSignIn.mockRejectedValue(offline);
+    const client = createFarmAuthClient();
+
+    await expect(client.signIn({ email: "ada@example.com", password: "secret" })).rejects.toBe(
+      offline,
+    );
+    expect(native.serverFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects social sign-in with an actionable error and calls nothing", async () => {
+    const client = createFarmAuthClient();
+    await expect(
+      client.signIn({ provider: "github" } as unknown as Parameters<typeof client.signIn>[0]),
+    ).rejects.toThrow("social and OAuth sign-in need a browser session");
+    expect(native.shellSignIn).not.toHaveBeenCalled();
   });
 });
 
@@ -227,6 +304,44 @@ describe("useAuth on native screens", () => {
       isPending: false,
       error: null,
     });
+  });
+
+  it("has the user once signIn resolves, as the web hook updates after a sign-in", async () => {
+    native.serverFetch.mockResolvedValueOnce(json({}, 401, "Unauthorized"));
+    const client = createFarmAuthClient();
+    const listener = vi.fn();
+    client.useAuth();
+    store.subscribe!(listener);
+    await flush();
+    expect(client.useAuth()).toMatchObject({ user: null, isPending: false });
+
+    native.shellSignIn.mockResolvedValue(reply(SIGNED_IN));
+    native.serverFetch.mockResolvedValue(json(SESSION));
+    listener.mockClear();
+    await client.useAuth().signIn({ email: "ada@example.com", password: "secret" });
+
+    // The session route, now with the device token the shell issued.
+    expect(native.serverFetch).toHaveBeenLastCalledWith("/api/auth/get-session", {
+      method: "GET",
+    });
+    expect(listener).toHaveBeenCalled();
+    expect(client.useAuth()).toMatchObject({ isPending: false, error: null });
+    expect(client.useAuth().user?.id).toBe("u1");
+  });
+
+  it("keeps useAuth signed out after a refused sign-in", async () => {
+    native.serverFetch.mockResolvedValue(json({}, 401, "Unauthorized"));
+    const client = createFarmAuthClient();
+    client.useAuth();
+    store.subscribe!(() => {});
+    await flush();
+    const calls = native.serverFetch.mock.calls.length;
+
+    native.shellSignIn.mockResolvedValue(reply({ code: "INVALID_EMAIL_OR_PASSWORD" }, 401));
+    await client.signIn({ email: "ada@example.com", password: "wrong" });
+
+    expect(native.serverFetch.mock.calls.length).toBe(calls);
+    expect(client.useAuth()).toMatchObject({ user: null, session: null, error: null });
   });
 
   it("passes refetch query params to the session route", async () => {
