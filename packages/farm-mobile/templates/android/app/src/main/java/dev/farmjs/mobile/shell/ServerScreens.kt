@@ -212,6 +212,7 @@ private class Renderer(private val context: Context, private val host: FarmNativ
 
     private fun box(node: JSONObject, style: JSONObject): View {
         val row = style.optString("flexDirection") == "row"
+        if (row && style.optString("flexWrap") == "wrap") return flow(node, style)
         val box = BoxLayout(context).apply {
             orientation = if (row) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
             maxWidth = length(style, "maxWidth")?.takeIf { it > 0 }
@@ -255,6 +256,23 @@ private class Renderer(private val context: Context, private val host: FarmNativ
             index += 1
         }
         return box
+    }
+
+    /** `flex-wrap: wrap` in a row: items flow left to right and wrap, with the gaps between. */
+    private fun flow(node: JSONObject, style: JSONObject): View {
+        val flow = FlowLayout(
+            context,
+            columnGap = px(style.optDouble("columnGap", 0.0)),
+            rowGap = px(style.optDouble("rowGap", 0.0)),
+            centerItems = style.optString("alignItems") == "center",
+        )
+        val children = node.optJSONArray("children") ?: JSONArray()
+        for (position in 0 until children.length()) {
+            val childNode = children.optJSONObject(position) ?: continue
+            val child = node(childNode, parentRow = true) ?: continue
+            flow.addView(child, child.layoutParams)
+        }
+        return flow
     }
 
     private fun layout(style: JSONObject, parentRow: Boolean): LinearLayout.LayoutParams {
@@ -450,5 +468,76 @@ private class BoxLayout(context: Context) : LinearLayout(context) {
             }
         }
         super.onMeasure(clamp(widthMeasureSpec, maxWidth), clamp(heightMeasureSpec, maxHeight))
+    }
+}
+
+/** Children laid out in rows that wrap, as a wrapping flex row does. */
+private class FlowLayout(
+    context: Context,
+    private val columnGap: Int,
+    private val rowGap: Int,
+    private val centerItems: Boolean,
+) : ViewGroup(context) {
+    override fun checkLayoutParams(params: LayoutParams?) = params is MarginLayoutParams
+    override fun generateLayoutParams(params: LayoutParams?) = MarginLayoutParams(params)
+    override fun generateDefaultLayoutParams() = MarginLayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
+
+    /** Each line: its children's indexes and its height. */
+    private var lines: List<Pair<List<Int>, Int>> = emptyList()
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val available = if (MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.UNSPECIFIED) {
+            Int.MAX_VALUE
+        } else {
+            MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
+        }
+        val built = mutableListOf<Pair<List<Int>, Int>>()
+        var current = mutableListOf<Int>()
+        var x = 0
+        var lineHeight = 0
+        var widest = 0
+        for (index in 0 until childCount) {
+            val child = getChildAt(index)
+            if (child.visibility == GONE) continue
+            measureChildWithMargins(child, widthMeasureSpec, 0, heightMeasureSpec, 0)
+            val params = child.layoutParams as MarginLayoutParams
+            val width = child.measuredWidth + params.leftMargin + params.rightMargin
+            val height = child.measuredHeight + params.topMargin + params.bottomMargin
+            if (current.isNotEmpty() && x + columnGap + width > available) {
+                built += current to lineHeight
+                current = mutableListOf()
+                x = 0
+                lineHeight = 0
+            }
+            if (current.isNotEmpty()) x += columnGap
+            current += index
+            x += width
+            lineHeight = maxOf(lineHeight, height)
+            widest = maxOf(widest, x)
+        }
+        if (current.isNotEmpty()) built += current to lineHeight
+        lines = built
+        val height = built.sumOf { it.second } + rowGap * maxOf(0, built.size - 1)
+        setMeasuredDimension(
+            resolveSize(widest + paddingLeft + paddingRight, widthMeasureSpec),
+            resolveSize(height + paddingTop + paddingBottom, heightMeasureSpec),
+        )
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        var y = paddingTop
+        for ((indexes, lineHeight) in lines) {
+            var x = paddingLeft
+            for (index in indexes) {
+                val child = getChildAt(index)
+                val params = child.layoutParams as MarginLayoutParams
+                val offset = if (centerItems) (lineHeight - child.measuredHeight - params.topMargin - params.bottomMargin) / 2 else 0
+                val childLeft = x + params.leftMargin
+                val childTop = y + params.topMargin + offset
+                child.layout(childLeft, childTop, childLeft + child.measuredWidth, childTop + child.measuredHeight)
+                x = childLeft + child.measuredWidth + params.rightMargin + columnGap
+            }
+            y += lineHeight + rowGap
+        }
     }
 }

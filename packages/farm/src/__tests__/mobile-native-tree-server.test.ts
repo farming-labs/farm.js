@@ -44,7 +44,15 @@ async function createApp(): Promise<string> {
   const files: Record<string, string> = {
     "package.json": '{"private":true,"type":"module"}',
     "src/app/layout.tsx":
-      "export default function Layout({ children }) { return <div><nav>chrome</nav>{children}</div>; }",
+      'import "./globals.css";\nexport default function Layout({ children }) { return <div><nav>chrome</nav>{children}</div>; }',
+    // The app's own CSS: a variable, dark mode, and a class.
+    "src/app/globals.css": `:root { --ink: #123456; }
+@media (prefers-color-scheme: dark) { :root { --ink: #abcdef; } }
+.title { font-size: 26px; color: var(--ink); margin: 0 0 8px; }
+`,
+    "src/app/about/page.tsx": `export const mobile = { native: true };
+export default function About() { return <h1 className="title">About</h1>; }
+`,
     // An async page: its data loads on the server, as for the web page.
     "src/app/notes/page.tsx": `export const mobile = { native: true };
 async function load() { return [{ id: 1, title: "First" }, { id: 2, title: "Second" }]; }
@@ -64,6 +72,17 @@ export default async function Notes() {
     await fs.writeFile(path.join(root, file), contents);
   }
   return root;
+}
+
+function expectAboutTree(tree: any) {
+  expect(tree.unsupported).toEqual([]);
+  expect(tree.root.children[0]).toMatchObject({
+    type: "Text",
+    tag: "h1",
+    style: { fontSize: 26, color: "#123456", marginBottom: 8 },
+    dark: { color: "#abcdef" },
+    children: ["About"],
+  });
 }
 
 function expectNotesTree(tree: any) {
@@ -103,6 +122,10 @@ describe("native tier screens from the web server", () => {
       // The dev server answers on localhost.
       root: JSON.parse(JSON.stringify(tree.root).replaceAll(origin, "https://notes.example.com")),
     });
+    // The app's stylesheet, as the dev server serves it to the browser.
+    expectAboutTree(
+      await fetch(`${origin}/about`, { headers: { accept: NATIVE } }).then((about) => about.json()),
+    );
     // The web page itself is unchanged.
     expect(await fetch(`${origin}/notes`).then((page) => page.text())).toContain(
       "<nav>chrome</nav>",
@@ -137,6 +160,10 @@ describe("native tier screens from the web server", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe(`${NATIVE}; charset=utf-8`);
     expectNotesTree(await response.json());
+    const about = await handler.fetch(
+      new Request("https://notes.example.com/about", { headers: { accept: NATIVE } }),
+    );
+    expectAboutTree(await about.json());
     const page = await handler.fetch(new Request("https://notes.example.com/notes"));
     expect(await page.text()).toContain("<nav>chrome</nav>");
   }, 120_000);

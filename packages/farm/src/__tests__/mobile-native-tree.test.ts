@@ -61,7 +61,7 @@ describe("native tier styles", () => {
     expect(
       resolveFarmNativeClasses("grid md:flex hover:bg-red-500 w-[13px] absolute").unsupported,
     ).toEqual(["grid", "md:flex", "hover:bg-red-500", "w-[13px]", "absolute"]);
-    expect(farmNativeClassProblem("flex-wrap")).toBe('class "flex-wrap" has no native-tier style');
+    expect(farmNativeClassProblem("absolute")).toBe('class "absolute" has no native-tier style');
     expect(farmNativeClassProblem("dark:bg-gray-900")).toBeUndefined();
   });
 

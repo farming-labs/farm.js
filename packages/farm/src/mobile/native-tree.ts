@@ -8,6 +8,12 @@
  */
 import { _readFarmRenderedHtml } from "../markdown";
 import {
+  cascadeFarmNativeStylesheets,
+  parseFarmNativeStylesheet,
+  type FarmNativeCssElement,
+  type FarmNativeStylesheet,
+} from "./native-css";
+import {
   FARM_NATIVE_TEXT_KEYS,
   resolveFarmNativeClasses,
   resolveFarmNativeInlineStyle,
@@ -64,10 +70,9 @@ const INLINE_DEFAULTS: Record<string, FarmNativeStyle> = {
   code: { fontFamily: "mono" },
 };
 
-interface HtmlElement {
-  tag: string;
-  attributes: Record<string, string>;
+interface HtmlElement extends FarmNativeCssElement {
   children: Array<HtmlElement | string>;
+  parent?: HtmlElement;
 }
 
 const ENTITIES: Record<string, string> = {
@@ -115,11 +120,26 @@ function parseHtml(html: string): HtmlElement {
         attribute[2] ?? attribute[3] ?? attribute[4] ?? "",
       );
     }
-    const element: HtmlElement = { tag: name, attributes, children: [] };
-    stack.at(-1)!.children.push(element);
+    const parent = stack.at(-1)!;
+    let previous: HtmlElement | undefined;
+    for (let index = parent.children.length - 1; index >= 0 && !previous; index -= 1) {
+      const child = parent.children[index]!;
+      if (typeof child !== "string") previous = child;
+    }
+    const element: HtmlElement = { tag: name, attributes, children: [], parent, previous };
+    parent.children.push(element);
     if (!match[4] && !VOID_TAGS.has(name)) stack.push(element);
   }
   if (cursor < html.length) stack.at(-1)!.children.push(decode(html.slice(cursor)));
+  const markLast = (element: HtmlElement) => {
+    const elements = element.children.filter(
+      (child): child is HtmlElement => typeof child !== "string",
+    );
+    const last = elements[elements.length - 1];
+    if (last) last.last = true;
+    elements.forEach(markLast);
+  };
+  markLast(root);
   return root;
 }
 
@@ -165,23 +185,53 @@ function settleLineHeight(style: FarmNativeStyle): FarmNativeStyle {
 class Converter {
   readonly unsupported: string[] = [];
 
-  constructor(private readonly pageUrl: URL) {}
+  /** Off while reading the ancestors above the page, which pass down text styles only. */
+  reporting = true;
+
+  /**
+   * `sheets`: the page's stylesheets. Without them, a class the Tailwind table does not know is
+   * reported; with them, only one a layered (Tailwind) rule styles is, since a class no rule
+   * styles has no effect in a browser either.
+   */
+  constructor(
+    private readonly pageUrl: URL,
+    private readonly sheets?: readonly FarmNativeStylesheet[],
+  ) {}
 
   private problem(message: string) {
-    if (!this.unsupported.includes(message)) this.unsupported.push(message);
+    if (this.reporting && !this.unsupported.includes(message)) this.unsupported.push(message);
   }
 
-  private stylesOf(element: HtmlElement): { style: FarmNativeStyle; dark: FarmNativeStyle } {
+  stylesOf(element: HtmlElement): { style: FarmNativeStyle; dark: FarmNativeStyle } {
     const classes = resolveFarmNativeClasses(element.attributes.class ?? "");
-    for (const token of classes.unsupported) this.problem(`<${element.tag}> class "${token}"`);
+    const cascade = this.sheets ? cascadeFarmNativeStylesheets(this.sheets, element) : undefined;
+    for (const token of classes.unsupported) {
+      if (!cascade || cascade.layered.includes(token.split(":").pop()!)) {
+        this.problem(`<${element.tag}> class "${token}"`);
+      }
+    }
+    for (const problem of cascade?.unsupported ?? []) {
+      this.problem(`<${element.tag}> ${problem}`);
+    }
     const inline = resolveFarmNativeInlineStyle(element.attributes.style ?? "");
     for (const declaration of inline.unsupported) {
       this.problem(`<${element.tag}> style "${declaration}"`);
     }
-    return {
-      style: { ...INLINE_DEFAULTS[element.tag], ...classes.style, ...inline.style },
-      dark: classes.dark ?? {},
+    // Browser defaults, then Tailwind's utilities, then the app's own rules, then the attribute.
+    const style = {
+      ...INLINE_DEFAULTS[element.tag],
+      ...classes.style,
+      ...cascade?.style,
+      ...inline.style,
     };
+    const dark = { ...classes.dark, ...cascade?.dark };
+    // CSS flex lays out in a row unless told otherwise.
+    for (const target of [style, dark]) {
+      if (target.display === "flex" && target.flexDirection === undefined && !style.flexDirection) {
+        target.flexDirection = "row";
+      }
+    }
+    return { style, dark };
   }
 
   private url(value: string | undefined): string | undefined {
@@ -262,6 +312,21 @@ class Converter {
     return node;
   }
 
+  /** A link drawn as a box: it holds blocks, or has a box style such as a background. */
+  private isBlockLink(element: HtmlElement): boolean {
+    if (element.tag !== "a") return false;
+    if (
+      element.children.some((child) => typeof child !== "string" && !INLINE_TAGS.has(child.tag))
+    ) {
+      return true;
+    }
+    const reporting = this.reporting;
+    this.reporting = false;
+    const { style } = this.stylesOf(element);
+    this.reporting = reporting;
+    return withoutText(style) !== undefined;
+  }
+
   /**
    * Block content: each element a view, and each run of inline content a text block. In a flex
    * container every child is its own item, as CSS blockifies them: a `<span>` pill there is a box.
@@ -290,7 +355,7 @@ class Converter {
       pending = [];
     };
     for (const child of content) {
-      if (typeof child === "string" || (INLINE_TAGS.has(child.tag) && !isBlockLink(child))) {
+      if (typeof child === "string" || (INLINE_TAGS.has(child.tag) && !this.isBlockLink(child))) {
         pending.push(child);
         continue;
       }
@@ -391,17 +456,6 @@ class Converter {
   }
 }
 
-/** A link drawn as a box: it holds blocks, or has a box style such as a background. */
-function isBlockLink(element: HtmlElement): boolean {
-  if (element.tag !== "a") return false;
-  if (element.children.some((child) => typeof child !== "string" && !INLINE_TAGS.has(child.tag))) {
-    return true;
-  }
-  const classes = resolveFarmNativeClasses(element.attributes.class ?? "").style;
-  const inline = resolveFarmNativeInlineStyle(element.attributes.style ?? "").style;
-  return withoutText({ ...classes, ...inline }) !== undefined;
-}
-
 function textContent(element: HtmlElement): string {
   return element.children
     .map((child) => (typeof child === "string" ? child : textContent(child)))
@@ -448,11 +502,29 @@ function collapse(runs: Array<FarmNativeNode | string>): Array<FarmNativeNode | 
   return out;
 }
 
+const parsedSheets = new Map<string, FarmNativeStylesheet>();
+
+/** Parse once per stylesheet text: a build's CSS is the same on every request. */
+function parsedStylesheet(css: string): FarmNativeStylesheet {
+  let sheet = parsedSheets.get(css);
+  if (!sheet) {
+    sheet = parseFarmNativeStylesheet(css);
+    if (parsedSheets.size >= 16) parsedSheets.delete(parsedSheets.keys().next().value!);
+    parsedSheets.set(css, sheet);
+  }
+  return sheet;
+}
+
 /**
  * A rendered page's tree: the page's own content (`#__farm_page__`, or `#root` without layouts),
  * since a native screen shows the page without its layouts.
  */
-export function createFarmNativeTree(html: string, pageUrl: URL): FarmNativeTree {
+export function createFarmNativeTree(
+  html: string,
+  pageUrl: URL,
+  /** The page's stylesheets' text; omitted, only Tailwind classes resolve. */
+  stylesheets?: readonly string[],
+): FarmNativeTree {
   const title = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
   const document = parseHtml(_readFarmRenderedHtml(html));
   const page =
@@ -460,9 +532,31 @@ export function createFarmNativeTree(html: string, pageUrl: URL): FarmNativeTree
     find(document, (element) => element.attributes.id === "root") ??
     find(document, (element) => element.tag === "body") ??
     document;
-  const converter = new Converter(pageUrl);
-  const root: FarmNativeNode = { type: "View", tag: page.tag };
-  const children = converter.blocks(page.children, { style: {}, dark: {} });
+  const converter = new Converter(pageUrl, stylesheets?.map(parsedStylesheet));
+  // What the elements above the page pass down: text styles, and the background the screen shows.
+  const ancestors: HtmlElement[] = [];
+  for (let element = page.parent; element; element = element.parent) ancestors.unshift(element);
+  const inherited = { style: {} as FarmNativeStyle, dark: {} as FarmNativeStyle };
+  let background: FarmNativeStyle = {};
+  converter.reporting = false;
+  for (const element of [...ancestors, page]) {
+    if (element.tag === "#root") continue;
+    const own = converter.stylesOf(element);
+    Object.assign(inherited.style, textOnly(own.style));
+    Object.assign(inherited.dark, textOnly(own.dark));
+    if (own.style.backgroundColor) background = { backgroundColor: own.style.backgroundColor };
+    if (own.dark.backgroundColor)
+      background = { ...background, darkBackground: own.dark.backgroundColor };
+  }
+  converter.reporting = true;
+  const { darkBackground, ...light } = background;
+  const root: FarmNativeNode = {
+    type: "View",
+    tag: page.tag,
+    ...(Object.keys(light).length > 0 ? { style: light } : {}),
+    ...(darkBackground ? { dark: { backgroundColor: darkBackground } } : {}),
+  };
+  const children = converter.blocks(page.children, inherited);
   if (children.length > 0) root.children = children;
   return {
     version: 1,
@@ -470,6 +564,29 @@ export function createFarmNativeTree(html: string, pageUrl: URL): FarmNativeTree
     root,
     unsupported: converter.unsupported,
   };
+}
+
+/** The page's stylesheets in document order: same-origin `<link>` hrefs and `<style>` text. */
+export function readFarmPageStylesheets(
+  html: string,
+  pageUrl: URL,
+): Array<{ href?: string; inline?: string }> {
+  const out: Array<{ href?: string; inline?: string }> = [];
+  const head = /<head\b[^>]*>([\s\S]*?)<\/head>/i.exec(html)?.[1] ?? html;
+  for (const match of head.matchAll(/<link\b([^>]*)>|<style\b[^>]*>([\s\S]*?)<\/style>/gi)) {
+    if (match[2] !== undefined) {
+      out.push({ inline: match[2] });
+      continue;
+    }
+    const attributes = match[1]!;
+    if (!/\brel\s*=\s*["']?stylesheet\b/i.test(attributes)) continue;
+    const href = /\bhref\s*=\s*["']([^"']+)["']/i.exec(attributes)?.[1];
+    if (!href) continue;
+    const resolved = new URL(decode(href), pageUrl);
+    // A cross-origin stylesheet (a font service, say) is the browser's to fetch.
+    if (resolved.origin === pageUrl.origin) out.push({ href: resolved.pathname + resolved.search });
+  }
+  return out;
 }
 
 /** The shell's request: a native tree, not HTML. */
@@ -485,6 +602,11 @@ export function farmRequestWantsNativeTree(request: Request): boolean {
 export async function createFarmNativeTreeResponse(options: {
   request: Request;
   renderPage: (request: Request) => Response | Promise<Response>;
+  /**
+   * A stylesheet's text by its href. Without it, `renderPage` serves it, as the dev server does;
+   * a production server passes the client CSS its build embedded.
+   */
+  loadStylesheet?: (href: string) => string | undefined | Promise<string | undefined>;
 }): Promise<Response> {
   const headers = new Headers(options.request.headers);
   headers.set("accept", "text/html");
@@ -498,7 +620,41 @@ export async function createFarmNativeTreeResponse(options: {
   );
   const type = page.headers.get("content-type") ?? "";
   if (page.status !== 200 || !type.includes("text/html")) return page;
-  const tree = createFarmNativeTree(await page.text(), new URL(options.request.url));
+  const html = await page.text();
+  const pageUrl = new URL(options.request.url);
+  const load =
+    options.loadStylesheet ??
+    (async (href: string) => {
+      const response = await options.renderPage(
+        new Request(new URL(href, pageUrl), {
+          headers: { accept: "text/css,*/*;q=0.1", cookie: headers.get("cookie") ?? "" },
+          signal: options.request.signal,
+        }),
+      );
+      return response.status === 200 && response.headers.get("content-type")?.includes("text/css")
+        ? response.text()
+        : undefined;
+    });
+  const stylesheets: string[] = [];
+  for (const source of readFarmPageStylesheets(html, pageUrl)) {
+    const css = source.inline ?? (await load(source.href!));
+    if (css === undefined) {
+      // The page is styled by CSS the tree cannot read: show the web screen.
+      const tree: FarmNativeTree = {
+        version: 1,
+        root: { type: "View", tag: "#root" },
+        unsupported: [`stylesheet "${source.href}" could not be read`],
+      };
+      return new Response(JSON.stringify(tree), {
+        headers: {
+          "Content-Type": `${FARM_NATIVE_TREE_CONTENT_TYPE}; charset=utf-8`,
+          Vary: "Accept",
+        },
+      });
+    }
+    stylesheets.push(css);
+  }
+  const tree = createFarmNativeTree(html, pageUrl, stylesheets);
   const out = new Headers({
     "Content-Type": `${FARM_NATIVE_TREE_CONTENT_TYPE}; charset=utf-8`,
     Vary: "Accept",
