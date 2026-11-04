@@ -15,13 +15,14 @@ const context: EntryContext = {
 };
 
 // Pull the generated click handler out of the client entry and rebuild it with
-// its three free variables (location, history, nav) supplied as parameters.
+// its free variables supplied as parameters. `nav` stands in for the router's navigate(), which
+// offers the move to navigation delegates and then writes history.
 function buildHandleClick(location: any, history: any, nav: () => void) {
   const entry = generateClientEntry(context);
   const start = entry.indexOf("const handleClick = (e) => {");
   const end = entry.indexOf("document.addEventListener('click', handleClick", start);
   const source = entry.slice(start, end).trim().replace(/;?$/, "");
-  return new Function("location", "history", "nav", `${source}\nreturn handleClick;`)(
+  return new Function("location", "history", "navigate", `${source}\nreturn handleClick;`)(
     location,
     history,
     nav,
@@ -96,7 +97,6 @@ describe("RSC client navigation and same-document fragment links", () => {
     handleClick(event);
 
     expect(event.preventDefault).toHaveBeenCalled();
-    expect(history.pushState).toHaveBeenCalledWith(null, "", "https://app.test/guide#intro");
-    expect(nav).toHaveBeenCalled();
+    expect(nav).toHaveBeenCalledWith("https://app.test/guide#intro", "push");
   });
 });
