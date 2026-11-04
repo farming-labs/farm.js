@@ -10242,7 +10242,11 @@ ${
       const farmKeptLayouts = farmKeptLayoutCount > 1 ? farmKeptLayoutCount : 0;`
           : `const farmKeptLayouts = 0;`
       }
-      const pprConfig = ${farmMobileShells ? "farmShellLoading ? { enabled: false } : " : ""}resolvePPRConfig(route);
+      ${
+        farmMobileShells
+          ? "const pprConfig = farmShellLoading ? { enabled: false } : resolvePPRConfig(route);"
+          : "const pprConfig = resolvePPRConfig(route);"
+      }
       const pprBypassReason = pprConfig.enabled
         ? getPPRShellBypassReason(request, middlewareData, middlewareContext)
         : undefined;
