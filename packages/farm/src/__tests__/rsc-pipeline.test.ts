@@ -149,6 +149,38 @@ describe("experimental.serverComponents from farm.config", () => {
     });
   });
 
+  it("adds the mobile client for a mobile block: an entry in builds, inline under farm dev --mobile", async () => {
+    const root = createApp();
+    const previous = process.env.FARM_PLATFORM;
+    const mobileClient = async (
+      userConfig: Record<string, unknown>,
+      command: "serve" | "build",
+      platform?: string,
+    ) => {
+      if (platform === undefined) delete process.env.FARM_PLATFORM;
+      else process.env.FARM_PLATFORM = platform;
+      try {
+        const config = (await createFarmRscViteConfig(
+          { experimental: { serverComponents: true }, ...userConfig },
+          { root, command, preset: "node-server" },
+        )) as Record<string, any>;
+        return config.farm.mobileClient;
+      } finally {
+        if (previous === undefined) delete process.env.FARM_PLATFORM;
+        else process.env.FARM_PLATFORM = previous;
+      }
+    };
+    const mobile = { mobile: () => ({ id: "com.example.notes", server: "https://n.example" }) };
+    expect(await mobileClient(mobile, "build")).toBe("entry");
+    expect(await mobileClient(mobile, "build", "mobile")).toBe("entry");
+    expect(await mobileClient(mobile, "serve", "mobile")).toBe("inline");
+    // farm dev without --mobile, a desktop build, and an app without the block add nothing.
+    expect(await mobileClient(mobile, "serve")).toBeUndefined();
+    expect(await mobileClient(mobile, "build", "desktop")).toBeUndefined();
+    expect(await mobileClient({}, "build")).toBeUndefined();
+    expect(await mobileClient({}, "serve", "mobile")).toBeUndefined();
+  });
+
   it("gives development Fast Refresh with core's plugin-react when the app has none", async () => {
     // The RSC client bootstrap imports /@react-refresh in development.
     const config = (await createFarmRscViteConfig(

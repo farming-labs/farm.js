@@ -155,12 +155,25 @@ export async function createFarmRscViteConfig(
   const tailwind = hasPluginNamed(vitePlugins, "@tailwindcss/vite")
     ? undefined
     : await loadTailwindVitePlugin();
+  // An app with a `mobile` block (RFC 0004): a build adds the mobile entry shell documents load,
+  // and `farm dev --mobile` hands navigations to the shell from the browser entry itself. Desktop
+  // builds and web dev servers add nothing.
+  const platform = resolveFarmPlatform();
+  const mobileClient =
+    userConfig.mobile === undefined || platform === "desktop"
+      ? undefined
+      : options.command === "build"
+        ? "entry"
+        : platform === "mobile"
+          ? "inline"
+          : undefined;
   const farmConfig = pluginRsc.defineConfig({
     ...rscConfig,
+    ...(mobileClient ? { mobileClient } : {}),
     experimental: { ...userConfig.experimental, serverComponents: true },
     port: options.port ?? userConfig.server?.port,
     plugins: [
-      ...(options.command === "serve" && resolveFarmPlatform() === "desktop"
+      ...(options.command === "serve" && platform === "desktop"
         ? [
             farmDesktopDevGuardPlugin(
               typeof userConfig.basePath === "string" ? userConfig.basePath : undefined,

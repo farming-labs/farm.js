@@ -31,7 +31,7 @@ import {
   type UserConfig,
 } from "vite";
 import { init as initModuleLexer, parse as parseModuleImports } from "es-module-lexer";
-import type { FarmRscPluginOptions, EntryContext } from "./types.js";
+import type { FarmRscPluginOptions, EntryContext, FarmRscMobileClient } from "./types.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
 import type { FarmAPIConfig } from "@farm.js/core/api";
 import type { FarmMiddlewareConfig } from "@farm.js/core/middleware";
@@ -65,6 +65,12 @@ import {
 } from "./server-fn-transform.js";
 import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-boundary.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
+import {
+  FARM_RSC_MOBILE_CLIENT_ENTRY_NAME,
+  createFarmRscMobileClientManifestPlugin,
+  generateMobileClientEntry,
+  removeFarmRscMobileClientManifest,
+} from "./mobile-client.js";
 import { rscPrivateClientSourcemaps } from "./client-sourcemaps.js";
 import { findDocumentLayouts, findRouteFiles } from "./document-layouts.js";
 import { assertRscPackageCompatibility } from "./compatibility.js";
@@ -207,6 +213,8 @@ export interface FarmRscConfig {
    * `oauth` is not supported in RSC apps yet.
    */
   mcp?: FarmMCPUserConfig;
+  /** @internal See `FarmRscPluginOptions.mobileClient`; set by `farm dev` and `farm build`. */
+  mobileClient?: FarmRscMobileClient;
 }
 
 /**
@@ -282,6 +290,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
         deploymentId: config.deploymentId,
         routesDir: config.routesDir,
         entries: config.entries,
+        mobileClient: config.mobileClient,
       }),
       ...(Array.isArray(config.plugins) ? config.plugins : []),
     ],
@@ -354,6 +363,11 @@ const VIRTUAL_PREFIX = "\0";
 const VIRTUAL_RSC_ENTRY = "virtual:@farm.js/rsc/entry-rsc";
 const VIRTUAL_SSR_ENTRY = "virtual:@farm.js/rsc/entry-ssr";
 const VIRTUAL_CLIENT_ENTRY = "virtual:@farm.js/rsc/entry-client";
+const VIRTUAL_MOBILE_CLIENT_ENTRY = "virtual:@farm.js/rsc/entry-mobile";
+/** The browser entry, as the client build's `index` input names it. */
+const RSC_CLIENT_ENTRY = "./.farm/rsc-entries/entry.browser.tsx";
+/** The mobile client entry a build of an app with a `mobile` block adds. */
+const RSC_MOBILE_CLIENT_ENTRY = "./.farm/rsc-entries/entry.mobile.tsx";
 const VIRTUAL_HYDRATE_ENTRY = "virtual:@farm.js/rsc/hydrate";
 const OPTIMIZED_BOUNDARY_ADAPTER = "@farm.js/plugin/rsc/optimized-boundary";
 const STRATA_PACKAGE = "@farming-labs/strata";
@@ -734,6 +748,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   // Context passed to entry generators
   let entryContext: EntryContext;
   let rscBuildRoot: string | undefined;
+  /** The app root, when this build adds the mobile client entry. */
+  let mobileClientRoot: string | undefined;
   const middlewareConfigModules = new Map<string, string>();
   let mcpConfigCandidates: string[] | null = null;
 
@@ -845,6 +861,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   return [
     farmEnvironmentFunctionsPlugin() as unknown as Plugin,
     rscPrivateClientSourcemaps(),
+    createFarmRscMobileClientManifestPlugin(() => mobileClientRoot) as unknown as Plugin,
     {
       name: "@farm.js/plugin/rsc:middleware-config",
       enforce: "pre",
@@ -1120,6 +1137,19 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           }),
         );
         const publicImageConfig = getPublicFarmImageConfig(imageConfig);
+        // An app with a `mobile` block (RFC 0004): a build adds the mobile entry, and
+        // `farm dev --mobile` makes the browser entry itself the mobile client.
+        const mobileClient =
+          options.mobileClient === "entry" && env.command === "build"
+            ? "entry"
+            : options.mobileClient === "inline" && env.command === "serve"
+              ? "inline"
+              : undefined;
+        mobileClientRoot = mobileClient === "entry" ? root : undefined;
+        // A mobile client from an earlier build must not outlive the `mobile` block.
+        if (env.command === "build" && mobileClient !== "entry") {
+          removeFarmRscMobileClientManifest(root);
+        }
         // Development always optimizes with Sharp, as core's dev server does.
         const imageRuntime =
           env.command === "serve"
@@ -1169,6 +1199,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           clientCachePersistence: generateClientCachePersistenceCode(
             resolveFarmClientCacheAdapterEntry(root, c.cache),
           ),
+          mobileClient,
         };
 
         logInfo(`srcDir: ${entryContext.srcDir}, outDir: ${entryContext.outDir}`);
@@ -1181,6 +1212,12 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         await fs.writeFile(entryRscPath, generateRscEntry(entryContext));
         await fs.writeFile(entrySsrPath, generateSsrEntry(entryContext));
         await fs.writeFile(entryClientPath, generateClientEntry(entryContext));
+        if (mobileClient === "entry") {
+          await fs.writeFile(
+            path.join(entriesDir, "entry.mobile.tsx"),
+            generateMobileClientEntry(RSC_CLIENT_ENTRY),
+          );
+        }
         await fs.writeFile(
           path.join(entriesDir, "error-fallback.tsx"),
           generateErrorFallbackEntry(),
@@ -1193,7 +1230,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         // Entry paths (relative to root) so Vite runs rsc/ssr/client builds (not index.html).
         const entryRsc = "./.farm/rsc-entries/entry.rsc.tsx";
         const entrySsr = "./.farm/rsc-entries/entry.ssr.tsx";
-        const entryClient = "./.farm/rsc-entries/entry.browser.tsx";
+        const entryClient = RSC_CLIENT_ENTRY;
 
         // Resolve @farm.js/core so Vite (and rsc/ssr envs) can load it when app code imports it (fixes "Failed to resolve entry" in dev).
         let farmCorePath: string | null = null;
@@ -1339,7 +1376,14 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             client: {
               build: {
                 outDir: `${outDir}/client`,
-                rollupOptions: { input: { index: entryClient } },
+                rollupOptions: {
+                  input: {
+                    index: entryClient,
+                    ...(mobileClient === "entry"
+                      ? { [FARM_RSC_MOBILE_CLIENT_ENTRY_NAME]: RSC_MOBILE_CLIENT_ENTRY }
+                      : {}),
+                  },
+                },
               },
               resolve: { conditions: ["browser", "import"] },
               // Optimize what the browser entry needs up front. A dependency first
@@ -1528,6 +1572,9 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         if (source.includes("rsc-entries") && source.includes("entry.browser.tsx")) {
           return VIRTUAL_PREFIX + VIRTUAL_CLIENT_ENTRY;
         }
+        if (source.includes("rsc-entries") && source.includes("entry.mobile.tsx")) {
+          return VIRTUAL_PREFIX + VIRTUAL_MOBILE_CLIENT_ENTRY;
+        }
         if (source.includes("rsc-entries") && source.includes("entry.rsc.tsx")) {
           return VIRTUAL_PREFIX + VIRTUAL_RSC_ENTRY;
         }
@@ -1561,6 +1608,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         if (id === VIRTUAL_PREFIX + VIRTUAL_CLIENT_ENTRY) {
           logInfo("Generating client entry");
           return generateClientEntry(entryContext);
+        }
+
+        if (id === VIRTUAL_PREFIX + VIRTUAL_MOBILE_CLIENT_ENTRY) {
+          return generateMobileClientEntry(RSC_CLIENT_ENTRY);
         }
 
         // Handle dynamic hydration entries

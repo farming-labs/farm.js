@@ -1,4 +1,5 @@
 import type { EntryContext } from "../types.js";
+import { generateMobileShellNavigation } from "../mobile-client.js";
 
 export const serverFnTransportErrorClientRuntime = `function createFarmServerFnTransportError(value) {
   const message = value && typeof value === 'object' && typeof value.message === 'string'
@@ -63,7 +64,13 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment';
+import { runFarmNavigationDelegates } from '@farm.js/core/internal/client-runtime';
 `;
+
+  // farm dev --mobile: every page runs in the shell's WebView, so this entry is the mobile client.
+  if (ctx.mobileClient === "inline") {
+    imports += generateMobileShellNavigation();
+  }
 
   if (ctx.actionsEnabled) {
     imports += `import { setServerCallback, encodeReply, createTemporaryReferenceSet } from '@vitejs/plugin-rsc/browser';
@@ -142,8 +149,7 @@ setServerCallback(async (id, args) => {
     // router performs the navigation here.
     if (p.returnValue?.redirect?.url) {
       debug('Server action redirected:', p.returnValue.redirect.url);
-      history.pushState(null, '', p.returnValue.redirect.url);
-      await farmNavigateRef.current?.(location.href);
+      await farmNavigateRef.current?.(p.returnValue.redirect.url, 'push');
       return;
     }
     debug('Server action failed:', id);
@@ -257,8 +263,8 @@ async function main() {
           }
 
           e.preventDefault();
-          history.pushState(null, '', a.href);
-          nav();
+          // Link replace marks its anchor; a plain anchor pushes.
+          navigate(a.href, a.hasAttribute('data-replace') ? 'replace' : 'push');
         }
       };
       
@@ -280,8 +286,28 @@ async function main() {
     return content;
   }
   
+  // An in-app navigation (a link click, a redirect after a server action). Navigation delegates
+  // get it first, after the router's own checks, as Farm's other routers offer it: one that takes
+  // it (a native shell showing the URL on its own screen) leaves the page and URL as they are.
+  // Back/forward, refreshes and same-page moves are not offered; other origins load as documents.
+  async function navigate(href, action) {
+    const url = new URL(href, location.href);
+    if (url.origin !== location.origin) {
+      location.assign(url.href);
+      return;
+    }
+    const from = location.pathname + location.search;
+    const to = url.pathname + url.search;
+    if (to !== from && (await runFarmNavigationDelegates({ url: url.href, from, to, action }))) {
+      return;
+    }
+    if (action === 'replace') history.replaceState(null, '', url.href);
+    else history.pushState(null, '', url.href);
+    await refetch(location.href);
+  }
+  farmNavigateRef.current = navigate;
+
   // Fetch new RSC payload for a URL
-  farmNavigateRef.current = (url) => refetch(url);
   async function refetch(url) {
     debug('Fetching RSC for:', url);
     

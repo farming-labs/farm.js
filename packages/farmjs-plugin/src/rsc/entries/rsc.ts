@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import type { EntryContext } from "../types.js";
+import { FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER } from "../mobile-client.js";
 
 const require_ = createRequire(import.meta.url);
 
@@ -112,7 +113,7 @@ import {
   createProductionMiddlewareRunner,
 } from '@farm.js/core/middleware';
 import { _withFarmGuardedResponseCache } from '@farm.js/core/internal/production-runtime';
-import {
+${ctx.mobileClient === "entry" ? "import { _applyFarmMobileShellClient } from '@farm.js/core/internal/production-runtime';\n" : ""}import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   isFarmAPIPathname,
@@ -1531,7 +1532,24 @@ async function handler(request, context) {
     headers.set('x-nitro-prerender', encodeURIComponent(farmPayloadPath(new URL(request.url).pathname)));
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
-  return response;
+  return ${ctx.mobileClient === "entry" ? "_applyFarmMobileShellClient(request, response, farmMobileShellClient)" : "response"};
+}
+${
+  ctx.mobileClient === "entry"
+    ? `
+// The mobile client (RFC 0004): the documents a mobile shell asks for (X-Farm-Shell) load its
+// entry instead of the web one, privately, and every HTML response varies on the header. The
+// Nitro build fills this in once the client is built; null leaves responses as they are.
+function readFarmMobileShellClient() {
+  try {
+    return JSON.parse("${FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER}");
+  } catch {
+    return null;
+  }
+}
+const farmMobileShellClient = readFarmMobileShellClient();
+`
+    : ""
 }
 
 async function handleFarmRequestWithRuntime(request, context) {
