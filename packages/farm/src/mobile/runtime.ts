@@ -27,7 +27,11 @@ import {
   formatFarmMobileNativeReport,
   type FarmMobileNativeReport,
 } from "./report";
-import { createFarmMobileRouteManifest, type FarmMobileRouteManifest } from "./routes";
+import {
+  createFarmMobileRouteManifest,
+  type FarmMobileRouteManifest,
+  type FarmMobileShellManifest,
+} from "./routes";
 import {
   readFarmMobilePageExport,
   resolveFarmMobileScreens,
@@ -42,6 +46,16 @@ export {
   validateFarmMobileConfig,
 } from "./config";
 export { createFarmMobileRouteManifest, createFarmMobileRoutePattern } from "./routes";
+export {
+  FARM_SHELL_PARAM_SEGMENT,
+  FARM_SHELL_RENDER_HEADER,
+  FARM_SHELL_ROUTE_HEADER,
+  createFarmMobilePageShell,
+  createFarmMobileShellRenderPath,
+  getFarmMobilePageShellFile,
+  renderFarmMobilePageShells,
+} from "./page-shells";
+export type * from "./page-shells";
 export {
   createFarmMobileModuleId,
   readFarmMobilePageExport,
@@ -122,6 +136,8 @@ export interface FarmMobileAppOptions {
    * that a page with `export const mobile = { native: true }` is always checked.
    */
   analyze?: boolean | "always";
+  /** `farm build --mobile` with `mobile.shells`: the page shells it rendered, for the manifest. */
+  shells?: FarmMobileShellManifest;
 }
 
 export interface FarmMobileApp {
@@ -316,6 +332,7 @@ export async function resolveFarmMobileApp(
     basePath: config.basePath,
     i18n,
     screens,
+    ...(options.shells ? { shells: options.shells } : {}),
   });
   return {
     context,

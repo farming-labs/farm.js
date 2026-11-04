@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.core.content.ContextCompat
@@ -46,6 +47,10 @@ class Screen(
     var onPainted: (() -> Unit)? = null
     private var awaitedToken = 0
 
+    /** The route's page shell, shown over the page until it paints (or for good when offline). */
+    private var shellView: WebView? = null
+    private var loadFailed = false
+
     init {
         applyTheme()
         view.addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -74,7 +79,7 @@ class Screen(
     }
 
     /** Show the route's web screen in place of this native screen (the web twin, RFC 0004 7.10). */
-    fun showWeb(page: Page, url: String) {
+    fun showWeb(page: Page, url: String, shell: String? = null) {
         if (destroyed || this.page != null) return
         native?.let {
             content.removeView(it.view)
@@ -84,7 +89,7 @@ class Screen(
         this.page = page
         setMain(page.webView)
         page.host = this
-        load(url)
+        load(url, shell)
     }
 
     fun setNavigation(icon: Int?, description: Int, onClick: () -> Unit) {
@@ -108,11 +113,26 @@ class Screen(
         awaitedToken = page.render(url)
     }
 
-    /** Cold path: load the document. */
-    fun load(url: String) {
+    /** Cold path: load the document, behind the route's page [shell] when it has one. */
+    fun load(url: String, shell: String? = null) {
         val page = page ?: return
         progress.visibility = View.VISIBLE
+        removeShell()
+        loadFailed = false
+        if (shell != null) {
+            val view = page.createShellView(url, shell)
+            // Over the page, under the progress bar.
+            content.addView(view, 1)
+            shellView = view
+        }
         page.load(url)
+    }
+
+    private fun removeShell() {
+        val view = shellView ?: return
+        shellView = null
+        content.removeView(view)
+        view.destroy()
     }
 
     private fun shown(title: String) {
@@ -136,8 +156,18 @@ class Screen(
 
     override fun onCommitVisible(page: Page) {
         progress.visibility = View.GONE
+        // A failed load commits the WebView's error page; the shell stays over it.
+        if (!loadFailed) removeShell()
         onPainted?.invoke()
         onPainted = null
+    }
+
+    override fun onLoadError(page: Page) {
+        loadFailed = true
+        if (shellView != null) {
+            progress.visibility = View.GONE
+            android.util.Log.i(Navigator.TAG, "shell: the document did not load; keeping the page shell")
+        }
     }
 
     override fun onRouterReady(page: Page, title: String) = shown(title)
@@ -148,6 +178,7 @@ class Screen(
 
     fun destroy() {
         destroyed = true
+        removeShell()
         page?.destroy()
         native?.close()
         native = null

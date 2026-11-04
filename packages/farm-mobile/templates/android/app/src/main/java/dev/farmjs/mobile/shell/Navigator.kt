@@ -34,6 +34,8 @@ class Navigator(
     private val modalLayer: FrameLayout,
     private val pool: WebViewPool?,
     private val newPage: () -> Page,
+    /** Page shells for cold document loads; null without mobile.shells. */
+    private val shells: PageShells? = null,
 ) {
     private val stackCount = config.tabs.size.coerceAtLeast(1)
     private val stacks = List(stackCount) { ArrayList<Screen>() }
@@ -300,7 +302,7 @@ class Navigator(
 
         override fun fallback(reason: String) = onMain {
             Log.w(TAG, "native screen ${it.nativeModule} failed, showing the web screen for ${url.path}: $reason")
-            it.showWeb(newPage(), url.toString())
+            it.showWeb(newPage(), url.toString(), shells?.html(config.match(url)))
         }
 
         override fun setTitle(title: String) = onMain { it.toolbar.title = title }
@@ -313,7 +315,8 @@ class Navigator(
     /**
      * Fill [screen] with [url] and call [ready] when it should animate in:
      * a warm page waits for its in-place render (capped), a cold page
-     * animates right away and shows a progress bar while the document loads,
+     * animates right away and shows its route's page shell, or a progress
+     * bar, while the document loads,
      * a native screen is ready at once.
      */
     private fun show(screen: Screen, url: String, label: String, onContent: () -> Unit = {}, ready: () -> Unit) {
@@ -343,10 +346,12 @@ class Navigator(
             screen.render(url)
             main.postDelayed({ fire() }, WARM_WAIT_MS)
         } else {
+            // A warm render never shows a shell: the running page is already there.
+            val shell = shells?.html(config.match(Uri.parse(url)))
             screen.onPainted = {
-                Log.i(TAG, "$label warm=false visit->firstPaint=${SystemClock.uptimeMillis() - started}ms")
+                Log.i(TAG, "$label warm=false shell=${shell != null} visit->firstPaint=${SystemClock.uptimeMillis() - started}ms")
             }
-            screen.load(url)
+            screen.load(url, shell)
             fire()
         }
     }

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -5,11 +6,13 @@ import { createServer } from "node:net";
 import type {
   MobileBundledAssets,
   MobileNativeScreens,
+  MobilePageShells,
   MobileShell,
   MobileShellContext,
 } from "@farm.js/core/mobile";
 import { withProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
 import { formatDesktopShellInstallCommand, setFarmPlatform, writeShellFiles } from "./desktop";
+import { renderMobilePageShells } from "./mobile-shells";
 import { ensureFarmRscPackages } from "./rsc-packages";
 
 /** An expected failure with its own fix; the CLI prints it without a stack. */
@@ -245,6 +248,7 @@ async function writeMobileProject(
   runtime: MobileRuntime,
   native?: MobileNativeScreens,
   assets?: MobileBundledAssets,
+  shells?: MobilePageShells,
 ): Promise<MobileShellContext> {
   const { config } = app;
   const context: MobileShellContext = {
@@ -260,6 +264,7 @@ async function writeMobileProject(
     ),
     ...(native ? { native } : {}),
     ...(assets ? { assets } : {}),
+    ...(shells ? { shells } : {}),
   };
   await writeShellFiles(
     context.projectDir,
@@ -443,8 +448,16 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     if (
       farmAppUsesRscPipeline(await resolveFarmRscCheckConfig(userConfig, root, "production"), root)
     ) {
+      // The RSC server has no page shell mode, so these apps bundle no shells yet.
+      if (preflight.mobile.shells)
+        runtime.logger.warn(
+          "mobile.shells: apps with experimental.serverComponents get no page shells yet.",
+        );
       await buildFarmRsc(userConfig ?? {}, { root, preset: "node-server", outputDir: dirs.www });
     } else {
+      // mobile.shells: this build's server, and only it, renders page shells for a random token.
+      if (preflight.mobile.shells)
+        config.mobileShells = { token: randomBytes(32).toString("base64url") };
       await build(config, { preset: "node-server", root, productionVite });
     }
     const assets = await readBundledAssets(root, config.distDir, mobileRuntime);
@@ -463,11 +476,53 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
       );
     }
 
+    let shells: MobilePageShells | undefined;
+    if (config.mobileShells && !assets) {
+      runtime.logger.warn(
+        "mobile.shells: this build has no mobile client, so the app bundles no page shells.",
+      );
+    } else if (config.mobileShells && assets) {
+      const basePath = config.basePath === "/" ? "" : config.basePath;
+      const rendered = await renderMobilePageShells({
+        root,
+        os,
+        runtime: mobileRuntime,
+        outputDir: path.resolve(root, dirs.www),
+        clientDir: assets.dir,
+        token: config.mobileShells.token,
+        basePath,
+        routes: preflight.manifest.rules.flatMap((rule) => (rule.route ? [rule.route] : [])),
+        client: assets.entry,
+        files: assets.files,
+      });
+      const count = Object.keys(rendered.shells.routes).length;
+      // Most routes have no loading file; name only the ones that have one and still get no shell.
+      for (const { route, reason } of rendered.skipped) {
+        if (reason !== "it has no loading file") {
+          runtime.logger.info(`Page shell ${route}: none, ${reason}`);
+        }
+      }
+      if (count > 0) {
+        shells = rendered.shells;
+        const files = Object.keys(shells.files).length;
+        runtime.logger.info(
+          `Page shells: ${count} route${count === 1 ? "" : "s"} in ${files} file${files === 1 ? "" : "s"}` +
+            (rendered.skipped.length > 0 ? ` (${rendered.skipped.length} without one)` : ""),
+        );
+      } else {
+        runtime.logger.warn(
+          "mobile.shells: no route has a page shell. A route gets one from its loading.tsx " +
+            "when that file and every layout around the page sit in folders without [params].",
+        );
+      }
+    }
+
     // The analyzer runs unless mobile.native.auto is "off"; it only reports.
     const app = await mobileRuntime.generateFarmMobileRoutes({
       ...appOptions,
       config,
       analyze: true,
+      ...(shells ? { shells: { client: shells.client, routes: shells.routes } } : {}),
     });
     if (app.table) console.log(app.table);
     // Unused native files and config ports nothing builds yet: the same as config inspect.
@@ -498,7 +553,15 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
           `${Math.round(built.hermesMs)} ms)`,
       );
     }
-    const context = await writeMobileProject(shell, app, "build", mobileRuntime, native, assets);
+    const context = await writeMobileProject(
+      shell,
+      app,
+      "build",
+      mobileRuntime,
+      native,
+      assets,
+      shells,
+    );
     runtime.logger.info(`📱 ${shownPath(root, context.projectDir)} (${shell.os} project)`);
     if (os === "android" && !options.apk) {
       runtime.logger.info("Run farm build --mobile --apk to build the debug app.");

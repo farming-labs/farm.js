@@ -515,6 +515,12 @@ export interface ResolvedFarmConfig extends Required<
    * block itself is never called or checked here.
    */
   mobileClient?: boolean;
+  /**
+   * @internal Set only by `farm build --mobile` with `mobile.shells`: the random token its server
+   * renders page shells for (`mobile/shell-render.ts`). A web build has none, so its server has no
+   * shell mode.
+   */
+  mobileShells?: { token: string };
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
   [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
   root: string;

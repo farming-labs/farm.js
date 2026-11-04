@@ -10,6 +10,7 @@ import type { MobileShellContext } from "@farm.js/core/mobile";
 import shell, {
   createIosProject,
   IOS_DEPLOYMENT_TARGET,
+  IOS_PAGE_SHELLS_DIR,
   listBootedSimulators,
   resolveTabSymbol,
 } from "./index";
@@ -242,6 +243,7 @@ describe("@farm.js/mobile/ios", () => {
       "App/NativeScreens.swift",
       "App/Navigator.swift",
       "App/Page.swift",
+      "App/PageShells.swift",
       "App/RouteConfig.swift",
       "App/SceneDelegate.swift",
       "App/ScreenViewController.swift",
@@ -605,6 +607,68 @@ async function uikitSdk(): Promise<string[] | undefined> {
 
 const sdkFlags = await uikitSdk();
 
+describe("page shells", () => {
+  const html =
+    "<!DOCTYPE html><html data-farm-page-shell><head><style>p{color:red}</style></head><body><p>Loading</p></body></html>";
+  const shells = {
+    client: "/farm-mobile-client-h1a2b3c4d.js",
+    routes: { "/notes": "0123456789abcdef.html" },
+    files: { "0123456789abcdef.html": html },
+  };
+  const withShells = () => {
+    const base = context({ command: "build" });
+    return context({
+      command: "build",
+      shells,
+      manifest: { ...base.manifest, shells: { client: shells.client, routes: shells.routes } },
+    });
+  };
+
+  it("bundles the shells as a folder resource and maps routes to them in farm-routes.json", async () => {
+    const files = await generated(withShells());
+    expect(files[`App/${IOS_PAGE_SHELLS_DIR}/0123456789abcdef.html`]).toBe(html);
+    expect(JSON.parse(files["App/farm-routes.json"]).shells).toEqual({
+      client: "/farm-mobile-client-h1a2b3c4d.js",
+      routes: { "/notes": "0123456789abcdef.html" },
+    });
+    const { objects, ofType } = parseProject(files);
+    const [[, target]] = ofType("PBXNativeTarget") as [[string, PbxObject]];
+    const resources = target.buildPhases
+      .map((id: string) => objects[id])
+      .find((object: PbxObject) => object.isa === "PBXResourcesBuildPhase")
+      .files.map((id: string) => objects[objects[id]!.fileRef]!);
+    expect(resources.find((file: PbxObject) => file.path === IOS_PAGE_SHELLS_DIR)).toMatchObject({
+      isa: "PBXFileReference",
+      lastKnownFileType: "folder",
+    });
+    // Without shells the project has no such folder.
+    const plain = await generated(context({ command: "build" }));
+    expect(Object.keys(plain).some((file) => file.includes(IOS_PAGE_SHELLS_DIR))).toBe(false);
+    expect(plain["App.xcodeproj/project.pbxproj"]).not.toContain(IOS_PAGE_SHELLS_DIR);
+  });
+
+  it("shows a shell with loadHTMLString before a cold document load, never on a warm render", async () => {
+    const files = await generated(context());
+    const navigator = files["App/Navigator.swift"];
+    const warm = navigator.slice(
+      navigator.indexOf("if warm {"),
+      navigator.indexOf("} else {", navigator.indexOf("if warm {")),
+    );
+    expect(warm).toContain("screen.render(url)");
+    expect(warm).not.toContain("shell");
+    expect(navigator).toContain("screen.load(url, shell: shell)");
+    const page = files["App/Page.swift"];
+    expect(page).toContain("shellNavigation = webView.loadHTMLString(shell, baseURL: url)");
+    // The document loads once the shell has finished, with the shell header.
+    expect(page).toContain("if navigation === shellNavigation {\n            loadShellTarget()");
+    expect(page).toContain("shells?.observe(client)");
+    expect(files["App/PageShells.swift"]).toContain("subdirectory: PageShells.directory");
+    expect(files["App/SceneDelegate.swift"]).toContain(
+      "let shells = PageShells.load(config: config)",
+    );
+  });
+});
+
 describe("generated files on this machine's tools", () => {
   it.skipIf(!hasPlutil)(
     "passes plutil: Info.plist lints, the project file converts",
@@ -673,7 +737,7 @@ describe("generated files on this machine's tools", () => {
 });
 
 describe("the bridge script on iOS", () => {
-  async function loadBridge(origin = "http://localhost:3000") {
+  async function loadBridge(origin = "http://localhost:3000", client: string | null = null) {
     const files = await generated(context());
     const source = files["App/farm-bridge.js"].replace("__FARM_PLUGINS__", "[]");
     // What FarmBridge.swift installs: the script inside an origin check.
@@ -699,7 +763,10 @@ describe("the bridge script on iOS", () => {
       document: {
         title: "Notes",
         addEventListener() {},
-        querySelector: () => null,
+        querySelector: (selector: string) =>
+          client !== null && selector.includes("farm-mobile-client-")
+            ? { getAttribute: (name: string) => (name === "src" ? client : null) }
+            : null,
         documentElement: {
           attributes: {} as Record<string, string>,
           setAttribute(name: string, value: string) {
@@ -720,6 +787,14 @@ describe("the bridge script on iOS", () => {
     vm.runInNewContext(scoped, sandbox);
     return { bridge: window.__farmBridge, window, posted, root: sandbox.document.documentElement };
   }
+
+  it("reports the mobile client a document loaded, for page shells", async () => {
+    const { window, posted } = await loadBridge(undefined, "/farm-mobile-client-h1a2b3c4d.js");
+    window.__FARM_SPA_ROUTER__ = { navigate: async () => {} };
+    expect(posted).toContainEqual(
+      expect.objectContaining({ type: "router-ready", client: "/farm-mobile-client-h1a2b3c4d.js" }),
+    );
+  });
 
   it("is the shared bridge with the iOS name and message port", async () => {
     const files = await generated(context());
@@ -771,6 +846,7 @@ describe("the bridge script on iOS", () => {
       type: "router-ready",
       url: "http://localhost:3000/notes",
       title: "Notes",
+      client: null,
     });
     expect(delegate({ url: "http://localhost:3000/notes/1", action: "push" })).toBe(true);
     expect(posted.filter((message) => message.type === "visit")).toEqual([

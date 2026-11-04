@@ -11,6 +11,8 @@ protocol PageHost: AnyObject {
     func pageRouterReady(_ page: Page, title: String)
     func page(_ page: Page, title: String)
     func pageCommitted(_ page: Page)
+    /// The route's page shell is showing; the document loads next.
+    func pageShowsShell(_ page: Page)
     func page(_ page: Page, failed error: Error)
     /// The web content process died; the page reloads itself next.
     func pageTerminated(_ page: Page)
@@ -22,6 +24,7 @@ extension PageHost {
     func pageRouterReady(_ page: Page, title: String) {}
     func page(_ page: Page, title: String) {}
     func pageCommitted(_ page: Page) {}
+    func pageShowsShell(_ page: Page) {}
     func page(_ page: Page, failed error: Error) {}
     func pageTerminated(_ page: Page) {}
 }
@@ -49,14 +52,21 @@ final class Page: NSObject, BridgeListener, WKNavigationDelegate, WKUIDelegate {
     private let config: RouteConfig
     private let openExternal: (URL) -> Void
     private var titleObservation: NSKeyValueObservation?
+    /// Page shells from the app; nil under farm dev --mobile or without mobile.shells.
+    private let shells: PageShells?
+    /// The page shell being shown, and the document to load once it has.
+    private var shellNavigation: WKNavigation?
+    private var shellTarget: URL?
 
     init(
         config: RouteConfig,
         plugins: [String: FarmPlugin],
         script: String,
+        shells: PageShells? = nil,
         openExternal: @escaping (URL) -> Void
     ) {
         self.config = config
+        self.shells = shells
         self.openExternal = openExternal
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
@@ -93,12 +103,36 @@ final class Page: NSObject, BridgeListener, WKNavigationDelegate, WKUIDelegate {
 
     /// A document load the shell starts, with the shell header.
     func load(_ url: URL) {
+        shellNavigation = nil
+        shellTarget = nil
         loadStartedAt = CACurrentMediaTime()
         lastURL = url
         shellLoad = true
         var request = URLRequest(url: url)
         request.setValue("ios", forHTTPHeaderField: Page.shellHeader)
         webView.load(request)
+    }
+
+    /// Show `shell`, the page shell of `url`'s route, then load the document over it. WebKit keeps
+    /// the shell on screen until the document commits, and when it cannot load.
+    func load(_ url: URL, shell: String?) {
+        guard let shell else {
+            load(url)
+            return
+        }
+        loadStartedAt = CACurrentMediaTime()
+        lastURL = url
+        shellLoad = false
+        shellTarget = url
+        shellNavigation = webView.loadHTMLString(shell, baseURL: url)
+    }
+
+    /// The shell finished (or could not show): load the document it stands in for.
+    private func loadShellTarget() {
+        guard let target = shellTarget else { return }
+        let started = loadStartedAt
+        load(target)
+        loadStartedAt = started
     }
 
     /// Render `url` with the running Farm router. Returns the token echoed by `rendered`.
@@ -147,8 +181,9 @@ final class Page: NSObject, BridgeListener, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
-    func bridgeRouterReady(_ bridge: FarmBridge, title: String) {
+    func bridgeRouterReady(_ bridge: FarmBridge, title: String, client: String?) {
         routerReady = true
+        shells?.observe(client)
         host?.pageRouterReady(self, title: title)
     }
 
@@ -163,6 +198,13 @@ final class Page: NSObject, BridgeListener, WKNavigationDelegate, WKUIDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
+        // The page shell this page is showing: local HTML at the document's URL.
+        if shellNavigation != nil, navigationAction.navigationType == .other,
+           navigationAction.targetFrame?.isMainFrame == true,
+           navigationAction.request.url == shellTarget || navigationAction.request.url?.scheme == "about" {
+            decisionHandler(.allow)
+            return
+        }
         let decision = policy(for: navigationAction)
         // WebKit drops a URLRequest's own headers on redirects, and loads the page started
         // (a router fallback, a reload) never had it. Load those again from the shell, so every
@@ -233,15 +275,27 @@ final class Page: NSObject, BridgeListener, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if navigation === shellNavigation {
+            host?.pageShowsShell(self)
+            return
+        }
         host?.pageCommitted(self)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if navigation === shellNavigation {
+            loadShellTarget()
+            return
+        }
         shellLoad = false
         if let url = webView.url, config.isAppURL(url) { MobileSession.shared?.sync() }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if navigation === shellNavigation {
+            loadShellTarget()
+            return
+        }
         failed(error)
     }
 
@@ -250,6 +304,10 @@ final class Page: NSObject, BridgeListener, WKNavigationDelegate, WKUIDelegate {
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
+        if navigation === shellNavigation {
+            loadShellTarget()
+            return
+        }
         failed(error)
     }
 

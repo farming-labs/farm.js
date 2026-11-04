@@ -93,8 +93,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         self.window = window
         window.makeKeyAndVisible()
 
+        // Page shells, bundled by farm build --mobile with mobile.shells.
+        let shells = PageShells.load(config: config)
         let newPage: () -> Page = { [weak self] in
-            Page(config: config, plugins: plugins, script: script) { url in
+            Page(config: config, plugins: plugins, script: script, shells: shells) { url in
                 self?.navigator?.openExternal(url)
             }
         }
@@ -107,6 +109,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             startPath: FarmBuild.startPath,
             tabIcons: FarmBuild.tabIcons,
             pool: pool,
+            shells: shells,
             newPage: newPage
         )
         navigator.onFirstReady = { pool?.start() }

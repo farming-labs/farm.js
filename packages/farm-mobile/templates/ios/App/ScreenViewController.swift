@@ -119,11 +119,11 @@ final class ScreenViewController: UIViewController, PageHost {
         awaitedToken = page.render(url)
     }
 
-    /// Cold path: load the document.
-    func load(_ url: URL) {
+    /// Cold path: load the document, behind the route's page `shell` when it has one.
+    func load(_ url: URL, shell: String? = nil) {
         guard let page else { return }
         if isViewLoaded { progress.startAnimating() }
-        page.load(url)
+        page.load(url, shell: shell)
     }
 
     private func retry() {
@@ -164,6 +164,12 @@ final class ScreenViewController: UIViewController, PageHost {
         let painted = onPainted
         onPainted = nil
         painted?()
+    }
+
+    func pageShowsShell(_ page: Page) {
+        // The shell is the loading state; a spinner over it would be a second one.
+        progress.stopAnimating()
+        page.webView.alpha = 1
     }
 
     func pageRouterReady(_ page: Page, title: String) {

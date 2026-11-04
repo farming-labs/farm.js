@@ -254,7 +254,12 @@ describe("mobile config", () => {
       tabs: [],
       routes: {},
       native: NATIVE,
+      shells: false,
     });
+    expect(resolve({ shells: true }).shells).toBe(true);
+    expect(() => resolve({ shells: "yes" as never })).toThrow(
+      /mobile \(os: android\): shells must be true or false\./,
+    );
     // A default id from an app named like a Java keyword says to set one.
     expect(() => resolve({ name: "Class" })).toThrow(
       /"class" is a Java keyword.*set mobile\.id, such as "com\.example\.notes"/,
