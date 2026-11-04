@@ -165,7 +165,10 @@ enable `server.trustProxy` so visitors are not all counted as the proxy's addres
 
 - `@farm.js/auth/server`: the `auth.session()` and `auth.user()` helpers.
 - `@farm.js/auth/client`: `useAuth`, `signIn`, `signUp`, `signOut`, `getSession`, and
-  `createFarmAuthClient`.
+  `createFarmAuthClient`. React Native screens (`page.native.tsx`) use the same import: Metro
+  resolves its `react-native` build, which calls the auth routes through `serverFetch` from
+  `@farm.js/native` (an optional peer). `signIn` and `signUp` reject there for now; sign in on a
+  web screen. Web bundles do not change.
 - `@farm.js/auth`: `resolveFarmAuthConfig` and the configuration and session types, such as
   `FarmAuthConfig`, `FarmAuthSession`, and `FarmAuthUser`.
 - `@farm.js/auth/internal`: loaded by Farm core and `farm auth migrate`. Applications do not
