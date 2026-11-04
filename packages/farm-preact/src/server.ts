@@ -1,9 +1,15 @@
 import { Transform } from "node:stream";
-import { Fragment as PreactFragment, h, type ComponentChildren, type VNode } from "preact";
+import { Fragment as PreactFragment, h, type VNode } from "preact";
 import renderPreactToString from "preact-render-to-string";
 import { renderToPipeableStream as preactRenderToPipeableStream } from "preact-render-to-string/stream-node";
 import { renderToReadableStream as preactRenderToReadableStream } from "preact-render-to-string/stream";
-import PreactCompat, { Fragment, Suspense, createElement, isValidElement } from "./runtime";
+import PreactCompat, {
+  Fragment,
+  Suspense,
+  createElement,
+  isValidElement,
+  type ErrorBoundary as ClientErrorBoundary,
+} from "./runtime";
 
 export const name = "preact";
 export const capabilities = {
@@ -16,9 +22,10 @@ export { Fragment, Suspense, createElement, isValidElement };
  * cannot render it again, so the boundary's subtree would come out empty and
  * the error would be lost. On the server the boundary passes its children
  * through and the throw fails the render, as React's does, so Farm answers
- * with the route's error page and status. The client keeps the real boundary.
+ * with the route's error page and status. The client keeps the real boundary,
+ * and both take the same props.
  */
-export function ErrorBoundary(props: { children?: ComponentChildren }) {
+export function ErrorBoundary(props: ClientErrorBoundary["props"]) {
   return h(PreactFragment, null, props.children);
 }
 
