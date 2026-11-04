@@ -1,5 +1,25 @@
 import { randomBytes } from "node:crypto";
 import { FARM_NATIVE_TREE_CONTENT_TYPE } from "../mobile/native-tree-type";
+
+/** Replaced with the client CSS by href, for the native tier's tree (apps with a mobile block). */
+const FARM_NATIVE_STYLESHEETS_PLACEHOLDER = "__FARM_NATIVE_STYLESHEETS__";
+
+async function readFarmNativeStylesheets(
+  clientOutputDir: string,
+  clientCssHref: string,
+): Promise<Record<string, string>> {
+  const fs = await import("node:fs/promises");
+  try {
+    return {
+      [clientCssHref]: await fs.readFile(
+        path.join(clientOutputDir, clientCssHref.slice(1)),
+        "utf8",
+      ),
+    };
+  } catch {
+    return {};
+  }
+}
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
@@ -9829,6 +9849,7 @@ ${
       ? `
   // The mobile app's native-tier screens: the page, rendered as for a browser, read into a
   // tree of native views.
+  const farmNativeStylesheets = JSON.parse(${JSON.stringify(FARM_NATIVE_STYLESHEETS_PLACEHOLDER)});
   if (
     (request.method === "GET" || request.method === "HEAD") &&
     request.headers.get("accept")?.includes(${JSON.stringify(FARM_NATIVE_TREE_CONTENT_TYPE)})
@@ -9836,6 +9857,8 @@ ${
     const treeResponse = await createFarmNativeTreeResponse({
       request,
       renderPage: (targetRequest) => fetchFarmInnerRequest(targetRequest, adapterContext),
+      // The client CSS this build emitted, embedded once it settled (FARM_NATIVE_STYLESHEETS).
+      loadStylesheet: (href) => farmNativeStylesheets[href],
     });
     return applyProductionMiddlewareHeaders(treeResponse, middlewareHeaders);
   }
@@ -11862,6 +11885,7 @@ async function buildNitroUniversal(
     readFarmDocsModulePreloads(path.join(root, distDir)),
     readFarmClientModulePreloads(path.join(root, distDir)),
   ]);
+  let nativeStylesheets: Record<string, string> | undefined;
   const encodedDocsModulePreloads = encodeFarmDocsModulePreloads(docsModulePreloads);
   const encodedClientModulePreloads = encodeFarmClientModulePreloads(clientModulePreloads);
   const encodedMobileShellClient = shouldBuildFarmMobileClient(config, { quiet: true })
@@ -11899,6 +11923,15 @@ async function buildNitroUniversal(
     }
     if (output.code.includes(FARM_CLIENT_JS_SRC_PLACEHOLDER)) {
       output.code = output.code.split(FARM_CLIENT_JS_SRC_PLACEHOLDER).join(clientJsSrc);
+    }
+    if (
+      config.mobileClient &&
+      output.code.includes(JSON.stringify(FARM_NATIVE_STYLESHEETS_PLACEHOLDER))
+    ) {
+      nativeStylesheets ??= await readFarmNativeStylesheets(clientOutputDir, clientCssHref);
+      output.code = output.code
+        .split(JSON.stringify(FARM_NATIVE_STYLESHEETS_PLACEHOLDER))
+        .join(JSON.stringify(JSON.stringify(nativeStylesheets)));
     }
   }
 

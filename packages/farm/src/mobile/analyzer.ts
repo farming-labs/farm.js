@@ -12,13 +12,18 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 import { FARM_VERSION } from "../version";
+import {
+  inspectFarmNativeStylesheets,
+  parseFarmNativeStylesheet,
+  type FarmNativeStylesheet,
+} from "./native-css";
 import { FARM_NATIVE_STYLE_PROPERTIES, farmNativeClassProblem } from "./native-style";
 
 /**
  * Cached facts are reused only by the same analyzer: bump when facts change shape or rules
  * change between releases; a new Farm version always starts fresh.
  */
-const ANALYZER_VERSION = `3:${FARM_VERSION}`;
+const ANALYZER_VERSION = `4:${FARM_VERSION}`;
 
 export type FarmUiNodeKind = "View" | "Text" | "Image" | "Pressable" | "TextInput" | "List";
 
@@ -442,6 +447,13 @@ interface ModuleFacts {
   serverBoundary: boolean;
   asyncDefault: boolean;
   components: Record<string, FarmUiNode>;
+  /**
+   * Classes outside the Tailwind table: the native tier accepts one only when the app's CSS styles
+   * it in a way the tier can draw, which the route pass checks against its stylesheets.
+   */
+  appClasses: Array<{ name: string; line: number; column: number }>;
+  /** Intrinsic elements rendered, for element rules in the app's CSS. */
+  tags: string[];
 }
 
 type Node = { type: string; start: number; end: number; [key: string]: any };
@@ -542,6 +554,8 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
     serverBoundary: false,
     asyncDefault: false,
     components: {},
+    appClasses: [],
+    tags: [],
   };
   const starts = lineStarts(source);
   const block = (
@@ -677,6 +691,7 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
     const isIntrinsic = opening.name.type === "JSXIdentifier" && /^[a-z]/.test(tag);
     if (isIntrinsic) {
       kind = INTRINSIC_KINDS[tag];
+      if (!facts.tags.includes(tag)) facts.tags.push(tag);
       if (!kind) block(opening, "unmapped-element", `<${tag}> has no native mapping`);
     } else if (opening.name.type === "JSXNamespacedName") {
       block(opening, "unmapped-element", `<${tag}> has no native mapping`);
@@ -772,7 +787,11 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
         }
         for (const token of classes.split(/\s+/).filter(Boolean)) {
           const problem = classifyClass(token);
-          if (problem) block(attribute, "class-name", problem);
+          if (problem && /^class ".*" is not in the native Tailwind subset$/.test(problem)) {
+            // Not Tailwind: React Native cannot use it; the app's CSS may style it natively.
+            block(attribute, "class-name", problem, "react-native");
+            facts.appClasses.push({ name: token, ...locate(starts, attribute.start) });
+          } else if (problem) block(attribute, "class-name", problem);
           else {
             style.push(token);
             const native = farmNativeClassProblem(token);
@@ -1075,6 +1094,8 @@ interface ResolvedImport {
   fact: ImportFact;
   /** Absolute app module path, for app-local script imports. */
   file?: string;
+  /** Absolute path of an app `.css` file it imports. */
+  stylesheet?: string;
   blocker?: LocalBlocker;
 }
 
@@ -1339,24 +1360,22 @@ export async function analyzeFarmMobileRoutes(
       const blocker = classifyPackage(fact, moduleFacts.serverBoundary);
       return blocker ? { fact, blocker } : { fact };
     }
-    if (STYLE_FILE.test(specifier)) {
-      return {
-        fact,
-        blocker: { ...at, rule: "css-import", message: `import "${specifier}" is a stylesheet` },
-      };
-    }
     if (ASSET_FILE.test(specifier)) return { fact };
     for (const candidate of candidates) {
       const file = resolveFile(candidate);
       if (file) {
         if (ASSET_FILE.test(file)) return { fact };
         if (STYLE_FILE.test(file)) {
+          const plain = file.endsWith(".css");
           return {
             fact,
+            ...(plain ? { stylesheet: file } : {}),
             blocker: {
               ...at,
               rule: "css-import",
               message: `import "${specifier}" is a stylesheet`,
+              // The native tier reads plain CSS the app imports; React Native cannot.
+              ...(plain ? { only: "react-native" as const } : {}),
             },
           };
         }
@@ -1407,6 +1426,16 @@ export async function analyzeFarmMobileRoutes(
   }
   await Promise.all([...scripts].map(visitModule));
 
+  const parsedSheets = new Map<string, FarmNativeStylesheet>();
+  const readStylesheet = (file: string): FarmNativeStylesheet => {
+    let sheet = parsedSheets.get(file);
+    if (!sheet) {
+      sheet = parseFarmNativeStylesheet(readFileSync(file, "utf8"));
+      parsedSheets.set(file, sheet);
+    }
+    return sheet;
+  };
+
   const settled = new Map<string, ModuleFacts>();
   for (const [file, pending] of facts) settled.set(file, await pending);
 
@@ -1417,6 +1446,11 @@ export async function analyzeFarmMobileRoutes(
     const elements: FarmMobileElementCounts = { total: 0, mapped: 0, byKind: {} };
     const seen = new Set<string>();
     const ir: FarmMobileRouteIR = { root: "", components: {} };
+    // For the native tier: the CSS the route imports (layouts' too, since it styles the page), and
+    // the page's classes and elements it must style.
+    const stylesheets = new Set<string>();
+    const appClasses: Array<{ file: string; name: string; line: number; column: number }> = [];
+    const tags = new Set<string>();
 
     // `layout`: a layout's graph, which only a React Native port includes.
     const walk = (file: string, entry: boolean, layout: boolean) => {
@@ -1451,6 +1485,11 @@ export async function analyzeFarmMobileRoutes(
       }
       if (moduleFacts.serverBoundary && !entry) return;
       for (const blocker of moduleFacts.blockers) add({ file: label, ...blocker });
+      if (!layout) {
+        for (const appClass of moduleFacts.appClasses)
+          appClasses.push({ file: label, ...appClass });
+        for (const tag of moduleFacts.tags) tags.add(tag);
+      }
       for (const win of moduleFacts.wins) wins.add(win);
       elements.total += moduleFacts.elements.total;
       elements.mapped += moduleFacts.elements.mapped;
@@ -1462,6 +1501,7 @@ export async function analyzeFarmMobileRoutes(
         ir.components[`${label}#${name}`] = node;
       }
       for (const entryImport of resolved.get(file) ?? []) {
+        if (entryImport.stylesheet) stylesheets.add(entryImport.stylesheet);
         if (entryImport.blocker) add({ file: label, ...entryImport.blocker });
         if (entryImport.file) walk(entryImport.file, false, layout);
       }
@@ -1488,6 +1528,35 @@ export async function analyzeFarmMobileRoutes(
       ir.root = `${relative(root, page)}#default`;
     }
     for (const layout of layouts) walk(layout, true, true);
+
+    const sheets = [...stylesheets].map(readStylesheet);
+    for (const appClass of appClasses) {
+      const { styled, problems } = inspectFarmNativeStylesheets(sheets, { class: appClass.name });
+      const at = { file: appClass.file, line: appClass.line, column: appClass.column };
+      if (!styled) {
+        blockers.push({
+          ...at,
+          rule: "class-name",
+          message: `class "${appClass.name}" is neither Tailwind nor in the app's CSS`,
+          only: "native",
+        });
+      }
+      for (const message of problems) {
+        blockers.push({ ...at, rule: "class-name", message, only: "native" });
+      }
+    }
+    for (const tag of tags) {
+      for (const message of inspectFarmNativeStylesheets(sheets, { tag }).problems) {
+        blockers.push({
+          file: relative(root, page ?? ""),
+          line: 1,
+          column: 1,
+          rule: "style",
+          message,
+          only: "native",
+        });
+      }
+    }
 
     const strip = ({ only: _only, ...blocker }: FarmMobileBlocker) => blocker;
     const portBlockers = blockers.filter((blocker) => blocker.only !== "native").map(strip);
