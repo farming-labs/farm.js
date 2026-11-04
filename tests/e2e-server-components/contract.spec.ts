@@ -610,3 +610,50 @@ test("client components use Farm's router hooks, page state, blocker and Link", 
   await expect(page).toHaveURL(/\/$/);
   expect(errors).toEqual([]);
 });
+
+// Hydration timing: `export const island = "interaction" | "visible" | "idle"` in a client module
+// (/timing has one island of each). Each island keeps its own trigger.
+test("an interaction island stays server HTML until it is clicked, and counts that click", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/timing");
+  await hydrated(page);
+  const island = page.getByTestId("interaction");
+  await expect(island).toHaveText("Interaction: 0");
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  await island.click();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await expect(island).toHaveText("Interaction: 1");
+  expect(errors).toEqual([]);
+});
+
+test("a visible island hydrates when it scrolls into view", async ({ page }) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/timing");
+  await hydrated(page);
+  const island = page.getByTestId("visible");
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  await island.scrollIntoViewIfNeeded();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await island.click();
+  await expect(island).toHaveText("Visible: 1");
+  expect(errors).toEqual([]);
+});
+
+test("an idle island hydrates without input, and leaves the other islands waiting", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/timing");
+  const island = page.getByTestId("idle");
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await island.click();
+  await expect(island).toHaveText("Idle: 1");
+  await expect(page.getByTestId("interaction")).toHaveAttribute("data-hydrated", "false");
+  await expect(page.getByTestId("visible")).toHaveAttribute("data-hydrated", "false");
+  expect(errors).toEqual([]);
+});
