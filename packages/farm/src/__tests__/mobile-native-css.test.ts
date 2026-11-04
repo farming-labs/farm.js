@@ -75,7 +75,9 @@ describe("app CSS in the native tier", () => {
     expect(row!.style).toMatchObject({ display: "flex", flexDirection: "column", rowGap: 2 });
     const span = byTag(row!, "span")[0]!;
     expect(span.style).toMatchObject({ color: "#5d645f", fontSize: 14 });
+    // Its own color holds in dark mode too: body's dark text color does not override it.
     expect(byTag(tree.root, "p")[1]!.style).toMatchObject({ color: "#c0392b" });
+    expect(byTag(tree.root, "p")[1]!.dark?.color ?? "#c0392b").toBe("#c0392b");
   });
 
   it("wraps .actions, and reports what the cascade cannot express", () => {

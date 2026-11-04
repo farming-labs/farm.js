@@ -175,6 +175,15 @@ describe("native tier tree", () => {
     ).toEqual(["<span> inside text has box styles"]);
   });
 
+  it("titles a page without <title> by its first heading", () => {
+    const tree = createFarmNativeTree(
+      page(`<main><h1>Field <em>notes</em></h1><h1>Later</h1></main>`, ""),
+      url,
+    );
+    expect(tree.title).toBe("Field notes");
+    expect(createFarmNativeTree(page("<p>none</p>", ""), url).title).toBeUndefined();
+  });
+
   it("puts streamed Suspense content in place", () => {
     const html = page(
       `<div><!--$?--><template id="B:0"></template><p>Loading…</p><!--/$--></div>`,
