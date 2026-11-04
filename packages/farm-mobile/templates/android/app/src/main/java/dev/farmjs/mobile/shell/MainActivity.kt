@@ -1,6 +1,7 @@
 package dev.farmjs.mobile.shell
 
 import android.content.pm.ApplicationInfo
+import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
@@ -24,10 +25,12 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
  */
 class MainActivity : AppCompatActivity() {
     private lateinit var navigator: Navigator
+    private var night = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         // Remote debugging needs adb access to the device, so any debuggable build may have it.
         val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (debuggable) WebView.setWebContentsDebuggingEnabled(true)
@@ -96,10 +99,26 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             bottomNav.setOnItemReselectedListener { item -> navigator.popToRoot(item.itemId, animated = true) }
+            navigator.applyTabBarTheme()
         }
 
         onBackPressedDispatcher.addCallback(this, navigator.backCallback)
         navigator.start()
+    }
+
+    /**
+     * The shell keeps its screens and WebViews through a theme change (`uiMode` is in the
+     * manifest's configChanges), so it repaints its own chrome in the new theme.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val next = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (next == night || !::navigator.isInitialized) return
+        night = next
+        enableEdgeToEdge()
+        // Behind the transparent status bar: the window's background, which the theme set once.
+        window.decorView.setBackgroundColor(androidx.core.content.ContextCompat.getColor(this, R.color.farm_background))
+        navigator.applyTheme()
     }
 
     private fun openExternal(url: android.net.Uri) = navigator.openExternal(url)

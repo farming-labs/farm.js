@@ -105,6 +105,16 @@ await signIn({
 });
 ```
 
+### On native screens
+
+React Native screens (`page.native.tsx`) in a [mobile app](/docs/mobile#auth-on-mobile) use the
+same import, `@farm.js/auth/client`. Metro resolves its `react-native` build, which calls the same
+auth routes through `serverFetch` from `@farm.js/native` with the device token, so `getSession`,
+`useAuth` and `signOut` behave as on the web. Web bundles are unaffected: Vite and other web bundlers
+never resolve that condition, and `@farm.js/native` is an optional peer only mobile apps install.
+`signIn` and `signUp` reject on native screens for now; sign in on a web screen. `basePath` applies
+on native too; `baseURL` does not, since native screens always call `mobile.server`.
+
 ## Configuration
 
 The default is intentionally useful. Add options only when application policy differs:

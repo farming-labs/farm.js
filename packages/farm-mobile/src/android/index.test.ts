@@ -616,6 +616,14 @@ describe("React Native screens", () => {
     expect(navigator).toContain("as a web screen");
     expect(navigator).toContain("it.showWeb(newPage(), url.toString())");
     expect(shellFile("Screen.kt")).toContain("fun showWeb(page: Page, url: String)");
+    // The shell keeps its screens through a theme change and repaints its chrome.
+    expect(shellFile("MainActivity.kt")).toContain(
+      "override fun onConfigurationChanged(newConfig: Configuration)",
+    );
+    expect(shellFile("MainActivity.kt")).toContain("navigator.applyTheme()");
+    expect(shellFile("Navigator.kt")).toContain(
+      "stacks.forEach { stack -> stack.forEach(Screen::applyTheme) }",
+    );
     // "server" rules draw the page the server renders, and fall back to the web screen.
     expect(shellFile("RouteConfig.kt")).toContain('setOf(WEB, "native", "platform", "server")');
     expect(shellFile("NativeScreens.kt")).toContain(

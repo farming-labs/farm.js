@@ -10,6 +10,7 @@ import type {
 } from "@farm.js/core/mobile";
 import { withProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
 import { formatDesktopShellInstallCommand, setFarmPlatform, writeShellFiles } from "./desktop";
+import { ensureFarmRscPackages } from "./rsc-packages";
 
 /** An expected failure with its own fix; the CLI prints it without a stack. */
 export class FarmMobileError extends Error {
@@ -434,8 +435,18 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
       outputDir: dirs.www,
       env: {},
     });
-    const { build } = await import("@farm.js/core/internal/build-runtime");
-    await build(config, { preset: "node-server", root, productionVite });
+    const { build, buildFarmRsc, farmAppUsesRscPipeline, resolveFarmRscCheckConfig } =
+      await import("@farm.js/core/internal/build-runtime");
+    // experimental.serverComponents: the RSC pipeline makes the deployment's build, as in
+    // `farm build`, and adds its own mobile entry.
+    await ensureFarmRscPackages(userConfig, root);
+    if (
+      farmAppUsesRscPipeline(await resolveFarmRscCheckConfig(userConfig, root, "production"), root)
+    ) {
+      await buildFarmRsc(userConfig ?? {}, { root, preset: "node-server", outputDir: dirs.www });
+    } else {
+      await build(config, { preset: "node-server", root, productionVite });
+    }
     const assets = await readBundledAssets(root, config.distDir, mobileRuntime);
     if (assets) {
       // WKWebView cannot answer https requests from the app, so iOS loads the files from the
@@ -448,7 +459,7 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     } else {
       runtime.logger.warn(
         "This build has no mobile client, so the app loads its client from the server and " +
-          "navigations stay in the page (server components apps do not get one yet).",
+          "navigations stay in the page.",
       );
     }
 
@@ -513,7 +524,8 @@ async function readBundledAssets(
   const manifest = await runtime.readFarmMobileClientManifest(buildDir);
   if (!manifest) return undefined;
   return {
-    dir: path.resolve(root, runtime.getFarmMobileOutputDirs(distDir).client),
+    // The RSC pipeline names the client output it built from; core builds into `client/`.
+    dir: path.resolve(root, manifest.clientDir ?? runtime.getFarmMobileOutputDirs(distDir).client),
     files: manifest.files,
     entry: manifest.entry,
   };

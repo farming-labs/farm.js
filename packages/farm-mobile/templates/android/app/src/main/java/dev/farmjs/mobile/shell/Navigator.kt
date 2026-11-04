@@ -55,6 +55,32 @@ class Navigator(
     private var selectingTab = false
     private val main = Handler(Looper.getMainLooper())
 
+    /** Paint the shell's chrome, tab bar, and every screen in the current theme. */
+    fun applyTheme() {
+        val background = ContextCompat.getColor(context, R.color.farm_background)
+        containers.forEach { it.setBackgroundColor(background) }
+        applyTabBarTheme()
+        stacks.forEach { stack -> stack.forEach(Screen::applyTheme) }
+        modal?.applyTheme()
+    }
+
+    /** The tab bar's colors, from the shell palette rather than the theme it was created with. */
+    fun applyTabBarTheme() {
+        val surface = ContextCompat.getColor(context, R.color.farm_surface)
+        val accent = ContextCompat.getColor(context, R.color.farm_accent)
+        val text = ContextCompat.getColor(context, R.color.farm_text)
+        val tint = android.content.res.ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+            intArrayOf(accent, (text and 0x00FFFFFF) or 0xB3000000.toInt()),
+        )
+        bottomNav.setBackgroundColor(surface)
+        bottomNav.itemIconTintList = tint
+        bottomNav.itemTextColor = tint
+        bottomNav.itemActiveIndicatorColor = android.content.res.ColorStateList.valueOf(
+            ContextCompat.getColor(context, R.color.farm_background),
+        )
+    }
+
     /** Runs once, when the first tab's page is interactive (used to start warming the pool). */
     var onFirstReady: (() -> Unit)? = null
 

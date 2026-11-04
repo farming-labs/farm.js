@@ -1597,23 +1597,12 @@ export async function buildUniversal(
 }
 
 /**
- * Whether this build adds the mobile client (RFC 0004, 7.2): the app has a `mobile` block, and
- * its pages use Farm's own client router. Server components apps keep the web client in a shell
- * for now (their routers do not hand navigations to it), and a desktop build is never loaded by
- * a mobile shell.
+ * Whether this build adds the mobile client (RFC 0004, 7.2): the app has a `mobile` block. Islands
+ * mode builds here with Farm's own client router; the RSC pipeline (`@farm.js/plugin/rsc`) adds
+ * its own mobile entry. A desktop build is never loaded by a mobile shell.
  */
-function shouldBuildFarmMobileClient(
-  config: ResolvedFarmConfig,
-  options: { quiet?: boolean } = {},
-): boolean {
-  if (!config.mobileClient || config.desktop) return false;
-  const mode = resolveFarmServerComponentsMode(config.experimental?.serverComponents);
-  if (mode === undefined) return true;
-  if (!options.quiet)
-    logger.info(
-      `📱 No mobile client for experimental.serverComponents (${mode}) yet; a mobile shell loads the web client.`,
-    );
-  return false;
+function shouldBuildFarmMobileClient(config: ResolvedFarmConfig): boolean {
+  return Boolean(config.mobileClient) && !config.desktop;
 }
 
 /**
@@ -6250,7 +6239,7 @@ function generateVirtualEntryCode(
   // Islands mode runs `"use server"` actions posted to a page (RFC 0003).
   const farmIslandsMode =
     resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
-  const farmMobileClient = shouldBuildFarmMobileClient(config, { quiet: true });
+  const farmMobileClient = shouldBuildFarmMobileClient(config);
   const hasCompressionRuntime =
     config.compress && resolveFarmInstrumentationRuntime(preset) === "nodejs";
   // agent.crawlers serves /robots.txt unless a root robots.ts owns it.
@@ -11888,7 +11877,7 @@ async function buildNitroUniversal(
   let nativeStylesheets: Record<string, string> | undefined;
   const encodedDocsModulePreloads = encodeFarmDocsModulePreloads(docsModulePreloads);
   const encodedClientModulePreloads = encodeFarmClientModulePreloads(clientModulePreloads);
-  const encodedMobileShellClient = shouldBuildFarmMobileClient(config, { quiet: true })
+  const encodedMobileShellClient = shouldBuildFarmMobileClient(config)
     ? encodeFarmMobileShellClient(
         await finalizeFarmMobileClient({
           buildDir: path.join(root, distDir),
@@ -12239,7 +12228,7 @@ function toFarmNodeResponse(request, response) {
     ssrOutputDir,
     ssrEntryFile,
   );
-  const configuredNitroRouteRules = shouldBuildFarmMobileClient(config, { quiet: true })
+  const configuredNitroRouteRules = shouldBuildFarmMobileClient(config)
     ? varyFarmNitroCacheRulesByShell(routeRulesToNitroRouteRules(config.routeRules))
     : routeRulesToNitroRouteRules(config.routeRules);
   const prerenderNitroRouteRules = Object.fromEntries(
