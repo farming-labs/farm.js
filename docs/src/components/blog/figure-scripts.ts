@@ -1971,11 +1971,11 @@ const AST_BLOCKS = ["canvas", "iframe", "window", "arbitrary CSS"];
 const astRow = (a: string, b: string | null, t: number, at: number) =>
   t < at
     ? ""
-    : `<div style="display:flex;justify-content:space-between;gap:0.6em;opacity:${ease(
+    : `<span style="display:flex;justify-content:space-between;gap:0.6em;opacity:${ease(
         prog(t, at, 0.3),
       ).toFixed(2)}"><span>${a}</span><span style="color:${b ? "#8fb8a0" : "#9a9a9a"}">${
         b ? `&rarr; ${b}` : "&#x2715;"
-      }</span></div>`;
+      }</span></span>`;
 const AST = { fork: 1.15, merge: 3.0, out: 3.9 };
 
 const astNative: FigureSpec = {
