@@ -844,6 +844,9 @@ browser API, and import against a portability model. From the parts it can map, 
 **platform-neutral UI tree** (an intermediate representation, or IR) that a native emitter turns into
 a React Native, Compose, or SwiftUI screen.
 
+For a shorter, illustrated walkthrough of how the analyzer maps your components and picks a tier, see
+the blog post [Your web app, native](/blog/web-to-native).
+
 <svg width="100%" viewBox="0 0 680 694" role="img" xmlns="http://www.w3.org/2000/svg">
 <title>How Farm's mobile analyzer reads a page</title>
 <desc>A build-time pipeline: a page is parsed with Oxc into an AST, every node is classified as a port (renders native) or a block (stays web), the portable nodes become a neutral UI tree, and a conservative rule decides port or web. The emitter that turns the tree into a native screen is still being built.</desc>
