@@ -47,7 +47,7 @@ class Screen(
     private var awaitedToken = 0
 
     init {
-        toolbar.setBackgroundColor(ContextCompat.getColor(context, R.color.farm_surface))
+        applyTheme()
         view.addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         val main = page?.webView ?: requireNotNull(native?.view) { "A screen needs a page or a native view." }
         setMain(main)
@@ -55,6 +55,17 @@ class Screen(
         view.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         page?.host = this
         if (nativeModule != null) toolbar.title = native?.title ?: nativeModule
+    }
+
+    /** This screen's chrome in the current theme: at creation, and after a theme change. */
+    fun applyTheme() {
+        val context = view.context
+        val text = ContextCompat.getColor(context, R.color.farm_text)
+        view.setBackgroundColor(ContextCompat.getColor(context, R.color.farm_background))
+        toolbar.setBackgroundColor(ContextCompat.getColor(context, R.color.farm_surface))
+        toolbar.setTitleTextColor(text)
+        toolbar.navigationIcon?.setTint(text)
+        page?.webView?.setBackgroundColor(ContextCompat.getColor(context, R.color.farm_background))
     }
 
     private fun setMain(main: View) {
@@ -83,6 +94,7 @@ class Screen(
             return
         }
         toolbar.setNavigationIcon(icon)
+        toolbar.navigationIcon?.setTint(ContextCompat.getColor(view.context, R.color.farm_text))
         toolbar.setNavigationContentDescription(description)
         toolbar.setNavigationOnClickListener { onClick() }
     }
