@@ -45,6 +45,7 @@ farm build                    # --web, the default, unchanged
 | Bundled client assets                         | Unreleased                     | Pages in a production shell run the mobile client; Android serves its files from the APK, iOS from the server (see [Bundled client assets](#bundled-client-assets)) |
 | Page shells                                   | Planned                        | No bundled layout or offline state yet; a push waits for the server's document                                                                                      |
 | Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                                    |
+| Server components apps                        | Unreleased                     | Both engines get the mobile client; islands mode also gets device tokens, the RSC pipeline does not (see [Bundled client assets](#bundled-client-assets))            |
 | Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                                  |
 | Native islands and native `@farm.js/ui`       | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` renders on the web only (see [Portable components](#portable-components-farmjsui))                               |
 | Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                                                         |
@@ -411,8 +412,13 @@ Limits:
 
 - Prerendered pages (`"use ssg"`) are static files the server never sees, so in a shell they load
   the web client, and their links navigate in place.
-- Apps with `experimental.serverComponents` get no mobile client yet; their routers do not hand
-  navigations to the shell.
+- Server components apps (`experimental.serverComponents`) get a mobile client too. In islands
+  mode it is the same mobile client as any app's. On the RSC pipeline the build adds one entry,
+  `farm-mobile-client`, that hands navigations to the shell and then runs the web entry, so the
+  two share every chunk and `.farm/mobile-client.json` lists the client build's files with
+  `clientDir`. There `platform()` is `"web"` in both, and pages do not take the WebView pool's
+  in-place renders (the bridge renders through Farm's SPA router), so each push loads its
+  document.
 - Both clients share the web build's stylesheet.
 - A document the WebView loads by itself has no header and gets the web client. The shells load
   router fallbacks and reloads again with the header, iOS also redirects, and Android's WebView
@@ -428,7 +434,9 @@ delegate that hands each in-app navigation (`Link`, `navigateTo`, router `push` 
 page, URL, and history untouched so the native navigator can own the transition. Back/forward,
 `refresh()`, same-page hashes, and cross-origin or locale document navigations are **not** offered,
 so the WebView handles those itself. In a plain browser there is no bridge and the delegate does
-nothing, so the web build is unaffected. Link prefetch is off inside the shell, since every screen
+nothing, so the web build is unaffected. On the RSC pipeline the RSC router offers link clicks
+(`Link replace` as `"replace"`), `router.push` and `replace`, and redirects after a server action
+the same way. Link prefetch is off inside the shell, since every screen
 has its own WebView.
 
 ## Choosing a screen
@@ -828,8 +836,11 @@ without setting `FARM_AUTH_URL`.
 
 ### Limits
 
-- Apps with `experimental.serverComponents` run the RSC server, which does not run Farm plugin
-  hooks in production, so native screens there stay signed out.
+- Server components apps in islands mode run Farm's own server and get device tokens like any
+  app. Apps on the RSC pipeline (`experimental.serverComponents: true` or `{ mode: "rsc" }`)
+  cannot use `auth` or `integrations` yet (the pipeline refuses to start with them), so there is
+  no session to trade: their native screens stay signed out, and a bearer never gets past their
+  middleware.
 - The device keeps the cookies it had when the token was issued, plus the rotations its own
   requests receive. A cookie rotated only in the WebView is not copied; the device keeps working
   while its own cookies sign in the same session.
@@ -1159,5 +1170,5 @@ parts are designed and still on the way:
   has not been built with Xcode (it type-checks against the macOS SDK). See
   [Auth on mobile](#auth-on-mobile) for which auth integrations are covered.
 - Device plugins (`native.<name>`) ship none, so calls reject as unavailable.
-- Apps with `experimental.serverComponents` use the RSC router, which does not hand navigations to
-  the shell yet.
+- Apps on the RSC pipeline get no device tokens until it runs `auth` and integrations (see
+  [Auth on mobile](#auth-on-mobile)), and their pages always load as documents in the WebView pool.

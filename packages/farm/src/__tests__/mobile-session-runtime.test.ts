@@ -33,30 +33,43 @@ afterEach(async () => {
 /**
  * An app with a `mobile` block and an auth integration whose `sid` cookie signs in "alice",
  * until /api/sign-out ends that session. /api/notes runs Farm's origin check, as an auth or
- * integration route does.
+ * integration route does, and the integration guards /account as `protectedRoutes` does.
  */
-const FILES: Record<string, string> = {
-  "package.json": '{"name":"notes","type":"module","private":true}',
-  "farm.config.ts": `import { defineIntegration } from "@farm.js/core";
+const farmConfig = (experimental = "") => `import { defineIntegration } from "@farm.js/core";
+const readSession = (request) => {
+  const sid = /(?:^|;\\s*)sid=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1];
+  const ended = globalThis.__farmTestEnded ?? new Set();
+  return sid === "alice-session" && !ended.has(sid) ? { id: sid, userId: "alice" } : null;
+};
 export default {
   telemetry: false,
-  images: { provider: "none" },
+  images: { provider: "none" },${experimental}
   mobile: { id: "${APP}", server: "https://notes.example.com" },
   integrations: {
     auth: defineIntegration({
       category: "auth",
       type: "test-auth",
       instance: {},
-      session(request) {
-        const sid = /(?:^|;\\s*)sid=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1];
-        const ended = globalThis.__farmTestEnded ?? new Set();
-        return sid === "alice-session" && !ended.has(sid) ? { id: sid, userId: "alice" } : null;
-      },
+      session: readSession,
+      middleware: [
+        {
+          matcher: ["/account"],
+          handler(request) {
+            if (readSession(request)) return;
+            return new Response("signed out", { status: 401 });
+          },
+        },
+      ],
     }),
   },
-};`,
+};`;
+
+const FILES: Record<string, string> = {
+  "package.json": '{"name":"notes","type":"module","private":true}',
+  "farm.config.ts": farmConfig(),
   "src/app/layout.tsx": `export default function Layout({ children }) { return <html><body>{children}</body></html>; }`,
   "src/app/page.tsx": `export default function Page() { return <main>notes</main>; }`,
+  "src/app/account/page.tsx": `export default function Account() { return <main>ACCOUNT_PAGE</main>; }`,
   "src/app/api/me/route.ts": `export function GET(request) {
   return Response.json({ cookie: request.headers.get("cookie"), authorization: request.headers.get("authorization") });
 }`,
@@ -72,7 +85,7 @@ export function POST(request) {
 }`,
 };
 
-async function createApp(prefix: string): Promise<string> {
+async function createApp(prefix: string, files = FILES): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   roots.add(root);
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
@@ -84,7 +97,7 @@ async function createApp(prefix: string): Promise<string> {
       "junction",
     );
   }
-  for (const [file, source] of Object.entries(FILES)) {
+  for (const [file, source] of Object.entries(files)) {
     await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await fs.writeFile(path.join(root, file), source);
   }
@@ -171,6 +184,29 @@ async function expectMobileSessions(
   });
   expect(mutation.status).toBe(200);
 
+  // A protected page runs its guard on the device's cookie session.
+  const account = await call("/account", {
+    headers: native({ authorization: `Bearer ${accessToken}` }),
+  });
+  expect(account.status, account.body).toBe(200);
+  expect(account.body).toContain("ACCOUNT_PAGE");
+  expect(account.cacheControl).toBe("private, no-store");
+  expect((await call("/account", { headers: native() })).status).toBe(401);
+  // A forged token, or a real one sent by a browser page, does not sign in.
+  const forged = await call("/account", {
+    headers: native({ authorization: `Bearer ${accessToken.slice(0, -4)}AAAA` }),
+  });
+  expect(forged.status).toBe(401);
+  expect(forged.body).not.toContain("ACCOUNT_PAGE");
+  const browserPage = await call("/account", {
+    headers: native({
+      authorization: `Bearer ${accessToken}`,
+      "sec-fetch-site": "same-origin",
+      "sec-fetch-mode": "navigate",
+    }),
+  });
+  expect(browserPage.status).toBe(401);
+
   // Without a token, the same native-shaped mutation keeps today's origin check.
   const cookieOnly = await call("/api/notes", {
     method: "POST",
@@ -246,6 +282,52 @@ async function expectMobileSessions(
   expect(revoked.status).toBe(401);
 }
 
+/** Build the app for node-server, start it, and return its port. */
+async function startProductionServer(root: string): Promise<number> {
+  const config = await resolveConfig(
+    { ...(await loadConfig(root, undefined, "production")), root, srcDir: "src" },
+    "production",
+  );
+  await build(config, { root, preset: "node-server" });
+  const port = await getAvailablePort();
+  const child = spawn(
+    process.execPath,
+    [path.join(root, ".farm", ".output", "server", "index.mjs")],
+    {
+      cwd: root,
+      env: { ...process.env, PORT: String(port), HOST: "127.0.0.1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  children.add(child);
+  let output = "";
+  await new Promise<void>((resolve, reject) => {
+    const onData = (chunk: Buffer) => {
+      output += chunk.toString();
+      if (output.includes("Listening on")) resolve();
+    };
+    child.stdout!.on("data", onData);
+    child.stderr!.on("data", onData);
+    child.once("exit", (code) => reject(new Error(`server exited ${code}: ${output}`)));
+  });
+  return port;
+}
+
+/** The same app with server components in islands mode, which runs on Farm's own server. */
+const ISLANDS_FILES: Record<string, string> = {
+  ...FILES,
+  "farm.config.ts": farmConfig(`
+  experimental: { serverComponents: { mode: "islands" } },`),
+  "src/app/counter.tsx": `"use client";
+import { useState } from "react";
+export function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>{count}</button>;
+}`,
+  "src/app/page.tsx": `import { Counter } from "./counter";
+export default function Page() { return <main>notes<Counter /></main>; }`,
+};
+
 describe("mobile session tokens on a running server", () => {
   it("work in farm dev", async () => {
     const root = await createApp("farm-mobile-session-dev-");
@@ -259,32 +341,23 @@ describe("mobile session tokens on a running server", () => {
   it("work in a production build", async (ctx) => {
     if (process.platform === "win32") ctx.skip();
     const root = await createApp("farm-mobile-session-build-");
-    const config = await resolveConfig(
-      { ...(await loadConfig(root, undefined, "production")), root, srcDir: "src" },
-      "production",
-    );
-    await build(config, { root, preset: "node-server" });
+    const port = await startProductionServer(root);
+    await expectMobileSessions("127.0.0.1", port, { mobileClient: true });
+  }, 240_000);
+
+  it("work in farm dev of a server components app in islands mode", async () => {
+    const root = await createApp("farm-mobile-session-islands-dev-", ISLANDS_FILES);
+    const server = await createServer({ root });
+    servers.add(server);
     const port = await getAvailablePort();
-    const child = spawn(
-      process.execPath,
-      [path.join(root, ".farm", ".output", "server", "index.mjs")],
-      {
-        cwd: root,
-        env: { ...process.env, PORT: String(port), HOST: "127.0.0.1" },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    children.add(child);
-    let output = "";
-    await new Promise<void>((resolve, reject) => {
-      const onData = (chunk: Buffer) => {
-        output += chunk.toString();
-        if (output.includes("Listening on")) resolve();
-      };
-      child.stdout!.on("data", onData);
-      child.stderr!.on("data", onData);
-      child.once("exit", (code) => reject(new Error(`server exited ${code}: ${output}`)));
-    });
+    await server.listen(port);
+    await expectMobileSessions("localhost", port);
+  }, 120_000);
+
+  it("work in a production build of a server components app in islands mode", async (ctx) => {
+    if (process.platform === "win32") ctx.skip();
+    const root = await createApp("farm-mobile-session-islands-build-", ISLANDS_FILES);
+    const port = await startProductionServer(root);
     await expectMobileSessions("127.0.0.1", port, { mobileClient: true });
   }, 240_000);
 });

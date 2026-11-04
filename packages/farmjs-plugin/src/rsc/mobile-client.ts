@@ -152,8 +152,8 @@ export function encodeFarmRscMobileShellClient(client: FarmRscMobileShellClient 
     .replace(/'/g, "\\u0027")
     .replace(/`/g, "\\u0060")
     .replace(/\$/g, "\\u0024")
-    .replace(/ /g, "\\u2028")
-    .replace(/ /g, "\\u2029");
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
 /**

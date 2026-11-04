@@ -137,8 +137,11 @@ Common config fields:
   `@farm.js/mobile`) and `farm build --mobile` prints the report unless `native.auto` is `"off"`;
   `farm build` of an app with `mobile` also builds the mobile client (`.farm/mobile-client.json`),
   which documents load when the shell sends `X-Farm-Shell`, and `farm build --mobile` bundles its
-  hashed files into the APK (iOS loads them from the server; SSG pages and server components apps
-  keep the web client);
+  hashed files into the APK (iOS loads them from the server; SSG pages keep the web client;
+  server components apps get it too: islands mode as any app, the RSC pipeline as one
+  `farm-mobile-client` entry that runs the web entry, with `clientDir` in the manifest, and
+  without device tokens since it refuses `auth`/`integrations`); the RSC router offers link
+  clicks, `router.push`/`replace` and server action redirects to `delegateNavigation`;
   `--os ios` generates the iOS shell (Xcode project, Swift + UIKit) into `.farm/output/mobile/ios`
   and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; not yet built with `xcodebuild`;
   `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; on Android

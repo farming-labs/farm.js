@@ -29,6 +29,11 @@ export interface FarmMobileClientManifest {
    * answer exactly these paths from its bundle; a hashed name only ever has these bytes.
    */
   files: string[];
+  /**
+   * The client output the files are in, relative to the app root, when it is not the build
+   * directory's `client/`: the RSC pipeline (`@farm.js/plugin/rsc`) writes this manifest too.
+   */
+  clientDir?: string;
 }
 
 /** What the client build records before the server build finishes the manifest. */
