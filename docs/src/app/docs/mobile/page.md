@@ -1083,7 +1083,11 @@ the page as written, with each DOM element renamed to `@farm.js/native/elements`
   production build links all of an app's CSS on every page, so the emitter reads every plain `.css`
   file the app imports and resolves each element's styles at build time, light and dark:
   - `@import "tailwindcss"` (Tailwind 4) turns on preflight, and each static `className` utility
-    resolves through the same table as the [native tier](#server-rendered-native-screens);
+    resolves through the same table as the [native tier](#server-rendered-native-screens),
+    with the app's `@theme` on top: colors (`oklch`, hex, `rgb`), `--spacing`, text sizes and
+    line heights, radii, weights, tracking, and `initial` resets. A value that reads a `:root`
+    variable (`@theme inline { --color-surface: var(--surface) }`) takes its dark value from
+    `prefers-color-scheme: dark`, so the class changes with the device theme;
   - the app's rules that match an element by its type and classes alone (`h1`, `.card`,
     `button.primary`, `*`, `:root`, `body`), with `inherit` (`font: inherit`) honored on form
     controls; `body` gives the screen its background, text style, and margin.
@@ -1096,11 +1100,11 @@ the page as written, with each DOM element renamed to `@farm.js/native/elements`
 - **Anything it cannot emit keeps the route web**, with the reason in the warning: class names built
   at runtime, `useContext`, `@farm.js/ui`, server functions, `@farm.js/core` APIs other than `Link`,
   packages outside the pure list, asset imports and CSS module names, dynamic `import()`, and
-  stylesheets that change what classes mean (`@theme`, `@utility`, `@apply`, `@layer`, other
-  `@import`s, Tailwind 3's `@tailwind`) or are not plain CSS.
+  stylesheets that change what classes mean (`@utility`, `@custom-variant` such as a class-based
+  dark mode, `@apply`, `@layer`, other `@import`s, Tailwind 3's `@tailwind`) or are not plain CSS.
 
 Not yet: ports in `farm dev --mobile` (the analyzer runs in builds, so they show as web screens in
-dev), iOS, `FlatList` for long lists, event bubbling from a child to a parent's `onClick`, and a
+dev), `@theme` on server-rendered native screens (their classes use the default theme), iOS, `FlatList` for long lists, event bubbling from a child to a parent's `onClick`, and a
 live light/dark switch (a screen takes the theme it opened with). The browser's default styles are
 Chrome's, approximated.
 

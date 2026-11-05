@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  createFarmNativeTheme,
   farmNativeClassProblem,
   resolveFarmNativeClasses,
   resolveFarmNativeInlineStyle,
@@ -63,6 +64,58 @@ describe("native tier styles", () => {
     ).toEqual(["grid", "md:flex", "hover:bg-red-500", "w-[13px]", "absolute"]);
     expect(farmNativeClassProblem("absolute")).toBe('class "absolute" has no native-tier style');
     expect(farmNativeClassProblem("dark:bg-gray-900")).toBeUndefined();
+  });
+
+  it("resolves classes against an app's @theme, light and dark", () => {
+    const theme = createFarmNativeTheme(
+      [
+        ["--color-brand", "oklch(52.7% 0.154 150.069)"],
+        ["--color-surface", "var(--surface)"],
+        ["--spacing", "0.5rem"],
+        ["--radius-card", "12px"],
+        ["--text-tiny", "10px"],
+        ["--text-hero", "3rem"],
+        ["--text-hero--line-height", "calc(3.5 / 3)"],
+        ["--color-gray-*", "initial"],
+      ],
+      { light: { "--surface": "#ffffff" }, dark: { "--surface": "#1d211e" } },
+    );
+    expect(
+      resolveFarmNativeClasses("bg-brand p-4 rounded-card text-hero bg-surface", theme),
+    ).toEqual({
+      style: {
+        backgroundColor: "#ffffff",
+        paddingTop: 32,
+        paddingRight: 32,
+        paddingBottom: 32,
+        paddingLeft: 32,
+        borderTopLeftRadius: 12,
+        borderTopRightRadius: 12,
+        borderBottomRightRadius: 12,
+        borderBottomLeftRadius: 12,
+        fontSize: 48,
+        lineHeight: 56,
+      },
+      // The surface variable changes in dark mode, so its class does too.
+      dark: { backgroundColor: "#1d211e" },
+      unsupported: [],
+    });
+    expect(resolveFarmNativeClasses("bg-brand", theme).style).toEqual({
+      backgroundColor: "#008236",
+    });
+    // A custom size without a line height sets only the size, as Tailwind does.
+    expect(resolveFarmNativeClasses("text-tiny", theme).style).toEqual({ fontSize: 10 });
+    // `--color-gray-*: initial` removes the grays; other colors stay.
+    expect(farmNativeClassProblem("text-gray-500", theme)).toBe(
+      'class "text-gray-500" has no native-tier style',
+    );
+    expect(farmNativeClassProblem("text-red-500", theme)).toBeUndefined();
+    // An explicit dark: class wins over the theme's dark value.
+    expect(resolveFarmNativeClasses("bg-surface dark:bg-brand", theme).dark).toEqual({
+      backgroundColor: "#008236",
+    });
+    // The default table is untouched.
+    expect(farmNativeClassProblem("bg-brand")).toBe('class "bg-brand" has no native-tier style');
   });
 
   it("reads inline styles as React renders them", () => {

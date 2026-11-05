@@ -284,12 +284,12 @@ export default function Site({ children }) { return children; }
     const tailwind = await createApp({
       "src/app/(site)/layout.tsx": `import "../app.css";\nexport default function Site({ children }) { return children; }\n`,
       "src/app/(site)/about/page.tsx": "export default function About() { return <p>About</p>; }\n",
-      "src/app/app.css": `@import "tailwindcss";\n@theme { --color-brand: #1f6f43; }\n`,
+      "src/app/app.css": `@import "tailwindcss";\n@utility tab-4 { tab-size: 4; }\n`,
       "src/app/lab/page.tsx": page,
     });
-    // A theme changes what classes mean, which the native style table does not know.
+    // A custom utility changes what classes mean, which the native style table does not know.
     expect((await generate(tailwind)).warnings).toEqual([
-      expect.stringContaining("src/app/app.css uses @theme, which ports do not read yet"),
+      expect.stringContaining("src/app/app.css uses @utility, which ports do not read yet"),
     ]);
   });
 
@@ -381,5 +381,34 @@ export default function Notes() {
     expect(blocked.screens["/notes"]).toMatchObject({ screen: "web", requested: "native" });
     expect(blocked.warnings[0]).toContain('class "ghost"');
     expect(blocked.warnings[0]).toContain('".card p" depends on where <p> renders');
+  });
+
+  it("resolves classes against the app's @theme, with dark values from :root", async () => {
+    const root = await createApp({
+      "src/app/layout.tsx": `import "./globals.css";\nexport default function Layout({ children }) { return children; }\n`,
+      "src/app/globals.css": `@import "tailwindcss";
+:root { --surface: #ffffff; }
+@media (prefers-color-scheme: dark) { :root { --surface: #1d211e; } }
+@theme inline {
+  --color-surface: var(--surface);
+  --color-brand: oklch(52.7% 0.154 150.069);
+  --radius-card: 12px;
+}
+`,
+      "src/app/page.tsx": PACKING.replace(
+        "<button onClick",
+        '<button className="bg-brand rounded-card" onClick',
+      ).replace("<ul>", '<ul className="bg-surface">'),
+    });
+    const result = await generate(root);
+    expect(result.warnings).toEqual([]);
+    const page = await fs.readFile(ports(root, "src/app/page.tsx"), "utf8");
+    expect(page).toContain(
+      // The theme's oklch brand color, converted as Tailwind's own green-700 is.
+      '<__FarmDom.button __farm={{"tw":{"style":{"borderTopLeftRadius":12,"borderTopRightRadius":12,"borderBottomRightRadius":12,"borderBottomLeftRadius":12,"backgroundColor":"#008236"}},"css":{"style":{}}}}',
+    );
+    expect(page).toContain(
+      '<__FarmDom.ul __farm={{"tw":{"style":{"backgroundColor":"#ffffff"},"dark":{"backgroundColor":"#1d211e"}},"css":{"style":{}}}}>',
+    );
   });
 });

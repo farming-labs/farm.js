@@ -16,6 +16,7 @@ import {
   parseFarmNativeStylesheet,
 } from "./native-css";
 import {
+  createFarmNativeTheme,
   farmNativeClassProblem,
   resolveFarmNativeClasses,
   type FarmNativeStyle,
@@ -409,9 +410,11 @@ export async function emitFarmMobilePort(options: {
   if (!hasDefault) problems.push(`${posix(path.relative(root, graph.page))} has no default export`);
 
   // The app's CSS, which ports apply as the web page gets it. `@import "tailwindcss"` brings
-  // Tailwind 4's preflight and the utilities in the native style table; anything that changes
-  // what a class means (`@theme`, `@utility`, Tailwind 3) keeps the route web.
+  // Tailwind 4's preflight and the utilities in the native style table, and `@theme` blocks
+  // change the values they resolve to; anything else that changes what a class means
+  // (`@utility`, `@custom-variant`, Tailwind 3) keeps the route web.
   const sheets = [];
+  const themeDeclarations: Array<[string, string]> = [];
   let tailwind = false;
   for (const file of options.stylesheets ?? []) {
     let css = read(file).replace(/\/\*[\s\S]*?\*\//g, "");
@@ -420,6 +423,13 @@ export async function emitFarmMobilePort(options: {
       return "";
     });
     css = css.replace(/@source\b[^;]*;/g, "");
+    // `@theme`, `@theme inline`, `@theme static`: declarations only, no nested blocks.
+    css = css.replace(/@theme\b[^{;]*\{([^{}]*)\}/g, (_block, body: string) => {
+      for (const match of body.matchAll(/(--[\w*-]+)\s*:\s*([^;]+);?/g)) {
+        themeDeclarations.push([match[1]!, match[2]!.trim()]);
+      }
+      return "";
+    });
     const directive =
       /@(?:import|layer|tailwind|apply|theme|utility|plugin|config|custom-variant|variant|reference)\b/.exec(
         css,
@@ -437,6 +447,17 @@ export async function emitFarmMobilePort(options: {
     string,
     { style?: FarmNativeStyle; dark?: FarmNativeStyle; inherit?: string[] }
   > = {};
+  // Theme values may read each other or the app's `:root` variables, light and dark.
+  const rootVars = {
+    light: Object.assign(
+      {},
+      ...sheets.map((sheet) => sheet.vars.light),
+      Object.fromEntries(themeDeclarations),
+    ) as Record<string, string>,
+    dark: Object.assign({}, ...sheets.map((sheet) => sheet.vars.dark)) as Record<string, string>,
+  };
+  const theme =
+    themeDeclarations.length > 0 ? createFarmNativeTheme(themeDeclarations, rootVars) : undefined;
   const contextClasses = new Set([
     ...graph.layoutClasses,
     ...classNames.flatMap((entry) => entry.classes),
@@ -446,17 +467,17 @@ export async function emitFarmMobilePort(options: {
     const utilities: string[] = [];
     const appClasses: string[] = [];
     for (const token of classes) {
-      const inTable = resolveFarmNativeClasses(token).unsupported.length === 0;
+      const inTable = resolveFarmNativeClasses(token, theme).unsupported.length === 0;
       const styled = inspectFarmNativeStylesheets(sheets, { class: token }).styled;
       if (tailwind && inTable) utilities.push(token);
       if (styled) appClasses.push(token);
       else if (tailwind && !inTable) {
         problems.push(
-          `${at} ${farmNativeClassProblem(token) ?? `class "${token}" has no port style`}`,
+          `${at} ${farmNativeClassProblem(token, theme) ?? `class "${token}" has no port style`}`,
         );
       }
     }
-    const tw = resolveFarmNativeClasses(utilities.join(" "));
+    const tw = resolveFarmNativeClasses(utilities.join(" "), theme);
     const css = cascadeFarmNativeStylesheetsForElement(
       sheets,
       { tag, classes: appClasses },
