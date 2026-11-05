@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MobileShellContext } from "@farm.js/core/mobile";
@@ -871,4 +874,240 @@ describe("devices", () => {
       ).rejects.toThrow();
     },
   );
+});
+
+describe("React Native native modules (autolinking)", () => {
+  const native = (overrides: Partial<NonNullable<MobileShellContext["native"]>> = {}) => ({
+    engine: "react-native" as const,
+    reactNativeVersion: "0.88.1",
+    hermesVersion: "260318099.0.5",
+    modules: ["app/feed", "app/notes/[id]"],
+    ...overrides,
+  });
+
+  async function writePackage(
+    dir: string,
+    pkg: Record<string, unknown>,
+    files: Record<string, string> = {},
+  ): Promise<void> {
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "package.json"), JSON.stringify(pkg));
+    for (const [file, contents] of Object.entries(files)) {
+      await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
+      await writeFile(path.join(dir, file), contents);
+    }
+  }
+
+  const androidModule = (className: string, javaPackage: string) => ({
+    "android/build.gradle": 'apply plugin: "com.android.library"\n',
+    [`android/src/main/java/${javaPackage.replace(/\./g, "/")}/${className}.java`]: `package ${javaPackage};\n\npublic class ${className} extends BaseReactPackage {\n}\n`,
+  });
+
+  /** An app with React Native installed and the given dependencies. */
+  async function app(pkg: Record<string, unknown>): Promise<string> {
+    const root = await tempDir();
+    const modules = path.join(root, "node_modules");
+    await writePackage(root, { name: "app", ...pkg });
+    await writePackage(path.join(modules, "react-native"), {
+      name: "react-native",
+      version: "0.88.1",
+    });
+    await writePackage(path.join(modules, "@react-native/gradle-plugin"), {
+      name: "@react-native/gradle-plugin",
+    });
+    await writePackage(path.join(modules, "@react-native/codegen"), {
+      name: "@react-native/codegen",
+    });
+    await writePackage(path.join(modules, "zod"), { name: "zod", version: "4.0.0" });
+    await writePackage(path.join(modules, "react"), { name: "react", version: "19.2.8" });
+    await writePackage(
+      path.join(modules, "@react-native-community/netinfo"),
+      {
+        name: "@react-native-community/netinfo",
+        version: "12.0.1",
+        codegenConfig: { name: "RNCNetInfoSpec", type: "modules", jsSrcsDir: "src/internal" },
+      },
+      androidModule("NetInfoPackage", "com.reactnativecommunity.netinfo"),
+    );
+    await writePackage(
+      path.join(modules, "react-native-dev-only"),
+      { name: "react-native-dev-only", codegenConfig: { name: "DevOnlySpec", type: "modules" } },
+      androidModule("DevOnlyPackage", "com.example.devonly"),
+    );
+    // Installed, but only as a dependency of a dependency.
+    await writePackage(
+      path.join(modules, "react-native-transitive"),
+      {
+        name: "react-native-transitive",
+        codegenConfig: { name: "TransitiveSpec", type: "modules" },
+      },
+      androidModule("TransitivePackage", "com.example.transitive"),
+    );
+    await writePackage(
+      path.join(modules, "react-native-device-info"),
+      { name: "react-native-device-info", version: "15.0.2" },
+      androidModule("RNDeviceInfo", "com.learnium.RNDeviceInfo"),
+    );
+    return root;
+  }
+
+  async function digest(ctx: MobileShellContext): Promise<string> {
+    const hash = createHash("sha256");
+    for (const file of await createAndroidProject(ctx)) {
+      hash.update(`${file.path}\0${file.executable ? 1 : 0}\0`);
+      hash.update(file.contents);
+      hash.update("\0");
+    }
+    return hash.digest("hex");
+  }
+
+  // The output before native modules were linked; apps that link none must keep it byte for byte.
+  const WEB_ONLY_DIGEST = "20022f07b040a02202ac24c9317a5aaabe686f4fa60171385e4e3e6a39bf4c8f";
+  const NATIVE_DIGEST = "edd0d2d0f931ebbbf2a898085494dc19bcde111c3af98675e555c30cb46ca069";
+
+  it("leaves projects without native modules byte-identical", async () => {
+    const root = await app({
+      dependencies: { react: "19.2.8", zod: "4.0.0" },
+      devDependencies: { "react-native": "0.88.1", "react-native-dev-only": "1.0.0" },
+    });
+    for (const ctx of [context(), context({ root })]) {
+      expect(await digest(ctx)).toBe(WEB_ONLY_DIGEST);
+    }
+    for (const ctx of [context({ native: native() }), context({ root, native: native() })]) {
+      expect(await digest(ctx)).toBe(NATIVE_DIGEST);
+    }
+  });
+
+  it("links the app's own dependencies with Android code through React Native's Gradle plugin", async () => {
+    const root = await app({
+      dependencies: { "@react-native-community/netinfo": "12.0.1", zod: "4.0.0" },
+      devDependencies: { "react-native": "0.88.1", "react-native-dev-only": "1.0.0" },
+    });
+    const real = (dir: string) => realpathSync(dir).split(path.sep).join("/");
+    const modules = path.join(root, "node_modules");
+    const netinfo = real(path.join(modules, "@react-native-community/netinfo"));
+    const files = await generated(
+      context({
+        root,
+        native: native({
+          devServer: { port: 8082, mainModule: ".farm/output/mobile/native/index" },
+        }),
+      }),
+    );
+
+    const settings = files["settings.gradle.kts"]!;
+    expect(settings).toContain(
+      `includeBuild(${JSON.stringify(real(path.join(modules, "@react-native/gradle-plugin")))})`,
+    );
+    expect(settings).toContain('id("com.facebook.react.settings")');
+    expect(settings).toContain('autolinkLibrariesFromConfigFile(file("autolinking.json"))');
+    // Modules such as netinfo declare their own repositories.
+    expect(settings).toContain("RepositoriesMode.PREFER_SETTINGS");
+    expect(settings).not.toContain("FAIL_ON_PROJECT_REPOS");
+
+    const autolinking = JSON.parse(files["autolinking.json"]!);
+    expect(autolinking.reactNativeVersion).toBe("0.88.1");
+    expect(autolinking.project.android.packageName).toBe(SHELL_NAMESPACE);
+    expect(autolinking.project.android.applicationId).toBe("com.example.notes");
+    expect(Object.keys(autolinking.dependencies)).toEqual(["@react-native-community/netinfo"]);
+    expect(autolinking.dependencies["@react-native-community/netinfo"]).toEqual({
+      root: netinfo,
+      name: "@react-native-community/netinfo",
+      platforms: {
+        android: {
+          sourceDir: `${netinfo}/android`,
+          packageImportPath: "import com.reactnativecommunity.netinfo.NetInfoPackage;",
+          packageInstance: "new NetInfoPackage()",
+          buildTypes: [],
+          libraryName: "RNCNetInfoSpec",
+          componentDescriptors: [],
+          cmakeListsPath: `${netinfo}/android/build/generated/source/codegen/jni/CMakeLists.txt`,
+          cxxModuleCMakeListsModuleName: null,
+          cxxModuleCMakeListsPath: null,
+          cxxModuleHeaderName: null,
+          dependencyConfiguration: null,
+          isPureCxxDependency: false,
+        },
+      },
+    });
+
+    expect(files["build.gradle.kts"]).toContain('apply(plugin = "com.facebook.react.rootproject")');
+    expect(files["build.gradle.kts"]).toContain(
+      'classpath("com.android.tools.build:gradle:9.2.1")',
+    );
+    const appGradle = files["app/build.gradle.kts"]!;
+    expect(appGradle).toContain('id("com.facebook.react")');
+    expect(appGradle).toContain("autolinkLibrariesWithApp()");
+    expect(appGradle).toContain(`root = file(${JSON.stringify(real(root))})`);
+    expect(appGradle).toContain('implementation("com.facebook.react:react-android:0.88.1")');
+    expect(appGradle).toContain('path = file("src/main/jni/CMakeLists.txt")');
+
+    expect(files["gradle/wrapper/gradle-wrapper.properties"]).toContain("gradle-9.4.1-bin.zip");
+    const properties = files["gradle.properties"]!;
+    expect(properties).toContain("android.builtInKotlin=false");
+    expect(properties).toContain("android.newDsl=false");
+    // The plugin writes the Metro port resource itself, so farm_native.xml no longer does.
+    expect(properties).toContain("reactNativeDevServerPort=8082");
+    expect(files["app/src/main/res/values/farm_native.xml"]).not.toContain(
+      "react_native_dev_server_port",
+    );
+
+    expect(files["app/src/main/jni/CMakeLists.txt"]).toContain(
+      "include(${REACT_ANDROID_DIR}/cmake-utils/ReactNative-application.cmake)",
+    );
+    const onLoad = files["app/src/main/jni/OnLoad.cpp"]!;
+    expect(onLoad).toContain("#include <autolinking.h>");
+    expect(onLoad).toContain("autolinking_ModuleProvider(name, params)");
+    expect(onLoad).toContain("autolinking_cxxModuleProvider(name, jsInvoker)");
+    expect(onLoad).toContain("autolinking_registerProviders(registry)");
+    expect(files[ENGINE]).toContain(
+      "packageList = PackageList(activity.application).packages + FarmShellPackage()",
+    );
+
+    // Dev dependencies and dependencies of dependencies are never linked.
+    for (const source of Object.values(files)) {
+      expect(source).not.toMatch(
+        /react-native-dev-only|react-native-transitive|DevOnlySpec|TransitiveSpec/,
+      );
+    }
+  });
+
+  it("links the real @react-native-community/netinfo package from the mobile example", async () => {
+    const example = fileURLToPath(new URL("../../../../examples/mobile/", import.meta.url));
+    const files = await generated(context({ root: example, native: native() }));
+    const linked = JSON.parse(files["autolinking.json"]!).dependencies;
+    expect(Object.keys(linked)).toEqual(["@react-native-community/netinfo"]);
+    expect(linked["@react-native-community/netinfo"].platforms.android).toMatchObject({
+      packageImportPath: "import com.reactnativecommunity.netinfo.NetInfoPackage;",
+      packageInstance: "new NetInfoPackage()",
+      libraryName: "RNCNetInfoSpec",
+    });
+  });
+
+  it("refuses a module without new architecture support, naming the package", async () => {
+    const root = await app({
+      dependencies: {
+        "@react-native-community/netinfo": "12.0.1",
+        "react-native-device-info": "15.0.2",
+      },
+    });
+    await expect(createAndroidProject(context({ root, native: native() }))).rejects.toThrow(
+      /"react-native-device-info" has Android code but no "codegenConfig"/,
+    );
+    await expect(createAndroidProject(context({ root, native: native() }))).rejects.toMatchObject({
+      name: "FarmMobileError",
+    });
+  });
+
+  it("refuses a dependency that is not installed", async () => {
+    const root = await app({ dependencies: { "react-native-missing": "1.0.0" } });
+    await expect(createAndroidProject(context({ root, native: native() }))).rejects.toThrow(
+      /"react-native-missing" is in dependencies but not installed/,
+    );
+  });
+
+  it("links nothing for a web-only build, even with native modules installed", async () => {
+    const root = await app({ dependencies: { "@react-native-community/netinfo": "12.0.1" } });
+    expect(await digest(context({ root }))).toBe(WEB_ONLY_DIGEST);
+  });
 });
