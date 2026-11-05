@@ -2061,7 +2061,8 @@ export class ServerRenderer {
               const layoutEntry = layouts[i];
               const LayoutComponent = layoutModule.default;
               // A layout chain that hydrates is rendered by React in the browser
-              // (document-layout-client.ts), which draws its boundaries without a key.
+              // (document-layout-client.ts), which draws its boundaries without a key, as
+              // the production server leaves them.
               const segment =
                 islandsSegments && !shouldHydrateLayout
                   ? { key: getFarmLayoutKey(layoutEntry.pattern, params) }

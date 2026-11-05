@@ -10603,9 +10603,12 @@ ${
                   {
                     "data-farm-layout-boundary": "true",
                     "data-farm-layout-pattern": layout.pattern,
-                    "data-farm-layout-key": farmLayoutKeyOf
-                      ? farmLayoutKeyOf(layout.pattern, params)
-                      : undefined,
+                    // A layout chain that hydrates is drawn by React in the browser
+                    // (document-layout-client.ts), without a key; it renders whole anyway.
+                    "data-farm-layout-key":
+                      farmLayoutKeyOf && !shouldHydrateLayout
+                        ? farmLayoutKeyOf(layout.pattern, params)
+                        : undefined,
                     style: { display: "contents" },
                   },
                   wrappedElement,

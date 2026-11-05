@@ -215,6 +215,13 @@ test("a navigation request gets the layouts it keeps as boundaries, and flush ma
   expect(html).toContain('data-farm-layout-key="/nav" data-farm-layout-kept="true"');
   expect(html).toContain("Nav page B");
   expect(segment.headers()["cache-control"]).toBe("private, no-store");
+  // A layout chain that hydrates (a client provider in /context's layout) is drawn by React in the
+  // browser, without keys, so the server leaves them out there.
+  const hydrating = await (
+    await request.get("/context", { headers: { Accept: "text/html" } })
+  ).text();
+  expect(hydrating).toContain('data-farm-layout-pattern="/context"');
+  expect(hydrating).not.toContain("data-farm-layout-key");
 
   // F-Stream: flush marks where each React flush ends, with the token from F-Flush.
   const streamed = await fetch(`${baseURL}/stream`, {
