@@ -217,6 +217,24 @@ CMD ["node", ".farm/.output/server/index.mjs"]
 
 The build stage keeps devDependencies because `farm build` runs the CLI. The runtime stage does not need `node_modules`. This file uses the default output directory, `.farm/.output`; if you set `deploy.output`, copy and start that directory instead. Add a `.dockerignore` with `node_modules`, `.farm`, and `.git` so local builds stay out of the image.
 
+### Startup code cache
+
+For the `node-server` preset, `.output/server/index.mjs` is a small launcher: it turns on
+Node's on-disk code cache and then loads the built server, `farm-server.mjs`, beside it. Keep
+starting the server through `index.mjs` as before.
+
+Node otherwise recompiles the whole server bundle from source on every start. The launcher
+writes V8's bytecode to `.output/server/.compile-cache` on the first start, and later starts
+read it instead. On the `examples/basic` app, boot to a first rendered page drops from 185 ms
+to 139 ms.
+
+The cache makes restarts and redeploys of the same build faster. It is written at runtime, so
+give the server a writable output directory to benefit from it — a container with a read-only
+filesystem, or one replaced on every request, simply starts uncached. Nothing depends on it:
+Node checks each entry against the source and its own version, and a stale, corrupt or missing
+cache compiles as before. Set `NODE_COMPILE_CACHE` yourself to put the cache elsewhere, such
+as a writable volume shared by restarts.
+
 ### Hosting platforms
 
 Any platform that builds from a Git repository and runs a long-lived Node.js process can host a Farm app, including Coolify, Dokploy, Railway, Render, Fly.io, Zeabur, Clever Cloud, and Heroku. They need the same settings:

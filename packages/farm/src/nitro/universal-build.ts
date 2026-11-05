@@ -188,11 +188,14 @@ import { farmStripPlatformConfigPlugin } from "../build/strip-platform-config";
 import type { FarmPlatform } from "../platform";
 import {
   createFarmBunServerEntry,
+  createFarmCompileCacheLauncher,
   createFarmNodeServerEntry,
+  FARM_COMPILE_CACHE_DIR,
   FARM_DESKTOP_ENV_MODULE_FILE,
   FARM_DESKTOP_ENV_MODULE_SOURCE,
   FARM_NODE_ENV_MODULE_FILE,
   FARM_NODE_ENV_MODULE_SOURCE,
+  FARM_SERVER_MODULE_FILE,
 } from "./node-server-entry";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
@@ -12775,6 +12778,15 @@ function toFarmNodeResponse(request, response) {
     logger.info("⚡ Built the Node adapter with Rolldown");
   }
 
+  // `index.mjs` becomes the launcher that primes V8's code cache, with Nitro's
+  // built server moved beside it. Only for a plain Node server: a desktop entry
+  // exports `start()` rather than listening on import, and a serverless or edge
+  // runtime gets a fresh filesystem per cold start, so a cache written at runtime
+  // would never be read back.
+  if (preset === "node-server" && !desktopServerEntry) {
+    await installFarmCompileCacheLauncher(path.join(outputDir, "server"), fs);
+  }
+
   if (pluginManager) {
     await pluginManager.runHookParallel("afterNitroBuild", {
       root,
@@ -12867,6 +12879,34 @@ async function copyPrebuiltSSRBundle(
   fs: typeof import("fs/promises"),
 ): Promise<void> {
   await writeSSRBundleFiles(await prepareSSRBundleFiles(ssrBundle, minifyOptions), targetDir, fs);
+}
+
+/**
+ * Put the compile-cache launcher at `index.mjs` and move Nitro's built server beside it,
+ * so `node .output/server/index.mjs` keeps working and starts from V8's code cache.
+ *
+ * A build that already installed the launcher (a rebuild into the same directory) is left
+ * alone rather than wrapping the launcher in itself.
+ */
+export async function installFarmCompileCacheLauncher(
+  serverDir: string,
+  fs: typeof import("fs/promises"),
+): Promise<boolean> {
+  const entryPath = path.join(serverDir, "index.mjs");
+  const serverPath = path.join(serverDir, FARM_SERVER_MODULE_FILE);
+  const entry = await fs.readFile(entryPath, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (entry === null) return false;
+  if (entry.includes(`./${FARM_SERVER_MODULE_FILE}`)) return false;
+
+  await fs.rename(entryPath, serverPath);
+  await fs.writeFile(entryPath, createFarmCompileCacheLauncher(FARM_SERVER_MODULE_FILE));
+  // A cache from an earlier build describes code this one replaced. Node would reject
+  // those entries anyway; removing them keeps the output from carrying dead bytes.
+  await fs.rm(path.join(serverDir, FARM_COMPILE_CACHE_DIR), { recursive: true, force: true });
+  return true;
 }
 
 async function registerPrebuiltSSRPackageImport(
