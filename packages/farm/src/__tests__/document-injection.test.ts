@@ -65,7 +65,11 @@ function renderFarmClientEntryScript(): string {
 const MODULE_PRELOAD_TAGS =
   '\n  <link rel="modulepreload" href="/chunks/react-h1.js" fetchpriority="low">';
 
-function createInjector(viewportTags = renderViewportHead(undefined)) {
+/** Islands mode's boot entry, which a document that hydrates nothing at load starts with. */
+const BOOT_SCRIPT =
+  '<script type="module" src="/__farm_client_boot_src__" data-farm-runtime="/__farm_client_js_src__"></script>';
+
+function createInjector(viewportTags = renderViewportHead(undefined), bootsClient = false) {
   const inject = new Function(
     "html",
     "title",
@@ -88,7 +92,13 @@ function createInjector(viewportTags = renderViewportHead(undefined)) {
     "ensureFarmDocumentRoot",
     "addFarmFallbackIcon",
     "hasFavicon",
-    "let fullHtml;\n" + extractEmittedFullDocumentInjection() + "\nreturn fullHtml;",
+    // Set before the composer runs, as the handler does once the whole page has rendered.
+    `let fullHtml;\nlet farmBootsClient = ${bootsClient};\n` +
+      "const farmEntryScript = farmBootsClient ? " +
+      JSON.stringify(BOOT_SCRIPT) +
+      " : renderFarmClientEntryScript();\n" +
+      extractEmittedFullDocumentInjection() +
+      "\nreturn fullHtml;",
   );
   return ((...args: unknown[]) =>
     inject(
@@ -119,6 +129,33 @@ function createInjector(viewportTags = renderViewportHead(undefined)) {
 }
 
 describe("generated full-document injection", () => {
+  it("starts a document that hydrates nothing at load with the boot entry and no preloads", () => {
+    const html = "<html><head><title>App</title></head><body><main>page</main></body></html>";
+    const args = [
+      html,
+      "Farm.js App",
+      "",
+      "",
+      false,
+      { hasExplicitTitle: false },
+      { __farmCanonicalPath: "/post" },
+      [],
+      {},
+      renderFarmClientBootstrapScript,
+      () => "",
+    ] as const;
+
+    const eager = createInjector()(...args);
+    expect(eager).toContain(MODULE_PRELOAD_TAGS);
+    expect(eager).toContain(renderFarmClientEntryScript());
+    expect(eager).not.toContain("__farm_client_boot_src__");
+
+    const booting = createInjector(undefined, true)(...args);
+    expect(booting).not.toContain("modulepreload");
+    expect(booting).toContain(BOOT_SCRIPT);
+    expect(booting.match(/<script type="module"/g)).toHaveLength(1);
+  });
+
   it("keeps $-sequences in page props literal when injecting the bootstrap script", () => {
     const inject = createInjector();
 

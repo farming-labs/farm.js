@@ -44,9 +44,11 @@ import { FARM_VERSION } from "../version";
 import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
 import { hasCustomFarmRouteContext, resolveDeployOutputPath } from "../config";
 import {
+  FARM_CLIENT_BOOT_SRC_PLACEHOLDER,
   FARM_CLIENT_CSS_HREF_PLACEHOLDER,
   FARM_CLIENT_JS_SRC_PLACEHOLDER,
   findFingerprintedClientEntry,
+  resolveClientBootSrc,
   resolveHashedClientCssHref,
   resolveHashedClientJsSrc,
 } from "./client-css-href";
@@ -79,6 +81,7 @@ import {
   generateFarmClientPluginEntryCode,
   type FarmClientPluginEntryCode,
 } from "../client-plugin-build";
+import { canBootFarmIslandsClient } from "../islands-client-boot";
 import {
   generateClientCachePersistenceCode,
   resolveFarmClientCacheAdapterEntry,
@@ -93,6 +96,7 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "../document-layout-client";
+import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "../client/navigation-stream-client";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
@@ -2134,6 +2138,18 @@ async function buildClient(
 
     // Write the client entry to a temporary file
     await fs.writeFile(clientEntryPath, clientHydrationCode);
+    // Islands mode's boot entry. It shares no module with the client entry and runs it from its
+    // URL, so the client entry and its chunks come out as they would without it.
+    const clientInput: Record<string, string> = { [entryName]: clientEntryPath };
+    if (platform === "web" && canBootFarmIslandsClient(config)) {
+      const clientBootPath = path.join(clientEntryDir, "farm-client-boot.tsx");
+      await fs.writeFile(
+        clientBootPath,
+        'import { startFarmIslandsBoot } from "@farm.js/core/internal/islands-boot";\n' +
+          "startFarmIslandsBoot();\n",
+      );
+      clientInput[`${entryName}-boot`] = clientBootPath;
+    }
 
     // Tailwind support:
     // - If project has explicit PostCSS config, respect it.
@@ -2178,9 +2194,7 @@ async function buildClient(
           assetsInlineLimit: 0,
           cssCodeSplit: false, // Bundle all CSS into one file
           rollupOptions: {
-            input: {
-              [entryName]: clientEntryPath,
-            },
+            input: clientInput,
             output: {
               entryFileNames: "[name]-h[hash].js",
               chunkFileNames: "chunks/[name]-h[hash].js",
@@ -2462,52 +2476,7 @@ async function fetchFarmNavigationDocument(url, headers, recover = true, signal)
   return response;
 }
 
-${
-  streamNavigations
-    ? `// Reads a streamed navigation (F-Stream) up to the end of React's shell. \`next\` then resolves
-// with each later flush as it ends, and null at the end; a document without a marker is all shell.
-// The marker carries the random token the server sent in the F-Flush header, so page content
-// cannot forge a boundary; a response without a valid token is all shell.
-async function readFarmNavigationStream(body, flushToken) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  const marker = typeof flushToken === "string" && /^[0-9a-f]{32}$/.test(flushToken)
-    ? "<!--farm-flush:" + flushToken + "-->"
-    : "";
-  let text = "";
-  let done = false;
-  const next = async function() {
-    for (;;) {
-      const at = marker ? text.indexOf(marker) : -1;
-      if (at !== -1) {
-        const flush = text.slice(0, at);
-        text = text.slice(at + marker.length);
-        return flush;
-      }
-      if (done) {
-        const flush = text;
-        text = "";
-        return flush ? flush : null;
-      }
-      const result = await reader.read();
-      if (result.done) {
-        done = true;
-        text += decoder.decode();
-      } else {
-        text += decoder.decode(result.value, { stream: true });
-      }
-    }
-  };
-  const shell = await next();
-  if (done && !text) return { shell: shell || "" };
-  return {
-    shell: shell,
-    next: next,
-    cancel: function() { reader.cancel().catch(function() {}); },
-  };
-}`
-    : ""
-}
+${streamNavigations ? FARM_NAVIGATION_STREAM_READER_SOURCE : ""}
 
 function clearFarmPrefetchCacheOnDeploymentMismatch(router, error) {
   if (error?.name === "FarmDeploymentMismatchError") {
@@ -6249,6 +6218,7 @@ function generateVirtualEntryCode(
   // Islands mode runs `"use server"` actions posted to a page (RFC 0003).
   const farmIslandsMode =
     resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
+  const farmClientBoot = canBootFarmIslandsClient(config);
   const farmMobileClient = shouldBuildFarmMobileClient(config);
   // farm build --mobile with mobile.shells: this server renders page shells for its token.
   const farmMobileShells = farmMobileClient && config.mobileShells ? config.mobileShells : null;
@@ -7736,6 +7706,31 @@ function renderFarmRendererHydrationScript() {
 function renderFarmClientEntryScript(early) {
   // An early entry runs as soon as it loads, while the body still streams.
   return stampFarmCspNonce('<script type="module"' + (early ? ' async' : '') + ' src="/__farm_client_js_src__"></script>');
+}
+
+// Islands mode: a whole document in which nothing hydrates at load (no island with \`load\`, and no
+// page, layout or route slot hydrating as a root) starts with the boot entry, which loads the
+// client runtime on an island's own trigger, a link or a form (RFC 0003, section 10).
+const FARM_CLIENT_BOOT = ${JSON.stringify(farmClientBoot)};
+const FARM_ISLAND_OPENING_TAG = /<f-island\\b[^>]*>/g;
+const FARM_DEFERRED_ISLAND_STRATEGY = /\\sstrategy="(?:interaction|visible|idle)"/;
+
+function farmDocumentBootsClient(markup, hydratesAtLoad, routeSlots) {
+  if (!FARM_CLIENT_BOOT || hydratesAtLoad || typeof markup !== "string") return false;
+  if (routeSlots && routeSlots.length > 0) return false;
+  // A Suspense boundary the server gave up on, which the browser renders.
+  if (markup.includes("<!--$!-->") || markup.includes("<!--$?-->")) return false;
+  for (const match of markup.matchAll(FARM_ISLAND_OPENING_TAG)) {
+    if (!FARM_DEFERRED_ISLAND_STRATEGY.test(match[0])) return false;
+  }
+  return true;
+}
+
+// The boot entry runs the client entry from the URL on its script.
+function renderFarmClientBootScript() {
+  return stampFarmCspNonce('<script type="module" src="${
+    farmClientBoot ? FARM_CLIENT_BOOT_SRC_PLACEHOLDER : ""
+  }" data-farm-runtime="/__farm_client_js_src__"></script>');
 }
 
 // Renderer options for the response being rendered: its CSP nonce, which the
@@ -10647,9 +10642,12 @@ ${
                   {
                     "data-farm-layout-boundary": "true",
                     "data-farm-layout-pattern": layout.pattern,
-                    "data-farm-layout-key": farmLayoutKeyOf
-                      ? farmLayoutKeyOf(layout.pattern, params)
-                      : undefined,
+                    // A layout chain that hydrates is drawn by React in the browser
+                    // (document-layout-client.ts), without a key; it renders whole anyway.
+                    "data-farm-layout-key":
+                      farmLayoutKeyOf && !shouldHydrateLayout
+                        ? farmLayoutKeyOf(layout.pattern, params)
+                        : undefined,
                     style: { display: "contents" },
                   },
                   wrappedElement,
@@ -10810,6 +10808,9 @@ ${
         // renderer-emitted one; explicit metadata titles still come first.
         const suppressDefaultTitle =
           !renderedMetadata.hasExplicitTitle && rendererHasTitle;
+        // Set once the whole document is rendered: whether it starts with the boot entry, which
+        // preloads nothing.
+        let farmBootsClient = false;
         // A layout's own <html> document with Farm's head assets merged in and the #root the client
         // hydrates opening its body: the whole document, or a streamed one's opening.
         const composeFarmFullDocument = function(markup) {
@@ -10819,7 +10820,7 @@ ${
           );
           composed = composed
             // Inject CSS link after opening head tag or first meta tag
-            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(composed, route.clientModule); })
+            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + (farmBootsClient ? "" : renderFarmClientModulePreloads(composed, route.clientModule)); })
             .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
             // Explicit metadata wins over renderer and layout titles. Without
             // explicit metadata, a renderer title wins over the layout title.
@@ -10995,7 +10996,15 @@ ${
             throw renderedPage.streamErrors[0];
           }
         }
-        
+        farmBootsClient = farmDocumentBootsClient(
+          html,
+          route.shouldHydrate || shouldHydrateLayout || Boolean(pprCacheKey),
+          routeSlotPayload
+        );
+        const farmEntryScript = farmBootsClient
+          ? renderFarmClientBootScript()
+          : renderFarmClientEntryScript();
+
         let fullHtml;
         if (hasFullDocument) {
           // Layout provides full HTML structure - inject CSS and client script
@@ -11011,7 +11020,7 @@ ${
                 routeSlotPayload,
                 clientPageProps
               ) + '\\n' +
-                '  ' + renderFarmClientEntryScript() + '\\n</body>',
+                '  ' + farmEntryScript + '\\n</body>',
             );
         } else {
           // No layout with full document - wrap in HTML structure
@@ -11022,13 +11031,13 @@ ${
   \${viewportTags}
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   \${suppressDefaultTitle ? "" : "<title>" + title + "</title>"}\${metaTags}\${rendererHead ? "\\n  " + rendererHead : ""}
-  <link rel="stylesheet" href="/__farm_client_css_href__">\${renderFarmClientModulePreloads(html, route.clientModule)}
+  <link rel="stylesheet" href="/__farm_client_css_href__">\${farmBootsClient ? "" : renderFarmClientModulePreloads(html, route.clientModule)}
   \${renderFarmRendererHydrationScript()}
 </head>
 <body>
   <div id="root">\${html}</div>
   \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, routeSlotPayload, clientPageProps)}
-  \${renderFarmClientEntryScript()}
+  \${farmEntryScript}
 </body>
 </html>\`;
         }
@@ -11973,12 +11982,14 @@ async function buildNitroUniversal(
   // content hash of the bytes browsers will actually receive. Substituting in
   // memory, before any consumer, covers the disk write below as well as the
   // prebuilt-SSR copies and prerendering that reuse this bundle directly.
-  const [clientCssHref, clientJsSrc, docsModulePreloads, clientModulePreloads] = await Promise.all([
-    resolveHashedClientCssHref(clientOutputDir),
-    resolveHashedClientJsSrc(clientOutputDir),
-    readFarmDocsModulePreloads(path.join(root, distDir)),
-    readFarmClientModulePreloads(path.join(root, distDir)),
-  ]);
+  const [clientCssHref, clientJsSrc, clientBootSrc, docsModulePreloads, clientModulePreloads] =
+    await Promise.all([
+      resolveHashedClientCssHref(clientOutputDir),
+      resolveHashedClientJsSrc(clientOutputDir),
+      resolveClientBootSrc(clientOutputDir),
+      readFarmDocsModulePreloads(path.join(root, distDir)),
+      readFarmClientModulePreloads(path.join(root, distDir)),
+    ]);
   let nativeStylesheets: Record<string, string> | undefined;
   const encodedDocsModulePreloads = encodeFarmDocsModulePreloads(docsModulePreloads);
   const encodedClientModulePreloads = encodeFarmClientModulePreloads(clientModulePreloads);
@@ -12017,6 +12028,13 @@ async function buildNitroUniversal(
     }
     if (output.code.includes(FARM_CLIENT_JS_SRC_PLACEHOLDER)) {
       output.code = output.code.split(FARM_CLIENT_JS_SRC_PLACEHOLDER).join(clientJsSrc);
+    }
+    if (output.code.includes(FARM_CLIENT_BOOT_SRC_PLACEHOLDER)) {
+      // Server code that can send the boot entry needs the file the client build emits with it.
+      if (!clientBootSrc) {
+        throw new IncompleteClientBuildOutputError("farm-client-boot is missing");
+      }
+      output.code = output.code.split(FARM_CLIENT_BOOT_SRC_PLACEHOLDER).join(clientBootSrc);
     }
     if (
       config.mobileClient &&

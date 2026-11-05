@@ -3,7 +3,7 @@
  * `mobile` block for an OS and write the navigator manifest. Loaded only through
  * `loadFarmMobileRuntime()`, so web builds never parse it.
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 import { loadConfig, resolveConfig, type FarmUserConfig, type ResolvedFarmConfig } from "../config";
@@ -22,6 +22,7 @@ import {
   type ResolvedFarmMobileConfig,
 } from "./config";
 import type { FarmMobileAnalyzerStats, FarmMobileBlocker } from "./analyzer";
+import type { FarmMobilePort } from "./port";
 import {
   createFarmMobileNativeReport,
   formatFarmMobileNativeReport,
@@ -33,6 +34,7 @@ import {
   type FarmMobileShellManifest,
 } from "./routes";
 import {
+  createFarmMobileModuleId,
   readFarmMobilePageExport,
   resolveFarmMobileScreens,
   type FarmMobilePageExport,
@@ -96,6 +98,8 @@ export function getFarmMobileOutputDirs(distDir: string): {
   /** Built apps, such as the debug APK. */
   dist: string;
   report: string;
+  /** Generated React Native ports of portable pages. */
+  ports: string;
   analyzerCache: string;
   /** The production build's client output, which holds the mobile client a shell bundles. */
   client: string;
@@ -109,6 +113,7 @@ export function getFarmMobileOutputDirs(distDir: string): {
     ios: path.join(root, "ios"),
     dist: path.join(root, "dist"),
     report: path.join(root, "native-report.json"),
+    ports: path.join(root, "ports"),
     analyzerCache: path.join(distDir, "cache", "mobile", "analyzer.json"),
     client: path.join(distDir, "client"),
   };
@@ -153,6 +158,8 @@ export interface FarmMobileApp {
   nativeLayouts: Record<string, PlatformRouteFiles>;
   /** Absolute page file per file-based page route. */
   pageFiles: Map<string, string>;
+  /** The React Native port of each route Farm ported, written by `generateFarmMobileRoutes`. */
+  ports: Record<string, FarmMobilePort>;
   /** The analyzer's report, when it ran. */
   report?: FarmMobileNativeReport;
   analyzerStats?: FarmMobileAnalyzerStats;
@@ -250,6 +257,8 @@ export async function resolveFarmMobileApp(
   let { screens, warnings } = resolveFarmMobileScreens(screenOptions);
   let report: FarmMobileNativeReport | undefined;
   let analyzerStats: FarmMobileAnalyzerStats | undefined;
+  const ports = new Map<string, FarmMobilePort>();
+  const portProblems = new Map<string, string[]>();
   // A page that requires a native screen is checked on every run, dev included.
   const asserted = [...pageExports.values()].some((page) => page.config.native === true);
   const analyze =
@@ -262,19 +271,64 @@ export async function resolveFarmMobileApp(
       const decision = screens[route]!;
       return decision.source === "default" || decision.requested !== undefined;
     });
+    // Ports need every stylesheet the app bundles, so they read every route's graph.
+    const portable =
+      context.os === "android" &&
+      mobile.native.engine !== "platform" &&
+      (mobile.native.auto === "on" ||
+        candidates.some((route) => screens[route]!.requested === "native"));
     const { analyzeFarmMobileRoutes } = await import("./analyzer");
-    const result = await analyzeFarmMobileRoutes({
+    const analyzed = await analyzeFarmMobileRoutes({
       root,
       srcDir: config.srcDir,
-      routes: candidates,
+      routes: portable ? routes : candidates,
       pageFiles: scan.pageFiles,
       serverComponents:
         resolveFarmServerComponentsMode(config.experimental?.serverComponents) !== undefined,
       cacheFile: path.resolve(root, getFarmMobileOutputDirs(config.distDir).analyzerCache),
     });
-    analyzerStats = result.stats;
+    analyzerStats = analyzed.stats;
+    const result = {
+      ...analyzed,
+      routes: Object.fromEntries(
+        candidates.flatMap((route) =>
+          analyzed.routes[route] ? [[route, analyzed.routes[route]!] as const] : [],
+        ),
+      ),
+    };
+    // React Native ports of portable pages: the routes `auto: "on"` picks and config routes that
+    // ask for a native screen, unless the page renders on the native tier without JavaScript.
+    // Only Android hosts React Native.
+    if (portable) {
+      const { emitFarmMobilePort } = await import("./port");
+      const portsDir = path.resolve(root, getFarmMobileOutputDirs(config.distDir).ports);
+      for (const analysis of Object.values(result.routes)) {
+        const graph = result.graphs[analysis.route];
+        const wanted =
+          (mobile.native.auto === "on" && analysis.decision === "port") ||
+          screens[analysis.route]!.requested === "native";
+        if (!graph || !wanted || analysis.tier === "native") continue;
+        const emitted = await emitFarmMobilePort({
+          root,
+          graph,
+          portsDir,
+          module: createFarmMobileModuleId(analysis.route),
+          stylesheets: result.stylesheets,
+          unreadStylesheets: result.unreadStylesheets,
+        });
+        if ("problems" in emitted) portProblems.set(analysis.route, emitted.problems);
+        else ports.set(analysis.route, emitted.port);
+      }
+    }
     ({ screens, warnings } = resolveFarmMobileScreens({
       ...screenOptions,
+      portFiles: new Map(
+        [...ports].map(([route, port]) => [
+          route,
+          path.resolve(root, getFarmMobileOutputDirs(config.distDir).ports, port.entry),
+        ]),
+      ),
+      portProblems,
       analyzerPorts: new Set(
         Object.values(result.routes)
           .filter((route) => route.decision === "port")
@@ -343,6 +397,7 @@ export async function resolveFarmMobileApp(
     warnings,
     nativeLayouts,
     pageFiles: scan.pageFiles,
+    ports: Object.fromEntries(ports),
     ...(report ? { report, analyzerStats } : {}),
   };
 }
@@ -359,6 +414,16 @@ export async function generateFarmMobileRoutes(
   const file = path.resolve(app.config.root, dirs.routes);
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, `${JSON.stringify(app.manifest, null, 2)}\n`);
+  // Farm owns the ports directory: a route that is no longer ported loses its files.
+  const portsDir = path.resolve(app.config.root, dirs.ports);
+  await rm(portsDir, { recursive: true, force: true });
+  for (const port of Object.values(app.ports)) {
+    for (const [relative, source] of Object.entries(port.files)) {
+      const target = path.join(portsDir, relative);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, source);
+    }
+  }
   if (!app.report) return { ...app, file };
   const reportFile = path.resolve(app.config.root, dirs.report);
   await writeFile(reportFile, `${JSON.stringify(app.report, null, 2)}\n`);

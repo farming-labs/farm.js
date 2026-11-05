@@ -2,8 +2,9 @@
 //
 // 1. `farm config inspect --mobile --report` for Android and iOS: every route's screen, source,
 //    module, and presentation in farm-routes.json, and the analyzer's port and web decisions.
-// 2. `farm build` (web) and `farm start`: every route answers, and no native screen file, shell
-//    bridge, or mobile block reaches the web output.
+// 2. `farm build` (web) and `farm start`: every route answers, no native screen file, shell
+//    bridge, or mobile block reaches the web output, and every `server` screen's native tree
+//    converts without unsupported markup.
 import { spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -56,21 +57,37 @@ expect(
 );
 expect(manifest.rules.at(-1)?.pattern === "^/", "a catch-all push rule comes last");
 for (const entry of manifest.rules) {
-  expect(["web", "native", "platform"].includes(entry.screen), `${entry.pattern} has a screen`);
   expect(
-    entry.screen === "web" ? entry.module === undefined : entry.module === `app${entry.route}`,
+    ["web", "server", "native", "platform"].includes(entry.screen),
+    `${entry.pattern} has a screen`,
+  );
+  const module = entry.route === "/" ? "app" : `app${entry.route}`;
+  expect(
+    entry.screen === "web" ? entry.module === undefined : entry.module === module,
     `${entry.route} module id`,
   );
 }
 
+// `native.auto: "on"`: the routes the analyzer proves render natively are `server` screens.
+const SERVER = ["/", "/notes", "/notes/[id]", "/about", "/feed", "/navigation/step/[n]", "/docs/[...slug]"];
 const ANDROID = {
-  "/": { presentation: "tab", tab: 0, screen: "web", source: "default" },
-  "/notes": { presentation: "tab", tab: 1, screen: "web", source: "default" },
+  "/": { presentation: "tab", tab: 0, screen: "server", source: "analyzer" },
+  "/notes": { presentation: "tab", tab: 1, screen: "server", source: "analyzer" },
   "/settings": { presentation: "tab", tab: 2, screen: "web", source: "default" },
-  "/notes/[id]": { presentation: "push", screen: "web", source: "default" },
+  "/notes/[id]": { presentation: "push", screen: "server", source: "analyzer" },
   "/notes/new": { presentation: "modal", screen: "web", source: "default" },
-  "/navigation/step/[n]": { presentation: "replace", screen: "web", source: "default" },
-  "/docs/[...slug]": { presentation: "push", screen: "web", source: "default" },
+  "/navigation/step/[n]": { presentation: "replace", screen: "server", source: "analyzer" },
+  "/docs/[...slug]": { presentation: "push", screen: "server", source: "analyzer" },
+  "/about": { presentation: "push", screen: "server", source: "analyzer" },
+  "/feed": { presentation: "push", screen: "server", source: "analyzer" },
+  "/navigation": { presentation: "push", screen: "web", source: "default" },
+  // The analyzer's `port`: Farm generates its React Native screen.
+  "/lab/packing": {
+    presentation: "push",
+    screen: "native",
+    source: "analyzer",
+    module: "app/lab/packing",
+  },
   "/stations/[id]": { presentation: "push", screen: "web", source: "default" },
   "/map": { presentation: "push", screen: "native", source: "config", module: "app/map" },
   "/camera": { presentation: "push", screen: "native", source: "file", module: "app/camera" },
@@ -88,11 +105,29 @@ for (const [route, expected] of Object.entries(ANDROID)) {
   }
 }
 expect(row("/camera")?.file === "src/app/(styled)/camera/page.android.tsx", "android camera file");
+expect(
+  JSON.stringify(manifest.rules.filter((entry) => entry.screen === "server").map((entry) => entry.route).sort()) ===
+    JSON.stringify([...SERVER].sort()),
+  `the server screens are ${SERVER.join(", ")}`,
+);
+for (const route of SERVER) {
+  expect(row(route)?.analysis?.tier === "native", `${route} is in the native tier`);
+}
 // Locale prefixes match the same rules.
 const notesPattern = new RegExp(rule("/notes").pattern);
 expect(notesPattern.test("/es/notes") && notesPattern.test("/notes"), "/es/notes is the notes tab");
 expect(!new RegExp(rule("/notes/[id]").pattern).test("/es"), "/es is not a note");
 
+expect(
+  row("/lab/packing")?.file === ".farm/output/mobile/ports/app/lab/packing.port.tsx",
+  "/lab/packing screen file is its port",
+);
+const packingPort = await readFile(
+  join(mobileDir, "ports", "src", "app", "lab", "packing", "page.tsx"),
+  "utf8",
+).catch(() => "");
+expect(packingPort.includes("<__FarmDom.input"), "/lab/packing port renames its elements");
+expect(!packingPort.includes("@farm.js/core"), "/lab/packing port does not import @farm.js/core");
 const packing = row("/lab/packing")?.analysis;
 expect(packing?.decision === "port", "/lab/packing is a port");
 expect(JSON.stringify(packing?.wins) === '["input","list"]', "/lab/packing wins: input, list");
@@ -126,7 +161,11 @@ const iosRule = (route) => ios.rules.find((entry) => entry.route === route);
 expect(iosRule("/map")?.screen === "web" && iosRule("/map")?.source === "config", "ios /map is web");
 expect(iosRule("/camera")?.screen === "native", "ios /camera is native");
 expect((await readJson("native-report.json")).routes.find((entry) => entry.route === "/camera")?.file === "src/app/(styled)/camera/page.native.tsx", "ios camera file");
-expect(iosRule("/settings/device")?.screen === "web", "ios /settings/device is web (page.kt is Android)");
+// page.kt is Android only; on iOS its page.tsx passes the native-tier check.
+expect(iosRule("/settings/device")?.screen === "server", "ios /settings/device is a server screen");
+for (const route of SERVER) expect(iosRule(route)?.screen === "server", `ios ${route} is a server screen`);
+// iOS does not host React Native yet, so the port stays web there.
+expect(iosRule("/lab/packing")?.screen === "web", "ios /lab/packing is web");
 
 // ---- web build ------------------------------------------------------------------------------
 
@@ -151,7 +190,11 @@ async function* files(dir) {
     else if (/\.(?:m?js|html|json)$/.test(entry.name)) yield file;
   }
 }
+// The mobile client entry carries the shell bridge on purpose: the server sends it only to
+// documents a shell asks for (checked below), never to a browser.
+const mobileClient = /^farm-mobile-client-h[0-9a-f]+\.js$/;
 for await (const file of files(join(root, ".farm", ".output"))) {
+  if (mobileClient.test(file.split(/[\\/]/).at(-1))) continue;
   const source = await readFile(file, "utf8");
   for (const leak of leaks) expect(!source.includes(leak), `${leak} is in the web output: ${file}`);
 }
@@ -187,6 +230,37 @@ try {
     const html = await response.text();
     expect(response.status === 200 && html.includes(text), `GET ${path} renders "${text}"`);
   }
+  // What the shell fetches for a `server` screen: the page as a native tree.
+  const TREES = {
+    "/": "Field notes",
+    "/notes": "Creek crossing",
+    "/notes/1": "Creek crossing",
+    "/about": "About",
+    "/feed": "Observation 240",
+    "/navigation/step/2": "Step 2",
+    "/docs/guide/tabs": "Tabs",
+  };
+  for (const [path, text] of Object.entries(TREES)) {
+    const response = await fetch(origin + path, {
+      headers: { accept: "application/vnd.farm.native+json" },
+    });
+    const tree = response.ok ? await response.json() : undefined;
+    expect(
+      response.headers.get("content-type")?.startsWith("application/vnd.farm.native+json"),
+      `GET ${path} answers the native tree`,
+    );
+    expect(
+      JSON.stringify(tree?.unsupported) === "[]",
+      `${path} converts natively, unsupported: ${JSON.stringify(tree?.unsupported)}`,
+    );
+    expect(JSON.stringify(tree?.root ?? null).includes(text), `the ${path} tree has "${text}"`);
+  }
+  const browserDocument = await (await fetch(`${origin}/notes`)).text();
+  const shellDocument = await (
+    await fetch(`${origin}/notes`, { headers: { "x-farm-shell": "android" } })
+  ).text();
+  expect(!browserDocument.includes("farm-mobile-client"), "a browser never loads the mobile client");
+  expect(shellDocument.includes("/farm-mobile-client-h"), "a shell document loads the mobile client");
   const feed = await (await fetch(`${origin}/feed`)).text();
   expect((feed.match(/Observation \d+/g) ?? []).length === 240, "/feed renders 240 rows");
   expect((await fetch(`${origin}/stations/nope`)).status === 404, "an unknown station is a 404");

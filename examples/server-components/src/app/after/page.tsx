@@ -1,7 +1,5 @@
-import { writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { after } from "@farm.js/core/after";
+import { afterLog } from "../../lib/after-log";
 
 const TOKEN = /^[a-zA-Z0-9_-]{1,80}$/;
 
@@ -18,10 +16,7 @@ export default async function AfterPage({
   if (typeof token === "string" && TOKEN.test(token)) {
     after(async () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
-      await writeFile(
-        join(tmpdir(), `farm-contract-after-${token}.json`),
-        JSON.stringify({ token, scheduledAt, completedAt: Date.now() }),
-      );
+      afterLog().set(token, { token, scheduledAt, completedAt: Date.now() });
     });
   }
   return (

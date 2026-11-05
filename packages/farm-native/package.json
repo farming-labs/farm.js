@@ -37,6 +37,12 @@
       "import": "./dist/internal.js",
       "default": "./dist/internal.js"
     },
+    "./elements": {
+      "types": "./dist/elements.d.ts",
+      "react-native": "./dist/elements.js",
+      "import": "./dist/elements.js",
+      "default": "./dist/elements.js"
+    },
     "./build": {
       "types": "./dist/build/index.d.ts",
       "import": "./dist/build/index.js",
