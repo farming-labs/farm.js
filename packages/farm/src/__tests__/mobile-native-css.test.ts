@@ -133,6 +133,26 @@ describe("app CSS in the native tier", () => {
     ]);
   });
 
+  it("reads the background shorthand as a build minifies it", () => {
+    // A production build writes `background: transparent` as `background:0 0`.
+    const css = `.row{background:#fff}.row.plain{background:0 0}.row.none{background:none}`;
+    const tree = createFarmNativeTree(
+      page(`<p class="row plain">a</p><p class="row none">b</p><p class="row">c</p>`),
+      url,
+      [css],
+    );
+    expect(tree.unsupported).toEqual([]);
+    expect(byTag(tree.root, "p").map((p) => p.style?.backgroundColor)).toEqual([
+      "transparent",
+      "transparent",
+      "#fff",
+    ]);
+    expect(
+      createFarmNativeTree(page(`<p class="hero">x</p>`), url, [".hero{background:url(a.png)}"])
+        .unsupported,
+    ).toEqual(["<p> background: url(a.png)"]);
+  });
+
   it("leaves layered Tailwind classes to the table, and ignores classes no rule styles", () => {
     const css = `@layer utilities { .grid { display: grid; } .p-4 { padding: calc(var(--spacing) * 4); } }`;
     const tree = createFarmNativeTree(
