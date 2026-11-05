@@ -463,14 +463,47 @@ describe("mobile modules", () => {
         },
       }),
     ).toEqual({
-      Device: { permissions: ["android.permission.VIBRATE"], usage: {} },
+      Device: { permissions: ["android.permission.VIBRATE"], usage: {}, web: false },
       "react-native-camera-kit": {
         permissions: ["android.permission.CAMERA"],
         usage: { NSCameraUsageDescription: "Scans receipts." },
+        web: false,
       },
     });
     expect(() => validateFarmMobileConfig({ modules: [] } as never)).toThrow(
       /^mobile: modules must be an object keyed by module name/,
+    );
+  });
+
+  it("lets web screens reach an app module only when it opts in", async () => {
+    const root = await createModuleApp();
+    const resolve = (modules: unknown) =>
+      resolveFarmMobileConfig(
+        { modules } as never,
+        { root, routes: ROUTES, appModules: ["Device", "Haptics"] },
+        build,
+      ).modules;
+    expect(
+      resolve({
+        Device: { web: true },
+        Haptics: { web: false },
+        "react-native-camera-kit": { permissions: ["android.permission.CAMERA"] },
+      }),
+    ).toEqual({
+      Device: { permissions: [], usage: {}, web: true },
+      Haptics: { permissions: [], usage: {}, web: false },
+      "react-native-camera-kit": {
+        permissions: ["android.permission.CAMERA"],
+        usage: {},
+        web: false,
+      },
+    });
+    // Community modules run on the React Native JS runtime, which web screens do not have.
+    expect(() => resolve({ "react-native-camera-kit": { web: true } })).toThrow(
+      /^mobile \(os: android\): modules\["react-native-camera-kit"\]\.web is true, but web screens reach only the app's own modules in src\/native\. "react-native-camera-kit" needs the React Native JS runtime, which web screens do not have\. Remove web, and call the module from a native screen \(page\.native\.tsx\)\.$/,
+    );
+    expect(() => resolve({ Device: { web: 1 } })).toThrow(
+      /modules\["Device"\]\.web must be true or false\./,
     );
   });
 
@@ -483,7 +516,7 @@ describe("mobile modules", () => {
           modules: {
             Device: { permissions: ["VIBRATE", "vibrate now"], usage: { Camera: "Scans." } },
             Haptics: {},
-            zod: { permissions: [] },
+            zod: { permissions: [], web: "yes" },
             "react-native-gone": {},
             "react-native-dev-only": {},
             "react-native-camera-kit": {
@@ -500,18 +533,19 @@ describe("mobile modules", () => {
       message = (error as Error).message;
     }
     expect(message.split("\n")).toEqual([
-      "mobile (os: android): modules has 11 problems:",
+      "mobile (os: android): modules has 12 problems:",
       '  - modules["Camera"] is not one of the app\'s native modules or an installed React Native module. Use the name a src/native/Native*.ts spec registers, or a package in dependencies in package.json.',
       '  - modules["Camera"] must be an object, such as { permissions: ["android.permission.VIBRATE"] }.',
       '  - modules["Device"].permissions[0] must be a full Android permission name such as "android.permission.VIBRATE", got "VIBRATE". Use "android.permission.VIBRATE".',
       '  - modules["Device"].permissions[1] must be a full Android permission name such as "android.permission.VIBRATE", got "vibrate now".',
       '  - modules["Device"].usage.Camera is not an iOS usage-description key. Keys are NS...UsageDescription, such as NSCameraUsageDescription.',
       '  - modules["Haptics"] is not one of the app\'s native modules or an installed React Native module. Use the name a src/native/Native*.ts spec registers, or a package in dependencies in package.json.',
-      '  - unknown option modules["react-native-camera-kit"].web. Supported: permissions, usage.',
       '  - modules["react-native-camera-kit"].usage.NSCameraUsageDescription must be a non-empty string: the sentence iOS shows when it asks for access.',
+      '  - modules["react-native-camera-kit"].web is true, but web screens reach only the app\'s own modules in src/native. "react-native-camera-kit" needs the React Native JS runtime, which web screens do not have. Remove web, and call the module from a native screen (page.native.tsx).',
       '  - modules["react-native-dev-only"] is not one of the app\'s native modules or an installed React Native module. Use the name a src/native/Native*.ts spec registers, or a package in dependencies in package.json.',
       '  - modules["react-native-gone"] is in dependencies but not installed. Install the app\'s dependencies, then run the command again.',
       '  - modules["zod"] names a package with no "codegenConfig" in its package.json, so it is not a React Native module for the new architecture. Remove the entry, or upgrade the package.',
+      '  - modules["zod"].web must be true or false.',
     ]);
     // One problem is one line.
     expect(() =>

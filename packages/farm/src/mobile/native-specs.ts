@@ -1,3 +1,4 @@
+import { existsSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 
@@ -84,9 +85,17 @@ function loadCodegen(root: string): { typescript: CodegenParser; flow: CodegenPa
   let codegenDir: string;
   let load: NodeJS.Require;
   try {
-    const reactNative = createRequire(path.join(root, "package.json")).resolve(
-      "react-native/package.json",
-    );
+    // The app's own react-native, found the way Node finds it from the app (not through
+    // NODE_PATH, which package managers set to their whole store).
+    let reactNative: string | undefined;
+    for (let dir = root; ; dir = path.dirname(dir)) {
+      const candidate = path.join(dir, "node_modules", "react-native", "package.json");
+      if (existsSync(candidate)) {
+        reactNative = realpathSync(candidate);
+        break;
+      }
+      if (path.dirname(dir) === dir) throw new Error(`react-native is not installed in ${root}.`);
+    }
     load = createRequire(reactNative);
     codegenDir = path.dirname(load.resolve("@react-native/codegen/package.json"));
   } catch (error) {
