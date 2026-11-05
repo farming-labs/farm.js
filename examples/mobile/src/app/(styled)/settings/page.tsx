@@ -1,5 +1,6 @@
 import { t } from "@farm.js/core/i18n/server";
 import { Link } from "@farm.js/core/client";
+import { DeviceCard } from "./device-card";
 import { LanguagePicker } from "./language-picker";
 
 export default function SettingsPage() {
@@ -7,6 +8,7 @@ export default function SettingsPage() {
     <>
       <h1 className="page-title">{t("settings.title")}</h1>
       <LanguagePicker />
+      <DeviceCard />
       <ul className="list">
         <li>
           <Link className="row" href="/settings/device">

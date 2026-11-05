@@ -177,7 +177,13 @@ const mobileClient = /^farm-mobile-client-h[0-9a-f]+\.js$/;
 for await (const file of files(join(root, ".farm", ".output"))) {
   if (mobileClient.test(file.split(/[\\/]/).at(-1))) continue;
   const source = await readFile(file, "utf8");
-  for (const leak of leaks) expect(!source.includes(leak), `${leak} is in the web output: ${file}`);
+  // `native` from @farm.js/core/native (the /settings device card) looks for the shell's bridge
+  // on purpose, and finds none in a browser.
+  const nativeProxy = source.includes("NativeUnavailableError");
+  for (const leak of leaks) {
+    if (nativeProxy && leak === "__farmBridge") continue;
+    expect(!source.includes(leak), `${leak} is in the web output: ${file}`);
+  }
 }
 
 const port = await availablePort();
