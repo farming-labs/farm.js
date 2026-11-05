@@ -782,7 +782,11 @@ await createNote({ title: "Photo note" }); // runs on mobile.server, typed as on
   functions to a generated stub, `.farm/output/mobile/native/server-fns/<hash>.js`, whose exports
   post `{ id, input }` through `serverFetch` to `POST /api/__farm/native/fn`. An id is a hash of
   the module's path from the app root and the export name, so the app and the server agree without
-  sharing a build.
+  sharing a build. A native bundle may import nothing else of `@farm.js/core` than
+  `@farm.js/core/api/client`: a server module Farm does not recognize as one (a namespace import
+  of `createServerFn`, a wrapper factory around it) imports `@farm.js/core` somewhere, and stops
+  the bundle with a message rather than ship server code. Define the functions native screens
+  import with `createServerFn` or `createServerQuery` imported by name.
 - **The server runs only what native screens import.** Farm follows each native screen's app
   imports (relative, `@/`, tsconfig paths) to the server function modules it reaches; a production
   build bundles exactly those, and an id outside them answers `404`.
@@ -792,9 +796,15 @@ await createNote({ title: "Photo note" }); // runs on mobile.server, typed as on
   Input and result travel as JSON. A declared error throws a `FarmServerFnError` with its `code`,
   `status`, and `data`; any other failure throws `server_error` and is logged on the server only.
 - **Only the app calls it.** The endpoint requires `X-Farm-Mobile` and refuses requests with fetch
-  metadata (`Sec-Fetch-*`) or another origin's `Origin`, which a browser always sends. Like a server
-  action on the web, every function a native screen imports is a public endpoint: check input and
-  rights inside it.
+  metadata (`Sec-Fetch-*`) or another origin's `Origin`. A browser sends fetch metadata on every
+  request, and a cross-site page cannot add the header without a CORS preflight that carries its
+  own `Origin`, so no page can call a function with a visitor's cookies. Input with `__proto__`,
+  `constructor`, or `prototype` keys is refused, the API route's body size limit applies, and a
+  result that is not JSON answers `server_error`.
+- **Each imported function is a public endpoint.** Anyone who sends the app's request shape can
+  call a function a native screen imports, with any input, as with a server action on the web:
+  check the input (its `input` schema) and the caller's rights (its `middleware`) inside it.
+  Functions no native screen imports are not reachable through this endpoint.
 - Not yet: exports other than server functions from those modules (they are not in the stub), and
   a `redirect()` in a function (it throws a `FarmServerFnError` with `redirect` set; navigate
   yourself). A server module a screen starts importing during `farm dev --mobile` stops the native

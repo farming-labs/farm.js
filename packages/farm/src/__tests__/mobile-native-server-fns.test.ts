@@ -32,7 +32,14 @@ const broken = createServerFn({
     throw new Error("database password is hunter2");
   },
 });
-const functions: Record<string, unknown> = { create: createNote, archived, broken };
+const cyclic = createServerFn({
+  handler: async () => {
+    const value: Record<string, unknown> = { secret: "hunter2" };
+    value.self = value;
+    return value;
+  },
+});
+const functions: Record<string, unknown> = { create: createNote, archived, broken, cyclic };
 
 function call(body: unknown, headers: Record<string, string> = { "x-farm-mobile": "notes" }) {
   return handleFarmNativeServerFnRequest(
@@ -57,6 +64,17 @@ describe("the native server function endpoint", () => {
     expect((await invalid.json()).error.code).toBe("invalid_input");
   });
 
+  it("refuses input with prototype keys, at any depth", async () => {
+    for (const input of [
+      JSON.parse('{"__proto__":{"admin":true},"title":"x"}'),
+      { title: "x", nested: [{ constructor: { prototype: {} } }] },
+    ]) {
+      const response = await call({ id: "create", input });
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("invalid_body");
+    }
+  });
+
   it("answers declared failures, and hides everything else", async () => {
     const failure = await call({ id: "archived", input: null });
     expect(failure.status).toBe(409);
@@ -73,6 +91,9 @@ describe("the native server function endpoint", () => {
       message: "Server function failed",
     });
     expect(error).toHaveBeenCalledOnce();
+    const cycle = await call({ id: "cyclic" });
+    expect(cycle.status).toBe(500);
+    expect(await cycle.text()).not.toContain("hunter2");
   });
 
   it("only answers the app's native screens", async () => {
@@ -92,6 +113,9 @@ describe("the native server function endpoint", () => {
     );
     expect(signedIn.status).toBe(200);
     expect((await call({ id: "nope" })).status).toBe(404);
+    // `functions` is a plain object: its prototype's names resolve, but only server functions run.
+    expect((await call({ id: "constructor" })).status).toBe(404);
+    expect((await call({ id: "toString" })).status).toBe(404);
     expect((await call({ id: "../x" })).status).toBe(400);
     const get = await handleFarmNativeServerFnRequest(
       new Request("https://notes.example.com/api/__farm/native/fn"),

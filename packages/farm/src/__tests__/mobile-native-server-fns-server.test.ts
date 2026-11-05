@@ -184,6 +184,9 @@ describe("server functions called from native screens", () => {
     expect(apiTypes).toContain('"/api/notes"');
     expect(apiTypes).not.toContain("__farm");
     expect(apiTypes).not.toContain("PluginAPIRouter");
+    // The API route's body limit applies before anything is parsed.
+    const large = await post(endpoint, { id: createNote, input: { title: "x".repeat(2_000_000) } });
+    expect(large.status).toBe(413);
     // A browser cannot call it: its fetch sends fetch metadata.
     const browser = await fetch(endpoint, call(createNote, { title: "x" }));
     expect(browser.status).toBe(403);

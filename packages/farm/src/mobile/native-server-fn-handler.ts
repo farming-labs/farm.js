@@ -14,7 +14,7 @@
  */
 import type { FarmPlugin } from "../plugin";
 import { DEFAULT_SERVER_ACTION_BODY_SIZE_LIMIT } from "../server-action-security";
-import { _invokeServerFunction } from "../server-fn";
+import { _describeServerFunction, _invokeServerFunction } from "../server-fn";
 
 import { FARM_NATIVE_SERVER_FN_PATH, FARM_NATIVE_SERVER_FN_PLUGIN } from "./native-server-fn-names";
 
@@ -22,6 +22,18 @@ export { FARM_NATIVE_SERVER_FN_PATH, FARM_NATIVE_SERVER_FN_PLUGIN };
 const MOBILE_APP_HEADER = "x-farm-mobile";
 const FETCH_METADATA = ["sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "sec-fetch-user"];
 const ID = /^[\w-]{1,64}$/;
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Whether parsed JSON holds a key that could reach an object's prototype in a handler's merge. */
+function hasUnsafeKey(value: unknown, depth = 0): boolean {
+  if (depth > 64) return true;
+  if (Array.isArray(value)) return value.some((item) => hasUnsafeKey(item, depth + 1));
+  if (!value || typeof value !== "object") return false;
+  return Object.keys(value).some(
+    (key) =>
+      UNSAFE_KEYS.has(key) || hasUnsafeKey((value as Record<string, unknown>)[key], depth + 1),
+  );
+}
 
 export interface FarmNativeServerFnOptions {
   /** The server function with this id, if a native screen imports it. */
@@ -77,8 +89,12 @@ export async function handleFarmNativeServerFnRequest(
   if (typeof call?.id !== "string" || !ID.test(call.id)) {
     return refuse(400, "invalid_body", 'Send { "id", "input" } as JSON.');
   }
+  if (hasUnsafeKey(call.input)) {
+    return refuse(400, "invalid_body", "The input has a key that is not allowed.");
+  }
   const fn = await options.resolve(call.id);
-  if (fn === undefined) {
+  // Only a createServerFn or createServerQuery function runs, whatever `resolve` returned.
+  if (fn === undefined || _describeServerFunction(fn) === undefined) {
     // A bundle from another build of the app, or a function no native screen imports.
     return refuse(
       404,
@@ -87,7 +103,15 @@ export async function handleFarmNativeServerFnRequest(
     );
   }
   const outcome = await _invokeServerFunction(fn, call.input, request);
-  if (outcome.ok) return json(200, { data: outcome.data ?? null });
+  if (outcome.ok) {
+    try {
+      return json(200, { data: outcome.data ?? null });
+    } catch (error) {
+      // A result JSON cannot hold (a cycle, a BigInt): the caller gets no details.
+      console.error("[Farm] A server function's result for a native screen is not JSON:", error);
+      return refuse(500, "server_error", "Server function failed");
+    }
+  }
   switch (outcome.reason) {
     case "input":
       // The validator's issues describe the caller's own input.

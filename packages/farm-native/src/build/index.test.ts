@@ -11,6 +11,7 @@ import {
   farmNativeBundleFiles,
   resolveFarmReactNative,
   resolveSingletonsFromApp,
+  guardFarmServerImports,
   resolveFarmServerFnStubs,
   resolveWatchFolders,
 } from "./index";
@@ -261,5 +262,25 @@ describe("resolveFarmServerFnStubs", () => {
     );
     expect(() => guarded({}, "./server", "android")).toThrow(/defines server functions/);
     expect(guarded({}, "./helper", "android")).toEqual({ type: "sourceFile", filePath: helper });
+  });
+});
+
+describe("guardFarmServerImports", () => {
+  it("keeps Farm's server runtime out of a native bundle", () => {
+    const resolve = guardFarmServerImports((_context, moduleName) => ({
+      type: "sourceFile",
+      filePath: `/resolved/${moduleName}`,
+    }));
+    // A server module the stub swap missed: a namespace import, a wrapper factory's own module.
+    for (const name of ["@farm.js/core/server-fn", "@farm.js/core", "@farm.js/core/server-query"]) {
+      expect(() => resolve({ originModulePath: "/app/src/authed.ts" }, name, "android")).toThrow(
+        /\/app\/src\/authed\.ts imports @farm\.js\/core.*never goes into a native bundle/,
+      );
+    }
+    expect(resolve({}, "@farm.js/core/api/client", "android")).toEqual({
+      type: "sourceFile",
+      filePath: "/resolved/@farm.js/core/api/client",
+    });
+    expect(resolve({}, "@farm.js/native", "android")).toMatchObject({ type: "sourceFile" });
   });
 });

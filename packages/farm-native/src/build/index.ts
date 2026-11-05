@@ -297,10 +297,12 @@ async function loadMetroConfig(
       ...config.resolver,
       blockList: [...blockList, ...BLOCKED],
       nodeModulesPaths: [...config.resolver.nodeModulesPaths, ...overrides.nodeModulesPaths],
-      resolveRequest: resolveFarmServerFnStubs(
-        overrides.serverFnStubs ?? new Map(),
-        resolveSingletonsFromApp(root, config.resolver.resolveRequest),
-        overrides.isServerFnModule,
+      resolveRequest: guardFarmServerImports(
+        resolveFarmServerFnStubs(
+          overrides.serverFnStubs ?? new Map(),
+          resolveSingletonsFromApp(root, config.resolver.resolveRequest),
+          overrides.isServerFnModule,
+        ),
       ),
     },
   };
@@ -420,6 +422,33 @@ async function writeServerFnStubs(
     if (current !== source) await writeFile(stub, source);
     stubs.set(realpathSync(module.file), stub);
   }
+}
+
+/** The `@farm.js/core` entries a native bundle may hold: their React Native builds. */
+const NATIVE_CORE_ENTRIES = new Set(["@farm.js/core/api/client"]);
+
+/**
+ * Stops the bundle when native code imports Farm's server runtime: `@farm.js/core` or any entry
+ * without a React Native build. A server function module always imports it, so a module the stub
+ * swap does not recognize (a namespace import of `createServerFn`, a wrapper factory) stops here
+ * instead of shipping server code. The stubs themselves import only `@farm.js/native`.
+ */
+export function guardFarmServerImports(next: ResolveRequest): ResolveRequest {
+  return (context, moduleName, platform) => {
+    const name = moduleName.split("?")[0]!;
+    if (
+      (name === "@farm.js/core" || name.startsWith("@farm.js/core/")) &&
+      !NATIVE_CORE_ENTRIES.has(name)
+    ) {
+      throw nativeError(
+        `${context?.originModulePath ?? "A native screen's module"} imports ${name}, Farm's server ` +
+          "runtime, which never goes into a native bundle. Native screens call the server through " +
+          "@farm.js/core/api/client, or import server functions defined with createServerFn or " +
+          "createServerQuery imported by name from @farm.js/core.",
+      );
+    }
+    return next(context, moduleName, platform);
+  };
 }
 
 /**

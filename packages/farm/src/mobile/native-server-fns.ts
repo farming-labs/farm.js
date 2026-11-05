@@ -57,7 +57,15 @@ export function describeFarmNativeServerFnModule(
   code: string,
 ): FarmNativeServerFnModule | undefined {
   if (!code.includes("createServerFn") && !code.includes("createServerQuery")) return undefined;
-  const analysis = transformFarmServerFns(code, file, { environment: "client" });
+  let analysis;
+  try {
+    analysis = transformFarmServerFns(code, file, { environment: "client" });
+  } catch (error) {
+    // The same rules as the web build's server function transform, with the file named.
+    const named = new Error(`${file}: ${error instanceof Error ? error.message : String(error)}`);
+    (named as { cause?: unknown }).cause = error;
+    throw named;
+  }
   if (!analysis || analysis.exports.length === 0) return undefined;
   return {
     file,
