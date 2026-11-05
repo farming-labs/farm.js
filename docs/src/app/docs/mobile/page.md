@@ -41,7 +41,7 @@ farm build                    # --web, the default, unchanged
 | Native-screen analyzer                        | Unreleased                     | Sorts routes into tiers; proven native-tier routes become `server` screens with `native: true` or `auto: "on"`                                                                |
 | Server-rendered native screens (`server`)     | Unreleased, Android            | Drawn with Android views from the page the server renders; run on an emulator under `farm dev --mobile`, not yet on a device. iOS shows them as web screens                   |
 | iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                                   |
-| React Native screens                          | Unreleased, dev only           | Android only; runs under `farm dev --mobile` on an emulator, not yet in a production build or on a device (see [React Native screens](#react-native-screens))                 |
+| React Native screens                          | Unreleased, Android            | Android only; on an emulator under `farm dev --mobile` and as a production APK; not yet on a device (see [React Native screens](#react-native-screens))                       |
 | Bundled client assets                         | Unreleased                     | Pages in a production shell run the mobile client; Android serves its files from the APK, iOS from the server (see [Bundled client assets](#bundled-client-assets))           |
 | Page shells                                   | Unreleased                     | `mobile.shells`: a route's layout and loading state, shown before its document and while offline; not yet run on an emulator or simulator (see [Page shells](#page-shells))   |
 | Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                                              |
@@ -678,9 +678,9 @@ pnpm add react@^19.2.8 react-dom@^19.2.8
 
 `@farm.js/native` needs React 19.2.8 or later. React Native 0.88 declares a `react@^19.3.0` peer
 (its renderer is built from React 19.3.0), so on 19.2.8 your package manager warns, but the mobile
-example runs its native screens on 19.2.8 with one React in the dev bundle. That is verified in dev,
-not yet in a production build. Web pages and native screens bundle the app's one `react`, so keep
-`react` and `react-dom` on a single version.
+example runs its native screens on 19.2.8 with one React in the dev bundle. That is verified in dev
+and in a production APK on an emulator. Web pages and native screens bundle the app's one `react`,
+so keep `react` and `react-dom` on a single version.
 
 What is verified, in `examples/mobile` under `farm dev --mobile` on an Android 15 emulator
 (SwiftShader software rendering, no GPU):
