@@ -147,8 +147,8 @@ declare module "@farm.js/core/native" {
   interface FarmNativeModules {
     Kitchen: {
       scalars(s: string, n: number, b: boolean, i: number): Promise<string>;
-      shapes(mode: "light" | "dark", point: { x: number; y?: number | null; }, tags: Array<string>, extra: Record<string, unknown>, note?: string | null): Promise<{ x: number; y?: number | null; }>;
-      levels(level: "low" | "high", points: Array<{ x: number; y?: number | null; }>): Promise<Array<number>>;
+      shapes(mode: "light" | "dark", point: { x: number; y?: number | null }, tags: Array<string>, extra: Record<string, unknown>, note?: string | null): Promise<{ x: number; y?: number | null }>;
+      levels(level: "low" | "high", points: Array<{ x: number; y?: number | null }>): Promise<Array<number>>;
       done(): Promise<void>;
     };
   }

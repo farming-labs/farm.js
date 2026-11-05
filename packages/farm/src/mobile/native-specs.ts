@@ -324,9 +324,9 @@ export function renderFarmNativeType(type: FarmNativeType): string {
               (property) =>
                 `${IDENTIFIER.test(property.name) ? property.name : JSON.stringify(property.name)}${
                   property.optional ? "?" : ""
-                }: ${renderFarmNativeType(property.type)};`,
+                }: ${renderFarmNativeType(property.type)}`,
             )
-            .join(" ")} }`
+            .join("; ")} }`
         : "{}";
       break;
   }
