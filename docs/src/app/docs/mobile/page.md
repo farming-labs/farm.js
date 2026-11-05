@@ -759,6 +759,16 @@ screen, and back returns to it.
   downloaded.
 - **Dev.** `farm dev --mobile` starts Metro next to the dev server (port 8081, or the next free
   one) and the debug app loads the screens from it, with Fast Refresh.
+- **Native modules.** A community React Native module in the app's `dependencies`, such as
+  `@react-native-community/netinfo`, is linked into the Android app: its Java or Kotlin package is
+  registered with React Native, its codegen library is built into `libappmodules.so`, and a
+  native screen imports it as in any React Native app. Farm reads only the app's own
+  `dependencies`, the packages Metro bundles for the screens; `devDependencies` and dependencies of
+  dependencies are never linked, and `@react-native-community/cli` is not needed. A module must
+  support the new architecture (a `codegenConfig` in its `package.json`): one without it, such as
+  `react-native-device-info` 15.0.2, fails the command with an error that names the package
+  instead of being skipped. iOS has no React Native host yet, so modules do nothing there. Not
+  verified yet: an APK build and an emulator run with a linked module.
 - **Runtime.** React Native's new architecture only: Hermes, Fabric, bridgeless. One runtime is
   shared by every native screen, each its own surface. It starts after the first screen shows
   content, so a web start screen pays nothing at launch.
@@ -782,6 +792,10 @@ screen, and back returns to it.
   - The example's screen bundle compiles to 1.23 MB of Hermes bytecode (Metro 18.5 s, `hermesc`
     1.6 s).
   - Only the 64-bit ABIs are built (`arm64-v8a`, `x86_64`), so 32-bit devices are not supported.
+  - An app that links at least one native module builds through React Native's Gradle plugin
+    and its toolchain, loaded from the app's `node_modules`: Android Gradle plugin 9.2.1 and Gradle
+    9.4.1 instead of the shell's 8.7.3 and 8.11.1, and JDK 17 or newer. Apps without native modules
+    keep the shell's toolchain and generate the same project as before.
 
 Native files import `react-native`, which a web-only checkout may not have. Keep them out of the
 web type-check and check them on their own:
@@ -822,6 +836,14 @@ empty plugin map), so every such call returns `{ code: "native_unavailable" }`. 
 device plugins will plug into; it is the right-hand channel in the
 [architecture figure](/blog/web-to-native#on-the-device).
 
+**Community React Native modules, on native screens, on Android.** A `page.native.tsx` screen can
+use an installed React Native module, such as `@react-native-community/netinfo`, the same way a
+React Native app does: add it to the app's `dependencies` and import it. Farm links the modules
+into the Android app (see [React Native screens](#react-native-screens)); the permissions a module
+declares in its own manifest are merged into the app's. Web screens cannot call these modules, and
+iOS has no React Native host yet. Not verified yet: an APK build and an emulator run with a linked
+module.
+
 **Reaching a real device feature.** For something like reading SMS you drop to native code, where the
 platform SDK is in reach:
 
@@ -838,7 +860,8 @@ platform SDK is in reach:
 **Web APIs are not a back door either.** The WebView enables only JavaScript and DOM storage, not
 media or geolocation grants, so a web screen cannot quietly use `getUserMedia` or the Geolocation API.
 
-In short: navigation, server data, and auth work across every screen today; device capabilities are
+In short: navigation, server data, and auth work across every screen today. Native screens on
+Android can use community React Native modules; for web screens, device capabilities are
 **designed, not shipped** — the reserved `native.<name>` channel and the native-screen escape hatch,
 both on the roadmap.
 
