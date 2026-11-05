@@ -509,7 +509,7 @@ test("generates a Solid starter while keeping React as the default renderer", as
       packageJson.dependencies["@farm.js/solid"],
       await workspaceRendererVersion("farm-solid"),
     );
-    assert.equal(packageJson.dependencies["solid-js"], "1.9.14");
+    assert.equal(packageJson.dependencies["solid-js"], "1.9.18");
     await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.match(config, /renderer: solid\(\)/);
     assert.match(config, /from "@farm\.js\/solid"/);
@@ -760,7 +760,7 @@ test("generates renderer-native Better Auth starters", async () => {
         packageJson.dependencies["@farm.js/better-auth"],
         templatePackage.dependencies["@farm.js/better-auth"],
       );
-      assert.equal(packageJson.dependencies["better-auth"], "1.6.25");
+      assert.equal(packageJson.dependencies["better-auth"], "1.7.14");
       assert.equal(
         packageJson.scripts["auth:migrate"],
         "node --experimental-strip-types src/lib/migrate-auth.ts",
@@ -789,6 +789,113 @@ test("generates renderer-native Better Auth starters", async () => {
         );
       }
     }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("Better Auth starter trusts the dev server's own origin and requires BETTER_AUTH_URL in production", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-better-auth-origin-"));
+
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "origin-app",
+        "--template",
+        "better-auth",
+        "--typescript",
+        "--skip-install",
+      ],
+      { cwd: tempDir, stdio: "pipe" },
+    );
+
+    const generatedDir = path.join(tempDir, "origin-app");
+    const auth = await readFile(path.join(generatedDir, "src/lib/auth.ts"), "utf8");
+    const envExample = await readFile(path.join(generatedDir, ".env.example"), "utf8");
+    assert.doesNotMatch(auth, /BETTER_AUTH_URL \?\? "http:\/\/localhost:3000"/);
+    assert.match(
+      auth,
+      /trustedOrigins: authBaseUrl \? \[new URL\(authBaseUrl\)\.origin\] : devServerOrigin/,
+    );
+    assert.match(envExample, /^# BETTER_AUTH_URL=/m);
+    assert.doesNotMatch(envExample, /^BETTER_AUTH_URL=/m);
+
+    // Run the generated module with stand-ins for its SDKs: betterAuth() returns its options.
+    for (const [name, source] of [
+      ["better-auth", "export const betterAuth = (options) => options;\n"],
+      ["pg", "export class Pool {}\n"],
+    ]) {
+      const dir = path.join(generatedDir, "node_modules", name);
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        path.join(dir, "package.json"),
+        JSON.stringify({ name, type: "module", exports: "./index.js" }),
+      );
+      await writeFile(path.join(dir, "index.js"), source);
+    }
+    const probe = `
+const { auth } = await import("./src/lib/auth.ts");
+const trusted = typeof auth.trustedOrigins === "function"
+  ? (url) => auth.trustedOrigins(new Request(url + "/api/auth/sign-in/email"))
+  : () => auth.trustedOrigins;
+console.log(JSON.stringify({
+  baseURL: auth.baseURL,
+  origins: Object.fromEntries(
+    ["http://localhost:3311", "http://10.0.2.2:3311", "http://192.168.1.20:5173", "http://[::1]:3311",
+     "http://app.localhost:3311", "http://evil.example:3311"].map((url) => [url, trusted(url)]),
+  ),
+  withoutRequest: typeof auth.trustedOrigins === "function" ? auth.trustedOrigins() : null,
+}));
+`;
+    const run = (env) => {
+      const childEnv = {
+        ...process.env,
+        BETTER_AUTH_SECRET: "test-secret",
+        DATABASE_URL: "postgresql://user:password@localhost/database",
+        ...env,
+      };
+      for (const [key, value] of Object.entries(childEnv)) {
+        if (value === undefined) delete childEnv[key];
+      }
+      return execFileSync(
+        process.execPath,
+        ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", probe],
+        { cwd: generatedDir, env: childEnv, encoding: "utf8", stdio: "pipe" },
+      );
+    };
+
+    const dev = JSON.parse(run({ NODE_ENV: "development", BETTER_AUTH_URL: undefined }));
+    assert.equal(dev.baseURL, "http://localhost:3000");
+    for (const origin of [
+      "http://localhost:3311",
+      "http://10.0.2.2:3311",
+      "http://192.168.1.20:5173",
+      "http://[::1]:3311",
+      "http://app.localhost:3311",
+    ]) {
+      assert.deepEqual(dev.origins[origin], [origin]);
+    }
+    // A DNS-rebinding name sends a matching Host and Origin, but is never trusted.
+    assert.deepEqual(dev.origins["http://evil.example:3311"], []);
+    assert.deepEqual(dev.withoutRequest, []);
+
+    // A configured URL stays authoritative in development.
+    const configured = JSON.parse(
+      run({ NODE_ENV: "development", BETTER_AUTH_URL: "http://app.localhost:4000" }),
+    );
+    assert.equal(configured.baseURL, "http://app.localhost:4000");
+    assert.deepEqual(configured.origins["http://10.0.2.2:3311"], ["http://app.localhost:4000"]);
+
+    const production = JSON.parse(
+      run({ NODE_ENV: "production", BETTER_AUTH_URL: "https://app.example.com" }),
+    );
+    assert.deepEqual(production.origins["http://localhost:3311"], ["https://app.example.com"]);
+    assert.throws(
+      () => run({ NODE_ENV: "production", BETTER_AUTH_URL: undefined }),
+      (error) => /BETTER_AUTH_URL is required in production/.test(String(error.stderr)),
+    );
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -944,7 +1051,7 @@ for (const template of [
       assert.match(generatedGitignore, /^\.netlify\/?$/m);
       const generatedConfig = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
       assert.match(generatedConfig, /theme:\s*\{\s*default: "dark"/s);
-      await readFile(path.join(generatedDir, ".env.example"), "utf8");
+      assertNoSecretValues(await readFile(path.join(generatedDir, ".env.example"), "utf8"));
       const generatedReadme = await readFile(path.join(generatedDir, "README.md"), "utf8");
       assert.match(generatedReadme, /^# FARMJS /);
 
@@ -1112,9 +1219,14 @@ test("generates every official integration starter", async () => {
       for (const key of template.env) {
         assert.match(environment, new RegExp(`^${key}=`, "m"));
       }
+      assertNoSecretValues(environment);
 
       if (template.name === "ai") {
-        await readFile(path.join(generatedDir, "src/app/api/chat/route.ts"), "utf8");
+        const chatRoute = await readFile(
+          path.join(generatedDir, "src/app/api/chat/route.ts"),
+          "utf8",
+        );
+        assert.match(chatRoute, /authorize: \(\) => process\.env\.NODE_ENV === "development"/);
       } else {
         assert.match(
           await readFile(path.join(generatedDir, "farm.config.ts"), "utf8"),
@@ -1390,6 +1502,17 @@ test("generates starters that start the built server and deploy to Vercel explic
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+// A placeholder secret that passes a provider's length check would be accepted
+// as-is once the file is copied, so every secret ships empty, commented or not.
+function assertNoSecretValues(environment) {
+  for (const match of environment.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=(.*)$/gm)) {
+    const [, key, value] = match;
+    if (/SECRET|_KEY$|TOKEN|PASSWORD/.test(key)) {
+      assert.equal(value.trim(), "", `${key} ships a value in .env.example`);
+    }
+  }
+}
 
 function escapeRegExp(input) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

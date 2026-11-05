@@ -80,16 +80,21 @@ window.__vite_plugin_react_preamble_installed__ = true;
   };
 }
 
-/** Development-only plugins that give React apps Fast Refresh. */
-export async function createFarmReactRefreshPlugins(): Promise<Plugin[]> {
+/** Core's own `@vitejs/plugin-react`, for apps that do not install it. */
+export async function loadFarmReactPlugin(): Promise<typeof import("@vitejs/plugin-react")> {
   // Resolved at runtime rather than imported: production servers bundle core,
   // and a traceable import would ship plugin-react, Vite and Rolldown with them.
   const entry = createRequire(
     typeof __filename === "string" ? __filename : import.meta.url,
   ).resolve("@vitejs/plugin-react");
-  const { default: react } = (await import(
+  return (await import(
     /* @vite-ignore */ pathToFileURL(entry).href
   )) as typeof import("@vitejs/plugin-react");
+}
+
+/** Development-only plugins that give React apps Fast Refresh. */
+export async function createFarmReactRefreshPlugins(): Promise<Plugin[]> {
+  const { default: react } = await loadFarmReactPlugin();
   const plugins = react().map(
     (plugin): Plugin =>
       Object.assign(

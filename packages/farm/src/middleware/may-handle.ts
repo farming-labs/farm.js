@@ -7,15 +7,15 @@
  */
 import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 import type { ResolvedFarmConfig } from "../config";
-import {
-  integrationMiddlewareMayHandlePath,
-  type FarmIntegrationsUserConfig,
-} from "../integrations";
+import { integrationMiddlewareMayHandlePath } from "../integration-middleware-matcher";
+// Type-only: a value import would bundle the whole integration runtime into the server.
+import type { FarmIntegrationsUserConfig } from "../integrations";
 import {
   compileMiddlewareConfig,
   matchesCompiledMiddlewareConfig,
   matchesMiddlewareRoute,
 } from "./matcher";
+import type { StaticMiddlewareConfig } from "./static-config";
 import type { MiddlewareContext, MiddlewareMatcher } from "./types";
 
 /** @internal */
@@ -66,10 +66,18 @@ export function configMiddlewareMayHandlePath(
 
 /** @internal File middleware counterpart of `configMiddlewareMayHandlePath`. */
 export function appMiddlewareMayHandlePath(
-  middlewareRoutes: readonly { path: string }[],
+  middlewareRoutes: readonly { path: string; config?: StaticMiddlewareConfig | null | "unknown" }[],
   pathname: string,
 ): boolean {
-  return middlewareRoutes.some((route) => matchesMiddlewareRoute(pathname, route).matched);
+  return middlewareRoutes.some((route) => {
+    if (!matchesMiddlewareRoute(pathname, route).matched) return false;
+    // The file's own literal `config.matcher` / `exclude`, as the runtime applies them after the
+    // folder matched. Without a known one (none read, or not literal) the file may run here.
+    if (!route.config || route.config === "unknown") return true;
+    if (!route.config.matcher && !route.config.exclude) return true;
+    const compiled = compileMiddlewareConfig(route.config);
+    return matchesCompiledMiddlewareConfig(pathname, compiled, {} as MiddlewareContext).matched;
+  });
 }
 
 // A path no app route uses: a matcher that meets it matches every path, so it names no

@@ -1416,6 +1416,107 @@ test("farm preview uses FARM_PREVIEW_HOST unless --host is passed", async () => 
   }
 });
 
+test("local providers reach the app through a proxy that marks preview requests", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-preview-local-proxy-"));
+  const resultFile = path.join(dir, "result.json");
+  const script = path.join(dir, "tunnel.cjs");
+  // A stand-in tunnel: it sends visitor requests to the URL farm preview gave it, including ones
+  // that try to forge or strip the marker, opens an HMR-style upgrade, then reports a public URL.
+  await fs.writeFile(
+    script,
+    `const http = require("node:http");
+const fs = require("node:fs");
+const [url, port] = process.argv.slice(2);
+const send = (path, headers = {}) => new Promise((resolve, reject) => {
+  const request = http.request(new URL(path, url), { headers }, (response) => {
+    let body = "";
+    response.on("data", (chunk) => (body += chunk));
+    response.on("end", () => resolve(JSON.parse(body)));
+  });
+  request.on("error", reject);
+  request.end();
+});
+const upgrade = () => new Promise((resolve, reject) => {
+  const request = http.request(new URL("/hmr", url), {
+    headers: { connection: "Upgrade", upgrade: "websocket", "x-farm-preview": "forged" },
+  });
+  request.on("upgrade", (_response, socket) => {
+    socket.once("data", (data) => { resolve(String(data)); socket.destroy(); });
+    socket.write("ping");
+  });
+  request.on("error", reject);
+  request.end();
+});
+(async () => {
+  const result = { url, port, envUrl: process.env.FARM_PREVIEW_LOCAL_URL };
+  result.plain = await send("/plain");
+  result.forged = await send("/forged", { "x-farm-preview": "forged" });
+  result.nominated = await send("/nominated", { connection: "x-farm-preview", "x-farm-preview": "" });
+  result.upgrade = await upgrade();
+  fs.writeFileSync(process.env.FARM_TEST_RESULT_FILE, JSON.stringify(result));
+  process.stdout.write("tunnel ready at https://marked-preview.example.test\\n");
+})().catch((error) => { console.error(error); process.exit(1); });
+`,
+  );
+  const app = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        marker: req.headers["x-farm-preview"] ?? null,
+        connection: req.headers.connection ?? null,
+      }),
+    );
+  });
+  app.on("upgrade", (req, socket) => {
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+    );
+    socket.once("data", (data) => socket.end(`marker=${req.headers["x-farm-preview"]};${data}`));
+  });
+  await new Promise((resolve) => app.listen(0, "127.0.0.1", resolve));
+  const appPort = app.address().port;
+
+  const previous = {
+    command: process.env.FARM_PREVIEW_TUNNEL_COMMAND,
+    resultFile: process.env.FARM_TEST_RESULT_FILE,
+  };
+  process.env.FARM_PREVIEW_TUNNEL_COMMAND = `${JSON.stringify(process.execPath)} ${JSON.stringify(script)} {url} {port}`;
+  process.env.FARM_TEST_RESULT_FILE = resultFile;
+  try {
+    const preview = await previewFarm({
+      root: dir,
+      provider: "local",
+      url: `http://127.0.0.1:${appPort}`,
+      timeoutMs: 10_000,
+    });
+    assert.equal(preview.publicUrl, "https://marked-preview.example.test");
+    const result = JSON.parse(await fs.readFile(resultFile, "utf8"));
+
+    // The tunnel targets the proxy, never the app port directly.
+    assert.notEqual(Number(result.port), appPort);
+    assert.equal(result.url, `http://127.0.0.1:${result.port}`);
+    assert.equal(result.envUrl, result.url);
+    assert.equal(preview.plan.target.port, Number(result.port));
+    assert.equal(preview.target.port, appPort);
+
+    // Every request carries the marker; a visitor's value is replaced, and naming the marker in
+    // Connection cannot get it dropped on the way to the dev server.
+    assert.equal(result.plain.marker, "1");
+    assert.equal(result.forged.marker, "1");
+    assert.equal(result.nominated.marker, "1");
+    assert.doesNotMatch(String(result.nominated.connection), /x-farm-preview/);
+    assert.equal(result.upgrade, "marker=1;ping");
+
+    // The proxy stops with the tunnel.
+    await assert.rejects(fetch(`http://127.0.0.1:${result.port}/`));
+  } finally {
+    restoreEnv("FARM_PREVIEW_TUNNEL_COMMAND", previous.command);
+    restoreEnv("FARM_TEST_RESULT_FILE", previous.resultFile);
+    await new Promise((resolve) => app.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 async function createTestServer(handler) {
   const server = createServer(
     handler ||

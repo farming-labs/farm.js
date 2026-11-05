@@ -4,7 +4,10 @@ import { after, before, beforeEach, test } from "node:test";
 import { invokeAPIRouteEndpoint } from "@farm.js/core/api/runtime";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { aiChatRoute } from "../dist/index.js";
+import { aiChatRoute as createChatRoute } from "../dist/index.js";
+
+// These cases are about file URLs, not authorization (see authorize.test.mjs).
+const aiChatRoute = (options) => createChatRoute({ allowUnauthenticated: true, ...options });
 
 // A chat route downloaded any file URL a visitor put in a message, so the public route
 // fetched internal addresses and handed the body to the model. The AI SDK's own URL check

@@ -19,6 +19,8 @@ export default middleware()
 
 export const config = {
   matcher: '/:path*',
+  // Only sets headers and redirects, so pages stay CDN cacheable.
+  cache: 'public',
   exclude: [
     '/_next/:path*',
     '/assets/:path*',

@@ -1,15 +1,16 @@
-import { brotliCompressSync, gzipSync } from "node:zlib";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import { createFarmRendererPlugin } from "../dist/vite.mjs";
-import { assertCoreRuntimeReduction } from "./runtime-size-budget.mjs";
+import { assertRuntimeSizeBudgets } from "./runtime-size-budget.mjs";
+import { measureJavaScriptOutput } from "./javascript-output-size.mjs";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtureRoot = join(packageRoot, "fixtures/runtime-size");
 const resultFile = join(packageRoot, "RUNTIME_SIZE_RESULTS.json");
 const checkOnly = process.argv.includes("--check");
+const chunkAccounting = [];
 
 async function bundle(entry, compiler) {
   const result = await build({
@@ -34,19 +35,14 @@ async function bundle(entry, compiler) {
       },
     },
   });
-  const outputs = Array.isArray(result) ? result : [result];
-  const code = outputs
-    .flatMap((output) => output.output)
-    .filter((output) => output.type === "chunk")
-    .map((output) => output.code)
-    .join("\n");
-  const bytes = Buffer.from(code);
-  return {
-    code,
-    raw: bytes.length,
-    gzip: gzipSync(bytes, { level: 9 }).length,
-    brotli: brotliCompressSync(bytes).length,
-  };
+  const measured = measureJavaScriptOutput(result);
+  if (compiler && measured.code.includes("@farm.js/react/compiler-hmr-registry")) {
+    throw new Error(`${entry} retained the development refresh registry in production.`);
+  }
+  if (measured.chunkAccounting.files.length > 1) {
+    chunkAccounting.push({ entry, compiler, ...measured.chunkAccounting });
+  }
+  return measured;
 }
 
 const [
@@ -281,12 +277,17 @@ if (keyedRollingWindowOn.code.includes("keyed-rows:mapped-rolling-window-hinted"
 }
 if (
   !keyedPositionOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedPositionOn.code.includes("keyed-rows:position-hinted") ||
+  !keyedPositionOn.code.includes("keyed-rows:plain-position-hinted") ||
   !keyedPositionOn.code.includes("positionIndexIndependent")
 ) {
   throw new Error(
-    `Keyed position fixture did not retain its isolated position-hint runtime: rows=${keyedPositionOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedPositionOn.code.includes("keyed-rows:position-hinted")}, proof=${keyedPositionOn.code.includes("positionIndexIndependent")}.`,
+    `Keyed position fixture did not retain its isolated position-hint runtime: rows=${keyedPositionOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedPositionOn.code.includes("keyed-rows:plain-position-hinted")}, proof=${keyedPositionOn.code.includes("positionIndexIndependent")}.`,
   );
+}
+for (const marker of ["Set.prototype.has", "Map.prototype.get", "keyed-rows:position-hinted"]) {
+  if (keyedPositionOn.code.includes(marker)) {
+    throw new Error(`Target-free position fixture unexpectedly retained ${marker}.`);
+  }
 }
 if (
   !keyedBatchPositionOn.code.includes("FarmCompiledKeyedRows") ||
@@ -323,14 +324,17 @@ if (
 }
 if (
   !keyedMapReorderOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedMapReorderOn.code.includes("keyed-rows:map-reorder-hinted") ||
+  !keyedMapReorderOn.code.includes("keyed-rows:plain-map-reorder-hinted") ||
   !keyedMapReorderOn.code.includes("reorderIndexIndependent")
 ) {
   throw new Error(
-    `Keyed map-reorder fixture did not retain its isolated runtime: rows=${keyedMapReorderOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedMapReorderOn.code.includes("keyed-rows:map-reorder-hinted")}, proof=${keyedMapReorderOn.code.includes("reorderIndexIndependent")}.`,
+    `Keyed map-reorder fixture did not retain its isolated runtime: rows=${keyedMapReorderOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedMapReorderOn.code.includes("keyed-rows:plain-map-reorder-hinted")}, proof=${keyedMapReorderOn.code.includes("reorderIndexIndependent")}.`,
   );
 }
-if (keyedReorderOn.code.includes("keyed-rows:map-reorder-hinted")) {
+if (
+  keyedReorderOn.code.includes("keyed-rows:map-reorder-hinted") ||
+  keyedReorderOn.code.includes("keyed-rows:plain-map-reorder-hinted")
+) {
   throw new Error("Reorder-only fixture retained the optional map-reorder runtime.");
 }
 if (
@@ -362,14 +366,17 @@ for (const [name, output] of [
   }
   if (
     output.code.includes("positionIndexIndependent") ||
-    output.code.includes("keyed-rows:position-hinted")
+    output.code.includes("keyed-rows:position-hinted") ||
+    output.code.includes("keyed-rows:plain-position-hinted")
   ) {
     throw new Error(`${name} fixture retained the optional position-hint runtime.`);
   }
   if (
     output.code.includes("reorderIndexIndependent") ||
     output.code.includes("keyed-rows:reorder-hinted") ||
-    output.code.includes("keyed-rows:plain-reorder-hinted")
+    output.code.includes("keyed-rows:plain-reorder-hinted") ||
+    output.code.includes("keyed-rows:plain-map-reorder-hinted") ||
+    output.code.includes("keyed-rows:map-reorder-hinted")
   ) {
     throw new Error(`${name} fixture retained the optional reorder-hint runtime.`);
   }
@@ -716,137 +723,16 @@ const results = {
   },
 };
 
+// Single-chunk reports retain their existing shape and exact byte measurements.
+if (chunkAccounting.length > 0) {
+  results.chunkAccounting = chunkAccounting.sort(
+    (a, b) => a.entry.localeCompare(b.entry) || Number(a.compiler) - Number(b.compiler),
+  );
+}
+
 if (checkOnly) {
   const reference = JSON.parse(await readFile(resultFile, "utf8"));
-  const checks = [
-    {
-      name: "direct compiler premium",
-      current: results.fixtures.direct.compilerPremium.gzip,
-      maximum: reference.fixtures.direct.compilerPremium.gzip + 128,
-    },
-    {
-      name: "keyed compiler premium",
-      current: results.fixtures.keyed.compilerPremium.gzip,
-      maximum: reference.fixtures.keyed.compilerPremium.gzip + 256,
-    },
-    {
-      name: "keyed append compiler premium",
-      current: results.fixtures.keyedAppend.compilerPremium.gzip,
-      maximum: reference.fixtures.keyedAppend.compilerPremium.gzip + 256,
-    },
-    {
-      name: "keyed filter compiler premium",
-      current: results.fixtures.keyedFilter.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 264,
-    },
-    {
-      name: "keyed structural-append compiler premium",
-      current: results.fixtures.keyedStructuralAppend.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralAppend?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralAppend.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed structural-append-map compiler premium",
-      current: results.fixtures.keyedStructuralAppendMap.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralAppendMap?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralAppendMap.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed structural-prepend compiler premium",
-      current: results.fixtures.keyedStructuralPrepend.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralPrepend?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralPrepend.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed structural-prepend-map compiler premium",
-      current: results.fixtures.keyedStructuralPrependMap.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralPrependMap?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralPrependMap.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed prepend compiler premium",
-      current: results.fixtures.keyedPrepend.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedPrepend?.compilerPremium.gzip ?? 12_000) + 256,
-    },
-    {
-      name: "keyed position compiler premium",
-      current: results.fixtures.keyedPosition.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedPosition?.compilerPremium.gzip ??
-          results.fixtures.keyedPosition.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed batch-position compiler premium",
-      current: results.fixtures.keyedBatchPosition.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedBatchPosition?.compilerPremium.gzip ??
-          results.fixtures.keyedBatchPosition.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed window-position compiler premium",
-      current: results.fixtures.keyedWindowPosition.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedWindowPosition?.compilerPremium.gzip ??
-          results.fixtures.keyedWindowPosition.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed reorder compiler premium",
-      current: results.fixtures.keyedReorder.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedReorder?.compilerPremium.gzip ??
-          results.fixtures.keyedReorder.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed map-reorder compiler premium",
-      current: results.fixtures.keyedMapReorder.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedMapReorder?.compilerPremium.gzip ??
-          results.fixtures.keyedMapReorder.compilerPremium.gzip) + 328,
-    },
-    {
-      name: "keyed sort compiler premium",
-      current: results.fixtures.keyedSort.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedSort?.compilerPremium.gzip ??
-          results.fixtures.keyedSort.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed slice compiler premium",
-      current: results.fixtures.keyedSlice.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedSlice?.compilerPremium.gzip ?? 12_250) + 256,
-    },
-    {
-      name: "keyed rolling-window compiler premium",
-      current: results.fixtures.keyedRollingWindow.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedRollingWindow?.compilerPremium.gzip ??
-          results.fixtures.keyedRollingWindow.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed mapped rolling-window compiler premium",
-      current: results.fixtures.keyedMappedRollingWindow.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedMappedRollingWindow?.compilerPremium.gzip ??
-          results.fixtures.keyedMappedRollingWindow.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "core runtime premium",
-      current: results.fixtures.isolatedRuntime.coreRuntimePremiumGzip,
-      maximum: reference.fixtures.isolatedRuntime.coreRuntimePremiumGzip + 128,
-    },
-  ];
-  for (const check of checks) {
-    if (check.current > check.maximum) {
-      throw new Error(
-        `${check.name} grew to ${check.current} B gzip; persisted maximum is ${check.maximum} B.`,
-      );
-    }
-  }
-  assertCoreRuntimeReduction(results.fixtures.isolatedRuntime, reference.fixtures.isolatedRuntime);
+  assertRuntimeSizeBudgets(results, reference);
 } else {
   await writeFile(resultFile, `${JSON.stringify(results, null, 2)}\n`, "utf8");
 }

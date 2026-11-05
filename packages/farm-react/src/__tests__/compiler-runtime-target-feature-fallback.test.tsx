@@ -16,12 +16,15 @@ import {
   keyedRowsPrependHintedRuntimeFeature,
   keyedRowsPrependOnlyRuntimeFeature,
   keyedRowsPlainReorderHintedRuntimeFeature,
+  keyedRowsPlainMapReorderHintedRuntimeFeature,
+  keyedRowsMapReorderHintedRuntimeFeature,
   keyedRowsReorderHintedRuntimeFeature,
   type CompilerStateUpdater,
 } from "../compiler-runtime";
 
 it.each([
   [keyedRowsPlainReorderHintedRuntimeFeature, keyedRowsReorderHintedRuntimeFeature],
+  [keyedRowsPlainMapReorderHintedRuntimeFeature, keyedRowsMapReorderHintedRuntimeFeature],
   [keyedRowsAppendOnlyRuntimeFeature, keyedRowsHintedRuntimeFeature],
   [keyedRowsPrependOnlyRuntimeFeature, keyedRowsPrependHintedRuntimeFeature],
   [keyedRowsFilterOnlyRuntimeFeature, keyedRowsFilterHintedRuntimeFeature],
@@ -139,6 +142,7 @@ it.each([
   keyedRowsFilterOnlyRuntimeFeature,
   keyedRowsPrependOnlyRuntimeFeature,
   keyedRowsPlainReorderHintedRuntimeFeature,
+  keyedRowsPlainMapReorderHintedRuntimeFeature,
 ])(
   "$name uses full binding reads when a target-free runtime receives valid target metadata",
   async (feature) => {

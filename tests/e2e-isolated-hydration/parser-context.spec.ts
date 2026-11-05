@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
 // that the widgets still work, which is what the fallback buys.
 
 async function boundaryMarkersInside(page: import("@playwright/test").Page, selector: string) {
-  return page.locator(`${selector} farm-client-boundary`).count();
+  return page.locator(`${selector} f-island`).count();
 }
 
 test("an island in table context keeps the row in the table and stays interactive", async ({
@@ -73,7 +73,7 @@ test("the layout islands still isolate on a route that fell back", async ({ page
   await page.goto("/table");
   // The fallback is scoped to the page that renders into a parser-sensitive
   // container; the layout's own islands keep their markers.
-  await expect(page.locator("header farm-client-boundary")).toHaveCount(2);
+  await expect(page.locator("header f-island")).toHaveCount(2);
   const counter = page.getByTestId("counter");
   await counter.click();
   await expect(counter).toHaveText("count: 1");

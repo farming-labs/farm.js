@@ -7,6 +7,7 @@ import {
   requestAcceptsMarkdown,
 } from "./markdown";
 import { createFarmMarkdownViewResponse } from "./markdown-view";
+import { FARM_ANONYMOUS_CLIENT_ADDRESS } from "./anonymous-client-address";
 import type { FarmMdxComponents, FarmMdxResolvedConfig } from "./app-markdown-config";
 
 // Preserve the existing entry points while keeping response-only imports
@@ -281,7 +282,7 @@ function hasOnlyAnonymousHeaders(headers: Headers): boolean {
  * Internal: the client address an adapter reports for the anonymous page check, in place of the
  * caller's. It is a documentation address (RFC 5737), so no IP allowlist admits it.
  */
-export const FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS = "192.0.2.1";
+export const FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS = FARM_ANONYMOUS_CLIENT_ADDRESS;
 
 export async function createFarmMarkdownSourceResponse(options: {
   request: Request;

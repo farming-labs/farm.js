@@ -255,7 +255,7 @@ import type { H3Event } from 'h3';
 import { farmRegistry } from '../farm-registry';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { searchParamsToObject } from '@farm.js/core/internal/production-runtime';
+import { createFarmSearchParams, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 import { createFarmLegacyRequest, renderFarmLegacyErrorHtml, renderFarmLegacyHtml } from '@farm.js/core/internal/production-runtime';
 
 export default defineEventHandler(async (event: H3Event) => {
@@ -427,7 +427,7 @@ export default defineEventHandler(async (event: H3Event) => {
       // Create page props
       const rawPageProps = {
         params,
-        searchParams: Promise.resolve(searchParamsObject),
+        searchParams: createFarmSearchParams(searchParamsObject),
         path: pathname,
       };
       const pageProps = routeModule.__farmResolveRouteProps
@@ -446,7 +446,7 @@ export default defineEventHandler(async (event: H3Event) => {
               ...rawPageProps,
               params: parsedParams,
               search: parsedSearch,
-              searchParams: Promise.resolve(parsedSearch),
+              searchParams: createFarmSearchParams(parsedSearch),
             };
           })();
       

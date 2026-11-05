@@ -265,8 +265,11 @@ export type EndpointOptions<
    * transport and endpoint authorization remain required separately.
    */
   mcp?: EndpointMCPOptions;
-  /** @deprecated Use plain functions in `middleware` for Farm endpoint middleware. */
-  use?: any[];
+  /**
+   * @deprecated Not supported: Farm never ran `use` middleware, so `createEndpoint` throws
+   * when it is set. Put plain functions in `middleware` instead.
+   */
+  use?: never;
 };
 
 export type EndpointHandler<
@@ -478,6 +481,14 @@ export function createEndpoint(
 
   if (typeof handler !== "function") {
     throw new TypeError("createEndpoint requires a handler function");
+  }
+  // better-call's `use` never ran in Farm's route runtime, so a guard put there
+  // was silently skipped. Fail at definition time instead of serving unguarded.
+  if ((options as { use?: unknown }).use !== undefined) {
+    throw new TypeError(
+      "createEndpoint does not support the `use` option. Move these functions to `middleware`: " +
+        "each receives the endpoint context and returns an object, true, false, or a Response.",
+    );
   }
 
   const middleware = normalizeEndpointMiddleware(options.middleware);

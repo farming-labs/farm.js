@@ -193,9 +193,23 @@ describe("development OpenAPI spec route", () => {
       });
       expect(cached.status).toBe(304);
 
+      const sectioned = await startApp(
+        `agent: { manifest: { app: { build: false }, mcp: { hide: ["admin"] }, plugins: false } },`,
+      );
+      expect(await (await fetch(`${sectioned}/.well-known/farmjs.json`)).json()).toMatchObject({
+        app: { basePath: "/" },
+        mcp: { servers: [] },
+        plugins: null,
+      });
+      expect(
+        (await (await fetch(`${sectioned}/.well-known/farmjs.json`)).json()).app,
+      ).not.toHaveProperty("build");
+
       const optedOut = await startApp(`agent: { manifest: false },`);
-      const off = await fetch(`${optedOut}/.well-known/farmjs.json`);
-      expect(off.headers.get("content-type") ?? "").not.toContain("application/json");
+      for (const pathname of ["/.well-known/farmjs.json", "/.well-known/farmjs"]) {
+        const off = await fetch(`${optedOut}${pathname}`);
+        expect(off.headers.get("content-type") ?? "").not.toContain("application/json");
+      }
     } finally {
       unpublish();
     }

@@ -686,6 +686,19 @@
 .bf-st--live {
   background: #d8d8d8;
 }
+/* A step that refused the call: the same circle as a check, without its brightness. */
+.bf-st--no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3em;
+  height: 1.3em;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  background: none;
+  color: #8a8a8a;
+  font-size: 0.78em;
+  line-height: 1;
+}
 .bf-st--ok {
   display: inline-flex;
   align-items: center;

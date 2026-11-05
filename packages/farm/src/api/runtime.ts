@@ -12,7 +12,7 @@ import {
 } from "../server-http";
 import { DEFAULT_FARM_API_BASE_PATH, normalizeFarmAPIBasePath } from "./config";
 import { resolveFarmAPICanonicalPathname } from "./server-path";
-import { parseRouteSchema } from "./route-schema";
+import { parseRouteSchema, toPublicValidationIssues } from "./route-schema";
 import { omitFarmResponseBody } from "../response-body";
 
 export { registerAPIRouteShape, type APIRouteShapeSource } from "./route-shape";
@@ -458,15 +458,11 @@ async function validateInput(
   if (!schema) return value;
   try {
     return await parseRouteSchema(schema, value);
-  } catch (validationError: any) {
+  } catch (validationError) {
     return Response.json(
       {
         error,
-        details: (validationError.issues || validationError.errors || []).map((issue: any) => ({
-          path: issue.path,
-          message: issue.message,
-          code: issue.code,
-        })),
+        details: toPublicValidationIssues(validationError),
       },
       { status: 400 },
     );

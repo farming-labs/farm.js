@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/cli",
-  "version": "0.1.39",
+  "version": "0.1.51-beta.3",
   "description": "CLI for Farm.js framework",
   "keywords": [
     "@farm.js/cli",
@@ -34,6 +34,14 @@
     "./build": {
       "import": "./dist/build.mjs",
       "require": "./dist/build.js"
+    },
+    "./desktop": {
+      "import": "./dist/desktop.mjs",
+      "require": "./dist/desktop.js"
+    },
+    "./mobile": {
+      "import": "./dist/mobile.mjs",
+      "require": "./dist/mobile.js"
     },
     "./add-integration": {
       "import": "./dist/add-integration.mjs",

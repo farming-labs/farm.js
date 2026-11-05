@@ -1618,7 +1618,10 @@ export function polar<TInput extends PolarIntegrationInput>(
               {
                 name: meter.eventName,
                 externalCustomerId: resolved.externalCustomerId,
-                externalId: body.idempotencyKey,
+                // Polar dedupes externalId across the organization, so a
+                // caller's key is kept to its own customer: one customer can
+                // never claim, and so drop, another customer's usage event.
+                externalId: `${resolved.externalCustomerId}:${body.idempotencyKey}`,
                 timestamp: occurredAt,
                 metadata,
               },

@@ -164,7 +164,13 @@ export function apiMcp(options: APIMCPOptions): FarmPlugin {
     // Only an oauth endpoint has metadata to serve, so others add no runtime hooks:
     // any runtime hook makes the production build bundle the plugin runtime.
     ...(normalized.oauth
-      ? { runtime: { before: ({ request }) => protectedResourceMetadata(request, normalized) } }
+      ? {
+          runtime: {
+            // before only answers the metadata endpoint; other responses pass through.
+            cache: "public" as const,
+            before: ({ request }) => protectedResourceMetadata(request, normalized),
+          },
+        }
       : {}),
   };
 }

@@ -783,6 +783,32 @@ export const config = {
   }
 });
 
+test("warns when a migrated middleware matcher uses .* or an inline param", async () => {
+  const { root, plan } = await planNextMiddlewareFixture({
+    "app/page.tsx": "export default function Home() { return null; }\n",
+    "middleware.ts": `export function middleware() {}
+
+export const config = {
+  matcher: ["/admin/.*", "/admin.+", "/user-:id", "/dash:path*", "/c++", "/admin*", "/*.json"],
+};
+`,
+  });
+  try {
+    const warnings = plan.warnings.filter((warning) => warning.includes("RegExp"));
+    assert.equal(warnings.length, 4, plan.warnings.join("\n"));
+    for (const [index, matcher] of [
+      "/admin/.*",
+      "/admin.+",
+      "/user-:id",
+      "/dash:path*",
+    ].entries()) {
+      assert.ok(warnings[index].includes(`"${matcher}"`), warnings[index]);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("warns that a TanStack pathless layout's beforeLoad check is not migrated", async () => {
   const root = await createTempProject({ dependencies: { "@tanstack/react-router": "latest" } });
   try {

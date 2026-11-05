@@ -1,0 +1,87 @@
+// The React Native screen for /map (module id app/map) on every OS that does not override it;
+// mobile.native.routes keeps iOS on the web screen. Web builds never read this file: it is not a
+// route, not in the generated route types, and not in any web bundle.
+import { serverFetch, useNavigate, useServerQuery } from "@farm.js/native";
+import { useState } from "react";
+import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import type { Station } from "../../../features/stations/data";
+
+type StationSummary = Omit<Station, "readings">;
+
+/** GET /api/stations on mobile.server, the route the web client would call. */
+async function listStations(): Promise<StationSummary[]> {
+  const response = await serverFetch("/api/stations");
+  if (!response.ok) throw new Error(`GET /api/stations answered ${response.status}`);
+  return (await response.json()) as StationSummary[];
+}
+
+export const metadata = { title: "Map" };
+
+export default function MapScreen() {
+  const navigate = useNavigate();
+  const { data: stations = [], error, refetch } = useServerQuery(listStations, undefined);
+  // `pending` is true only for the first load, so pull-to-refresh tracks its own state.
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = () => {
+    setRefreshing(true);
+    refetch()
+      .catch(() => {}) // the failure shows through `error`
+      .finally(() => setRefreshing(false));
+  };
+
+  return (
+    <View style={styles.screen} testID="map-screen">
+      <Text style={styles.lead}>Native screen. Stations come from GET /api/stations.</Text>
+      {error ? <Text style={styles.error}>{error.message}</Text> : null}
+      <FlatList
+        data={stations}
+        keyExtractor={(station) => station.id}
+        refreshing={refreshing}
+        onRefresh={refresh}
+        renderItem={({ item }) => (
+          <Pressable
+            accessibilityRole="link"
+            onPress={() => navigate(`/stations/${item.id}`)}
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            testID={`station-${item.id}`}
+          >
+            <Text style={styles.title}>{item.name}</Text>
+            <Text style={styles.subtitle}>{item.elevationM} m</Text>
+          </Pressable>
+        )}
+      />
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => navigate("/about")}
+        style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+        testID="open-about"
+      >
+        <Text style={styles.buttonText}>About this app (web screen)</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: "#f7f7f5" },
+  lead: { padding: 16, color: "#55524c" },
+  error: { paddingHorizontal: 16, color: "#b3261e" },
+  row: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#d9d6cf",
+    backgroundColor: "#ffffff",
+  },
+  pressed: { opacity: 0.6 },
+  title: { fontSize: 17, color: "#1d1b18" },
+  subtitle: { marginTop: 2, color: "#6b6760" },
+  button: {
+    margin: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "#2f6b3f",
+  },
+  buttonText: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
+});

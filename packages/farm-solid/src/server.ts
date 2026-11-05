@@ -9,7 +9,7 @@ import SolidCompat, {
   ErrorBoundary,
   createElement,
   isValidElement,
-  materializeSolidElement,
+  materializeSolidDocument,
 } from "./runtime";
 
 export const name = "solid";
@@ -29,7 +29,7 @@ export async function renderToString(
   options?: FarmSolidRenderOptions,
 ): Promise<string> {
   return renderToStringAsync(
-    () => materializeSolidElement(element),
+    () => materializeSolidDocument(element),
     options?.nonce ? { nonce: options.nonce } : undefined,
   );
 }
@@ -44,7 +44,7 @@ function createSolidStream(
   >[1] & {
     onError(error: unknown): void;
   };
-  return renderSolidToStream(() => materializeSolidElement(element), options);
+  return renderSolidToStream(() => materializeSolidDocument(element), options);
 }
 
 export function renderToReadableStream(

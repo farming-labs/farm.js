@@ -1,0 +1,6 @@
+<resources>
+    <color name="farm_background">#F7F8F6</color>
+    <color name="farm_surface">#FFFFFF</color>
+    <color name="farm_accent">#2F6F4F</color>
+    <color name="farm_text">#1A1D1B</color>
+</resources>

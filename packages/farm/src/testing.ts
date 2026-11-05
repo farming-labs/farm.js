@@ -18,7 +18,7 @@ import {
 } from "./router";
 import { runWithServerActionRequest } from "./server-action-security";
 import type { ServerFn } from "./server-fn";
-import { searchParamsToObject } from "./search-params";
+import { createFarmSearchParams, searchParamsToObject } from "./search-params";
 import type { FarmContextFactory, MiddlewareProps, PluginContextProps, RouteModule } from "./types";
 
 export type FarmTestQuery = URLSearchParams | Record<string, FarmRouterQueryValue>;
@@ -214,7 +214,7 @@ export function createFarmTestHarness<TContext = unknown>(
       const rawProps = withFarmRouteContext(
         {
           params,
-          searchParams: Promise.resolve(search),
+          searchParams: createFarmSearchParams(search),
           path: url.pathname,
           middleware: routeOptions.middleware,
           context: routeOptions.pluginContext,
@@ -229,7 +229,7 @@ export function createFarmTestHarness<TContext = unknown>(
       ).__farmResolveRouteProps;
       const resolvedProps = resolveProps
         ? await resolveProps(rawProps)
-        : { ...rawProps, search, searchParams: Promise.resolve(search) };
+        : { ...rawProps, search, searchParams: createFarmSearchParams(search) };
       const canonicalPath = readCanonicalPath(resolvedProps);
       const componentProps = stripInternalRouteProps(resolvedProps) as FarmTestRouteProps<TRoute>;
 

@@ -19,7 +19,7 @@ import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { stripFarmBasePath } from "../base-path";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
-import type { ResolvedFarmServerConfig } from "../server-http";
+import { withFarmRequestClientAddress, type ResolvedFarmServerConfig } from "../server-http";
 import {
   parseMiddlewareCookieHeader,
   serializeMiddlewareCookie as serializeCookie,
@@ -72,6 +72,11 @@ export interface ProductionMiddlewareResult {
   context: Map<string, any>;
   headers: Headers;
   handled: boolean;
+  /**
+   * Middleware without `cache: "public"` ran and let the request through. It may have been a
+   * guard (an IP allowlist, an API key header), so the response must not reach a shared cache.
+   */
+  guarded: boolean;
   /** Middleware called notFound(): answer with the app's not-found page. */
   notFound?: true;
 }
@@ -337,34 +342,6 @@ function createResponseShim(headers: WebResponseHeaderMap): WebResponseShimState
   };
 }
 
-function withNodeRequestShape(
-  request: Request,
-  trustProxy: boolean,
-  clientAddress: string | undefined,
-): Request {
-  const requestWithShape = request as Request & {
-    socket?: { remoteAddress?: string };
-  };
-
-  if (!requestWithShape.socket) {
-    const forwardedFor = trustProxy
-      ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-      : undefined;
-    try {
-      // A web Request carries no socket, so the address comes from a trusted
-      // proxy or from the server adapter's own connection. Never invent one:
-      // reporting `127.0.0.1` used to make every visitor look like the same
-      // client, which collapsed per-client rate limiting into one shared
-      // bucket. Leave it undefined so a consumer can tell that it does not know.
-      requestWithShape.socket = { remoteAddress: forwardedFor || clientAddress || undefined };
-    } catch {
-      // Some Request implementations may not be extensible.
-    }
-  }
-
-  return requestWithShape;
-}
-
 function createHandledResponse(
   body: BodyInit | null,
   init: ResponseInit,
@@ -391,7 +368,7 @@ function createWebMiddlewareContext(
   clientAddress?: string,
   toRoutePathname?: (pathname: string) => string,
 ): WebMiddlewareContextState {
-  let currentRequest = withNodeRequestShape(request, trustProxy, clientAddress);
+  let currentRequest = withFarmRequestClientAddress(request, trustProxy, clientAddress);
   let handledResponse: Response | null = null;
   const url = new URL(currentRequest.url);
   const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
@@ -450,7 +427,7 @@ function createWebMiddlewareContext(
     rewrite(rewriteUrl: string): void {
       ctx._rewriteUrl = rewriteUrl;
       const nextUrl = new URL(rewriteUrl, currentRequest.url);
-      currentRequest = withNodeRequestShape(
+      currentRequest = withFarmRequestClientAddress(
         new Request(nextUrl, currentRequest),
         trustProxy,
         clientAddress,
@@ -550,8 +527,8 @@ function toMiddlewareConfig(
     handlers?: MiddlewareFunction[];
   },
 ): MiddlewareConfig {
-  const { matcher, exclude, runtime } = entry;
-  return { matcher, exclude, runtime };
+  const { matcher, exclude, runtime, cache } = entry;
+  return { matcher, exclude, runtime, cache };
 }
 
 function normalizeConfigMiddleware(config?: FarmMiddlewareConfig | null): {
@@ -642,6 +619,7 @@ function emptyResult(request: Request): ProductionMiddlewareResult {
     context: new Map(),
     headers: new Headers(),
     handled: false,
+    guarded: false,
   };
 }
 
@@ -711,6 +689,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     // path which have not run yet get a pass of their own. Each entry runs at
     // most once, so repeated rewrites end after at most one pass per entry.
     const ran = new Set<ProductionMiddlewareEntry>();
+    let guarded = false;
     function* applicableMiddleware() {
       for (
         let pathname = initialPathname, requestPathname = initialRequestPathname, pass = 0;
@@ -745,6 +724,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
         continue;
       }
       ran.add(entry);
+      if (entry.config?.cache !== "public") guarded = true;
 
       if (parentData) {
         contextState = createWebMiddlewareContext(
@@ -793,6 +773,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
 
@@ -810,6 +791,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
 
@@ -840,6 +822,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
         if (isFarmNotFoundError(error)) {
@@ -851,6 +834,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
             notFound: true,
           };
         }
@@ -877,6 +861,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       context: new Map(ctx.locals),
       headers: mapToHeaders(contextState.headers),
       handled: false,
+      guarded,
     };
   };
 }
@@ -898,7 +883,22 @@ export function applyProductionMiddlewareHeaders(
       : [];
   return _withFarmResponseHeaders(response, (headers) => {
     for (const [key, value] of middlewareHeaders) {
-      if (key.toLowerCase() === "set-cookie") continue;
+      const name = key.toLowerCase();
+      if (name === "set-cookie") continue;
+      // Vary is a list a cache reads whole: a response varies on what middleware read as well as
+      // on what the page varies on (islands mode's F-Layouts), so both lists are kept.
+      if (name === "vary") {
+        // Header names are case-insensitive: keep the first spelling of each.
+        const values = new Map<string, string>();
+        for (const entry of [headers.get("vary"), value].flatMap((list) =>
+          list ? list.split(",") : [],
+        )) {
+          const field = entry.trim();
+          if (field && !values.has(field.toLowerCase())) values.set(field.toLowerCase(), field);
+        }
+        headers.set("Vary", Array.from(values.values()).join(", "));
+        continue;
+      }
       // A returned Response's headers are authoritative and preserved (matching
       // the dev runtime, where the Response is applied after ctx.headers). ctx
       // headers only add keys the Response did not already set.
@@ -908,5 +908,33 @@ export function applyProductionMiddlewareHeaders(
     for (const cookie of setCookies) {
       headers.append("Set-Cookie", cookie);
     }
+  });
+}
+
+const PRIVATE_CACHE_DIRECTIVE = /(?:^|,)\s*(?:private|no-store)\s*(?:[,=]|$)/i;
+// Directives a CDN reads in place of Cache-Control (RFC 9213 and the platform names).
+const CDN_CACHE_CONTROL_HEADERS = [
+  "cdn-cache-control",
+  "vercel-cdn-cache-control",
+  "netlify-cdn-cache-control",
+  "cloudflare-cdn-cache-control",
+];
+
+/**
+ * Keep a response that middleware let through out of shared caches. A CDN keys its copy by URL
+ * and serves it without running the guard again, so a page an IP allowlist or API key header
+ * let one visitor read would reach everyone. A Cache-Control that a shared cache may store
+ * becomes `private, no-store`; a private one is left as it is.
+ *
+ * @internal
+ */
+export function _withFarmGuardedResponseCache(response: Response): Response {
+  const shareable = !PRIVATE_CACHE_DIRECTIVE.test(response.headers.get("cache-control") ?? "");
+  if (!shareable && !CDN_CACHE_CONTROL_HEADERS.some((name) => response.headers.has(name))) {
+    return response;
+  }
+  return _withFarmResponseHeaders(response, (headers) => {
+    if (shareable) headers.set("Cache-Control", "private, no-store");
+    for (const name of CDN_CACHE_CONTROL_HEADERS) headers.delete(name);
   });
 }

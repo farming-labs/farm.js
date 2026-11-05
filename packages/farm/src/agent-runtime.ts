@@ -324,7 +324,12 @@ export async function proxyAgentRuntimeRequest(
 ): Promise<Response> {
   const upstreamOrigin = normalizeAgentOrigin(origin);
   const incomingUrl = new URL(request.url);
-  const targetUrl = new URL(`${incomingUrl.pathname}${incomingUrl.search}`, upstreamOrigin);
+  // Set the path on the upstream origin instead of resolving it against the origin: a path such
+  // as `//host/x` (which still matches the agent route) would otherwise replace the upstream host
+  // and send the visitor's cookies and Authorization to it.
+  const targetUrl = new URL(upstreamOrigin);
+  targetUrl.pathname = incomingUrl.pathname;
+  targetUrl.search = incomingUrl.search;
   const headers = createProxyRequestHeaders(request.headers, incomingUrl);
   const method = request.method.toUpperCase();
   const init: RequestInit & { duplex?: "half" } = {

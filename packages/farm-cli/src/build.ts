@@ -4,8 +4,10 @@ import {
   logger,
   resolveConfig,
   resolveDeployConfig,
+  validateFarmDesktopConfig,
 } from "@farm.js/core/internal/config-runtime";
 import { withProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
+import { ensureFarmRscPackages } from "./rsc-packages";
 
 export { withProductionNodeEnv };
 
@@ -45,6 +47,31 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
 
       if (!userConfig) {
         throw new Error("No Farm config found. Please create farm.config.ts or config.ts.");
+      }
+
+      // A web build still catches a malformed static `desktop` block; a function-valued block
+      // is only called by --desktop.
+      if (typeof userConfig.desktop !== "function") validateFarmDesktopConfig(userConfig.desktop);
+
+      // experimental.serverComponents: the RSC pipeline builds the app for the deploy preset.
+      await ensureFarmRscPackages(userConfig, root);
+      const buildRuntime = buildRuntimeResult.value;
+      if (
+        buildRuntime.farmAppUsesRscPipeline(
+          await buildRuntime.resolveFarmRscCheckConfig(userConfig, root, mode),
+          root,
+        )
+      ) {
+        const deploy = resolveDeployConfig(userConfig, {
+          preset: options.preset as any,
+          target: options.target,
+        });
+        await buildRuntimeResult.value.buildFarmRsc(userConfig, {
+          root,
+          preset: deploy.preset,
+          outputDir: deploy.outputDir,
+        });
+        return;
       }
 
       const config = await resolveConfig(userConfig, mode);

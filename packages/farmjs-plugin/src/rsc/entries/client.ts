@@ -1,4 +1,5 @@
 import type { EntryContext } from "../types.js";
+import { generateMobileShellNavigation } from "../mobile-client.js";
 
 export const serverFnTransportErrorClientRuntime = `function createFarmServerFnTransportError(value) {
   const message = value && typeof value === 'object' && typeof value.message === 'string'
@@ -63,7 +64,13 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment';
+import { runFarmNavigationDelegates } from '@farm.js/core/internal/client-runtime';
 `;
+
+  // farm dev --mobile: every page runs in the shell's WebView, so this entry is the mobile client.
+  if (ctx.mobileClient === "inline") {
+    imports += generateMobileShellNavigation();
+  }
 
   if (ctx.actionsEnabled) {
     imports += `import { setServerCallback, encodeReply, createTemporaryReferenceSet } from '@vitejs/plugin-rsc/browser';
@@ -142,8 +149,7 @@ setServerCallback(async (id, args) => {
     // router performs the navigation here.
     if (p.returnValue?.redirect?.url) {
       debug('Server action redirected:', p.returnValue.redirect.url);
-      history.pushState(null, '', p.returnValue.redirect.url);
-      await farmNavigateRef.current?.(location.href);
+      await farmNavigateRef.current?.(p.returnValue.redirect.url, 'push');
       return;
     }
     debug('Server action failed:', id);
@@ -182,9 +188,10 @@ async function main() {
   
   debug('Starting client hydration');
   
-  // Clean duplicate DOM as early as possible (server may have sent two blocks)
+  // Clean duplicate DOM as early as possible (server may have sent two blocks). Only Farm's own
+  // wrapper: an app that owns the document can have an element with id="root" in its content.
   const rootEl = document.getElementById('root');
-  if (rootEl) {
+  if (rootEl && rootEl.firstElementChild?.hasAttribute('data-farm-root')) {
     while (rootEl.children.length > 1) rootEl.lastElementChild.remove();
     while (rootEl.nextElementSibling) rootEl.nextElementSibling.remove();
   }
@@ -256,8 +263,8 @@ async function main() {
           }
 
           e.preventDefault();
-          history.pushState(null, '', a.href);
-          nav();
+          // Link replace marks its anchor; a plain anchor pushes.
+          navigate(a.href, a.hasAttribute('data-replace') ? 'replace' : 'push');
         }
       };
       
@@ -279,14 +286,39 @@ async function main() {
     return content;
   }
   
+  // An in-app navigation (a link click, a redirect after a server action). Navigation delegates
+  // get it first, after the router's own checks, as Farm's other routers offer it: one that takes
+  // it (a native shell showing the URL on its own screen) leaves the page and URL as they are.
+  // Back/forward, refreshes and same-page moves are not offered; other origins load as documents.
+  async function navigate(href, action) {
+    const url = new URL(href, location.href);
+    if (url.origin !== location.origin) {
+      location.assign(url.href);
+      return;
+    }
+    const from = location.pathname + location.search;
+    const to = url.pathname + url.search;
+    if (to !== from && (await runFarmNavigationDelegates({ url: url.href, from, to, action }))) {
+      return;
+    }
+    if (action === 'replace') history.replaceState(null, '', url.href);
+    else history.pushState(null, '', url.href);
+    await refetch(location.href);
+  }
+  farmNavigateRef.current = navigate;
+
   // Fetch new RSC payload for a URL
-  farmNavigateRef.current = (url) => refetch(url);
   async function refetch(url) {
     debug('Fetching RSC for:', url);
     
     try {
-      // Request RSC format instead of HTML
-      const res = await fetch(url, {
+      // Request the page's RSC payload, '<page>.rsc', which a prerendered page serves as a
+      // static file. The page URL itself may be static HTML.
+      const payloadUrl = new URL(url, location.href);
+      payloadUrl.pathname = payloadUrl.pathname.endsWith('/')
+        ? payloadUrl.pathname + 'index.rsc'
+        : payloadUrl.pathname + '.rsc';
+      const res = await fetch(payloadUrl, {
         headers: createFarmDeploymentRequestHeaders(farmDeploymentId, {
           Accept: 'text/x-component',
         }),
@@ -310,6 +342,10 @@ async function main() {
       // reflect the page actually rendered (auth gates redirect this way).
       if (res.redirected && res.url) {
         const dest = new URL(res.url);
+        if (dest.pathname.endsWith('.rsc')) {
+          const page = dest.pathname.slice(0, -'.rsc'.length);
+          dest.pathname = page.endsWith('/index') ? page.slice(0, -'index'.length) : page;
+        }
         if (dest.origin === location.origin) {
           const target = dest.pathname + dest.search + dest.hash;
           if (target !== location.pathname + location.search + location.hash) {
@@ -326,14 +362,17 @@ async function main() {
       location.href = url;
     }
   }
-  const rootElForHydrate = document.getElementById('root');
+  // A root layout that renders <html> owns the document: hydrate it whole, as Next.js does.
+  const rootElForHydrate = initial.ownsDocument ? document : document.getElementById('root');
   if (!rootElForHydrate) {
     console.error('[Farm.js] #root element not found');
     return;
   }
-  // Final cleanup pass before hydrate (in case DOM changed during async)
-  while (rootElForHydrate.children.length > 1) rootElForHydrate.lastElementChild.remove();
-  while (rootElForHydrate.nextElementSibling) rootElForHydrate.nextElementSibling.remove();
+  if (!initial.ownsDocument) {
+    // Final cleanup pass before hydrate (in case DOM changed during async)
+    while (rootElForHydrate.children.length > 1) rootElForHydrate.lastElementChild.remove();
+    while (rootElForHydrate.nextElementSibling) rootElForHydrate.nextElementSibling.remove();
+  }
   debug('Hydrating application');
   globalThis.__FARM_RSC_HYDRATED = true;
   hydrateRoot(rootElForHydrate, React.createElement(BrowserRoot), {

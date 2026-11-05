@@ -627,7 +627,8 @@ jobs:
 
   react-compiler-browser:
     name: React Compiler Browser (${{ matrix.builder }})
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -760,7 +761,8 @@ jobs:
 
   wasm-e2e:
     name: WebAssembly E2E (${{ matrix.builder }})
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -790,7 +792,8 @@ jobs:
 
   devtools-e2e:
     name: DevTools E2E (${{ matrix.builder }})
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -820,7 +823,8 @@ jobs:
 
   framework-e2e:
     name: Framework E2E
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
 
     steps:

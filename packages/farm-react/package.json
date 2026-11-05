@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/react",
-  "version": "0.1.0-beta.32",
+  "version": "0.1.0-beta.36",
   "description": "React renderer and opt-in AOT compiler for FARMJS applications",
   "keywords": [
     "aot",
@@ -64,12 +64,12 @@
     "test:stress": "vitest run --config vitest.stress.config.ts",
     "benchmark:reactivity": "node scripts/benchmark-reactivity.mjs",
     "benchmark:runtime-size": "pnpm build && node scripts/benchmark-runtime-size.mjs",
-    "test:runtime-size": "pnpm build && node --test scripts/runtime-size-budget.test.mjs && node scripts/benchmark-runtime-size.mjs --check && node scripts/benchmark-keyed-targets.mjs",
+    "test:runtime-size": "pnpm build && node --test scripts/runtime-size-budget.test.mjs scripts/javascript-output-size.test.mjs && node scripts/benchmark-runtime-size.mjs --check && node scripts/benchmark-keyed-targets.mjs",
     "test:compat": "pnpm build && node scripts/test-react-version.mjs 18.3.1 && node scripts/test-react-version.mjs 19.2.8",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@babel/core": "7.28.4"
+    "@babel/core": "7.29.7"
   },
   "devDependencies": {
     "@farm.js/core": "workspace:*",

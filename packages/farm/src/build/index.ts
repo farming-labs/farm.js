@@ -26,6 +26,10 @@ import { getFarmRendererComponentExtensions, loadFarmRendererVitePlugins } from 
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "./production-vite";
 import { withProductionNodeEnv } from "./production-node-env";
 import { createFarmProjectModuleSsrEnvironment } from "./project-module-runner";
+import {
+  usePackageClientBoundaryCacheFile,
+  withPackageClientBoundaryCache,
+} from "../utils/package-client-boundary-cache";
 
 interface BuildOptions {
   preset?: string;
@@ -46,7 +50,9 @@ interface BuildTargetBaseline {
  * Build Farm.js application for production
  */
 export async function build(config: ResolvedFarmConfig, options: BuildOptions = {}) {
-  return withProductionNodeEnv(() => buildWithProductionNodeEnv(config, options));
+  return withProductionNodeEnv(() =>
+    withPackageClientBoundaryCache(() => buildWithProductionNodeEnv(config, options)),
+  );
 }
 
 /** Every build path derived from config, recomputed once plugins have transformed it. */
@@ -144,6 +150,9 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
     if (config.docs?.enabled) await loadFarmDocsEngine();
     pluginManager.updateContext({ config });
     const { root, preset, srcDir, distDir, deployOutputDir } = targets;
+    usePackageClientBoundaryCacheFile(
+      path.resolve(root, distDir, "cache", "client-boundaries.json"),
+    );
 
     logger.info(`🚜 Building Farm.js application with preset: ${preset}...`);
 
@@ -411,7 +420,7 @@ async function buildClient(
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),
       farmPlugin(config, pluginManager),
-      farmEnvironmentFunctionsPlugin(),
+      farmEnvironmentFunctionsPlugin(config),
     ],
     mode: "production",
   });
@@ -457,7 +466,7 @@ async function buildSSR(
     plugins: [
       farmI18nClientBridgePlugin(),
       farmPlugin(config, pluginManager),
-      farmEnvironmentFunctionsPlugin(),
+      farmEnvironmentFunctionsPlugin(config),
     ],
     mode: "production",
   });

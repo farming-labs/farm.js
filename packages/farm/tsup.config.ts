@@ -1,6 +1,7 @@
 import path from "node:path";
 import { defineConfig, type Options } from "tsup";
 import { restoreDynamicImportsInDirectory } from "./scripts/restore-cjs-dynamic-imports";
+import { writeReactServerClientEntry } from "./scripts/write-react-server-client";
 
 const entry = {
   index: "src/index.ts",
@@ -24,13 +25,17 @@ const entry = {
   router: "src/router.ts",
   routes: "src/routes.ts",
   request: "src/request.ts",
-  plugin: "src/plugin.ts",
+  plugin: "src/plugin-entry.ts",
   integrations: "src/integrations.ts",
   schema: "src/schema.ts",
   storage: "src/storage/index.ts",
   cache: "src/cache.ts",
   deferred: "src/deferred.ts",
   after: "src/after.ts",
+  platform: "src/platform.ts",
+  desktop: "src/desktop/index.ts",
+  mobile: "src/mobile/index.ts",
+  "internal/desktop-guard": "src/desktop/guard.ts",
   navigation: "src/navigation.ts",
   headers: "src/headers.ts",
   "theme/index": "src/theme/index.ts",
@@ -68,7 +73,18 @@ const entry = {
   "internal/client-runtime": "src/client/production-runtime.ts",
   "internal/client-error-overlay": "src/client/runtime-error-overlay.ts",
   "internal/isolated-boundary": "src/client/isolated-boundary.ts",
+  "internal/island-value-store": "src/client/island-value-store.ts",
+  "internal/island-codec": "src/client/island-codec.ts",
   "internal/server-tree": "src/client/server-tree.ts",
+  "internal/islands-runtime": "src/client/islands-runtime.ts",
+  "internal/islands-boot": "src/client/islands-boot.ts",
+  "internal/islands-server": "src/client/islands-server.ts",
+  "internal/islx-client": "src/islx/client.ts",
+  "internal/server-fn-transform": "src/server-fn-transform.ts",
+  "internal/islx-server": "src/islx/server.ts",
+  "internal/islx-react": "src/islx/react.ts",
+  "internal/form-actions": "src/form-actions.ts",
+  "internal/form-actions-client": "src/form-actions-client.ts",
   "internal/production-runtime": "src/nitro/production-runtime.ts",
   "internal/product-telemetry-runtime": "src/product-telemetry.ts",
   "internal/infra-analytics-runtime": "src/infra-analytics-runtime.ts",
@@ -92,11 +108,20 @@ export const farmPackageBuildOptions = {
   entry,
   format: ["cjs", "esm"],
   // Declarations for every entry except the CLI's React-free runtime. Everything it exports
-  // is typed by index.d.ts, which package.json points it at. The declaration worker peaks
-  // around 10 GB on Node 22, so builds run with a 12 GB heap.
+  // is typed by index.d.ts, which package.json points it at.
+  // The bundled declarations are built from what `tsc -p tsconfig.dts.json` emits first in
+  // the build and dev scripts, not from source:
+  // given source entries, tsup's declaration plugin starts a TypeScript program for each run
+  // of consecutive entries in one directory, and each program parses the whole import graph
+  // again (34 programs here, about 11 GB). Given .d.ts entries, it starts none.
   dts: {
     entry: Object.fromEntries(
-      Object.entries(entry).filter(([name]) => name !== "internal/cli-runtime"),
+      Object.entries(entry)
+        .filter(([name]) => name !== "internal/cli-runtime")
+        .map(([name, source]) => [
+          name,
+          source.replace(/^src\//, ".tmp-dts/").replace(/\.tsx?$/, ".d.ts"),
+        ]),
     ),
   },
   clean: true,
@@ -106,6 +131,7 @@ export const farmPackageBuildOptions = {
     "@farm.js/core/internal/client-error-overlay",
     "react",
     "react-dom",
+    /^@farm\.js\/islx/,
     "@vercel/og",
     "rolldown",
     "sharp",
@@ -118,8 +144,9 @@ export const farmPackageBuildOptions = {
   // entry inlined its own copy of the modules it imports.
   splitting: true,
   treeshake: false,
+  // No keepNames: its `__name(fn, "fn")` calls are side effects to an app's bundler, so every
+  // core function stayed in server and browser bundles whether the app used it or not.
   esbuildOptions(options, { format }) {
-    options.keepNames = true;
     // Split CommonJS is emitted as ESM and converted afterwards, which keeps
     // import.meta. Give it the empty object esbuild substitutes in CommonJS.
     if (format === "cjs") options.define = { ...options.define, "import.meta": "{}" };
@@ -131,6 +158,7 @@ export const farmPackageBuildOptions = {
   // Splitting converts CommonJS dynamic imports to require(); restore import().
   async onSuccess() {
     await restoreDynamicImportsInDirectory(path.join(process.cwd(), "dist"));
+    await writeReactServerClientEntry(path.join(process.cwd(), "dist"));
   },
 } satisfies Options;
 

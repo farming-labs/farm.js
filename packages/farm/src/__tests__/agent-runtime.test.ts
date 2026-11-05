@@ -336,6 +336,30 @@ describe("agent runtime proxy", () => {
     expect(await response.text()).toBe("POST:hello:done");
   });
 
+  it("keeps the upstream host when the request path starts with two slashes", async () => {
+    // `//agents/x` still matches the `/agents/[...]` route, and resolving it against the origin
+    // would send the visitor's credentials to the host `agents`.
+    const targets: string[] = [];
+    for (const path of ["//agents/x?y=1", "/\\agents/x?y=1", "//agent.evil.test/agents/x"]) {
+      await proxyAgentRuntimeRequest(
+        new Request(`https://farm.test${path}`, { headers: { authorization: "Bearer secret" } }),
+        "https://agent.example.com",
+        {
+          fetch: async (input) => {
+            targets.push(String(input));
+            return new Response("ok");
+          },
+        },
+      );
+    }
+
+    expect(targets).toEqual([
+      "https://agent.example.com//agents/x?y=1",
+      "https://agent.example.com//agents/x?y=1",
+      "https://agent.example.com//agent.evil.test/agents/x",
+    ]);
+  });
+
   it("replaces client-supplied forwarded headers with the trusted request authority", async () => {
     // A spoofed X-Forwarded-Host must never reach the upstream: the rest of
     // the framework gates forwarded-authority trust behind trustProxy, and a

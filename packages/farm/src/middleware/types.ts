@@ -170,6 +170,14 @@ export interface MiddlewareConfig {
   matcher?: MiddlewareMatcher | MiddlewareMatcher[];
   exclude?: (string | RegExp)[];
   runtime?: "nodejs" | "edge";
+  /**
+   * Whether a response this middleware lets through may be stored by a shared cache (a CDN).
+   * Farm cannot tell a guard from harmless middleware, and a CDN serves its copy without
+   * running either, so by default (`"private"`) the response is sent with
+   * `Cache-Control: private, no-store`. Set `"public"` only on middleware that never decides
+   * who may read the response, such as logging or response headers.
+   */
+  cache?: "private" | "public";
 }
 
 export interface MiddlewareConfigEntry extends MiddlewareConfig {

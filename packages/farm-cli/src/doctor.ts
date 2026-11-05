@@ -1,7 +1,11 @@
 import {
+  FARM_RSC_INSTALL_HINT,
+  formatFarmRscBlockingMessage,
+  formatFarmRscFallbackMessage,
   generateFarmTypeArtifacts,
   getFarmSourceRoots,
   getFarmDocsRouteTypeEntries,
+  inspectFarmServerComponents,
   loadConfig,
   resolveConfig,
 } from "@farm.js/core/internal/cli-runtime";
@@ -398,6 +402,7 @@ async function createProjectReport(
     await collectGeneratedArtifactChecks(config, options.configPath, root, checks);
     collectEntrypointChecks(config, root, checks);
     collectOptionalPackageChecks(config, root, checks);
+    collectServerComponentsChecks(userConfig, config.root, checks);
     report.target = collectDeploymentChecks(config, userConfig, checks);
     collectCronChecks(config, options.env || process.env, checks);
   }
@@ -1039,6 +1044,71 @@ const GENERATED_METADATA_IMAGE_FILE = /^(?:opengraph|twitter)-image\.(?:[cm]?[jt
 const SOURCE_FILE = /(?<!\.d)\.(?:[cm]?[jt]sx?|vue|svelte)$/;
 const CORE_OG_IMPORT = /["']@farm\.js\/core\/og["']/;
 const CORE_IMAGE_IMPORT = /["']@farm\.js\/core\/image["']/;
+
+/**
+ * `experimental.serverComponents: true` now runs the RSC pipeline. Report which way this app goes,
+ * so the change is visible before an upgrade removes the fallback.
+ */
+function collectServerComponentsChecks(
+  userConfig: Record<string, any>,
+  root: string,
+  checks: FarmDoctorCheck[],
+): void {
+  const status = inspectFarmServerComponents(userConfig, root);
+  if (status.mode === "islands") {
+    checks.push({
+      status: "pass",
+      code: "SERVER_COMPONENTS_ISLANDS",
+      title: "Server components run in islands mode",
+      message:
+        "farm dev and farm build render server components on Farm's pipeline and hydrate only client components (experimental, RFC 0003).",
+    });
+    return;
+  }
+  if (!status.enabled) return;
+  if (status.missingPackages.length > 0 && !status.fallback) {
+    checks.push({
+      status: "fail",
+      code: "SERVER_COMPONENTS_PACKAGES_MISSING",
+      title: "React Server Components packages are not installed",
+      message: `experimental.serverComponents: { mode: "rsc" } needs ${status.missingPackages.join(", ")}.`,
+      action: `Install them: ${FARM_RSC_INSTALL_HINT}`,
+    });
+    return;
+  }
+  if (status.fallback) {
+    checks.push({
+      status: "warn",
+      code: "SERVER_COMPONENTS_FALLBACK",
+      title: "experimental.serverComponents runs without React Server Components",
+      message: formatFarmRscFallbackMessage(status.missingPackages, status.blockingKeys),
+      action:
+        status.blockingKeys.length > 0
+          ? "Remove experimental.serverComponents, or move those features out of farm.config."
+          : `Run farm dev or farm build to install them, or ${FARM_RSC_INSTALL_HINT}.`,
+    });
+    return;
+  }
+  if (status.blockingKeys.length > 0) {
+    checks.push({
+      status: "fail",
+      code: "SERVER_COMPONENTS_BLOCKED",
+      title: "React Server Components cannot start",
+      message: formatFarmRscBlockingMessage(status.blockingKeys),
+      action: "Remove experimental.serverComponents, or move those features out of farm.config.",
+    });
+    return;
+  }
+  checks.push({
+    status: "pass",
+    code: "SERVER_COMPONENTS_READY",
+    title: "React Server Components are on",
+    message:
+      status.ignoredKeys.length > 0
+        ? `farm dev and farm build run the RSC pipeline; it ignores ${status.ignoredKeys.join(", ")}.`
+        : "farm dev and farm build run the RSC pipeline.",
+  });
+}
 
 function collectOptionalPackageChecks(
   config: ResolvedFarmConfig,

@@ -329,7 +329,15 @@ For each application request, Farm runs the runtime hooks in this order:
 
 `runtime.before` may return a new `Request`, return a `Response` to short-circuit, or return nothing. A short-circuit response still passes through `runtime.after`. `runtime.after` may return a new `Response` or return nothing.
 
-Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
+`runtime.before` runs for every request and may be a guard, so in production a response it lets
+through is sent with `Cache-Control: private, no-store` instead of a shared policy, as for
+[middleware](/docs/middleware#caching). A plugin whose `before` decides nothing about access, such
+as logging or analytics, declares `runtime: { cache: "public", before() {} }` to keep the app's
+shared caching.
+
+When a configured rewrite sends the request to an internal destination, every `runtime.before` runs again with the destination `Request` and the same `ctx`, so a guard on `/admin/*` also covers a rewrite that lands there. `runtime.context` and `runtime.after` run once per request.
+
+Runtime hooks don't run for files in `public/`, which are served as static assets first; serve a protected file from a route instead. Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
 
 An endpoint is intentionally isolated from `runtime.context` and `runtime.before`. Perform any
 endpoint-specific authentication inside its handler. Global `runtime.after` and `runtime.error`

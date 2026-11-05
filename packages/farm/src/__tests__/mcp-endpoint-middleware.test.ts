@@ -202,8 +202,8 @@ describe("MCP endpoint tools run the endpoint's middleware", () => {
       try {
         const address = dev.httpServer!.address();
         if (!address || typeof address === "string") throw new Error("Dev server did not bind");
-        // Development runs integration guards for API routes; app middleware guards them in
-        // production builds only, and a tool gets exactly what a direct request gets.
+        // App middleware and integration guards cover API routes in development as in a
+        // production build, and a tool gets exactly what a direct request gets.
         await expectToolsMatchDirectRequests(
           (request) =>
             fetch(
@@ -212,7 +212,7 @@ describe("MCP endpoint tools run the endpoint's middleware", () => {
                 request,
               ),
             ),
-          ["list_partners"],
+          ["admin_list_users", "list_reports", "list_partners"],
         );
       } finally {
         await dev.close();

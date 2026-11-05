@@ -113,13 +113,14 @@ Use `getFarmTraceContext()` when a log or provider call needs the current trace 
 
 Metric attributes are deliberately bounded. A cache `key` embeds the serialized arguments of the cached call, a tag is authored at runtime, and the `route` on cache, PPR, and streaming events is the request pathname rather than a route pattern, so none of them becomes a metric attribute. That detail is recorded as an event on the active span instead, where per-request cardinality is free and a stale serve stays attributable to the request that caused it. When `observability.tracing` is enabled Farm already writes those span events itself, so `@farm.js/otel` does not add a second copy.
 
-Metrics need a metric reader, and Farm registers one only when you ask for it. Name an exporter with `OTEL_METRICS_EXPORTER`, or pass `metricReaders` to `registerOTel`:
+Metrics need a metric reader, and Farm registers one only when the app points metrics somewhere: an OTLP endpoint in `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, an exporter named in `OTEL_METRICS_EXPORTER`, or `metricReaders` passed to `registerOTel`. `OTEL_METRICS_EXPORTER=none` turns metrics off even when an endpoint is set:
 
 ```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.example.com # traces and metrics
 OTEL_METRICS_EXPORTER=otlp # otlp, console, prometheus, or none
 ```
 
-Without it there is no meter provider, the instruments are no-ops, and the span events still work. That opt-in is deliberate: left to its own defaults the Node SDK exports metrics to `localhost:4318` whether or not an app configured metrics, and with nothing listening there every recorded metric turns graceful shutdown into the exporter's retry window, around eight seconds. Traces are unaffected and keep using the OTLP trace endpoint.
+Without any of these there is no meter provider, the instruments are no-ops, and the span events still work. That opt-in is deliberate: left to its own defaults the Node SDK exports metrics to `localhost:4318` whether or not an app configured metrics, and with nothing listening there every recorded metric turns graceful shutdown into the exporter's retry window, around eight seconds. Traces are unaffected and keep using the OTLP trace endpoint.
 
 Pass `farmEvents` to narrow or disable the mapping:
 
@@ -208,6 +209,8 @@ export default defineConfig({
 ```
 
 `events` is optional. Leave it out to receive every emitted event. Filtering event delivery does not disable span creation, the events recorded on active spans, or the `@farm.js/otel` metrics; use `farmEvents: false` for those.
+
+Cache and PPR shell keys can contain call arguments and query strings, so built-in logs print `key_hash=<digest>` and exported spans carry `farm.key_hash` instead of the key; `onEvent` handlers still receive `event.key`. `route.redirect` carries the redirect target without its query string or fragment.
 
 ## Runtime subscription
 

@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.39",
+  "version": "0.1.51-beta.3",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -56,6 +56,18 @@
       ],
       "after": [
         "./dist/after.d.ts"
+      ],
+      "platform": [
+        "./dist/platform.d.ts"
+      ],
+      "desktop": [
+        "./dist/desktop.d.ts"
+      ],
+      "mobile": [
+        "./dist/mobile.d.ts"
+      ],
+      "internal/desktop-guard": [
+        "./dist/internal/desktop-guard.d.ts"
       ],
       "navigation": [
         "./dist/navigation.d.ts"
@@ -190,6 +202,12 @@
       "internal/isolated-boundary": [
         "./dist/internal/isolated-boundary.d.ts"
       ],
+      "internal/island-value-store": [
+        "./dist/internal/island-value-store.d.ts"
+      ],
+      "internal/island-codec": [
+        "./dist/internal/island-codec.d.ts"
+      ],
       "internal/server-tree": [
         "./dist/internal/server-tree.d.ts"
       ],
@@ -306,6 +324,7 @@
     },
     "./client": {
       "types": "./types/client.d.ts",
+      "react-server": "./dist/client.react-server.mjs",
       "import": "./dist/client.mjs",
       "require": "./dist/client.cjs"
     },
@@ -343,6 +362,26 @@
       "types": "./dist/after.d.ts",
       "import": "./dist/after.mjs",
       "require": "./dist/after.cjs"
+    },
+    "./platform": {
+      "types": "./dist/platform.d.ts",
+      "import": "./dist/platform.mjs",
+      "require": "./dist/platform.cjs"
+    },
+    "./desktop": {
+      "types": "./dist/desktop.d.ts",
+      "import": "./dist/desktop.mjs",
+      "require": "./dist/desktop.cjs"
+    },
+    "./mobile": {
+      "types": "./dist/mobile.d.ts",
+      "import": "./dist/mobile.mjs",
+      "require": "./dist/mobile.cjs"
+    },
+    "./internal/desktop-guard": {
+      "types": "./dist/internal/desktop-guard.d.ts",
+      "import": "./dist/internal/desktop-guard.mjs",
+      "require": "./dist/internal/desktop-guard.cjs"
     },
     "./navigation": {
       "types": "./dist/navigation.d.ts",
@@ -647,10 +686,65 @@
       "import": "./dist/internal/isolated-boundary.mjs",
       "require": "./dist/internal/isolated-boundary.cjs"
     },
+    "./internal/island-value-store": {
+      "types": "./dist/internal/island-value-store.d.ts",
+      "import": "./dist/internal/island-value-store.mjs",
+      "require": "./dist/internal/island-value-store.cjs"
+    },
+    "./internal/island-codec": {
+      "types": "./dist/internal/island-codec.d.ts",
+      "import": "./dist/internal/island-codec.mjs",
+      "require": "./dist/internal/island-codec.cjs"
+    },
     "./internal/server-tree": {
       "types": "./dist/internal/server-tree.d.ts",
       "import": "./dist/internal/server-tree.mjs",
       "require": "./dist/internal/server-tree.cjs"
+    },
+    "./internal/islands-runtime": {
+      "types": "./dist/internal/islands-runtime.d.ts",
+      "import": "./dist/internal/islands-runtime.mjs",
+      "require": "./dist/internal/islands-runtime.cjs"
+    },
+    "./internal/islands-boot": {
+      "types": "./dist/internal/islands-boot.d.ts",
+      "import": "./dist/internal/islands-boot.mjs",
+      "require": "./dist/internal/islands-boot.cjs"
+    },
+    "./internal/islands-server": {
+      "types": "./dist/internal/islands-server.d.ts",
+      "import": "./dist/internal/islands-server.mjs",
+      "require": "./dist/internal/islands-server.cjs"
+    },
+    "./internal/islx-client": {
+      "types": "./dist/internal/islx-client.d.ts",
+      "import": "./dist/internal/islx-client.mjs",
+      "require": "./dist/internal/islx-client.cjs"
+    },
+    "./internal/server-fn-transform": {
+      "types": "./dist/internal/server-fn-transform.d.ts",
+      "import": "./dist/internal/server-fn-transform.mjs",
+      "require": "./dist/internal/server-fn-transform.cjs"
+    },
+    "./internal/islx-server": {
+      "types": "./dist/internal/islx-server.d.ts",
+      "import": "./dist/internal/islx-server.mjs",
+      "require": "./dist/internal/islx-server.cjs"
+    },
+    "./internal/islx-react": {
+      "types": "./dist/internal/islx-react.d.ts",
+      "import": "./dist/internal/islx-react.mjs",
+      "require": "./dist/internal/islx-react.cjs"
+    },
+    "./internal/form-actions": {
+      "types": "./dist/internal/form-actions.d.ts",
+      "import": "./dist/internal/form-actions.mjs",
+      "require": "./dist/internal/form-actions.cjs"
+    },
+    "./internal/form-actions-client": {
+      "types": "./dist/internal/form-actions-client.d.ts",
+      "import": "./dist/internal/form-actions-client.mjs",
+      "require": "./dist/internal/form-actions-client.cjs"
     },
     "./internal/build-runtime": {
       "types": "./dist/internal/build-runtime.d.ts",
@@ -682,9 +776,9 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "node -e \"require('node:fs').rmSync('.tmp-dts', { recursive: true, force: true })\" && tsc -p tsconfig.dts.json && tsup",
     "build:runtime": "tsup --config tsup.runtime.config.ts",
-    "dev": "tsup --watch",
+    "dev": "node -e \"require('node:fs').rmSync('.tmp-dts', { recursive: true, force: true })\" && tsc -p tsconfig.dts.json && tsup --watch",
     "test": "vitest run",
     "test:coverage": "vitest --coverage",
     "lint": "biome lint .",
@@ -694,8 +788,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farming-labs/orm": "0.0.65",
-    "@farming-labs/orm-runtime": "0.0.65",
+    "@farm.js/islx": "0.0.7",
+    "@farming-labs/orm": "0.0.66",
+    "@farming-labs/orm-runtime": "0.0.66",
     "@formatjs/icu-messageformat-parser": "3.5.15",
     "@jridgewell/trace-mapping": "0.3.31",
     "@mdx-js/mdx": "^3.1.1",
@@ -704,7 +799,6 @@
     "better-call": "^1.0.19",
     "db0": "^0.3.4",
     "es-module-lexer": "2.0.0",
-    "fast-glob": "^3.3.2",
     "h3": "2.0.1-rc.32",
     "image-size": "^2.0.4",
     "intl-messageformat": "11.2.12",
@@ -716,9 +810,10 @@
     "rolldown": "^1.2.7",
     "sugar-high": "^0.9.5",
     "supports-color": "^10.2.2",
+    "tinyglobby": "^0.2.17",
     "unstorage": "2.0.0-alpha.10",
     "vite": "8.3.4",
-    "zod": "^4.1.12"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@clerk/react": "^6.4.3",

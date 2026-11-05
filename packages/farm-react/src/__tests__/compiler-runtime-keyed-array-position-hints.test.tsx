@@ -5,7 +5,10 @@ import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  createCompiledComponent,
+  createCompiledComponent as createCompleteCompiledComponent,
+  createCompiledComponentWithFeatures,
+  keyedRowsPlainPositionHintedRuntimeFeature,
+  keyedRowsPositionHintedRuntimeFeature,
   createCompilerKeyedArrayPositionUpdate,
   type CompilerKeyedRowElement,
 } from "../compiler-runtime";
@@ -26,6 +29,7 @@ type PositionArray = Item[] & {
 };
 
 const roots: Root[] = [];
+let createCompiledComponent = createCompleteCompiledComponent;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -215,7 +219,42 @@ function createPositionHarness(initialItems: Item[], readsCollection = false) {
   };
 }
 
-describe("compiled keyed-array position hints", () => {
+it("remounts on Fast Refresh when position target capabilities change", () => {
+  const definition = {
+    displayName: "PositionCapabilityRefresh",
+    hmrId: `position-capability-refresh-${Math.random()}`,
+    stateSignature: "rows",
+    initialize: () => [[]],
+    render: () => null,
+    bindings: [],
+  };
+  const Plain = createCompiledComponentWithFeatures(definition, [
+    keyedRowsPlainPositionHintedRuntimeFeature,
+  ]);
+  const Compatible = createCompiledComponentWithFeatures(definition, [
+    keyedRowsPlainPositionHintedRuntimeFeature,
+  ]);
+  const General = createCompiledComponentWithFeatures(definition, [
+    keyedRowsPositionHintedRuntimeFeature,
+  ]);
+  const PlainAgain = createCompiledComponentWithFeatures(definition, [
+    keyedRowsPlainPositionHintedRuntimeFeature,
+  ]);
+  expect(Compatible).toBe(Plain);
+  expect(General).not.toBe(Plain);
+  expect(PlainAgain).not.toBe(General);
+});
+
+describe.each(["complete", "plain-position"])("keyed position hints (%s)", (runtime) => {
+  beforeEach(() => {
+    createCompiledComponent =
+      runtime === "complete"
+        ? createCompleteCompiledComponent
+        : (definition) =>
+            createCompiledComponentWithFeatures(definition, [
+              keyedRowsPlainPositionHintedRuntimeFeature,
+            ]);
+  });
   it("inserts one row at a known position without reading existing row keys or bindings", async () => {
     const initialItems = Array.from(
       { length: 4_096 },

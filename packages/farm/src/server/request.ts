@@ -5,6 +5,7 @@ import {
   _setAppRequestView,
   _setCspNonceResolver,
   _setCurrentRequestResolver,
+  _setSharedCacheScopeRunner,
 } from "./request-bridge";
 
 const REQUEST_STORAGE_KEY = Symbol.for("@farm.js/core/request-storage");
@@ -22,6 +23,36 @@ function getRequestStore(): AsyncLocalStorage<Request> {
 }
 
 const requestStore = getRequestStore();
+
+// Set while a function whose result every request shares (unstable_cache) runs.
+// A request read there would cache one visitor's cookies or headers for all of
+// them, and a later cache hit reads nothing, so the shared-response checks that
+// count reads cannot see it. Refuse the read instead.
+const SHARED_CACHE_SCOPE_KEY = Symbol.for("@farm.js/core/shared-cache-scope");
+
+function getSharedCacheScopeStore(): AsyncLocalStorage<string> {
+  const runtime = globalThis as typeof globalThis & Record<PropertyKey, unknown>;
+  const existing = runtime[SHARED_CACHE_SCOPE_KEY];
+  if (existing instanceof AsyncLocalStorage) return existing as AsyncLocalStorage<string>;
+  const storage = new AsyncLocalStorage<string>();
+  runtime[SHARED_CACHE_SCOPE_KEY] = storage;
+  return storage;
+}
+
+const sharedCacheScope = getSharedCacheScopeStore();
+_setSharedCacheScopeRunner((label, fn) => sharedCacheScope.run(label, fn));
+
+/** @internal Throw when `api` reads the request inside a shared cache function. */
+export function _assertRequestReadAllowed(api: string): void {
+  const scope = sharedCacheScope.getStore();
+  if (!scope) return;
+  throw new Error(
+    `${api} cannot be called inside ${scope}: its result is cached and shared by every ` +
+      "request, so one visitor's request data would be served to others. Read it outside " +
+      "the cached function and pass the value in as an argument, which also makes it part " +
+      "of the cache key.",
+  );
+}
 
 // How many times app code read each request through getCurrentRequest(),
 // headers(), or cookies(). Renderers compare it across a render: HTML that
@@ -55,35 +86,63 @@ function getAppRequestView(request: Request): Request {
   let view: Request;
   if (request.method !== "GET" && request.method !== "HEAD") {
     // Copying a request with a body would take it from the caller; such a
-    // request is never a shared render anyway, so count it up front.
+    // request is never a shared render anyway, so count it up front. The
+    // headers still carry the visitor's identity, so guard them on the request
+    // itself: its body, URL, and fetch() forwarding stay native.
     countRequestRead(request);
     view = request;
+    try {
+      guardRequestReads(view, request, request.headers, request.clone);
+    } catch {
+      // A frozen request cannot carry the guard; it is still counted.
+    }
   } else {
     view = new Request(request);
-    Object.defineProperties(view, {
-      // The rendered request's own signal, so aborting it reaches the handler unchanged.
-      signal: { configurable: true, get: () => request.signal },
-      headers: {
-        configurable: true,
-        get() {
-          countRequestRead(request);
-          return request.headers;
-        },
-      },
-      clone: {
-        configurable: true,
-        value() {
-          countRequestRead(request);
-          return request.clone();
-        },
-      },
-    });
+    // The rendered request's own signal, so aborting it reaches the handler unchanged.
+    Object.defineProperty(view, "signal", { configurable: true, get: () => request.signal });
+    guardRequestReads(view, request, request.headers, request.clone);
   }
   appRequestViews.set(request, view);
   return view;
 }
 
-_setCurrentRequestResolver(() => requestStore.getStore());
+function guardRequestReads(
+  view: Request,
+  request: Request,
+  requestHeaders: Headers,
+  clone: Request["clone"],
+): void {
+  Object.defineProperties(view, {
+    headers: {
+      configurable: true,
+      get() {
+        _assertRequestReadAllowed("request.headers");
+        countRequestRead(request);
+        return requestHeaders;
+      },
+    },
+    clone: {
+      configurable: true,
+      value() {
+        _assertRequestReadAllowed("request.clone()");
+        countRequestRead(request);
+        return clone.call(request);
+      },
+    },
+  });
+}
+
+_setCurrentRequestResolver(
+  () => {
+    // Auth helpers, the server `api` client, and integration clients read the
+    // visitor's cookies through this resolver.
+    _assertRequestReadAllowed(
+      "A helper that reads the current request (such as auth.user() or the server api client)",
+    );
+    return requestStore.getStore();
+  },
+  () => requestStore.getStore(),
+);
 
 // The CSP nonce of the response being rendered. It is scoped apart from the
 // request because rewrites and middleware replace the Request object while
@@ -232,6 +291,7 @@ export async function _runWithCurrentRequest<T>(
 }
 
 export function getCurrentRequest(): Request {
+  _assertRequestReadAllowed("getCurrentRequest()");
   const request = requestStore.getStore();
   if (!request) {
     throw new Error(

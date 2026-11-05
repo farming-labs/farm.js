@@ -237,9 +237,15 @@ export async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+/**
+ * Files matching `pattern` under `cwd`, sorted. tinyglobby lists them in the order its crawl finds
+ * them, which changes from run to run; routes of equal rank keep the order they were found in, so
+ * an unsorted list makes the client route table, and the hashes of every client chunk, change
+ * between builds of the same app.
+ */
 export async function globFiles(pattern: string, cwd: string): Promise<string[]> {
-  const glob = await import("fast-glob");
-  return glob.default(pattern, { cwd, absolute: false });
+  const { glob } = await import("tinyglobby");
+  return (await glob(pattern, { cwd, expandDirectories: false })).sort();
 }
 
 export function parseSearchParams(

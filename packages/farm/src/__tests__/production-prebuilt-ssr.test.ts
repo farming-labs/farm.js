@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import fs from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
@@ -14,7 +14,6 @@ import { imageSize } from "image-size";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
-import { signFarmInfraManifestRequest } from "../app-manifest";
 import { loadConfig, resolveConfig } from "../config";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
@@ -109,19 +108,26 @@ export default function StableCounter() {
 }
 `.trim(),
   );
+  // `export *` keeps this boundary route-wide: its export names live in another module.
   await fs.writeFile(
     path.join(root, "src", "components", "fallback-counter.tsx"),
     `
 "use client";
 
+export * from "./fallback-counter-implementation";
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "components", "fallback-counter-implementation.tsx"),
+    `
+"use client";
+
 import { useState } from "react";
 
-function FallbackCounter() {
+export function FallbackCounter() {
   const [count, setCount] = useState(0);
   return <button data-fallback-counter onClick={() => setCount((value) => value + 1)}>fallback:{count}</button>;
 }
-
-export { FallbackCounter };
 `.trim(),
   );
   await fs.writeFile(
@@ -173,10 +179,10 @@ type IsolatedBoundaryMetadata = {
 function readIsolatedBoundaryMetadata(html: string): IsolatedBoundaryMetadata[] {
   const readAttribute = (attributes: string, name: string) =>
     attributes.match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? "";
-  return Array.from(html.matchAll(/<farm-client-boundary\b([^>]*)>/g), ([, attributes]) => ({
-    reference: readAttribute(attributes, "data-farm-client-boundary"),
-    exportName: readAttribute(attributes, "data-farm-client-export"),
-    strategy: readAttribute(attributes, "data-farm-island-strategy"),
+  return Array.from(html.matchAll(/<f-island\b([^>]*)>/g), ([, attributes]) => ({
+    reference: readAttribute(attributes, "src"),
+    exportName: readAttribute(attributes, "export"),
+    strategy: readAttribute(attributes, "strategy"),
   }));
 }
 
@@ -286,6 +292,14 @@ async function resolveInstalledChromiumExecutable(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** The header Farm Infra signed manifest requests with, which once unlocked a full view. */
+function legacyFarmInfraSignature(key: string) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const secret = createHash("sha256").update(key).digest("hex");
+  const hmac = createHmac("sha256", secret).update(`farmjs-manifest-v1\n${timestamp}`);
+  return `t=${timestamp}, v1=${hmac.digest("hex")}`;
 }
 
 async function runProductionRequest(
@@ -887,7 +901,7 @@ export default async function IslandsPage() {
         async (response) => {
           expect(response.status).toBe(200);
           const html = await response.text();
-          expect(html).toContain('data-farm-client-boundary="/src/app/counter.tsx"');
+          expect(html).toContain('<f-island src="/src/app/counter.tsx"');
           const files = await preloadsIn(html);
           expect(files).toContain(moduleChunk("/src/app/counter.tsx"));
           expect(files).not.toContain(moduleChunk("/src/app/page.tsx"));
@@ -916,6 +930,86 @@ export default async function IslandsPage() {
         const html = await response.text();
         expect(html).toContain('data-farm-island="page"');
         expect(html).not.toContain('rel="modulepreload" href="/chunks/');
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("marks streamed navigation flushes with a per-response token page content cannot forge", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      // A JSON-LD script with user content carrying the old fixed marker, then a Suspense
+      // boundary that streams in a later flush.
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import { Suspense } from "react";
+
+export const dynamic = "force-dynamic";
+
+async function Late() {
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  return <p>late content</p>;
+}
+
+export default async function Page() {
+  const jsonLd = { name: "<!--farm-flush--><img src=x onerror=alert(1)>" };
+  return (
+    <main>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <Suspense fallback={<p>loading</p>}><Late /></Suspense>
+    </main>
+  );
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "flush-token-test",
+          experimental: { serverComponents: { mode: "islands" } },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+
+      const tokens: string[] = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            const token = response.headers.get("F-Flush") ?? "";
+            expect(token).toMatch(/^[0-9a-f]{32}$/);
+            tokens.push(token);
+            const flushes = (await response.text()).split(`<!--farm-flush:${token}-->`);
+            expect(flushes.length).toBeGreaterThan(1);
+            // The forged marker stays inside the shell's JSON-LD script.
+            expect(flushes[0]).toContain(
+              '<script type="application/ld+json">{"name":"<!--farm-flush--><img src=x onerror=alert(1)>"}</script>',
+            );
+            expect(flushes[0]).not.toContain("late content");
+            expect(flushes.slice(1).join("")).toContain("late content");
+          },
+          "/",
+          { headers: { Accept: "text/html", "F-Stream": "flush" } },
+        );
+      }
+      expect(tokens[0]).not.toBe(tokens[1]);
+
+      // A document request gets no markers and no token.
+      await runProductionRequest(serverDir, async (response) => {
+        expect(response.status).toBe(200);
+        expect(response.headers.has("F-Flush")).toBe(false);
+        const html = await response.text();
+        expect(html).not.toContain("<!--farm-flush:");
+        expect(html).toContain("late content");
       });
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -1698,6 +1792,121 @@ export default { basePath: "/workspace", plugins: [${plugin}] };`,
     }
   }, 120_000);
 
+  it("prerenders the pages a docs adapter lists and leaves its other surfaces dynamic", async () => {
+    const root = await createProductionFixture();
+    const adapterDir = path.join(root, "node_modules", "fake-docs-adapter");
+    await fs.mkdir(adapterDir, { recursive: true });
+    await fs.writeFile(
+      path.join(adapterDir, "package.json"),
+      JSON.stringify({
+        name: "fake-docs-adapter",
+        type: "module",
+        exports: { "./server": "./server.js", "./react": "./react.js" },
+      }),
+    );
+    // Each response says whether it was rendered for the build or for a visitor.
+    await fs.writeFile(
+      path.join(adapterDir, "server.js"),
+      `export function listFarmDocsPages(config) {
+  return [config.docsPath, config.docsPath + "/guide", config.docsPath + "/changelog"];
+}
+export function createFarmDocsRuntimeHandler() {
+  return async (request) => {
+    const { pathname } = new URL(request.url);
+    const renderedFor = request.headers.has("x-nitro-prerender") ? "build" : "visitor";
+    if (pathname.startsWith("/api/docs")) return Response.json({ pathname, renderedFor });
+    if (pathname.endsWith(".md")) {
+      return new Response("# " + pathname + " for " + renderedFor, {
+        headers: { "Content-Type": "text/markdown; charset=utf-8" },
+      });
+    }
+    if (!["/docs", "/docs/guide", "/docs/changelog"].includes(pathname)) return null;
+    return new Response(
+      "<!doctype html><html><head></head><body><main>" + pathname + " for " + renderedFor + "</main></body></html>",
+      { headers: { "Content-Type": "text/html; charset=utf-8", "X-Farm-Docs-Adapter": "fake" } },
+    );
+  };
+}`,
+    );
+    await fs.writeFile(path.join(adapterDir, "react.js"), "export function hydrateFarmDocs() {}");
+    // Docs content inside the app directory is also a set of dynamic page routes.
+    const docsDir = path.join(root, "src", "app", "docs");
+    await fs.mkdir(path.join(docsDir, "guide"), { recursive: true });
+    await fs.mkdir(path.join(docsDir, "changelog"), { recursive: true });
+    await fs.writeFile(path.join(docsDir, "page.md"), "# Docs\n");
+    await fs.writeFile(path.join(docsDir, "guide", "page.md"), "# Guide\n");
+    await fs.writeFile(path.join(docsDir, "changelog", "page.md"), "# Changelog\n");
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          agent: { llmsTxt: { full: false } },
+          routeRules: { "/docs/changelog": { prerender: false } },
+          docs: {
+            enabled: true,
+            entry: "/docs",
+            contentDir: "src/app/docs",
+            prerender: true,
+            adapter: {
+              id: "fake",
+              protocol: 1,
+              server: "fake-docs-adapter/server",
+              react: "fake-docs-adapter/react",
+            },
+          },
+          generateBuildId: () => "production-docs-prerender-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      const publicDir = path.join(root, ".farm", ".output", "public");
+      expect(await fs.readFile(path.join(publicDir, "docs", "index.html"), "utf8")).toContain(
+        "/docs for build",
+      );
+      expect(
+        await fs.readFile(path.join(publicDir, "docs", "guide", "index.html"), "utf8"),
+      ).toContain("/docs/guide for build");
+      const exists = (file: string) =>
+        fs.stat(path.join(publicDir, file)).then(
+          () => true,
+          () => false,
+        );
+      expect(await exists("docs/changelog")).toBe(false);
+      expect(await exists("docs/guide.md")).toBe(false);
+      expect(await exists("api")).toBe(false);
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(await response.text()).toContain("/docs/guide for build");
+          const origin = new URL(response.url).origin;
+          const text = async (pathname: string, init?: RequestInit) =>
+            (await fetch(`${origin}${pathname}`, init)).text();
+
+          expect(await text("/docs")).toContain("/docs for build");
+          expect(await text("/docs/changelog")).toContain("/docs/changelog for visitor");
+          expect(await text("/docs/guide.md")).toBe("# /docs/guide.md for visitor");
+          expect(JSON.parse(await text("/api/docs/mcp"))).toEqual({
+            pathname: "/api/docs/mcp",
+            renderedFor: "visitor",
+          });
+          expect(JSON.parse(await text("/api/docs?query=guide"))).toMatchObject({
+            renderedFor: "visitor",
+          });
+        },
+        "/docs/guide",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("reads server env where the server runs instead of storing it in the build output", async () => {
     const root = await createProductionFixture();
     const previous = process.env.FARM_TEST_DATABASE_URL;
@@ -2231,14 +2440,14 @@ export function CopyButton({ text }) {
           const html = await response.text();
           expect(html).toContain("Some server-rendered text.");
           expect(html).toContain('data-farm-layout-client="true"');
-          expect(html).toMatch(/<farm-client-boundary[^>]*copy-button/);
+          expect(html).toMatch(/<f-island[^>]*copy-button/);
           expect(html).toContain("<title>Notes</title>");
 
           const mdx = await fetch(new URL("/notes-mdx", response.url));
           expect(mdx.status).toBe(200);
           const mdxHtml = await mdx.text();
           expect(mdxHtml).toContain("Some server-rendered text.");
-          expect(mdxHtml).toMatch(/<farm-client-boundary[^>]*copy-button/);
+          expect(mdxHtml).toMatch(/<f-island[^>]*copy-button/);
           expect(mdxHtml).toContain("<title>Notes</title>");
 
           for (const pathname of ["/notes.md", "/notes-mdx.md"]) {
@@ -2479,7 +2688,7 @@ export function CopyButton({ text }) {
     { label: "without a plugin runtime", withPlugin: false },
     { label: "alongside a runtime plugin", withPlugin: true },
   ])(
-    "sends Farm Infra analytics only when the environment links a project, $label",
+    "sends Farm Infra analytics only when the environment sets a key, $label",
     async ({ withPlugin }) => {
       const root = await createProductionFixture();
       const received: { headers: Record<string, string | string[] | undefined>; body: string }[] =
@@ -2579,6 +2788,29 @@ export function CopyButton({ text }) {
             },
           ],
         });
+
+        // An API key scoped to one project needs nothing else: Farm Infra resolves the project.
+        const apiKey = `farmjs_${"s".repeat(32)}`;
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            await vi.waitFor(() => expect(received).toHaveLength(2), { timeout: 5_000 });
+          },
+          pathname,
+          undefined,
+          {
+            FARMJS_API_KEY: apiKey,
+            FARMJS_API_URL: `http://127.0.0.1:${receiverPort}`,
+            NODE_ENV: "production",
+          },
+        );
+        expect(received[1]!.headers.authorization).toBe(`Bearer ${apiKey}`);
+        expect(received[1]!.headers["x-farm-environment"]).toBe("production");
+        expect(received[1]!.headers).not.toHaveProperty("x-farm-project");
+        expect(JSON.parse(received[1]!.body).events).toMatchObject([
+          { kind: "request", route: "/users/[id]", method: "GET", status: 200 },
+        ]);
       } finally {
         await new Promise((resolve) => receiver.close(resolve));
         await fs.rm(root, { recursive: true, force: true });
@@ -2688,10 +2920,134 @@ export default {
     }
   }, 120_000);
 
-  it("serves /.well-known/farmjs.json to anyone, and the full view to Farm Infra's signed request", async () => {
+  it("reports built-in endpoints, Markdown mirrors, and docs pages by a route template", async () => {
+    const root = await createProductionFixture();
+    const received: string[] = [];
+    const receiver = createHttpServer((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => {
+        received.push(body);
+        response.writeHead(202).end();
+      });
+    });
+    await new Promise<void>((resolve) => receiver.listen(0, "127.0.0.1", resolve));
+    const receiverPort = (receiver.address() as { port: number }).port;
+    const requests = () =>
+      received
+        .flatMap((body) => JSON.parse(body).events)
+        .filter(({ kind }) => kind === "request")
+        .map(({ method, route, status }) => `${method} ${route} ${status}`);
+
+    try {
+      await fs.mkdir(path.join(root, "src", "app", "blog", "[slug]"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "blog", "[slug]", "page.tsx"),
+        `export default function Post({ params }) { return <main>post {params.slug}</main>; }`,
+      );
+      await fs.mkdir(path.join(root, "src", "app", "about"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "about", "page.tsx"),
+        `export default function About() { return <main>about</main>; }`,
+      );
+      await fs.mkdir(path.join(root, "src", "app", "docs", "routing"), { recursive: true });
+      await fs.writeFile(path.join(root, "src", "app", "docs", "page.md"), "# Docs\n\nHome.");
+      await fs.writeFile(
+        path.join(root, "src", "app", "docs", "routing", "page.md"),
+        "# Routing\n\nFile routes.",
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          docs: { entry: "/docs", search: false },
+          agent: { mcp: true, llmsTxt: { enabled: true, full: false } },
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "infra-route-labels-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const origin = new URL(response.url).origin;
+          const status = async (pathname: string, init?: RequestInit) => {
+            const answer = await fetch(origin + pathname, init);
+            await answer.arrayBuffer();
+            return answer.status;
+          };
+          const initialize = JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "fixture", version: "1.0.0" },
+            },
+          });
+          expect(
+            await status("/mcp", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                accept: "application/json, text/event-stream",
+              },
+              body: initialize,
+            }),
+          ).toBe(200);
+          expect(await status("/mcp")).toBe(405);
+          expect(await status("/llms.txt")).toBe(200);
+          expect(await status("/blog/private-post.md")).toBe(200);
+          expect(await status("/about.md")).toBe(200);
+          expect(await status("/.well-known/farmjs.json")).toBe(200);
+          expect(await status("/docs/routing")).toBe(200);
+          expect(await status("/blog/private-post?secret=private-query")).toBe(200);
+          expect(await status("/private-missing")).toBe(404);
+          await vi.waitFor(
+            () =>
+              expect(requests()).toEqual(
+                expect.arrayContaining([
+                  "GET / 200",
+                  "POST /mcp 200",
+                  "GET /mcp 405",
+                  "GET /llms.txt 200",
+                  "GET /blog/[slug].md 200",
+                  "GET /about.md 200",
+                  "GET /.well-known/farmjs.json 200",
+                  "GET /docs/[...slug] 200",
+                  "GET /blog/[slug] 200",
+                  "GET /[unmatched] 404",
+                ]),
+              ),
+            { timeout: 5_000 },
+          );
+        },
+        "/",
+        undefined,
+        {
+          FARMJS_API_KEY: `fti_${"l".repeat(43)}`,
+          FARMJS_API_URL: `http://127.0.0.1:${receiverPort}`,
+        },
+      );
+      // Only the request nothing answered is unmatched, and no label carries the path.
+      expect(requests().filter((line) => line.includes("/[unmatched]"))).toEqual([
+        "GET /[unmatched] 404",
+      ]);
+      expect(received.join("")).not.toContain("private");
+    } finally {
+      await new Promise((resolve) => receiver.close(resolve));
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("serves the same public /.well-known/farmjs.json to anyone, signed by Farm Infra or not", async () => {
     const root = await createProductionFixture();
     const key = `fti_${"m".repeat(43)}`;
-    const keyHash = createHash("sha256").update(key).digest("hex");
     // What @farm.js/mcp does when it mounts its endpoint: publish the tools and their schemas.
     // "fixture" is public; "admin" requires authorize.
     const publish = `_publishFarmMCPCatalog(
@@ -2773,9 +3129,14 @@ export const listTodos = defineWebMCPTool({
       // Reading WebMCP tools is build work: the server never loads the parser's native binary.
       await expect(fs.stat(path.join(serverDir, "node_modules", "rolldown"))).rejects.toThrow();
       const linked = { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" };
+      const bodies = new Set<string>();
 
-      // Anyone, linked to Farm Infra or not: the public view.
-      for (const env of [undefined, linked]) {
+      // Anyone, linked to Farm Infra or not, signed or not: the one public document.
+      for (const [env, init] of [
+        [undefined, undefined],
+        [linked, undefined],
+        [linked, { headers: { "farmjs-infra-signature": legacyFarmInfraSignature(key) } }],
+      ] as const) {
         await runProductionRequest(
           serverDir,
           async (response) => {
@@ -2811,58 +3172,7 @@ export const listTodos = defineWebMCPTool({
                 tools: [],
               },
             ]);
-            const body = JSON.stringify(manifest);
-            for (const hidden of [key, "/api/users/[id]", "ban_user", "admin://audit"]) {
-              expect(body).not.toContain(hidden);
-            }
-          },
-          "/.well-known/farmjs.json",
-          undefined,
-          env,
-        );
-      }
-      await runProductionRequest(
-        serverDir,
-        async (response) => {
-          expect(response.status).toBe(200);
-          expect(response.headers.get("cache-control")).toBe("private, no-store");
-          const manifest = await response.json();
-          expect(manifest).toMatchObject({
-            schemaVersion: 1,
-            app: { basePath: "/", build: "manifest-test" },
-            mcp: {
-              servers: [
-                {
-                  name: "fixture",
-                  path: "/api/mcp",
-                  authorization: "none",
-                  resources: [{ name: "handbook", uri: "docs://handbook" }],
-                  tools: [
-                    {
-                      name: "list_users",
-                      source: "defineTool",
-                      readOnlyHint: true,
-                      inputSchema: { type: "object", properties: { q: { type: "string" } } },
-                    },
-                    {
-                      name: "remove_user",
-                      source: "endpoint",
-                      method: "DELETE",
-                      path: "/api/users/[id]",
-                      destructiveHint: true,
-                    },
-                  ],
-                },
-                // Infra's view lists the tools of a server that requires authorize.
-                {
-                  name: "admin",
-                  authorization: "required",
-                  tools: [{ name: "ban_user" }],
-                  resources: [{ name: "audit" }],
-                },
-              ],
-            },
-            webmcp: {
+            expect(manifest.webmcp).toEqual({
               enabled: true,
               tools: [
                 {
@@ -2873,17 +3183,24 @@ export const listTodos = defineWebMCPTool({
                   inputSchemaSource: "literal",
                 },
               ],
-            },
-            integrations: [{ key: "errors", category: "monitoring", type: "fixture-errors" }],
-          });
-          expect(manifest.plugins).toEqual(expect.arrayContaining(["farm:webmcp", "fixture-mcp"]));
-          expect(JSON.stringify(manifest)).not.toContain(key);
-        },
-        "/.well-known/farmjs.json",
-        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
-        linked,
-      );
-      // Farm 0.1.34 served it at /.well-known/farmjs: that path still answers, signed or not.
+            });
+            expect(manifest.plugins).toEqual(
+              expect.arrayContaining(["farm:webmcp", "fixture-mcp"]),
+            );
+            const body = JSON.stringify(manifest);
+            for (const hidden of [key, "/api/users/[id]", "ban_user", "admin://audit"]) {
+              expect(body).not.toContain(hidden);
+            }
+            bodies.add(body);
+          },
+          "/.well-known/farmjs.json",
+          init,
+          env,
+        );
+      }
+      expect(bodies.size).toBe(1);
+
+      // Farm 0.1.34 served it at /.well-known/farmjs: that path still answers.
       await runProductionRequest(
         serverDir,
         async (response) => {
@@ -2897,10 +3214,103 @@ export const listTodos = defineWebMCPTool({
     }
   }, 120_000);
 
-  it("serves no /.well-known/farmjs.json with agent.manifest: false, signed or not", async () => {
+  it("serves the agent.manifest sections the app chose, from the embedded config", async () => {
+    const root = await createProductionFixture();
+    const publish = `_publishFarmMCPCatalog(
+      { name: "fixture", version: "1.0.0", path: "/api/mcp" },
+      [
+        { name: "list_users", kind: "standalone", readOnlyHint: true },
+        { name: "remove_user", kind: "standalone", destructiveHint: true },
+      ],
+      { public: true, schemas: { list_users: { input: { type: "object" } } } },
+    );
+    _publishFarmMCPCatalog({ name: "internal", version: "1.0.0", path: "/api/internal/mcp" }, [
+      { name: "ping", kind: "standalone" },
+    ], { public: true });`;
+    try {
+      // The fixture links @farm.js/core; listing it makes it an installed package.
+      await fs.writeFile(
+        path.join(root, "package.json"),
+        JSON.stringify({ private: true, type: "module", dependencies: { "@farm.js/core": "*" } }),
+      );
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `import { _publishFarmMCPCatalog } from "@farm.js/core/api/runtime";
+export default {
+  plugins: [{
+    name: "fixture-mcp",
+    routes: ({ route }) => {
+      ${publish}
+      return [route.post("/api/mcp", { handler: () => Response.json({ ok: true }) })];
+    },
+  }],
+};`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          deploymentId: "sections-test",
+          agent: {
+            manifest: {
+              app: { build: false },
+              packages: "names",
+              mcp: { schemas: false, hide: ["internal", "fixture/remove_user"] },
+              integrations: false,
+              plugins: false,
+            },
+          },
+          plugins: [
+            definePlugin({
+              name: "fixture-mcp",
+              routes: ({ route }) => [
+                route.post("/api/mcp", { handler: () => Response.json({ ok: true }) }),
+              ],
+            }),
+          ],
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          const manifest = await response.json();
+          expect(manifest.app).toEqual({
+            farm: expect.any(String),
+            renderer: "react",
+            basePath: "/",
+          });
+          expect(manifest.packages).toEqual({ "@farm.js/core": null });
+          expect(manifest.mcp.servers).toEqual([
+            {
+              name: "fixture",
+              version: "1.0.0",
+              path: "/api/mcp",
+              authorization: "none",
+              resources: [],
+              prompts: [],
+              tools: [{ name: "list_users", source: "defineTool", readOnlyHint: true }],
+            },
+          ]);
+          expect(manifest).toMatchObject({ integrations: null, plugins: null });
+          expect(manifest.agent).not.toBeNull();
+          expect(JSON.stringify(manifest)).not.toContain("sections-test");
+        },
+        "/.well-known/farmjs.json",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("serves no /.well-known/farmjs.json at either path with agent.manifest: false", async () => {
     const root = await createProductionFixture();
     const key = `fti_${"o".repeat(43)}`;
-    const keyHash = createHash("sha256").update(key).digest("hex");
     try {
       const config = await resolveConfig(
         {
@@ -2914,15 +3324,18 @@ export const listTodos = defineWebMCPTool({
       );
       await build(config, { root, preset: "node-server" });
       const serverDir = path.join(root, ".farm", ".output", "server");
-      await runProductionRequest(
-        serverDir,
-        async (response) => {
-          expect(response.headers.get("content-type") ?? "").not.toContain("application/json");
-        },
-        "/.well-known/farmjs.json",
-        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
-        { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" },
-      );
+      for (const pathname of ["/.well-known/farmjs.json", "/.well-known/farmjs"]) {
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(404);
+            expect(response.headers.get("content-type") ?? "").not.toContain("application/json");
+          },
+          pathname,
+          { headers: { "farmjs-infra-signature": legacyFarmInfraSignature(key) } },
+          { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" },
+        );
+      }
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -3127,7 +3540,7 @@ export default function Counter({ name, initial = 0 }) {
   const [count, setCount] = useState(initial);
   const ref = useRef(null);
   useEffect(() => {
-    const container = ref.current?.closest("farm-client-boundary");
+    const container = ref.current?.closest("f-island");
     globalThis.__farmIsolatedLifecycle = globalThis.__farmIsolatedLifecycle || [];
     globalThis.__farmIsolatedLifecycle.push({ type: "mount", name });
     return () => globalThis.__farmIsolatedLifecycle.push({
@@ -3148,7 +3561,7 @@ export default function PageCounter({ name }) {
   const [count, setCount] = useState(0);
   const ref = useRef(null);
   useEffect(() => {
-    const container = ref.current?.closest("farm-client-boundary");
+    const container = ref.current?.closest("f-island");
     globalThis.__farmIsolatedLifecycle = globalThis.__farmIsolatedLifecycle || [];
     globalThis.__farmIsolatedLifecycle.push({ type: "mount", name });
     return () => globalThis.__farmIsolatedLifecycle.push({
@@ -3260,7 +3673,7 @@ export default function SecondPage() {
       await build(baselineConfig, { root: baselineRoot, preset: "node-server" });
       const baselineJavaScript = await readAllClientJavaScript(baselineRoot);
       expect(baselineJavaScript).toContain("SERVER_LAYOUT_SENTINEL_");
-      expect(baselineJavaScript).not.toContain("data-farm-client-boundary");
+      expect(baselineJavaScript).not.toContain("<f-island");
       expect(baselineJavaScript).not.toContain("__farm_client_boundary_originals__");
       expect(baselineJavaScript).not.toContain("Could not hydrate isolated client boundary");
       expect(Buffer.byteLength(clientJavaScript)).toBeLessThan(
@@ -3289,17 +3702,15 @@ export default function SecondPage() {
           expect(response.status).toBe(200);
           const html = await response.text();
           expect(html).toContain("SERVER_LAYOUT_SENTINEL_");
-          expect(html).toContain('data-farm-client-boundary="/src/components/counter.tsx"');
-          expect(html).toContain('data-farm-client-export="default"');
+          expect(html).toContain('<f-island src="/src/components/counter.tsx"');
+          expect(html).toContain('export="default"');
           expect(html).toContain('data-isolated-counter="first"');
           expect(html).toContain('data-isolated-counter="second"');
           expect(html).toContain("data-nested-counter");
           expect(html).toContain(">2</button>");
           expect(html).toContain('data-page-counter="first-page"');
-          expect(html.match(/<farm-client-boundary/g)).toHaveLength(4);
-          expect(html).not.toContain(
-            'data-farm-client-boundary="/src/components/child-counter.tsx"',
-          );
+          expect(html.match(/<f-island/g)).toHaveLength(4);
+          expect(html).not.toContain('<f-island src="/src/components/child-counter.tsx"');
 
           const executablePath = await resolveInstalledChromiumExecutable();
           if (!executablePath) return;
@@ -3326,7 +3737,7 @@ export default function SecondPage() {
               await expect
                 .poll(() =>
                   counter.evaluate((element) =>
-                    element.closest("farm-client-boundary")?.getAttribute("data-farm-hydrated"),
+                    element.closest("f-island")?.getAttribute("data-farm-hydrated"),
                   ),
                 )
                 .toBe("true");
@@ -3342,7 +3753,7 @@ export default function SecondPage() {
             await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
             await expect.poll(() => pageCounter.textContent()).toBe("1");
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(4);
 
             await page.locator("[data-nav-second]").click();
@@ -3413,7 +3824,7 @@ export default function SecondPage() {
             await expect.poll(() => first.textContent()).toBe("3");
             await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(4);
 
             const lifecycle = await page.evaluate(
@@ -3540,7 +3951,7 @@ await server.listen(Number(process.env.PORT));
       ) => {
         expect(response.status).toBe(200);
         const html = await response.text();
-        expect(html.match(/<farm-client-boundary/g) ?? []).toHaveLength(expected.isolatedRoots);
+        expect(html.match(/<f-island/g) ?? []).toHaveLength(expected.isolatedRoots);
         expect(html).toMatch(
           new RegExp(
             `id="__farm_page__"[^>]*data-farm-client="${expected.pageHydrates ? "true" : "false"}`,
@@ -3561,7 +3972,7 @@ await server.listen(Number(process.env.PORT));
           const counter = page.locator(`[data-cost-counter="${expected.counter}"]`);
           try {
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(expected.isolatedRoots);
             await counter.click();
             await expect.poll(() => counter.textContent()).toBe(`${expected.counter}:1`);
@@ -3770,8 +4181,7 @@ await server.listen(Number(process.env.PORT));
             });
             await page.goto(url);
 
-            const boundary = (strategy: string) =>
-              page.locator(`farm-client-boundary[data-farm-island-strategy="${strategy}"]`);
+            const boundary = (strategy: string) => page.locator(`f-island[strategy="${strategy}"]`);
             await boundary("load").locator('[data-strategy="load"]').waitFor();
             await expect
               .poll(() => boundary("load").getAttribute("data-farm-hydrated"))
@@ -3889,9 +4299,9 @@ await server.listen(Number(process.env.PORT));
           expect(response.status).toBe(200);
           const html = await response.text();
           for (const strategy of ["load", "interaction", "visible", "idle"]) {
-            expect(html).toContain(`data-farm-island-strategy="${strategy}"`);
+            expect(html).toContain(`strategy="${strategy}"`);
           }
-          expect(html.match(/<farm-client-boundary/g)).toHaveLength(4);
+          expect(html.match(/<f-island/g)).toHaveLength(4);
           await verifyScheduling(response.url);
         },
       );
@@ -3973,7 +4383,7 @@ await server.listen(Number(process.env.PORT));
           await page.goto(new URL("/fallback", url).href);
 
           await expect
-            .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+            .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
             .toBe(expectedIsolatedRoots);
           expect(
             await page.locator("#__farm_page__").getAttribute("data-farm-island-hydrated"),
@@ -4038,7 +4448,7 @@ await server.listen(Number(process.env.PORT));
           try {
             await page.goto(response.url);
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(3);
             await page.locator("[data-parity-layout]").evaluate((element) => {
               element.setAttribute("data-layout-identity", "retained");
@@ -4133,7 +4543,7 @@ await server.listen(Number(process.env.PORT));
               })
               .toBe("server-stable");
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(2);
 
             await fs.writeFile(
@@ -4148,7 +4558,7 @@ export default function Page() { return <main data-parity-page>Parity page <Page
             );
             await expect.poll(() => page.locator("[data-page-owner]").count()).toBe(1);
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(3);
             await page.evaluate(() => {
               (
@@ -4179,7 +4589,7 @@ export default function PageOwner() { return <section data-page-owner><LiveCount
               .poll(() => page.locator("#__farm_page__").getAttribute("data-farm-client"))
               .toBe("true");
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(2);
             expect(
               browserErrors,
@@ -4663,7 +5073,9 @@ export default function DynamicPage({ params }) {
 
   // Windows has no POSIX signals: child.kill("SIGTERM") maps to TerminateProcess,
   // so graceful shutdown never runs and its effects cannot be observed.
-  it.each([
+  // it.for, not it.each: only it.for hands the test context to the callback, so
+  // ctx.skip() works where bun is missing or the platform is Windows.
+  it.for([
     { preset: "node-server", command: process.execPath },
     { preset: "bun", command: "bun" },
   ])(
@@ -5542,6 +5954,39 @@ export const GET = createEndpoint(
     }
   }, 120_000);
 
+  it("asks Nitro to list the Node server output without gzipping every file", async () => {
+    const root = await createProductionFixture();
+    let logging: unknown;
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "server-listing-test",
+          plugins: [
+            definePlugin({
+              name: "server-listing-test",
+              build: {
+                configure(nitroConfig) {
+                  logging = nitroConfig.logging;
+                },
+              },
+            }),
+          ],
+        },
+        "production",
+      );
+      // Nitro prints the listing only outside test runs, so the option it reads is the seam.
+      await build(config, { root, preset: "node-server" });
+
+      expect(logging).toEqual({ compressedSizes: false });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it.each([false, true])(
     "keeps plugin-replaced requests current during production rendering (headers: %s)",
     async (withHeaders) => {
@@ -6306,6 +6751,95 @@ export default function OpenGraphImage() {
             expect(await response.text()).toContain("prebuilt SSR output");
           });
         }
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
+
+  it.each([{ docs: false }, { docs: true }])(
+    "keeps the dev pipeline out of a runtime plugin app's server output (%j)",
+    async ({ docs }) => {
+      const root = await createProductionFixture();
+
+      try {
+        // The app's own config imports the plugin API, as a real app does. The
+        // server bundles it, so whatever shares a chunk with definePlugin and
+        // PluginManager ships too.
+        await fs.writeFile(
+          path.join(root, "farm.config.ts"),
+          `import { definePlugin } from "@farm.js/core/plugin";
+
+export default {
+  plugins: [
+    definePlugin({
+      name: "test:stamp",
+      runtime: {
+        after({ response }) {
+          const headers = new Headers(response.headers);
+          headers.set("x-test-plugin", "ran");
+          return new Response(response.body, { status: response.status, headers });
+        },
+      },
+    }),
+  ],
+};
+`,
+        );
+        if (docs) {
+          await fs.mkdir(path.join(root, "src", "app", "docs"), { recursive: true });
+          await fs.writeFile(
+            path.join(root, "src", "app", "docs", "page.mdx"),
+            `# Plugin app docs\n\nServer-rendered documentation content.`,
+          );
+        }
+        const userConfig = await loadConfig(root, undefined, "production");
+        const config = await resolveConfig(
+          {
+            ...userConfig,
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            ...(docs ? { docs: { entry: "/docs", search: false } } : {}),
+            generateBuildId: () => `plugin-server-output-${docs}-test`,
+          },
+          "production",
+        );
+
+        await build(config, { root, preset: "node-server" });
+
+        const serverDir = path.join(root, ".farm", ".output", "server");
+        let serverCode = "";
+        for (const file of await fs.readdir(serverDir, { recursive: true })) {
+          if (/\.m?js$/.test(file))
+            serverCode += await fs.readFile(path.join(serverDir, file), "utf8");
+        }
+        // The Vite plugin and dev pipeline never run in a built server.
+        expect(serverCode).not.toContain("farm:server-only-entries");
+        expect(serverCode).not.toContain("@tailwindcss/vite");
+        // The MDX compiler ships only with the docs runtime that uses it.
+        if (docs) expect(serverCode).toContain("mdxjsEsm");
+        else expect(serverCode).not.toContain("mdxjsEsm");
+
+        await runProductionRequest(serverDir, async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("x-test-plugin")).toBe("ran");
+          expect(await response.text()).toContain("prebuilt SSR output");
+
+          // Markdown mirrors are on by default and still work.
+          const markdown = await fetch(new URL("/index.md", response.url));
+          expect(markdown.status).toBe(200);
+          expect(markdown.headers.get("content-type")).toContain("text/markdown");
+          expect(await markdown.text()).toContain("prebuilt SSR output");
+
+          if (docs) {
+            const page = await fetch(new URL("/docs", response.url));
+            expect(page.status).toBe(200);
+            expect(page.headers.get("x-test-plugin")).toBe("ran");
+            expect(await page.text()).toContain("Plugin app docs");
+          }
+        });
       } finally {
         await fs.rm(root, { recursive: true, force: true });
       }

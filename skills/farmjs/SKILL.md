@@ -124,6 +124,43 @@ Common config fields:
 - `cron`: named portable UTC schedules mapped to GET API routes
 - `docs`, `md`, `mdx`: docs runtime, markdown mirrors, and MDX components
 - `deploy`: first-class target, Nitro preset, and output
+- `desktop`: native desktop app for `farm dev|build --desktop` (`name`, `id`, `icon`, `window`, `shell`; install `@farm.js/desktop electrobun`);
+  use `platform()` and `appDataDir()` from `@farm.js/core/platform` for platform-specific server code
+- `mobile`: preview (`name`, `id`, `server`, `tabs`, `routes` with `presentation`, `native` with
+  `engine`, `auto`, `routes` tiers, `islands`, `prefetch`, `budgets`); a route is native with
+  `page.native.tsx` (or `page.ios.tsx`/`page.android.tsx`, `page.kt`/`page.swift`) next to its
+  required `page.tsx`; precedence: `page.tsx` `export const mobile` > `native.routes` > native
+  files > analyzer > web; `farm config inspect --mobile` prints each route's screen and source plus
+  `farm-routes.json`; `--report` runs the build-time analyzer (report only) and writes
+  `.farm/output/mobile/native-report.json` with each route's blockers as file:line:column;
+  `farm dev|build --mobile` generates the Android shell into `.farm/output/mobile/android` (install
+  `@farm.js/mobile`) and `farm build --mobile` prints the report unless `native.auto` is `"off"`;
+  `farm build` of an app with `mobile` also builds the mobile client (`.farm/mobile-client.json`),
+  which documents load when the shell sends `X-Farm-Shell`, and `farm build --mobile` bundles its
+  hashed files into the APK (iOS loads them from the server; SSG pages keep the web client;
+  server components apps get it too: islands mode as any app, the RSC pipeline as one
+  `farm-mobile-client` entry that runs the web entry, with `clientDir` in the manifest, and
+  without device tokens since it refuses `auth`/`integrations`); the RSC router offers link
+  clicks, `router.push`/`replace` and server action redirects to `delegateNavigation`;
+  `--os ios` generates the iOS shell (Xcode project, Swift + UIKit) into `.farm/output/mobile/ios`
+  and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; not yet built with `xcodebuild`;
+  `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; on Android
+  `page.native.tsx`/`page.android.tsx` build as React Native screens, verified in
+  `farm dev --mobile` on an Android emulator (not in production bytecode builds or on real
+  devices), signed in through device tokens after a web-screen sign-in (`/__farm/mobile/session`:
+  the shell keeps tokens in the Keystore/Keychain, `serverFetch` sends `Authorization: Bearer` and
+  refreshes once on 401, the server runs a valid bearer as the cookie session; covered for
+  `@farm.js/auth` and `@farm.js/better-auth` through an integration's `session(request)`; mount
+  persistent storage at `farm-mobile` in production; with `@farm.js/auth`, native screens import
+  `getSession`, `useAuth` and `signOut` from `@farm.js/auth/client` like web pages (Metro resolves
+  its `react-native` build; web bundles unchanged; `signIn`/`signUp` reject natively, sign in on a
+  web screen); `signOut()` from `@farm.js/native` is the low-level forget-this-device call) (install
+  `@farm.js/native react-native @react-native/metro-config` as dev deps, React 19.2.8 or later;
+  needs NDK 27.1.12297006 and CMake 3.22.1; hooks `useNavigate`, `useRouteParams`,
+  `useServerQuery`, `serverFetch`; Metro in dev, Hermes bytecode in builds; a screen that throws
+  while loading shows the web twin `page.tsx` in builds and React Native's error screen in dev;
+  keep native files out of the web tsconfig); on iOS `native` screens show a placeholder;
+  `platform` screens show a placeholder on both; `src/native/` is for native module specs
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits
@@ -349,8 +386,15 @@ farm add integration jobs-trigger
 ```
 
 Current integration families include AI, Stripe, Autumn, Polar, Resend, Trigger.dev, Inngest,
-Unkey, Cloudflare agents, Eve, Auth0, Auth.js, Better Auth, Clerk, Supabase, WorkOS, custom
-integrations, UI registries, and ORM-backed data.
+Unkey, Cloudflare agents, Eve, Auth0, Auth.js, Better Auth, Clerk, Supabase, WorkOS, Convex
+(`@farm.js/convex`, installed with `pnpm add`, not `farm add`), custom integrations, UI
+registries, and ORM-backed data. Auth, billing or email that runs inside Convex is detected from
+`convex/convex.config.ts` by `convex()`, or listed with `component()` in `convex({ use })`; never
+a second Farm integration. Auth that stays in Farm gives `convex()` a `token` reader and `tokenPath`.
+Durable agents (`@farm.js/agent`, `pnpm add @farm.js/agent agent-unit`) mount as
+`integrations: { agent: agent({ framework, storage, authorize }) }` and serve `src/agents` under
+`/api/agent`; agent-unit builds them into the Nitro output for every target. Its settings evaluate in
+the server, so never move them into a separate agent-unit.config.ts.
 
 Provider adapters support two ownership modes: pass credentials so the adapter constructs its
 default SDK, or pass an app-owned vendor client through `instance`. Keep the vendor instance in a
@@ -455,6 +499,8 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
 - Use `docs` for human docs, shared search, markdown, `llms.txt`, sitemap, robots, and agent APIs.
   A root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` (or the same file in `public/`)
   takes its path from the docs engine.
+- Docs pages render on request. `docs.prerender: true` writes the pages a docs adapter lists as
+  static files on Node and serverless targets; a docs `page.mdx` takes no `force-static` export.
 - Use `agent.llmsTxt` for an app's own `/llms.txt` and `/llms-full.txt` (`full: false` skips the
   second). A static `public/llms.txt` or `public/llms-full.txt` overrides each, and so do
   `src/app/llms.ts` and `src/app/llms-full.ts`, which return the whole file as a string or the
@@ -470,8 +516,11 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
   `src/app/robots.ts`, win over it; it wins over the docs engine's robots.txt.
 - Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
 - Every app serves a public `/.well-known/farmjs.json` manifest (Farm version and packages, MCP
-  tools and schemas, WebMCP tools, integration providers, plugin names; never config or env).
-  MCP servers with `authorize` are listed without their tools. `agent.manifest: false` turns it off.
+  tools and schemas, WebMCP tools, integration providers, plugin names; never config or env), the
+  same document for every reader, Farm Infra included. MCP servers with `authorize` or behind a
+  guard are listed without their tools. `agent.manifest: { packages: "names", mcp: { schemas:
+false, hide: ["server", "server/tool"] }, webmcp: { hide }, app: { build: false }, plugins:
+false }` trims it (a hidden section is `null`); `agent.manifest: false` turns it off.
 - Use `agent.noindexPreviews: true` to send `X-Robots-Tag: noindex, nofollow` on preview
   deployments (`FARM_PREVIEW=1`, `VERCEL_ENV=preview`, Netlify deploy-preview/branch-deploy at
   build time, Render PR previews). Test locally with `FARM_PREVIEW=1 farm dev`.

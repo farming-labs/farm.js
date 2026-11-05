@@ -71,7 +71,10 @@ export interface ResolvedFarmServerHealthConfig {
 export interface FarmServerConfig {
   /** Maximum request body size for API routes, integrations, workflows, and uploads. */
   bodySizeLimit?: number | string;
-  /** Trust proxy-provided client address and request authority headers. Enable only behind a trusted proxy. */
+  /**
+   * Trust proxy-provided client address and request authority headers. Enable only behind a trusted proxy.
+   * The client address is the last `X-Forwarded-For` hop, the one the closest proxy appended.
+   */
   trustProxy?: boolean;
   /** Maximum time for a Node client to send complete request headers. */
   headersTimeout?: FarmServerDuration;
@@ -328,6 +331,41 @@ export function parseBodySizeLimit(value: number | string, optionName = "bodySiz
   return bytes;
 }
 
+/**
+ * Attach the caller's address as `request.socket.remoteAddress`, the shape Farm's
+ * middleware and integrations read it from.
+ *
+ * A web Request carries no socket, so the address comes from a trusted proxy or
+ * from the server adapter's own connection. Never invent one: reporting
+ * `127.0.0.1` used to make every visitor look like the same client, which
+ * collapsed per-client rate limiting into one shared bucket. Leave it undefined
+ * so a consumer can tell that it does not know.
+ */
+export function withFarmRequestClientAddress<T extends Request>(
+  request: T,
+  trustProxy: boolean,
+  clientAddress: string | undefined,
+): T {
+  const requestWithShape = request as T & {
+    socket?: { remoteAddress?: string };
+  };
+
+  if (!requestWithShape.socket) {
+    // The trusted proxy appends the address it saw, so that hop is the last
+    // one. Anything before it was sent by the client and can be anything.
+    const forwardedFor = trustProxy
+      ? request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim()
+      : undefined;
+    try {
+      requestWithShape.socket = { remoteAddress: forwardedFor || clientAddress || undefined };
+    } catch {
+      // Some Request implementations may not be extensible.
+    }
+  }
+
+  return requestWithShape;
+}
+
 export function cloneFarmRequestWithContext(request: Request): Request {
   const cloned = request.clone();
   copyRequestContext(request, cloned);
@@ -404,7 +442,31 @@ export async function readFarmRequestBody(request: Request, limit: number): Prom
   return body;
 }
 
+/**
+ * A Node request's body can be read once. A guard that reads it (an integration's
+ * protectedRoutes check, say) and the handler that runs next both call readNodeRequestBody,
+ * so the bytes are kept per request and the second reader gets the same ones instead of
+ * waiting on a stream that already ended.
+ */
+const nodeRequestBodies = new WeakMap<object, Promise<Buffer>>();
+
 export async function readNodeRequestBody(
+  request: Parameters<typeof readNodeRequestBodyOnce>[0],
+  limit: number,
+): Promise<Buffer> {
+  let body = nodeRequestBodies.get(request);
+  if (!body) {
+    body = readNodeRequestBodyOnce(request, limit);
+    nodeRequestBodies.set(request, body);
+  }
+  const bytes = await body;
+  if (bytes.byteLength > limit) {
+    throw new FarmRequestBodyError("BODY_TOO_LARGE", 413, "Request body is too large");
+  }
+  return bytes;
+}
+
+async function readNodeRequestBodyOnce(
   request: {
     headers: Record<string, string | string[] | undefined>;
     on(event: "data", listener: (chunk: unknown) => void): unknown;

@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/email",
-  "version": "0.1.39",
+  "version": "0.1.51-beta.3",
   "description": "Email and Resend integration for Farm.js",
   "license": "MIT",
   "repository": {

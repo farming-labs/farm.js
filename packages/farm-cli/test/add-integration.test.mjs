@@ -411,7 +411,9 @@ test("scaffolds a working Better Auth starter with its UI dependencies", async (
     assert.match(panel, /authClient\.signUp\.email/);
     assert.match(panel, /authClient\.getSession/);
     assert.match(panel, /authClient\.signOut/);
-    assert.match(env, /BETTER_AUTH_SECRET=/);
+    // Empty: a placeholder long enough for Better Auth would be accepted as-is.
+    assert.match(env, /^BETTER_AUTH_SECRET=$/m);
+    assert.match(env, /^# Generate with: openssl rand -base64 32$/m);
     assert.match(env, /EXISTING_VALUE=kept/);
     assert.match(gitignore, /node_modules/);
     assert.match(gitignore, /better-auth\.sqlite/);
@@ -449,6 +451,8 @@ test("scaffolds a complete Auth.js instance with matching dependencies", async (
     assert.match(auth, /import \{ Auth \} from "@auth\/core"/);
     assert.match(auth, /GitHub\(\{/);
     assert.match(auth, /handlers:\s*\{\s*GET: handler,\s*POST: handler/s);
+    // The route @farm.js/authjs mounts; Auth.js otherwise only answers under /auth.
+    assert.match(auth, /basePath: "\/api\/auth"/);
     assert.deepEqual(result.env, ["AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -518,6 +522,9 @@ test("adds a Vercel AI SDK chat route template", async () => {
     assert.match(route, /import \{ aiChatRoute \} from "@farm.js\/ai"/);
     assert.match(route, /export const POST = aiChatRoute/);
     assert.match(route, /model: "openai\/gpt-4o-mini"/);
+    // Fails closed in production until the app checks a session.
+    assert.match(route, /authorize: \(\) => process\.env\.NODE_ENV === "development"/);
+    assert.doesNotMatch(route, /allowUnauthenticated/);
     await assert.rejects(() => readFile(path.join(root, "src/lib/integrations.ts"), "utf8"));
     await assert.rejects(() => readFile(path.join(root, "farm.config.ts"), "utf8"));
   } finally {

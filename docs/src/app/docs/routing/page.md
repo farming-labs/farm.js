@@ -75,12 +75,72 @@ export default defineRoutes(({ page, api }) => [
 Prefer a file route when the URL maps to a folder. Reach for `defineRoutes` for colocated
 features, URLs a folder can't express, and route lists generated from data or configuration.
 
-The browser loads the routes file to hydrate its pages, so the client build keeps only what that
-needs: components, `pending`/`error`/`notFound`, params and search options, and actions. It removes
-`guard`, `data`, `staticPaths`, `generateMetadata`, and `api()` handlers from inline route options,
-along with the imports and top-level helpers only they use, so database clients and credentials
-stay on the server. Write route options inline for this to apply. A client build fails if the
-routes file, or an application module it keeps, still imports a Node builtin such as `node:fs`.
+### Routes files never reach the browser
+
+A routes file holds server code: guards, `data` hooks, `staticPaths`, `generateMetadata`, API
+handlers, and the database clients and credentials they import. The browser never loads it. When
+a programmatic page or layout hydrates, its client copy imports only the module that defines its
+`component` (and its `pending` component), so give every component its own module and import it
+into the routes file:
+
+**src/features/admin/page.tsx**
+
+```tsx
+export function AdminPage({ data }: { data: { users: string[] } }) {
+  return (
+    <ul>
+      {data.users.map((user) => (
+        <li key={user}>{user}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+**src/routes.tsx**
+
+```tsx
+import { defineRoutes } from "@farm.js/core";
+import { AdminPage } from "./features/admin/page";
+import { db } from "./lib/db";
+import { requireAdmin } from "./lib/auth";
+
+export default defineRoutes(({ page }) => [
+  page("/admin", {
+    component: AdminPage,
+    guard: requireAdmin,
+    data: { main: async () => ({ users: await db.listUsers() }) },
+  }),
+]);
+```
+
+Farm finds each component's module from the routes it evaluates on the server, so the route list
+can be built any way you like: helpers, lists imported from other modules, definition objects, or
+options assigned after `page()` returns. Its params, search, guard, and data run on the server,
+and the page hydrates from the props the server resolved for the document.
+
+A client build fails when a hydrating page or layout's component has no module of its own: it is
+declared in the routes file or another module that defines routes, computed there
+(`component: memo(AdminPage)`), or imported straight from a package. A module defines routes when
+it holds route definitions in any shape (exported lists, objects or maps of routes, routes kept
+behind a function) or calls `page()`, `layout()`, `api()`, or `defineRoutes()`; a component module
+that imports one counts too. Move the component to its own module, or re-export the package
+component from one. Several unrelated modules exporting the same component also fail the build
+unless the routes file imports it from one of them. A client build also fails if any browser module
+imports a module that defines routes, or if a component's imports reach a Node builtin; import the
+component, server function, or helper from its own module instead. The one exception is the
+action-only proxy that [route actions](#route-actions) get with Server Actions enabled. Pages and
+layouts that don't hydrate ship no client code, so these rules don't apply to them.
+
+Farm can't trace a route written as a plain object literal that no module exports. While such a
+route exists, a component module is only accepted when neither it nor anything it imports could
+build a route definition (an object with a route `kind`, or an imported route factory). Build those
+routes with `page()` and `layout()`, or export them, if a component module is refused.
+
+> **Migration:** earlier releases loaded the routes file in the browser and stripped its server
+> options. Move components declared in a routes file into their own modules, and stop importing
+> route definitions from client components. Programmatic pages with `params` or `search` now
+> hydrate from server-resolved props, like pages with `guard` or `data`.
 
 ## Named slots and intercepted routes
 
@@ -331,6 +391,50 @@ export function ProductForm({ isDirty }: { isDirty: boolean }) {
 ```
 
 Blockers apply to Farm SPA navigation and browser unload prompts. They improve UX, but they do not replace server-side validation or persistence checks.
+
+## Navigation delegates
+
+A host that shows each page on its own screen, such as a native mobile or desktop shell, can take
+in-app navigations instead of letting the router navigate in place. Register a delegate in the
+app's client entry; return `true` to take the navigation, anything else to let the router go ahead.
+
+```ts
+// src/client.ts
+import { defineClient } from "@farm.js/core/client/lifecycle";
+import { delegateNavigation } from "@farm.js/core/renderer-client";
+
+declare global {
+  interface Window {
+    nativeShell?: { postMessage(message: unknown): void };
+  }
+}
+
+export default defineClient({
+  setup() {
+    const shell = window.nativeShell;
+    if (!shell) return;
+    delegateNavigation(({ url, action }) => {
+      shell.postMessage({ type: "visit", url, action });
+      return true;
+    });
+  },
+});
+```
+
+The delegate gets the resolved absolute `url`, `from` and `to` paths as blockers see them, and
+`action` (`"push"`, or `"replace"` for `Link replace`, `router.replace()` and `{ replace: true }`).
+It runs after blockers, for `Link`, plain same-origin anchors, `navigateTo`, router `push` and
+`replace`, and redirects after an islands-mode server action. A taken navigation leaves the page,
+URL and navigation state untouched and fires no navigation events.
+
+These are not offered: back/forward (the host owns its own stack), `router.refresh()` and the
+refresh after a server action, same-page hash links, and document navigations (other origins,
+locale switches, routes that need a full page load), which a WebView's own navigation callback
+sees. A delegate that throws is logged and treated as declining. `delegateNavigation` returns a
+function that removes the delegate, and it is also exported from `@farm.js/core/client`. Apps
+on the RSC pipeline (`experimental.serverComponents`) run the RSC router, which offers link clicks,
+router `push` and `replace`, and redirects after a server action; it has no client entry, so
+register the delegate from a client component.
 
 ## Page state
 

@@ -19,7 +19,9 @@ import { collectDevStylesheetUrls, resolveDevGlobalStylesheetHref } from "./dev-
 import {
   composeFarmFullDocument,
   classifyFarmDocumentPrefix,
+  createFarmStreamedDocumentTransform,
   extractFarmFullDocument,
+  openFarmStreamedDocument,
   removeFarmDocumentTitles,
 } from "./full-document";
 import {
@@ -54,7 +56,7 @@ import {
   getCurrentRequestOrNull,
   resolveFarmRequestURL,
 } from "./request";
-import { _resolveCurrentCspNonce, _resolveCurrentRequest } from "./request-bridge";
+import { _peekCurrentRequest, _resolveCurrentCspNonce } from "./request-bridge";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { getFarmAppDirectories } from "../layers";
@@ -76,7 +78,7 @@ import {
   type MetadataImageKind,
 } from "../metadata";
 import { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
-import { searchParamsToObject } from "../search-params";
+import { createFarmSearchParams, searchParamsToObject } from "../search-params";
 import { prepareDeferredData, snapshotDeferredData, type DeferredRecord } from "../deferred";
 import { createFarmDeploymentCookie, FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
 import type { StaticMetadataImageInfo } from "../static-metadata-image";
@@ -96,6 +98,12 @@ import {
   createLateNotFoundRecovery,
   createLateRedirectRecovery,
 } from "../navigation/late-navigation-recovery";
+import {
+  countFarmKeptLayouts,
+  createFarmFlushToken,
+  farmFlushMarker,
+  getFarmLayoutKey,
+} from "../navigation/segment-navigation";
 import { sendWebResponse } from "./response";
 import { matchesFarmIfNoneMatch } from "../server-http";
 import { renderFarmFontDevHead } from "../font-vite";
@@ -160,6 +168,11 @@ import { pathToFileURL } from "node:url";
 import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
+import { handleFarmFormActionRequest } from "../form-actions";
+import { installFarmIslandValues, uninstallFarmIslandValues } from "../client/island-values";
+import { resolveServerActionsConfig } from "../server-action-security";
+import { canBootFarmIslandsClient } from "../islands-client-boot";
+import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
   createFarmCspNonceRewriter,
   createFarmCspNonce,
@@ -170,11 +183,43 @@ import {
   type ResolvedFarmSecurityConfig,
 } from "../security";
 
+// Islands mode renders on islx, which loads React: only an islands app loads it (`initialize`).
+let islands: typeof import("../client/islands-runtime") | undefined;
+
+/** Islands mode: every render of the runtime is one islands render (`withFarmIslandsRender`). */
+function withFarmIslandsRenders(
+  runtime: FarmServerRendererRuntime,
+  islandsRuntime: typeof import("../client/islands-runtime"),
+): FarmServerRendererRuntime {
+  const wrap = (element: unknown) =>
+    islandsRuntime.withFarmIslandsRender(
+      element as Parameters<typeof islandsRuntime.withFarmIslandsRender>[0],
+    );
+  const wrapped: FarmServerRendererRuntime = {
+    ...runtime,
+    renderToString: (element, ...rest) => runtime.renderToString(wrap(element), ...rest),
+  };
+  for (const name of [
+    "renderToStringWithHead",
+    "renderToPipeableStream",
+    "renderToReadableStream",
+  ] as const) {
+    const render = runtime[name] as ((element: unknown, ...rest: unknown[]) => unknown) | undefined;
+    if (render) {
+      (wrapped as unknown as Record<string, unknown>)[name] = (
+        element: unknown,
+        ...rest: unknown[]
+      ) => render(wrap(element), ...rest);
+    }
+  }
+  return wrapped;
+}
+
 let cachedClerkProvider: { ClerkProvider: any } | null = null;
 
-const importRuntimeModule = new Function("specifier", "return import(specifier);") as (
-  specifier: string,
-) => Promise<any>;
+function importRuntimeModule(specifier: string): Promise<any> {
+  return import(/* @vite-ignore */ specifier);
+}
 
 interface CachedSSGPage {
   html: string;
@@ -359,6 +404,12 @@ function appendResponseHeader(res: FarmResponse, name: string, value: string): v
   }
 }
 
+/** A request header's first value. */
+function requestHeader(req: FarmRequest, name: string): string | undefined {
+  const value = req.headers?.[name];
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function appendResponseVary(res: FarmResponse, value: string): void {
   const current = res.getHeader("Vary");
   const values = new Set(
@@ -423,16 +474,28 @@ function rendererRenderOptions(): FarmRendererRenderOptions | undefined {
   return nonce ? { nonce } : undefined;
 }
 
+/**
+ * Islands mode starts the client while the body streams, as production does: an async entry
+ * right after `<body>` hydrates islands as they arrive, and waits for the document otherwise.
+ */
+const FARM_DEV_EARLY_CLIENT_SCRIPT = `<script type="module" async src="/@farm/client.js"></script>`;
+/** The boot entry in its place, for a page that hydrates nothing at load (RFC 0003, section 10). */
+const FARM_DEV_BOOT_SCRIPT = `<script type="module" async src="/@farm/client-boot.js" data-farm-runtime="/@farm/client.js"></script>`;
+
 function createDocumentFooter(options: {
   suspenseRevealFallback: string;
   refreshPPR?: boolean;
   deferredHydrationScript?: string;
+  /** The client entry already started from the top of the body. */
+  earlyClient?: boolean;
+  /** Close Farm's #root. A streamed full document closes it only when Farm opened it. */
+  closeRoot?: boolean;
 }): string {
-  return `</div>
+  return `${options.closeRoot === false ? "" : "</div>"}
   ${options.suspenseRevealFallback}
   ${options.refreshPPR ? createPPRRefreshScript() : ""}
   ${options.deferredHydrationScript || ""}
-  <script type="module" src="/@farm/client.js"></script>
+  ${options.earlyClient ? "" : '<script type="module" src="/@farm/client.js"></script>'}
 </body>
 </html>`;
 }
@@ -551,7 +614,7 @@ async function parseRouteModuleProps(
     ...input.props,
     params: params as Record<string, string>,
     search,
-    searchParams: Promise.resolve(search as Record<string, string | string[] | undefined>),
+    searchParams: createFarmSearchParams(search as Record<string, string | string[] | undefined>),
   };
 }
 
@@ -583,7 +646,7 @@ function createRouteStateProps(input: {
   return {
     params: input.params,
     search: input.searchParamsObject,
-    searchParams: Promise.resolve(input.searchParamsObject),
+    searchParams: createFarmSearchParams(input.searchParamsObject),
     path: input.path,
     middleware: input.middlewareMap.size > 0 ? { data: input.middlewareMap } : undefined,
     context: input.pluginExposedContext.size > 0 ? { data: input.pluginExposedContext } : undefined,
@@ -632,6 +695,16 @@ export class ServerRenderer {
   async initialize(): Promise<void> {
     if (this.rendererRuntime) return;
 
+    // Islands mode: boundaries this server renders address their large prop values. Without it
+    // props stay plain JSON, so a dev server restarted with islands mode off stops encoding them.
+    if (this.islandValues()) {
+      installFarmIslandValues();
+      (await import("../client/islands-server")).installFarmIslandsServer();
+      islands ??= await import("../client/islands-runtime");
+    } else {
+      uninstallFarmIslandValues();
+    }
+
     if (this.config.notFound?.component?.trim()) {
       resolveFarmNotFoundComponentPath(this.config, getFarmAppDirectories(this.config));
     }
@@ -665,7 +738,10 @@ export class ServerRenderer {
       "node",
     );
 
-    this.rendererRuntime = runtime as FarmServerRendererRuntime;
+    this.rendererRuntime =
+      islands && this.islandValues()
+        ? withFarmIslandsRenders(runtime as FarmServerRendererRuntime, islands)
+        : (runtime as FarmServerRendererRuntime);
     this.routeManager.setRendererRuntime?.(this.rendererRuntime);
     await this.applyRendererAppSetup();
   }
@@ -754,12 +830,23 @@ export class ServerRenderer {
     );
   }
 
-  private createLayoutBoundary(pattern: string, layoutElement: unknown): unknown {
+  /**
+   * A layout's boundary. Islands mode keys it (the pattern with its params, as the production
+   * server does), so a navigation can name the layouts the browser shows; a layout the browser
+   * keeps is sent as its boundary alone (`kept`).
+   */
+  private createLayoutBoundary(
+    pattern: string,
+    layoutElement: unknown,
+    segment?: { key: string; kept?: boolean },
+  ): unknown {
     return this.rendererRuntime.createElement(
       "div",
       {
         "data-farm-layout-boundary": "true",
         "data-farm-layout-pattern": pattern,
+        ...(segment ? { "data-farm-layout-key": segment.key } : {}),
+        ...(segment?.kept ? { "data-farm-layout-kept": "true" } : {}),
         style: { display: "contents" },
       },
       layoutElement,
@@ -775,7 +862,25 @@ export class ServerRenderer {
     ) {
       return element;
     }
+    // Islands mode runs on islx.
+    if (islands && this.islandValues())
+      return islands.wrapFarmIsolatedClientGraph(undefined as never, element as never);
     return this.rendererRuntime.wrapClientGraph(element);
+  }
+
+  /** The page a hydrating layout keeps as server HTML: islands again, or a server tree. */
+  private async isolateServerPage(element: unknown, serverTree: boolean): Promise<unknown> {
+    if (islands && this.islandValues()) {
+      const runtime = islands;
+      return serverTree
+        ? runtime.renderFarmServerTreePage(undefined as never, element as never, {
+            isolate: (node) => runtime.isolateFarmServerPageGraph(undefined as never, node),
+          })
+        : runtime.isolateFarmServerPageGraph(undefined as never, element as never);
+    }
+    return serverTree && this.rendererRuntime.renderServerTreePage
+      ? this.rendererRuntime.renderServerTreePage(element, { values: false })
+      : this.rendererRuntime.isolateServerPageGraph!(element);
   }
 
   private async renderElementToCompleteHTML(
@@ -862,6 +967,13 @@ export class ServerRenderer {
     return { html: await this.renderElementToCompleteHTML(element, options), head: "" };
   }
 
+  /** Islands mode sends large prop values once, keyed by content (RFC 0003). */
+  private islandValues(): boolean {
+    return (
+      resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands"
+    );
+  }
+
   /**
    * Render the route tree used by client navigation without producing a second
    * document response. Layout markers let the browser preserve the longest
@@ -894,10 +1006,7 @@ export class ServerRenderer {
     ) {
       // As in renderPage: the layout keeps this page as server HTML, so its islands stay islands,
       // unless the page renders as a server tree the layout's root rebuilds.
-      element =
-        input.serverTree && this.rendererRuntime.renderServerTreePage
-          ? await this.rendererRuntime.renderServerTreePage(element)
-          : this.rendererRuntime.isolateServerPageGraph(element);
+      element = await this.isolateServerPage(element, input.serverTree === true);
     }
     element = this.createPageBoundary(element, {
       pageShouldHydrate: input.pageShouldHydrate,
@@ -1037,7 +1146,7 @@ export class ServerRenderer {
   }
 
   private getCachedPPRShell(pathname: string, search: string, locale = "", origin = "") {
-    return this.dataCache.getEntryAsync<CachedPPRShell>(
+    return this.dataCache.pprShellCache.getEntryAsync<CachedPPRShell>(
       this.getPPRCacheKey(pathname, search, locale, origin),
     );
   }
@@ -1049,7 +1158,7 @@ export class ServerRenderer {
       options.locale,
       options.origin,
     );
-    await this.dataCache.setAsync(
+    await this.dataCache.pprShellCache.setAsync(
       key,
       { html },
       {
@@ -1154,7 +1263,7 @@ export class ServerRenderer {
           const PageComponent = mod.default;
           const pageProps = {
             params: page.params,
-            searchParams: Promise.resolve({}),
+            searchParams: createFarmSearchParams({}),
             path: page.urlPath,
           };
 
@@ -1448,6 +1557,32 @@ export class ServerRenderer {
         params,
       });
 
+      // Islands mode: a form or client component posting a server action to this page. Loading
+      // the page and its layouts registers the `"use server"` modules they import, as the
+      // production server does at startup.
+      let actionRequest: Request | undefined;
+      if (
+        req.method === "POST" &&
+        resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands"
+      ) {
+        await Promise.all([
+          this.routeManager.loadRouteModule(route.modulePath),
+          ...layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
+        ]);
+        actionRequest = createWebRequestFromFarmRequest(req, {
+          trustProxy: this.config.server?.trustProxy,
+        });
+        const actionResponse = await handleFarmFormActionRequest(
+          actionRequest,
+          resolveServerActionsConfig(this.config.serverActions),
+        );
+        if (actionResponse) {
+          await sendWebResponse(res, actionResponse);
+          completeRender(actionResponse.status, route.pattern);
+          return;
+        }
+      }
+
       const loadingBoundaryEntry = this.routeManager.getMatchingLoading(pathname, route);
       errorBoundaryEntry = this.routeManager.getMatchingError(pathname, route);
 
@@ -1456,9 +1591,12 @@ export class ServerRenderer {
       pluginExposedContext = getRequestContextSnapshot(req as object, {
         exposedOnly: true,
       });
-      const currentRequest = createWebRequestFromFarmRequest(req, {
-        trustProxy: this.config.server?.trustProxy,
-      });
+      // The action check above already read the body stream into a Request.
+      const currentRequest =
+        actionRequest ??
+        createWebRequestFromFarmRequest(req, {
+          trustProxy: this.config.server?.trustProxy,
+        });
       const routeContext = await this.resolveRouteContext({
         request: currentRequest,
         rawRequest: req,
@@ -1478,7 +1616,7 @@ export class ServerRenderer {
       const rawPageProps: PageProps = withFarmRouteContext(
         {
           params,
-          searchParams: Promise.resolve(searchParamsObject),
+          searchParams: createFarmSearchParams(searchParamsObject),
           path: pathname,
           middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
           context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
@@ -1517,7 +1655,7 @@ export class ServerRenderer {
         const routeStateProps = {
           ...rawPageProps,
           search: searchParamsObject,
-          searchParams: Promise.resolve(searchParamsObject),
+          searchParams: createFarmSearchParams(searchParamsObject),
           error,
         };
 
@@ -1542,7 +1680,14 @@ export class ServerRenderer {
       const pprBypassReason = renderingConfig.ppr
         ? this.getPPRShellBypassReason(req, middlewareMap, middlewareContext, pluginExposedContext)
         : undefined;
-      const canCachePPRShell = renderingConfig.ppr && !pprBypassReason;
+      // An islands navigation (F-Layouts, F-Stream) gets part of a page or flush markers: it never
+      // reads or stores the cached shell, which full loads share.
+      const islandsNavigationRequest = Boolean(
+        islands &&
+        this.islandValues() &&
+        (requestHeader(req, "f-layouts") || requestHeader(req, "f-stream")),
+      );
+      const canCachePPRShell = renderingConfig.ppr && !pprBypassReason && !islandsNavigationRequest;
       const pprI18nSnapshot = canCachePPRShell ? getFarmI18nClientSnapshot() : undefined;
       const pprShellOptions: PPRShellCacheOptions | undefined = canCachePPRShell
         ? {
@@ -1605,7 +1750,7 @@ export class ServerRenderer {
 
       // Metadata runs in the outer request scope and the page in its own, so
       // count reads on both: a render that read the request is per-visitor.
-      const outerRequest = _resolveCurrentRequest();
+      const outerRequest = _peekCurrentRequest();
       const countRequestReads = () =>
         (outerRequest ? _getRequestReadCount(outerRequest) : 0) +
         _getRequestReadCount(currentRequest);
@@ -1657,7 +1802,7 @@ export class ServerRenderer {
           const rawSlotProps = withFarmRouteContext(
             {
               params: slot.params,
-              searchParams: Promise.resolve(searchParamsObject),
+              searchParams: createFarmSearchParams(searchParamsObject),
               path: pathname,
               middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
               context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
@@ -1706,6 +1851,7 @@ export class ServerRenderer {
               hasIsolatedClientBoundaries?: boolean;
               suppressedAsyncHydration?: true;
               suppressedAsyncHydrationReason?: string;
+              serverTree?: true;
             }
           | undefined;
         if (manifestEntry?.suppressedAsyncHydration) {
@@ -1722,6 +1868,7 @@ export class ServerRenderer {
             ...(manifestEntry.hasIsolatedClientBoundaries === true
               ? { hasIsolatedClientBoundaries: true }
               : {}),
+            ...(manifestEntry.serverTree === true ? { serverTree: true } : {}),
           };
         }
         return {
@@ -1740,6 +1887,10 @@ export class ServerRenderer {
         islandStrategy: layoutHydrationMetadata[index]?.islandStrategy ?? null,
         ...(layoutHydrationMetadata[index]?.hasIsolatedClientBoundaries === true
           ? { hasIsolatedClientBoundaries: true }
+          : {}),
+        // Islands mode: the browser rebuilds this layout from its tree, not its module.
+        ...(shouldHydrateLayout && layoutHydrationMetadata[index]?.serverTree === true
+          ? { serverTree: true }
           : {}),
       }));
       const hydrationStrategies = [
@@ -1879,10 +2030,10 @@ export class ServerRenderer {
               // The hydrating layout keeps this page as server HTML, so its client components
               // render as their own islands instead of joining the layout's React tree. A
               // server-tree page instead joins it: the browser rebuilds the resolved tree there.
-              pageElement =
-                routeManifestEntry?.serverTree === true && this.rendererRuntime.renderServerTreePage
-                  ? await this.rendererRuntime.renderServerTreePage(pageElement)
-                  : this.rendererRuntime.isolateServerPageGraph(pageElement);
+              pageElement = await this.isolateServerPage(
+                pageElement,
+                routeManifestEntry?.serverTree === true,
+              );
             }
 
             // Every route gets a stable HTML boundary. Server-only pages keep
@@ -1894,11 +2045,38 @@ export class ServerRenderer {
               islandStrategy: hydrationIslandStrategy,
             });
 
+            // Islands mode: the layouts the navigating browser keeps (F-Layouts), as on the
+            // production server. A static page, a layout that hydrates as a root, or a route
+            // slot always renders whole, and the root layout always renders: it may own the
+            // document, so keeping one layout keeps nothing.
+            const islandsSegments = Boolean(islands && this.islandValues());
+            const keptLayoutCount =
+              islandsSegments &&
+              !renderingConfig.ssg &&
+              !shouldHydrateLayout &&
+              renderedRouteSlots.length === 0
+                ? countFarmKeptLayouts(requestHeader(req, "f-layouts"), layouts, params)
+                : 0;
+            const keptLayouts = keptLayoutCount > 1 ? keptLayoutCount : 0;
             let wrappedElement: any = pageElement;
             for (let i = layoutModules.length - 1; i >= 0; i--) {
               const layoutModule = layoutModules[i];
               const layoutEntry = layouts[i];
               const LayoutComponent = layoutModule.default;
+              // A layout chain that hydrates is rendered by React in the browser
+              // (document-layout-client.ts), which draws its boundaries without a key, as
+              // the production server leaves them.
+              const segment =
+                islandsSegments && !shouldHydrateLayout
+                  ? { key: getFarmLayoutKey(layoutEntry.pattern, params) }
+                  : undefined;
+              if (LayoutComponent && i > 0 && i < keptLayouts) {
+                wrappedElement = this.createLayoutBoundary(layoutEntry.pattern, wrappedElement, {
+                  key: segment!.key,
+                  kept: true,
+                });
+                continue;
+              }
               const slotProps: Record<string, any> = {};
               for (const slot of renderedRouteSlots) {
                 if ((slot.ownerDirectory ?? slot.ownerPattern) !== layoutEntry.pattern) continue;
@@ -1919,12 +2097,27 @@ export class ServerRenderer {
                 );
                 slotProps[slot.name] = slotElement;
               }
-              wrappedElement = this.rendererRuntime.createElement(LayoutComponent, {
-                children: wrappedElement,
-                params,
-                ...slotProps,
-              });
-              wrappedElement = this.createLayoutBoundary(layoutEntry.pattern, wrappedElement);
+              wrappedElement =
+                shouldHydrateLayout &&
+                layoutHydrationMetadata[i]?.serverTree === true &&
+                islands &&
+                this.islandValues()
+                  ? await islands.renderFarmServerTreeLayout(
+                      LayoutComponent,
+                      { params },
+                      { children: wrappedElement, ...slotProps },
+                      layoutEntry.pattern,
+                    )
+                  : this.rendererRuntime.createElement(LayoutComponent, {
+                      children: wrappedElement,
+                      params,
+                      ...slotProps,
+                    });
+              wrappedElement = this.createLayoutBoundary(
+                layoutEntry.pattern,
+                wrappedElement,
+                segment,
+              );
             }
 
             if (shouldHydrateLayout) {
@@ -2749,7 +2942,7 @@ export class ServerRenderer {
 
     const imageProps: PageProps = {
       params: options.params,
-      searchParams: Promise.resolve(options.searchParamsObject),
+      searchParams: createFarmSearchParams(options.searchParamsObject),
       path: options.pagePath,
     };
     const handlerResult =
@@ -2770,6 +2963,7 @@ export class ServerRenderer {
     const response = await createFarmMetadataImageResponse(value, imageModule, {
       method: req.method,
       ifNoneMatch: Array.isArray(ifNoneMatch) ? ifNoneMatch[0] : ifNoneMatch,
+      renderer: isReactRenderer(this.config.renderer) ? undefined : this.rendererRuntime,
     });
     await sendWebResponse(res as any, response);
   }
@@ -2962,7 +3156,9 @@ export class ServerRenderer {
           pattern: layoutEntry.pattern,
           shouldHydrate: layoutEntry.shouldHydrate,
           islandStrategy: layoutEntry.islandStrategy,
-          preloads: [layoutEntry.modulePath],
+          // Islands mode: rebuilt from its server tree, so its module is never preloaded.
+          ...(layoutEntry.serverTree ? { serverTree: true } : {}),
+          preloads: layoutEntry.serverTree ? [] : [layoutEntry.modulePath],
           assets: [],
         };
       }
@@ -3214,15 +3410,17 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     const renderToPipeableStream = this.rendererRuntime.renderToPipeableStream;
     const fullDocumentRouteKey =
       options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
-    // A full-document layout can't be composed once the stream's shell is
-    // flushed, so a route known to render one is served through the buffered
-    // path, which produces a valid single document. So is the anonymous check behind
-    // a page's Markdown source, where a late redirect() must still set the status.
+    // A route known to render a full-document layout streams that document: React's output is
+    // held until its <body>, so Farm's head assets go into the layout's head, as production
+    // does. A static-shell capture and other renderers take the buffered path, which composes
+    // the whole document. So does the anonymous check behind a page's Markdown source, where a
+    // late redirect() must still set the status.
+    const streamDocument =
+      fullDocumentRoutes.has(fullDocumentRouteKey) || (await this.rootLayoutRendersDocument());
     if (
       !renderToPipeableStream ||
       _isFarmMarkdownPageCheck(req.headers?.[FARM_MARKDOWN_PAGE_CHECK_HEADER]) ||
-      fullDocumentRoutes.has(fullDocumentRouteKey) ||
-      (await this.rootLayoutRendersDocument())
+      (streamDocument && (options.captureStaticShell || !isReactRenderer(this.config.renderer)))
     ) {
       return this.renderBufferedSSR(element, req, res, clearMiddlewareData, options);
     }
@@ -3236,6 +3434,22 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       for (const [key, value] of Object.entries(options.responseHeaders || {})) {
         res.setHeader(key, value);
+      }
+      // Islands mode answers navigations as the production server does: a navigation the
+      // browser streams (F-Stream: flush) gets a marker after each React flush, with the random
+      // token sent in F-Flush, so page content cannot forge one.
+      const islandsMode = Boolean(islands && this.islandValues());
+      const flushToken =
+        islandsMode && requestHeader(req, "f-stream") === "flush" ? createFarmFlushToken() : "";
+      const flushMarker = flushToken ? Buffer.from(farmFlushMarker(flushToken)) : undefined;
+      if (islandsMode) {
+        for (const name of ["F-Values", "F-Layouts", "F-Render", "F-Stream"]) {
+          appendResponseVary(res, name);
+        }
+        if (requestHeader(req, "f-layouts") || flushToken) {
+          res.setHeader("Cache-Control", "private, no-store");
+        }
+        if (flushToken) res.setHeader("F-Flush", flushToken);
       }
       const htmlParts: string[] = [];
       // Splitting a static shell out of the stream requires knowing where the
@@ -3307,7 +3521,9 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           pattern: layoutEntry.pattern,
           shouldHydrate: layoutEntry.shouldHydrate,
           islandStrategy: layoutEntry.islandStrategy,
-          preloads: [layoutEntry.modulePath],
+          // Islands mode: rebuilt from its server tree, so its module is never preloaded.
+          ...(layoutEntry.serverTree ? { serverTree: true } : {}),
+          preloads: layoutEntry.serverTree ? [] : [layoutEntry.modulePath],
           assets: [],
         };
       }
@@ -3361,10 +3577,20 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
 </script>`;
+      // Islands mode: a page whose route hydrates nothing as a root starts with the boot entry, as
+      // in production, and the boot holds early clicks in islands itself (RFC 0003, section 10).
+      const bootClient =
+        this.islandValues() &&
+        !staticShellParts &&
+        (req as any).__FARM_PAGE_SHOULD_HYDRATE__ !== true &&
+        (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ !== true &&
+        (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ !== true &&
+        canBootFarmIslandsClient(this.config);
       const hydrationClickQueueScript =
-        isClientComponent ||
-        (req as any).__FARM_SHOULD_HYDRATE__ === true ||
-        (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ === true
+        !bootClient &&
+        (isClientComponent ||
+          (req as any).__FARM_SHOULD_HYDRATE__ === true ||
+          (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ === true)
           ? createPreHydrationClickQueueScript()
           : "";
 
@@ -3372,6 +3598,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         title,
         tags: metaTags,
         hasFavicon,
+        hasExplicitTitle,
         viewport: viewportTags,
       } = renderMetadataHead((req as any).__FARM_METADATA__, {
         pathname: getFarmMetadataPathname(req),
@@ -3410,6 +3637,8 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         cspNonce ? filterFarmCspNonces(html, cspNonce) : html;
       const createLateNavigationRecovery = (navigationError: unknown) =>
         this.createLateNavigationRecoveryHTML(req, navigationError);
+      const earlyClient = this.islandValues();
+      const earlyClientScript = bootClient ? FARM_DEV_BOOT_SCRIPT : FARM_DEV_EARLY_CLIENT_SCRIPT;
       const { pipe, abort } = renderToPipeableStream(streamRoot, {
         nonce: cspNonce,
         onShellReady() {
@@ -3448,28 +3677,93 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
   ${propsScript}
   ${hydrationClickQueueScript}
 </head>
-<body class="">
+<body class="">${earlyClient ? `\n  ${earlyClientScript}` : ""}
   <div id="root">`;
-          const securedShell = stampDocumentHTML(shell);
-          htmlParts.push(securedShell);
-          staticShellParts?.push(securedShell);
+          // A full document opens from React's own <html> instead (documentTransform).
+          const securedShell = streamDocument ? "" : stampDocumentHTML(shell);
+          if (securedShell) {
+            htmlParts.push(securedShell);
+            staticShellParts?.push(securedShell);
+          }
+
+          // A full document: its head gets the assets the buffered path composes in. They are
+          // Farm's own markup, so they carry the nonce; the layout's markup kept only the nonces
+          // the renderer or the app gave it (cspNonceRewriter).
+          // Islands mode: the early client entry goes right after the layout's own <body>.
+          const withEarlyClient = (document: { html: string; rootOpened: boolean }) =>
+            earlyClient
+              ? {
+                  ...document,
+                  html: document.html.replace(
+                    /<body\b[^>]*>/i,
+                    (open) => `${open}\n  ${stampDocumentHTML(earlyClientScript)}`,
+                  ),
+                }
+              : document;
+          const documentTransform = streamDocument
+            ? createFarmStreamedDocumentTransform(
+                (opening) =>
+                  withEarlyClient(
+                    openFarmStreamedDocument(
+                      hasExplicitTitle ? removeFarmDocumentTitles(opening) : opening,
+                      {
+                        fallbackIcon: !hasFavicon,
+                        viewport: viewportTags,
+                        htmlAttributes: `${
+                          i18nSnapshot
+                            ? ` lang="${escapeHtmlAttribute(i18nSnapshot.locale)}" dir="${escapeHtmlAttribute(i18nSnapshot.direction)}"`
+                            : ""
+                        }${themeDocument.attributes}`,
+                        replaceHtmlAttributes: [
+                          ...(i18nSnapshot ? ["lang", "dir"] : []),
+                          ...(themeDocument.attributes ? ["data-theme"] : []),
+                        ],
+                        headAssets: stampDocumentHTML(
+                          [
+                            themeDocument.head,
+                            `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">`,
+                            hasExplicitTitle ? `<title>${title}</title>` : "",
+                            metaTags,
+                            i18nAlternateTags,
+                            fontHead,
+                            globalStylesheetLink,
+                            ...devStyleLinks,
+                            `<script type="module" src="/@vite/client"></script>`,
+                            propsScript,
+                            hydrationClickQueueScript,
+                          ]
+                            .filter(Boolean)
+                            .join("\n  "),
+                        ),
+                        // The footer follows the streamed body.
+                        bodyFooter: "",
+                      },
+                    ),
+                  ),
+                stampDocumentHTML(shell),
+              )
+            : undefined;
 
           let firstChunk = true;
           let checkedFullDocument = false;
           let documentPrefix = "";
           const cspNonceRewriter = cspNonce ? createFarmCspNonceRewriter(cspNonce) : undefined;
           const cspStreamDecoder = cspNonceRewriter ? new TextDecoder() : undefined;
-          const recordRenderedChunk = (chunkText: string) => {
-            if (!chunkText) return;
-            if (!checkedFullDocument) {
-              documentPrefix += chunkText;
+          // `renderedText` is React's output, which tells whether the route renders a document;
+          // `chunkText` is what the response sends.
+          const recordRenderedChunk = (chunkText: string, renderedText = chunkText) => {
+            if (!checkedFullDocument && renderedText) {
+              documentPrefix += renderedText;
               const prefix = classifyFarmDocumentPrefix(documentPrefix);
               if (prefix !== "pending") {
                 checkedFullDocument = true;
                 documentPrefix = "";
                 if (prefix === "document") fullDocumentRoutes.add(fullDocumentRouteKey);
+                // A route that no longer renders one streams in Farm's shell again.
+                else fullDocumentRoutes.delete(fullDocumentRouteKey);
               }
             }
+            if (!chunkText) return;
             htmlParts.push(chunkText);
 
             if (staticShellParts && findStaticShellBoundary && !staticShellClosed) {
@@ -3490,6 +3784,18 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           };
           const writableStream = new Writable({
             write(chunk, encoding, callback) {
+              // A flush marker goes out in order with React's chunks, and stays out of what is
+              // recorded (the PPR shell, the document check).
+              if (flushMarker && chunk === flushMarker) {
+                const marker = documentTransform
+                  ? documentTransform.write(flushMarker.toString())
+                  : flushMarker;
+                res.write(marker, () => {
+                  if (typeof (res as any).flush === "function") (res as any).flush();
+                  callback();
+                });
+                return;
+              }
               if (firstChunk && process.env.FARM_VERBOSE) {
                 console.log(`[FARM STREAM] first pipe chunk at ${Date.now() - streamStartTime}ms`);
                 firstChunk = false;
@@ -3502,16 +3808,21 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
               const securedChunkText = cspNonceRewriter
                 ? cspNonceRewriter.write(chunkText)
                 : chunkText;
-              // The shell was already flushed, so this response still nests the
-              // document; record the route so later requests take the buffered
-              // path (which composes it correctly) and warn the developer once.
-              recordRenderedChunk(securedChunkText);
+              const outputText = documentTransform
+                ? documentTransform.write(securedChunkText)
+                : securedChunkText;
+              // A shell already flushed nests a document this request found; record the route
+              // so later requests stream it as a document.
+              recordRenderedChunk(outputText, securedChunkText);
 
               const onWrite = () => {
                 if (typeof (res as any).flush === "function") (res as any).flush();
                 callback();
               };
-              if (cspNonceRewriter) res.write(securedChunkText, onWrite);
+              if (documentTransform) {
+                if (outputText) res.write(outputText, onWrite);
+                else callback();
+              } else if (cspNonceRewriter) res.write(securedChunkText, onWrite);
               else res.write(chunk, encoding, onWrite);
             },
             final: (callback) => {
@@ -3520,7 +3831,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                 lateNavigationError = null;
                 createLateNavigationRecovery(navigationError).then(
                   (recovery: string) => {
-                    const secured = filterDocumentHTML(recovery);
+                    const filtered = filterDocumentHTML(recovery);
+                    const secured = documentTransform
+                      ? documentTransform.write(filtered)
+                      : filtered;
                     htmlParts.push(secured);
                     res.write(secured);
                     finishStream(callback);
@@ -3537,15 +3851,24 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           });
           const finishStream = (callback: (error?: Error | null) => void) => {
             if (cspNonceRewriter) {
-              const tail = cspNonceRewriter.write(cspStreamDecoder!.decode(), true);
-              recordRenderedChunk(tail);
+              const rewritten = cspNonceRewriter.write(cspStreamDecoder!.decode(), true);
+              const tail = documentTransform ? documentTransform.write(rewritten) : rewritten;
+              recordRenderedChunk(tail, rewritten);
               if (tail) res.write(tail);
+            }
+            const documentEnd = documentTransform?.end();
+            if (documentEnd?.text) {
+              recordRenderedChunk(documentEnd.text, "");
+              res.write(documentEnd.text);
             }
             const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
             const footer = stampDocumentHTML(
               createDocumentFooter({
                 suspenseRevealFallback,
                 deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
+                earlyClient,
+                // A full document: Farm's #root closes only where Farm opened it.
+                ...(documentEnd?.document ? { closeRoot: documentEnd.rootOpened } : {}),
               }),
             );
             htmlParts.push(footer);
@@ -3569,6 +3892,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                   createDocumentFooter({
                     suspenseRevealFallback,
                     refreshPPR: staticShellClosed,
+                    earlyClient,
                   }),
                 );
               }
@@ -3593,6 +3917,8 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           if (typeof (res as any).flush === "function") {
             (res as any).flush();
           }
+          // React calls flush() on its destination after each flush it writes.
+          if (flushMarker) (writableStream as any).flush = () => writableStream.write(flushMarker);
           pipe(writableStream);
         },
         onShellError(error) {

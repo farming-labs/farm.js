@@ -154,7 +154,7 @@ export const GET = createEndpoint(
 );
 ```
 
-Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues.
+Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues. Each issue in `details` has a `path` and `code`. Its `message` is a generic `"Invalid value"`, because a validator's own message can quote what it expected, such as a literal header token; only refinement messages you write (`code: "custom"`) and type mismatches (`code: "invalid_type"`, which name types, not values) are returned as is.
 
 Generated callers use the schema's **input** type for body and query values; middleware and
 handlers receive its parsed **output** type. For example, a field declared as
@@ -340,6 +340,8 @@ Middleware return values have deliberate control-flow meaning:
 Only literal `false` is the default denial signal. Returning `null`, `undefined`, an array, or another value is an error, which catches forgotten returns instead of silently skipping authorization. Context is shallowly frozen, duplicate keys are rejected, and `__proto__`, `constructor`, and `prototype` cannot be provided as context keys.
 
 Endpoint middleware is local to one `createEndpoint` declaration and can use its validated input. Use `src/app/**/middleware.ts` for path-level behavior shared by many routes, such as request tracing, common headers, or an early rewrite before endpoint parsing.
+
+Put endpoint guards in `middleware`. `createEndpoint` throws if you pass a `use` option, which Farm never ran.
 
 > **Authorization boundary**
 >

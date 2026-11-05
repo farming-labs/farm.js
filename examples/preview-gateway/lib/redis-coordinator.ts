@@ -45,6 +45,14 @@ export class RedisPreviewRelayCoordinator implements PersistentPreviewRelayCoord
     return result === "OK";
   }
 
+  async reserveName(name: string, ownerId: string, ttlMs: number) {
+    await this.redis.set(this.ownerKey(name), ownerId, "PX", Math.max(1, Math.ceil(ttlMs)));
+  }
+
+  async findNameOwner(name: string) {
+    return (await this.redis.get(this.ownerKey(name))) ?? undefined;
+  }
+
   async findSession(name: string) {
     const id = await this.redis.get(this.nameKey(name));
     return id ? { id, name } : undefined;
@@ -115,6 +123,10 @@ export class RedisPreviewRelayCoordinator implements PersistentPreviewRelayCoord
 
   private nameKey(name: string) {
     return `${KEY_PREFIX}:names:${name}`;
+  }
+
+  private ownerKey(name: string) {
+    return `${KEY_PREFIX}:owners:${name}`;
   }
 
   private requestKey(sessionId: string) {

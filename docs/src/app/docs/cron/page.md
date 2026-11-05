@@ -240,7 +240,9 @@ parses `application/json` and `application/*+json` bodies as JSON, wraps other n
 should use `cron` config plus an ordinary API route so local, deployment, security, and testing
 behavior share one model. Its generated production route also fails closed when no workflow secret
 is configured or available; legacy applications that intentionally expose the route may set
-`workflows.allowUnsecured: true`. Existing workflow-module applications may configure
+`workflows.allowUnsecured: true`. On Vercel, scheduled workflow modules run only through that
+route: Farm writes one Build Output API cron per schedule pointing at it and does not mount Nitro's
+`/_vercel/cron` handler. Existing workflow-module applications may configure
 `workflows.dir` or `workflows.dirs` with project-relative or absolute directories; absolute
 directories remain rooted outside the project instead of being remounted below it. Production
 preparation replaces the generated workflow wrappers on each run, so removed modules or disabling

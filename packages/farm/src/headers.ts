@@ -1,4 +1,4 @@
-import { getCurrentRequest } from "./server/request";
+import { _assertRequestReadAllowed, getCurrentRequest } from "./server/request";
 import { _resolveCurrentCspNonce } from "./server/request-bridge";
 import { parseRequestCookieHeader } from "./request-cookies";
 
@@ -24,10 +24,12 @@ export interface ReadonlyRequestCookies extends Iterable<RequestCookie> {
 }
 
 export function headers(): ReadonlyHeaders {
+  _assertRequestReadAllowed("headers()");
   return new Headers(getCurrentRequest().headers) as ReadonlyHeaders;
 }
 
 export function cookies(): ReadonlyRequestCookies {
+  _assertRequestReadAllowed("cookies()");
   const cookieHeader = getCurrentRequest().headers.get("cookie") || "";
   const parsed = parseRequestCookieHeader(cookieHeader);
 
@@ -60,5 +62,6 @@ export function cookies(): ReadonlyRequestCookies {
  * script run. Every other script loses its nonce attribute.
  */
 export function getCspNonce(): string | undefined {
+  _assertRequestReadAllowed("getCspNonce()");
   return _resolveCurrentCspNonce();
 }
