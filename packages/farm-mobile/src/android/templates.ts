@@ -73,6 +73,13 @@ const REACT_NATIVE_ABIS = ["arm64-v8a", "x86_64"];
  */
 export const REACT_NATIVE_NDK = "27.1.12297006";
 
+/** The app's SDK levels, which linked native modules build against too. */
+const COMPILE_SDK = 35;
+const MIN_SDK = 26;
+const TARGET_SDK = 35;
+/** The Android Gradle plugin 9.2.1's default build tools, which it installs on the first build. */
+const REACT_NATIVE_PLUGIN_BUILD_TOOLS = "36.0.0";
+
 const EXECUTABLES = new Set(["gradlew"]);
 
 const NATIVE_ENGINE = "app/src/main/java/dev/farmjs/mobile/shell/NativeEngine.kt";
@@ -139,6 +146,15 @@ buildscript {
         classpath("com.facebook.react:react-native-gradle-plugin")
     }
 }
+
+// Native modules read these from rootProject.ext, as in a React Native app. Without them each
+// module falls back to its own defaults, such as compileSdk 33, which React Native rejects.
+extra["compileSdkVersion"] = ${COMPILE_SDK}
+extra["minSdkVersion"] = ${MIN_SDK}
+extra["targetSdkVersion"] = ${TARGET_SDK}
+extra["buildToolsVersion"] = ${JSON.stringify(REACT_NATIVE_PLUGIN_BUILD_TOOLS)}
+extra["ndkVersion"] = ${JSON.stringify(REACT_NATIVE_NDK)}
+extra["kotlinVersion"] = ${JSON.stringify(REACT_NATIVE_KOTLIN)}
 
 apply(plugin = "com.facebook.react.rootproject")
 `;
@@ -223,12 +239,12 @@ plugins {
 
 android {
     namespace = ${JSON.stringify(SHELL_NAMESPACE)}
-    compileSdk = 35
+    compileSdk = ${COMPILE_SDK}
 
     defaultConfig {
         applicationId = ${JSON.stringify(context.mobile.id)}
-        minSdk = 26
-        targetSdk = 35
+        minSdk = ${MIN_SDK}
+        targetSdk = ${TARGET_SDK}
         versionCode = 1
         versionName = "1.0"${abis}
     }

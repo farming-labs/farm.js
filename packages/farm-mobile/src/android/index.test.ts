@@ -1048,6 +1048,17 @@ describe("React Native native modules (autolinking)", () => {
     });
 
     expect(files["build.gradle.kts"]).toContain('apply(plugin = "com.facebook.react.rootproject")');
+    // Modules build against the app's SDK levels (rootProject.ext), not their own defaults.
+    for (const line of [
+      'extra["compileSdkVersion"] = 35',
+      'extra["minSdkVersion"] = 26',
+      'extra["targetSdkVersion"] = 35',
+      'extra["buildToolsVersion"] = "36.0.0"',
+      'extra["ndkVersion"] = "27.1.12297006"',
+      'extra["kotlinVersion"] = "2.2.21"',
+    ]) {
+      expect(files["build.gradle.kts"]).toContain(line);
+    }
     expect(files["build.gradle.kts"]).toContain(
       'classpath("com.android.tools.build:gradle:9.2.1")',
     );
