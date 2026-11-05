@@ -5,11 +5,15 @@
  * Server modules are imported only as types. Runtime data contains paths and methods only.
  */
 
+import type { GET as GET_after } from "../app/api/after/route";
 import type { GET as GET_echo } from "../app/api/echo/route";
 import type { POST as POST_echo } from "../app/api/echo/route";
 
 // Type-only representation of your API routes
 export type APIRouter = {
+  after: {
+    get: typeof GET_after;
+  };
   echo: {
     get: typeof GET_echo;
     post: typeof POST_echo;
@@ -18,6 +22,10 @@ export type APIRouter = {
 
 // Pass this schema-free manifest to createApiClients({ routes: apiRoutes }).
 export const apiRoutes = [
+  {
+    path: "/api/after",
+    methods: ["GET"],
+  },
   {
     path: "/api/echo",
     methods: ["GET", "POST"],

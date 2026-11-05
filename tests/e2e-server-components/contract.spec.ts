@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -9,7 +7,14 @@ import { expect, test, type Page } from "@playwright/test";
 // { mode: "rsc" } and with { mode: "islands" } (playwright.server-components.config.ts).
 const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" : "rsc";
 const dev = process.env.FARM_SERVER_COMPONENTS_SERVER === "dev";
-const output = path.resolve("examples/server-components", `.farm/.output-${mode}`);
+const target = dev ? undefined : process.env.FARM_SERVER_COMPONENTS_TARGET;
+const output = path.resolve(
+  "examples/server-components",
+  `.farm/.output-${mode}${target ? `-${target}` : ""}`,
+);
+// Where the build puts its static files: Cloudflare Pages serves the output directory itself.
+const publicDir =
+  target === "cloudflare" ? output : path.join(output, target === "vercel" ? "static" : "public");
 
 /** Console errors and uncaught exceptions while the page runs. */
 function collectErrors(page: Page): string[] {
@@ -300,7 +305,7 @@ test("generateMetadata sets the head", async ({ request }) => {
 
 test("static pages are prerendered at build time", async ({ request }) => {
   test.skip(dev, "build output only");
-  expect(existsSync(path.join(output, "public/static/a/index.html"))).toBe(true);
+  expect(existsSync(path.join(publicDir, "static/a/index.html"))).toBe(true);
   expect(await (await request.get("/static/b")).text()).toContain("Static b");
 });
 
@@ -519,27 +524,21 @@ test("middleware runs for API routes, and API routes keep their validation", asy
   expect((await request.get("/api/missing")).status()).toBe(404);
 });
 
-test("after() runs once the response has finished", async ({ page }) => {
+test("after() runs once the response has finished", async ({ page, request }) => {
   const token = randomUUID();
-  const marker = path.join(tmpdir(), `farm-contract-after-${token}.json`);
-  await rm(marker, { force: true });
+  const written = async () =>
+    (
+      (await (await request.get(`/api/after?token=${token}`)).json()) as {
+        written: { token: string; scheduledAt: number; completedAt: number } | null;
+      }
+    ).written;
   const response = await page.goto(`/after?token=${token}`);
   expect(response?.status()).toBe(200);
   await expect(page.getByTestId("after-status")).toHaveText("scheduled");
-  expect(existsSync(marker)).toBe(false);
-  let written: { token: string; scheduledAt: number; completedAt: number } | undefined;
-  await expect
-    .poll(async () => {
-      try {
-        written = JSON.parse(await readFile(marker, "utf8"));
-        return written?.token;
-      } catch {
-        return undefined;
-      }
-    })
-    .toBe(token);
-  expect(written!.completedAt - written!.scheduledAt).toBeGreaterThanOrEqual(500);
-  await rm(marker, { force: true });
+  expect(await written()).toBeNull();
+  await expect.poll(async () => (await written())?.token).toBe(token);
+  const record = (await written())!;
+  expect(record.completedAt - record.scheduledAt).toBeGreaterThanOrEqual(500);
 });
 
 test("server function middleware runs in order for browser and form calls", async ({ page }) => {
