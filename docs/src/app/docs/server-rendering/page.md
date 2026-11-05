@@ -184,8 +184,8 @@ trigger.
 
 | Strategy      | Hydration trigger                                                     |
 | ------------- | --------------------------------------------------------------------- |
-| `load`        | Immediately. This is the default and compatibility-first behavior.    |
-| `interaction` | The first button-like click; Farm replays that click after hydration. |
+| `load`        | Immediately. The default, except as below in islands mode.            |
+| `interaction` | The first button-like click or same-page link; replayed after.        |
 | `visible`     | When the route boundary approaches the viewport.                      |
 | `idle`        | During browser idle time, with a timeout fallback.                    |
 
@@ -194,7 +194,9 @@ client module keeps its own strategy, including after SPA navigation. Sibling bo
 all four strategies: one boundary's trigger never hydrates another, and an interaction click is
 claimed and replayed once by the boundary that contains it. Removing a boundary cancels its pending
 observer, idle callback, or interaction listener. Islands mode
-(`serverComponents: { mode: "islands" }`) keeps each client module's strategy the same way. With
+(`serverComponents: { mode: "islands" }`) keeps each client module's strategy the same way, and gives
+a module without an `island` export `interaction` when its code provably does nothing before a
+click ([React Server Components](#react-server-components) lists the checks). With
 React Server Components (`{ mode: "rsc" }`), React's client hydrates every client component on load
 and the `island` export has no effect.
 
@@ -372,16 +374,20 @@ the authoring rules on this page, so switching between them is a one-line change
 tests (`tests/e2e-server-components`) run against both, in development and in production builds.
 `benchmarks/server-components-payload` compares what each mode sends.
 
-In islands mode a page loads React and Farm's client runtime when it first needs them. A page with
-a client component that hydrates at load, the default, loads them at once, as before. A page whose
-client components all wait for `"interaction"`, `"visible"` or `"idle"` (see
-[Deferred route islands](#deferred-route-islands)), or that has none, starts with a 1.6 KB script
-instead, and loads the runtime when the first one is due, when the pointer reaches a link, or when
-a form gets focus. A click on such a component or on a link before then is held and replayed once
-the runtime runs, and a `<form>` written in a server component posts natively until it does. An
+In islands mode a page loads React and Farm's client runtime when it first needs them. A client
+component without an `island` export waits for a click when its code provably does nothing before
+one: it uses no effect, `ref`, form field, or handler other than `onClick` and `onSubmit` (a
+handled link only with a `#` link), and imports nothing but React and the app's own files that
+pass the same checks. Copy buttons, like buttons, menu toggles and tables of contents usually
+qualify; anything else hydrates at load, and an explicit `island` export always wins (see
+[Deferred route islands](#deferred-route-islands)). A page whose client components all wait, or
+that has none, starts with a 1.6 KB script, and loads the runtime when one is clicked, pressed or
+focused, when one that waits for `"visible"` or `"idle"` is due, when the pointer reaches a link,
+or when a form gets focus. A click made before then is held and replayed once the component has
+hydrated, and a `<form>` written in a server component posts natively until the runtime runs. An
 app with client plugins, a `src/client.ts`, or `docs` loads the runtime on every page. On
-`benchmarks/server-components-payload`, a blog post whose like button waits for `"interaction"`
-loads 1.6 KB of JavaScript instead of 84.6 KB (`"rsc"`: 69.7 KB).
+`benchmarks/server-components-payload`, with no change to the app, a docs page loads 1.6 KB of
+JavaScript instead of 85.7 KB and a blog post 1.6 KB instead of 84.6 KB (`"rsc"`: 69.7 KB).
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
 The build goes to the deploy target's

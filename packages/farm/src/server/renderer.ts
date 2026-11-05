@@ -3577,17 +3577,18 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
 </script>`;
-      // Islands mode: a page whose route hydrates nothing as a root starts with the boot entry, as
-      // in production, and the boot holds early clicks in islands itself (RFC 0003, section 10).
-      const bootClient =
+      // Islands mode: a page whose route hydrates nothing as a root hydrates only islands, which
+      // hold their own clicks, so nothing else on it is held, as in production. It starts with the
+      // boot entry, as in production, unless the app runs client code at load (RFC 0003, section 10).
+      const islandsOnlyPage =
         this.islandValues() &&
-        !staticShellParts &&
         (req as any).__FARM_PAGE_SHOULD_HYDRATE__ !== true &&
         (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ !== true &&
-        (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ !== true &&
-        canBootFarmIslandsClient(this.config);
+        (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ !== true;
+      const bootClient =
+        islandsOnlyPage && !staticShellParts && canBootFarmIslandsClient(this.config);
       const hydrationClickQueueScript =
-        !bootClient &&
+        !islandsOnlyPage &&
         (isClientComponent ||
           (req as any).__FARM_SHOULD_HYDRATE__ === true ||
           (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ === true)

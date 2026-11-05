@@ -235,6 +235,7 @@ import type { FarmRenderer } from "./renderer";
 import { createFarmReactRefreshPlugins, isFarmReactRefreshActive } from "./react-refresh";
 import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
+import { inferFarmIslandStrategy } from "./island-inference";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
   createFarmRouteRenderPlan,
@@ -1037,6 +1038,11 @@ export function transformIsolatedClientBoundaryModule(options: {
   parse: (code: string) => FarmModuleAstNode;
   /** Islands mode: server output in props travels as DOM slots (RFC 0003). */
   slots?: boolean;
+  /**
+   * Islands mode: the module sets no `island` export and its islands can wait for an interaction
+   * (RFC 0003, section 11); `islandStrategy` is ignored.
+   */
+  inferredInteraction?: boolean;
 }): string | null {
   let ast: FarmModuleAstNode;
   try {
@@ -1056,9 +1062,11 @@ export function transformIsolatedClientBoundaryModule(options: {
     const wrapperName = `__farm_isolated_boundary_${safeName || "default"}__`;
     wrapperStatements.push(
       // Islands mode renders through islx; the older isolated hydration keeps Farm's boundary.
-      options.slots
-        ? `const ${wrapperName} = __farm_islx_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`
-        : `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`,
+      options.slots && options.inferredInteraction
+        ? `const ${wrapperName} = __farm_islx_inferred_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)});`
+        : options.slots
+          ? `const ${wrapperName} = __farm_islx_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`
+          : `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`,
     );
     wrapperStatements.push(
       isDefault ? `export default ${wrapperName};` : `export { ${wrapperName} as ${exportName} };`,
@@ -1165,7 +1173,7 @@ export function transformIsolatedClientBoundaryModule(options: {
   }
 
   const runtimeImport = options.slots
-    ? `import { createIsland as __farm_islx_island__ } from "@farm.js/core/internal/islx-react";`
+    ? `import { createIsland as __farm_islx_island__, createInferredIsland as __farm_islx_inferred_island__ } from "@farm.js/core/internal/islx-react";`
     : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";`;
   return `${runtimeImport}\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
 }
@@ -4077,14 +4085,29 @@ export const manifest = getManifest();
           isIsolatableClientBoundarySource(clientBoundarySource)
         ) {
           isolatedModuleReference = toViteModuleId(cleanId, root);
+          const islandsMode =
+            resolveFarmServerComponentsMode(currentConfig.experimental?.serverComponents) ===
+            "islands";
+          const explicitStrategy = getIslandStrategyExport(clientBoundarySource);
+          // Islands mode: a module that sets no strategy waits for an interaction when its code
+          // provably does nothing before one (RFC 0003, section 11).
+          const inference =
+            islandsMode && explicitStrategy === null
+              ? inferFarmIslandStrategy(cleanId, root)
+              : null;
+          if (inference) {
+            for (const file of inference.files) {
+              if (file !== path.resolve(cleanId)) this.addWatchFile(file);
+              recordFarmIslandInferenceDependency(file, cleanId);
+            }
+          }
           const transformedBoundary = transformIsolatedClientBoundaryModule({
             code: transformedCode,
             moduleReference: isolatedModuleReference,
-            islandStrategy: getIslandStrategyExport(clientBoundarySource) ?? "load",
+            islandStrategy: explicitStrategy ?? "load",
             parse: (source) => this.parse(source) as unknown as FarmModuleAstNode,
-            slots:
-              resolveFarmServerComponentsMode(currentConfig.experimental?.serverComponents) ===
-              "islands",
+            slots: islandsMode,
+            inferredInteraction: inference?.strategy === "interaction",
           });
           if (!transformedBoundary) {
             this.error(
@@ -4329,6 +4352,15 @@ if (import.meta.hot) {
             error,
             meta: { file },
           });
+        }
+      }
+
+      // A file an island's inferred hydration read: the island transforms again on its next
+      // request, so its strategy follows the change. Vite still updates the file itself.
+      for (const island of farmIslandInferenceDependents.get(path.resolve(file)) ?? []) {
+        if (island === path.resolve(file)) continue;
+        for (const mod of server.moduleGraph.getModulesByFile(toPosixPath(island)) ?? []) {
+          server.moduleGraph.invalidateModule(mod);
         }
       }
 
@@ -4580,6 +4612,16 @@ function resolveDevelopmentRoot(farmRoot: string | undefined, viteRoot: string):
     // A missing root fails later with Farm's own error.
   }
   return farmRoot;
+}
+
+// Islands mode: the island modules whose inferred hydration (RFC 0003, section 11) read each file.
+const farmIslandInferenceDependents = new Map<string, Set<string>>();
+
+function recordFarmIslandInferenceDependency(file: string, island: string): void {
+  const key = path.resolve(file);
+  let islands = farmIslandInferenceDependents.get(key);
+  if (!islands) farmIslandInferenceDependents.set(key, (islands = new Set()));
+  islands.add(path.resolve(island));
 }
 
 /** Islands mode's boot entry in `farm dev` (RFC 0003, section 10); it runs /@farm/client.js. */
@@ -6792,12 +6834,10 @@ function farmIslandsOnlyDocument() {
     ${
       isolatedHydrationEnabled
         ? `if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate) {
-      const hydrationController = new AbortController();
-      pendingPageHydrationController = hydrationController;
       // Islands mode hydrates the document, as production does, so islx also watches the islands
-      // that stream in after this runs.
-      await hydrateFarmIsolatedClientBoundaries(${islandValues ? "document" : "rootContainer"}, hydrationController.signal);
-      if (hydrationController.signal.aborted) return;
+      // that stream in after this runs. Not cancelled by a navigation: an island it removes is
+      // disposed with its DOM, and one in a layout it keeps still waits for its trigger.
+      await hydrateFarmIsolatedClientBoundaries(${islandValues ? "document" : "rootContainer"});
       // The rest of the document is static server HTML with nothing to hydrate, so
       // stop holding its clicks and submits once the load-strategy islands are live.
       // Deferred islands capture their own interactions, and held targets outside an

@@ -4349,9 +4349,9 @@ async function hydrate() {
     !matched.route.pageShouldHydrate &&
     !hasHydratableLayout(pathname)
   ) {
-    const hydrationController = new AbortController();
-    pendingPageHydrationController = hydrationController;
-    await hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal);
+    // Not cancelled by a navigation: an island it removes is disposed with its DOM, and one in a
+    // layout it keeps still waits for its trigger, with any click it already holds.
+    await hydrateFarmIsolatedClientBoundaries(document);
     return;
   }`
       : ""

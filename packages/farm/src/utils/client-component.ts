@@ -1788,7 +1788,8 @@ function isTypeOnlyNamedClause(
  * inspected like any app module; false for an npm package, whose client
  * boundaries are inspected through its own entry graph.
  */
-function resolveImportedModule(
+/** Resolves an import to its source file; `local` when it is the app's own code (or an alias). */
+export function resolveImportedModule(
   importerPath: string,
   specifier: string,
   root?: string,

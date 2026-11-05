@@ -30,6 +30,13 @@ function isModified(event: MouseEvent): boolean {
   return event.metaKey || event.altKey || event.ctrlKey || event.shiftKey;
 }
 
+/** The element a click is held on: as the island scheduler's heldClickTarget (island-runtime.ts). */
+function heldClickTarget(target: Element): Element | null {
+  const link = target.closest("a[href]");
+  if (link) return link.getAttribute("href")?.startsWith("#") ? link : null;
+  return target.closest(FARM_ISLANDS_BOOT_REPLAYABLE_SELECTOR);
+}
+
 /** The island `node` is in, when that island has not hydrated yet. */
 function pendingIsland(node: Element): Element | null {
   const island = node.closest(ISLAND);
@@ -123,11 +130,8 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
     (event) => {
       const click = event as MouseEvent;
       if (click.defaultPrevented || click.button !== 0 || isModified(click)) return;
-      const target =
-        click.target instanceof Element
-          ? click.target.closest(FARM_ISLANDS_BOOT_REPLAYABLE_SELECTOR)
-          : null;
-      if (!target || target.closest("a[href]") || !pendingIsland(target)) return;
+      const target = click.target instanceof Element ? heldClickTarget(click.target) : null;
+      if (!target || !pendingIsland(target)) return;
       hold(event, target, "click");
     },
     true,
