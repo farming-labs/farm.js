@@ -352,7 +352,7 @@ export const getNote = createServerFn({ handler: async ({ id }) => JSON.parse(aw
       analysis: { decision: "web", portable: false },
     });
     expect(result.warnings).toEqual([
-      'native.routes["/asked"].screen is "native", but "/asked" has no page.native.tsx and Farm cannot port pages yet, so it stays web. The analyzer would keep it web: src/app/asked/page.tsx:1:42 <video> has no native mapping. This fails the build once native screens ship.',
+      'native.routes["/asked"].screen is "native", but "/asked" has no page.native.tsx and Farm cannot port it yet, so it stays web. The analyzer would keep it web: src/app/asked/page.tsx:1:42 <video> has no native mapping. This fails the build once native screens ship.',
     ]);
     expect(rules(routeOf(result, "/docs"))).toEqual([
       "src/app/docs/page.md:1:1 markdown-page a Markdown page renders HTML from Markdown",
