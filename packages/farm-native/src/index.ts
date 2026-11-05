@@ -33,9 +33,19 @@ export type FarmNavigate = (href: string, options?: FarmNavigateOptions) => void
  * component. `/notes/7` is an app path (the base path is added); other origins open outside.
  */
 export function useNavigate(): FarmNavigate {
-  const screen = useScreen("useNavigate");
+  return useScreenNavigate(useScreen("useNavigate"));
+}
+
+/** @internal `navigate` for components that may render outside a native screen. */
+export function _useNavigateInScreen(): FarmNavigate {
+  return useScreenNavigate(useContext(FarmScreenContext));
+}
+
+function useScreenNavigate(screen: FarmScreenState | null): FarmNavigate {
   return useCallback(
     (href: string, options?: FarmNavigateOptions) => {
+      if (!screen)
+        throw new Error("Navigation works only in a Farm native screen (page.native.tsx).");
       const path =
         href.startsWith("/") && !href.startsWith("//") ? `${screen.basePath}${href}` : href;
       const url = resolveFarmHref(path, screen.url);
