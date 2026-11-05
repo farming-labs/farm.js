@@ -22,6 +22,7 @@ import {
   type ResolvedFarmMobileConfig,
 } from "./config";
 import type { FarmMobileAnalyzerStats, FarmMobileBlocker } from "./analyzer";
+import { scanFarmMobileAppModules, type FarmMobileAppModules } from "./modules";
 import {
   createFarmMobileNativeReport,
   formatFarmMobileNativeReport,
@@ -156,6 +157,8 @@ export interface FarmMobileApp {
   /** The analyzer's report, when it ran. */
   report?: FarmMobileNativeReport;
   analyzerStats?: FarmMobileAnalyzerStats;
+  /** The app's own native modules in `src/native/`, when it has any. */
+  appModules?: FarmMobileAppModules;
 }
 
 const SCRIPT_PAGE = /\.(?:tsx|ts|jsx|js)$/;
@@ -229,7 +232,25 @@ export async function resolveFarmMobileApp(
     platformFiles: true,
   });
   const routes = [...scan.pages].sort();
-  const mobile = resolveFarmMobileConfig(block, { root, srcDir: config.srcDir, routes }, context);
+  let appModules: FarmMobileAppModules | undefined;
+  try {
+    appModules = scanFarmMobileAppModules({ root, srcDir: config.srcDir });
+  } catch (error) {
+    throw Object.assign(
+      new FarmMobileError(`mobile (os: ${context.os}): ${(error as Error).message}`),
+      { cause: error },
+    );
+  }
+  const mobile = resolveFarmMobileConfig(
+    block,
+    {
+      root,
+      srcDir: config.srcDir,
+      routes,
+      appModules: appModules?.specs.map((spec) => spec.name),
+    },
+    context,
+  );
   const pageExports = await readPageExports(root, scan.pageFiles, context.os);
   for (const [route, page] of pageExports) {
     if (page.config.presentation !== undefined && mobile.tabs.some((tab) => tab.path === route)) {
@@ -344,6 +365,7 @@ export async function resolveFarmMobileApp(
     nativeLayouts,
     pageFiles: scan.pageFiles,
     ...(report ? { report, analyzerStats } : {}),
+    ...(appModules ? { appModules } : {}),
   };
 }
 

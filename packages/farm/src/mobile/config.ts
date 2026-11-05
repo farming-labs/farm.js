@@ -9,6 +9,11 @@ import {
   type PlatformBlockChecker,
 } from "../platform-blocks";
 import { getRoutePatternShape } from "../routing/specificity";
+import {
+  resolveFarmMobileModules,
+  type FarmMobileModuleConfig,
+  type ResolvedFarmMobileModuleConfig,
+} from "./modules";
 
 export type FarmMobileOS = "android" | "ios";
 
@@ -137,6 +142,13 @@ export interface FarmMobileUserConfig {
    * `farm build --mobile`; defaults to `false`.
    */
   shells?: boolean;
+  /**
+   * What the OS needs for each native module, keyed by module name: an app module's registered
+   * name (`src/native/NativeDevice.ts` registers `"Device"`) or an installed package such as
+   * `"react-native-vision-camera"`. `permissions` go into the Android manifest and `usage`
+   * strings into the iOS `Info.plist`.
+   */
+  modules?: Record<string, FarmMobileModuleConfig>;
 }
 
 /** What a function-valued `mobile` block receives. Resolved once per OS per dev start or build. */
@@ -179,9 +191,20 @@ export interface ResolvedFarmMobileConfig {
   routes: Record<string, FarmMobileRouteConfig>;
   native: ResolvedFarmMobileNativeConfig;
   shells: boolean;
+  /** `mobile.modules`, checked: permissions deduplicated per module, usage strings trimmed. */
+  modules: Record<string, ResolvedFarmMobileModuleConfig>;
 }
 
-const MOBILE_KEYS = new Set(["name", "id", "server", "tabs", "routes", "native", "shells"]);
+const MOBILE_KEYS = new Set([
+  "name",
+  "id",
+  "server",
+  "tabs",
+  "routes",
+  "native",
+  "shells",
+  "modules",
+]);
 const ROUTE_KEYS = new Set(["presentation"]);
 const TAB_KEYS = new Set(["path", "title", "icon"]);
 const NATIVE_KEYS = new Set(["engine", "auto", "routes", "islands", "prefetch", "budgets"]);
@@ -479,6 +502,14 @@ export function validateFarmMobileConfig(
   if (input.shells !== undefined && typeof input.shells !== "boolean") {
     fail("shells must be true or false.");
   }
+  // Each entry is checked by resolveFarmMobileConfig, which knows the app's modules and reports
+  // every problem at once.
+  if (input.modules !== undefined && !isPlainObject(input.modules)) {
+    fail(
+      "modules must be an object keyed by module name, such as " +
+        '{ Device: { permissions: ["android.permission.VIBRATE"] } }.',
+    );
+  }
   // One presentation per route: mobile.routes and mobile.native.routes share the field.
   if (isPlainObject(input.routes) && isPlainObject(input.native)) {
     const nativeRoutes = isPlainObject(input.native.routes) ? input.native.routes : {};
@@ -520,6 +551,8 @@ export interface FarmMobileResolveOptions {
   srcDir?: string;
   /** The app's page route patterns, such as `"/notes/[id]"` (route groups removed). */
   routes: readonly string[];
+  /** Names the app's own native module specs register (`scanFarmMobileAppModules`). */
+  appModules?: readonly string[];
 }
 
 /**
@@ -625,6 +658,7 @@ export function resolveFarmMobileConfig(
       budgets: { ...native.budgets },
     },
     shells: config.shells === true,
+    modules: resolveFarmMobileModules(config.modules, options, fail),
   };
 }
 

@@ -125,6 +125,7 @@ test("farm config inspect --mobile prints the block and farm-routes.json for an 
       budgets: {},
     },
     shells: false,
+    modules: {},
   });
   // Every route's tier on this OS and what decided it.
   assert.deepEqual(printed.screens, {
