@@ -163,7 +163,7 @@ Common config fields:
   with Android code are autolinked from a Farm-written `autolinking.json`, never devDependencies or
   transitive packages, and must have `codegenConfig` (new architecture) or generation fails naming
   the package; an app that links one builds through React Native's Gradle plugin, AGP 9.2.1 and
-  Gradle 9.4.1, apps without one are byte-identical; APK build with a module not verified yet); on iOS `native` screens show a placeholder;
+  Gradle 9.4.1, apps without one are unchanged; verified on an Android emulator, not on devices); on iOS `native` screens show a placeholder;
   `platform` screens show a placeholder on both; `src/native/` is for native module specs
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy

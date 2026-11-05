@@ -694,9 +694,9 @@ What is verified, in `examples/mobile` under `farm dev --mobile` on an Android 1
   `/map` open takes 611 to 1413 ms (103 to 797 ms on later opens), the first `/camera` open 184 to
   205 ms.
 
-Not verified yet: native screens in a production build (a bytecode build installs and cold-starts,
-but no native screen was opened in it), and real devices, so the emulator numbers say nothing about
-smoothness on a phone.
+In a bytecode build (`farm build --mobile --apk`, a debug APK) against a local production server,
+`/map` opens as React Native with its stations. Not verified yet: real devices, so the emulator
+numbers say nothing about smoothness on a phone.
 
 ```tsx
 // src/app/map/page.native.tsx
@@ -841,8 +841,10 @@ use an installed React Native module, such as `@react-native-community/netinfo`,
 React Native app does: add it to the app's `dependencies` and import it. Farm links the modules
 into the Android app (see [React Native screens](#react-native-screens)); the permissions a module
 declares in its own manifest are merged into the app's. Web screens cannot call these modules, and
-iOS has no React Native host yet. Not verified yet: an APK build and an emulator run with a linked
-module.
+iOS has no React Native host yet. Verified on an Android 15 emulator with netinfo 12.0.1, in
+`farm dev --mobile` and in a bytecode APK: `/map` shows the connection type and `isConnected`, and
+both change when Wi-Fi, mobile data, or airplane mode are switched off. Not verified yet: real
+devices and Expo modules.
 
 **Reaching a real device feature.** For something like reading SMS you drop to native code, where the
 platform SDK is in reach:
