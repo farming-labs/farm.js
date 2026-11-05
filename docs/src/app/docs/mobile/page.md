@@ -771,7 +771,8 @@ screen, and back returns to it.
   `react-native-device-info` 15.0.2, fails the command with an error that names the package
   instead of being skipped. The app's own modules in `src/native/` link the same way
   ([App native modules](#app-native-modules)). iOS has no React Native host yet, so modules do
-  nothing there. Not verified yet: an APK build and an emulator run with a linked module.
+  nothing there. A debug APK with netinfo and an app module, and one with an app module alone,
+  build and run on an Android 15 emulator.
 - **Runtime.** React Native's new architecture only: Hermes, Fabric, bridgeless. One runtime is
   shared by every native screen, each its own surface. It starts after the first screen shows
   content, so a web start screen pays nothing at launch.
@@ -962,9 +963,13 @@ to the Xcode project, outside its target, so nothing builds or registers them un
 Web screens cannot call app modules yet. Keep `src/native/` out of the web `tsconfig.json`: specs
 import `react-native`.
 
-Not verified yet: an APK build and an emulator run with an app module. The specs are checked with
-React Native's own Codegen in Farm's tests (the base class and its method signatures), and the
-generated Gradle project with unit tests.
+Verified with `examples/mobile` on an Android 15 emulator (arm64), in a debug APK of Hermes
+bytecode and under `farm dev --mobile`: Gradle runs Codegen for `farm-app-modules`,
+`libappmodules.so` links `react_codegen_FarmAppSpec`, `/map` shows the emulator's `Build.MODEL`
+(`sdk_gphone64_arm64`), `vibrate(200)` resolves and the vibrator service records a 200 ms
+vibration, and `VIBRATE` is granted at install with no prompt. An app with app modules and no
+community modules builds the same way. Not verified yet: real devices and a release (minified)
+build.
 
 ### `mobile.modules`
 

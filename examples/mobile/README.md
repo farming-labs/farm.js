@@ -93,8 +93,9 @@ spec, and `src/native/DeviceModule.kt`): it shows the phone's model (`testID="de
 a button that vibrates for 200 ms (`testID="vibrate"`). `mobile.modules.Device.permissions` in
 `farm.config.ts` adds `android.permission.VIBRATE` to the manifest, an install-time permission with
 no prompt. Farm copies the module into `farm-app-modules/` in the generated project and links it
-like netinfo. Not verified yet: an APK build and an emulator run with it. `src/native/` is
-type-checked with the native files (`tsconfig.native.json`).
+like netinfo. On an Android 15 emulator, in `pnpm dev:mobile` and in a bytecode APK, `/map` shows
+the emulator's model (`sdk_gphone64_arm64`) and `Vibrate` vibrates for 200 ms with no error.
+`src/native/` is type-checked with the native files (`tsconfig.native.json`).
 
 React versions: this example pins `react` and `react-dom` 19.2.8, the version Farm core is tested
 on. React Native 0.88 declares a `react@^19.3.0` peer (its renderer is built from 19.3.0), so pnpm
