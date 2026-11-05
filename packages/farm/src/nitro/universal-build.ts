@@ -6430,6 +6430,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       metadata: pageHydrationPlans.get(route.modulePath)!,
     })),
     routeBoundaryCoversDirectory,
+    { serverOwners: pageHydrationPlanOptions.serverOwners },
   );
   const providerServerImports = [
     providerServerModules.hasClerkProvider

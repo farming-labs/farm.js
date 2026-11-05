@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import React from "react";
@@ -249,6 +249,19 @@ describe("islands mode", () => {
     expect(plan(true).fallbackReason).toBeUndefined();
     // Isolated hydration without islands mode can still hydrate the page whole instead.
     expect(plan(false)).toMatchObject({ shouldHydrate: true, hasIsolatedClientBoundaries: false });
+  });
+
+  it("skips the root budget wherever the build and the route manager plan routes", () => {
+    // The client build, the server entry and the route manager each plan every route; one call
+    // without the option ships that output's pages whole.
+    const calls = ["nitro/universal-build.ts", "routing/route-manager.ts"].flatMap((file) => {
+      const source = readFileSync(path.join(__dirname, "..", file), "utf-8");
+      return [...source.matchAll(/\n\s*enforceFarmIsolatedHydrationRouteBudget\(/g)].map(
+        (match) => /^[^]*?\n\s*\);/.exec(source.slice(match.index))![0],
+      );
+    });
+    expect(calls).toHaveLength(3);
+    for (const call of calls) expect(call).toContain("{ serverOwners: ");
   });
 
   describe("a server layout around a client provider", () => {
