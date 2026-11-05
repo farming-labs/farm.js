@@ -1192,6 +1192,18 @@ Measured on `examples/mobile` (two screens), macOS arm64, Node 24, React Native 
   `abiFilters` `arm64-v8a` and `x86_64`, the CMake build and the bytecode asset. A project without
   native routes gets the same Gradle files, manifest, resources and assets as before; its debug APK
   grows by 4 KB for the engine-neutral hook.
+- Amended 2026-11-05: apps that link community React Native modules (7.5) use React Native's
+  Gradle plugin and its toolchain. New-architecture modules apply `com.facebook.react` in their own
+  `android/build.gradle` for Codegen and for `react-android:+` substitution, so they cannot build
+  without it. The plugin is not on Maven Central for 0.88, so it is a composite build from the
+  app's `node_modules/@react-native/gradle-plugin`, and with it come Android Gradle plugin 9.2.1,
+  Gradle 9.4.1, `android.builtInKotlin=false`, `android.newDsl=false` and a JDK 17 toolchain. Farm
+  writes `autolinking.json` from the app's own `dependencies` (the packages Metro bundles) and the
+  plugin's `autolinkLibrariesFromConfigFile` reads it, so `@react-native-community/cli` is not
+  needed. `libappmodules.so` is then built with React Native's app setup, which adds the
+  autolinking sources and each module's codegen library. A module without `codegenConfig` fails
+  generation with an error naming it. Apps without native modules are unchanged: prebuilt Maven
+  artifacts, no plugin, the shell's own toolchain, byte-identical generated projects.
 
 ### Native screens are surfaces in Farm's navigator
 
