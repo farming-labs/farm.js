@@ -919,9 +919,11 @@ describe("the bridge script on iOS", () => {
     const ok = bridge.call("haptics", "impact", { style: "light" });
     const failed = bridge.call("camera", "takePhoto");
     const calls = posted.filter((message) => message.type === "call");
+    // Each carries the document's id; the iOS shell answers without it.
+    const doc = expect.stringMatching(/^[a-z0-9]{1,16}$/);
     expect(calls).toEqual([
-      { type: "call", id: 1, plugin: "haptics", method: "impact", args: { style: "light" } },
-      { type: "call", id: 2, plugin: "camera", method: "takePhoto", args: {} },
+      { type: "call", id: 1, plugin: "haptics", method: "impact", args: { style: "light" }, doc },
+      { type: "call", id: 2, plugin: "camera", method: "takePhoto", args: {}, doc },
     ]);
     bridge._resolve(1, true, null);
     bridge._resolve(2, false, {
