@@ -130,8 +130,12 @@ element, script type and header carries the `f` prefix, and JSON reserves one ke
 
 ```html
 <f-island src="src/components/toc.tsx" export="Toc" props="_R_b_" strategy="load">…</f-island>
-<script type="f/props" for="_R_b_">{"headings":[…],"tree":{"$":"r","v":"04jiw29097x8ki"}}</script>
-<script type="f/value" name="04jiw29097x8ki">[…]</script>
+<script type="f/props" for="_R_b_">
+  {"headings":[…],"tree":{"$":"r","v":"04jiw29097x8ki"}}
+</script>
+<script type="f/value" name="04jiw29097x8ki">
+  […]
+</script>
 <f-slot name="_R_5_s0">…server output passed as children…</f-slot>
 ```
 
@@ -455,9 +459,9 @@ navigation with state kept in layouts; back and forward; HMR; error and not-foun
   slots. Routes a shared cache can store send the whole document, and the request-scoped response
   is `private, no-store`. A kept layout does not render, as in Next.js: access checks belong in
   middleware or page guards. PPR routes cache each segment under its own key (the page's shell key
-plus the number of kept layouts; `revalidatePath` clears both, since entries are stored by path).
-The prefetch cache keys a partial response by the headers it was asked with (layout chain, tree
-navigation), so a navigation from other layouts fetches its own answer.
+  plus the number of kept layouts; `revalidatePath` clears both, since entries are stored by path).
+  The prefetch cache keys a partial response by the headers it was asked with (layout chain, tree
+  navigation), so a navigation from other layouts fetches its own answer.
 - Values in server-tree payloads: a page under a layout that hydrates as one root sends its large
   prop values once, in scripts right before its payload, and the browser re-renders those scripts
   so hydration matches. On the shop benchmark a navigation drops from 5.8 KB to 4.2 KB (brotli);
