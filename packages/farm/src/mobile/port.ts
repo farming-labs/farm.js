@@ -10,8 +10,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { FarmMobilePortGraph } from "./analyzer";
-import { cascadeFarmNativeStylesheetsForTag, parseFarmNativeStylesheet } from "./native-css";
-import type { FarmNativeStyle } from "./native-style";
+import {
+  cascadeFarmNativeStylesheetsForElement,
+  inspectFarmNativeStylesheets,
+  parseFarmNativeStylesheet,
+} from "./native-css";
+import {
+  farmNativeClassProblem,
+  resolveFarmNativeClasses,
+  type FarmNativeStyle,
+} from "./native-style";
 
 /** Elements `@farm.js/native/elements` draws. */
 const DOM_TAGS = new Set(
@@ -115,6 +123,22 @@ function hasJsx(program: Node): boolean {
   return found;
 }
 
+/** A JSX attribute's static string: `"a b"`, `{"a b"}`, or a template without expressions. */
+function staticString(value: Node | null | undefined): string | undefined {
+  if (!value) return undefined;
+  if (
+    (value.type === "Literal" || value.type === "StringLiteral") &&
+    typeof value.value === "string"
+  ) {
+    return value.value;
+  }
+  if (value.type === "JSXExpressionContainer") return staticString(value.expression);
+  if (value.type === "TemplateLiteral" && value.expressions.length === 0) {
+    return value.quasis.map((quasi: Node) => quasi.value.cooked).join("");
+  }
+  return undefined;
+}
+
 function lineColumn(source: string, offset: number): string {
   const before = source.slice(0, offset).split("\n");
   return `${before.length}:${before.at(-1)!.length + 1}`;
@@ -156,8 +180,22 @@ export async function emitFarmMobilePort(options: {
   );
 
   const files: Record<string, string> = {};
-  // Every element the port renders, for the app's CSS.
+  // Every element the port renders, for the app's CSS, and each static className, resolved once
+  // every class the port renders is known.
   const tags = new Set<string>();
+  const classNames: Array<{
+    edits: Array<{ start: number; end: number; text: string }>;
+    attribute: Node;
+    tag: string;
+    classes: string[];
+    at: string;
+  }> = [];
+  const outputs: Array<{
+    key: string;
+    label: string;
+    source: string;
+    edits: Array<{ start: number; end: number; text: string }>;
+  }> = [];
   for (const module of graph.modules) {
     const label = posix(path.relative(root, module.file));
     if (module.serverBoundary) {
@@ -222,6 +260,13 @@ export async function emitFarmMobilePort(options: {
             }
           }
         }
+        // The app's CSS reaches the port through its sheet, not the import.
+        if (/\.css$/i.test(specifier)) {
+          if ((statement.specifiers as Node[]).length > 0) {
+            problems.push(`${at(statement)} imports CSS module names, which ports do not map yet`);
+          } else edits.push({ start: statement.start, end: statement.end, text: "" });
+          continue;
+        }
         if (!typeOnly && CORE_LINK.has(specifier)) {
           const values = (statement.specifiers as Node[]).filter(
             (imported) => imported.importKind !== "type",
@@ -280,9 +325,28 @@ export async function emitFarmMobilePort(options: {
       if (node.type === "JSXOpeningElement" || node.type === "JSXClosingElement") {
         const name = node.name as Node;
         if (name.type !== "JSXIdentifier") return;
+        const className = (tag: string) => {
+          if (node.type !== "JSXOpeningElement") return;
+          for (const attribute of node.attributes as Node[]) {
+            if (attribute.type !== "JSXAttribute" || attribute.name.name !== "className") continue;
+            const classes = staticString(attribute.value);
+            if (classes === undefined) {
+              problems.push(`${at(attribute)} <${tag}> builds its class names at runtime`);
+              continue;
+            }
+            classNames.push({
+              edits,
+              attribute,
+              tag,
+              classes: classes.split(/\s+/).filter(Boolean),
+              at: at(attribute),
+            });
+          }
+        };
         if (linkNames.has(name.name)) {
           edits.push({ start: name.start, end: name.end, text: "__FarmLink" });
           tags.add("a");
+          className("a");
           return;
         }
         if (!/^[a-z]/.test(name.name)) return;
@@ -305,14 +369,11 @@ export async function emitFarmMobilePort(options: {
             attribute.name.type === "JSXNamespacedName"
               ? `${attribute.name.namespace.name}:${attribute.name.name.name}`
               : (attribute.name.name as string);
-          if (prop === "className") {
-            problems.push(
-              `${at(attribute)} className needs the route's stylesheet, which ports do not load yet`,
-            );
-          } else if (!DOM_PROPS.has(prop) && !/^(?:aria|data)-/.test(prop)) {
+          if (prop !== "className" && !DOM_PROPS.has(prop) && !/^(?:aria|data)-/.test(prop)) {
             problems.push(`${at(attribute)} <${name.name} ${prop}> has no port mapping yet`);
           }
         }
+        className(name.name);
       }
     });
 
@@ -333,14 +394,12 @@ export async function emitFarmMobilePort(options: {
       });
     }
 
-    let output = source;
-    for (const edit of edits.sort(
-      (left, right) => right.start - left.start || right.end - left.end,
-    )) {
-      output = output.slice(0, edit.start) + edit.text + output.slice(edit.end);
-    }
-    files[posix(path.relative(portsDir, copyOf(module.file)))] =
-      `// Generated by Farm from ${label} for its React Native port. Do not edit.\n${output}`;
+    outputs.push({
+      key: posix(path.relative(portsDir, copyOf(module.file))),
+      label,
+      source,
+      edits,
+    });
   }
 
   const page = parsed.get(graph.page)!;
@@ -349,14 +408,25 @@ export async function emitFarmMobilePort(options: {
   );
   if (!hasDefault) problems.push(`${posix(path.relative(root, graph.page))} has no default export`);
 
-  // The app's CSS for each element, which ports apply as the web page gets it. Only rules a port
-  // can decide from the tag alone; anything else keeps the route web.
+  // The app's CSS, which ports apply as the web page gets it. `@import "tailwindcss"` brings
+  // Tailwind 4's preflight and the utilities in the native style table; anything that changes
+  // what a class means (`@theme`, `@utility`, Tailwind 3) keeps the route web.
   const sheets = [];
+  let tailwind = false;
   for (const file of options.stylesheets ?? []) {
-    const css = read(file).replace(/\/\*[\s\S]*?\*\//g, "");
-    if (/@(?:import|layer|tailwind|apply)\b/.test(css)) {
+    let css = read(file).replace(/\/\*[\s\S]*?\*\//g, "");
+    css = css.replace(/@import\s+(["'])tailwindcss\1[^;]*;/g, () => {
+      tailwind = true;
+      return "";
+    });
+    css = css.replace(/@source\b[^;]*;/g, "");
+    const directive =
+      /@(?:import|layer|tailwind|apply|theme|utility|plugin|config|custom-variant|variant|reference)\b/.exec(
+        css,
+      );
+    if (directive) {
       problems.push(
-        `${posix(path.relative(root, file))} uses @import, @layer, or Tailwind, which ports do not read yet`,
+        `${posix(path.relative(root, file))} uses ${directive[0]}, which ports do not read yet`,
       );
     } else sheets.push(parseFarmNativeStylesheet(css));
   }
@@ -367,9 +437,60 @@ export async function emitFarmMobilePort(options: {
     string,
     { style?: FarmNativeStyle; dark?: FarmNativeStyle; inherit?: string[] }
   > = {};
-  const contextClasses = new Set(graph.layoutClasses);
+  const contextClasses = new Set([
+    ...graph.layoutClasses,
+    ...classNames.flatMap((entry) => entry.classes),
+  ]);
+  for (const { edits, attribute, tag, classes, at } of classNames) {
+    // Tailwind's utilities sit in a layer, so the app's own rules (here, `css`) override them.
+    const utilities: string[] = [];
+    const appClasses: string[] = [];
+    for (const token of classes) {
+      const inTable = resolveFarmNativeClasses(token).unsupported.length === 0;
+      const styled = inspectFarmNativeStylesheets(sheets, { class: token }).styled;
+      if (tailwind && inTable) utilities.push(token);
+      if (styled) appClasses.push(token);
+      else if (tailwind && !inTable) {
+        problems.push(
+          `${at} ${farmNativeClassProblem(token) ?? `class "${token}" has no port style`}`,
+        );
+      }
+    }
+    const tw = resolveFarmNativeClasses(utilities.join(" "));
+    const css = cascadeFarmNativeStylesheetsForElement(
+      sheets,
+      { tag, classes: appClasses },
+      contextClasses,
+    );
+    problems.push(...css.problems.map((message) => `${at} ${message}`));
+    const resolved = {
+      ...(utilities.length > 0
+        ? { tw: { style: tw.style, ...(tw.dark ? { dark: tw.dark } : {}) } }
+        : {}),
+      css: {
+        style: css.style,
+        ...(Object.keys(css.dark).length > 0 ? { dark: css.dark } : {}),
+        ...(css.inherit.length > 0 ? { inherit: css.inherit } : {}),
+      },
+    };
+    edits.push({
+      start: attribute.start,
+      end: attribute.end,
+      text: `__farm={${JSON.stringify(resolved)}}`,
+    });
+  }
+  for (const { key, label, source, edits } of outputs) {
+    let output = source;
+    for (const edit of edits.sort(
+      (left, right) => right.start - left.start || right.end - left.end,
+    )) {
+      output = output.slice(0, edit.start) + edit.text + output.slice(edit.end);
+    }
+    files[key] =
+      `// Generated by Farm from ${label} for its React Native port. Do not edit.\n${output}`;
+  }
   for (const tag of ["html", "body", ...[...tags].sort()]) {
-    const cascaded = cascadeFarmNativeStylesheetsForTag(sheets, tag, contextClasses);
+    const cascaded = cascadeFarmNativeStylesheetsForElement(sheets, { tag }, contextClasses);
     problems.push(...cascaded.problems);
     const entry = {
       ...(Object.keys(cascaded.style).length > 0 ? { style: cascaded.style } : {}),
@@ -401,7 +522,7 @@ export async function emitFarmMobilePort(options: {
     "",
     "export default function FarmPort() {",
     "  return (",
-    "    <FarmDomScreen sheet={sheet}>",
+    `    <FarmDomScreen sheet={sheet}${tailwind ? " preflight" : ""}>`,
     "      <Page params={useRouteParams()} />",
     "    </FarmDomScreen>",
     "  );",
