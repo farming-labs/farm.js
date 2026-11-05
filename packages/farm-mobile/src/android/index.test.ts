@@ -1220,9 +1220,11 @@ class DeviceModule(reactContext: ReactApplicationContext) : NativeDeviceSpec(rea
     expect(gradle).toContain('id("com.android.library")');
     expect(gradle).toContain('id("com.facebook.react")');
     expect(gradle).toContain('implementation("com.facebook.react:react-android:0.88.1")');
-    expect(files["farm-app-modules/android/src/main/AndroidManifest.xml"]).toContain(
-      "<manifest />",
-    );
+    const libraryManifest = files["farm-app-modules/android/src/main/AndroidManifest.xml"]!;
+    expect(libraryManifest).toContain("<manifest />");
+    // The manifest merger rejects "--" inside XML comments.
+    for (const [, comment] of libraryManifest.matchAll(/<!--([\s\S]*?)-->/g))
+      expect(comment).not.toContain("--");
     expect(
       files["farm-app-modules/android/src/main/java/com/example/notes/modules/DeviceModule.kt"],
     ).toBe(DEVICE_MODULE);
