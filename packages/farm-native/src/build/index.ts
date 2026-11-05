@@ -166,7 +166,10 @@ const BUILD_TOOLS =
   /^(?:metro(?:-(?!runtime$).*)?|@react-native\/(?:community-cli-plugin|codegen|gradle-plugin|dev-middleware|metro-babel-transformer|babel-preset|metro-config)|@babel\/(?:core|preset-.+|plugin-.+|helper-.+|parser|generator|traverse|template|types)|hermes-compiler|typescript|vite|@types\/.+)$/;
 
 // Farm's web runtime is never part of a React Native bundle.
-const WEB_ONLY = new Set(["@farm.js/core", "@farm.js/cli", "@farm.js/mobile", "react-dom"]);
+const WEB_ONLY = new Set(["@farm.js/cli", "@farm.js/mobile", "react-dom"]);
+// Packages whose React Native builds (the `react-native` export condition) import nothing outside
+// themselves, such as `@farm.js/core/api/client`: watched without their dependencies.
+const SELF_CONTAINED = new Set(["@farm.js/core"]);
 
 /** A package's real directory as Node resolves `name` from `from`, including pnpm's hoisted store. */
 function packageDir(from: string, name: string): string | undefined {
@@ -207,6 +210,7 @@ export function resolveWatchFolders(
     const dir = packageDir(from, name);
     if (!dir || seen.has(dir)) continue;
     seen.add(dir);
+    if (SELF_CONTAINED.has(name)) continue;
     const manifest = readManifest(dir);
     for (const field of ["dependencies", "peerDependencies", "optionalDependencies"] as const) {
       for (const dependency of Object.keys(manifest[field] ?? {})) queue.push([dir, dependency]);
