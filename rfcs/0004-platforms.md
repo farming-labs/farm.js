@@ -754,52 +754,68 @@ app directory routes, `mobile.tabs`, `mobile.routes`, `mobile.native` and page e
 
 ### 7.5 Native modules
 
-One typed spec, one implementation per OS, two transports, one app-facing API.
+Device APIs come from React Native modules. Farm adds the plumbing around them (linking,
+permissions, a transport for web screens), not a module system of its own. Revised 2026-11-05; see
+[Device APIs are React Native modules](#device-apis-are-react-native-modules).
 
 ```text
-src/native/haptics.ts            spec, React Native Codegen style
-src/native/haptics.android.kt    implementation, written once per OS
-src/native/haptics.ios.swift
-  generated: TS types, Kotlin and Swift interfaces, JSI glue, bridge dispatcher
-  native screens: TurboModule over JSI, direct calls
-  web screens:    origin-scoped async bridge, JSON messages
+native screen  page.native.tsx ──JSI──▶ TurboModule (community or the app's own)
+web screen     page.tsx ──bridge `call`, async JSON──▶ the same module class, opted in per module
+visual or continuous (camera preview, map, video) ──▶ a native view: native screen, or island (7.7)
 ```
 
-```ts
-// src/native/haptics.ts
-import { defineNativeModule } from "@farm.js/native/spec";
+- **Native screens use the React Native ecosystem as is.** Any module that supports the new
+  architecture works in `page.native.tsx` after a normal install. The generated Android host
+  autolinks the app's dependencies (React Native's Gradle settings plugin,
+  `autolinkLibrariesWithApp()`, and the autolinked C++ TurboModules in `OnLoad.cpp`), only when the
+  app has native screens, so a web-only app still gets no React Native code.
+- **The app's own modules are TurboModules written the React Native way:** a Codegen spec such as
+  `src/native/NativeHaptics.ts` (`TurboModuleRegistry.getEnforcing<Spec>("Haptics")`) and one
+  Kotlin and one Swift class. Farm copies them into the generated projects and registers them; there
+  is no Farm-specific spec format.
 
-export interface Spec {
-  impact(style: "light" | "medium" | "heavy"): Promise<void>;
-  selection(): Promise<void>;
+```ts
+// src/native/NativeHaptics.ts
+import { TurboModuleRegistry, type TurboModule } from "react-native";
+
+export interface Spec extends TurboModule {
+  impact(style: string): Promise<void>;
 }
 
-export default defineNativeModule<Spec>("Haptics");
+export default TurboModuleRegistry.getEnforcing<Spec>("Haptics");
 ```
 
-```ts
-// in a web screen, a native screen, or a web or desktop build
-import { native } from "@farm.js/core/native";
-
-await native.haptics.impact("light");
-const photo = await native.camera.takePhoto({ quality: 0.8 });
-```
-
-- Specs use React Native Codegen's type subset: primitives, string unions, objects, arrays,
-  `Promise` results and event emitters. Methods must be async, because the web-screen transport is.
-  A synchronous method is a spec error, so the API is the same on both transports.
-- Both transports validate arguments against the spec on the native side before the
-  implementation runs.
-- First-party modules (camera, share, biometrics, push, haptics) use the same format.
-  `mobile.modules` enables them and writes their permission strings
-  (`mobile.modules.camera.usage` becomes `NSCameraUsageDescription` and the Android permission
-  entry). App modules in `src/native/` are enabled by existing.
-- `native` is a typed proxy generated into `.farm/types/native.d.ts`. Where a web fallback exists
-  (`<input type="file" capture>`, `navigator.share`) web and desktop use it; other calls reject
-  with a typed `NativeUnavailableError`, and `native.<module>.available()` checks first.
+- **`mobile.modules` holds what the OS needs:** permission entries and usage strings, per module
+  (`mobile.modules.camera.usage` becomes `NSCameraUsageDescription` and the Android
+  `<uses-permission>`). A module that needs a permission and has none configured fails the build
+  with the key to add.
+- **Web screens reach a module only when it opts in** (`mobile.modules.<name>.web: true`). The
+  bridge's `call` message dispatches to the same Kotlin or Swift class, for methods that return a
+  `Promise` in its Codegen spec, with arguments checked against the spec before the module runs.
+  Modules that need the React Native JS runtime, which is most community modules, are not
+  reachable from web screens; a route that needs them becomes a native screen.
+- **References, not bytes.** A large result (a photo, a recording, a picked file) comes back as a
+  URL, never as base64 through the bridge. On Android it is an unguessable path on the server's own
+  origin (`/__farm/files/<id>`) that the shell answers from app storage in `shouldInterceptRequest`,
+  as it answers bundled client files, scoped to the screen that asked and dropped when it closes.
+  iOS cannot answer `https` requests (7.12) and a custom scheme would be mixed content, so iOS
+  returns such results as a native upload to a server route instead (open question 8).
+- **Events are subscriptions.** `subscribe` and `unsubscribe` bridge messages, at most one delivery
+  per animation frame with the latest value. The shell closes every subscription of a page when its
+  document changes, its screen pops, or a pooled WebView moves to another route.
+- **Visual and continuous features are native views.** Camera preview, maps and video never stream
+  frames through JS: native screens render them, and web screens use islands (7.7). JS sends
+  commands only.
+- **No JS engine for web screens.** A web screen's code runs in the system WebView's engine, in
+  another process (Android's sandboxed renderer, iOS's WebContent process). A second engine in the
+  app process could not share its heap, and the only synchronous Android hook,
+  `addJavascriptInterface`, is ruled out by 7.10. The web transport stays async; direct calls are
+  what native screens are for.
+- `native.<module>.available()` checks first. Where a web fallback exists (`<input type="file"
+capture>`, `navigator.share`) web and desktop use it; other calls reject with
+  `NativeUnavailableError`.
 - Farm does not reuse Capacitor's bridge. Its Android fallback to `addJavascriptInterface`, and
-  plugins that register one unconditionally, conflict with the bridge rules in 7.10. A Capacitor
-  plugin adapter is an open question.
+  plugins that register one unconditionally, conflict with the bridge rules in 7.10.
 
 ### 7.6 Components
 
@@ -1125,7 +1141,7 @@ Rules that hold either way:
 | Local files      | host-dependent      | yes, `appDataDir()`              | through native modules only                                  |
 | HMR              | yes                 | yes, window loads `farm dev`     | WebView HMR, Fast Refresh for React Native screens           |
 | Agent-readiness  | full, on by default | off or guarded (6.5)             | served by the web deployment                                 |
-| Native features  | web APIs            | shell APIs (menu, tray, dialogs) | typed native modules through `native` (7.5)                  |
+| Native features  | web APIs            | shell APIs (menu, tray, dialogs) | React Native modules; opted-in modules on web screens (7.5)  |
 | Native islands   | DOM                 | DOM                              | `Map`, `Video`, `CameraPreview` when listed (7.7)            |
 | Auth             | cookies             | cookies, local guard             | Keychain/Keystore tokens                                     |
 | Store acceptance | n/a                 | signing and notarization (open)  | native navigation and chrome (see 7.1)                       |
@@ -1298,6 +1314,26 @@ Made while building bundled client assets (#2472). Narrows 7.2 and 7.12.
   measured need on a device.
 - Gaps: prerendered pages are static files the server never sees, so in a shell they load the web
   client. Server components apps get no mobile client yet. Page shells (7.2) are not built.
+
+### Device APIs are React Native modules
+
+Made 2026-11-05. Replaces the 2026-11-01 text of 7.5.
+
+- The draft's own spec format (`defineNativeModule` from `@farm.js/native/spec`, a generated
+  `native` proxy, Farm-built first-party modules) is dropped. Native screens already run React
+  Native's new architecture, so its modules (community, Expo where they link, and the app's own
+  TurboModules) are the module system, and Farm maintains no camera or location code.
+- What the generated Android host lacked: it registered only `MainReactPackage` and Farm's own
+  `FarmShellPackage`, and `OnLoad.cpp` resolved no autolinked libraries, so a community module
+  installed in the app never loaded. Autolinking is the first step.
+- The web-screen transport is kept but narrowed: opt-in per module, Promise methods only, and
+  results by reference. It is the bridge's existing `call` message, which today answers
+  `native_unavailable` because no module is registered.
+- Rejected: a Farm JS engine for web screens to get JSI-style direct calls. The page's code runs in
+  the WebView's engine in another process, so an engine of Farm's would add size and still cross a
+  process boundary. Direct calls belong to native screens.
+- Order: autolinking on Android, then app TurboModules and `mobile.modules`, then the web-screen
+  transport with file references and subscriptions. iOS follows when its shell hosts React Native.
 
 ## 9. Rollout
 
@@ -1520,9 +1556,10 @@ limited, and server secrets would ship in the app binary.
    entry could put the guard in front of static serving for uniformity.
 7. **Island placement on Android.** Settled by the scroll-tracking experiment (7.7): root-flow
    islands that scroll with the page, or only placements that do not scroll.
-8. **Module and island catalog.** Which native modules and islands ship first-party, how third
-   parties publish a spec with its Kotlin and Swift implementations, and whether a Capacitor plugin
-   adapter is worth it.
+8. **Modules and islands.** Whether Expo modules link in Farm's host (they need
+   `expo-modules-core` autolinking on top of React Native's), which islands ship first-party, how
+   iOS web screens get large results without an `https` handler (a native upload to a server route,
+   or a size-capped inline result), and whether a Capacitor plugin adapter is worth it.
 9. **Analyzer cost.** `mobile.native.auto` defaults to `"report"`, so every `farm build --mobile`
    runs stage 0. Its parse cache and per-route timings decide whether large apps need it off by
    default; `farm build` for web never runs it.
