@@ -701,14 +701,25 @@ but no native screen was opened in it), and real devices, so the emulator number
 smoothness on a phone.
 
 ```tsx
+// src/lib/api.ts: the app's typed API client, shared by web pages and native screens
+import { createApiClients } from "@farm.js/core/api/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+
+export const { api, apiClient } = createApiClients<APIRouter>({ routes: apiRoutes });
+```
+
+```tsx
 // src/app/map/page.native.tsx
-import { serverFetch, useNavigate, useServerQuery } from "@farm.js/native";
+import { useNavigate, useServerQuery } from "@farm.js/native";
 import { useState } from "react";
 import { FlatList, Pressable, Text } from "react-native";
+import { apiClient } from "../../lib/api";
 
-async function listStations(): Promise<Array<{ id: string; name: string }>> {
-  const response = await serverFetch("/api/stations");
-  return response.json();
+// The same typed call a web page makes: GET /api/stations, typed from the route's handler.
+async function listStations() {
+  const { data, error } = await apiClient.stations.get();
+  if (error) throw error;
+  return data;
 }
 
 export const metadata = { title: "Map" };
@@ -748,9 +759,13 @@ export default function MapScreen() {
 | `serverUrl(path)`             | The absolute URL of a path on `mobile.server`                                                                                        |
 | `export const metadata.title` | The native bar's title                                                                                                               |
 
-Native screens call the same API routes as the web client, over HTTP to `mobile.server`. They send
-no cookies. Once the user has signed in on a web screen, `serverFetch` sends the device's session
-token, so protected routes see the same user (see [Auth on mobile](#auth-on-mobile)). A screen
+Native screens call the same API routes as the web client, over HTTP to `mobile.server`, with the
+same typed client: `@farm.js/core/api/client` has a React Native build (Metro picks it through the
+`react-native` export condition) whose `createApiClients` sends requests through `serverFetch`
+unless given a `baseURL` or `fetch` of its own. Import the client from `@farm.js/core/api/client`,
+not `@farm.js/core/client`, so one `lib/api.ts` serves both. Native screens send no cookies. Once
+the user has signed in on a web screen, `serverFetch` sends the device's session token, so
+protected routes see the same user (see [Auth on mobile](#auth-on-mobile)). A screen
 navigates by URL only, so `farm-routes.json` always decides what
 opens next: a link from a native screen can open a web screen, a modal, a tab, or another native
 screen, and back returns to it.
@@ -1288,7 +1303,8 @@ parts are designed and still on the way:
   `page.swift` yet; `FarmNativeScreens` in the generated project is where they will register.
 - React Native screens use React Native's own components. `@farm.js/ui` components, native modules
   from `src/native/`, `layout.native.tsx` providers, intent prefetch, and server functions called by
-  reference are not wired into native screens yet; `serverFetch` calls API routes. Images imported
+  reference are not wired into native screens yet; call them through API routes with the typed
+  `apiClient` (as the web does in apps without server actions). Images imported
   by native screens are not copied into the app yet; load them by URL.
 - Page shells are tested in unit and generator tests, and the iOS code type-checks; they have not
   run in a production build on an Android emulator or an iOS simulator yet (see

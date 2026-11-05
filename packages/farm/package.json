@@ -555,6 +555,7 @@
     },
     "./api/client": {
       "types": "./dist/api/client.d.ts",
+      "react-native": "./dist/api/client.native.mjs",
       "import": "./dist/api/client.mjs",
       "require": "./dist/api/client.cjs"
     },

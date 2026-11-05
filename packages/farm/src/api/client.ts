@@ -2042,7 +2042,8 @@ function buildCacheKey(
 }
 
 function isSameOriginAPIBaseURL(baseURL: string): boolean {
-  if (typeof window === "undefined") return baseURL.startsWith("/");
+  // React Native has a `window` but no `location`.
+  if (typeof window === "undefined" || !window.location) return baseURL.startsWith("/");
   return resolveFarmAPIRequestURL("/api", baseURL).origin === window.location.origin;
 }
 
