@@ -158,11 +158,13 @@ export const initialNotes: Note[] = [{ id: "1", title: "Creek" }];
 
   it("keeps a route web, with the reason, when the port needs what it cannot emit yet", async () => {
     const root = await createApp({
-      "src/app/styled/page.tsx": `"use client";
+      "src/app/routed/page.tsx": `"use client";
 import { useState } from "react";
-export default function Styled() {
+import { useRouter } from "@farm.js/core/client";
+export default function Routed() {
   const [draft, setDraft] = useState("");
-  return <input className="p-4" value={draft} onChange={(event) => setDraft(event.target.value)} />;
+  const router = useRouter();
+  return <input value={draft} onChange={(event) => setDraft(router.pathname + event.target.value)} />;
 }
 `,
       "src/app/themed/page.tsx": `"use client";
@@ -176,11 +178,11 @@ export default function Themed() {
 `,
     });
     const result = await generate(root);
-    expect(result.screens["/styled"]).toMatchObject({ screen: "web", requested: "native" });
+    expect(result.screens["/routed"]).toMatchObject({ screen: "web", requested: "native" });
     expect(result.screens["/themed"]).toMatchObject({ screen: "web", requested: "native" });
     expect(result.warnings).toEqual([
       expect.stringContaining(
-        '"/styled" is portable, but Farm cannot port it yet, so it stays web: src/app/styled/page.tsx:5:17 className needs the route\'s stylesheet',
+        '"/routed" is portable, but Farm cannot port it yet, so it stays web: src/app/routed/page.tsx:3:10 uses useRouter from "@farm.js/core/client", which ports do not map yet',
       ),
       expect.stringContaining(
         'src/app/themed/page.tsx:2:25 uses useContext from "react", which ports do not support yet',
@@ -282,11 +284,131 @@ export default function Site({ children }) { return children; }
     const tailwind = await createApp({
       "src/app/(site)/layout.tsx": `import "../app.css";\nexport default function Site({ children }) { return children; }\n`,
       "src/app/(site)/about/page.tsx": "export default function About() { return <p>About</p>; }\n",
-      "src/app/app.css": `@import "tailwindcss";\n`,
+      "src/app/app.css": `@import "tailwindcss";\n@utility tab-4 { tab-size: 4; }\n`,
       "src/app/lab/page.tsx": page,
     });
+    // A custom utility changes what classes mean, which the native style table does not know.
     expect((await generate(tailwind)).warnings).toEqual([
-      expect.stringContaining("src/app/app.css uses @import, @layer, or Tailwind"),
+      expect.stringContaining("src/app/app.css uses @utility, which ports do not read yet"),
     ]);
+  });
+
+  it("ports Tailwind pages: preflight, utilities, and the app's own classes", async () => {
+    const root = await createApp({
+      "src/app/layout.tsx": `import "./globals.css";
+export default function Layout({ children }) { return <div className="min-h-screen">{children}</div>; }
+`,
+      "src/app/globals.css": `@import "tailwindcss";
+@source "../components";
+.card { padding: 12px; border-radius: 8px; }
+.card p { color: #555; }
+`,
+      "src/app/notes/notes.css": ".note { margin: 0; }\n",
+      "src/app/notes/page.tsx": `"use client";
+import { useState } from "react";
+import { Link } from "@farm.js/core/client";
+import "./notes.css";
+export default function Notes() {
+  const [notes] = useState(["Creek"]);
+  return (
+    <main className="flex flex-col gap-4 p-4">
+      <h1 className="text-2xl font-bold dark:text-white">Notes</h1>
+      <ul>{notes.map((note) => <li key={note} className="card bg-white">{note}</li>)}</ul>
+      <Link className="text-blue-600 underline" href="/">Home</Link>
+    </main>
+  );
+}
+`,
+    });
+    const result = await generate(root);
+    expect(result.warnings).toEqual([]);
+    expect(result.screens["/notes"]).toMatchObject({ screen: "native", source: "analyzer" });
+    const page = await fs.readFile(ports(root, "src/app/notes/page.tsx"), "utf8");
+    // The page's CSS import goes: its rules reach the port through the sheet.
+    expect(page).not.toContain("notes.css");
+    // The JSON after an element's `__farm={`, read up to its matching brace.
+    const resolved = (tag: string) => {
+      const start = page.indexOf("__farm={", page.indexOf(`<${tag} `)) + "__farm={".length;
+      let depth = 0;
+      let end = start;
+      do {
+        if (page[end] === "{") depth += 1;
+        else if (page[end] === "}") depth -= 1;
+        end += 1;
+      } while (depth > 0);
+      return JSON.parse(page.slice(start, end));
+    };
+    expect(resolved("__FarmDom.h1")).toEqual({
+      tw: {
+        style: { fontSize: 24, lineHeight: 32, fontWeight: 700 },
+        dark: { color: "#ffffff" },
+      },
+      css: { style: {} },
+    });
+    // `card` is the app's class, after the bg-white utility.
+    expect(resolved("__FarmDom.li")).toEqual({
+      tw: { style: { backgroundColor: "#ffffff" } },
+      css: {
+        style: {
+          paddingTop: 12,
+          paddingRight: 12,
+          paddingBottom: 12,
+          paddingLeft: 12,
+          borderTopLeftRadius: 8,
+          borderTopRightRadius: 8,
+          borderBottomRightRadius: 8,
+          borderBottomLeftRadius: 8,
+        },
+      },
+    });
+    expect(resolved("__FarmLink").tw.style).toMatchObject({ color: "#155dfc" });
+    expect(await fs.readFile(ports(root, "app/notes.port.tsx"), "utf8")).toContain(
+      "<FarmDomScreen sheet={sheet} preflight>",
+    );
+
+    // With Tailwind loaded, a class nothing styles may be a utility the table does not know; a
+    // class rule that depends on structure cannot be decided. Both keep the route web.
+    await fs.writeFile(
+      path.join(root, "src/app/notes/page.tsx"),
+      (await fs.readFile(path.join(root, "src/app/notes/page.tsx"), "utf8"))
+        .replace('"flex flex-col gap-4 p-4"', '"flex flex-col gap-4 p-4 ghost"')
+        .replace(
+          '<li key={note} className="card bg-white">{note}</li>',
+          '<li key={note} className="card"><p>{note}</p></li>',
+        ),
+    );
+    const blocked = await generate(root);
+    expect(blocked.screens["/notes"]).toMatchObject({ screen: "web", requested: "native" });
+    expect(blocked.warnings[0]).toContain('class "ghost"');
+    expect(blocked.warnings[0]).toContain('".card p" depends on where <p> renders');
+  });
+
+  it("resolves classes against the app's @theme, with dark values from :root", async () => {
+    const root = await createApp({
+      "src/app/layout.tsx": `import "./globals.css";\nexport default function Layout({ children }) { return children; }\n`,
+      "src/app/globals.css": `@import "tailwindcss";
+:root { --surface: #ffffff; }
+@media (prefers-color-scheme: dark) { :root { --surface: #1d211e; } }
+@theme inline {
+  --color-surface: var(--surface);
+  --color-brand: oklch(52.7% 0.154 150.069);
+  --radius-card: 12px;
+}
+`,
+      "src/app/page.tsx": PACKING.replace(
+        "<button onClick",
+        '<button className="bg-brand rounded-card" onClick',
+      ).replace("<ul>", '<ul className="bg-surface">'),
+    });
+    const result = await generate(root);
+    expect(result.warnings).toEqual([]);
+    const page = await fs.readFile(ports(root, "src/app/page.tsx"), "utf8");
+    expect(page).toContain(
+      // The theme's oklch brand color, converted as Tailwind's own green-700 is.
+      '<__FarmDom.button __farm={{"tw":{"style":{"borderTopLeftRadius":12,"borderTopRightRadius":12,"borderBottomRightRadius":12,"borderBottomLeftRadius":12,"backgroundColor":"#008236"}},"css":{"style":{}}}}',
+    );
+    expect(page).toContain(
+      '<__FarmDom.ul __farm={{"tw":{"style":{"backgroundColor":"#ffffff"},"dark":{"backgroundColor":"#1d211e"}},"css":{"style":{}}}}>',
+    );
   });
 });

@@ -444,17 +444,17 @@ export function inspectFarmNativeStylesheets(
 }
 
 /**
- * For a React Native port, which knows each element's tag but not where it renders: the style
- * the rules for the tag alone give it (type, universal, `:root`), light and dark, and every rule
- * that could match it but depends on more than its tag, which a port cannot decide.
+ * For a React Native port, which knows each element's tag and static classes but not where it
+ * renders: the style the rules for the element alone give it (type, class, universal, `:root`),
+ * light and dark, and every rule that could match it but depends on more than the element, which
+ * a port cannot decide.
  *
- * Port elements carry no classes, so a rule that needs a class on the element never matches, and
- * one that needs a class on an ancestor or sibling matches only when a layout around the page
- * renders that class (`contextClasses`).
+ * A rule that needs a class on an ancestor or sibling matches only when something around the
+ * element renders that class (`contextClasses`: the page's own classes and its layouts').
  */
-export function cascadeFarmNativeStylesheetsForTag(
+export function cascadeFarmNativeStylesheetsForElement(
   sheets: readonly FarmNativeStylesheet[],
-  tag: string,
+  element: { tag: string; classes?: readonly string[] },
   contextClasses: ReadonlySet<string> = new Set(),
 ): {
   style: FarmNativeStyle;
@@ -466,6 +466,7 @@ export function cascadeFarmNativeStylesheetsForTag(
   inherit: string[];
   problems: string[];
 } {
+  const { tag, classes = [] } = element;
   const problems: string[] = [];
   const inherit = new Set<string>();
   const problem = (message: string) => {
@@ -475,7 +476,12 @@ export function cascadeFarmNativeStylesheetsForTag(
     for (const rule of sheet.rules) {
       const [subject, ...context] = rule.selector.steps;
       const compound = subject!.compound;
-      if ((compound.tag && compound.tag !== tag) || compound.classes.length > 0) continue;
+      if (
+        (compound.tag && compound.tag !== tag) ||
+        compound.classes.some((name) => !classes.includes(name))
+      ) {
+        continue;
+      }
       const unreachable = context.some(
         (step) =>
           step.compound.classes.length > 0 &&
@@ -500,14 +506,19 @@ export function cascadeFarmNativeStylesheetsForTag(
       }
     }
     for (const unknown of sheet.unknown) {
-      if (unknown.classes.length === 0 && (!unknown.tag || unknown.tag === tag)) {
-        problem(`"${unknown.text}" is CSS a port cannot apply`);
-      }
+      const touches =
+        unknown.classes.length > 0
+          ? unknown.classes.some((name) => classes.includes(name))
+          : !unknown.tag || unknown.tag === tag;
+      if (touches) problem(`"${unknown.text}" is CSS a port cannot apply`);
     }
   }
   const { style, dark, unsupported } = cascadeFarmNativeStylesheets(sheets, {
     tag,
-    attributes: tag === "html" ? { "data-farm-shell": "" } : {},
+    attributes: {
+      ...(tag === "html" ? { "data-farm-shell": "" } : {}),
+      ...(classes.length > 0 ? { class: classes.join(" ") } : {}),
+    },
   });
   for (const message of unsupported) problem(`<${tag}> ${message}`);
   return { style, dark, inherit: [...inherit].sort(), problems };

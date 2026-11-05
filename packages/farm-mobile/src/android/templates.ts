@@ -435,6 +435,40 @@ function linkPackageList(engine: MobileGeneratedFile): MobileGeneratedFile {
   return { ...engine, contents: source.replace(PACKAGE_LIST_FROM, PACKAGE_LIST_TO) };
 }
 
+const ANDROID_MANIFEST = "app/src/main/AndroidManifest.xml";
+const INTERNET_PERMISSION = '    <uses-permission android:name="android.permission.INTERNET" />\n';
+
+/**
+ * The manifest with the permissions `mobile.modules` lists, after the shell's own `INTERNET`.
+ * Community modules merge their own manifest's permissions; these are the app's extra ones.
+ * Without any, the manifest is the template unchanged.
+ */
+function addManifestPermissions(
+  manifest: MobileGeneratedFile,
+  context: MobileShellContext,
+): MobileGeneratedFile {
+  // A core from before `mobile.modules` resolves no `modules` entry.
+  const modules = Object.values(context.mobile.modules ?? {});
+  const permissions = [...new Set(modules.flatMap((module) => module.permissions))]
+    .filter((permission) => permission !== "android.permission.INTERNET")
+    .sort();
+  if (permissions.length === 0) return manifest;
+  const source = String(manifest.contents);
+  if (!source.includes(INTERNET_PERMISSION)) {
+    throw new Error(`AndroidManifest.xml no longer contains "${INTERNET_PERMISSION.trim()}".`);
+  }
+  const lines = permissions
+    .map((permission) => `    <uses-permission android:name="${permission}" />\n`)
+    .join("");
+  return {
+    ...manifest,
+    contents: source.replace(
+      INTERNET_PERMISSION,
+      `${INTERNET_PERMISSION}    <!-- mobile.modules -->\n${lines}`,
+    ),
+  };
+}
+
 async function readTemplateFiles(dir: string, prefix = ""): Promise<MobileGeneratedFile[]> {
   const files: MobileGeneratedFile[] = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -498,7 +532,10 @@ export async function createAndroidProject(
         mainActivity: MAIN_ACTIVITY,
       }),
     });
+    linking.appModuleFiles?.forEach(add);
   }
+  const manifest = byPath.get(ANDROID_MANIFEST);
+  if (manifest) add(addManifestPermissions(manifest, context));
   const files = [...byPath.values()];
   files.push(
     ...(await createBundledAssetFiles(context.assets, {
