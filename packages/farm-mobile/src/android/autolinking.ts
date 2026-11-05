@@ -2,12 +2,14 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { MobileShellContext } from "@farm.js/core/mobile";
+import type { MobileGeneratedFile, MobileShellContext } from "@farm.js/core/mobile";
+import { resolveAndroidAppModules } from "./app-modules.js";
 
 /**
  * Community React Native modules on native screens (RFC 0004, 7.5). Farm writes the
  * `autolinking.json` React Native's Gradle plugin reads, from the app's own `dependencies` only:
- * the packages Metro bundles for the screens, without `@react-native-community/cli`.
+ * the packages Metro bundles for the screens, without `@react-native-community/cli`. The app's
+ * own modules in `src/native/` are one more entry (app-modules.ts).
  */
 
 /** One linked package, in the shape React Native's Gradle plugin reads from `autolinking.json`. */
@@ -39,6 +41,8 @@ export interface AndroidAutolinking {
   reactNativeDir: string;
   gradlePluginDir: string;
   codegenDir: string;
+  /** The library for the app's own modules in `src/native/`, when it has specs. */
+  appModuleFiles?: MobileGeneratedFile[];
 }
 
 function mobileError(message: string): Error {
@@ -205,9 +209,10 @@ async function linkPackage(name: string, root: string): Promise<AndroidNativeMod
 
 /**
  * The native modules a project with React Native screens links: the app's `dependencies` that
- * have Android code. `devDependencies` and dependencies of dependencies are never linked, the
- * way Metro bundles only what the screens import. Undefined when there is nothing to link, and
- * then the project is exactly the one without autolinking.
+ * have Android code, and the app's own modules in `src/native/`. `devDependencies` and
+ * dependencies of dependencies are never linked, the way Metro bundles only what the screens
+ * import. Undefined when there is nothing to link, and then the project is exactly the one
+ * without autolinking.
  */
 export async function resolveAndroidAutolinking(
   context: MobileShellContext,
@@ -228,6 +233,8 @@ export async function resolveAndroidAutolinking(
     const linked = await linkPackage(name, root);
     if (linked) modules.push(linked);
   }
+  const appModules = await resolveAndroidAppModules(context);
+  if (appModules) modules.push(appModules.module);
   if (modules.length === 0) return undefined;
 
   const reactNativeDir = await findPackage("react-native", context.root);
@@ -254,6 +261,7 @@ export async function resolveAndroidAutolinking(
     reactNativeDir: slash(reactNativeDir),
     gradlePluginDir: slash(gradlePluginDir),
     codegenDir: slash(codegenDir),
+    ...(appModules ? { appModuleFiles: appModules.files } : {}),
   };
 }
 

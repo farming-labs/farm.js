@@ -164,7 +164,19 @@ Common config fields:
   transitive packages, and must have `codegenConfig` (new architecture) or generation fails naming
   the package; an app that links one builds through React Native's Gradle plugin, AGP 9.2.1 and
   Gradle 9.4.1, apps without one are unchanged; verified on an Android emulator, not on devices); on iOS `native` screens show a placeholder;
-  `platform` screens show a placeholder on both; `src/native/` is for native module specs
+  `platform` screens show a placeholder on both
+- App native modules: `src/native/Native<Name>.ts` Codegen specs
+  (`TurboModuleRegistry.getEnforcing<Spec>("<Name>")`) plus one Kotlin class per spec that extends
+  `dev.farmjs.mobile.specs.Native<Name>Spec` and takes a `ReactApplicationContext`; with a React
+  Native screen on Android, Farm copies them into a `farm-app-modules` library linked through
+  `autolinking.json` like a community module (Codegen by React Native's Gradle plugin, a generated
+  `FarmAppModulesPackage`); a spec without exactly one class, or a `.kt` without `package`, fails
+  naming the file; Swift files are copied outside the Xcode target (no iOS React Native host);
+  keep `src/native` out of the web tsconfig; not yet built into an APK
+- `mobile.modules`: per module (an app module's registered name or a React Native package in
+  `dependencies`), `permissions` (full Android names, added to `AndroidManifest.xml` after
+  `INTERNET`) and `usage` (`NS...UsageDescription` keys into `Info.plist`); every problem reported
+  at once with the key and fix; no permission table, community modules merge their own manifests
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits

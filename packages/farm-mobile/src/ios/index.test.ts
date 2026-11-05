@@ -367,6 +367,63 @@ describe("@farm.js/mobile/ios", () => {
     expect(build).not.toContain("NSLocalNetworkUsageDescription");
   });
 
+  it("adds the usage strings mobile.modules sets to Info.plist", async () => {
+    const base = buildContext();
+    const plist = (
+      await generated({
+        ...base,
+        mobile: {
+          ...base.mobile,
+          modules: {
+            Device: { permissions: ["android.permission.VIBRATE"], usage: {} },
+            "react-native-camera-kit": {
+              permissions: [],
+              usage: { NSCameraUsageDescription: 'Scans "receipts" & notes.' },
+            },
+            Contacts: {
+              permissions: [],
+              usage: { NSContactsUsageDescription: "Finds people to share notes with." },
+            },
+          },
+        },
+      })
+    )["App/Info.plist"]!;
+    expect(plist).toContain(
+      "\t<key>NSCameraUsageDescription</key>\n\t<string>Scans &quot;receipts&quot; &amp; notes.</string>",
+    );
+    expect(plist).toContain(
+      "\t<key>NSContactsUsageDescription</key>\n\t<string>Finds people to share notes with.</string>",
+    );
+    expect(plist).not.toContain("VIBRATE");
+    // Without mobile.modules, no usage strings.
+    expect((await generated(base))["App/Info.plist"]).not.toContain("UsageDescription");
+  });
+
+  it("copies the app's Swift module classes next to the project, outside the built target", async () => {
+    const root = await tempDir();
+    const dir = path.join(root, "src/native");
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "DeviceModule.swift"), "import Foundation\n");
+    await writeFile(path.join(dir, "DeviceModule.kt"), "package com.example\n");
+    const files = await generated(
+      context({
+        appModules: {
+          dir,
+          specs: [{ name: "Device", file: path.join(dir, "NativeDevice.ts") }],
+          android: [path.join(dir, "DeviceModule.kt")],
+          ios: [path.join(dir, "DeviceModule.swift")],
+        },
+      }),
+    );
+    expect(files["FarmAppModules/DeviceModule.swift"]).toBe("import Foundation\n");
+    expect(Object.keys(files).filter((file) => file.endsWith(".kt"))).toEqual([]);
+    // iOS does not host React Native yet, so the project neither builds nor lists the class.
+    expect(files["App.xcodeproj/project.pbxproj"]).not.toContain("DeviceModule");
+    expect(files["App.xcodeproj/project.pbxproj"]).toBe(
+      (await generated(context()))["App.xcodeproj/project.pbxproj"],
+    );
+  });
+
   it("registers the bridge only with origin and main-frame checks, and evaluates only into the app", async () => {
     const files = await generated(context());
     const registration = /addScriptMessageHandler|\.add\([^)]*\bname:/;
