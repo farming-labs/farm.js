@@ -609,7 +609,8 @@ shell ◀── { root: { type: "View", children: [...] } } ──────�
   type, class, id, and attribute selectors, compounds, descendant, child, and sibling combinators,
   `:first-child` and `:last-child`, specificity and source order, `:root` variables with `var()`,
   and `@media (prefers-color-scheme: dark)`. Shorthands such as `margin: 8px 0 4px` and
-  `border: 1px solid var(--border)` expand; `:hover` and `:focus` rules never match a static
+  `border: 1px solid var(--border)` expand, and `background: none` or its minified `0 0` clears the
+  color; `:hover` and `:focus` rules never match a static
   screen; `body` passes its text styles down and gives the screen its background. Rules in
   `@layer` are Tailwind's and left to the table above. Another `@media`, an unknown pseudo-class,
   or a declaration with no native style is reported in `unsupported`. The analyzer reads the plain
@@ -629,6 +630,11 @@ routes as web screens until the iOS shell draws them.
 
 A web server answers these requests only for an app with a `mobile` block, so a web-only app's
 server is unchanged.
+
+`examples/mobile` sets `native.auto: "on"`. Seven of its routes are `server` screens (`/`,
+`/notes`, `/notes/[id]`, `/about`, `/feed`, `/navigation/step/[n]`, `/docs/[...slug]`), and its
+`pnpm smoke` checks that each one's tree converts with nothing in `unsupported` against the
+production server. The routes with client-side state stay web.
 
 ## Native screens
 

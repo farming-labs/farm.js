@@ -28,7 +28,9 @@ export default defineConfig({
       "/navigation/step/[n]": { presentation: "replace" },
     },
     native: {
-      auto: "report",
+      // Pages the analyzer proves render natively become `server` screens: the server renders the
+      // page and the shell draws it with native views. Pages with client-side logic stay web.
+      auto: "on",
       routes: {
         // /map is native (page.native.tsx) except on iOS, which keeps the web screen for now.
         "/map": { screen: "native", ios: "web" },
