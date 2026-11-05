@@ -53,7 +53,10 @@ function modifiedAt(file: string): number {
 }
 
 // Inferences by module, valid while none of the files they read changes.
-const inferences = new Map<string, { stamps: Array<[string, number]>; result: FarmIslandInference }>();
+const inferences = new Map<
+  string,
+  { stamps: Array<[string, number]>; result: FarmIslandInference }
+>();
 
 /**
  * Infers the hydration of the islands `filePath` exports (a `"use client"` module) with islx's
@@ -169,4 +172,3 @@ export function resolveFarmRouteRootStrategy(
   if (inference.declared) return combined;
   return inference.strategy ?? "load";
 }
-
