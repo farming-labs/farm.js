@@ -66,6 +66,9 @@
       "mobile": [
         "./dist/mobile.d.ts"
       ],
+      "native": [
+        "./dist/native.d.ts"
+      ],
       "internal/desktop-guard": [
         "./dist/internal/desktop-guard.d.ts"
       ],
@@ -377,6 +380,11 @@
       "types": "./dist/mobile.d.ts",
       "import": "./dist/mobile.mjs",
       "require": "./dist/mobile.cjs"
+    },
+    "./native": {
+      "types": "./dist/native.d.ts",
+      "import": "./dist/native.mjs",
+      "require": "./dist/native.cjs"
     },
     "./internal/desktop-guard": {
       "types": "./dist/internal/desktop-guard.d.ts",
@@ -706,6 +714,11 @@
       "import": "./dist/internal/islands-runtime.mjs",
       "require": "./dist/internal/islands-runtime.cjs"
     },
+    "./internal/islands-boot": {
+      "types": "./dist/internal/islands-boot.d.ts",
+      "import": "./dist/internal/islands-boot.mjs",
+      "require": "./dist/internal/islands-boot.cjs"
+    },
     "./internal/islands-server": {
       "types": "./dist/internal/islands-server.d.ts",
       "import": "./dist/internal/islands-server.mjs",
@@ -783,7 +796,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farm.js/islx": "0.0.7",
+    "@farm.js/islx": "0.0.8",
     "@farming-labs/orm": "0.0.66",
     "@farming-labs/orm-runtime": "0.0.66",
     "@formatjs/icu-messageformat-parser": "3.5.15",

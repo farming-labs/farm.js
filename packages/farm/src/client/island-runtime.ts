@@ -80,6 +80,16 @@ function runWhenIdle(callback: () => void): () => void {
   return () => window.clearTimeout(handle);
 }
 
+/**
+ * The element a click before hydration is held on: a control, or a same-page link, whose handler
+ * the island may need (a table of contents marking its heading). Any other link navigates.
+ */
+export function heldClickTarget(target: Element): Element | null {
+  const link = target.closest("a[href]");
+  if (link) return link.getAttribute("href")?.startsWith("#") ? link : null;
+  return target.closest(FARM_ISLAND_REPLAYABLE_SELECTOR);
+}
+
 function replayClick(target: Element): void {
   const clickable = target as Element & { click?: () => void };
   if (typeof clickable.click === "function") {
@@ -267,14 +277,10 @@ export function scheduleFarmIslandHydration<T>({
     };
 
     const queueActivatingClick = (event: MouseEvent) => {
-      const target =
-        event.target instanceof Element
-          ? event.target.closest(FARM_ISLAND_REPLAYABLE_SELECTOR)
-          : null;
+      const target = event.target instanceof Element ? heldClickTarget(event.target) : null;
       if (
         !target ||
         !container.contains(target) ||
-        target.closest("a[href]") ||
         event.button !== 0 ||
         event.metaKey ||
         event.altKey ||

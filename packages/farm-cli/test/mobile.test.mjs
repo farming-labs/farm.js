@@ -125,6 +125,7 @@ test("farm config inspect --mobile prints the block and farm-routes.json for an 
       budgets: {},
     },
     shells: false,
+    modules: {},
   });
   // Every route's tier on this OS and what decided it.
   assert.deepEqual(printed.screens, {
@@ -396,7 +397,7 @@ test("farm build --mobile builds the mobile client apart from the web output and
   // The config asks for a native "/notes"; the analyzer proves the page needs no JavaScript, so
   // the shell draws it from the page the server renders, with no warning.
   assert.match(result.output, /\/notes\s+server\s+native\s/);
-  assert.doesNotMatch(result.output, /Farm cannot port pages yet/);
+  assert.doesNotMatch(result.output, /Farm cannot port it yet/);
   // native.auto defaults to "report": the build prints the analyzer table and writes the report.
   assert.match(result.output, /route\s+screen\s+tier\s+decision\s+mapped\s+portable\s+reason/);
   assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);

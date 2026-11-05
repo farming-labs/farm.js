@@ -262,6 +262,7 @@ describe("the route manifest", () => {
       budgets: {},
     },
     shells: true,
+    modules: {},
   };
 
   it("maps routes to their shells and carries nothing else of them", () => {

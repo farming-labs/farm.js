@@ -159,8 +159,32 @@ Common config fields:
   needs NDK 27.1.12297006 and CMake 3.22.1; hooks `useNavigate`, `useRouteParams`,
   `useServerQuery`, `serverFetch`; Metro in dev, Hermes bytecode in builds; a screen that throws
   while loading shows the web twin `page.tsx` in builds and React Native's error screen in dev;
-  keep native files out of the web tsconfig); on iOS `native` screens show a placeholder;
-  `platform` screens show a placeholder on both; `src/native/` is for native module specs
+  keep native files out of the web tsconfig; React Native modules in the app's own `dependencies`
+  with Android code are autolinked from a Farm-written `autolinking.json`, never devDependencies or
+  transitive packages, and must have `codegenConfig` (new architecture) or generation fails naming
+  the package; an app that links one builds through React Native's Gradle plugin, AGP 9.2.1 and
+  Gradle 9.4.1, apps without one are unchanged; verified on an Android emulator, not on devices); on iOS `native` screens show a placeholder;
+  `platform` screens show a placeholder on both
+- App native modules: `src/native/Native<Name>.ts` Codegen specs
+  (`TurboModuleRegistry.getEnforcing<Spec>("<Name>")`) plus one Kotlin class per spec that extends
+  `dev.farmjs.mobile.specs.Native<Name>Spec` and takes a `ReactApplicationContext`; with a React
+  Native screen on Android, Farm copies them into a `farm-app-modules` library linked through
+  `autolinking.json` like a community module (Codegen by React Native's Gradle plugin, a generated
+  `FarmAppModulesPackage`); a spec without exactly one class, or a `.kt` without `package`, fails
+  naming the file; Swift files are copied outside the Xcode target (no iOS React Native host);
+  keep `src/native` out of the web tsconfig; not yet built into an APK
+- `mobile.modules`: per module (an app module's registered name or a React Native package in
+  `dependencies`), `permissions` (full Android names, added to `AndroidManifest.xml` after
+  `INTERNET`) and `usage` (`NS...UsageDescription` keys into `Info.plist`); every problem reported
+  at once with the key and fix; no permission table, community modules merge their own manifests;
+  `web: true` (app modules only, a community module is an error) lets web screens call the module
+- Web screens calling app modules: `import { native, NativeUnavailableError, NativeCallError } from
+"@farm.js/core/native"`; `native.<Name>.available()` first, then `native.<Name>.<method>(...args)`
+  for the spec's Promise methods only; Android only (needs a React Native screen in the app, or
+  generation fails), iOS `available()` is false; arguments are checked against the Codegen spec in
+  generated Kotlin before the module runs (`invalid_args`, `unknown_method`, `native_error`, or the
+  module's own reject code); calls run on the module instance native screens use; types come from
+  the specs into `src/farm.d.ts` (`FarmNativeModules`); no file results or event subscriptions yet
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits

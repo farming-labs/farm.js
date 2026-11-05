@@ -442,3 +442,97 @@ export function inspectFarmNativeStylesheets(
   }
   return { styled, problems };
 }
+
+/**
+ * For a React Native port, which knows each element's tag and static classes but not where it
+ * renders: the style the rules for the element alone give it (type, class, universal, `:root`),
+ * light and dark, and every rule that could match it but depends on more than the element, which
+ * a port cannot decide.
+ *
+ * A rule that needs a class on an ancestor or sibling matches only when something around the
+ * element renders that class (`contextClasses`: the page's own classes and its layouts').
+ */
+export function cascadeFarmNativeStylesheetsForElement(
+  sheets: readonly FarmNativeStylesheet[],
+  element: { tag: string; classes?: readonly string[] },
+  contextClasses: ReadonlySet<string> = new Set(),
+): {
+  style: FarmNativeStyle;
+  dark: FarmNativeStyle;
+  /**
+   * Text styles a rule sets to `inherit`, such as `font: inherit` on `input`: form controls take
+   * no font or color from their parent otherwise.
+   */
+  inherit: string[];
+  problems: string[];
+} {
+  const { tag, classes = [] } = element;
+  const problems: string[] = [];
+  const inherit = new Set<string>();
+  const problem = (message: string) => {
+    if (!problems.includes(message)) problems.push(message);
+  };
+  for (const sheet of sheets) {
+    for (const rule of sheet.rules) {
+      const [subject, ...context] = rule.selector.steps;
+      const compound = subject!.compound;
+      if (
+        (compound.tag && compound.tag !== tag) ||
+        compound.classes.some((name) => !classes.includes(name))
+      ) {
+        continue;
+      }
+      const unreachable = context.some(
+        (step) =>
+          step.compound.classes.length > 0 &&
+          step.compound.classes.some((name) => !contextClasses.has(name)),
+      );
+      if (unreachable) continue;
+      const shellOnly =
+        tag === "html" &&
+        compound.attributes.every((attribute) => attribute.name === "data-farm-shell");
+      if (
+        context.length > 0 ||
+        compound.id ||
+        compound.positions.length > 0 ||
+        (compound.attributes.length > 0 && !shellOnly)
+      ) {
+        problem(`"${rule.text}" depends on where <${tag}> renders`);
+        continue;
+      }
+      for (const [property, value] of rule.declarations) {
+        if (value.trim().toLowerCase() !== "inherit") continue;
+        for (const key of INHERITABLE[property] ?? []) inherit.add(key);
+      }
+    }
+    for (const unknown of sheet.unknown) {
+      const touches =
+        unknown.classes.length > 0
+          ? unknown.classes.some((name) => classes.includes(name))
+          : !unknown.tag || unknown.tag === tag;
+      if (touches) problem(`"${unknown.text}" is CSS a port cannot apply`);
+    }
+  }
+  const { style, dark, unsupported } = cascadeFarmNativeStylesheets(sheets, {
+    tag,
+    attributes: {
+      ...(tag === "html" ? { "data-farm-shell": "" } : {}),
+      ...(classes.length > 0 ? { class: classes.join(" ") } : {}),
+    },
+  });
+  for (const message of unsupported) problem(`<${tag}> ${message}`);
+  return { style, dark, inherit: [...inherit].sort(), problems };
+}
+
+/** The native text styles each inheritable CSS property sets. */
+const INHERITABLE: Record<string, string[]> = {
+  font: ["fontFamily", "fontSize", "fontStyle", "fontWeight", "lineHeight"],
+  "font-family": ["fontFamily"],
+  "font-size": ["fontSize"],
+  "font-style": ["fontStyle"],
+  "font-weight": ["fontWeight"],
+  "line-height": ["lineHeight"],
+  "letter-spacing": ["letterSpacing"],
+  color: ["color"],
+  "text-align": ["textAlign"],
+};

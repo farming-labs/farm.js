@@ -142,6 +142,20 @@ declare module "@farm.js/core/i18n" {
 }
 
 /**
+ * Auto-generated from the Codegen specs in src/native: native.<module> from @farm.js/core/native.
+ * Web screens reach a module's Promise methods only when mobile.modules.<name>.web is true, and
+ * only inside the Android shell; check native.<module>.available() first.
+ */
+declare module "@farm.js/core/native" {
+  interface FarmNativeModules {
+    Device: {
+      model(): Promise<string>;
+      vibrate(ms: number): Promise<void>;
+    };
+  }
+}
+
+/**
  * Auto-generated content collection types from Farm layers and farm.config.
  * Regenerated on dev start, build, and farm generate.
  */
