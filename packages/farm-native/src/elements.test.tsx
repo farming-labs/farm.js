@@ -296,4 +296,63 @@ describe("FarmDom", () => {
       scheme.current = "light";
     }
   });
+
+  it("starts from Tailwind's preflight, then utilities, then the app's rules, then inline style", () => {
+    const sheet = { h1: { style: { fontSize: 26 } } };
+    const html = render(
+      createElement(
+        FarmDomScreen,
+        { sheet, preflight: true },
+        createElement(
+          "rn-root",
+          null,
+          createElement(
+            h1,
+            { __farm: { tw: { style: { fontSize: 30, color: "#101828" } } } },
+            "Notes",
+          ),
+          createElement(
+            div,
+            {
+              __farm: {
+                tw: {
+                  style: { borderBottomWidth: 1, paddingTop: 16 },
+                  dark: { backgroundColor: "#000000" },
+                },
+                css: { style: { paddingTop: 12 } },
+              },
+            },
+            "Body",
+          ),
+          createElement(ul, null, createElement(li, null, "One")),
+          createElement(input, { value: "x" }),
+        ),
+      ),
+    );
+    // No body margin; the page's text has a 1.5 line height.
+    expect(html).toContain(
+      'data-content="{&quot;paddingTop&quot;:0,&quot;paddingRight&quot;:0,&quot;paddingBottom&quot;:0,&quot;paddingLeft&quot;:0}"',
+    );
+    // The app's unlayered h1 rule beats the text-3xl utility, as cascade layers order them.
+    expect(styleOf(html, "text", 0)).toMatchObject({
+      fontSize: 26,
+      color: "#101828",
+      lineHeight: 39,
+    });
+    expect(styleOf(html, "text", 0)).not.toHaveProperty("marginTop");
+    // Preflight's solid zero-width border lets `border-b` draw; the app's padding beats `pt-4`.
+    expect(styleOf(html, "view", 0)).toMatchObject({
+      borderStyle: "solid",
+      borderBottomWidth: 1,
+      paddingTop: 12,
+    });
+    // Lists have no markers; inputs take the page's font and color on a transparent background.
+    expect(html).not.toContain("•");
+    expect(styleOf(html, "textinput")).toMatchObject({
+      backgroundColor: "transparent",
+      fontSize: 16,
+      color: "#000000",
+      lineHeight: 24,
+    });
+  });
 });

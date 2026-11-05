@@ -717,7 +717,8 @@ test("a page with an island that hydrates at load loads the client runtime at on
 }) => {
   test.skip(mode !== "islands", "rsc hydrates every client component on load");
   const scripts = scriptRequests(page);
-  await page.goto("/");
+  // /window's island reads the window in an effect, so it hydrates at load.
+  await page.goto("/window");
   await hydrated(page);
   expect(scripts.filter(isClientRuntime)).toHaveLength(1);
 });

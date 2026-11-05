@@ -37,5 +37,10 @@ export default defineConfig({
       },
       budgets: { appSizeMb: 12, screenOpenMs: 300, droppedFrames: 2 },
     },
+    // The app's own Device module (src/native/) vibrates, so the Android manifest declares
+    // VIBRATE, an install-time permission with no prompt.
+    modules: {
+      Device: { permissions: ["android.permission.VIBRATE"] },
+    },
   }),
 });

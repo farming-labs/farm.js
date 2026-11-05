@@ -31,7 +31,7 @@ pnpm smoke               # checks the mobile decisions and the web build
 | `/docs/[...slug]`        | A catch-all route                                                         |
 | `/feed`                  | 240 rows, for scroll and frame-time checks                                |
 | `/stations/[id]`         | A programmatic route (`src/farm.routes.tsx`) whose data comes from `data.main` |
-| `/map`                   | `page.native.tsx`: a React Native list of stations from `GET /api/stations`; a row opens the web `/stations/[id]`. `mobile.native.routes` keeps it web on iOS |
+| `/map`                   | `page.native.tsx`: a React Native list of stations from `GET /api/stations`; a row opens the web `/stations/[id]`; the device model from the app's `Device` module and a vibrate button. `mobile.native.routes` keeps it web on iOS |
 | `/camera`                | `page.native.tsx` with a `page.android.tsx` override: notes from `GET /api/notes` and a button to the web `/notes/new` modal |
 | `/settings/device`       | `page.kt`: a platform screen on Android                                   |
 | `/lab/packing`           | Only portable elements and inline styles: the analyzer says `port`, and `farm build --mobile` generates its React Native port on Android |
@@ -87,6 +87,15 @@ which Gradle installs on the first build, for the 73 KB `libappmodules.so`.
 Netinfo's `ACCESS_NETWORK_STATE` and `ACCESS_WIFI_STATE` permissions are granted at install, with
 no prompt. On an Android 15 emulator, in `pnpm dev:mobile` and in a bytecode APK, `/map` shows
 `wifi` and `true`, then `cellular` with Wi-Fi off and `none` and `false` with all networks off.
+
+`/map` also uses the app's own native module, `Device` (`src/native/NativeDevice.ts`, a Codegen
+spec, and `src/native/DeviceModule.kt`): it shows the phone's model (`testID="device-model"`) and
+a button that vibrates for 200 ms (`testID="vibrate"`). `mobile.modules.Device.permissions` in
+`farm.config.ts` adds `android.permission.VIBRATE` to the manifest, an install-time permission with
+no prompt. Farm copies the module into `farm-app-modules/` in the generated project and links it
+like netinfo. On an Android 15 emulator, in `pnpm dev:mobile` and in a bytecode APK, `/map` shows
+the emulator's model (`sdk_gphone64_arm64`) and `Vibrate` vibrates for 200 ms with no error.
+`src/native/` is type-checked with the native files (`tsconfig.native.json`).
 
 React versions: this example pins `react` and `react-dom` 19.2.8, the version Farm core is tested
 on. React Native 0.88 declares a `react@^19.3.0` peer (its renderer is built from 19.3.0), so pnpm

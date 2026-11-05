@@ -49,7 +49,8 @@ farm build                    # --web, the default, unchanged
 | Server components apps                        | Unreleased                     | Both engines get the mobile client; islands mode also gets device tokens, the RSC pipeline does not (see [Bundled client assets](#bundled-client-assets)); no page shells yet |
 | Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                                            |
 | Native islands and native `@farm.js/ui`       | Planned                        | `mobile.native.islands` is reserved; `@farm.js/ui` renders on the web only (see [Portable components](#portable-components-farmjsui))                                         |
-| Device modules (`native.<name>`)              | Planned                        | Calls reject as unavailable                                                                                                                                                   |
+| App native modules and `mobile.modules`       | Unreleased, Android            | TurboModules from `src/native/` on React Native screens; generated and Codegen-checked, not yet built into an APK (see [App native modules](#app-native-modules))             |
+| Device modules for web screens                | Planned                        | `native.<name>` calls from web screens reject as unavailable                                                                                                                  |
 
 ## Requirements
 
@@ -96,15 +97,16 @@ export default defineConfig({
 });
 ```
 
-| Option   | Notes                                                                                           |
-| -------- | ----------------------------------------------------------------------------------------------- |
-| `name`   | Defaults to package.json `productName` or `name`                                                |
-| `id`     | Android application ID and iOS bundle ID: letters and digits per segment, such as `com.a.notes` |
-| `server` | Origin of the web deployment. `https://`; `http://` only for loopback and LAN hosts in dev      |
-| `tabs`   | At most 5. Each `path` is a static page route                                                   |
-| `routes` | Keyed by page route pattern: `presentation` (`push`, `modal`, `replace`)                        |
-| `native` | Screen tiers per route, the native engine, and the analyzer (below)                             |
-| `shells` | `true` bundles [page shells](#page-shells) in `farm build --mobile`. Defaults to `false`        |
+| Option    | Notes                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------ |
+| `name`    | Defaults to package.json `productName` or `name`                                                 |
+| `id`      | Android application ID and iOS bundle ID: letters and digits per segment, such as `com.a.notes`  |
+| `server`  | Origin of the web deployment. `https://`; `http://` only for loopback and LAN hosts in dev       |
+| `tabs`    | At most 5. Each `path` is a static page route                                                    |
+| `routes`  | Keyed by page route pattern: `presentation` (`push`, `modal`, `replace`)                         |
+| `native`  | Screen tiers per route, the native engine, and the analyzer (below)                              |
+| `shells`  | `true` bundles [page shells](#page-shells) in `farm build --mobile`. Defaults to `false`         |
+| `modules` | Android permissions and iOS usage strings per native module ([`mobile.modules`](#mobilemodules)) |
 
 Tabs and route keys are checked against the app. A web build never calls or checks the block and
 strips it from the server, as it does `desktop`. It also builds the
@@ -527,7 +529,7 @@ The files in a route folder ([The files that make a screen](#the-files-that-make
 the tier. `page.tsx` is required; a native file without one is an error, and so is a React Native
 file and a platform file for the same route and OS. Web and desktop builds never resolve these
 files: they are not routes, not in the generated route types, and not in any web bundle.
-`src/native/` is reserved for native module specs.
+`src/native/` holds the app's own native modules ([App native modules](#app-native-modules)).
 
 ### Page export
 
@@ -769,8 +771,10 @@ screen, and back returns to it.
   dependencies are never linked, and `@react-native-community/cli` is not needed. A module must
   support the new architecture (a `codegenConfig` in its `package.json`): one without it, such as
   `react-native-device-info` 15.0.2, fails the command with an error that names the package
-  instead of being skipped. iOS has no React Native host yet, so modules do nothing there. Not
-  verified yet: an APK build and an emulator run with a linked module.
+  instead of being skipped. The app's own modules in `src/native/` link the same way
+  ([App native modules](#app-native-modules)). iOS has no React Native host yet, so modules do
+  nothing there. A debug APK with netinfo and an app module, and one with an app module alone,
+  build and run on an Android 15 emulator.
 - **Runtime.** React Native's new architecture only: Hermes, Fabric, bridgeless. One runtime is
   shared by every native screen, each its own surface. It starts after the first screen shows
   content, so a web start screen pays nothing at launch.
@@ -794,12 +798,13 @@ screen, and back returns to it.
   - The example's screen bundle compiles to 1.23 MB of Hermes bytecode (Metro 18.5 s, `hermesc`
     1.6 s).
   - Only the 64-bit ABIs are built (`arm64-v8a`, `x86_64`), so 32-bit devices are not supported.
-  - An app that links at least one native module builds through React Native's Gradle plugin
-    and its toolchain, loaded from the app's `node_modules`: Android Gradle plugin 9.2.1 and Gradle
-    9.4.1 instead of the shell's 8.7.3 and 8.11.1, and JDK 17 or newer. The plugin compiles itself
-    with a JDK 17 toolchain, so on a machine without JDK 17 the first build also downloads one
-    (about 490 MB in `~/.gradle/jdks`), and Android build-tools 36.0.0. Apps without native modules
-    keep the shell's toolchain and generate the same project as before.
+  - An app that links at least one native module, a community one or its own, builds through
+    React Native's Gradle plugin and its toolchain, loaded from the app's `node_modules`: Android
+    Gradle plugin 9.2.1 and Gradle 9.4.1 instead of the shell's 8.7.3 and 8.11.1, and JDK 17 or
+    newer. The plugin compiles itself with a JDK 17 toolchain, so on a machine without JDK 17 the
+    first build also downloads one (about 490 MB in `~/.gradle/jdks`), and Android build-tools
+    36.0.0. Apps without native modules keep the shell's toolchain and generate the same project
+    as before.
 
 Native files import `react-native`, which a web-only checkout may not have. Keep them out of the
 web type-check and check them on their own:
@@ -811,7 +816,7 @@ web type-check and check them on their own:
     /* ... */
   },
   "include": ["src"],
-  "exclude": ["src/**/*.native.tsx", "src/**/*.android.tsx", "src/**/*.ios.tsx"],
+  "exclude": ["src/**/*.native.tsx", "src/**/*.android.tsx", "src/**/*.ios.tsx", "src/native"],
 }
 ```
 
@@ -820,7 +825,7 @@ web type-check and check them on their own:
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "lib": ["ESNext"], "customConditions": ["react-native"] },
-  "include": ["src/**/*.native.tsx", "src/**/*.android.tsx", "src/**/*.ios.tsx"],
+  "include": ["src/**/*.native.tsx", "src/**/*.android.tsx", "src/**/*.ios.tsx", "src/native"],
   "exclude": [],
 }
 ```
@@ -830,8 +835,10 @@ web type-check and check them on their own:
 A phone has capabilities a browser does not — the camera, SMS, contacts, sensors, push. Here is the
 honest state of reaching them from a Farm app today, and where it is headed.
 
-**Nothing ships automatically.** The generated app declares only the `INTERNET` permission, and the
-WebView is given no device APIs, so there is no `native.camera` or `native.sms` to call yet.
+**Nothing ships automatically.** The generated app declares the `INTERNET` permission and the ones
+[`mobile.modules`](#mobilemodules) lists, and the WebView is given no device APIs, so a web screen
+has no `native.camera` or `native.sms` to call yet. Native screens reach device APIs through React
+Native modules: community ones and [the app's own](#app-native-modules).
 
 **The reserved channel.** The bridge defines a device-capability call — `window.__farmBridge.call(name,
 method, args)`, surfaced as `native.<name>` — and both the Android and iOS shells carry a `FarmPlugin`
@@ -867,9 +874,152 @@ platform SDK is in reach:
 media or geolocation grants, so a web screen cannot quietly use `getUserMedia` or the Geolocation API.
 
 In short: navigation, server data, and auth work across every screen today. Native screens on
-Android can use community React Native modules; for web screens, device capabilities are
+Android can use community React Native modules and the app's own; for web screens, device
+capabilities are
 **designed, not shipped** — the reserved `native.<name>` channel and the native-screen escape hatch,
 both on the roadmap.
+
+### App native modules
+
+An app writes its own TurboModule the React Native way, in `src/native/`: a Codegen spec named
+`Native<Something>.ts` and one Kotlin class. There is no Farm-specific spec format.
+
+```ts
+// src/native/NativeDevice.ts
+import { TurboModuleRegistry, type TurboModule } from "react-native";
+
+export interface Spec extends TurboModule {
+  model(): Promise<string>;
+  vibrate(ms: number): Promise<void>;
+}
+
+export default TurboModuleRegistry.getEnforcing<Spec>("Device");
+```
+
+```kotlin
+// src/native/DeviceModule.kt
+package com.example.notes
+
+import android.os.Build
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import dev.farmjs.mobile.specs.NativeDeviceSpec
+
+class DeviceModule(reactContext: ReactApplicationContext) : NativeDeviceSpec(reactContext) {
+    override fun model(promise: Promise) = promise.resolve(Build.MODEL)
+    override fun vibrate(ms: Double, promise: Promise) { /* VibratorManager, then promise.resolve(null) */ }
+}
+```
+
+A native screen imports the spec, as in a React Native app:
+
+```tsx
+// src/app/map/page.native.tsx
+import { useEffect, useState } from "react";
+import { Text } from "react-native";
+import Device from "../../native/NativeDevice";
+
+export default function MapScreen() {
+  const [model, setModel] = useState("...");
+  useEffect(() => {
+    Device.model().then(setModel);
+  }, []);
+  return <Text>{model}</Text>;
+}
+```
+
+What Farm does with it on Android, when the app has at least one React Native screen:
+
+- It copies the specs and every `.kt` file in `src/native/` into a library in the generated
+  project (`farm-app-modules/`) and adds that library to `autolinking.json`, the way it links a
+  community module. React Native's Gradle plugin runs Codegen for the specs, builds the generated
+  JNI code into `libappmodules.so`, and adds the library's package to `PackageList`. An app with app
+  modules and no community modules switches to the plugin's toolchain too
+  ([React Native screens](#react-native-screens)).
+- Codegen writes each spec's base class to `dev.farmjs.mobile.specs`: `NativeDevice.ts` becomes
+  `dev.farmjs.mobile.specs.NativeDeviceSpec`, with one abstract method per spec method (`number`
+  is `Double`, a `Promise` return is a trailing `Promise` argument).
+- A generated `FarmAppModulesPackage` registers the class that extends each spec's base class,
+  under the name the spec registers (`"Device"`). The class takes a `ReactApplicationContext`.
+
+The files are read directly from `src/native/` (not from subfolders). A spec must register its name
+with `TurboModuleRegistry.getEnforcing<Spec>("Name")` (or `get`), each name once. On Android, every
+spec needs exactly one Kotlin class that extends its base class, and every Kotlin file needs a
+`package` line. Otherwise the command fails and names the file and the fix:
+
+```text
+src/native/NativeDevice.ts registers the native module "Device", but no Kotlin class in src/native extends NativeDeviceSpec. Add one, such as src/native/DeviceModule.kt with "class DeviceModule(reactContext: ReactApplicationContext) : NativeDeviceSpec(reactContext)" and "import dev.farmjs.mobile.specs.NativeDeviceSpec".
+```
+
+States:
+
+| App has                                      | Generated Android project                                       |
+| -------------------------------------------- | --------------------------------------------------------------- |
+| No `src/native/` specs                       | Unchanged                                                       |
+| Specs, but no React Native screen on Android | Unchanged: nothing on Android imports the modules               |
+| Specs and a React Native screen              | `farm-app-modules/` linked through React Native's Gradle plugin |
+| Kotlin or Swift files without a spec         | Unchanged: there is nothing to register                         |
+
+iOS has no React Native host yet. Swift files in `src/native/` are copied to `FarmAppModules/` next
+to the Xcode project, outside its target, so nothing builds or registers them until it has one.
+Web screens cannot call app modules yet. Keep `src/native/` out of the web `tsconfig.json`: specs
+import `react-native`.
+
+Verified with `examples/mobile` on an Android 15 emulator (arm64), in a debug APK of Hermes
+bytecode and under `farm dev --mobile`: Gradle runs Codegen for `farm-app-modules`,
+`libappmodules.so` links `react_codegen_FarmAppSpec`, `/map` shows the emulator's `Build.MODEL`
+(`sdk_gphone64_arm64`), `vibrate(200)` resolves and the vibrator service records a 200 ms
+vibration, and `VIBRATE` is granted at install with no prompt. An app with app modules and no
+community modules builds the same way. Not verified yet: real devices and a release (minified)
+build.
+
+### `mobile.modules`
+
+What the OS needs for a module, keyed by module name: an app module's registered name (`"Device"`)
+or a React Native package in the app's `dependencies`.
+
+```ts
+// farm.config.ts
+mobile: {
+  modules: {
+    Device: { permissions: ["android.permission.VIBRATE"] },
+    "react-native-vision-camera": {
+      usage: { NSCameraUsageDescription: "Scans the receipts you attach to a note." },
+    },
+  },
+},
+```
+
+| Option        | Notes                                                                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------- |
+| `permissions` | Android permission names, such as `"android.permission.VIBRATE"`, added to `AndroidManifest.xml`        |
+| `usage`       | iOS usage strings keyed by `NS...UsageDescription`, such as `NSCameraUsageDescription`, in `Info.plist` |
+
+- Without `modules`, or with entries that list no permissions, the manifest is the shell's own,
+  with `INTERNET` only. Each permission is declared once, whichever modules list it.
+- Without usage strings, `Info.plist` has none apart from the shell's own
+  `NSLocalNetworkUsageDescription` under `farm dev --mobile`; a module's value for that key wins.
+- A community module's own manifest permissions are merged into the app already, so list only the
+  extra ones it asks the app to add. Farm keeps no table of which module needs which permission.
+- A runtime permission, such as `android.permission.CAMERA`, is only declared: the module or the
+  screen still asks the user for it (React Native's `PermissionsAndroid`). An install-time one,
+  such as `VIBRATE`, is granted with the install.
+- Usage strings are written to `Info.plist` now, but no module runs on iOS until the iOS shell hosts
+  React Native.
+
+Every problem in `modules` is reported at once, each with its key and the fix:
+
+```text
+mobile (os: android): modules has 3 problems:
+  - modules["Camera"] is not one of the app's native modules or an installed React Native module. Use the name a src/native/Native*.ts spec registers, or a package in dependencies in package.json.
+  - modules["Device"].permissions[0] must be a full Android permission name such as "android.permission.VIBRATE", got "VIBRATE". Use "android.permission.VIBRATE".
+  - modules["Device"].usage.Camera is not an iOS usage-description key. Keys are NS...UsageDescription, such as NSCameraUsageDescription.
+```
+
+A package in `dependencies` that is not installed, or that has no `codegenConfig` (not a React
+Native module for the new architecture), is an error too, and so are two modules that set one usage
+key to different strings. Usage keys outside the `NS...UsageDescription` pattern, such as
+`NFCReaderUsageDescription`, are not accepted yet.
 
 ## Auth on mobile
 
@@ -1071,10 +1221,11 @@ not replace, and sorts what it finds into two buckets:
   with those properties; `onClick`, and input change handlers; server function modules, which the
   screen calls over the network.
 - **Blocks, so the route stays web:** `canvas`, `iframe`, `video`, `table`, `svg`, `select`, `form`;
-  `dangerouslySetInnerHTML`, element refs, spread props, other DOM events; stylesheet imports, grid,
-  `fixed`/`sticky`, transitions, responsive and `hover:` variants, arbitrary values, runtime class
-  names; `window`, `document`, storage and observer APIs, `useLayoutEffect`, `createElement`; DOM
-  packages and any package not on the list; server components, async pages, and Markdown pages.
+  `dangerouslySetInnerHTML`, element refs, spread props, other DOM events; Sass and other non-CSS
+  stylesheets, grid, `fixed`/`sticky`, transitions, responsive and `hover:` variants, arbitrary
+  values, runtime class names; `window`, `document`, storage and observer APIs, `useLayoutEffect`,
+  `createElement`; DOM packages and any package not on the list; server components, async pages,
+  and Markdown pages.
 
 The decision is deliberately conservative: a route is **`port`** only when it has **zero blockers
 and at least one win** (a rendered list, a controlled input, a timer). A portable route with no win
@@ -1104,21 +1255,33 @@ the page as written, with each DOM element renamed to `@farm.js/native/elements`
   text in `Text`, and pass inherited text styles down as CSS does. `Link` navigates through the
   shell. App components the page imports are copied the same way; other modules are imported where
   they are.
-- **Styles are the web page's.** Elements start from the browser's default styles, then the app's
-  CSS, then their inline `style`. A production build links all of an app's CSS on every page, so
-  the emitter reads every plain `.css` file the app imports and resolves, per element type, the
-  rules that match the type alone (`h1`, `input`, `*`, `:root`, `body`), light and dark. `body`
-  gives the screen its background, text style, and margin. A rule that also depends on where the
-  element renders (`main h1`, `li + li`, attributes, `:first-child`) keeps the route web, unless it
-  needs a class nothing around the page renders.
-- **Anything it cannot emit keeps the route web**, with the reason in the warning: `className`
-  (ports do not load Tailwind classes yet), `useContext`, `@farm.js/ui`, server functions,
-  `@farm.js/core` APIs other than `Link`, packages outside the pure list, asset imports, dynamic
-  `import()`, and stylesheets with `@import`, `@layer`, or Tailwind directives, or that are not plain
-  CSS.
+- **Styles are the web page's**, in the browser's cascade order: the browser's default styles (or
+  Tailwind's preflight), Tailwind utilities, the app's own rules, then the inline `style`. A
+  production build links all of an app's CSS on every page, so the emitter reads every plain `.css`
+  file the app imports and resolves each element's styles at build time, light and dark:
+  - `@import "tailwindcss"` (Tailwind 4) turns on preflight, and each static `className` utility
+    resolves through the same table as the [native tier](#server-rendered-native-screens),
+    with the app's `@theme` on top: colors (`oklch`, hex, `rgb`), `--spacing`, text sizes and
+    line heights, radii, weights, tracking, and `initial` resets. A value that reads a `:root`
+    variable (`@theme inline { --color-surface: var(--surface) }`) takes its dark value from
+    `prefers-color-scheme: dark`, so the class changes with the device theme;
+  - the app's rules that match an element by its type and classes alone (`h1`, `.card`,
+    `button.primary`, `*`, `:root`, `body`), with `inherit` (`font: inherit`) honored on form
+    controls; `body` gives the screen its background, text style, and margin.
+
+  A rule that also depends on where the element renders (`main h1`, `.card p`, `li + li`,
+  attributes, `:first-child`) keeps the route web, unless it needs a class nothing around the page
+  renders. With Tailwind loaded, a class neither the table nor the app's CSS knows keeps the route
+  web too, since it may be a utility the table cannot draw.
+
+- **Anything it cannot emit keeps the route web**, with the reason in the warning: class names built
+  at runtime, `useContext`, `@farm.js/ui`, server functions, `@farm.js/core` APIs other than `Link`,
+  packages outside the pure list, asset imports and CSS module names, dynamic `import()`, and
+  stylesheets that change what classes mean (`@utility`, `@custom-variant` such as a class-based
+  dark mode, `@apply`, `@layer`, other `@import`s, Tailwind 3's `@tailwind`) or are not plain CSS.
 
 Not yet: ports in `farm dev --mobile` (the analyzer runs in builds, so they show as web screens in
-dev), iOS, `FlatList` for long lists, event bubbling from a child to a parent's `onClick`, and a
+dev), `@theme` on server-rendered native screens (their classes use the default theme), iOS, `FlatList` for long lists, event bubbling from a child to a parent's `onClick`, and a
 live light/dark switch (a screen takes the theme it opened with). The browser's default styles are
 Chrome's, approximated.
 
@@ -1313,8 +1476,8 @@ parts are designed and still on the way:
   production (Hermes bytecode) build or on real devices.
 - `platform` screens show a placeholder naming the module id. Farm does not build `page.kt` or
   `page.swift` yet; `FarmNativeScreens` in the generated project is where they will register.
-- React Native screens use React Native's own components. `@farm.js/ui` components, native modules
-  from `src/native/`, `layout.native.tsx` providers, intent prefetch, and server functions called by
+- React Native screens use React Native's own components. `@farm.js/ui` components,
+  `layout.native.tsx` providers, intent prefetch, and server functions called by
   reference are not wired into native screens yet; `serverFetch` calls API routes. Images imported
   by native screens are not copied into the app yet; load them by URL.
 - Page shells are tested in unit and generator tests, and the iOS code type-checks; they have not
@@ -1332,6 +1495,7 @@ parts are designed and still on the way:
   Android shell's session code on an emulator under `farm dev --mobile`. The Swift session code
   has not been built with Xcode (it type-checks against the macOS SDK). See
   [Auth on mobile](#auth-on-mobile) for which auth integrations are covered.
-- Device plugins (`native.<name>`) ship none, so calls reject as unavailable.
+- Web screens reach no native module (`native.<name>`), so calls reject as unavailable. App native
+  modules from `src/native/` link on Android but have not been built into an APK yet.
 - Apps on the RSC pipeline get no device tokens until it runs `auth` and integrations (see
   [Auth on mobile](#auth-on-mobile)), and their pages always load as documents in the WebView pool.
