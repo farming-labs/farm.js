@@ -246,6 +246,16 @@ export async function generateFarmTypeArtifacts(
     if (syncModelTypes) unifiedSections.push(syncModelTypes);
   }
 
+  // Only an app with native module specs loads the mobile code, so other apps never pay for it.
+  if (shouldRefreshUnifiedTypes && existsSync(join(root, srcDir, "native"))) {
+    const [{ scanFarmMobileAppModules }, { createFarmNativeModuleTypeDeclarations }] =
+      await Promise.all([import("./mobile/modules"), import("./mobile/native-specs")]);
+    const appModules = scanFarmMobileAppModules({ root, srcDir });
+    const nativeTypes =
+      appModules && createFarmNativeModuleTypeDeclarations(appModules.specs, { root });
+    if (nativeTypes) unifiedSections.push(nativeTypes);
+  }
+
   if (shouldRefreshUnifiedTypes) {
     unifiedSections.push(
       createContentTypeDeclarations(

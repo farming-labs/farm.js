@@ -33,6 +33,12 @@ export type {
   ResolvedFarmMobileModuleConfig,
 } from "./modules";
 export type {
+  FarmNativeMethod,
+  FarmNativeProperty,
+  FarmNativeType,
+  FarmNativeWebSpec,
+} from "./native-specs";
+export type {
   FarmMobileRouteManifest,
   FarmMobileRouteRule,
   FarmMobileShellManifest,

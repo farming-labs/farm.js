@@ -36,6 +36,7 @@ const entry = {
   platform: "src/platform.ts",
   desktop: "src/desktop/index.ts",
   mobile: "src/mobile/index.ts",
+  native: "src/native.ts",
   "internal/desktop-guard": "src/desktop/guard.ts",
   navigation: "src/navigation.ts",
   headers: "src/headers.ts",

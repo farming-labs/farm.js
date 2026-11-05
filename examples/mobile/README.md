@@ -22,7 +22,7 @@ pnpm smoke               # checks the mobile decisions and the web build
 | ------------------------ | ------------------------------------------------------------------------- |
 | `/`                      | Home tab: a static page that links every demo, and an external link       |
 | `/notes`                 | Notes tab: a server-rendered list                                         |
-| `/settings`              | Settings tab: i18n (`en`, `es`) with a language switch                    |
+| `/settings`              | Settings tab: i18n (`en`, `es`) with a language switch, and the `Device` module from a web screen |
 | `/about`                 | A static push, from Home or Settings (each tab keeps its own stack)       |
 | `/notes/[id]`            | A dynamic route pushed on the Notes tab                                   |
 | `/notes/new`             | `export const mobile = { presentation: "modal" }`, a form that calls the `createNote` server function and pushes the new note |
@@ -96,6 +96,14 @@ no prompt. Farm copies the module into `farm-app-modules/` in the generated proj
 like netinfo. On an Android 15 emulator, in `pnpm dev:mobile` and in a bytecode APK, `/map` shows
 the emulator's model (`sdk_gphone64_arm64`) and `Vibrate` vibrates for 200 ms with no error.
 `src/native/` is type-checked with the native files (`tsconfig.native.json`).
+
+`/settings` (a web screen) calls the same `Device` module from the WebView:
+`mobile.modules.Device.web` in `farm.config.ts` registers it with the Android shell's bridge, and
+`src/app/(styled)/settings/device-card.tsx` shows `native.Device.model()` from
+`@farm.js/core/native` (`data-testid="web-device-model"`) and a `Vibrate` button
+(`data-testid="web-vibrate"`). In a browser and in the iOS shell, `native.Device.available()` is
+false and the card says `not in the app`. `src/farm.d.ts` types `native.Device` from the spec. Not
+verified on an emulator yet.
 
 React versions: this example pins `react` and `react-dom` 19.2.8, the version Farm core is tested
 on. React Native 0.88 declares a `react@^19.3.0` peer (its renderer is built from 19.3.0), so pnpm

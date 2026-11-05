@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { isPlainObject, readAppPackageJson } from "../platform-blocks";
+import { readFarmNativeWebSpec, type FarmNativeWebSpec } from "./native-specs";
 
 /**
  * Native modules (RFC 0004, 7.5): the app's own TurboModules in `src/native/`, and
@@ -20,11 +21,19 @@ export interface FarmMobileModuleConfig {
    * `{ NSCameraUsageDescription: "Scans receipts." }`.
    */
   usage?: Record<string, string>;
+  /**
+   * Lets web screens (`page.tsx` in the shell's WebView) call the module's Promise methods as
+   * `native.<name>.<method>()` from `@farm.js/core/native`, with arguments checked against its
+   * Codegen spec. App modules in `src/native/` only: community modules need the React Native JS
+   * runtime. Android only for now. Defaults to `false`.
+   */
+  web?: boolean;
 }
 
 export interface ResolvedFarmMobileModuleConfig {
   permissions: string[];
   usage: Record<string, string>;
+  web: boolean;
 }
 
 /** One Codegen spec in `src/native/`, such as `NativeDevice.ts`. */
@@ -33,6 +42,11 @@ export interface FarmMobileAppModuleSpec {
   name: string;
   /** Absolute path of the spec file. */
   file: string;
+  /**
+   * With `mobile.modules.<name>.web`: the Promise methods web screens may call, read from the spec
+   * with React Native's Codegen.
+   */
+  web?: FarmNativeWebSpec;
 }
 
 /** The app's own native modules: the files in `src/native/` the generated projects copy. */
@@ -46,7 +60,7 @@ export interface FarmMobileAppModules {
   ios: string[];
 }
 
-const MODULE_KEYS = new Set(["permissions", "usage"]);
+const MODULE_KEYS = new Set(["permissions", "usage", "web"]);
 /** A fully qualified Android permission, such as `android.permission.VIBRATE`. */
 const PERMISSION = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$/;
 const BARE_PERMISSION = /^[A-Z][A-Z0-9_]*$/;
@@ -198,7 +212,7 @@ export function resolveFarmMobileModules(
     }
     for (const key of Object.keys(entry)) {
       if (!MODULE_KEYS.has(key)) {
-        issues.push(`unknown option ${where}.${key}. Supported: permissions, usage.`);
+        issues.push(`unknown option ${where}.${key}. Supported: permissions, usage, web.`);
       }
     }
     const permissions: string[] = [];
@@ -259,7 +273,21 @@ export function resolveFarmMobileModules(
         }
       }
     }
-    resolved[name] = { permissions, usage };
+    let web = false;
+    if (entry.web !== undefined) {
+      if (typeof entry.web !== "boolean") {
+        issues.push(`${where}.web must be true or false.`);
+      } else if (entry.web && !appModules.has(name)) {
+        issues.push(
+          `${where}.web is true, but web screens reach only the app's own modules in ${specDir}. ` +
+            `"${name}" needs the React Native JS runtime, which web screens do not have. Remove ` +
+            "web, and call the module from a native screen (page.native.tsx).",
+        );
+      } else {
+        web = entry.web;
+      }
+    }
+    resolved[name] = { permissions, usage, web };
   }
   if (issues.length === 1) fail(issues[0]!);
   if (issues.length > 1) {
@@ -268,4 +296,57 @@ export function resolveFarmMobileModules(
     );
   }
   return resolved;
+}
+
+/**
+ * The app modules with `mobile.modules.<name>.web`, each spec with the Promise methods web screens
+ * may call (RFC 0004, 7.5), read with the app's own React Native Codegen. Throws, naming the spec
+ * and the fix, when Codegen cannot read it or a Promise method takes a value web screens cannot
+ * send: an opted-in module either works from web screens as declared or fails the build.
+ */
+export function readFarmMobileWebModules(
+  appModules: FarmMobileAppModules,
+  modules: Record<string, ResolvedFarmMobileModuleConfig>,
+  options: { root: string },
+): FarmMobileAppModules {
+  const issues: string[] = [];
+  const specs = appModules.specs.map((spec) => {
+    if (!modules[spec.name]?.web) return spec;
+    const shown = relative(options.root, spec.file);
+    const where = `modules[${JSON.stringify(spec.name)}].web`;
+    let web: FarmNativeWebSpec;
+    try {
+      web = readFarmNativeWebSpec({ root: options.root, file: spec.file });
+    } catch (error) {
+      issues.push(`${where}: ${(error as Error).message}`);
+      return spec;
+    }
+    for (const { method, reason } of web.unsupported) {
+      issues.push(
+        `${where}: ${shown} declares ${method}(), but ${reason}. Change the parameter to a ` +
+          "string, number, boolean, object, or array, or remove web and call the module from a " +
+          "native screen (page.native.tsx).",
+      );
+    }
+    if (web.methods.some((method) => method.name === "available")) {
+      issues.push(
+        `${where}: ${shown} declares available(), which web screens use to check for the ` +
+          "module (native.<module>.available()). Rename the method.",
+      );
+    }
+    if (web.methods.length === 0 && web.unsupported.length === 0) {
+      issues.push(
+        `${where}: ${shown} declares no method that returns a Promise, and web screens call ` +
+          "only those. Remove web, or declare one, such as model(): Promise<string>.",
+      );
+    }
+    return { ...spec, web };
+  });
+  if (issues.length === 1) throw new TypeError(issues[0]);
+  if (issues.length > 1) {
+    throw new TypeError(
+      `modules has ${issues.length} problems:\n${issues.map((issue) => `  - ${issue}`).join("\n")}`,
+    );
+  }
+  return { ...appModules, specs };
 }

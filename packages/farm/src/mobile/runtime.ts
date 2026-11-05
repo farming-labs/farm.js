@@ -22,8 +22,12 @@ import {
   type ResolvedFarmMobileConfig,
 } from "./config";
 import type { FarmMobileAnalyzerStats, FarmMobileBlocker } from "./analyzer";
-import { scanFarmMobileAppModules, type FarmMobileAppModules } from "./modules";
 import type { FarmMobilePort } from "./port";
+import {
+  readFarmMobileWebModules,
+  scanFarmMobileAppModules,
+  type FarmMobileAppModules,
+} from "./modules";
 import {
   createFarmMobileNativeReport,
   formatFarmMobileNativeReport,
@@ -258,6 +262,16 @@ export async function resolveFarmMobileApp(
     },
     context,
   );
+  if (appModules && Object.values(mobile.modules).some((module) => module.web)) {
+    try {
+      appModules = readFarmMobileWebModules(appModules, mobile.modules, { root });
+    } catch (error) {
+      throw Object.assign(
+        new FarmMobileError(`mobile (os: ${context.os}): ${(error as Error).message}`),
+        { cause: error },
+      );
+    }
+  }
   const pageExports = await readPageExports(root, scan.pageFiles, context.os);
   for (const [route, page] of pageExports) {
     if (page.config.presentation !== undefined && mobile.tabs.some((tab) => tab.path === route)) {
