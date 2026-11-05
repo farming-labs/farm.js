@@ -1063,7 +1063,7 @@ export function transformIsolatedClientBoundaryModule(options: {
     wrapperStatements.push(
       // Islands mode renders through islx; the older isolated hydration keeps Farm's boundary.
       options.slots && options.inferredInteraction
-        ? `const ${wrapperName} = __farm_islx_inferred_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)});`
+        ? `const ${wrapperName} = __farm_islx_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, "interaction", { inferred: true });`
         : options.slots
           ? `const ${wrapperName} = __farm_islx_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`
           : `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`,
@@ -1173,7 +1173,7 @@ export function transformIsolatedClientBoundaryModule(options: {
   }
 
   const runtimeImport = options.slots
-    ? `import { createIsland as __farm_islx_island__, createInferredIsland as __farm_islx_inferred_island__ } from "@farm.js/core/internal/islx-react";`
+    ? `import { createIsland as __farm_islx_island__ } from "@farm.js/core/internal/islx-react";`
     : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";`;
   return `${runtimeImport}\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
 }
