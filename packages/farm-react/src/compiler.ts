@@ -30,6 +30,8 @@ export interface CompileReactModuleResult {
   };
 }
 
+type HelperIdentifier = () => t.Identifier;
+
 interface StateBinding {
   valueName: string;
   setterName: string;
@@ -1563,7 +1565,7 @@ function rewriteKeyedMapUpdateHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  helperIdentifier: t.Identifier,
+  helperIdentifier: HelperIdentifier,
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number } {
   if (hintedStateIndices.size === 0) return { root, count: 0 };
@@ -1627,7 +1629,7 @@ function rewriteKeyedMapUpdateHints(
       }
       path.node.arguments[0] = t.arrowFunctionExpression(
         [t.cloneNode(previous)],
-        t.callExpression(t.cloneNode(helperIdentifier), [
+        t.callExpression(t.cloneNode(helperIdentifier()), [
           t.cloneNode(previous),
           t.arrowFunctionExpression(
             [t.cloneNode(pipelineValue), t.cloneNode(applyMap)],
@@ -1649,7 +1651,7 @@ function rewriteKeyedArrayAppendHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  helperIdentifier: t.Identifier,
+  helperIdentifier: HelperIdentifier,
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number } {
   if (hintedStateIndices.size === 0) return { root, count: 0 };
@@ -1730,7 +1732,7 @@ function rewriteKeyedArrayAppendHints(
             t.variableDeclarator(t.cloneNode(nextValue), t.cloneNode(updateExpression, true)),
           ]),
           t.returnStatement(
-            t.callExpression(t.cloneNode(helperIdentifier), [
+            t.callExpression(t.cloneNode(helperIdentifier()), [
               t.cloneNode(previous),
               t.cloneNode(nextValue),
             ]),
@@ -1751,7 +1753,7 @@ function rewriteKeyedArrayPrependHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  helperIdentifier: t.Identifier,
+  helperIdentifier: HelperIdentifier,
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
@@ -1838,7 +1840,7 @@ function rewriteKeyedArrayPrependHints(
             t.variableDeclarator(t.cloneNode(nextValue), t.cloneNode(updateExpression, true)),
           ]),
           t.returnStatement(
-            t.callExpression(t.cloneNode(helperIdentifier), [
+            t.callExpression(t.cloneNode(helperIdentifier()), [
               t.cloneNode(previous),
               t.cloneNode(nextValue),
             ]),
@@ -1861,8 +1863,8 @@ function rewriteKeyedArrayRollingWindowHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  sliceHelperIdentifier: t.Identifier,
-  rollingWindowHelperIdentifier: t.Identifier,
+  sliceHelperIdentifier: HelperIdentifier,
+  rollingWindowHelperIdentifier: HelperIdentifier,
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
@@ -1972,7 +1974,7 @@ function rewriteKeyedArrayRollingWindowHints(
             ),
             t.variableDeclarator(
               t.cloneNode(retained),
-              t.callExpression(t.cloneNode(sliceHelperIdentifier), [
+              t.callExpression(t.cloneNode(sliceHelperIdentifier()), [
                 t.cloneNode(previous),
                 t.cloneNode(sliceMethod),
                 t.cloneNode(retainedStart, true),
@@ -1981,7 +1983,7 @@ function rewriteKeyedArrayRollingWindowHints(
             t.variableDeclarator(t.cloneNode(nextValue), t.arrayExpression(nextElements)),
           ]),
           t.returnStatement(
-            t.callExpression(t.cloneNode(rollingWindowHelperIdentifier), [
+            t.callExpression(t.cloneNode(rollingWindowHelperIdentifier()), [
               t.cloneNode(previous),
               t.cloneNode(retained),
               t.cloneNode(nextValue),
@@ -2036,9 +2038,9 @@ function rewriteKeyedArrayPositionHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  helperIdentifier: t.Identifier,
-  batchInsertHelperIdentifier: t.Identifier,
-  windowReplaceHelperIdentifier: t.Identifier,
+  helperIdentifier: HelperIdentifier,
+  batchInsertHelperIdentifier: HelperIdentifier,
+  windowReplaceHelperIdentifier: HelperIdentifier,
   safeGlobals: ReadonlySet<string>,
 ): {
   root: t.JSXElement;
@@ -2177,21 +2179,21 @@ function rewriteKeyedArrayPositionHints(
           ]),
           t.returnStatement(
             kind === "batch-insert"
-              ? t.callExpression(t.cloneNode(batchInsertHelperIdentifier), [
+              ? t.callExpression(t.cloneNode(batchInsertHelperIdentifier()), [
                   t.cloneNode(previous),
                   t.cloneNode(method),
                   t.cloneNode(position, true),
                   ...args.slice(2).map((argument) => t.cloneNode(argument, true)),
                 ])
               : kind === "window-replace"
-                ? t.callExpression(t.cloneNode(windowReplaceHelperIdentifier), [
+                ? t.callExpression(t.cloneNode(windowReplaceHelperIdentifier()), [
                     t.cloneNode(previous),
                     t.cloneNode(method),
                     t.cloneNode(position, true),
                     t.cloneNode(args[1], true),
                     ...args.slice(2).map((argument) => t.cloneNode(argument, true)),
                   ])
-                : t.callExpression(t.cloneNode(helperIdentifier), [
+                : t.callExpression(t.cloneNode(helperIdentifier()), [
                     t.cloneNode(previous),
                     t.cloneNode(method),
                     t.stringLiteral(kind),
@@ -2220,7 +2222,7 @@ function rewriteKeyedArrayReorderHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  helperIdentifier: t.Identifier,
+  helperIdentifier: HelperIdentifier,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
     return { root, count: 0, stateIndices: new Set() };
@@ -2273,7 +2275,7 @@ function rewriteKeyedArrayReorderHints(
             ),
           ]),
           t.returnStatement(
-            t.callExpression(t.cloneNode(helperIdentifier), [
+            t.callExpression(t.cloneNode(helperIdentifier()), [
               t.cloneNode(previous),
               t.cloneNode(method),
             ]),
@@ -2435,15 +2437,15 @@ function rewriteKeyedArrayReorderPipelineHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  filterHelperIdentifier: t.Identifier,
-  mapHelperIdentifier: t.Identifier,
-  mapReorderHelperIdentifier: t.Identifier,
-  mappedStructuralHelperIdentifier: t.Identifier,
-  reorderHelperIdentifier: t.Identifier,
-  structuralReorderHelperIdentifier: t.Identifier,
-  sliceHelperIdentifier: t.Identifier,
-  sortHelperIdentifier: t.Identifier,
-  structuralSortHelperIdentifier: t.Identifier,
+  filterHelperIdentifier: HelperIdentifier,
+  mapHelperIdentifier: HelperIdentifier,
+  mapReorderHelperIdentifier: HelperIdentifier,
+  mappedStructuralHelperIdentifier: HelperIdentifier,
+  reorderHelperIdentifier: HelperIdentifier,
+  structuralReorderHelperIdentifier: HelperIdentifier,
+  sliceHelperIdentifier: HelperIdentifier,
+  sortHelperIdentifier: HelperIdentifier,
+  structuralSortHelperIdentifier: HelperIdentifier,
   safeGlobals: ReadonlySet<string>,
   allowMapPipelines: boolean,
 ): {
@@ -2574,7 +2576,7 @@ function rewriteKeyedArrayReorderPipelineHints(
               t.variableDeclaration("const", [
                 t.variableDeclarator(
                   t.cloneNode(result),
-                  t.callExpression(t.cloneNode(mapHelperIdentifier), [
+                  t.callExpression(t.cloneNode(mapHelperIdentifier()), [
                     t.cloneNode(value),
                     t.arrowFunctionExpression(
                       [t.cloneNode(pipelineValue), t.cloneNode(applyMap)],
@@ -2654,7 +2656,7 @@ function rewriteKeyedArrayReorderPipelineHints(
           t.variableDeclaration("const", [
             t.variableDeclarator(
               t.cloneNode(result),
-              t.callExpression(t.cloneNode(helper), [
+              t.callExpression(t.cloneNode(helper()), [
                 t.cloneNode(value),
                 t.cloneNode(method),
                 ...args,
@@ -2681,7 +2683,9 @@ function rewriteKeyedArrayReorderPipelineHints(
       statements.push(
         t.returnStatement(
           terminalStructuralPipeline
-            ? t.callExpression(t.cloneNode(mappedStructuralHelperIdentifier), [t.cloneNode(value)])
+            ? t.callExpression(t.cloneNode(mappedStructuralHelperIdentifier()), [
+                t.cloneNode(value),
+              ])
             : t.cloneNode(value),
         ),
       );
@@ -2713,13 +2717,13 @@ function rewriteKeyedArrayReorderPipelineHints(
 function rewriteQueuedKeyedArrayReorderMapHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  mapUpdateIdentifier: t.Identifier,
-  queuedMapPipelineIdentifier: t.Identifier,
-  mapReorderIdentifier: t.Identifier,
-  reorderIdentifier: t.Identifier,
-  sortIdentifier: t.Identifier,
-  structuralReorderIdentifier: t.Identifier,
-  structuralSortIdentifier: t.Identifier,
+  mapUpdateIdentifier: HelperIdentifier,
+  queuedMapPipelineIdentifier: HelperIdentifier,
+  mapReorderIdentifier: HelperIdentifier,
+  reorderIdentifier: HelperIdentifier,
+  sortIdentifier: HelperIdentifier,
+  structuralReorderIdentifier: HelperIdentifier,
+  structuralSortIdentifier: HelperIdentifier,
   allowed: boolean,
 ): { root: t.JSXElement; mapCount: number } {
   if (!allowed) return { root, mapCount: 0 };
@@ -2744,13 +2748,13 @@ function rewriteQueuedKeyedArrayReorderMapHints(
     return found;
   };
   const reorderHelperNames = new Set([
-    mapReorderIdentifier.name,
-    reorderIdentifier.name,
-    sortIdentifier.name,
+    mapReorderIdentifier().name,
+    reorderIdentifier().name,
+    sortIdentifier().name,
   ]);
   const structuralHelperNames = new Set([
-    structuralReorderIdentifier.name,
-    structuralSortIdentifier.name,
+    structuralReorderIdentifier().name,
+    structuralSortIdentifier().name,
   ]);
 
   traverse(file, {
@@ -2797,7 +2801,7 @@ function rewriteQueuedKeyedArrayReorderMapHints(
         if (
           queuedReorderState !== state.index ||
           !t.isCallExpression(updater.body) ||
-          !t.isIdentifier(updater.body.callee, { name: mapUpdateIdentifier.name }) ||
+          !t.isIdentifier(updater.body.callee, { name: mapUpdateIdentifier().name }) ||
           updater.body.arguments.length !== 2
         ) {
           queuedReorderState = undefined;
@@ -2824,7 +2828,7 @@ function rewriteQueuedKeyedArrayReorderMapHints(
           continue;
         }
 
-        updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier);
+        updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier());
         mapCount += pipelineMapCount;
       }
     },
@@ -2837,11 +2841,11 @@ function rewriteQueuedKeyedArrayReorderMapHints(
 
 function countKeyedArrayMapPipeline(
   updater: t.ArrowFunctionExpression,
-  mapUpdateIdentifier: t.Identifier,
+  mapUpdateIdentifier: HelperIdentifier,
 ): number {
   if (
     !t.isCallExpression(updater.body) ||
-    !t.isIdentifier(updater.body.callee, { name: mapUpdateIdentifier.name }) ||
+    !t.isIdentifier(updater.body.callee, { name: mapUpdateIdentifier().name }) ||
     updater.body.arguments.length !== 2
   ) {
     return 0;
@@ -2867,11 +2871,11 @@ function countKeyedArrayMapPipeline(
 function rewriteQueuedKeyedArrayMappedStructuralHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  mapUpdateIdentifier: t.Identifier,
-  queuedMapPipelineIdentifier: t.Identifier,
-  mappedStructuralIdentifier: t.Identifier,
-  filterIdentifier: t.Identifier,
-  sliceIdentifier: t.Identifier,
+  mapUpdateIdentifier: HelperIdentifier,
+  queuedMapPipelineIdentifier: HelperIdentifier,
+  mappedStructuralIdentifier: HelperIdentifier,
+  filterIdentifier: HelperIdentifier,
+  sliceIdentifier: HelperIdentifier,
   allowed: boolean,
 ): {
   root: t.JSXElement;
@@ -2902,8 +2906,8 @@ function rewriteQueuedKeyedArrayMappedStructuralHints(
       !statement.argument ||
       !t.isCallExpression(statement.argument) ||
       !t.isIdentifier(statement.argument.callee) ||
-      (statement.argument.callee.name !== filterIdentifier.name &&
-        statement.argument.callee.name !== sliceIdentifier.name)
+      (statement.argument.callee.name !== filterIdentifier().name &&
+        statement.argument.callee.name !== sliceIdentifier().name)
     ) {
       return undefined;
     }
@@ -2980,7 +2984,7 @@ function rewriteQueuedKeyedArrayMappedStructuralHints(
 
         if (hasPendingMaps) {
           for (const candidate of pendingMaps) {
-            candidate.updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier);
+            candidate.updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier());
             mapCount += candidate.count;
           }
         }
@@ -2990,7 +2994,7 @@ function rewriteQueuedKeyedArrayMappedStructuralHints(
           pendingMaps = [];
           continue;
         }
-        structuralReturn.argument = t.callExpression(t.cloneNode(mappedStructuralIdentifier), [
+        structuralReturn.argument = t.callExpression(t.cloneNode(mappedStructuralIdentifier()), [
           t.cloneNode(structuralValue),
         ]);
         structuralCount += 1;
@@ -3011,14 +3015,14 @@ function rewriteQueuedKeyedArrayMappedStructuralHints(
 function rewriteQueuedKeyedArrayStructuralMapHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  mapUpdateIdentifier: t.Identifier,
-  mapPipelineIdentifier: t.Identifier,
-  appendIdentifier: t.Identifier,
-  mappedStructuralAppendIdentifier: t.Identifier,
-  structuralAppendMapPipelineIdentifier: t.Identifier,
-  filterIdentifier: t.Identifier,
-  sliceIdentifier: t.Identifier,
-  mappedStructuralIdentifier: t.Identifier,
+  mapUpdateIdentifier: HelperIdentifier,
+  mapPipelineIdentifier: HelperIdentifier,
+  appendIdentifier: HelperIdentifier,
+  mappedStructuralAppendIdentifier: HelperIdentifier,
+  structuralAppendMapPipelineIdentifier: HelperIdentifier,
+  filterIdentifier: HelperIdentifier,
+  sliceIdentifier: HelperIdentifier,
+  mappedStructuralIdentifier: HelperIdentifier,
   allowed: boolean,
 ): {
   root: t.JSXElement;
@@ -3052,13 +3056,13 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
     let mapped = false;
     t.traverseFast(statement.argument, (node) => {
       if (!found && t.isCallExpression(node) && t.isIdentifier(node.callee)) {
-        if (node.callee.name === filterIdentifier.name) found = "filter";
-        if (node.callee.name === sliceIdentifier.name) found = "slice";
+        if (node.callee.name === filterIdentifier().name) found = "filter";
+        if (node.callee.name === sliceIdentifier().name) found = "slice";
       }
       if (
         !mapped &&
         t.isCallExpression(node) &&
-        t.isIdentifier(node.callee, { name: mappedStructuralIdentifier.name })
+        t.isIdentifier(node.callee, { name: mappedStructuralIdentifier().name })
       ) {
         mapped = true;
       }
@@ -3124,7 +3128,7 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
         t.traverseFast(updater.body, (node) => {
           if (
             t.isCallExpression(node) &&
-            t.isIdentifier(node.callee, { name: appendIdentifier.name })
+            t.isIdentifier(node.callee, { name: appendIdentifier().name })
           ) {
             appendCalls.push(node);
           }
@@ -3134,7 +3138,7 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
             structuralAppendState = state.index;
             if (structuralMapState === state.index) {
               for (const call of appendCalls) {
-                call.callee = t.cloneNode(mappedStructuralAppendIdentifier);
+                call.callee = t.cloneNode(mappedStructuralAppendIdentifier());
               }
               mappedStructuralAppendCount += appendCalls.length;
             }
@@ -3158,8 +3162,8 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
         (updater as t.ArrowFunctionExpression & { body: t.CallExpression }).body.callee =
           t.cloneNode(
             structuralAppendState === state.index
-              ? structuralAppendMapPipelineIdentifier
-              : mapPipelineIdentifier,
+              ? structuralAppendMapPipelineIdentifier()
+              : mapPipelineIdentifier(),
           );
         mapCount += pipelineMapCount;
         if (structuralAppendState === state.index) {
@@ -3182,14 +3186,14 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
 function rewriteQueuedKeyedArrayStructuralPrependMapHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  mapUpdateIdentifier: t.Identifier,
-  mapPipelineIdentifier: t.Identifier,
-  prependIdentifier: t.Identifier,
-  mappedStructuralPrependIdentifier: t.Identifier,
-  structuralPrependMapPipelineIdentifier: t.Identifier,
-  filterIdentifier: t.Identifier,
-  sliceIdentifier: t.Identifier,
-  mappedStructuralIdentifier: t.Identifier,
+  mapUpdateIdentifier: HelperIdentifier,
+  mapPipelineIdentifier: HelperIdentifier,
+  prependIdentifier: HelperIdentifier,
+  mappedStructuralPrependIdentifier: HelperIdentifier,
+  structuralPrependMapPipelineIdentifier: HelperIdentifier,
+  filterIdentifier: HelperIdentifier,
+  sliceIdentifier: HelperIdentifier,
+  mappedStructuralIdentifier: HelperIdentifier,
   allowed: boolean,
 ): {
   root: t.JSXElement;
@@ -3223,13 +3227,13 @@ function rewriteQueuedKeyedArrayStructuralPrependMapHints(
     let mapped = false;
     t.traverseFast(statement.argument, (node) => {
       if (!found && t.isCallExpression(node) && t.isIdentifier(node.callee)) {
-        if (node.callee.name === filterIdentifier.name) found = "filter";
-        if (node.callee.name === sliceIdentifier.name) found = "slice";
+        if (node.callee.name === filterIdentifier().name) found = "filter";
+        if (node.callee.name === sliceIdentifier().name) found = "slice";
       }
       if (
         !mapped &&
         t.isCallExpression(node) &&
-        t.isIdentifier(node.callee, { name: mappedStructuralIdentifier.name })
+        t.isIdentifier(node.callee, { name: mappedStructuralIdentifier().name })
       ) {
         mapped = true;
       }
@@ -3295,7 +3299,7 @@ function rewriteQueuedKeyedArrayStructuralPrependMapHints(
         t.traverseFast(updater.body, (node) => {
           if (
             t.isCallExpression(node) &&
-            t.isIdentifier(node.callee, { name: prependIdentifier.name })
+            t.isIdentifier(node.callee, { name: prependIdentifier().name })
           ) {
             prependCalls.push(node);
           }
@@ -3305,7 +3309,7 @@ function rewriteQueuedKeyedArrayStructuralPrependMapHints(
             structuralPrependState = state.index;
             if (structuralMapState === state.index) {
               for (const call of prependCalls) {
-                call.callee = t.cloneNode(mappedStructuralPrependIdentifier);
+                call.callee = t.cloneNode(mappedStructuralPrependIdentifier());
               }
               mappedStructuralPrependCount += prependCalls.length;
             }
@@ -3331,8 +3335,8 @@ function rewriteQueuedKeyedArrayStructuralPrependMapHints(
         (updater as t.ArrowFunctionExpression & { body: t.CallExpression }).body.callee =
           t.cloneNode(
             structuralPrependState === state.index
-              ? structuralPrependMapPipelineIdentifier
-              : mapPipelineIdentifier,
+              ? structuralPrependMapPipelineIdentifier()
+              : mapPipelineIdentifier(),
           );
         mapCount += pipelineMapCount;
         if (structuralPrependState === state.index) {
@@ -3355,16 +3359,16 @@ function rewriteQueuedKeyedArrayStructuralPrependMapHints(
 function rewriteQueuedKeyedArrayRollingWindowMapHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  mapUpdateIdentifier: t.Identifier,
-  mapPipelineIdentifier: t.Identifier,
-  queuedMapPipelineIdentifier: t.Identifier,
-  rollingWindowMapPipelineIdentifier: t.Identifier,
-  mappedRollingWindowIdentifier: t.Identifier,
-  rollingWindowIdentifier: t.Identifier,
-  structuralAppendIdentifier: t.Identifier,
-  mappedStructuralAppendIdentifier: t.Identifier,
-  structuralAppendMapPipelineIdentifier: t.Identifier,
-  mappedStructuralIdentifier: t.Identifier,
+  mapUpdateIdentifier: HelperIdentifier,
+  mapPipelineIdentifier: HelperIdentifier,
+  queuedMapPipelineIdentifier: HelperIdentifier,
+  rollingWindowMapPipelineIdentifier: HelperIdentifier,
+  mappedRollingWindowIdentifier: HelperIdentifier,
+  rollingWindowIdentifier: HelperIdentifier,
+  structuralAppendIdentifier: HelperIdentifier,
+  mappedStructuralAppendIdentifier: HelperIdentifier,
+  structuralAppendMapPipelineIdentifier: HelperIdentifier,
+  mappedStructuralIdentifier: HelperIdentifier,
   allowed: boolean,
 ): {
   chainedMapCount: number;
@@ -3425,7 +3429,7 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
       !t.isReturnStatement(statement) ||
       !statement.argument ||
       !t.isCallExpression(statement.argument) ||
-      !t.isIdentifier(statement.argument.callee, { name: rollingWindowIdentifier.name }) ||
+      !t.isIdentifier(statement.argument.callee, { name: rollingWindowIdentifier().name }) ||
       statement.argument.arguments.length !== 3 ||
       !t.isExpression(statement.argument.arguments[1]) ||
       !t.isExpression(statement.argument.arguments[2])
@@ -3457,13 +3461,13 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
           }
           for (const step of maps) {
             if (step.kind !== "map") continue;
-            step.value.updater.body.callee = t.cloneNode(rollingWindowMapPipelineIdentifier);
+            step.value.updater.body.callee = t.cloneNode(rollingWindowMapPipelineIdentifier());
             chainedMapCount += step.value.count;
           }
           for (const index of rollingIndices) {
             const step = segment[index];
             if (step.kind === "rolling") {
-              step.value.call.callee = t.cloneNode(mappedRollingWindowIdentifier);
+              step.value.call.callee = t.cloneNode(mappedRollingWindowIdentifier());
             }
           }
           chainedRollingWindowCount += rollingIndices.length;
@@ -3488,11 +3492,11 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
         if (!t.isExpression(retained) || !t.isExpression(value)) return;
         const hasLeadingMaps = leadingMaps.length > 0;
         rolling.value.call.callee = t.cloneNode(
-          hasLeadingMaps ? mappedStructuralAppendIdentifier : structuralAppendIdentifier,
+          hasLeadingMaps ? mappedStructuralAppendIdentifier() : structuralAppendIdentifier(),
         );
         rolling.value.call.arguments = [
           hasLeadingMaps
-            ? t.callExpression(t.cloneNode(mappedStructuralIdentifier), [
+            ? t.callExpression(t.cloneNode(mappedStructuralIdentifier()), [
                 t.cloneNode(retained, true),
               ])
             : t.cloneNode(retained, true),
@@ -3503,7 +3507,7 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
           mappedRollingWindowCount += 1;
           for (const step of leadingMaps) {
             if (step.kind !== "map") continue;
-            step.value.updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier);
+            step.value.updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier());
             leadingMapCount += step.value.count;
           }
         } else {
@@ -3511,7 +3515,7 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
         }
         for (const step of trailingMaps) {
           if (step.kind !== "map") continue;
-          step.value.updater.body.callee = t.cloneNode(structuralAppendMapPipelineIdentifier);
+          step.value.updater.body.callee = t.cloneNode(structuralAppendMapPipelineIdentifier());
           trailingMapCount += step.value.count;
         }
         segment = [];
@@ -3577,16 +3581,16 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
 function rewriteQueuedKeyedArrayStructuralReorderHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  filterIdentifier: t.Identifier,
-  sliceIdentifier: t.Identifier,
-  mapPipelineIdentifier: t.Identifier,
-  queuedMapPipelineIdentifier: t.Identifier,
-  mappedStructuralIdentifier: t.Identifier,
-  mapReorderIdentifier: t.Identifier,
-  reorderIdentifier: t.Identifier,
-  sortIdentifier: t.Identifier,
-  structuralReorderIdentifier: t.Identifier,
-  structuralSortIdentifier: t.Identifier,
+  filterIdentifier: HelperIdentifier,
+  sliceIdentifier: HelperIdentifier,
+  mapPipelineIdentifier: HelperIdentifier,
+  queuedMapPipelineIdentifier: HelperIdentifier,
+  mappedStructuralIdentifier: HelperIdentifier,
+  mapReorderIdentifier: HelperIdentifier,
+  reorderIdentifier: HelperIdentifier,
+  sortIdentifier: HelperIdentifier,
+  structuralReorderIdentifier: HelperIdentifier,
+  structuralSortIdentifier: HelperIdentifier,
   allowed: boolean,
 ): {
   root: t.JSXElement;
@@ -3674,40 +3678,40 @@ function rewriteQueuedKeyedArrayStructuralReorderHints(
           if (!t.isCallExpression(node) || !t.isIdentifier(node.callee)) return;
           const helperName = node.callee.name;
           if (
-            helperName === filterIdentifier.name ||
-            helperName === sliceIdentifier.name ||
-            helperName === mappedStructuralIdentifier.name
+            helperName === filterIdentifier().name ||
+            helperName === sliceIdentifier().name ||
+            helperName === mappedStructuralIdentifier().name
           ) {
             startsStructuralLineage = true;
             return;
           }
           if (
-            helperName === structuralReorderIdentifier.name ||
-            helperName === structuralSortIdentifier.name
+            helperName === structuralReorderIdentifier().name ||
+            helperName === structuralSortIdentifier().name
           ) {
             startsStructuralLineage = true;
             return;
           }
-          if (helperName === mapPipelineIdentifier.name) {
+          if (helperName === mapPipelineIdentifier().name) {
             continuesStructuralLineage = true;
             return;
           }
-          if (helperName === queuedMapPipelineIdentifier.name) {
+          if (helperName === queuedMapPipelineIdentifier().name) {
             continuesStructuralLineage = true;
             queuedMaps.push(node);
             return;
           }
-          if (helperName === reorderIdentifier.name) {
+          if (helperName === reorderIdentifier().name) {
             continuesStructuralLineage = true;
             reorderCalls.push({ call: node, kind: "reverse", mapped: false });
             return;
           }
-          if (helperName === sortIdentifier.name) {
+          if (helperName === sortIdentifier().name) {
             continuesStructuralLineage = true;
             reorderCalls.push({ call: node, kind: "sort", mapped: false });
             return;
           }
-          if (helperName === mapReorderIdentifier.name) {
+          if (helperName === mapReorderIdentifier().name) {
             const method = node.arguments[1];
             const kind = t.isIdentifier(method) ? methodKinds.get(method.name) : undefined;
             if (!kind) {
@@ -3730,12 +3734,12 @@ function rewriteQueuedKeyedArrayStructuralReorderHints(
         }
 
         for (const call of queuedMaps) {
-          call.callee = t.cloneNode(mapPipelineIdentifier);
+          call.callee = t.cloneNode(mapPipelineIdentifier());
           replacedQueuedMapCount += 1;
         }
         for (const { call, kind, mapped } of reorderCalls) {
           call.callee = t.cloneNode(
-            kind === "reverse" ? structuralReorderIdentifier : structuralSortIdentifier,
+            kind === "reverse" ? structuralReorderIdentifier() : structuralSortIdentifier(),
           );
           if (kind === "reverse") {
             reorderCount += 1;
@@ -3762,13 +3766,13 @@ function rewriteQueuedKeyedArrayStructuralReorderHints(
 function rewriteQueuedKeyedArrayMapReorderHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  mapUpdateIdentifier: t.Identifier,
-  queuedMapPipelineIdentifier: t.Identifier,
-  mapReorderIdentifier: t.Identifier,
-  reorderIdentifier: t.Identifier,
-  sortIdentifier: t.Identifier,
-  structuralReorderIdentifier: t.Identifier,
-  structuralSortIdentifier: t.Identifier,
+  mapUpdateIdentifier: HelperIdentifier,
+  queuedMapPipelineIdentifier: HelperIdentifier,
+  mapReorderIdentifier: HelperIdentifier,
+  reorderIdentifier: HelperIdentifier,
+  sortIdentifier: HelperIdentifier,
+  structuralReorderIdentifier: HelperIdentifier,
+  structuralSortIdentifier: HelperIdentifier,
   allowed: boolean,
 ): {
   root: t.JSXElement;
@@ -3832,7 +3836,7 @@ function rewriteQueuedKeyedArrayMapReorderHints(
 
         if (
           t.isCallExpression(updater.body) &&
-          t.isIdentifier(updater.body.callee, { name: mapUpdateIdentifier.name }) &&
+          t.isIdentifier(updater.body.callee, { name: mapUpdateIdentifier().name }) &&
           updater.body.arguments.length === 2
         ) {
           const pipeline = updater.body.arguments[1];
@@ -3873,15 +3877,15 @@ function rewriteQueuedKeyedArrayMapReorderHints(
         t.traverseFast(updater.body, (node) => {
           if (!t.isCallExpression(node) || !t.isIdentifier(node.callee)) return;
           if (
-            node.callee.name === structuralReorderIdentifier.name ||
-            node.callee.name === structuralSortIdentifier.name
+            node.callee.name === structuralReorderIdentifier().name ||
+            node.callee.name === structuralSortIdentifier().name
           ) {
             structural = true;
-          } else if (node.callee.name === mapReorderIdentifier.name) {
+          } else if (node.callee.name === mapReorderIdentifier().name) {
             containsMappedReorder = true;
-          } else if (node.callee.name === reorderIdentifier.name) {
+          } else if (node.callee.name === reorderIdentifier().name) {
             reorderCalls.push({ call: node, kind: "reverse" });
-          } else if (node.callee.name === sortIdentifier.name) {
+          } else if (node.callee.name === sortIdentifier().name) {
             reorderCalls.push({ call: node, kind: "sort" });
           }
         });
@@ -3912,12 +3916,12 @@ function rewriteQueuedKeyedArrayMapReorderHints(
 
         if (hasPendingMaps) {
           for (const candidate of pendingMaps) {
-            candidate.updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier);
+            candidate.updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier());
             mapCount += candidate.count;
           }
         }
         for (const { call, kind } of reorderCalls) {
-          call.callee = t.cloneNode(mapReorderIdentifier);
+          call.callee = t.cloneNode(mapReorderIdentifier());
           if (kind === "reverse") mapReorderCount += 1;
           else mapSortCount += 1;
         }
@@ -3938,7 +3942,7 @@ function rewriteKeyedArraySortHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  helperIdentifier: t.Identifier,
+  helperIdentifier: HelperIdentifier,
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
@@ -4001,7 +4005,7 @@ function rewriteKeyedArraySortHints(
             ),
           ]),
           t.returnStatement(
-            t.callExpression(t.cloneNode(helperIdentifier), [
+            t.callExpression(t.cloneNode(helperIdentifier()), [
               t.cloneNode(previous),
               t.cloneNode(method),
               ...(comparator ? [t.cloneNode(comparator, true)] : []),
@@ -4025,7 +4029,7 @@ function rewriteKeyedArraySliceHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  helperIdentifier: t.Identifier,
+  helperIdentifier: HelperIdentifier,
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
@@ -4086,7 +4090,7 @@ function rewriteKeyedArraySliceHints(
             ),
           ]),
           t.returnStatement(
-            t.callExpression(t.cloneNode(helperIdentifier), [
+            t.callExpression(t.cloneNode(helperIdentifier()), [
               t.cloneNode(previous),
               t.cloneNode(sliceMethod),
               ...bounds.map((bound) => t.cloneNode(bound, true)),
@@ -4110,7 +4114,7 @@ function rewriteKeyedArrayFilterHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  helperIdentifier: t.Identifier,
+  helperIdentifier: HelperIdentifier,
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
@@ -4170,7 +4174,7 @@ function rewriteKeyedArrayFilterHints(
             ),
           ]),
           t.returnStatement(
-            t.callExpression(t.cloneNode(helperIdentifier), [
+            t.callExpression(t.cloneNode(helperIdentifier()), [
               t.cloneNode(previous),
               t.cloneNode(filterMethod),
               t.cloneNode(predicate, true),
@@ -4313,8 +4317,8 @@ function collectionMutationArgumentsAreValid(
 function prepareKeyedCollectionUpdater(
   updater: t.ArrowFunctionExpression | t.FunctionExpression,
   kind: KeyedCollectionTargetKind,
-  updateHelper: t.Identifier,
-  mutationHelper: t.Identifier,
+  updateHelper: HelperIdentifier,
+  mutationHelper: HelperIdentifier,
 ): PreparedKeyedCollectionUpdater | undefined {
   if (
     updater.async ||
@@ -4352,9 +4356,9 @@ function prepareKeyedCollectionUpdater(
         ),
       ]),
       t.returnStatement(
-        t.callExpression(t.cloneNode(updateHelper), [
+        t.callExpression(t.cloneNode(updateHelper()), [
           t.cloneNode(previous),
-          t.callExpression(t.cloneNode(mutationHelper), [
+          t.callExpression(t.cloneNode(mutationHelper()), [
             t.cloneNode(collection),
             t.memberExpression(t.cloneNode(collection), t.cloneNode(updater.body.callee.property)),
             t.stringLiteral(operation),
@@ -4531,7 +4535,7 @@ function prepareKeyedCollectionUpdater(
       const operation = collectionMutationOperation(kind, callee.property.name);
       if (!collectionMutationArgumentsAreValid(operation, path.node.arguments)) return;
       path.replaceWith(
-        t.callExpression(t.cloneNode(mutationHelper), [
+        t.callExpression(t.cloneNode(mutationHelper()), [
           t.cloneNode(callee.object),
           t.memberExpression(t.cloneNode(callee.object), t.cloneNode(callee.property)),
           t.stringLiteral(operation!),
@@ -4542,7 +4546,7 @@ function prepareKeyedCollectionUpdater(
     },
     ReturnStatement(path) {
       if (path.getFunctionParent()?.node !== functionPath?.node || !path.node.argument) return;
-      path.node.argument = t.callExpression(t.cloneNode(updateHelper), [
+      path.node.argument = t.callExpression(t.cloneNode(updateHelper()), [
         t.cloneNode(clonedPrevious),
         t.cloneNode(path.node.argument, true),
         t.stringLiteral(kind),
@@ -4560,8 +4564,8 @@ function rewriteKeyedCollectionUpdateHints(
   targetKinds: ReadonlyMap<number, KeyedCollectionTargetKind>,
   states: readonly StateBinding[],
   statesBySetter: ReadonlyMap<string, StateBinding>,
-  updateHelper: t.Identifier,
-  mutationHelper: t.Identifier,
+  updateHelper: HelperIdentifier,
+  mutationHelper: HelperIdentifier,
   globalCollections: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number } {
   if (targetKinds.size === 0) return { root, count: 0 };
@@ -9146,31 +9150,31 @@ function wrapperElement(definitionIdentifier: t.Identifier, props?: t.Expression
 function compileCandidate(
   candidate: Candidate,
   createComponentIdentifier: t.Identifier,
-  keyedMapUpdateIdentifier: t.Identifier,
-  keyedArrayAppendIdentifier: t.Identifier,
-  keyedArrayFilterIdentifier: t.Identifier,
-  keyedArrayMapPipelineIdentifier: t.Identifier,
-  keyedArrayMappedStructuralAppendIdentifier: t.Identifier,
-  keyedArrayStructuralAppendMapPipelineIdentifier: t.Identifier,
-  keyedArrayMappedStructuralPrependIdentifier: t.Identifier,
-  keyedArrayStructuralPrependMapPipelineIdentifier: t.Identifier,
-  keyedArrayQueuedMapPipelineIdentifier: t.Identifier,
-  keyedArrayRollingWindowMapPipelineIdentifier: t.Identifier,
-  keyedArrayMappedRollingWindowIdentifier: t.Identifier,
-  keyedArrayMapReorderIdentifier: t.Identifier,
-  keyedArrayMappedStructuralIdentifier: t.Identifier,
-  keyedArrayPrependIdentifier: t.Identifier,
-  keyedArrayPositionIdentifier: t.Identifier,
-  keyedArrayBatchInsertIdentifier: t.Identifier,
-  keyedArrayWindowReplaceIdentifier: t.Identifier,
-  keyedArrayReorderIdentifier: t.Identifier,
-  keyedArrayStructuralReorderIdentifier: t.Identifier,
-  keyedArraySortIdentifier: t.Identifier,
-  keyedArrayStructuralSortIdentifier: t.Identifier,
-  keyedArrayRollingWindowIdentifier: t.Identifier,
-  keyedArraySliceIdentifier: t.Identifier,
-  keyedCollectionUpdateIdentifier: t.Identifier,
-  keyedCollectionMutationIdentifier: t.Identifier,
+  keyedMapUpdateIdentifier: HelperIdentifier,
+  keyedArrayAppendIdentifier: HelperIdentifier,
+  keyedArrayFilterIdentifier: HelperIdentifier,
+  keyedArrayMapPipelineIdentifier: HelperIdentifier,
+  keyedArrayMappedStructuralAppendIdentifier: HelperIdentifier,
+  keyedArrayStructuralAppendMapPipelineIdentifier: HelperIdentifier,
+  keyedArrayMappedStructuralPrependIdentifier: HelperIdentifier,
+  keyedArrayStructuralPrependMapPipelineIdentifier: HelperIdentifier,
+  keyedArrayQueuedMapPipelineIdentifier: HelperIdentifier,
+  keyedArrayRollingWindowMapPipelineIdentifier: HelperIdentifier,
+  keyedArrayMappedRollingWindowIdentifier: HelperIdentifier,
+  keyedArrayMapReorderIdentifier: HelperIdentifier,
+  keyedArrayMappedStructuralIdentifier: HelperIdentifier,
+  keyedArrayPrependIdentifier: HelperIdentifier,
+  keyedArrayPositionIdentifier: HelperIdentifier,
+  keyedArrayBatchInsertIdentifier: HelperIdentifier,
+  keyedArrayWindowReplaceIdentifier: HelperIdentifier,
+  keyedArrayReorderIdentifier: HelperIdentifier,
+  keyedArrayStructuralReorderIdentifier: HelperIdentifier,
+  keyedArraySortIdentifier: HelperIdentifier,
+  keyedArrayStructuralSortIdentifier: HelperIdentifier,
+  keyedArrayRollingWindowIdentifier: HelperIdentifier,
+  keyedArraySliceIdentifier: HelperIdentifier,
+  keyedCollectionUpdateIdentifier: HelperIdentifier,
+  keyedCollectionMutationIdentifier: HelperIdentifier,
   runtimeFeatureIdentifiers: Map<CompilerRuntimeFeatureName, t.Identifier>,
   usedRuntimeFeatures: Set<CompilerRuntimeFeatureName>,
   optimizationCounts: {
@@ -10653,82 +10657,71 @@ export async function compileReactModule(
         const createProductionComponentIdentifier = programPath.scope.generateUidIdentifier(
           "createProductionComponent",
         );
-        const keyedMapUpdateIdentifier = programPath.scope.generateUidIdentifier(
-          "createCompilerKeyedMapUpdate",
-        );
-        const keyedArrayAppendIdentifier = programPath.scope.generateUidIdentifier(
-          "createCompilerKeyedArrayAppend",
-        );
-        const keyedArrayFilterIdentifier = programPath.scope.generateUidIdentifier(
-          "createCompilerKeyedArrayFilter",
-        );
-        const keyedArrayMapPipelineIdentifier = programPath.scope.generateUidIdentifier(
+        // Reserve each helper in the module scope only when a rewrite or its
+        // recognizer needs it. Repeated candidates share the same identifier.
+        const helperIdentifier = (name: string): HelperIdentifier => {
+          let identifier: t.Identifier | undefined;
+          return () => (identifier ??= programPath.scope.generateUidIdentifier(name));
+        };
+        const keyedMapUpdateIdentifier = helperIdentifier("createCompilerKeyedMapUpdate");
+        const keyedArrayAppendIdentifier = helperIdentifier("createCompilerKeyedArrayAppend");
+        const keyedArrayFilterIdentifier = helperIdentifier("createCompilerKeyedArrayFilter");
+        const keyedArrayMapPipelineIdentifier = helperIdentifier(
           "createCompilerKeyedArrayMapPipeline",
         );
-        const keyedArrayMappedStructuralAppendIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayMappedStructuralAppendIdentifier = helperIdentifier(
           "createCompilerKeyedArrayMappedStructuralAppend",
         );
-        const keyedArrayStructuralAppendMapPipelineIdentifier =
-          programPath.scope.generateUidIdentifier(
-            "createCompilerKeyedArrayStructuralAppendMapPipeline",
-          );
-        const keyedArrayMappedStructuralPrependIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayStructuralAppendMapPipelineIdentifier = helperIdentifier(
+          "createCompilerKeyedArrayStructuralAppendMapPipeline",
+        );
+        const keyedArrayMappedStructuralPrependIdentifier = helperIdentifier(
           "createCompilerKeyedArrayMappedStructuralPrepend",
         );
-        const keyedArrayStructuralPrependMapPipelineIdentifier =
-          programPath.scope.generateUidIdentifier(
-            "createCompilerKeyedArrayStructuralPrependMapPipeline",
-          );
-        const keyedArrayQueuedMapPipelineIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayStructuralPrependMapPipelineIdentifier = helperIdentifier(
+          "createCompilerKeyedArrayStructuralPrependMapPipeline",
+        );
+        const keyedArrayQueuedMapPipelineIdentifier = helperIdentifier(
           "createCompilerKeyedArrayQueuedMapPipeline",
         );
-        const keyedArrayRollingWindowMapPipelineIdentifier =
-          programPath.scope.generateUidIdentifier(
-            "createCompilerKeyedArrayRollingWindowMapPipeline",
-          );
-        const keyedArrayMappedRollingWindowIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayRollingWindowMapPipelineIdentifier = helperIdentifier(
+          "createCompilerKeyedArrayRollingWindowMapPipeline",
+        );
+        const keyedArrayMappedRollingWindowIdentifier = helperIdentifier(
           "createCompilerKeyedArrayMappedRollingWindow",
         );
-        const keyedArrayMapReorderIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayMapReorderIdentifier = helperIdentifier(
           "createCompilerKeyedArrayMapReorder",
         );
-        const keyedArrayMappedStructuralIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayMappedStructuralIdentifier = helperIdentifier(
           "finalizeCompilerKeyedArrayMappedStructuralUpdate",
         );
-        const keyedArrayPrependIdentifier = programPath.scope.generateUidIdentifier(
-          "createCompilerKeyedArrayPrepend",
-        );
-        const keyedArrayPositionIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayPrependIdentifier = helperIdentifier("createCompilerKeyedArrayPrepend");
+        const keyedArrayPositionIdentifier = helperIdentifier(
           "createCompilerKeyedArrayPositionUpdate",
         );
-        const keyedArrayBatchInsertIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayBatchInsertIdentifier = helperIdentifier(
           "createCompilerKeyedArrayBatchInsert",
         );
-        const keyedArrayWindowReplaceIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayWindowReplaceIdentifier = helperIdentifier(
           "createCompilerKeyedArrayWindowReplace",
         );
-        const keyedArrayReorderIdentifier = programPath.scope.generateUidIdentifier(
-          "createCompilerKeyedArrayReorder",
-        );
-        const keyedArrayStructuralReorderIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayReorderIdentifier = helperIdentifier("createCompilerKeyedArrayReorder");
+        const keyedArrayStructuralReorderIdentifier = helperIdentifier(
           "createCompilerKeyedArrayStructuralReorder",
         );
-        const keyedArraySortIdentifier = programPath.scope.generateUidIdentifier(
-          "createCompilerKeyedArraySort",
-        );
-        const keyedArrayStructuralSortIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArraySortIdentifier = helperIdentifier("createCompilerKeyedArraySort");
+        const keyedArrayStructuralSortIdentifier = helperIdentifier(
           "createCompilerKeyedArrayStructuralSort",
         );
-        const keyedArrayRollingWindowIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArrayRollingWindowIdentifier = helperIdentifier(
           "createCompilerKeyedArrayRollingWindow",
         );
-        const keyedArraySliceIdentifier = programPath.scope.generateUidIdentifier(
-          "createCompilerKeyedArraySlice",
-        );
-        const keyedCollectionUpdateIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedArraySliceIdentifier = helperIdentifier("createCompilerKeyedArraySlice");
+        const keyedCollectionUpdateIdentifier = helperIdentifier(
           "createCompilerKeyedCollectionUpdate",
         );
-        const keyedCollectionMutationIdentifier = programPath.scope.generateUidIdentifier(
+        const keyedCollectionMutationIdentifier = helperIdentifier(
           "applyCompilerKeyedCollectionMutation",
         );
         const runtimeFeatureIdentifiers = new Map<CompilerRuntimeFeatureName, t.Identifier>();
@@ -10837,7 +10830,7 @@ export async function compileReactModule(
                 ...(optimizationCounts.keyedMapUpdateHints > compilerUsage.keyedArrayMapUpdateHints
                   ? [
                       t.importSpecifier(
-                        keyedMapUpdateIdentifier,
+                        keyedMapUpdateIdentifier(),
                         t.identifier("createCompilerKeyedMapUpdate"),
                       ),
                     ]
@@ -10845,7 +10838,7 @@ export async function compileReactModule(
                 ...(hasEagerKeyedArrayMapUpdateHints
                   ? [
                       t.importSpecifier(
-                        keyedArrayMapPipelineIdentifier,
+                        keyedArrayMapPipelineIdentifier(),
                         t.identifier("createCompilerKeyedArrayMapPipeline"),
                       ),
                     ]
@@ -10853,7 +10846,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayStructuralAppendMapHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayStructuralAppendMapPipelineIdentifier,
+                        keyedArrayStructuralAppendMapPipelineIdentifier(),
                         t.identifier("createCompilerKeyedArrayStructuralAppendMapPipeline"),
                       ),
                     ]
@@ -10861,7 +10854,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayStructuralPrependMapHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayStructuralPrependMapPipelineIdentifier,
+                        keyedArrayStructuralPrependMapPipelineIdentifier(),
                         t.identifier("createCompilerKeyedArrayStructuralPrependMapPipeline"),
                       ),
                     ]
@@ -10869,7 +10862,7 @@ export async function compileReactModule(
                 ...(hasKeyedArrayMapReorderHints
                   ? [
                       t.importSpecifier(
-                        keyedArrayMapReorderIdentifier,
+                        keyedArrayMapReorderIdentifier(),
                         t.identifier("createCompilerKeyedArrayMapReorder"),
                       ),
                     ]
@@ -10877,7 +10870,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayMappedStructuralHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayMappedStructuralIdentifier,
+                        keyedArrayMappedStructuralIdentifier(),
                         t.identifier("finalizeCompilerKeyedArrayMappedStructuralUpdate"),
                       ),
                     ]
@@ -10887,7 +10880,7 @@ export async function compileReactModule(
                   compilerUsage.keyedArrayMappedRollingWindowChainHints
                   ? [
                       t.importSpecifier(
-                        keyedArrayMappedStructuralAppendIdentifier,
+                        keyedArrayMappedStructuralAppendIdentifier(),
                         t.identifier("createCompilerKeyedArrayMappedStructuralAppend"),
                       ),
                     ]
@@ -10895,7 +10888,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayMappedStructuralPrependHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayMappedStructuralPrependIdentifier,
+                        keyedArrayMappedStructuralPrependIdentifier(),
                         t.identifier("createCompilerKeyedArrayMappedStructuralPrepend"),
                       ),
                     ]
@@ -10903,7 +10896,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayQueuedMapUpdateHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayQueuedMapPipelineIdentifier,
+                        keyedArrayQueuedMapPipelineIdentifier(),
                         t.identifier("createCompilerKeyedArrayQueuedMapPipeline"),
                       ),
                     ]
@@ -10911,7 +10904,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayMappedRollingWindowChainHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayRollingWindowMapPipelineIdentifier,
+                        keyedArrayRollingWindowMapPipelineIdentifier(),
                         t.identifier("createCompilerKeyedArrayRollingWindowMapPipeline"),
                       ),
                     ]
@@ -10919,7 +10912,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayMappedRollingWindowChainHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayMappedRollingWindowIdentifier,
+                        keyedArrayMappedRollingWindowIdentifier(),
                         t.identifier("createCompilerKeyedArrayMappedRollingWindow"),
                       ),
                     ]
@@ -10928,7 +10921,7 @@ export async function compileReactModule(
                 compilerUsage.keyedArrayStructuralRollingWindowHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayAppendIdentifier,
+                        keyedArrayAppendIdentifier(),
                         t.identifier(
                           hasKeyedArrayStructuralAppendHints
                             ? "createCompilerKeyedArrayStructuralAppend"
@@ -10940,7 +10933,7 @@ export async function compileReactModule(
                 ...(optimizationCounts.keyedArrayFilterHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayFilterIdentifier,
+                        keyedArrayFilterIdentifier(),
                         t.identifier("createCompilerKeyedArrayFilter"),
                       ),
                     ]
@@ -10948,7 +10941,7 @@ export async function compileReactModule(
                 ...(hasUnmappedKeyedArrayPrependHints
                   ? [
                       t.importSpecifier(
-                        keyedArrayPrependIdentifier,
+                        keyedArrayPrependIdentifier(),
                         t.identifier(
                           hasKeyedArrayStructuralPrependHints
                             ? "createCompilerKeyedArrayStructuralPrepend"
@@ -10962,7 +10955,7 @@ export async function compileReactModule(
                   compilerUsage.keyedArrayWindowReplaceHints
                   ? [
                       t.importSpecifier(
-                        keyedArrayPositionIdentifier,
+                        keyedArrayPositionIdentifier(),
                         t.identifier("createCompilerKeyedArrayPositionUpdate"),
                       ),
                     ]
@@ -10970,7 +10963,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayBatchInsertHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayBatchInsertIdentifier,
+                        keyedArrayBatchInsertIdentifier(),
                         t.identifier("createCompilerKeyedArrayBatchInsert"),
                       ),
                     ]
@@ -10978,7 +10971,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayWindowReplaceHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayWindowReplaceIdentifier,
+                        keyedArrayWindowReplaceIdentifier(),
                         t.identifier("createCompilerKeyedArrayWindowReplace"),
                       ),
                     ]
@@ -10988,7 +10981,7 @@ export async function compileReactModule(
                   compilerUsage.keyedArrayMapReorderHints
                   ? [
                       t.importSpecifier(
-                        keyedArrayReorderIdentifier,
+                        keyedArrayReorderIdentifier(),
                         t.identifier("createCompilerKeyedArrayReorder"),
                       ),
                     ]
@@ -10996,7 +10989,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayStructuralReorderHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayStructuralReorderIdentifier,
+                        keyedArrayStructuralReorderIdentifier(),
                         t.identifier("createCompilerKeyedArrayStructuralReorder"),
                       ),
                     ]
@@ -11005,7 +10998,7 @@ export async function compileReactModule(
                 compilerUsage.keyedArrayStructuralSortHints + compilerUsage.keyedArrayMapSortHints
                   ? [
                       t.importSpecifier(
-                        keyedArraySortIdentifier,
+                        keyedArraySortIdentifier(),
                         t.identifier("createCompilerKeyedArraySort"),
                       ),
                     ]
@@ -11013,7 +11006,7 @@ export async function compileReactModule(
                 ...(compilerUsage.keyedArrayStructuralSortHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArrayStructuralSortIdentifier,
+                        keyedArrayStructuralSortIdentifier(),
                         t.identifier("createCompilerKeyedArrayStructuralSort"),
                       ),
                     ]
@@ -11023,7 +11016,7 @@ export async function compileReactModule(
                   compilerUsage.keyedArrayStructuralRollingWindowHints
                   ? [
                       t.importSpecifier(
-                        keyedArrayRollingWindowIdentifier,
+                        keyedArrayRollingWindowIdentifier(),
                         t.identifier("createCompilerKeyedArrayRollingWindow"),
                       ),
                     ]
@@ -11032,7 +11025,7 @@ export async function compileReactModule(
                 optimizationCounts.keyedArrayRollingWindowHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedArraySliceIdentifier,
+                        keyedArraySliceIdentifier(),
                         t.identifier("createCompilerKeyedArraySlice"),
                       ),
                     ]
@@ -11040,11 +11033,11 @@ export async function compileReactModule(
                 ...(optimizationCounts.keyedCollectionUpdateHints > 0
                   ? [
                       t.importSpecifier(
-                        keyedCollectionUpdateIdentifier,
+                        keyedCollectionUpdateIdentifier(),
                         t.identifier("createCompilerKeyedCollectionUpdate"),
                       ),
                       t.importSpecifier(
-                        keyedCollectionMutationIdentifier,
+                        keyedCollectionMutationIdentifier(),
                         t.identifier("applyCompilerKeyedCollectionMutation"),
                       ),
                     ]

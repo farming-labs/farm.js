@@ -193,7 +193,10 @@ With [isolated client hydration](/docs/configuration#isolated-client-hydration),
 client module keeps its own strategy, including after SPA navigation. Sibling boundaries can mix
 all four strategies: one boundary's trigger never hydrates another, and an interaction click is
 claimed and replayed once by the boundary that contains it. Removing a boundary cancels its pending
-observer, idle callback, or interaction listener.
+observer, idle callback, or interaction listener. Islands mode
+(`serverComponents: { mode: "islands" }`) keeps each client module's strategy the same way. With
+React Server Components (`{ mode: "rsc" }`), React's client hydrates every client component on load
+and the `island` export has no effect.
 
 Farm uses the same isolated boundary metadata for Vite development, streamed or buffered SSR, and
 statically generated HTML. In development, updating a client module rerenders every live boundary
@@ -373,7 +376,8 @@ The app's `vite` options and plugins apply as in other Farm apps, and so does bu
 The build goes to the deploy target's
 output directory, so `farm start` and platform deploys work unchanged.
 
-The pipeline does not run every Farm feature yet:
+The RSC pipeline (`serverComponents: true` or `{ mode: "rsc" }`) does not run every Farm feature
+yet:
 
 - `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, `context`, and
   `security.csp` decide what a request may see or receive. Running the app without them could
@@ -381,6 +385,8 @@ The pipeline does not run every Farm feature yet:
   including when a layer (`extends`) sets them.
 - Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, and `observability`
   are ignored, with a warning.
+
+Islands mode renders on Farm's own pipeline, so it runs all of these.
 
 Before this flag ran the RSC pipeline it only switched off isolated hydration, so some apps set it
 without using React Server Components. If such an app uses `auth`, `integrations` or another
