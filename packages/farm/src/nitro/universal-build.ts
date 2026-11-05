@@ -1965,6 +1965,7 @@ async function buildClient(
       })),
     ],
     layoutAppliesToRoute,
+    { serverOwners: islandsMode },
   );
 
   for (const layout of clientLayouts) {

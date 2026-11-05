@@ -793,6 +793,7 @@ export class RouteManager {
         metadata,
       })),
       routeBoundaryCoversDirectory,
+      { serverOwners: islandsMode },
     );
 
     for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {

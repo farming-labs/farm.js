@@ -925,11 +925,18 @@ export function enforceFarmIsolatedHydrationRouteBudget(
   layouts: FarmIsolatedHydrationRouteOwner[],
   routes: FarmIsolatedHydrationRouteOwner[],
   layoutAppliesToRoute: (layoutPattern: string, routePattern: string) => boolean,
+  options: {
+    /**
+     * Islands mode: pages and layouts are server components with no route-wide root to fall back
+     * to (one would ship their server code), so islands are how they hydrate, however many.
+     */
+    serverOwners?: boolean;
+  } = {},
 ): void {
   const boundaryLimit = isolatedHydrationBoundaryLimit();
   const sortedLayouts = [...layouts].sort((left, right) => left.depth - right.depth);
 
-  for (const route of routes) {
+  for (const route of options.serverOwners ? [] : routes) {
     if (route.metadata.mode !== "enabled") continue;
     const applicableLayouts = sortedLayouts.filter((layout) =>
       layoutAppliesToRoute(layout.pattern, route.pattern),

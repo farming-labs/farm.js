@@ -5,7 +5,11 @@ import React from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
-import { getClientModuleHydrationPlan, usesFarmServerTree } from "../utils/client-component";
+import {
+  enforceFarmIsolatedHydrationRouteBudget,
+  getClientModuleHydrationPlan,
+  usesFarmServerTree,
+} from "../utils/client-component";
 import { getFarmServerTreeLayoutPatterns } from "../routing/layout-selector";
 import { transformIsolatedClientBoundaryModule } from "../vite";
 
@@ -210,6 +214,41 @@ describe("islands mode", () => {
     expect(output).toContain("export { __farm_isolated_reexport_1__ as format };");
     expect(output).toContain('export type { Props } from "./types";');
     expect(output).not.toMatch(/export \{ Counter, helper/);
+  });
+
+  it("keeps every island of a page above the root budget, so the page never ships", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-islands-budget-"));
+    roots.push(root);
+    mkdirSync(path.join(root, "src/app"), { recursive: true });
+    writeFileSync(
+      path.join(root, "src/copy.tsx"),
+      '"use client";\nexport function Copy({ text }) { return <button>{text}</button>; }\n',
+    );
+    const pageFile = path.join(root, "src/app/page.tsx");
+    writeFileSync(
+      pageFile,
+      'import { Copy } from "../copy";\nimport { secret } from "../secret";\nexport default function Page() { return <main><p>{secret()}</p><Copy text="1" /><Copy text="2" /><Copy text="3" /><Copy text="4" /><Copy text="5" /></main>; }\n',
+    );
+    const plan = (serverOwners: boolean) => {
+      const metadata = getClientModuleHydrationPlan(pageFile, root, "enabled", {
+        asyncOwnerIslands: true,
+        serverOwners,
+      });
+      enforceFarmIsolatedHydrationRouteBudget(
+        [],
+        [{ pattern: "/", depth: 0, metadata }],
+        () => true,
+        { serverOwners },
+      );
+      return metadata;
+    };
+
+    // Islands mode: five islands, and the page module stays on the server.
+    expect(plan(true)).toMatchObject({ shouldHydrate: false, hasIsolatedClientBoundaries: true });
+    expect(plan(true).isolatedBoundaries).toHaveLength(1);
+    expect(plan(true).fallbackReason).toBeUndefined();
+    // Isolated hydration without islands mode can still hydrate the page whole instead.
+    expect(plan(false)).toMatchObject({ shouldHydrate: true, hasIsolatedClientBoundaries: false });
   });
 
   describe("a server layout around a client provider", () => {
