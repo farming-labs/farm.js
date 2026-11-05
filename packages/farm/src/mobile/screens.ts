@@ -67,6 +67,10 @@ export interface FarmMobileScreensOptions {
   analyzerBlockers?: ReadonlyMap<string, readonly string[]>;
   /** Each analyzed route's tier, and what rules out the native tier. */
   analyzerTiers?: ReadonlyMap<string, { tier: FarmMobileTier; nativeBlockers: readonly string[] }>;
+  /** The generated React Native port of each route Farm ported, as an absolute screen file. */
+  portFiles?: ReadonlyMap<string, string>;
+  /** Why Farm could not emit the port of a portable route. */
+  portProblems?: ReadonlyMap<string, readonly string[]>;
 }
 
 export interface FarmMobileScreens {
@@ -225,12 +229,25 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
         screens[route] = { screen: "server", source: "config", module, ...base };
         continue;
       }
+      const portFile = options.portFiles?.get(route);
+      if (nativeTier === "native" && portFile) {
+        screens[route] = {
+          screen: "native",
+          source: "config",
+          file: relativeFile(root, portFile),
+          module,
+          ...base,
+        };
+        continue;
+      }
       const blockers = options.analyzerBlockers?.get(route);
+      const problems = options.portProblems?.get(route);
       warnings.push(
         `${where}.${tierKey} is "native", but "${route}" has no ` +
           `${nativeTier === "native" ? "page.native.tsx" : platformFileName} and Farm cannot ` +
-          "port pages yet, so it stays web" +
+          "port it yet, so it stays web" +
           (blockers?.length ? `. The analyzer would keep it web: ${blockers.join("; ")}` : "") +
+          (problems?.length ? `. The port would need: ${problems.join("; ")}` : "") +
           ". This fails the build once native screens ship.",
       );
       screens[route] = { screen: "web", source: "config", requested: nativeTier, ...base };
@@ -253,6 +270,24 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
       continue;
     }
     if (native.auto === "on" && options.analyzerPorts?.has(route)) {
+      const portFile = options.portFiles?.get(route);
+      if (nativeTier === "native" && portFile) {
+        screens[route] = {
+          screen: "native",
+          source: "analyzer",
+          file: relativeFile(root, portFile),
+          module,
+          ...base,
+        };
+        continue;
+      }
+      const problems = options.portProblems?.get(route);
+      if (problems?.length) {
+        warnings.push(
+          `${prefix}: "${route}" is portable, but Farm cannot port it yet, so it stays web: ` +
+            `${problems.join("; ")}.`,
+        );
+      }
       screens[route] = { screen: "web", source: "analyzer", requested: nativeTier, ...base };
       continue;
     }

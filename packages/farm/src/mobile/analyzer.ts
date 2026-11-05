@@ -152,6 +152,43 @@ export interface FarmMobileAnalyzerStats {
 export interface FarmMobileAnalyzerResult {
   routes: Record<string, FarmMobileRouteAnalysis>;
   stats: FarmMobileAnalyzerStats;
+  /**
+   * The page's own module graph (not its layouts) for each portable route, which the port emitter
+   * copies. Not part of the report.
+   *
+   * @internal
+   */
+  graphs: Record<string, FarmMobilePortGraph>;
+  /**
+   * Every plain `.css` file the analyzed pages and layouts import. A production build bundles the
+   * app's CSS into one stylesheet every page links, so each of these can style any page.
+   *
+   * @internal
+   */
+  stylesheets: string[];
+  /**
+   * Stylesheets the analyzer cannot read as plain CSS: package CSS and preprocessor files, by
+   * specifier.
+   *
+   * @internal
+   */
+  unreadStylesheets: string[];
+}
+
+/** @internal */
+export interface FarmMobilePortGraph {
+  /** Absolute page file. */
+  page: string;
+  modules: Array<{
+    /** Absolute module file. */
+    file: string;
+    /** A server function module, which the client calls over the network. */
+    serverBoundary: boolean;
+    /** Each import's specifier, and the app module it resolves to, if any. */
+    imports: Array<{ source: string; file?: string }>;
+  }>;
+  /** Class names the route's layouts render, which may wrap the page's elements on the web. */
+  layoutClasses: string[];
 }
 
 export interface FarmMobileAnalyzeOptions {
@@ -1477,6 +1514,9 @@ export async function analyzeFarmMobileRoutes(
   for (const [file, pending] of facts) settled.set(file, await pending);
 
   const routes: Record<string, FarmMobileRouteAnalysis> = {};
+  const graphs: Record<string, FarmMobilePortGraph> = {};
+  const allStylesheets = new Set<string>();
+  const unreadStylesheets = new Set<string>();
   for (const [route, { page, layouts }] of entries) {
     const blockers: FarmMobileBlocker[] = [];
     const wins = new Set<FarmMobileWin>();
@@ -1488,6 +1528,8 @@ export async function analyzeFarmMobileRoutes(
     const stylesheets = new Set<string>();
     const appClasses: Array<{ file: string; name: string; line: number; column: number }> = [];
     const tags = new Set<string>();
+    const graph: FarmMobilePortGraph["modules"] = [];
+    const layoutClasses = new Set<string>();
 
     // `layout`: a layout's graph, which only a React Native port includes.
     const walk = (file: string, entry: boolean, layout: boolean) => {
@@ -1520,6 +1562,25 @@ export async function analyzeFarmMobileRoutes(
           only: "react-native",
         });
       }
+      if (!layout) {
+        graph.push({
+          file,
+          serverBoundary: moduleFacts.serverBoundary,
+          imports: (resolved.get(file) ?? []).map((entryImport) => ({
+            source: entryImport.fact.source,
+            ...(entryImport.file ? { file: entryImport.file } : {}),
+          })),
+        });
+      }
+      if (layout) {
+        for (const appClass of moduleFacts.appClasses) layoutClasses.add(appClass.name);
+        const visit = (node: FarmUiNode) => {
+          for (const token of node.style ?? [])
+            if (!token.startsWith("style.")) layoutClasses.add(token);
+          for (const child of node.children ?? []) visit(child);
+        };
+        for (const node of Object.values(moduleFacts.components)) visit(node);
+      }
       if (moduleFacts.serverBoundary && !entry) return;
       for (const blocker of moduleFacts.blockers) add({ file: label, ...blocker });
       if (!layout) {
@@ -1538,7 +1599,12 @@ export async function analyzeFarmMobileRoutes(
         ir.components[`${label}#${name}`] = node;
       }
       for (const entryImport of resolved.get(file) ?? []) {
-        if (entryImport.stylesheet) stylesheets.add(entryImport.stylesheet);
+        if (entryImport.stylesheet) {
+          stylesheets.add(entryImport.stylesheet);
+          allStylesheets.add(entryImport.stylesheet);
+        } else if (entryImport.blocker?.rule === "css-import") {
+          unreadStylesheets.add(entryImport.fact.source);
+        }
         if (entryImport.blocker) add({ file: label, ...entryImport.blocker });
         if (entryImport.file) walk(entryImport.file, false, layout);
       }
@@ -1622,6 +1688,7 @@ export async function analyzeFarmMobileRoutes(
     if (portable) {
       analysis.ir = ir;
       analysis.irBytes = Buffer.byteLength(JSON.stringify(ir));
+      if (page) graphs[route] = { page, modules: graph, layoutClasses: [...layoutClasses].sort() };
     }
     routes[route] = analysis;
   }
@@ -1636,5 +1703,8 @@ export async function analyzeFarmMobileRoutes(
   return {
     routes,
     stats: { modules: facts.size, parsed, cached, ms: Math.round(performance.now() - started) },
+    graphs,
+    stylesheets: [...allStylesheets].sort(),
+    unreadStylesheets: [...unreadStylesheets].sort(),
   };
 }

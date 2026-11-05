@@ -31,6 +31,12 @@
       "import": "./dist/register.js",
       "default": "./dist/register.js"
     },
+    "./elements": {
+      "types": "./dist/elements.d.ts",
+      "react-native": "./dist/elements.js",
+      "import": "./dist/elements.js",
+      "default": "./dist/elements.js"
+    },
     "./build": {
       "types": "./dist/build/index.d.ts",
       "import": "./dist/build/index.js",
