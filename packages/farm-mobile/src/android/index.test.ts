@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -951,31 +950,48 @@ describe("React Native native modules (autolinking)", () => {
     return root;
   }
 
-  async function digest(ctx: MobileShellContext): Promise<string> {
-    const hash = createHash("sha256");
-    for (const file of await createAndroidProject(ctx)) {
-      hash.update(`${file.path}\0${file.executable ? 1 : 0}\0`);
-      hash.update(file.contents);
-      hash.update("\0");
+  /**
+   * Every file linking native modules can change. Their snapshots under __snapshots__/unlinked are
+   * the output from before modules were linked, so apps that link none keep it unchanged.
+   */
+  const LINKABLE = [
+    "settings.gradle.kts",
+    "build.gradle.kts",
+    "gradle.properties",
+    "gradle/wrapper/gradle-wrapper.properties",
+    "app/build.gradle.kts",
+    "app/src/main/jni/CMakeLists.txt",
+    "app/src/main/jni/OnLoad.cpp",
+    ENGINE,
+    "app/src/main/res/values/farm_native.xml",
+  ];
+
+  async function expectUnlinked(ctx: MobileShellContext, name: string): Promise<void> {
+    const files = await createAndroidProject(ctx);
+    const list = files.map((file) => `${file.path}${file.executable ? " (executable)" : ""}\n`);
+    await expect(list.join("")).toMatchFileSnapshot(`__snapshots__/unlinked/${name}/files.txt`);
+    const contents = Object.fromEntries(files.map((file) => [file.path, String(file.contents)]));
+    for (const file of LINKABLE.filter((file) => file in contents)) {
+      await expect(contents[file]).toMatchFileSnapshot(`__snapshots__/unlinked/${name}/${file}`);
     }
-    return hash.digest("hex");
   }
 
-  // The output before native modules were linked; apps that link none must keep it byte for byte.
-  const WEB_ONLY_DIGEST = "20022f07b040a02202ac24c9317a5aaabe686f4fa60171385e4e3e6a39bf4c8f";
-  const NATIVE_DIGEST = "edd0d2d0f931ebbbf2a898085494dc19bcde111c3af98675e555c30cb46ca069";
+  it("leaves web-only projects unchanged, even with native modules installed", async () => {
+    const root = await app({
+      dependencies: { "@react-native-community/netinfo": "12.0.1", zod: "4.0.0" },
+      devDependencies: { "react-native": "0.88.1" },
+    });
+    await expectUnlinked(context(), "web-only");
+    await expectUnlinked(context({ root }), "web-only");
+  });
 
-  it("leaves projects without native modules byte-identical", async () => {
+  it("leaves native-screen projects without native modules unchanged", async () => {
     const root = await app({
       dependencies: { react: "19.2.8", zod: "4.0.0" },
       devDependencies: { "react-native": "0.88.1", "react-native-dev-only": "1.0.0" },
     });
-    for (const ctx of [context(), context({ root })]) {
-      expect(await digest(ctx)).toBe(WEB_ONLY_DIGEST);
-    }
-    for (const ctx of [context({ native: native() }), context({ root, native: native() })]) {
-      expect(await digest(ctx)).toBe(NATIVE_DIGEST);
-    }
+    await expectUnlinked(context({ native: native() }), "native");
+    await expectUnlinked(context({ root, native: native() }), "native");
   });
 
   it("links the app's own dependencies with Android code through React Native's Gradle plugin", async () => {
@@ -1104,10 +1120,5 @@ describe("React Native native modules (autolinking)", () => {
     await expect(createAndroidProject(context({ root, native: native() }))).rejects.toThrow(
       /"react-native-missing" is in dependencies but not installed/,
     );
-  });
-
-  it("links nothing for a web-only build, even with native modules installed", async () => {
-    const root = await app({ dependencies: { "@react-native-community/netinfo": "12.0.1" } });
-    expect(await digest(context({ root }))).toBe(WEB_ONLY_DIGEST);
   });
 });
