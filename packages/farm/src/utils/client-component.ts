@@ -671,6 +671,7 @@ export function getClientModuleHydrationPlan(
   const layout = collectIsolatedClientBoundaries(resolvedPath, root, {
     allowDynamicCardinality: true,
     allowElementProps: true,
+    staticPackageLeaves: true,
   });
   const routeWide = {
     ...plan,
@@ -690,7 +691,18 @@ export function getClientModuleHydrationPlan(
         : layout.fallbackReason,
     };
   }
-  return { ...routeWide, serverTreeLayout: true, isolatedBoundaries: layout.boundaries };
+  const staticPackages =
+    layout.staticPackages.length > 0 ? { staticPackageBoundaries: layout.staticPackages } : {};
+  // Only package elements rendered as static HTML: nothing in the layout needs the browser.
+  if (layout.boundaries.length === 0) {
+    return { ...routeWide, shouldHydrate: false, islandStrategy: null, ...staticPackages };
+  }
+  return {
+    ...routeWide,
+    serverTreeLayout: true,
+    isolatedBoundaries: layout.boundaries,
+    ...staticPackages,
+  };
 }
 
 function planClientModuleHydration(
@@ -745,6 +757,7 @@ function planClientModuleHydration(
     allowDynamicCardinality: asyncOwner,
     allowElementProps: asyncOwner,
     staticPackageBoundaries: asyncOwner,
+    staticPackageLeaves: options.serverTreeLayouts === true && options.asyncOwnerIslands === true,
   });
   if (inspection.fallbackReason && asyncOwner && options.serverOwners === true) {
     // A server page in islands mode never hydrates as a whole: that bundles the page module and
@@ -793,9 +806,9 @@ function planClientModuleHydration(
   if (asyncOwner) {
     delete plan.suppressedAsyncHydration;
     plan.asyncOwnerIslands = true;
-    if (inspection.staticPackages.length > 0)
-      plan.staticPackageBoundaries = inspection.staticPackages;
   }
+  if (inspection.staticPackages.length > 0)
+    plan.staticPackageBoundaries = inspection.staticPackages;
   return plan;
 }
 
@@ -1386,6 +1399,27 @@ function passesElementValuedProps(content: string | null, localBindings: string[
   return false;
 }
 
+/** Whether every element of these bindings closes itself and takes no element-valued prop. */
+function rendersOnlyLeafElements(content: string | null, localBindings: string[]): boolean {
+  if (!content) return false;
+  const names = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+  for (let index = 0; index < tokens.length - 1; index++) {
+    if (tokens[index].value !== "<" || !names.has(tokens[index + 1].value)) continue;
+    let braceDepth = 0;
+    let cursor = index + 2;
+    for (; cursor < tokens.length; cursor++) {
+      const value = tokens[cursor].value;
+      if (value === "{") braceDepth++;
+      else if (value === "}") braceDepth--;
+      else if (value === "<" && braceDepth > 0) return false;
+      else if (value === ">" && braceDepth === 0) break;
+    }
+    if (cursor >= tokens.length || tokens[cursor - 1]?.value !== "/") return false;
+  }
+  return true;
+}
+
 function hasDynamicJsxCardinality(content: string | null, localBindings: string[]): boolean {
   if (!content || localBindings.length === 0) return false;
   const clientBindings = new Set(localBindings);
@@ -1452,6 +1486,12 @@ function collectIsolatedClientBoundaries(
      * Only for owners with no route-wide fallback, where rejecting leaves everything static.
      */
     staticPackageBoundaries?: boolean;
+    /**
+     * Render a package client component as static server HTML when every element of it closes
+     * itself and takes no element props, such as an icon. Islands mode's layouts: one that wraps
+     * content (a provider) is still rejected, since its client children would lose its context.
+     */
+    staticPackageLeaves?: boolean;
   } = {},
 ): {
   boundaries: IsolatedClientBoundaryReference[];
@@ -1517,7 +1557,11 @@ function collectIsolatedClientBoundaries(
       if (!imported.local) {
         const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
         if (packageMetadata.shouldHydrate) {
-          if (options.staticPackageBoundaries) {
+          if (
+            options.staticPackageBoundaries ||
+            (options.staticPackageLeaves &&
+              rendersOnlyLeafElements(content, importedBindings.get(specifier) ?? []))
+          ) {
             staticPackages.add(specifier);
             continue;
           }

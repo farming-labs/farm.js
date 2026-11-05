@@ -775,7 +775,7 @@ export class RouteManager {
     for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
       if (isFarmMarkdownPageFile(entry.modulePath) || !metadata.staticPackageBoundaries) continue;
       logger.info(
-        `[Farm.js] ${entry.pattern} is async, so it renders client components from ${metadata.staticPackageBoundaries.join(", ")} as static HTML: package client components cannot be isolated yet.`,
+        `[Farm.js] ${entry.pattern} renders client components from ${metadata.staticPackageBoundaries.join(", ")} as static HTML: package client components cannot be isolated yet.`,
       );
     }
 

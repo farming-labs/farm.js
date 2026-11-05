@@ -317,6 +317,57 @@ describe("islands mode", () => {
       );
     });
 
+    const iconKit = {
+      "../node_modules/icon-kit/package.json": '{"name":"icon-kit","main":"index.js"}',
+      "../node_modules/icon-kit/index.js":
+        '"use client";\nexport function Github() { return null; }\nexport function ThemeProvider({ children }) { return children; }\n',
+    };
+
+    it("renders a package's icons as static HTML, so an icon-only layout stays on the server", () => {
+      const { plan } = planLayout(
+        'import { Github } from "icon-kit";\nexport default function Layout({ children }) { return <main><a href="/"><Github size={16} /></a>{children}</main>; }\n',
+        iconKit,
+      );
+      expect(plan).toMatchObject({ shouldHydrate: false, staticPackageBoundaries: ["icon-kit"] });
+      expect(plan.islandsError).toBeUndefined();
+      expect(plan.serverTreeLayout).toBeUndefined();
+    });
+
+    it("keeps a layout's islands beside the icons it renders statically", () => {
+      const { root, plan } = planLayout(
+        'import { Nav } from "../nav";\nexport default function Layout({ children }) { return <main><Nav />{children}</main>; }\n',
+        {
+          ...iconKit,
+          "nav.tsx":
+            'import { Github } from "icon-kit";\nimport { Counter } from "./counter";\nexport function Nav() { return <nav><Github /><Counter /></nav>; }\n',
+          "counter.tsx":
+            '"use client";\nexport function Counter() { return <button>1</button>; }\n',
+        },
+      );
+      expect(plan).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+        staticPackageBoundaries: ["icon-kit"],
+        isolatedBoundaries: [{ modulePath: path.join(root, "src/counter.tsx") }],
+      });
+      expect(plan.serverTreeLayout).toBeUndefined();
+    });
+
+    it("still reports a package component that wraps content, or takes an element prop", () => {
+      for (const body of [
+        "<ThemeProvider>{children}</ThemeProvider>",
+        "<main><Github label={<b>x</b>} />{children}</main>",
+      ]) {
+        const { plan } = planLayout(
+          `import { Github, ThemeProvider } from "icon-kit";\nexport default function Layout({ children }) { return ${body}; }\n`,
+          iconKit,
+        );
+        expect(plan.islandsError, body).toMatch(
+          /package client boundary icon-kit cannot yet be isolated/,
+        );
+      }
+    });
+
     it("renders the server layouts on the same pages as trees too", () => {
       const patterns = getFarmServerTreeLayoutPatterns([
         { pattern: "/", shouldHydrate: false },
