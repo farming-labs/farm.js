@@ -794,7 +794,9 @@ screen, and back returns to it.
   - Only the 64-bit ABIs are built (`arm64-v8a`, `x86_64`), so 32-bit devices are not supported.
   - An app that links at least one native module builds through React Native's Gradle plugin
     and its toolchain, loaded from the app's `node_modules`: Android Gradle plugin 9.2.1 and Gradle
-    9.4.1 instead of the shell's 8.7.3 and 8.11.1, and JDK 17 or newer. Apps without native modules
+    9.4.1 instead of the shell's 8.7.3 and 8.11.1, and JDK 17 or newer. The plugin compiles itself
+    with a JDK 17 toolchain, so on a machine without JDK 17 the first build also downloads one
+    (about 490 MB in `~/.gradle/jdks`), and Android build-tools 36.0.0. Apps without native modules
     keep the shell's toolchain and generate the same project as before.
 
 Native files import `react-native`, which a web-only checkout may not have. Keep them out of the
