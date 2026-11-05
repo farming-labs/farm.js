@@ -1,6 +1,7 @@
 # RFC 0003: Server components in islands mode
 
-- Status: Draft
+- Status: Implemented in part (experimental, `serverComponents: { mode: "islands" }`; see
+  [Implementation status](#implementation-status))
 - Tracking issue: none yet
 - Scope: `experimental.serverComponents`, production and development, React first; the wire format
   is renderer-neutral
