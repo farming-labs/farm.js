@@ -7,6 +7,7 @@ import {
   createAutolinkingConfig,
   resolveAndroidAutolinking,
 } from "./autolinking.js";
+import { createAndroidWebModules } from "./web-modules.js";
 import { createBundledAssetFiles } from "../shared/assets.js";
 import { createBridgeScript } from "../shared/bridge.js";
 import { createPageShellFiles } from "../shared/shells.js";
@@ -534,6 +535,8 @@ export async function createAndroidProject(
     });
     linking.appModuleFiles?.forEach(add);
   }
+  // Web screens' calls to app modules with mobile.modules.<name>.web; nothing without one.
+  createAndroidWebModules(context, byPath).forEach(add);
   const manifest = byPath.get(ANDROID_MANIFEST);
   if (manifest) add(addManifestPermissions(manifest, context));
   const files = [...byPath.values()];
