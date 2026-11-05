@@ -572,6 +572,9 @@ function resolveLinkHref(
   options: FarmRouterBuildOptions,
 ) {
   if (isExternalUrl(href)) return href;
+  // A link to a place on this page: the browser resolves it against the current URL, as it does
+  // for any anchor, and the router scrolls to it. Resolved here, it would point at the root.
+  if (href.startsWith("#") && !params && !options.query && options.hash === undefined) return href;
 
   const { pathname, query, hash } = splitInternalHref(href);
 
