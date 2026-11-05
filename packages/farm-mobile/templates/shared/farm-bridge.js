@@ -18,6 +18,9 @@
   const plugins = __FARM_PLUGINS__;
   const pending = new Map();
   let seq = 0;
+  // Call ids start at 1 in every document, so native answers with this document's id too, and an
+  // answer that arrives after the WebView loaded another document never settles that one's calls.
+  const documentId = Math.random().toString(36).slice(2, 12) || "0";
   let router;
   // In-place renders the navigator asked for; their navigations stay in the page.
   let rendering = 0;
@@ -33,11 +36,12 @@
       const id = ++seq;
       return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
-        post({ type: "call", id, plugin, method, args: args ?? {} });
+        post({ type: "call", id, plugin, method, args: args ?? {}, doc: documentId });
       });
     },
 
-    _resolve(id, ok, value) {
+    _resolve(id, ok, value, doc) {
+      if (doc !== undefined && doc !== documentId) return;
       const entry = pending.get(id);
       if (!entry) return;
       pending.delete(id);

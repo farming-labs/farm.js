@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MobileShellContext } from "@farm.js/core/mobile";
+// Core reads opted-in specs with Codegen before a shell runs; the tests do the same.
+import { readFarmNativeWebSpec } from "../../../farm/src/mobile/native-specs";
 import shell, {
   BUNDLED_ASSETS_DIR,
   BUNDLED_ASSETS_MANIFEST,
@@ -402,6 +404,7 @@ dependencies {
 `;
 
 const ENGINE = "app/src/main/java/dev/farmjs/mobile/shell/NativeEngine.kt";
+const WEB_MODULES = "app/src/main/java/dev/farmjs/mobile/shell/FarmWebModules.kt";
 
 describe("bundled client assets", () => {
   async function clientOutput(): Promise<string> {
@@ -789,6 +792,62 @@ describe("the bridge script", () => {
     );
   });
 
+  it("settles a call when native answers later, only in the document that asked", async () => {
+    const { bridge, posted } = await loadBridge();
+    const vibrate = bridge.call("Device", "vibrate", [200]);
+    const message = posted.at(-1)!;
+    expect(message).toMatchObject({
+      type: "call",
+      id: 1,
+      plugin: "Device",
+      method: "vibrate",
+      args: [200],
+    });
+    expect(message.doc).toMatch(/^[a-z0-9]{1,16}$/);
+    // Call ids restart in every document: an answer for another document's call 1 is dropped.
+    bridge._resolve(1, true, "stale", "zzzzzzzzzz");
+    bridge._resolve(1, true, null, message.doc);
+    await expect(vibrate).resolves.toBeNull();
+
+    const invalid = bridge.call("Device", "vibrate", ["200"]);
+    bridge._resolve(
+      2,
+      false,
+      { code: "invalid_args", message: "ms must be a number." },
+      message.doc,
+    );
+    await expect(invalid).rejects.toMatchObject({
+      code: "invalid_args",
+      message: "ms must be a number.",
+    });
+    // A shell that answers without the document id (iOS) still settles its calls.
+    const model = bridge.call("Device", "model");
+    expect(posted.at(-1)).toMatchObject({ id: 3, args: {} });
+    bridge._resolve(3, true, "Pixel 8");
+    await expect(model).resolves.toBe("Pixel 8");
+  });
+
+  it("answers plugins that complete later through the same call message", async () => {
+    const files = await generated(context());
+    const bridge = files["app/src/main/java/dev/farmjs/mobile/shell/FarmBridge.kt"]!;
+    // Synchronous plugins keep working: the completion form defaults to call().
+    expect(bridge).toContain(
+      "    fun callAsync(method: String, args: Any?, webView: WebView, result: FarmCallResult) {\n" +
+        "        result.resolve(call(method, args as? JSONObject ?: JSONObject(), webView))\n",
+    );
+    // One answer per call, from any thread, delivered on the main thread to the asking document.
+    expect(bridge).toContain("if (!answered.compareAndSet(false, true)) return");
+    expect(bridge).toContain("main.post { respond(id, doc,");
+    expect(bridge).toContain(
+      'evaluate("window.__farmBridge && window.__farmBridge._resolve($id, $ok, $payload$document)")',
+    );
+    expect(bridge).toContain(
+      "} catch (error: FarmCallException) {\n            result.reject(error.code,",
+    );
+    // Unregistered modules still answer native_unavailable.
+    expect(bridge).toContain('result.reject("native_unavailable", "No native plugin');
+  });
+
   it("marks the page as running in the shell so app CSS can hide web-only chrome", async () => {
     const { root } = await loadBridge();
     expect(root.attributes["data-farm-shell"]).toBe("android");
@@ -965,6 +1024,8 @@ describe("React Native native modules (autolinking)", () => {
     "app/src/main/jni/OnLoad.cpp",
     ENGINE,
     "app/src/main/res/values/farm_native.xml",
+    // Web screens' module calls replace its empty plugin map, only when a module opts in.
+    "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt",
   ];
 
   async function expectUnlinked(ctx: MobileShellContext, name: string): Promise<void> {
@@ -1383,6 +1444,239 @@ class DeviceModule(reactContext: ReactApplicationContext) : NativeDeviceSpec(rea
     expect(kotlin).toContain(": NativeDeviceSpec(reactContext)");
     expect(kotlin).toContain("override fun model(promise: Promise)");
     expect(kotlin).toContain("override fun vibrate(ms: Double, promise: Promise)");
+  });
+
+  describe("web screens' calls to app modules", () => {
+    const EXAMPLE = fileURLToPath(new URL("../../../../examples/mobile/", import.meta.url));
+    const MAIN = "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt";
+    const KITCHEN_SPEC = `import { TurboModuleRegistry, type TurboModule, type CodegenTypes } from "react-native";
+
+export type Mode = "light" | "dark";
+export type Point = { x: number; y?: number | null };
+export enum Level {
+  Low = 1,
+  High = 2,
+}
+
+export interface Spec extends TurboModule {
+  scalars(s: string, n: number, b: boolean, i: CodegenTypes.Int32): Promise<string>;
+  shapes(mode: Mode, point: Point, tags: Array<string>, extra: Object, note?: string | null): Promise<Point>;
+  optional(n?: number, b?: boolean | null, points?: ReadonlyArray<Point> | null): Promise<void>;
+  levels(level: Level, items: Array<any>): Promise<Array<number>>;
+  syncValue(): string;
+}
+
+export default TurboModuleRegistry.getEnforcing<Spec>("Kitchen");
+`;
+    const KITCHEN_MODULE = `package com.example.notes.modules
+
+import com.facebook.react.bridge.ReactApplicationContext
+import dev.farmjs.mobile.specs.NativeKitchenSpec
+
+class KitchenModule(reactContext: ReactApplicationContext) : NativeKitchenSpec(reactContext)
+`;
+
+    /** What core attaches to an opted-in spec: its Promise methods, read with Codegen. */
+    function optIn(
+      modules: NonNullable<MobileShellContext["appModules"]>,
+      names: string[],
+    ): NonNullable<MobileShellContext["appModules"]> {
+      return {
+        ...modules,
+        specs: modules.specs.map((spec) =>
+          names.includes(spec.name)
+            ? { ...spec, web: readFarmNativeWebSpec({ root: EXAMPLE, file: spec.file }) }
+            : spec,
+        ),
+      };
+    }
+
+    const webConfig = (names: string[]) => {
+      const base = context().mobile;
+      return {
+        ...base,
+        modules: Object.fromEntries(
+          names.map((name) => [name, { permissions: [], usage: {}, web: true }]),
+        ),
+      };
+    };
+
+    it("registers each opted-in module, generated from its Codegen spec", async () => {
+      const root = await app({ dependencies: { react: "19.2.8" } });
+      const modules = optIn(
+        await appModules(root, {
+          "NativeDevice.ts": await readFile(
+            path.join(EXAMPLE, "src/native/NativeDevice.ts"),
+            "utf8",
+          ),
+          "DeviceModule.kt": DEVICE_MODULE,
+          "NativeKitchen.ts": KITCHEN_SPEC,
+          "KitchenModule.kt": KITCHEN_MODULE,
+        }),
+        ["Device", "Kitchen"],
+      );
+      const files = await generated(
+        context({
+          root,
+          native: native(),
+          appModules: modules,
+          mobile: webConfig(["Device", "Kitchen"]),
+        }),
+      );
+      const dispatcher = files[WEB_MODULES]!;
+      await expect(dispatcher).toMatchFileSnapshot("__snapshots__/web-modules/FarmWebModules.kt");
+
+      // The bridge dispatches only to these modules, and only to their Promise methods.
+      expect(dispatcher).toContain(
+        "internal fun farmWebModules(): Map<String, FarmPlugin> = listOf<FarmPlugin>(\n    DeviceWebModule,\n    KitchenWebModule,\n).associateBy { it.name }",
+      );
+      expect(dispatcher).not.toContain("syncValue");
+      expect(dispatcher).toContain("else -> throw unknownMethod(method)");
+      // Arguments are checked on the main thread before the module runs.
+      expect(dispatcher.indexOf("val bound = bind(method, list)")).toBeLessThan(
+        dispatcher.indexOf("starter.execute"),
+      );
+      expect(dispatcher).toContain('FarmCallException("invalid_args", message)');
+      expect(files[MAIN]).toContain("        val plugins = farmWebModules()\n");
+      expect(files[MAIN]).not.toContain("emptyMap<String, FarmPlugin>()");
+      expect(files[ENGINE]).toContain("    internal fun host(): ReactHost? {");
+      // Still autolinked and with the PackageList, so the module is the one native screens use.
+      expect(files[ENGINE]).toContain(
+        "com.facebook.react.PackageList(activity.application).packages",
+      );
+
+      // Each call passes exactly the Kotlin types of the Java methods React Native's Codegen
+      // generates from the same specs.
+      const java = await codegenJava(Object.values(modules.specs).map((spec) => spec.file));
+      const calls = [
+        ...dispatcher.matchAll(
+          /module: (Native\w+Spec), promise: Promise -> module\.(\w+)\(([^\n]*)promise\)/g,
+        ),
+      ];
+      expect(calls.map((call) => `${call[1]}.${call[2]}`)).toEqual([
+        "NativeDeviceSpec.model",
+        "NativeDeviceSpec.vibrate",
+        "NativeKitchenSpec.scalars",
+        "NativeKitchenSpec.shapes",
+        "NativeKitchenSpec.optional",
+        "NativeKitchenSpec.levels",
+      ]);
+      for (const [, spec, method, args] of calls) {
+        const kotlin = [...args!.matchAll(/as ([\w?]+), /g)].map((match) => match[1]);
+        expect(kotlin, `${spec}.${method}`).toEqual(java[`${spec}.${method}`]);
+      }
+    });
+
+    /** Codegen's Java spec methods, as the Kotlin types a caller passes: `Double?` for `@Nullable Double`. */
+    async function codegenJava(specs: string[]): Promise<Record<string, string[]>> {
+      const dir = await tempDir();
+      const reactNative = realpathSync(path.join(EXAMPLE, "node_modules/react-native"));
+      const codegen = realpathSync(path.join(reactNative, "../@react-native/codegen"));
+      await mkdir(path.join(dir, "specs"), { recursive: true });
+      for (const spec of specs) {
+        await writeFile(path.join(dir, "specs", path.basename(spec)), await readFile(spec, "utf8"));
+      }
+      const run = (args: string[]) =>
+        execFileSync(process.execPath, args, { cwd: dir, encoding: "utf8" });
+      run([
+        path.join(codegen, "lib/cli/combine/combine-js-to-schema-cli.js"),
+        "--platform",
+        "android",
+        path.join(dir, "schema.json"),
+        path.join(dir, "specs"),
+      ]);
+      run([
+        path.join(reactNative, "scripts/generate-specs-cli.js"),
+        "--platform",
+        "android",
+        "--schemaPath",
+        path.join(dir, "schema.json"),
+        "--outputDir",
+        path.join(dir, "out"),
+        "--libraryName",
+        "FarmAppSpec",
+        "--javaPackageName",
+        "dev.farmjs.mobile.specs",
+      ]);
+      const kotlin: Record<string, string> = {
+        String: "String",
+        double: "Double",
+        boolean: "Boolean",
+        Double: "Double",
+        Boolean: "Boolean",
+        ReadableMap: "ReadableMap",
+        ReadableArray: "ReadableArray",
+      };
+      const methods: Record<string, string[]> = {};
+      for (const spec of specs) {
+        const name = `${path.basename(spec).replace(/\.\w+$/, "")}Spec`;
+        const source = await readFile(
+          path.join(dir, "out/java/dev/farmjs/mobile/specs", `${name}.java`),
+          "utf8",
+        );
+        for (const [, method, params] of source.matchAll(
+          /public abstract void (\w+)\(([^)]*)Promise promise\);/g,
+        )) {
+          methods[`${name}.${method}`] = params!
+            .split(",")
+            .map((param) => param.trim())
+            .filter(Boolean)
+            .map((param) => {
+              const nullable = param.startsWith("@Nullable ");
+              const type = param.replace("@Nullable ", "").split(" ")[0]!;
+              return `${kotlin[type] ?? `<${type}>`}${nullable ? "?" : ""}`;
+            });
+        }
+      }
+      return methods;
+    }
+
+    it("leaves the shell as it was when no module opts in", async () => {
+      const root = await app({ dependencies: { react: "19.2.8" } });
+      const modules = await appModules(root, {
+        "NativeDevice.ts": DEVICE_SPEC,
+        "DeviceModule.kt": DEVICE_MODULE,
+      });
+      const files = await generated(context({ root, native: native(), appModules: modules }));
+      const plain = await generated(context({ native: native() }));
+      expect(files[WEB_MODULES]).toBeUndefined();
+      expect(files[MAIN]).toBe(plain[MAIN]);
+      expect(files[MAIN]).toContain("val plugins = emptyMap<String, FarmPlugin>()");
+      expect(files[ENGINE]).toContain("    private fun host(): ReactHost? {");
+      // A module with web: false is not registered either.
+      const off = await generated(
+        context({
+          root,
+          native: native(),
+          appModules: modules,
+          mobile: {
+            ...context().mobile,
+            modules: { Device: { permissions: [], usage: {}, web: false } },
+          },
+        }),
+      );
+      expect(off[WEB_MODULES]).toBeUndefined();
+      expect(off[MAIN]).toBe(plain[MAIN]);
+    });
+
+    it("names the fix when a module opts in but the Android app has no React Native", async () => {
+      const root = await app({ dependencies: { react: "19.2.8" } });
+      const modules = optIn(
+        await appModules(root, {
+          "NativeDevice.ts": await readFile(
+            path.join(EXAMPLE, "src/native/NativeDevice.ts"),
+            "utf8",
+          ),
+          "DeviceModule.kt": DEVICE_MODULE,
+        }),
+        ["Device"],
+      );
+      await expect(
+        createAndroidProject(context({ root, appModules: modules, mobile: webConfig(["Device"]) })),
+      ).rejects.toThrow(
+        "mobile.modules.Device.web needs React Native in the Android app to run the module, and Farm adds it only when a route has a native screen (page.native.tsx). Add one, or remove web.",
+      );
+    });
   });
 
   it("refuses a dependency that is not installed", async () => {

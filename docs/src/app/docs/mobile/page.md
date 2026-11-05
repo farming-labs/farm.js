@@ -374,8 +374,12 @@ The messages that matter:
 - **`render`** / **`rendered`** — the shell asks a warm WebView's running router to navigate to a
   URL in place, and the page replies when the frame has painted.
 - **`router-ready`**, **`title`**, **`error`** — lifecycle and the document-load fallback above.
-- **`call`** — a device-capability call (`native.<name>`). Reserved: no device plugins ship yet,
-  so these reject as `native_unavailable`.
+- **`call`** — a call to a native module (`native.<name>.<method>()` from `@farm.js/core/native`),
+  with a request id and the id of the document that sent it. On Android the shell dispatches it to
+  the app modules with `mobile.modules.<name>.web` (see
+  [Web screens call app modules](#web-screens-call-app-modules)) and answers when the module's
+  Promise settles, only into the document that asked. Any other module answers
+  `native_unavailable`; iOS registers none yet.
 
 ### Bundled client assets
 
@@ -837,14 +841,14 @@ honest state of reaching them from a Farm app today, and where it is headed.
 
 **Nothing ships automatically.** The generated app declares the `INTERNET` permission and the ones
 [`mobile.modules`](#mobilemodules) lists, and the WebView is given no device APIs, so a web screen
-has no `native.camera` or `native.sms` to call yet. Native screens reach device APIs through React
+has no `native.camera` or `native.sms` to call. Native screens reach device APIs through React
 Native modules: community ones and [the app's own](#app-native-modules).
 
-**The reserved channel.** The bridge defines a device-capability call — `window.__farmBridge.call(name,
-method, args)`, surfaced as `native.<name>` — and both the Android and iOS shells carry a `FarmPlugin`
-interface for it. But no plugins are registered (`MainActivity.kt` and `SceneDelegate.swift` ship an
-empty plugin map), so every such call returns `{ code: "native_unavailable" }`. This is the seam that
-device plugins will plug into; it is the right-hand channel in the
+**Web screens reach the app's own modules when they opt in.** `native.<name>.<method>()` from
+`@farm.js/core/native` sends the bridge's `call` message, and on Android the shell runs the Promise
+methods of an app module with `mobile.modules.<name>.web: true`, checking the arguments against its
+Codegen spec first (see [Web screens call app modules](#web-screens-call-app-modules)). Every other
+call rejects with `NativeUnavailableError`. It is the right-hand channel in the
 [architecture figure](/blog/web-to-native#on-the-device).
 
 **Community React Native modules, on native screens, on Android.** A `page.native.tsx` screen can
@@ -874,10 +878,9 @@ platform SDK is in reach:
 media or geolocation grants, so a web screen cannot quietly use `getUserMedia` or the Geolocation API.
 
 In short: navigation, server data, and auth work across every screen today. Native screens on
-Android can use community React Native modules and the app's own; for web screens, device
-capabilities are
-**designed, not shipped** — the reserved `native.<name>` channel and the native-screen escape hatch,
-both on the roadmap.
+Android can use community React Native modules and the app's own. Web screens on Android can call
+the Promise methods of app modules that opt in; results by reference (files) and subscriptions
+(events) are not built yet, and neither is the iOS side.
 
 ### App native modules
 
@@ -962,8 +965,8 @@ States:
 
 iOS has no React Native host yet. Swift files in `src/native/` are copied to `FarmAppModules/` next
 to the Xcode project, outside its target, so nothing builds or registers them until it has one.
-Web screens cannot call app modules yet. Keep `src/native/` out of the web `tsconfig.json`: specs
-import `react-native`.
+Web screens call them only when they opt in (next section). Keep `src/native/` out of the web
+`tsconfig.json`: specs import `react-native`.
 
 Verified with `examples/mobile` on an Android 15 emulator (arm64), in a debug APK of Hermes
 bytecode and under `farm dev --mobile`: Gradle runs Codegen for `farm-app-modules`,
@@ -972,6 +975,85 @@ bytecode and under `farm dev --mobile`: Gradle runs Codegen for `farm-app-module
 vibration, and `VIBRATE` is granted at install with no prompt. An app with app modules and no
 community modules builds the same way. Not verified yet: real devices and a release (minified)
 build.
+
+### Web screens call app modules
+
+A web screen (`page.tsx` in the shell's WebView) calls an app module through `native` from
+`@farm.js/core/native`, once the module opts in:
+
+```ts
+// farm.config.ts
+mobile: {
+  modules: {
+    Device: { permissions: ["android.permission.VIBRATE"], web: true },
+  },
+},
+```
+
+```tsx
+// src/app/settings/device-card.tsx
+"use client";
+
+import { native } from "@farm.js/core/native";
+import { useEffect, useState } from "react";
+
+export function DeviceCard() {
+  const [model, setModel] = useState("checking");
+  useEffect(() => {
+    if (!native.Device.available()) return setModel("not in the app");
+    native.Device.model().then(setModel);
+  }, []);
+  return <p>Device: {model}</p>;
+}
+```
+
+- **Promise methods only.** `native.Device.model()` reaches the spec's `model(): Promise<string>`.
+  Synchronous methods, callbacks, and constants are not reachable from a web screen. An opted-in
+  spec whose Promise method takes a callback, or that has no Promise method, fails the command and
+  names the method.
+- **App modules only.** `web: true` on a community module is a config error: its JavaScript runs
+  on React Native's runtime, which a web screen does not have. Call it from a native screen.
+- **Arguments are checked before the module runs.** Arguments go over the bridge as a JSON array.
+  The generated Kotlin checks each one against the spec's type (string, number, `Int32` as a whole
+  number, boolean, string or number literal unions and enums, objects with their declared
+  properties, `Object` maps, arrays of a type) and converts objects and arrays to `ReadableMap` and
+  `ReadableArray`. A mismatch rejects with `invalid_args`, naming the argument; the module never
+  sees it.
+- **The same module instance as native screens.** The call runs on the module React Native's
+  runtime created for native screens, on its native-modules thread. A call made before the runtime
+  has warmed up starts it, as opening a native screen would.
+- **`available()` first.** It is true only inside the Android shell, for a module this build
+  registered. In a browser, during server rendering, on iOS, or for a module without `web`, it is
+  false and calls reject with `NativeUnavailableError`.
+- **Types come from the spec.** `farm generate` (and every dev start and build) adds each spec's
+  Promise methods to `src/farm.d.ts` as `FarmNativeModules`, read with React Native's Codegen, so
+  `native.Device.vibrate("200")` is a type error. Without `react-native` installed (a pruned
+  production install) the section is left out; it only types web pages.
+- **Free when unused.** `@farm.js/core/native` is its own entry with no imports. A web build that
+  does not import it is unchanged, and the shell adds no Kotlin for apps without a `web` module.
+
+Rejections are a `NativeUnavailableError` (`code: "native_unavailable"`) or a `NativeCallError`
+with the shell's or the module's code:
+
+| `code`               | When                                                                                |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| `native_unavailable` | Outside the Android shell, the module has no `web`, or React Native failed to start |
+| `invalid_args`       | The arguments do not match the spec; the module did not run                         |
+| `unknown_method`     | The spec has no Promise method by that name                                         |
+| `native_error`       | The module threw                                                                    |
+| The module's own     | The module called `promise.reject(code, message)`, such as `no_vibrator`            |
+
+On Android this needs React Native in the app, which Farm adds when a route has a native screen
+(`page.native.tsx`); `web: true` without one fails the command with that fix. The bridge rules stay
+those of [The bridge](#the-bridge): the server origin only, the main frame only, and only the
+registered modules and the methods in their specs.
+
+Not built yet: large results as references (a photo comes back as a URL, not base64), events as
+subscriptions, and the iOS side, which waits for the iOS shell to host React Native. In the iOS
+shell, `available()` is false.
+
+Tested in unit and generator tests, and the generated Kotlin compiles against React Native
+0.88.1's `react-android` and the Java specs Codegen generates. Not run on a device or emulator yet.
 
 ### `mobile.modules`
 
@@ -994,6 +1076,7 @@ mobile: {
 | ------------- | ------------------------------------------------------------------------------------------------------- |
 | `permissions` | Android permission names, such as `"android.permission.VIBRATE"`, added to `AndroidManifest.xml`        |
 | `usage`       | iOS usage strings keyed by `NS...UsageDescription`, such as `NSCameraUsageDescription`, in `Info.plist` |
+| `web`         | App modules only: `true` lets web screens call it ([details](#web-screens-call-app-modules))            |
 
 - Without `modules`, or with entries that list no permissions, the manifest is the shell's own,
   with `INTERNET` only. Each permission is declared once, whichever modules list it.
@@ -1495,7 +1578,7 @@ parts are designed and still on the way:
   Android shell's session code on an emulator under `farm dev --mobile`. The Swift session code
   has not been built with Xcode (it type-checks against the macOS SDK). See
   [Auth on mobile](#auth-on-mobile) for which auth integrations are covered.
-- Web screens reach no native module (`native.<name>`), so calls reject as unavailable. App native
-  modules from `src/native/` link on Android but have not been built into an APK yet.
+- Web screens call app modules with `mobile.modules.<name>.web` on Android only, and the path has
+  not run on an emulator yet. Results by reference and event subscriptions are not built.
 - Apps on the RSC pipeline get no device tokens until it runs `auth` and integrations (see
   [Auth on mobile](#auth-on-mobile)), and their pages always load as documents in the WebView pool.
