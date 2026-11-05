@@ -334,6 +334,38 @@ Acceptance:
   is replayed; a link clicked before the runtime loads is a client navigation; a runtime that fails
   to load leaves a native navigation.
 
+### 11. Islands that wait for a click by default
+
+Section 10 helps only pages whose islands wait, and an island waits only when its module says so
+(`export const island = "interaction"`). Few do, so most pages still load the runtime at once. Yet
+most islands on content pages are buttons that change their own state when clicked: a copy
+button, a like button, a menu toggle, a collapsible sidebar section, a table of contents marking
+the heading it links to. Before that click they render exactly what the server sent.
+
+In islands mode, a client module without an `island` export gets `"interaction"` when the build
+can prove that from its source and the app files it imports (parsed with Rolldown's parser):
+
+- hooks only among `useState`, `useReducer`, `useRef`, `useMemo`, `useCallback`, `useContext`,
+  `useId`, `useTransition`, `useDebugValue`; no effect, external store, `use()` or form-status
+  hook;
+- event handlers only `onClick` and `onSubmit` on HTML elements, which the scheduler holds and
+  replays; a handled link only with a same-page (`#…`) `href`, which is now held too;
+- no form field (`input`, `textarea`, `select`), `ref`, `autoFocus`, `contentEditable`, form
+  `action` or `formAction`, props spread onto an HTML element, class, `createElement`,
+  `cloneElement` or runtime `import()`;
+- imports only from React, stylesheets and assets, and the app's own files, which pass the same
+  checks; a top level that only declares values (`createContext()` and `memo()` included).
+
+Anything else keeps `"load"`, and an explicit export always wins. A render that passes the island
+server output (an element prop) hydrates at load, since islands inside that output would
+otherwise wait with it. A press or focus on the island starts hydrating it, so the click that
+follows usually finds it ready. `farm dev` infers the same and infers again when a file the island
+read changes.
+
+Measured (`benchmarks/server-components-payload`, no change to the app): docs pages load 1.6 KB of
+JavaScript instead of 85.7 KB (`"rsc"`: 69.7 KB), blog posts 1.6 KB instead of 84.6 KB. Shop pages
+are unchanged (85.3 KB): their layout hydrates as one root around a cart provider.
+
 ## Fallbacks
 
 | Situation                                                | Result                                         |
