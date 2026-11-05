@@ -1221,10 +1221,11 @@ not replace, and sorts what it finds into two buckets:
   with those properties; `onClick`, and input change handlers; server function modules, which the
   screen calls over the network.
 - **Blocks, so the route stays web:** `canvas`, `iframe`, `video`, `table`, `svg`, `select`, `form`;
-  `dangerouslySetInnerHTML`, element refs, spread props, other DOM events; stylesheet imports, grid,
-  `fixed`/`sticky`, transitions, responsive and `hover:` variants, arbitrary values, runtime class
-  names; `window`, `document`, storage and observer APIs, `useLayoutEffect`, `createElement`; DOM
-  packages and any package not on the list; server components, async pages, and Markdown pages.
+  `dangerouslySetInnerHTML`, element refs, spread props, other DOM events; Sass and other non-CSS
+  stylesheets, grid, `fixed`/`sticky`, transitions, responsive and `hover:` variants, arbitrary
+  values, runtime class names; `window`, `document`, storage and observer APIs, `useLayoutEffect`,
+  `createElement`; DOM packages and any package not on the list; server components, async pages,
+  and Markdown pages.
 
 The decision is deliberately conservative: a route is **`port`** only when it has **zero blockers
 and at least one win** (a rendered list, a controlled input, a timer). A portable route with no win
@@ -1254,21 +1255,33 @@ the page as written, with each DOM element renamed to `@farm.js/native/elements`
   text in `Text`, and pass inherited text styles down as CSS does. `Link` navigates through the
   shell. App components the page imports are copied the same way; other modules are imported where
   they are.
-- **Styles are the web page's.** Elements start from the browser's default styles, then the app's
-  CSS, then their inline `style`. A production build links all of an app's CSS on every page, so
-  the emitter reads every plain `.css` file the app imports and resolves, per element type, the
-  rules that match the type alone (`h1`, `input`, `*`, `:root`, `body`), light and dark. `body`
-  gives the screen its background, text style, and margin. A rule that also depends on where the
-  element renders (`main h1`, `li + li`, attributes, `:first-child`) keeps the route web, unless it
-  needs a class nothing around the page renders.
-- **Anything it cannot emit keeps the route web**, with the reason in the warning: `className`
-  (ports do not load Tailwind classes yet), `useContext`, `@farm.js/ui`, server functions,
-  `@farm.js/core` APIs other than `Link`, packages outside the pure list, asset imports, dynamic
-  `import()`, and stylesheets with `@import`, `@layer`, or Tailwind directives, or that are not plain
-  CSS.
+- **Styles are the web page's**, in the browser's cascade order: the browser's default styles (or
+  Tailwind's preflight), Tailwind utilities, the app's own rules, then the inline `style`. A
+  production build links all of an app's CSS on every page, so the emitter reads every plain `.css`
+  file the app imports and resolves each element's styles at build time, light and dark:
+  - `@import "tailwindcss"` (Tailwind 4) turns on preflight, and each static `className` utility
+    resolves through the same table as the [native tier](#server-rendered-native-screens),
+    with the app's `@theme` on top: colors (`oklch`, hex, `rgb`), `--spacing`, text sizes and
+    line heights, radii, weights, tracking, and `initial` resets. A value that reads a `:root`
+    variable (`@theme inline { --color-surface: var(--surface) }`) takes its dark value from
+    `prefers-color-scheme: dark`, so the class changes with the device theme;
+  - the app's rules that match an element by its type and classes alone (`h1`, `.card`,
+    `button.primary`, `*`, `:root`, `body`), with `inherit` (`font: inherit`) honored on form
+    controls; `body` gives the screen its background, text style, and margin.
+
+  A rule that also depends on where the element renders (`main h1`, `.card p`, `li + li`,
+  attributes, `:first-child`) keeps the route web, unless it needs a class nothing around the page
+  renders. With Tailwind loaded, a class neither the table nor the app's CSS knows keeps the route
+  web too, since it may be a utility the table cannot draw.
+
+- **Anything it cannot emit keeps the route web**, with the reason in the warning: class names built
+  at runtime, `useContext`, `@farm.js/ui`, server functions, `@farm.js/core` APIs other than `Link`,
+  packages outside the pure list, asset imports and CSS module names, dynamic `import()`, and
+  stylesheets that change what classes mean (`@utility`, `@custom-variant` such as a class-based
+  dark mode, `@apply`, `@layer`, other `@import`s, Tailwind 3's `@tailwind`) or are not plain CSS.
 
 Not yet: ports in `farm dev --mobile` (the analyzer runs in builds, so they show as web screens in
-dev), iOS, `FlatList` for long lists, event bubbling from a child to a parent's `onClick`, and a
+dev), `@theme` on server-rendered native screens (their classes use the default theme), iOS, `FlatList` for long lists, event bubbling from a child to a parent's `onClick`, and a
 live light/dark switch (a screen takes the theme it opened with). The browser's default styles are
 Chrome's, approximated.
 

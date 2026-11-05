@@ -6,7 +6,7 @@
  * The analyzer checks a native-tier page with {@link farmNativeClassProblem}, so a class it lets
  * through always resolves here.
  */
-import { FARM_NATIVE_THEME as THEME } from "./native-theme";
+import { FARM_NATIVE_THEME } from "./native-theme";
 
 /** A style value: a length in px, a percentage such as `"50%"`, or a keyword. */
 export type FarmNativeValue = number | string;
@@ -76,6 +76,37 @@ const ALIGN: Record<string, string> = {
 };
 const DROPPED = /^(?:relative|cursor-.+|select-.+|outline-.+|pointer-events-.+)$/;
 
+/**
+ * The values Tailwind classes resolve to: Tailwind's default theme, or an app's theme on top of it
+ * (`createFarmNativeTheme`). Lengths are in px, tracking in em, text is [size, line height].
+ * `darkColors` are colors whose value changes in dark mode.
+ */
+export interface FarmNativeTheme {
+  spacing: number;
+  colors: Readonly<Record<string, string>>;
+  darkColors?: Readonly<Record<string, string>>;
+  text: Readonly<Record<string, readonly [number, number]>>;
+  fontWeight: Readonly<Record<string, number>>;
+  tracking: Readonly<Record<string, number>>;
+  leading: Readonly<Record<string, number>>;
+  radius: Readonly<Record<string, number>>;
+  container: Readonly<Record<string, number>>;
+}
+
+const DEFAULT_THEME: FarmNativeTheme = FARM_NATIVE_THEME;
+// The theme the exported resolvers read while they run; they are synchronous.
+let THEME: FarmNativeTheme = DEFAULT_THEME;
+
+function withTheme<T>(theme: FarmNativeTheme | undefined, run: () => T): T {
+  const previous = THEME;
+  THEME = theme ?? DEFAULT_THEME;
+  try {
+    return run();
+  } finally {
+    THEME = previous;
+  }
+}
+
 function spacing(value: string): FarmNativeValue | undefined {
   if (value === "px") return 1;
   if (value === "auto") return "auto";
@@ -94,7 +125,7 @@ function color(value: string): string | undefined {
   const [name, alpha] = value.split("/");
   if (name === "transparent") return "transparent";
   if (name === "current" || name === "inherit") return "currentColor";
-  const hex = (THEME.colors as Record<string, string>)[name!];
+  const hex = THEME.colors[name!];
   if (!hex) return undefined;
   if (alpha === undefined) return hex;
   if (!/^\d{1,3}$/.test(alpha) || Number(alpha) > 100) return undefined;
@@ -163,7 +194,7 @@ function utility(token: string): FarmNativeStyle | undefined {
     case "rounded":
       return each(
         ALL_CORNERS.map((corner) => `border${corner}Radius`),
-        THEME.radius.sm,
+        THEME.radius.sm!,
       );
     case "border":
       return {
@@ -230,13 +261,17 @@ function utility(token: string): FarmNativeStyle | undefined {
   if (match) {
     if (match[1] === "none") return {};
     if (match[1] === "full") return { maxWidth: "100%" };
-    const value = (THEME.container as Record<string, number>)[match[1]!];
+    const value = THEME.container[match[1]!];
     return value === undefined ? undefined : { maxWidth: value };
   }
   match = /^text-(.+)$/.exec(token);
   if (match) {
-    const text = (THEME.text as Record<string, readonly [number, number]>)[match[1]!];
-    if (text) return { fontSize: text[0], lineHeight: text[1] };
+    const text = THEME.text[match[1]!];
+    if (text) {
+      return Number.isFinite(text[1])
+        ? { fontSize: text[0], lineHeight: text[1] }
+        : { fontSize: text[0] };
+    }
     const value = color(match[1]!);
     return value === undefined ? undefined : { color: value };
   }
@@ -245,20 +280,20 @@ function utility(token: string): FarmNativeStyle | undefined {
     if (match[1] === "sans" || match[1] === "serif" || match[1] === "mono") {
       return { fontFamily: match[1] };
     }
-    const weight = (THEME.fontWeight as Record<string, number>)[match[1]!];
+    const weight = THEME.fontWeight[match[1]!];
     return weight === undefined ? undefined : { fontWeight: weight };
   }
   match = /^leading-(.+)$/.exec(token);
   if (match) {
     if (match[1] === "none") return { lineHeightScale: 1 };
-    const scale = (THEME.leading as Record<string, number>)[match[1]!];
+    const scale = THEME.leading[match[1]!];
     if (scale !== undefined) return { lineHeightScale: scale };
     const value = spacing(match[1]!);
     return typeof value === "number" ? { lineHeightPx: value } : undefined;
   }
   match = /^tracking-(.+)$/.exec(token);
   if (match) {
-    const value = (THEME.tracking as Record<string, number>)[match[1]!];
+    const value = THEME.tracking[match[1]!];
     return value === undefined ? undefined : { letterSpacing: value };
   }
   match = /^bg-(.+)$/.exec(token);
@@ -287,12 +322,12 @@ function utility(token: string): FarmNativeStyle | undefined {
   if (match) {
     const radius =
       match[2] === undefined
-        ? THEME.radius.sm
+        ? THEME.radius.sm!
         : match[2] === "none"
           ? 0
           : match[2] === "full"
             ? 9999
-            : (THEME.radius as Record<string, number>)[match[2]];
+            : THEME.radius[match[2]];
     if (radius === undefined) return undefined;
     const corners = match[1] ? CORNERS[match[1]] : [...ALL_CORNERS];
     if (!corners) return undefined;
@@ -308,7 +343,11 @@ function utility(token: string): FarmNativeStyle | undefined {
  * it for native-tier pages; responsive and state variants, arbitrary values, and anything not
  * listed here keep the page off the native tier.
  */
-export function farmNativeClassProblem(token: string): string | undefined {
+export function farmNativeClassProblem(token: string, theme?: FarmNativeTheme): string | undefined {
+  return withTheme(theme, () => classProblem(token));
+}
+
+function classProblem(token: string): string | undefined {
   const parts = token.split(":");
   const base = parts.pop()!.replace(/^!/, "");
   if (parts.some((variant) => variant !== "dark")) {
@@ -319,20 +358,42 @@ export function farmNativeClassProblem(token: string): string | undefined {
 }
 
 /** Resolve a `class` attribute. `unsupported` lists the classes that did not resolve. */
-export function resolveFarmNativeClasses(className: string): FarmNativeStyles & {
+export function resolveFarmNativeClasses(
+  className: string,
+  theme?: FarmNativeTheme,
+): FarmNativeStyles & {
   unsupported: string[];
 } {
+  return withTheme(theme, () => resolveClasses(className));
+}
+
+function resolveClasses(className: string): FarmNativeStyles & { unsupported: string[] } {
   const light: FarmNativeStyle[] = [];
   const darkParts: FarmNativeStyle[] = [];
+  // A theme color whose value changes in dark mode gives its class a dark style of its own; an
+  // explicit `dark:` class still wins.
+  const themedDark: FarmNativeStyle[] = [];
+  const darkTheme = THEME.darkColors
+    ? { ...THEME, colors: { ...THEME.colors, ...THEME.darkColors } }
+    : undefined;
   const unsupported: string[] = [];
   for (const token of className.split(/\s+/)) {
     if (!token) continue;
-    if (farmNativeClassProblem(token)) {
+    if (classProblem(token)) {
       unsupported.push(token);
       continue;
     }
     const parts = token.split(":");
-    (parts.length > 1 ? darkParts : light).push(utility(parts.pop()!.replace(/^!/, ""))!);
+    const base = parts.pop()!.replace(/^!/, "");
+    const resolved = utility(base)!;
+    (parts.length > 0 ? darkParts : light).push(resolved);
+    if (parts.length === 0 && darkTheme) {
+      const lightTheme = THEME;
+      THEME = darkTheme;
+      const dark = utility(base);
+      THEME = lightTheme;
+      if (dark && JSON.stringify(dark) !== JSON.stringify(resolved)) themedDark.push(dark);
+    }
   }
   // As in Tailwind, a utility that sets fewer sides wins over a broader one, whatever the class
   // order: `px-4 p-2` keeps 16px on the sides. A sort by key count is stable for the rest.
@@ -342,7 +403,8 @@ export function resolveFarmNativeClasses(className: string): FarmNativeStyles & 
       ...parts.sort((left, right) => Object.keys(right).length - Object.keys(left).length),
     ) as FarmNativeStyle;
   const style = merge(light);
-  return { style, ...(darkParts.length > 0 ? { dark: merge(darkParts) } : {}), unsupported };
+  const dark = { ...merge(themedDark), ...merge(darkParts) };
+  return { style, ...(Object.keys(dark).length > 0 ? { dark } : {}), unsupported };
 }
 
 /** Shorthand keys as the longhands class styles use, so a shell reads one form. */
@@ -676,4 +738,191 @@ export function resolveFarmNativeInlineStyle(css: string): {
     else if (resolved === undefined) unsupported.push(`${property}: ${value}`);
   }
   return { style, unsupported };
+}
+
+/** An `oklch(L% C H)` or `oklch(L C H)` color as sRGB hex, as Tailwind 4 writes its colors. */
+function oklchToHex(value: string): string | undefined {
+  const match =
+    /^oklch\(\s*([\d.]+)(%?)\s+([\d.]+)\s+([\d.]+|none)(?:deg)?\s*(?:\/\s*([\d.]+)(%?))?\s*\)$/.exec(
+      value,
+    );
+  if (!match) return undefined;
+  const l = Number(match[1]) / (match[2] ? 100 : 1);
+  const c = Number(match[3]);
+  const h = ((match[4] === "none" ? 0 : Number(match[4])) * Math.PI) / 180;
+  const a = c * Math.cos(h);
+  const b = c * Math.sin(h);
+  const l_ = (l + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m_ = (l - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s_ = (l - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  const linear = [
+    4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+    -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+    -0.0041960863 * l_ - 0.7034186147 * m_ + 1.707614701 * s_,
+  ];
+  const hex = linear
+    .map((channel) => {
+      const clamped = Math.min(1, Math.max(0, channel));
+      const gamma = clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * clamped ** (1 / 2.4) - 0.055;
+      return Math.round(gamma * 255)
+        .toString(16)
+        .padStart(2, "0");
+    })
+    .join("");
+  if (match[5] === undefined) return `#${hex}`;
+  const alpha = Number(match[5]) / (match[6] ? 100 : 1);
+  return `#${hex}${Math.round(Math.min(1, alpha) * 255)
+    .toString(16)
+    .padStart(2, "0")}`;
+}
+
+function themeColor(value: string): string | undefined {
+  const parsed = cssColor(value.toLowerCase());
+  if (parsed && parsed !== "currentColor") return parsed;
+  return oklchToHex(value.toLowerCase());
+}
+
+function themeLength(value: string): number | undefined {
+  const length = cssLength(value.trim());
+  return typeof length === "number" ? length : undefined;
+}
+
+/**
+ * An app's Tailwind theme on top of the default one, from the declarations in its `@theme` blocks
+ * (`--color-brand: oklch(...)`, `--spacing: 0.25rem`, `--radius-card: 12px`, `--color-*: initial`).
+ * A value that reads a variable (`var(--background)`, as `@theme inline` does) takes the app's
+ * `:root` value, and its dark-mode value under `prefers-color-scheme: dark`. A value it cannot
+ * resolve leaves the class undefined, so it is reported rather than guessed.
+ */
+export function createFarmNativeTheme(
+  declarations: ReadonlyArray<readonly [name: string, value: string]>,
+  vars: { light: Readonly<Record<string, string>>; dark: Readonly<Record<string, string>> } = {
+    light: {},
+    dark: {},
+  },
+): FarmNativeTheme {
+  const theme = {
+    spacing: DEFAULT_THEME.spacing,
+    colors: { ...DEFAULT_THEME.colors } as Record<string, string>,
+    darkColors: {} as Record<string, string>,
+    text: { ...DEFAULT_THEME.text } as Record<string, readonly [number, number]>,
+    fontWeight: { ...DEFAULT_THEME.fontWeight } as Record<string, number>,
+    tracking: { ...DEFAULT_THEME.tracking } as Record<string, number>,
+    leading: { ...DEFAULT_THEME.leading } as Record<string, number>,
+    radius: { ...DEFAULT_THEME.radius } as Record<string, number>,
+    container: { ...DEFAULT_THEME.container } as Record<string, number>,
+  };
+  const namespaces: Array<[prefix: string, key: keyof typeof theme]> = [
+    ["color-", "colors"],
+    ["text-", "text"],
+    ["font-weight-", "fontWeight"],
+    ["tracking-", "tracking"],
+    ["leading-", "leading"],
+    ["radius-", "radius"],
+    ["container-", "container"],
+  ];
+  const resolve = (value: string, scheme: "light" | "dark", depth = 0): string | undefined => {
+    const reference = /^var\(\s*(--[\w-]+)\s*(?:,\s*(.+))?\)$/.exec(value.trim());
+    if (!reference) return value.trim();
+    if (depth > 8) return undefined;
+    const name = reference[1]!;
+    const next =
+      (scheme === "dark" ? (vars.dark[name] ?? vars.light[name]) : vars.light[name]) ??
+      reference[2];
+    return next === undefined ? undefined : resolve(next, scheme, depth + 1);
+  };
+  const lineHeights: Array<[size: string, value: string]> = [];
+  for (const [rawName, value] of declarations) {
+    const name = rawName.replace(/^--/, "");
+    if (value.trim() === "initial") {
+      if (name === "*") {
+        for (const [, key] of namespaces) theme[key] = {} as never;
+        continue;
+      }
+      // `--color-*`, `--color-gray-*`, or one value such as `--color-brand`.
+      for (const [prefix, key] of namespaces) {
+        if (!name.startsWith(prefix)) continue;
+        const rest = name.slice(prefix.length);
+        const values = theme[key] as Record<string, unknown>;
+        if (rest.endsWith("*")) {
+          for (const entry of Object.keys(values)) {
+            if (entry.startsWith(rest.slice(0, -1))) delete values[entry];
+          }
+        } else delete values[rest];
+      }
+      continue;
+    }
+    const light = resolve(value, "light");
+    if (name === "spacing") {
+      const px = light === undefined ? undefined : themeLength(light);
+      if (px !== undefined) theme.spacing = px;
+      continue;
+    }
+    if (name.startsWith("color-")) {
+      const key = name.slice(6);
+      const color = light === undefined ? undefined : themeColor(light);
+      const darkValue = resolve(value, "dark");
+      const dark = darkValue === undefined ? undefined : themeColor(darkValue);
+      // Unresolved: the class has no value, so it is reported.
+      delete theme.colors[key];
+      delete theme.darkColors[key];
+      if (color) theme.colors[key] = color;
+      if (color && dark && dark !== color) theme.darkColors[key] = dark;
+      continue;
+    }
+    const lineHeight = /^text-(.+)--line-height$/.exec(name);
+    if (lineHeight) {
+      if (light !== undefined) lineHeights.push([lineHeight[1]!, light]);
+      continue;
+    }
+    if (name.startsWith("text-") && !name.includes("--")) {
+      const px = light === undefined ? undefined : themeLength(light);
+      const key = name.slice(5);
+      if (px === undefined) delete theme.text[key];
+      // Without `--text-*--line-height`, Tailwind sets only the size.
+      else theme.text[key] = [px, theme.text[key]?.[1] ?? Number.NaN];
+      continue;
+    }
+    const numeric: Array<[prefix: string, key: "fontWeight" | "leading"]> = [
+      ["font-weight-", "fontWeight"],
+      ["leading-", "leading"],
+    ];
+    const number = numeric.find(([prefix]) => name.startsWith(prefix));
+    if (number) {
+      const parsed = light === undefined ? Number.NaN : Number(light);
+      const key = name.slice(number[0].length);
+      if (Number.isFinite(parsed)) theme[number[1]][key] = parsed;
+      else delete theme[number[1]][key];
+      continue;
+    }
+    if (name.startsWith("tracking-")) {
+      const em = light === undefined ? undefined : /^(-?[\d.]+)em$/.exec(light.trim());
+      const key = name.slice(9);
+      if (em) theme.tracking[key] = Number(em[1]);
+      else delete theme.tracking[key];
+      continue;
+    }
+    for (const [prefix, key] of [
+      ["radius-", "radius"],
+      ["container-", "container"],
+    ] as const) {
+      if (!name.startsWith(prefix)) continue;
+      const px = light === undefined ? undefined : themeLength(light);
+      if (px === undefined) delete theme[key][name.slice(prefix.length)];
+      else theme[key][name.slice(prefix.length)] = px;
+    }
+  }
+  // `--text-xl--line-height`: a ratio of the size, `calc(a / b)`, or a length.
+  for (const [size, value] of lineHeights) {
+    const text = theme.text[size];
+    if (!text) continue;
+    const calc = /^calc\(\s*([\d.]+)\s*\/\s*([\d.]+)\s*\)$/.exec(value.trim());
+    const ratio = calc ? Number(calc[1]) / Number(calc[2]) : Number(value);
+    const px = Number.isFinite(ratio)
+      ? Math.round(ratio * text[0] * 1000) / 1000
+      : themeLength(value);
+    if (px !== undefined) theme.text[size] = [text[0], px];
+  }
+  const { darkColors, ...rest } = theme;
+  return Object.keys(darkColors).length > 0 ? { ...rest, darkColors } : rest;
 }
