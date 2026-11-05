@@ -2,6 +2,7 @@
 // mobile.native.routes keeps iOS on the web screen. Web builds never read this file: it is not a
 // route, not in the generated route types, and not in any web bundle.
 import { useNavigate, useServerQuery } from "@farm.js/native";
+import { useNetInfo } from "@react-native-community/netinfo";
 import { useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { apiClient } from "../../../lib/api";
@@ -17,6 +18,8 @@ export const metadata = { title: "Map" };
 
 export default function MapScreen() {
   const navigate = useNavigate();
+  // A community native module, linked into the Android app from the app's dependencies.
+  const network = useNetInfo();
   const { data: stations = [], error, refetch } = useServerQuery(listStations, undefined);
   // `pending` is true only for the first load, so pull-to-refresh tracks its own state.
   const [refreshing, setRefreshing] = useState(false);
@@ -30,6 +33,10 @@ export default function MapScreen() {
   return (
     <View style={styles.screen} testID="map-screen">
       <Text style={styles.lead}>Native screen. Stations come from GET /api/stations.</Text>
+      <Text style={styles.network} testID="network-status">
+        Network: {network.type}, connected:{" "}
+        {network.isConnected === null ? "unknown" : String(network.isConnected)}
+      </Text>
       {error ? <Text style={styles.error}>{error.message}</Text> : null}
       <FlatList
         data={stations}
@@ -63,6 +70,7 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#f7f7f5" },
   lead: { padding: 16, color: "#55524c" },
+  network: { paddingHorizontal: 16, paddingBottom: 12, color: "#55524c" },
   error: { paddingHorizontal: 16, color: "#b3261e" },
   row: {
     paddingHorizontal: 16,

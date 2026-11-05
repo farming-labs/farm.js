@@ -1056,6 +1056,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
+      '@react-native-community/netinfo':
+        specifier: 12.0.1
+        version: 12.0.1(react-native@0.88.1)(react@19.2.8)
       react:
         specifier: 19.2.8
         version: 19.2.8
@@ -2179,8 +2182,8 @@ importers:
   packages/farm:
     dependencies:
       '@farm.js/islx':
-        specifier: 0.0.7
-        version: 0.0.7(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
+        specifier: 0.0.8
+        version: 0.0.8(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
       '@farming-labs/orm':
         specifier: 0.0.66
         version: 0.0.66
@@ -6527,8 +6530,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@farm.js/islx@0.0.7(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
-    resolution: {integrity: sha512-GgraZ+RT277cB5s4o8/ZdfbLlpbDXCZm+V6l10gQLtGCkKMYczATj1BOcWF9qRgOg1TIsvVpORN2NobdV/nHZw==}
+  /@farm.js/islx@0.0.8(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
+    resolution: {integrity: sha512-8TfwxqMRu5JP/cQkHuhBy6w54pmkPREy6ZR5UctfE3LqsOFyhdGDavh2BiPAG4tX3K17vlP71Nyd+1tLVWabcg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@tanstack/react-router': '>=1.170'
@@ -12050,6 +12053,16 @@ packages:
       react: 19.2.8
     dev: false
 
+  /@react-native-community/netinfo@12.0.1(react-native@0.88.1)(react@19.2.8):
+    resolution: {integrity: sha512-P/3caXIvfYSJG8AWJVefukg+ZGRPs+M4Lp3pNJtgcTYoJxCjWrKQGNnCkj/Cz//zWa/avGed0i/wzm0T8vV2IQ==}
+    peerDependencies:
+      react: '*'
+      react-native: '>=0.59'
+    dependencies:
+      react: 19.2.8
+      react-native: 0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1)(@types/react@19.2.13)(react@19.2.8)(supports-color@10.2.2)
+    dev: false
+
   /@react-native/asset-utils@0.88.1:
     resolution: {integrity: sha512-BLb5FF7NgggGYiCsA7KKkK2qFhn0K+6iGXOI+4Ucd+G7Robzw9Gt4WsWwxLt+Od+G+/hyqfz8ASokyWFZ6VcLw==}
     engines: {node: ^22.13.0 || ^24.3.0 || >= 26.0.0}
@@ -12232,7 +12245,6 @@ packages:
       nullthrows: 1.1.1
       react: 19.2.8
       react-native: 0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1)(@types/react@19.2.13)(react@19.2.8)(supports-color@10.2.2)
-    dev: true
 
   /@react-native/virtualized-lists@0.88.1(@types/react@19.2.13)(react-native@0.88.1)(react@19.3.1):
     resolution: {integrity: sha512-Zt+OGvJE6VgmzgemZL8TSA0VomNWpHMNcG0OvLkkBQEGrzY8OdDHRfjJh7S+f+UFJF77kicRC6o6mt3A7ER9lQ==}
@@ -22700,7 +22712,6 @@ packages:
       - bufferutil
       - supports-color
       - utf-8-validate
-    dev: true
 
   /react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1)(@types/react@19.2.13)(react@19.3.1)(supports-color@10.2.2):
     resolution: {integrity: sha512-wajWcLZ93GCN7k4Uwh4CS4L2Ah8ohcvkOXnvIYmh4Yvuqho5j3APZ9qozK+nQrHWSgauq4h8D3HN5DKK84SrHA==}

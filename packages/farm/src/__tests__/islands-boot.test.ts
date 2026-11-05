@@ -53,8 +53,12 @@ afterEach(async () => {
     document.body.innerHTML = '<a href="/end">end</a>';
     document.querySelector("a")!.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
   }
+  // A link click a test left held replays as the load finishes; jsdom cannot follow it.
+  const stop = (event: Event) => event.preventDefault();
+  window.addEventListener("click", stop);
   finishLoad?.();
   await settle();
+  window.removeEventListener("click", stop);
   finishLoad = undefined;
   started = undefined;
   delete (window as QueueWindow).__FARM_PREHYDRATION_CLICK_QUEUE__;
@@ -143,6 +147,21 @@ describe("startFarmIslandsBoot", () => {
     expect(replayed.mock.calls[0]![0].target).toBe(anchor);
   });
 
+  it("holds a click on a same-page link in an island, for the island to replay", () => {
+    const load = boot(
+      '<f-island strategy="interaction"><a href="#usage">Usage</a><a href="/next">Next</a></f-island>',
+    );
+    const [hash, page] = Array.from(document.querySelectorAll("a"));
+    expect(click(hash!)).toBe(true);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect((window as QueueWindow).__FARM_PREHYDRATION_CLICK_QUEUE__).toEqual([
+      expect.objectContaining({ target: hash, kind: "click" }),
+    ]);
+    // A link to another page is the router's: held as a link, not queued for the island.
+    expect(click(page!)).toBe(true);
+    expect((window as QueueWindow).__FARM_PREHYDRATION_CLICK_QUEUE__).toHaveLength(1);
+  });
+
   it("leaves links the router does not take to the browser", () => {
     const load = boot(
       '<f-island strategy="interaction"></f-island>' +
@@ -153,6 +172,28 @@ describe("startFarmIslandsBoot", () => {
       expect(click(anchor)).toBe(false);
     }
     expect(load).not.toHaveBeenCalled();
+  });
+
+  it("holds clicks in a root that waits, and starts on its press", () => {
+    const load = boot(
+      '<script type="module" data-farm-runtime="/r.js" data-farm-root="root" data-farm-root-strategy="interaction"></script>' +
+        '<div id="root"><p>Cart: 0</p><button type="button">Add</button><a href="/next">Next</a></div>',
+    );
+    expect(load).not.toHaveBeenCalled();
+    const button = document.querySelector("button")!;
+    expect(click(button)).toBe(true);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect((window as QueueWindow).__FARM_PREHYDRATION_CLICK_QUEUE__).toEqual([
+      expect.objectContaining({ target: button, kind: "click" }),
+    ]);
+  });
+
+  it("loads the runtime at once for a root that hydrates at load or cannot be found", () => {
+    expect(
+      boot(
+        '<script type="module" data-farm-runtime="/r.js" data-farm-root="root" data-farm-root-strategy="load"></script><div id="root"></div>',
+      ),
+    ).toHaveBeenCalledTimes(1);
   });
 
   it("starts loading when a pointer moves over a link", () => {

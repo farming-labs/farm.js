@@ -69,9 +69,9 @@ Verified with `pnpm dev:mobile` on an Android 15 emulator (SwiftShader software 
 - The Hermes bytecode build takes 18.5 s in Metro and 1.6 s in `hermesc`, for 1.23 MB of bytecode
   and a 73.7 MB debug APK.
 
-Not verified yet: native screens in a production bytecode build (it installs and cold-starts, but
-no native screen was opened in it), and real devices, so the emulator numbers say nothing about
-smoothness on a phone.
+In a bytecode build (`pnpm build:apk`, a debug APK) against a local production server, `/map` opens
+as React Native with its stations. Not verified yet: real devices, so the emulator numbers say
+nothing about smoothness on a phone.
 
 When a native screen throws while loading, a build shows its web version (`page.tsx`, the web
 twin) and logs `<module id> failed to load: <error>` (`adb logcat -s FarmShell`). In
@@ -79,6 +79,14 @@ twin) and logs `<module id> failed to load: <error>` (`adb logcat -s FarmShell`)
 
 Building the native screens needs the Android NDK 27.1.12297006 (2.4 GB) and CMake 3.22.1 (94 MB),
 which Gradle installs on the first build, for the 73 KB `libappmodules.so`.
+
+`/map` also shows the network type and `isConnected` from `@react-native-community/netinfo`
+(`testID="network-status"`), a community native module. Farm links the modules in the app's
+`dependencies` into the Android app, so the example builds through React Native's Gradle plugin
+(Android Gradle plugin 9.2.1, Gradle 9.4.1, JDK 17 or newer) instead of the shell's own toolchain.
+Netinfo's `ACCESS_NETWORK_STATE` and `ACCESS_WIFI_STATE` permissions are granted at install, with
+no prompt. On an Android 15 emulator, in `pnpm dev:mobile` and in a bytecode APK, `/map` shows
+`wifi` and `true`, then `cellular` with Wi-Fi off and `none` and `false` with all networks off.
 
 React versions: this example pins `react` and `react-dom` 19.2.8, the version Farm core is tested
 on. React Native 0.88 declares a `react@^19.3.0` peer (its renderer is built from 19.3.0), so pnpm
