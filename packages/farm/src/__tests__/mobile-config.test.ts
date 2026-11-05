@@ -869,7 +869,7 @@ describe("mobile screens", () => {
     });
     expect(ios.warnings).toEqual([
       ...android.warnings,
-      'native.routes["/shop/[[...filters]]"].ios is "native", but "/shop/[[...filters]]" has no page.native.tsx and Farm cannot port pages yet, so it stays web. This fails the build once native screens ship.',
+      'native.routes["/shop/[[...filters]]"].ios is "native", but "/shop/[[...filters]]" has no page.native.tsx and Farm cannot port it yet, so it stays web. This fails the build once native screens ship.',
     ]);
 
     const manifest = android.manifest.rules;
@@ -917,7 +917,7 @@ describe("mobile screens", () => {
     const ios = await appFor(platformApp, platform, "ios");
     expect(ios.screens["/feed"]).toMatchObject({ screen: "platform", source: "config" });
     expect(ios.screens["/notes"]).toMatchObject({ screen: "web", requested: "platform" });
-    expect(ios.warnings[0]).toMatch(/has no page\.swift and Farm cannot port pages yet/);
+    expect(ios.warnings[0]).toMatch(/has no page\.swift and Farm cannot port it yet/);
   });
 
   it("reads a page's mobile export without running it", async () => {

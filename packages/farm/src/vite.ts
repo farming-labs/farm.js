@@ -3726,7 +3726,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         return id;
       }
 
-      if (isFarmClientVirtualId(id)) {
+      if (isFarmClientVirtualId(id) || id === FARM_DEV_CLIENT_BOOT_ID) {
         return id;
       }
 
@@ -3773,6 +3773,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           );
         }
         return generateProgrammaticRouteModule(id, root, renderer);
+      }
+
+      if (id === FARM_DEV_CLIENT_BOOT_ID) {
+        return FARM_DEV_CLIENT_BOOT_MODULE;
       }
 
       if (isFarmClientVirtualId(id)) {
@@ -4577,6 +4581,12 @@ function resolveDevelopmentRoot(farmRoot: string | undefined, viteRoot: string):
   }
   return farmRoot;
 }
+
+/** Islands mode's boot entry in `farm dev` (RFC 0003, section 10); it runs /@farm/client.js. */
+const FARM_DEV_CLIENT_BOOT_ID = "/@farm/client-boot.js";
+const FARM_DEV_CLIENT_BOOT_MODULE =
+  'import { startFarmIslandsBoot } from "@farm.js/core/internal/islands-boot";\n' +
+  "startFarmIslandsBoot();\n";
 
 function isFarmClientVirtualId(id: string): boolean {
   const pathname = id.split("?", 1)[0];

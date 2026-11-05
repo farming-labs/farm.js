@@ -39,6 +39,7 @@ farm build                    # --web, the default, unchanged
 | Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                                                                       |
 | `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                                                                      |
 | Native-screen analyzer                        | Unreleased                     | Sorts routes into tiers; proven native-tier routes become `server` screens with `native: true` or `auto: "on"`                                                                |
+| Generated React Native ports                  | Unreleased                     | Android: emitted from portable pages with `auto: "on"`; run on an emulator, not yet on a device. See [Generated ports](#generated-react-native-ports)                         |
 | Server-rendered native screens (`server`)     | Unreleased, Android            | Drawn with Android views from the page the server renders; run on an emulator under `farm dev --mobile`, not yet on a device. iOS shows them as web screens                   |
 | iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                                   |
 | React Native screens                          | Unreleased, Android            | Android only; on an emulator under `farm dev --mobile` and as a production APK; not yet on a device (see [React Native screens](#react-native-screens))                       |
@@ -568,14 +569,14 @@ The check runs on every dev start and build, whatever `native.auto` is. A passin
 
 ### `mobile.native`
 
-| Option     | Notes                                                                                           |
-| ---------- | ----------------------------------------------------------------------------------------------- |
-| `engine`   | `"react-native"` (default) or `"platform"`. With `"platform"`, `.native.tsx` files are an error |
-| `auto`     | The build-time analyzer: `"off"`, `"report"` (default), or `"on"` (records ports, see below)    |
-| `routes`   | Keyed by page route: `screen` (`web`, `native`, `platform`), `android`, `ios`, `presentation`   |
-| `islands`  | Components that may render natively inside web screens, such as `["Map"]`. Reserved             |
-| `prefetch` | `"intent"` (default) or `"off"`                                                                 |
-| `budgets`  | `appSizeMb`, `screenOpenMs`, `droppedFrames`. Reserved for the mobile CI run                    |
+| Option     | Notes                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------ |
+| `engine`   | `"react-native"` (default) or `"platform"`. With `"platform"`, `.native.tsx` files are an error  |
+| `auto`     | The build-time analyzer: `"off"`, `"report"` (default), or `"on"` (applies its tiers, see below) |
+| `routes`   | Keyed by page route: `screen` (`web`, `native`, `platform`), `android`, `ios`, `presentation`    |
+| `islands`  | Components that may render natively inside web screens, such as `["Map"]`. Reserved              |
+| `prefetch` | `"intent"` (default) or `"off"`                                                                  |
+| `budgets`  | `appSizeMb`, `screenOpenMs`, `droppedFrames`. Reserved for the mobile CI run                     |
 
 `android` and `ios` override `screen` on that OS. `engine` records which toolchain a native screen
 would use; `"react-native"` renders `page.native.tsx`, `"platform"` renders `page.kt` / `page.swift`
@@ -653,9 +654,10 @@ module id in `FarmNativeScreens`, keyed like `app/notes/[id]`.
 builds and real devices are not verified yet** ([below](#react-native-screens)). A `platform`
 route is recorded in `farm-routes.json` and shown on device as a **placeholder naming the module
 id**: Farm does not build `page.kt` or `page.swift` yet.
-A config route that asks for `screen: "native"` with no file **stays web and records
-`requested: "native"`** with a warning, since the analyzer cannot emit native code yet. An ejected
-project is where an app registers its own platform screens before they land.
+A config route that asks for `screen: "native"` with no file gets a
+[generated port](#generated-react-native-ports) on Android when the page passes the analyzer and the
+emitter; otherwise it **stays web and records `requested: "native"`** with a warning that says why.
+An ejected project is where an app registers its own platform screens before they land.
 
 The two engines, as designed:
 
@@ -1261,10 +1263,9 @@ _The analyzer pipeline — parse each page, classify every node as a **port** (r
 **block** (stays web), collect the ports into the IR, then conservatively pick the tier — is animated
 in the blog post [Your web app, native](/blog/web-to-native#how-the-analyzer-decides)._
 
-The native tier is the one that changes output today: a proven route becomes a
-[server-rendered native screen](#server-rendered-native-screens). Porting a page to React Native is
-still report only: the IR is produced, but the emitter that would read it and generate a
-`page.native.tsx` is not built yet.
+With `auto: "on"`, a native-tier route becomes a
+[server-rendered native screen](#server-rendered-native-screens), and a `port` route on Android
+becomes a [generated React Native port](#generated-react-native-ports) of its page.
 
 ```sh
 farm config inspect --mobile --report   # table, plus .farm/output/mobile/native-report.json
@@ -1313,10 +1314,46 @@ and at least one win** (a rendered list, a controlled input, a timer). A portabl
 is reported as such and stays web, and **any doubt is web.** Every blocker is reported with its
 `file:line:column`, a rule name (such as `unmapped-element` or `unknown-package`), and a message.
 With `auto: "on"`, a native-tier route is recorded in `farm-routes.json` as a `server` screen
-with `source: "analyzer"`; a React Native port is recorded with `requested: "native"`, still a web
-screen until an emitter ships. Facts are cached by file content
+with `source: "analyzer"`, and a `port` route as a `native` screen whose file is its generated port.
+A port the emitter cannot write stays web with `requested: "native"` and a warning. Facts are cached
+by file content
 in `.farm/cache/mobile/` and keyed by the analyzer and Farm version, so the report is cheap to
 re-run.
+
+### Generated React Native ports
+
+For a `port` route, Farm writes a React Native screen from the page itself into
+`.farm/output/mobile/ports/`, and registers it like a hand-written `page.native.tsx`. The copy is
+the page as written, with each DOM element renamed to `@farm.js/native/elements`:
+
+```tsx
+// .farm/output/mobile/ports/src/app/lab/packing/page.tsx (generated)
+<__FarmDom.input value={draft} onChange={(event) => setDraft(event.target.value)} />
+<__FarmDom.button onClick={() => setItems([...items, draft])}>Add</__FarmDom.button>
+```
+
+- **The page's logic runs unchanged.** Hooks, state, and handlers are the page's own code; the
+  elements adapt DOM props and events (`onClick`, `onChange` with `event.target.value`), wrap bare
+  text in `Text`, and pass inherited text styles down as CSS does. `Link` navigates through the
+  shell. App components the page imports are copied the same way; other modules are imported where
+  they are.
+- **Styles are the web page's.** Elements start from the browser's default styles, then the app's
+  CSS, then their inline `style`. A production build links all of an app's CSS on every page, so
+  the emitter reads every plain `.css` file the app imports and resolves, per element type, the
+  rules that match the type alone (`h1`, `input`, `*`, `:root`, `body`), light and dark. `body`
+  gives the screen its background, text style, and margin. A rule that also depends on where the
+  element renders (`main h1`, `li + li`, attributes, `:first-child`) keeps the route web, unless it
+  needs a class nothing around the page renders.
+- **Anything it cannot emit keeps the route web**, with the reason in the warning: `className`
+  (ports do not load Tailwind classes yet), `useContext`, `@farm.js/ui`, server functions,
+  `@farm.js/core` APIs other than `Link`, packages outside the pure list, asset imports, dynamic
+  `import()`, and stylesheets with `@import`, `@layer`, or Tailwind directives, or that are not plain
+  CSS.
+
+Not yet: ports in `farm dev --mobile` (the analyzer runs in builds, so they show as web screens in
+dev), iOS, `FlatList` for long lists, event bubbling from a child to a parent's `onClick`, and a
+live light/dark switch (a screen takes the theme it opened with). The browser's default styles are
+Chrome's, approximated.
 
 ## Route manifest
 
@@ -1517,8 +1554,11 @@ parts are designed and still on the way:
   run in a production build on an Android emulator or an iOS simulator yet (see
   [Page shells](#page-shells)). iOS loads the mobile client from the server rather than the app,
   and prerendered pages load the web client (see [Bundled client assets](#bundled-client-assets)).
-- The analyzer only reports. With `auto: "on"` it records ports in `farm-routes.json`, and those
-  routes stay web screens.
+- A generated port of `examples/mobile`'s `/lab/packing` ran on an Android emulator from Metro's
+  dev bundle, with the analyzer switched on for the test (`farm dev --mobile` does not run it), and
+  ports bundle with Metro and Hermes for a production build. They have not run from a production
+  APK or on a device, and iOS keeps their routes web. See
+  [Generated React Native ports](#generated-react-native-ports) for what they cannot emit yet.
 - Native islands (`mobile.native.islands`), native rendering of `@farm.js/ui` (it renders on the
   web only), and the theme-token pipeline are reserved.
 - Signed-in native screens are tested in unit, dev-server and production-build tests, and the
