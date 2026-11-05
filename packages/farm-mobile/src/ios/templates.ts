@@ -137,6 +137,18 @@ export function createTransportSecurity(
   };
 }
 
+/**
+ * The usage strings `mobile.modules` sets, such as `NSCameraUsageDescription`. Core rejects two
+ * modules that set one key to different strings.
+ */
+export function createUsageDescriptions(context: MobileShellContext): Record<string, string> {
+  // A core from before `mobile.modules` resolves no `modules` entry.
+  return Object.assign(
+    {},
+    ...Object.values(context.mobile.modules ?? {}).map((module) => module.usage),
+  );
+}
+
 export function createInfoPlist(context: MobileShellContext): string {
   const transport = createTransportSecurity(context);
   const orientations = [
@@ -171,6 +183,8 @@ export function createInfoPlist(context: MobileShellContext): string {
       ...orientations,
       "UIInterfaceOrientationPortraitUpsideDown",
     ],
+    // After the shell's own keys, so a module's NSLocalNetworkUsageDescription wins.
+    ...createUsageDescriptions(context),
   });
 }
 
@@ -559,6 +573,21 @@ async function readTemplateFiles(dir: string, prefix = ""): Promise<MobileGenera
   return files;
 }
 
+/**
+ * The app's Swift module classes from `src/native/`, kept next to the Xcode project and outside its
+ * target: the iOS shell does not host React Native yet, so nothing builds or registers them.
+ */
+export const IOS_APP_MODULES_DIR = "FarmAppModules";
+
+async function createAppModuleFiles(context: MobileShellContext): Promise<MobileGeneratedFile[]> {
+  return Promise.all(
+    (context.appModules?.ios ?? []).map(async (file) => ({
+      path: `${IOS_APP_MODULES_DIR}/${path.basename(file)}`,
+      contents: await readFile(file, "utf8"),
+    })),
+  );
+}
+
 /** The Xcode project for `.farm/output/mobile/ios`, sorted by path. */
 export async function createIosProject(
   context: MobileShellContext,
@@ -582,6 +611,7 @@ export async function createIosProject(
     },
     { path: `${IOS_PROJECT}/project.xcworkspace/contents.xcworkspacedata`, contents: WORKSPACE },
     ...createPageShellFiles(context.shells, `${IOS_TARGET}/${IOS_PAGE_SHELLS_DIR}`),
+    ...(await createAppModuleFiles(context)),
   );
   files.push({
     path: `${IOS_PROJECT}/project.pbxproj`,

@@ -266,6 +266,7 @@ async function writeMobileProject(
     ...(native ? { native } : {}),
     ...(assets ? { assets } : {}),
     ...(shells ? { shells } : {}),
+    ...(app.appModules ? { appModules: app.appModules } : {}),
   };
   await writeShellFiles(
     context.projectDir,

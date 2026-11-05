@@ -1,9 +1,14 @@
+import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MobileShellContext } from "@farm.js/core/mobile";
+// Core reads opted-in specs with Codegen before a shell runs; the tests do the same.
+import { readFarmNativeWebSpec } from "../../../farm/src/mobile/native-specs";
 import shell, {
   BUNDLED_ASSETS_DIR,
   BUNDLED_ASSETS_MANIFEST,
@@ -399,6 +404,7 @@ dependencies {
 `;
 
 const ENGINE = "app/src/main/java/dev/farmjs/mobile/shell/NativeEngine.kt";
+const WEB_MODULES = "app/src/main/java/dev/farmjs/mobile/shell/FarmWebModules.kt";
 
 describe("bundled client assets", () => {
   async function clientOutput(): Promise<string> {
@@ -895,6 +901,62 @@ describe("the bridge script", () => {
     );
   });
 
+  it("settles a call when native answers later, only in the document that asked", async () => {
+    const { bridge, posted } = await loadBridge();
+    const vibrate = bridge.call("Device", "vibrate", [200]);
+    const message = posted.at(-1)!;
+    expect(message).toMatchObject({
+      type: "call",
+      id: 1,
+      plugin: "Device",
+      method: "vibrate",
+      args: [200],
+    });
+    expect(message.doc).toMatch(/^[a-z0-9]{1,16}$/);
+    // Call ids restart in every document: an answer for another document's call 1 is dropped.
+    bridge._resolve(1, true, "stale", "zzzzzzzzzz");
+    bridge._resolve(1, true, null, message.doc);
+    await expect(vibrate).resolves.toBeNull();
+
+    const invalid = bridge.call("Device", "vibrate", ["200"]);
+    bridge._resolve(
+      2,
+      false,
+      { code: "invalid_args", message: "ms must be a number." },
+      message.doc,
+    );
+    await expect(invalid).rejects.toMatchObject({
+      code: "invalid_args",
+      message: "ms must be a number.",
+    });
+    // A shell that answers without the document id (iOS) still settles its calls.
+    const model = bridge.call("Device", "model");
+    expect(posted.at(-1)).toMatchObject({ id: 3, args: {} });
+    bridge._resolve(3, true, "Pixel 8");
+    await expect(model).resolves.toBe("Pixel 8");
+  });
+
+  it("answers plugins that complete later through the same call message", async () => {
+    const files = await generated(context());
+    const bridge = files["app/src/main/java/dev/farmjs/mobile/shell/FarmBridge.kt"]!;
+    // Synchronous plugins keep working: the completion form defaults to call().
+    expect(bridge).toContain(
+      "    fun callAsync(method: String, args: Any?, webView: WebView, result: FarmCallResult) {\n" +
+        "        result.resolve(call(method, args as? JSONObject ?: JSONObject(), webView))\n",
+    );
+    // One answer per call, from any thread, delivered on the main thread to the asking document.
+    expect(bridge).toContain("if (!answered.compareAndSet(false, true)) return");
+    expect(bridge).toContain("main.post { respond(id, doc,");
+    expect(bridge).toContain(
+      'evaluate("window.__farmBridge && window.__farmBridge._resolve($id, $ok, $payload$document)")',
+    );
+    expect(bridge).toContain(
+      "} catch (error: FarmCallException) {\n            result.reject(error.code,",
+    );
+    // Unregistered modules still answer native_unavailable.
+    expect(bridge).toContain('result.reject("native_unavailable", "No native plugin');
+  });
+
   it("marks the page as running in the shell so app CSS can hide web-only chrome", async () => {
     const { root } = await loadBridge();
     expect(root.attributes["data-farm-shell"]).toBe("android");
@@ -980,4 +1042,805 @@ describe("devices", () => {
       ).rejects.toThrow();
     },
   );
+});
+
+describe("React Native native modules (autolinking)", () => {
+  const native = (overrides: Partial<NonNullable<MobileShellContext["native"]>> = {}) => ({
+    engine: "react-native" as const,
+    reactNativeVersion: "0.88.1",
+    hermesVersion: "260318099.0.5",
+    modules: ["app/feed", "app/notes/[id]"],
+    ...overrides,
+  });
+
+  async function writePackage(
+    dir: string,
+    pkg: Record<string, unknown>,
+    files: Record<string, string> = {},
+  ): Promise<void> {
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "package.json"), JSON.stringify(pkg));
+    for (const [file, contents] of Object.entries(files)) {
+      await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
+      await writeFile(path.join(dir, file), contents);
+    }
+  }
+
+  const androidModule = (className: string, javaPackage: string) => ({
+    "android/build.gradle": 'apply plugin: "com.android.library"\n',
+    [`android/src/main/java/${javaPackage.replace(/\./g, "/")}/${className}.java`]: `package ${javaPackage};\n\npublic class ${className} extends BaseReactPackage {\n}\n`,
+  });
+
+  /** An app with React Native installed and the given dependencies. */
+  async function app(pkg: Record<string, unknown>): Promise<string> {
+    const root = await tempDir();
+    const modules = path.join(root, "node_modules");
+    await writePackage(root, { name: "app", ...pkg });
+    await writePackage(path.join(modules, "react-native"), {
+      name: "react-native",
+      version: "0.88.1",
+    });
+    await writePackage(path.join(modules, "@react-native/gradle-plugin"), {
+      name: "@react-native/gradle-plugin",
+    });
+    await writePackage(path.join(modules, "@react-native/codegen"), {
+      name: "@react-native/codegen",
+    });
+    await writePackage(path.join(modules, "zod"), { name: "zod", version: "4.0.0" });
+    await writePackage(path.join(modules, "react"), { name: "react", version: "19.2.8" });
+    await writePackage(
+      path.join(modules, "@react-native-community/netinfo"),
+      {
+        name: "@react-native-community/netinfo",
+        version: "12.0.1",
+        codegenConfig: { name: "RNCNetInfoSpec", type: "modules", jsSrcsDir: "src/internal" },
+      },
+      androidModule("NetInfoPackage", "com.reactnativecommunity.netinfo"),
+    );
+    await writePackage(
+      path.join(modules, "react-native-dev-only"),
+      { name: "react-native-dev-only", codegenConfig: { name: "DevOnlySpec", type: "modules" } },
+      androidModule("DevOnlyPackage", "com.example.devonly"),
+    );
+    // Installed, but only as a dependency of a dependency.
+    await writePackage(
+      path.join(modules, "react-native-transitive"),
+      {
+        name: "react-native-transitive",
+        codegenConfig: { name: "TransitiveSpec", type: "modules" },
+      },
+      androidModule("TransitivePackage", "com.example.transitive"),
+    );
+    await writePackage(
+      path.join(modules, "react-native-device-info"),
+      { name: "react-native-device-info", version: "15.0.2" },
+      androidModule("RNDeviceInfo", "com.learnium.RNDeviceInfo"),
+    );
+    return root;
+  }
+
+  /**
+   * Every file linking native modules can change. Their snapshots under __snapshots__/unlinked are
+   * the output from before modules were linked, so apps that link none keep it unchanged.
+   */
+  const LINKABLE = [
+    "settings.gradle.kts",
+    "build.gradle.kts",
+    "gradle.properties",
+    "gradle/wrapper/gradle-wrapper.properties",
+    "app/build.gradle.kts",
+    "app/src/main/jni/CMakeLists.txt",
+    "app/src/main/jni/OnLoad.cpp",
+    ENGINE,
+    "app/src/main/res/values/farm_native.xml",
+    // Web screens' module calls replace its empty plugin map, only when a module opts in.
+    "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt",
+  ];
+
+  async function expectUnlinked(ctx: MobileShellContext, name: string): Promise<void> {
+    const files = await createAndroidProject(ctx);
+    const list = files.map((file) => `${file.path}${file.executable ? " (executable)" : ""}\n`);
+    await expect(list.join("")).toMatchFileSnapshot(`__snapshots__/unlinked/${name}/files.txt`);
+    const contents = Object.fromEntries(files.map((file) => [file.path, String(file.contents)]));
+    for (const file of LINKABLE.filter((file) => file in contents)) {
+      await expect(contents[file]).toMatchFileSnapshot(`__snapshots__/unlinked/${name}/${file}`);
+    }
+  }
+
+  it("leaves web-only projects unchanged, even with native modules installed", async () => {
+    const root = await app({
+      dependencies: { "@react-native-community/netinfo": "12.0.1", zod: "4.0.0" },
+      devDependencies: { "react-native": "0.88.1" },
+    });
+    await expectUnlinked(context(), "web-only");
+    await expectUnlinked(context({ root }), "web-only");
+  });
+
+  it("leaves native-screen projects without native modules unchanged", async () => {
+    const root = await app({
+      dependencies: { react: "19.2.8", zod: "4.0.0" },
+      devDependencies: { "react-native": "0.88.1", "react-native-dev-only": "1.0.0" },
+    });
+    await expectUnlinked(context({ native: native() }), "native");
+    await expectUnlinked(context({ root, native: native() }), "native");
+  });
+
+  it("links the app's own dependencies with Android code through React Native's Gradle plugin", async () => {
+    const root = await app({
+      dependencies: { "@react-native-community/netinfo": "12.0.1", zod: "4.0.0" },
+      devDependencies: { "react-native": "0.88.1", "react-native-dev-only": "1.0.0" },
+    });
+    const real = (dir: string) => realpathSync(dir).split(path.sep).join("/");
+    const modules = path.join(root, "node_modules");
+    const netinfo = real(path.join(modules, "@react-native-community/netinfo"));
+    const files = await generated(
+      context({
+        root,
+        native: native({
+          devServer: { port: 8082, mainModule: ".farm/output/mobile/native/index" },
+        }),
+      }),
+    );
+
+    const settings = files["settings.gradle.kts"]!;
+    expect(settings).toContain(
+      `includeBuild(${JSON.stringify(real(path.join(modules, "@react-native/gradle-plugin")))})`,
+    );
+    expect(settings).toContain('id("com.facebook.react.settings")');
+    expect(settings).toContain('autolinkLibrariesFromConfigFile(file("autolinking.json"))');
+    // Modules such as netinfo declare their own repositories.
+    expect(settings).toContain("RepositoriesMode.PREFER_SETTINGS");
+    expect(settings).not.toContain("FAIL_ON_PROJECT_REPOS");
+
+    const autolinking = JSON.parse(files["autolinking.json"]!);
+    expect(autolinking.reactNativeVersion).toBe("0.88.1");
+    expect(autolinking.project.android.packageName).toBe(SHELL_NAMESPACE);
+    expect(autolinking.project.android.applicationId).toBe("com.example.notes");
+    expect(Object.keys(autolinking.dependencies)).toEqual(["@react-native-community/netinfo"]);
+    expect(autolinking.dependencies["@react-native-community/netinfo"]).toEqual({
+      root: netinfo,
+      name: "@react-native-community/netinfo",
+      platforms: {
+        android: {
+          sourceDir: `${netinfo}/android`,
+          packageImportPath: "import com.reactnativecommunity.netinfo.NetInfoPackage;",
+          packageInstance: "new NetInfoPackage()",
+          buildTypes: [],
+          libraryName: "RNCNetInfoSpec",
+          componentDescriptors: [],
+          cmakeListsPath: `${netinfo}/android/build/generated/source/codegen/jni/CMakeLists.txt`,
+          cxxModuleCMakeListsModuleName: null,
+          cxxModuleCMakeListsPath: null,
+          cxxModuleHeaderName: null,
+          dependencyConfiguration: null,
+          isPureCxxDependency: false,
+        },
+      },
+    });
+
+    expect(files["build.gradle.kts"]).toContain('apply(plugin = "com.facebook.react.rootproject")');
+    // Modules build against the app's SDK levels (rootProject.ext), not their own defaults.
+    for (const line of [
+      'extra["compileSdkVersion"] = 35',
+      'extra["minSdkVersion"] = 26',
+      'extra["targetSdkVersion"] = 35',
+      'extra["buildToolsVersion"] = "36.0.0"',
+      'extra["ndkVersion"] = "27.1.12297006"',
+      'extra["kotlinVersion"] = "2.2.21"',
+    ]) {
+      expect(files["build.gradle.kts"]).toContain(line);
+    }
+    expect(files["build.gradle.kts"]).toContain(
+      'classpath("com.android.tools.build:gradle:9.2.1")',
+    );
+    const appGradle = files["app/build.gradle.kts"]!;
+    expect(appGradle).toContain('id("com.facebook.react")');
+    expect(appGradle).toContain("autolinkLibrariesWithApp()");
+    expect(appGradle).toContain(`root = file(${JSON.stringify(real(root))})`);
+    expect(appGradle).toContain('implementation("com.facebook.react:react-android:0.88.1")');
+    expect(appGradle).toContain('path = file("src/main/jni/CMakeLists.txt")');
+
+    expect(files["gradle/wrapper/gradle-wrapper.properties"]).toContain("gradle-9.4.1-bin.zip");
+    const properties = files["gradle.properties"]!;
+    expect(properties).toContain("android.builtInKotlin=false");
+    expect(properties).toContain("android.newDsl=false");
+    // The plugin writes the Metro port resource itself, so farm_native.xml no longer does.
+    expect(properties).toContain("reactNativeDevServerPort=8082");
+    expect(files["app/src/main/res/values/farm_native.xml"]).not.toContain(
+      "react_native_dev_server_port",
+    );
+
+    expect(files["app/src/main/jni/CMakeLists.txt"]).toContain(
+      "include(${REACT_ANDROID_DIR}/cmake-utils/ReactNative-application.cmake)",
+    );
+    const onLoad = files["app/src/main/jni/OnLoad.cpp"]!;
+    expect(onLoad).toContain("#include <autolinking.h>");
+    expect(onLoad).toContain("autolinking_ModuleProvider(name, params)");
+    expect(onLoad).toContain("autolinking_cxxModuleProvider(name, jsInvoker)");
+    expect(onLoad).toContain("autolinking_registerProviders(registry)");
+    // React Native's Gradle plugin generates PackageList in com.facebook.react, not the app's
+    // package, and the engine does not import it.
+    expect(files[ENGINE]).toContain(
+      "packageList = com.facebook.react.PackageList(activity.application).packages + FarmShellPackage()",
+    );
+
+    // Dev dependencies and dependencies of dependencies are never linked.
+    for (const source of Object.values(files)) {
+      expect(source).not.toMatch(
+        /react-native-dev-only|react-native-transitive|DevOnlySpec|TransitiveSpec/,
+      );
+    }
+  });
+
+  it("links the real @react-native-community/netinfo package from the mobile example", async () => {
+    const example = fileURLToPath(new URL("../../../../examples/mobile/", import.meta.url));
+    const files = await generated(context({ root: example, native: native() }));
+    const linked = JSON.parse(files["autolinking.json"]!).dependencies;
+    expect(Object.keys(linked)).toEqual(["@react-native-community/netinfo"]);
+    expect(linked["@react-native-community/netinfo"].platforms.android).toMatchObject({
+      packageImportPath: "import com.reactnativecommunity.netinfo.NetInfoPackage;",
+      packageInstance: "new NetInfoPackage()",
+      libraryName: "RNCNetInfoSpec",
+    });
+  });
+
+  it("refuses a module without new architecture support, naming the package", async () => {
+    const root = await app({
+      dependencies: {
+        "@react-native-community/netinfo": "12.0.1",
+        "react-native-device-info": "15.0.2",
+      },
+    });
+    await expect(createAndroidProject(context({ root, native: native() }))).rejects.toThrow(
+      /"react-native-device-info" has Android code but no "codegenConfig"/,
+    );
+    await expect(createAndroidProject(context({ root, native: native() }))).rejects.toMatchObject({
+      name: "FarmMobileError",
+    });
+  });
+
+  const DEVICE_SPEC = `import { TurboModuleRegistry, type TurboModule } from "react-native";
+
+export interface Spec extends TurboModule {
+  model(): Promise<string>;
+}
+
+export default TurboModuleRegistry.getEnforcing<Spec>("Device");
+`;
+  const DEVICE_MODULE = `package com.example.notes.modules
+
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import dev.farmjs.mobile.specs.NativeDeviceSpec
+
+class DeviceModule(reactContext: ReactApplicationContext) : NativeDeviceSpec(reactContext) {
+    override fun model(promise: Promise) = promise.resolve(android.os.Build.MODEL)
+}
+`;
+
+  /** `src/native/` with the given files, as core's scan reports it. */
+  async function appModules(
+    root: string,
+    files: Record<string, string>,
+  ): Promise<NonNullable<MobileShellContext["appModules"]>> {
+    const dir = path.join(root, "src/native");
+    await mkdir(dir, { recursive: true });
+    for (const [name, contents] of Object.entries(files)) {
+      await writeFile(path.join(dir, name), contents);
+    }
+    const names = Object.keys(files).sort();
+    return {
+      dir,
+      specs: names
+        .filter((name) => name.startsWith("Native"))
+        .map((name) => ({
+          name: /getEnforcing<Spec>\("(\w+)"\)/.exec(files[name]!)![1]!,
+          file: path.join(dir, name),
+        })),
+      android: names.filter((name) => name.endsWith(".kt")).map((name) => path.join(dir, name)),
+      ios: names.filter((name) => name.endsWith(".swift")).map((name) => path.join(dir, name)),
+    };
+  }
+
+  it("links the app's own modules from src/native as a local library, with Codegen configured", async () => {
+    // No community module: the app's own module alone switches to the plugin toolchain.
+    const root = await app({ dependencies: { react: "19.2.8", zod: "4.0.0" } });
+    const modules = await appModules(root, {
+      "NativeDevice.ts": DEVICE_SPEC,
+      "DeviceModule.kt": DEVICE_MODULE,
+      "DeviceModule.swift": "import Foundation\n",
+    });
+    const projectDir = "/app/.farm/output/mobile/android";
+    const files = await generated(context({ root, native: native(), appModules: modules }));
+
+    const library = `${projectDir}/farm-app-modules`;
+    const autolinking = JSON.parse(files["autolinking.json"]!);
+    expect(Object.keys(autolinking.dependencies)).toEqual(["farm-app-modules"]);
+    expect(autolinking.dependencies["farm-app-modules"]).toEqual({
+      root: library,
+      name: "farm-app-modules",
+      platforms: {
+        android: {
+          sourceDir: `${library}/android`,
+          packageImportPath: "import dev.farmjs.mobile.modules.FarmAppModulesPackage;",
+          packageInstance: "new FarmAppModulesPackage()",
+          buildTypes: [],
+          libraryName: "FarmAppSpec",
+          componentDescriptors: [],
+          cmakeListsPath: `${library}/android/build/generated/source/codegen/jni/CMakeLists.txt`,
+          cxxModuleCMakeListsModuleName: null,
+          cxxModuleCMakeListsPath: null,
+          cxxModuleHeaderName: null,
+          dependencyConfiguration: null,
+          isPureCxxDependency: false,
+        },
+      },
+    });
+
+    // Codegen: the plugin reads ../package.json of a library and generates its specs from
+    // jsSrcsDir, in the Java package the Kotlin class imports its base class from.
+    expect(JSON.parse(files["farm-app-modules/package.json"]!).codegenConfig).toEqual({
+      name: "FarmAppSpec",
+      type: "modules",
+      jsSrcsDir: "specs",
+      android: { javaPackageName: "dev.farmjs.mobile.specs" },
+    });
+    expect(files["farm-app-modules/specs/NativeDevice.ts"]).toBe(DEVICE_SPEC);
+    const gradle = files["farm-app-modules/android/build.gradle.kts"]!;
+    expect(gradle).toContain('id("com.android.library")');
+    expect(gradle).toContain('id("com.facebook.react")');
+    expect(gradle).toContain('implementation("com.facebook.react:react-android:0.88.1")');
+    const libraryManifest = files["farm-app-modules/android/src/main/AndroidManifest.xml"]!;
+    expect(libraryManifest).toContain("<manifest />");
+    // The manifest merger rejects "--" inside XML comments.
+    for (const [, comment] of libraryManifest.matchAll(/<!--([\s\S]*?)-->/g))
+      expect(comment).not.toContain("--");
+    expect(
+      files["farm-app-modules/android/src/main/java/com/example/notes/modules/DeviceModule.kt"],
+    ).toBe(DEVICE_MODULE);
+    const pkg =
+      files[
+        "farm-app-modules/android/src/main/java/dev/farmjs/mobile/modules/FarmAppModulesPackage.kt"
+      ]!;
+    expect(pkg).toContain("class FarmAppModulesPackage : BaseReactPackage()");
+    expect(pkg).toContain('"Device" -> com.example.notes.modules.DeviceModule(reactContext)');
+    expect(pkg).toContain(
+      '"Device" to ReactModuleInfo("Device", "com.example.notes.modules.DeviceModule", false, false, false, true),',
+    );
+    // Swift is for iOS only.
+    expect(Object.keys(files).filter((file) => file.endsWith(".swift"))).toEqual([]);
+
+    // The same toolchain and app setup as a community module.
+    expect(files["settings.gradle.kts"]).toContain(
+      'autolinkLibrariesFromConfigFile(file("autolinking.json"))',
+    );
+    expect(files["build.gradle.kts"]).toContain('apply(plugin = "com.facebook.react.rootproject")');
+    expect(files["app/build.gradle.kts"]).toContain("autolinkLibrariesWithApp()");
+    expect(files["app/src/main/jni/OnLoad.cpp"]).toContain(
+      "autolinking_ModuleProvider(name, params)",
+    );
+    expect(files[ENGINE]).toContain(
+      "com.facebook.react.PackageList(activity.application).packages",
+    );
+    expect(files["gradle/wrapper/gradle-wrapper.properties"]).toContain("gradle-9.4.1-bin.zip");
+  });
+
+  it("links the app's modules after the community modules", async () => {
+    const root = await app({ dependencies: { "@react-native-community/netinfo": "12.0.1" } });
+    const modules = await appModules(root, {
+      "NativeDevice.ts": DEVICE_SPEC,
+      "DeviceModule.kt": DEVICE_MODULE,
+    });
+    const files = await generated(context({ root, native: native(), appModules: modules }));
+    expect(Object.keys(JSON.parse(files["autolinking.json"]!).dependencies)).toEqual([
+      "@react-native-community/netinfo",
+      "farm-app-modules",
+    ]);
+  });
+
+  it("leaves projects without native screens unchanged, even with app modules", async () => {
+    const root = await app({ dependencies: { react: "19.2.8" } });
+    const modules = await appModules(root, {
+      "NativeDevice.ts": DEVICE_SPEC,
+      "DeviceModule.kt": DEVICE_MODULE,
+    });
+    await expectUnlinked(context({ root, appModules: modules }), "web-only");
+    // Kotlin or Swift without a spec registers nothing.
+    const loose = await appModules(await app({ dependencies: {} }), {
+      "Helpers.kt": "package com.example.notes\n",
+    });
+    await expectUnlinked(context({ native: native(), appModules: loose }), "native");
+  });
+
+  it("names the spec and the class to add when an app module has no Kotlin class", async () => {
+    const root = await app({ dependencies: {} });
+    const missing = await appModules(root, { "NativeDevice.ts": DEVICE_SPEC });
+    await expect(
+      createAndroidProject(context({ root, native: native(), appModules: missing })),
+    ).rejects.toThrow(
+      'src/native/NativeDevice.ts registers the native module "Device", but no Kotlin class in src/native extends NativeDeviceSpec. Add one, such as src/native/DeviceModule.kt with "class DeviceModule(reactContext: ReactApplicationContext) : NativeDeviceSpec(reactContext)" and "import dev.farmjs.mobile.specs.NativeDeviceSpec".',
+    );
+
+    const other = await app({ dependencies: {} });
+    const twice = await appModules(other, {
+      "NativeDevice.ts": DEVICE_SPEC,
+      "DeviceModule.kt": DEVICE_MODULE,
+      "PhoneModule.kt": DEVICE_MODULE.replace("class DeviceModule", "class PhoneModule"),
+    });
+    await expect(
+      createAndroidProject(context({ root: other, native: native(), appModules: twice })),
+    ).rejects.toThrow(
+      "com.example.notes.modules.DeviceModule and com.example.notes.modules.PhoneModule both extend NativeDeviceSpec.",
+    );
+
+    const third = await app({ dependencies: {} });
+    const unpackaged = await appModules(third, {
+      "NativeDevice.ts": DEVICE_SPEC,
+      "DeviceModule.kt": DEVICE_MODULE.replace("package com.example.notes.modules\n", ""),
+    });
+    await expect(
+      createAndroidProject(context({ root: third, native: native(), appModules: unpackaged })),
+    ).rejects.toThrow(/src\/native\/DeviceModule\.kt has no package declaration/);
+  });
+
+  it("links the mobile example's Device module, and Codegen generates the class it extends", async () => {
+    const example = fileURLToPath(new URL("../../../../examples/mobile/", import.meta.url));
+    const dir = path.join(example, "src/native");
+    const modules = {
+      dir,
+      specs: [{ name: "Device", file: path.join(dir, "NativeDevice.ts") }],
+      android: [path.join(dir, "DeviceModule.kt")],
+      ios: [],
+    };
+    const projectDir = await tempDir();
+    const project = await createAndroidProject(
+      context({ root: example, projectDir, native: native(), appModules: modules }),
+    );
+    for (const file of project) {
+      await mkdir(path.dirname(path.join(projectDir, file.path)), { recursive: true });
+      await writeFile(path.join(projectDir, file.path), file.contents);
+    }
+    const linked = JSON.parse(await readFile(path.join(projectDir, "autolinking.json"), "utf8"));
+    expect(Object.keys(linked.dependencies)).toEqual([
+      "@react-native-community/netinfo",
+      "farm-app-modules",
+    ]);
+
+    // React Native's own Codegen, run the way its Gradle plugin runs it for a library.
+    const reactNative = realpathSync(path.join(example, "node_modules/react-native"));
+    const codegen = realpathSync(path.join(reactNative, "../@react-native/codegen"));
+    const library = path.join(projectDir, "farm-app-modules");
+    const schema = path.join(library, "android/build/generated/source/codegen/schema.json");
+    const out = path.join(library, "android/build/generated/source/codegen");
+    await mkdir(out, { recursive: true });
+    const run = (args: string[]) =>
+      execFileSync(process.execPath, args, { cwd: library, encoding: "utf8" });
+    run([
+      path.join(codegen, "lib/cli/combine/combine-js-to-schema-cli.js"),
+      "--platform",
+      "android",
+      schema,
+      path.join(library, "specs"),
+    ]);
+    run([
+      path.join(reactNative, "scripts/generate-specs-cli.js"),
+      "--platform",
+      "android",
+      "--schemaPath",
+      schema,
+      "--outputDir",
+      out,
+      "--libraryName",
+      "FarmAppSpec",
+      "--javaPackageName",
+      "dev.farmjs.mobile.specs",
+    ]);
+    const spec = await readFile(
+      path.join(out, "java/dev/farmjs/mobile/specs/NativeDeviceSpec.java"),
+      "utf8",
+    );
+    expect(spec).toContain('public static final String NAME = "Device";');
+    expect(spec).toContain("public abstract void model(Promise promise);");
+    expect(spec).toContain("public abstract void vibrate(double ms, Promise promise);");
+    // The JNI library React Native's app CMake adds, and the provider OnLoad.cpp reaches.
+    const cmake = await readFile(path.join(out, "jni/CMakeLists.txt"), "utf8");
+    expect(cmake).toContain("react_codegen_FarmAppSpec");
+    expect(await readFile(path.join(out, "jni/FarmAppSpec.h"), "utf8")).toContain(
+      "FarmAppSpec_ModuleProvider",
+    );
+    // The example's class overrides exactly those methods.
+    const kotlin = await readFile(path.join(dir, "DeviceModule.kt"), "utf8");
+    expect(kotlin).toContain(": NativeDeviceSpec(reactContext)");
+    expect(kotlin).toContain("override fun model(promise: Promise)");
+    expect(kotlin).toContain("override fun vibrate(ms: Double, promise: Promise)");
+  });
+
+  describe("web screens' calls to app modules", () => {
+    const EXAMPLE = fileURLToPath(new URL("../../../../examples/mobile/", import.meta.url));
+    const MAIN = "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt";
+    const KITCHEN_SPEC = `import { TurboModuleRegistry, type TurboModule, type CodegenTypes } from "react-native";
+
+export type Mode = "light" | "dark";
+export type Point = { x: number; y?: number | null };
+export enum Level {
+  Low = 1,
+  High = 2,
+}
+
+export interface Spec extends TurboModule {
+  scalars(s: string, n: number, b: boolean, i: CodegenTypes.Int32): Promise<string>;
+  shapes(mode: Mode, point: Point, tags: Array<string>, extra: Object, note?: string | null): Promise<Point>;
+  optional(n?: number, b?: boolean | null, points?: ReadonlyArray<Point> | null): Promise<void>;
+  levels(level: Level, items: Array<any>): Promise<Array<number>>;
+  syncValue(): string;
+}
+
+export default TurboModuleRegistry.getEnforcing<Spec>("Kitchen");
+`;
+    const KITCHEN_MODULE = `package com.example.notes.modules
+
+import com.facebook.react.bridge.ReactApplicationContext
+import dev.farmjs.mobile.specs.NativeKitchenSpec
+
+class KitchenModule(reactContext: ReactApplicationContext) : NativeKitchenSpec(reactContext)
+`;
+
+    /** What core attaches to an opted-in spec: its Promise methods, read with Codegen. */
+    function optIn(
+      modules: NonNullable<MobileShellContext["appModules"]>,
+      names: string[],
+    ): NonNullable<MobileShellContext["appModules"]> {
+      return {
+        ...modules,
+        specs: modules.specs.map((spec) =>
+          names.includes(spec.name)
+            ? { ...spec, web: readFarmNativeWebSpec({ root: EXAMPLE, file: spec.file }) }
+            : spec,
+        ),
+      };
+    }
+
+    const webConfig = (names: string[]) => {
+      const base = context().mobile;
+      return {
+        ...base,
+        modules: Object.fromEntries(
+          names.map((name) => [name, { permissions: [], usage: {}, web: true }]),
+        ),
+      };
+    };
+
+    it("registers each opted-in module, generated from its Codegen spec", async () => {
+      const root = await app({ dependencies: { react: "19.2.8" } });
+      const modules = optIn(
+        await appModules(root, {
+          "NativeDevice.ts": await readFile(
+            path.join(EXAMPLE, "src/native/NativeDevice.ts"),
+            "utf8",
+          ),
+          "DeviceModule.kt": DEVICE_MODULE,
+          "NativeKitchen.ts": KITCHEN_SPEC,
+          "KitchenModule.kt": KITCHEN_MODULE,
+        }),
+        ["Device", "Kitchen"],
+      );
+      const files = await generated(
+        context({
+          root,
+          native: native(),
+          appModules: modules,
+          mobile: webConfig(["Device", "Kitchen"]),
+        }),
+      );
+      const dispatcher = files[WEB_MODULES]!;
+      await expect(dispatcher).toMatchFileSnapshot("__snapshots__/web-modules/FarmWebModules.kt");
+
+      // The bridge dispatches only to these modules, and only to their Promise methods.
+      expect(dispatcher).toContain(
+        "internal fun farmWebModules(): Map<String, FarmPlugin> = listOf<FarmPlugin>(\n    DeviceWebModule,\n    KitchenWebModule,\n).associateBy { it.name }",
+      );
+      expect(dispatcher).not.toContain("syncValue");
+      expect(dispatcher).toContain("else -> throw unknownMethod(method)");
+      // Arguments are checked on the main thread before the module runs.
+      expect(dispatcher.indexOf("val bound = bind(method, list)")).toBeLessThan(
+        dispatcher.indexOf("starter.execute"),
+      );
+      expect(dispatcher).toContain('FarmCallException("invalid_args", message)');
+      expect(files[MAIN]).toContain("        val plugins = farmWebModules()\n");
+      expect(files[MAIN]).not.toContain("emptyMap<String, FarmPlugin>()");
+      expect(files[ENGINE]).toContain("    internal fun host(): ReactHost? {");
+      // Still autolinked and with the PackageList, so the module is the one native screens use.
+      expect(files[ENGINE]).toContain(
+        "com.facebook.react.PackageList(activity.application).packages",
+      );
+
+      // Each call passes exactly the Kotlin types of the Java methods React Native's Codegen
+      // generates from the same specs.
+      const java = await codegenJava(Object.values(modules.specs).map((spec) => spec.file));
+      const calls = [
+        ...dispatcher.matchAll(
+          /module: (Native\w+Spec), promise: Promise -> module\.(\w+)\(([^\n]*)promise\)/g,
+        ),
+      ];
+      expect(calls.map((call) => `${call[1]}.${call[2]}`)).toEqual([
+        "NativeDeviceSpec.model",
+        "NativeDeviceSpec.vibrate",
+        "NativeKitchenSpec.scalars",
+        "NativeKitchenSpec.shapes",
+        "NativeKitchenSpec.optional",
+        "NativeKitchenSpec.levels",
+      ]);
+      for (const [, spec, method, args] of calls) {
+        const kotlin = [...args!.matchAll(/as ([\w?]+), /g)].map((match) => match[1]);
+        expect(kotlin, `${spec}.${method}`).toEqual(java[`${spec}.${method}`]);
+      }
+    });
+
+    /** Codegen's Java spec methods, as the Kotlin types a caller passes: `Double?` for `@Nullable Double`. */
+    async function codegenJava(specs: string[]): Promise<Record<string, string[]>> {
+      const dir = await tempDir();
+      const reactNative = realpathSync(path.join(EXAMPLE, "node_modules/react-native"));
+      const codegen = realpathSync(path.join(reactNative, "../@react-native/codegen"));
+      await mkdir(path.join(dir, "specs"), { recursive: true });
+      for (const spec of specs) {
+        await writeFile(path.join(dir, "specs", path.basename(spec)), await readFile(spec, "utf8"));
+      }
+      const run = (args: string[]) =>
+        execFileSync(process.execPath, args, { cwd: dir, encoding: "utf8" });
+      run([
+        path.join(codegen, "lib/cli/combine/combine-js-to-schema-cli.js"),
+        "--platform",
+        "android",
+        path.join(dir, "schema.json"),
+        path.join(dir, "specs"),
+      ]);
+      run([
+        path.join(reactNative, "scripts/generate-specs-cli.js"),
+        "--platform",
+        "android",
+        "--schemaPath",
+        path.join(dir, "schema.json"),
+        "--outputDir",
+        path.join(dir, "out"),
+        "--libraryName",
+        "FarmAppSpec",
+        "--javaPackageName",
+        "dev.farmjs.mobile.specs",
+      ]);
+      const kotlin: Record<string, string> = {
+        String: "String",
+        double: "Double",
+        boolean: "Boolean",
+        Double: "Double",
+        Boolean: "Boolean",
+        ReadableMap: "ReadableMap",
+        ReadableArray: "ReadableArray",
+      };
+      const methods: Record<string, string[]> = {};
+      for (const spec of specs) {
+        const name = `${path.basename(spec).replace(/\.\w+$/, "")}Spec`;
+        const source = await readFile(
+          path.join(dir, "out/java/dev/farmjs/mobile/specs", `${name}.java`),
+          "utf8",
+        );
+        for (const [, method, params] of source.matchAll(
+          /public abstract void (\w+)\(([^)]*)Promise promise\);/g,
+        )) {
+          methods[`${name}.${method}`] = params!
+            .split(",")
+            .map((param) => param.trim())
+            .filter(Boolean)
+            .map((param) => {
+              const nullable = param.startsWith("@Nullable ");
+              const type = param.replace("@Nullable ", "").split(" ")[0]!;
+              return `${kotlin[type] ?? `<${type}>`}${nullable ? "?" : ""}`;
+            });
+        }
+      }
+      return methods;
+    }
+
+    it("leaves the shell as it was when no module opts in", async () => {
+      const root = await app({ dependencies: { react: "19.2.8" } });
+      const modules = await appModules(root, {
+        "NativeDevice.ts": DEVICE_SPEC,
+        "DeviceModule.kt": DEVICE_MODULE,
+      });
+      const files = await generated(context({ root, native: native(), appModules: modules }));
+      const plain = await generated(context({ native: native() }));
+      expect(files[WEB_MODULES]).toBeUndefined();
+      expect(files[MAIN]).toBe(plain[MAIN]);
+      expect(files[MAIN]).toContain("val plugins = emptyMap<String, FarmPlugin>()");
+      expect(files[ENGINE]).toContain("    private fun host(): ReactHost? {");
+      // A module with web: false is not registered either.
+      const off = await generated(
+        context({
+          root,
+          native: native(),
+          appModules: modules,
+          mobile: {
+            ...context().mobile,
+            modules: { Device: { permissions: [], usage: {}, web: false } },
+          },
+        }),
+      );
+      expect(off[WEB_MODULES]).toBeUndefined();
+      expect(off[MAIN]).toBe(plain[MAIN]);
+    });
+
+    it("names the fix when a module opts in but the Android app has no React Native", async () => {
+      const root = await app({ dependencies: { react: "19.2.8" } });
+      const modules = optIn(
+        await appModules(root, {
+          "NativeDevice.ts": await readFile(
+            path.join(EXAMPLE, "src/native/NativeDevice.ts"),
+            "utf8",
+          ),
+          "DeviceModule.kt": DEVICE_MODULE,
+        }),
+        ["Device"],
+      );
+      await expect(
+        createAndroidProject(context({ root, appModules: modules, mobile: webConfig(["Device"]) })),
+      ).rejects.toThrow(
+        "mobile.modules.Device.web needs React Native in the Android app to run the module, and Farm adds it only when a route has a native screen (page.native.tsx). Add one, or remove web.",
+      );
+    });
+  });
+
+  it("refuses a dependency that is not installed", async () => {
+    const root = await app({ dependencies: { "react-native-missing": "1.0.0" } });
+    await expect(createAndroidProject(context({ root, native: native() }))).rejects.toThrow(
+      /"react-native-missing" is in dependencies but not installed/,
+    );
+  });
+});
+
+describe("mobile.modules", () => {
+  const MANIFEST = "app/src/main/AndroidManifest.xml";
+
+  it("declares the permissions mobile.modules lists, once each, after INTERNET", async () => {
+    const base = context();
+    const files = await generated(
+      context({
+        mobile: {
+          ...base.mobile,
+          modules: {
+            Device: { permissions: ["android.permission.VIBRATE"], usage: {} },
+            "react-native-camera-kit": {
+              permissions: ["android.permission.CAMERA", "android.permission.VIBRATE"],
+              usage: { NSCameraUsageDescription: "Scans receipts." },
+            },
+            Network: { permissions: ["android.permission.INTERNET"], usage: {} },
+          },
+        },
+      }),
+    );
+    expect(files[MANIFEST]).toContain(
+      '    <uses-permission android:name="android.permission.INTERNET" />\n' +
+        "    <!-- mobile.modules -->\n" +
+        '    <uses-permission android:name="android.permission.CAMERA" />\n' +
+        '    <uses-permission android:name="android.permission.VIBRATE" />\n\n' +
+        "    <application",
+    );
+    expect(files[MANIFEST]!.match(/android\.permission\.INTERNET/g)).toHaveLength(1);
+  });
+
+  it("leaves the manifest as the template without permissions to add", async () => {
+    const template = await readFile(
+      fileURLToPath(
+        new URL("../../templates/android/app/src/main/AndroidManifest.xml", import.meta.url),
+      ),
+      "utf8",
+    );
+    const base = context();
+    expect((await generated(base))[MANIFEST]).toBe(template);
+    const usageOnly = context({
+      mobile: {
+        ...base.mobile,
+        modules: { Device: { permissions: [], usage: { NSCameraUsageDescription: "x" } } },
+      },
+    });
+    expect((await generated(usageOnly))[MANIFEST]).toBe(template);
+  });
 });

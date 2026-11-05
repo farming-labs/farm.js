@@ -197,14 +197,56 @@ export type FarmDomSheet = Record<
   }
 >;
 
-const Sheet = createContext<{ sheet: FarmDomSheet; dark: boolean }>({ sheet: {}, dark: false });
+interface SheetContext {
+  sheet: FarmDomSheet;
+  dark: boolean;
+  /** Tailwind's preflight replaces the browser's default styles. */
+  preflight: boolean;
+}
 
-function sheetStyle(context: { sheet: FarmDomSheet; dark: boolean }, tag: string): Style {
-  const entry = context.sheet[tag];
+const Sheet = createContext<SheetContext>({ sheet: {}, dark: false, preflight: false });
+
+/** A light style with its dark changes, from the app's CSS or Tailwind classes. */
+type Themed = { style?: Style; dark?: Style; inherit?: string[] } | undefined;
+
+function themed(context: SheetContext, entry: Themed): Style {
   const style: Style = { ...entry?.style, ...(context.dark ? entry?.dark : undefined) };
   if (typeof style.fontWeight === "number") style.fontWeight = String(style.fontWeight);
   // `sans` is the system's sans-serif (`system-ui`, `sans-serif`): React Native's default font.
   if (style.fontFamily === "sans") delete style.fontFamily;
+  if (style.fontFamily === "mono") style.fontFamily = "monospace";
+  return style;
+}
+
+function sheetStyle(context: SheetContext, tag: string): Style {
+  return themed(context, context.sheet[tag]);
+}
+
+const CONTROLS = new Set(["button", "input", "textarea"]);
+const CONTROL_INHERIT = [
+  "color",
+  "fontFamily",
+  "fontSize",
+  "fontStyle",
+  "fontWeight",
+  "letterSpacing",
+  "lineHeight",
+];
+
+/**
+ * Tailwind 4's preflight: no margins or padding, a solid zero-width border on every element (so
+ * `border` classes draw), headings and links that inherit, lists without markers, and form
+ * controls that inherit the page's font and color on a transparent background.
+ */
+function preflightDefaults(tag: string): Style {
+  const style: Style = { borderStyle: "solid" };
+  if (tag === "strong" || tag === "b") style.fontWeight = "700";
+  if (tag === "em" || tag === "i") style.fontStyle = "italic";
+  if (tag === "code") style.fontFamily = "monospace";
+  if (tag === "hr") style.borderTopWidth = 1;
+  if (CONTROLS.has(tag)) style.backgroundColor = "transparent";
+  // A button centers its label, as a browser's does.
+  if (tag === "button") style.alignItems = "center";
   return style;
 }
 
@@ -216,17 +258,27 @@ function sheetStyle(context: { sheet: FarmDomSheet; dark: boolean }, tag: string
 function useOwn(tag: string, props: Props): Style {
   const context = useContext(Sheet);
   const inherited = useContext(InheritedText);
-  const fromParent = Object.fromEntries(
-    (context.sheet[tag]?.inherit ?? [])
-      .filter((key) => key in inherited)
-      .map((key) => [key, inherited[key]]),
-  );
-  return dropUnstyledBorders(tag, {
-    ...DEFAULTS[tag],
-    ...fromParent,
-    ...sheetStyle(context, tag),
+  const pick = (keys: readonly string[]) =>
+    Object.fromEntries(keys.filter((key) => key in inherited).map((key) => [key, inherited[key]]));
+  // Set by the emitter for an element with a className: its Tailwind utilities, and the app's
+  // rules for its tag and classes, which replace the tag's rules in `sheet`.
+  const resolved = props.__farm as { tw?: Themed; css?: Themed } | undefined;
+  const css = resolved?.css ?? context.sheet[tag];
+  const base = context.preflight ? preflightDefaults(tag) : DEFAULTS[tag];
+  const style: Style = {
+    ...base,
+    ...(context.preflight && CONTROLS.has(tag) ? pick(CONTROL_INHERIT) : {}),
+    ...themed(context, resolved?.tw),
+    ...pick(css?.inherit ?? []),
+    ...themed(context, css),
     ...toNativeStyle(props.style),
-  });
+  };
+  // `small` is 80% of the text around it under preflight.
+  if (context.preflight && tag === "small" && style.fontSize === undefined) {
+    style.fontSize = (typeof inherited.fontSize === "number" ? inherited.fontSize : 16) * 0.8;
+  }
+  if (tag === "hr" && style.borderColor === undefined) style.borderColor = inherited.color;
+  return dropUnstyledBorders(tag, style);
 }
 
 /** Text styles inherited from the boxes above, as CSS inheritance carries them. */
@@ -531,8 +583,10 @@ function List({ tag, props }: { tag: "ul" | "ol"; props: Props }) {
 function Item(props: Props) {
   const marker = useContext(ListMarker);
   const inherited = useContext(InheritedText);
+  const { preflight } = useContext(Sheet);
   const style = useOwn("li", props);
-  if (!marker) return <Box tag="li" props={props} />;
+  // Preflight lists have no markers.
+  if (!marker || preflight) return <Box tag="li" props={props} />;
   // An outside marker sits left of the item's box, on its first line.
   const top =
     (typeof style.paddingTop === "number" ? style.paddingTop : 0) +
@@ -592,17 +646,25 @@ const SIDES = ["Top", "Right", "Bottom", "Left"] as const;
 export function FarmDomScreen({
   children,
   sheet = {},
+  preflight = false,
 }: {
   children?: ReactNode;
   sheet?: FarmDomSheet;
+  /** The app's CSS imports Tailwind, whose preflight replaces the browser's defaults. */
+  preflight?: boolean;
 }) {
-  const context = { sheet, dark: useColorScheme() === "dark" };
+  const context = { sheet, dark: useColorScheme() === "dark", preflight };
   const html = sheetStyle(context, "html");
   const body = sheetStyle(context, "body");
-  const text = { ...BASE_TEXT, ...split(html).text, ...split(body).text };
+  const text = {
+    ...BASE_TEXT,
+    ...(preflight ? { lineHeight: 1.5 } : {}),
+    ...split(html).text,
+    ...split(body).text,
+  };
   const padding: Style = {};
   for (const side of SIDES) {
-    const margin = body[`margin${side}`] ?? 8;
+    const margin = body[`margin${side}`] ?? (preflight ? 0 : 8);
     const inner = body[`padding${side}`] ?? 0;
     padding[`padding${side}`] =
       (typeof margin === "number" ? margin : 0) + (typeof inner === "number" ? inner : 0);

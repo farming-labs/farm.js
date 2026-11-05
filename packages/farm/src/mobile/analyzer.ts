@@ -845,8 +845,8 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
         for (const token of classes.split(/\s+/).filter(Boolean)) {
           const problem = classifyClass(token);
           if (problem && /^class ".*" is not in the native Tailwind subset$/.test(problem)) {
-            // Not Tailwind: React Native cannot use it; the app's CSS may style it natively.
-            block(attribute, "class-name", problem, "react-native");
+            // Not Tailwind: the app's CSS may style it, which the native tier and the React
+            // Native port emitter each check against the stylesheets.
             facts.appClasses.push({ name: token, ...locate(starts, attribute.start) });
           } else if (problem) block(attribute, "class-name", problem);
           else {
@@ -1440,16 +1440,14 @@ export async function analyzeFarmMobileRoutes(
       if (file) {
         if (ASSET_FILE.test(file)) return { fact };
         if (STYLE_FILE.test(file)) {
-          const plain = file.endsWith(".css");
+          // Plain CSS is the app's stylesheet, which the native tier and React Native ports read.
+          if (file.endsWith(".css")) return { fact, stylesheet: file };
           return {
             fact,
-            ...(plain ? { stylesheet: file } : {}),
             blocker: {
               ...at,
               rule: "css-import",
               message: `import "${specifier}" is a stylesheet`,
-              // The native tier reads plain CSS the app imports; React Native cannot.
-              ...(plain ? { only: "react-native" as const } : {}),
             },
           };
         }

@@ -4,6 +4,7 @@
  * identity helper only; nothing here runs in a web build.
  */
 import type { FarmMobileOS, ResolvedFarmMobileConfig } from "./config";
+import type { FarmMobileAppModules } from "./modules";
 import type { FarmMobileRouteManifest } from "./routes";
 
 export type {
@@ -25,6 +26,18 @@ export type {
   FarmMobileUserConfig,
   ResolvedFarmMobileConfig,
 } from "./config";
+export type {
+  FarmMobileAppModules,
+  FarmMobileAppModuleSpec,
+  FarmMobileModuleConfig,
+  ResolvedFarmMobileModuleConfig,
+} from "./modules";
+export type {
+  FarmNativeMethod,
+  FarmNativeProperty,
+  FarmNativeType,
+  FarmNativeWebSpec,
+} from "./native-specs";
 export type {
   FarmMobileRouteManifest,
   FarmMobileRouteRule,
@@ -115,6 +128,8 @@ export interface MobileShellContext {
   assets?: MobileBundledAssets;
   /** `farm build --mobile` with `mobile.shells`: the page shells to bundle. */
   shells?: MobilePageShells;
+  /** The app's own native modules in `src/native/`, when it has any. */
+  appModules?: FarmMobileAppModules;
 }
 
 export interface MobilePackageContext extends MobileShellContext {
