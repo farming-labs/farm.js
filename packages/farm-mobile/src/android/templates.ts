@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { MobileGeneratedFile, MobileShellContext } from "@farm.js/core/mobile";
 import { createBundledAssetFiles } from "../shared/assets.js";
 import { createBridgeScript } from "../shared/bridge.js";
+import { createPageShellFiles } from "../shared/shells.js";
 
 /** The Kotlin package of the shell's code. The app's `mobile.id` is only its application ID. */
 export const SHELL_NAMESPACE = "dev.farmjs.mobile.shell";
@@ -23,6 +24,8 @@ export const REACT_NATIVE_TEMPLATE_DIR = fileURLToPath(
  */
 export const BUNDLED_ASSETS_DIR = "app/src/main/assets/farm-www";
 export const BUNDLED_ASSETS_MANIFEST = "app/src/main/assets/farm-assets.json";
+/** Page shells (`mobile.shells`), read by `PageShells.kt`; `farm-routes.json` maps routes to them. */
+export const PAGE_SHELLS_DIR = "app/src/main/assets/farm-shells";
 
 /** The Hermes bytecode asset the React Native engine loads (`ReactNativeEngine.BUNDLE_ASSET`). */
 export const NATIVE_BUNDLE_ASSET = "app/src/main/assets/farm-native.hbc";
@@ -310,6 +313,7 @@ export async function createAndroidProject(
       root: BUNDLED_ASSETS_DIR,
       manifest: BUNDLED_ASSETS_MANIFEST,
     })),
+    ...createPageShellFiles(context.shells, PAGE_SHELLS_DIR),
   );
   files.push(
     { path: "build.gradle.kts", contents: createRootBuildGradle(context) },

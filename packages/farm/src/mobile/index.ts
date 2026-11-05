@@ -25,7 +25,11 @@ export type {
   FarmMobileUserConfig,
   ResolvedFarmMobileConfig,
 } from "./config";
-export type { FarmMobileRouteManifest, FarmMobileRouteRule } from "./routes";
+export type {
+  FarmMobileRouteManifest,
+  FarmMobileRouteRule,
+  FarmMobileShellManifest,
+} from "./routes";
 
 /** A file a mobile shell generates, relative to the native project directory. */
 export interface MobileGeneratedFile {
@@ -73,6 +77,20 @@ export interface MobileBundledAssets {
   entry: string;
 }
 
+/**
+ * The page shells of `farm build --mobile` with `mobile.shells` (RFC 0004, 7.2): per route, the
+ * layouts around its `loading.tsx` as HTML with no scripts. `manifest.shells` maps routes to
+ * these files. Absent in dev, without `mobile.shells`, or when no route has one.
+ */
+export interface MobilePageShells {
+  /** The mobile client entry they were rendered with; also `manifest.shells.client`. */
+  client: string;
+  /** Shell file per page route; also `manifest.shells.routes`. */
+  routes: Record<string, string>;
+  /** HTML by file name, such as `1a2b3c4d5e6f7a8b.html`. On iOS each stylesheet is inlined. */
+  files: Record<string, string>;
+}
+
 export interface MobileShellContext {
   /** App root. */
   root: string;
@@ -90,6 +108,8 @@ export interface MobileShellContext {
   native?: MobileNativeScreens;
   /** `farm build --mobile`: the mobile client's files to bundle. Absent in dev. */
   assets?: MobileBundledAssets;
+  /** `farm build --mobile` with `mobile.shells`: the page shells to bundle. */
+  shells?: MobilePageShells;
 }
 
 export interface MobilePackageContext extends MobileShellContext {

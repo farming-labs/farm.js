@@ -669,7 +669,7 @@ describe("RSC client link interceptor respects modified and non-primary clicks",
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const slice = entry.slice(start, end);
-    return new Function("location", "history", "nav", `${slice} return handleClick;`) as (
+    return new Function("location", "history", "navigate", `${slice} return handleClick;`) as (
       location: any,
       history: any,
       nav: any,
@@ -719,8 +719,9 @@ describe("RSC client link interceptor respects modified and non-primary clicks",
     const e = makeEvent(makeLink());
     handleClick(e);
     expect(e.preventDefault).toHaveBeenCalledOnce();
-    expect(history.pushState).toHaveBeenCalledWith(null, "", `${origin}/page`);
-    expect(nav).toHaveBeenCalledOnce();
+    // The router's navigate() offers it to delegates, then writes history.
+    expect(nav).toHaveBeenCalledExactlyOnceWith(`${origin}/page`, "push");
+    expect(history.pushState).not.toHaveBeenCalled();
   });
 
   it.each([

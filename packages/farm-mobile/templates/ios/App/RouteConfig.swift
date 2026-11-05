@@ -35,17 +35,26 @@ struct RouteConfig {
     static let web = "web"
     private static let screens: Set<String> = [web, "native", "platform", "server"]
 
+    /// The mobile client entry the page shells were rendered with, and each route's shell file.
+    struct Shells {
+        let client: String
+        let routes: [String: String]
+    }
+
     let server: URL
     let tabs: [Tab]
     let rules: [Rule]
+    /// Page shells, only in farm build --mobile with mobile.shells.
+    let shells: Shells?
 
     /// scheme://host[:port], the only origin the bridge and link interception trust.
     let origin: String
 
-    init(server: URL, tabs: [Tab], rules: [Rule]) {
+    init(server: URL, tabs: [Tab], rules: [Rule], shells: Shells? = nil) {
         self.server = server
         self.tabs = tabs
         self.rules = rules
+        self.shells = shells
         origin = RouteConfig.origin(of: server) ?? ""
     }
 
@@ -136,7 +145,12 @@ struct RouteConfig {
             )
         }
         let rules = try (json["rules"] as? [[String: Any]] ?? []).map(rule)
-        return RouteConfig(server: server, tabs: tabs, rules: rules)
+        var shells: Shells?
+        if let entry = json["shells"] as? [String: Any], let client = entry["client"] as? String,
+           !client.isEmpty, let routes = entry["routes"] as? [String: String] {
+            shells = Shells(client: client, routes: routes)
+        }
+        return RouteConfig(server: server, tabs: tabs, rules: rules, shells: shells)
     }
 }
 

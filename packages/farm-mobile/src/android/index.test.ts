@@ -11,6 +11,7 @@ import shell, {
   listAndroidDevices,
   MAIN_ACTIVITY,
   NATIVE_BUNDLE_ASSET,
+  PAGE_SHELLS_DIR,
   resolveTabIcon,
   SHELL_NAMESPACE,
 } from "./index";
@@ -148,6 +149,7 @@ describe("@farm.js/mobile/android", () => {
       "app/src/main/java/dev/farmjs/mobile/shell/NativeScreens.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/Navigator.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/Page.kt",
+      "app/src/main/java/dev/farmjs/mobile/shell/PageShells.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/RouteConfig.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/Screen.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/ServerScreens.kt",
@@ -499,6 +501,93 @@ describe("bundled client assets", () => {
   });
 });
 
+describe("page shells", () => {
+  const html = "<!DOCTYPE html><html data-farm-page-shell><body><p>Loading notes</p></body></html>";
+  const shells = {
+    client: "/farm-mobile-client-h1a2b3c4d.js",
+    routes: { "/notes": "0123456789abcdef.html", "/notes/new": "0123456789abcdef.html" },
+    files: { "0123456789abcdef.html": html },
+  };
+  const withShells = () => {
+    const base = context({ command: "build" });
+    return context({
+      command: "build",
+      shells,
+      manifest: { ...base.manifest, shells: { client: shells.client, routes: shells.routes } },
+    });
+  };
+
+  it("bundles one file per shell and maps routes to them in farm-routes.json", async () => {
+    const files = await generated(withShells());
+    expect(Object.keys(files).filter((file) => file.startsWith(`${PAGE_SHELLS_DIR}/`))).toEqual([
+      `${PAGE_SHELLS_DIR}/0123456789abcdef.html`,
+    ]);
+    expect(files[`${PAGE_SHELLS_DIR}/0123456789abcdef.html`]).toBe(html);
+    expect(JSON.parse(files["app/src/main/assets/farm-routes.json"]).shells).toEqual({
+      client: "/farm-mobile-client-h1a2b3c4d.js",
+      routes: { "/notes": "0123456789abcdef.html", "/notes/new": "0123456789abcdef.html" },
+    });
+    const routes = files["app/src/main/java/dev/farmjs/mobile/shell/RouteConfig.kt"];
+    expect(routes).toContain('json.optJSONObject("shells")');
+    expect(files["app/src/main/java/dev/farmjs/mobile/shell/PageShells.kt"]).toContain(
+      'private const val ROOT = "farm-shells"',
+    );
+  });
+
+  it("bundles none without shells, and refuses a file name core would not write", async () => {
+    const files = await generated(context({ command: "build" }));
+    expect(Object.keys(files).some((file) => file.startsWith(`${PAGE_SHELLS_DIR}/`))).toBe(false);
+    for (const name of ["../x.html", "notes.html", "0123456789abcdef.js"]) {
+      await expect(
+        createAndroidProject(context({ shells: { ...shells, files: { [name]: html } } })),
+      ).rejects.toThrow(/Refusing to write the page shell/);
+    }
+  });
+
+  it("shows a shell only over a cold document load, until the page paints or for good offline", async () => {
+    const files = await generated(context());
+    const navigator = files["app/src/main/java/dev/farmjs/mobile/shell/Navigator.kt"];
+    const warm = navigator.slice(
+      navigator.indexOf("if (warm) {"),
+      navigator.indexOf("} else {", navigator.indexOf("if (warm) {")),
+    );
+    expect(warm).toContain("screen.render(url)");
+    expect(warm).not.toContain("shell");
+    expect(navigator).toContain("screen.load(url, shell)");
+    // The web twin of a native screen that fails is a cold load too.
+    expect(navigator).toContain(
+      "it.showWeb(newPage(), url.toString(), shells?.html(config.match(url)))",
+    );
+    const screen = files["app/src/main/java/dev/farmjs/mobile/shell/Screen.kt"];
+    expect(screen).toContain("if (!loadFailed) removeShell()");
+    expect(screen).toContain("override fun onLoadError(page: Page)");
+    const page = files["app/src/main/java/dev/farmjs/mobile/shell/Page.kt"];
+    const view = page.slice(page.indexOf("fun createShellView"), page.indexOf("/** Render [url]"));
+    // A shell runs no code, never navigates, and loads its stylesheet from the APK.
+    expect(view).toContain("settings.javaScriptEnabled = false");
+    expect(view).toContain(
+      "shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = true",
+    );
+    expect(view).toContain("bundle?.respond(request)");
+    expect(view).toContain('loadDataWithBaseURL(url, html, "text/html", "utf-8", null)');
+    expect(page).toContain("error.errorCode in UNREACHABLE");
+    expect(files["app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt"]).toContain(
+      "val shells = PageShells.load(this, config)",
+    );
+  });
+
+  it("stops showing shells while documents load another client build", async () => {
+    const files = await generated(context());
+    const shellsKt = files["app/src/main/java/dev/farmjs/mobile/shell/PageShells.kt"];
+    expect(shellsKt).toContain("if (!enabled) return null");
+    expect(shellsKt).toContain("loaded.substringAfterLast('/') == client.substringAfterLast('/')");
+    expect(shellsKt).toContain("putString(KEY_MISMATCH, client)");
+    expect(files["app/src/main/java/dev/farmjs/mobile/shell/Page.kt"]).toContain(
+      "shells?.observe(client)",
+    );
+  });
+});
+
 describe("React Native screens", () => {
   const native = (overrides: Partial<NonNullable<MobileShellContext["native"]>> = {}) => ({
     engine: "react-native" as const,
@@ -614,8 +703,20 @@ describe("React Native screens", () => {
     // A null screen from the engine opens the route as a web screen.
     expect(navigator).toContain("if (content != null) {");
     expect(navigator).toContain("as a web screen");
-    expect(navigator).toContain("it.showWeb(newPage(), url.toString())");
-    expect(shellFile("Screen.kt")).toContain("fun showWeb(page: Page, url: String)");
+    expect(navigator).toContain(
+      "it.showWeb(newPage(), url.toString(), shells?.html(config.match(url)))",
+    );
+    expect(shellFile("Screen.kt")).toContain(
+      "fun showWeb(page: Page, url: String, shell: String? = null)",
+    );
+    // The shell keeps its screens through a theme change and repaints its chrome.
+    expect(shellFile("MainActivity.kt")).toContain(
+      "override fun onConfigurationChanged(newConfig: Configuration)",
+    );
+    expect(shellFile("MainActivity.kt")).toContain("navigator.applyTheme()");
+    expect(shellFile("Navigator.kt")).toContain(
+      "stacks.forEach { stack -> stack.forEach(Screen::applyTheme) }",
+    );
     // "server" rules draw the page the server renders, and fall back to the web screen.
     expect(shellFile("RouteConfig.kt")).toContain('setOf(WEB, "native", "platform", "server")');
     expect(shellFile("NativeScreens.kt")).toContain(
@@ -638,7 +739,7 @@ describe("React Native screens", () => {
 });
 
 describe("the bridge script", () => {
-  async function loadBridge() {
+  async function loadBridge(client: string | null = null) {
     const files = await generated(context());
     const source = files["app/src/main/assets/farm-bridge.js"].replace("__FARM_PLUGINS__", "[]");
     const posted: Array<Record<string, unknown>> = [];
@@ -651,7 +752,11 @@ describe("the bridge script", () => {
       document: {
         title: "Notes",
         addEventListener() {},
-        querySelector: () => null,
+        // The mobile client entry a shell document loads.
+        querySelector: (selector: string) =>
+          client !== null && selector.includes("farm-mobile-client-")
+            ? { getAttribute: (name: string) => (name === "src" ? client : null) }
+            : null,
         documentElement: {
           attributes: {} as Record<string, string>,
           setAttribute(name: string, value: string) {
@@ -672,6 +777,14 @@ describe("the bridge script", () => {
     vm.runInNewContext(source, sandbox);
     return { bridge: window.__farmBridge, window, posted, root: sandbox.document.documentElement };
   }
+
+  it("reports the mobile client a document loaded, for page shells", async () => {
+    const { window, posted } = await loadBridge("/farm-mobile-client-h1a2b3c4d.js");
+    window.__FARM_SPA_ROUTER__ = { navigate: async () => {} };
+    expect(posted).toContainEqual(
+      expect.objectContaining({ type: "router-ready", client: "/farm-mobile-client-h1a2b3c4d.js" }),
+    );
+  });
 
   it("marks the page as running in the shell so app CSS can hide web-only chrome", async () => {
     const { root } = await loadBridge();
@@ -697,6 +810,7 @@ describe("the bridge script", () => {
       type: "router-ready",
       url: "http://10.0.2.2:3000/notes",
       title: "Notes",
+      client: null,
     });
     // Prefetch is a no-op in the shell.
     await window.__FARM_SPA_ROUTER__.prefetch("/notes/2");

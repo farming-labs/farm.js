@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -9,7 +7,14 @@ import { expect, test, type Page } from "@playwright/test";
 // { mode: "rsc" } and with { mode: "islands" } (playwright.server-components.config.ts).
 const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" : "rsc";
 const dev = process.env.FARM_SERVER_COMPONENTS_SERVER === "dev";
-const output = path.resolve("examples/server-components", `.farm/.output-${mode}`);
+const target = dev ? undefined : process.env.FARM_SERVER_COMPONENTS_TARGET;
+const output = path.resolve(
+  "examples/server-components",
+  `.farm/.output-${mode}${target ? `-${target}` : ""}`,
+);
+// Where the build puts its static files: Cloudflare Pages serves the output directory itself.
+const publicDir =
+  target === "cloudflare" ? output : path.join(output, target === "vercel" ? "static" : "public");
 
 /** Console errors and uncaught exceptions while the page runs. */
 function collectErrors(page: Page): string[] {
@@ -171,7 +176,7 @@ test("client components before and inside slow Suspense content both hydrate", a
 test("a client navigation shows a Suspense page before its slow content arrives", async ({
   page,
 }) => {
-  test.skip(mode !== "islands" || dev, "islands production navigations stream");
+  test.skip(mode !== "islands", "islands navigations stream");
   const errors = collectErrors(page);
   await page.goto("/");
   await hydrated(page);
@@ -196,8 +201,47 @@ test("a client navigation shows a Suspense page before its slow content arrives"
   expect(errors).toEqual([]);
 });
 
+test("a navigation request gets the layouts it keeps as boundaries, and flush markers", async ({
+  baseURL,
+  request,
+}) => {
+  test.skip(
+    mode !== "islands",
+    "islands mode's navigation protocol, the same in dev and production",
+  );
+  // F-Layouts names the layouts the browser shows, by key: the root renders, the rest are kept.
+  const segment = await request.get("/nav/b", {
+    headers: { Accept: "text/html", "F-Layouts": JSON.stringify(["/", "/nav"]) },
+  });
+  const html = await segment.text();
+  expect(html).toContain(
+    'data-farm-layout-pattern="/" data-farm-layout-key="/" style="display:contents"',
+  );
+  expect(html).toContain('data-farm-layout-key="/nav" data-farm-layout-kept="true"');
+  expect(html).toContain("Nav page B");
+  expect(segment.headers()["cache-control"]).toBe("private, no-store");
+  // A layout chain that hydrates (a client provider in /context's layout) is drawn by React in the
+  // browser, without keys, so the server leaves them out there.
+  const hydrating = await (
+    await request.get("/context", { headers: { Accept: "text/html" } })
+  ).text();
+  expect(hydrating).toContain('data-farm-layout-pattern="/context"');
+  expect(hydrating).not.toContain("data-farm-layout-key");
+
+  // F-Stream: flush marks where each React flush ends, with the token from F-Flush.
+  const streamed = await fetch(`${baseURL}/stream`, {
+    headers: { Accept: "text/html", "F-Stream": "flush" },
+  });
+  const token = streamed.headers.get("f-flush");
+  expect(token).toMatch(/^[0-9a-f]{32}$/);
+  const [shell, ...flushes] = (await streamed.text()).split(`<!--farm-flush:${token}-->`);
+  expect(shell).toContain("Loading slow content");
+  expect(shell).not.toContain("Slow content arrived");
+  expect(flushes.join("")).toContain("Slow content arrived");
+});
+
 test("leaving a streaming page drops the rest of its content", async ({ page }) => {
-  test.skip(mode !== "islands" || dev, "islands production navigations stream");
+  test.skip(mode !== "islands", "islands navigations stream");
   const errors = collectErrors(page);
   await page.goto("/");
   await hydrated(page);
@@ -261,7 +305,7 @@ test("generateMetadata sets the head", async ({ request }) => {
 
 test("static pages are prerendered at build time", async ({ request }) => {
   test.skip(dev, "build output only");
-  expect(existsSync(path.join(output, "public/static/a/index.html"))).toBe(true);
+  expect(existsSync(path.join(publicDir, "static/a/index.html"))).toBe(true);
   expect(await (await request.get("/static/b")).text()).toContain("Static b");
 });
 
@@ -480,27 +524,21 @@ test("middleware runs for API routes, and API routes keep their validation", asy
   expect((await request.get("/api/missing")).status()).toBe(404);
 });
 
-test("after() runs once the response has finished", async ({ page }) => {
+test("after() runs once the response has finished", async ({ page, request }) => {
   const token = randomUUID();
-  const marker = path.join(tmpdir(), `farm-contract-after-${token}.json`);
-  await rm(marker, { force: true });
+  const written = async () =>
+    (
+      (await (await request.get(`/api/after?token=${token}`)).json()) as {
+        written: { token: string; scheduledAt: number; completedAt: number } | null;
+      }
+    ).written;
   const response = await page.goto(`/after?token=${token}`);
   expect(response?.status()).toBe(200);
   await expect(page.getByTestId("after-status")).toHaveText("scheduled");
-  expect(existsSync(marker)).toBe(false);
-  let written: { token: string; scheduledAt: number; completedAt: number } | undefined;
-  await expect
-    .poll(async () => {
-      try {
-        written = JSON.parse(await readFile(marker, "utf8"));
-        return written?.token;
-      } catch {
-        return undefined;
-      }
-    })
-    .toBe(token);
-  expect(written!.completedAt - written!.scheduledAt).toBeGreaterThanOrEqual(500);
-  await rm(marker, { force: true });
+  expect(await written()).toBeNull();
+  await expect.poll(async () => (await written())?.token).toBe(token);
+  const record = (await written())!;
+  expect(record.completedAt - record.scheduledAt).toBeGreaterThanOrEqual(500);
 });
 
 test("server function middleware runs in order for browser and form calls", async ({ page }) => {
@@ -608,5 +646,52 @@ test("client components use Farm's router hooks, page state, blocker and Link", 
   await expect(page.getByRole("button", { name: "page state: details" })).toBeVisible();
   await page.getByRole("link", { name: "link home" }).click();
   await expect(page).toHaveURL(/\/$/);
+  expect(errors).toEqual([]);
+});
+
+// Hydration timing: `export const island = "interaction" | "visible" | "idle"` in a client module
+// (/timing has one island of each). Each island keeps its own trigger.
+test("an interaction island stays server HTML until it is clicked, and counts that click", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/timing");
+  await hydrated(page);
+  const island = page.getByTestId("interaction");
+  await expect(island).toHaveText("Interaction: 0");
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  await island.click();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await expect(island).toHaveText("Interaction: 1");
+  expect(errors).toEqual([]);
+});
+
+test("a visible island hydrates when it scrolls into view", async ({ page }) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/timing");
+  await hydrated(page);
+  const island = page.getByTestId("visible");
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  await island.scrollIntoViewIfNeeded();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await island.click();
+  await expect(island).toHaveText("Visible: 1");
+  expect(errors).toEqual([]);
+});
+
+test("an idle island hydrates without input, and leaves the other islands waiting", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/timing");
+  const island = page.getByTestId("idle");
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await island.click();
+  await expect(island).toHaveText("Idle: 1");
+  await expect(page.getByTestId("interaction")).toHaveAttribute("data-hydrated", "false");
+  await expect(page.getByTestId("visible")).toHaveAttribute("data-hydrated", "false");
   expect(errors).toEqual([]);
 });

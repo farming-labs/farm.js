@@ -209,4 +209,20 @@ describe("resolveSingletonsFromApp", () => {
       ["./routes", linked.originModulePath],
     ]);
   });
+
+  it("resolves @farm.js/native from the app for a package that imports it", () => {
+    const calls: Array<[string, string]> = [];
+    const resolve = (context: { originModulePath: string }, moduleName: string) => {
+      calls.push([moduleName, context.originModulePath]);
+      return { type: "sourceFile", filePath: moduleName };
+    };
+    const resolveRequest = resolveSingletonsFromApp("/app", resolve);
+    const auth = { originModulePath: "/repo/packages/farm-auth/dist/client.native.js" };
+    resolveRequest(auth, "@farm.js/native", "android");
+    resolveRequest(auth, "@farm.js/native-extra", "android");
+    expect(calls).toEqual([
+      ["@farm.js/native", path.join("/app", "package.json")],
+      ["@farm.js/native-extra", auth.originModulePath],
+    ]);
+  });
 });

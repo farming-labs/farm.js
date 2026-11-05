@@ -55,7 +55,18 @@ export interface FarmRscPluginOptions {
    * @default false
    */
   debug?: boolean;
+
+  /**
+   * @internal Set by `farm dev` and `farm build` for an app with a `mobile` block (RFC 0004).
+   * `"entry"`: the build adds a mobile client entry, which the server points the documents a
+   * mobile shell asks for (`X-Farm-Shell`) at. `"inline"`: the browser entry itself hands in-app
+   * navigations to the shell (`farm dev --mobile`).
+   */
+  mobileClient?: FarmRscMobileClient;
 }
+
+/** @internal See `FarmRscPluginOptions.mobileClient`. */
+export type FarmRscMobileClient = "entry" | "inline";
 
 /**
  * Internal context passed to entry generators.
@@ -156,6 +167,9 @@ export interface EntryContext {
 
   /** Generated import/init fragments for `cache.client.adapter` persistence. */
   clientCachePersistence?: { imports: string; init: string };
+
+  /** The mobile client of an app with a `mobile` block (see `FarmRscPluginOptions`). */
+  mobileClient?: FarmRscMobileClient;
 }
 
 /**

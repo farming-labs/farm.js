@@ -9,8 +9,13 @@ class RouteConfig(
     val server: Uri,
     val tabs: List<Tab>,
     val rules: List<Rule>,
+    /** Page shells, only in farm build --mobile with mobile.shells. */
+    val shells: Shells? = null,
 ) {
     data class Tab(val path: String, val title: String, val icon: String)
+
+    /** The mobile client entry the shells were rendered with, and each route's shell file. */
+    data class Shells(val client: String, val routes: Map<String, String>)
 
     data class Rule(
         val route: String?,
@@ -76,10 +81,16 @@ class RouteConfig(
             val rules = json.getJSONArray("rules").let { array ->
                 List(array.length()) { i -> rule(array.getJSONObject(i)) }
             }
+            val shells = json.optJSONObject("shells")?.let { shells ->
+                val routes = shells.optJSONObject("routes") ?: return@let null
+                val client = shells.optString("client").ifEmpty { return@let null }
+                Shells(client, buildMap { routes.keys().forEach { put(it, routes.getString(it)) } })
+            }
             return RouteConfig(
                 server = Uri.parse(serverOverride ?: json.getString("server")),
                 tabs = tabs,
                 rules = rules,
+                shells = shells,
             )
         }
     }

@@ -127,6 +127,7 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "./document-layout-client";
+import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "./client/navigation-stream-client";
 import {
   getClientModuleMetadata,
   resolveModuleSourcePath,
@@ -5127,6 +5128,7 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment'
+${islandValues ? "import { getFarmIslandValueHeaders } from '@farm.js/core/internal/client-runtime'" : ""}
 ${providerClientCode.imports}
 ${clientPluginEntry.imports}
 
@@ -5593,6 +5595,7 @@ class LegacyManifestSPARouter {
 // Initialize the SPA router
 const spaRouter = new SPARouter({
   shouldUseDocumentNavigation: matchesDocumentNavigation,
+  ${islandValues ? "fetchNavigationDocument: fetchFarmNavigationDocument," : ""}
 });
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
@@ -6215,7 +6218,14 @@ function parseNavigationFragment(html) {
   return template.content;
 }
 
-function replaceNavigationBoundary(container, fragment, currentPatterns, nextPatterns, refresh = false) {
+function replaceNavigationBoundary(
+  container,
+  fragment,
+  currentPatterns,
+  nextPatterns,
+  refresh = false,
+  find = findLayoutBoundary,
+) {
   let sharedCount = 0;
   while (
     sharedCount < currentPatterns.length &&
@@ -6226,13 +6236,13 @@ function replaceNavigationBoundary(container, fragment, currentPatterns, nextPat
   }
 
   const fragmentTreeRoot = nextPatterns.length > 0
-    ? findLayoutBoundary(fragment, nextPatterns[0])
+    ? find(fragment, nextPatterns[0])
     : fragment.querySelector('#__farm_page__');
   const currentTarget = sharedCount < currentPatterns.length
-    ? findLayoutBoundary(container, currentPatterns[sharedCount])
+    ? find(container, currentPatterns[sharedCount])
     : container.querySelector('#__farm_page__');
   const nextTarget = sharedCount < nextPatterns.length
-    ? findLayoutBoundary(fragment, nextPatterns[sharedCount])
+    ? find(fragment, nextPatterns[sharedCount])
     : fragment.querySelector('#__farm_page__');
 
   if (!currentTarget || !nextTarget) {
@@ -6271,6 +6281,196 @@ function replaceNavigationBoundary(container, fragment, currentPatterns, nextPat
   return nextTarget;
 }
 
+${
+  islandValues
+    ? `${FARM_NAVIGATION_STREAM_READER_SOURCE}
+
+// Islands mode navigates as the production client does: it fetches the page itself, names the
+// layouts it shows by key (F-Layouts), and asks for flush markers (F-Stream), so the shell arrives
+// before slow Suspense content. Other pages (a client page, a layout that hydrates, route slots)
+// keep the page-data request.
+function farmLayoutIdentity(boundary) {
+  return boundary.getAttribute('data-farm-layout-key') || boundary.getAttribute('data-farm-layout-pattern');
+}
+
+function findLayoutBoundaryByIdentity(root, identity) {
+  const boundaries = root.querySelectorAll
+    ? root.querySelectorAll('[data-farm-layout-boundary="true"]')
+    : [];
+  for (const boundary of boundaries) {
+    if (farmLayoutIdentity(boundary) === identity) return boundary;
+  }
+  return null;
+}
+
+function readLayoutIdentities(root) {
+  return Array.from(root.querySelectorAll ? root.querySelectorAll('[data-farm-layout-boundary="true"]') : [])
+    .map(farmLayoutIdentity)
+    .filter(Boolean);
+}
+
+// A segment response leaves out the layouts the browser said it shows. It fits this page only if
+// the page still shows each of them, at the same depth.
+function fitsFarmSegment(currentRoot, nextRoot) {
+  const nextBoundaries = Array.from(nextRoot.querySelectorAll('[data-farm-layout-boundary="true"]'));
+  const lastKept = nextBoundaries
+    .map((boundary) => boundary.getAttribute('data-farm-layout-kept') === 'true')
+    .lastIndexOf(true);
+  if (lastKept === -1) return true;
+  const current = readLayoutIdentities(currentRoot);
+  for (let index = 0; index <= lastKept; index++) {
+    if (current[index] !== farmLayoutIdentity(nextBoundaries[index])) return false;
+  }
+  return true;
+}
+
+// Each navigation starts a new generation, so a page left while it streams stops adding content.
+let farmNavigationStreamGeneration = 0;
+
+function farmDocumentNavigationRoute(pathname) {
+  const match = findRoute(pathname);
+  if (!match) return null;
+  const route = match.route;
+  if (route.isClientComponent || route.shouldHydrate) return null;
+  if (route.renderPlan && route.renderPlan.hydration !== 'none') return null;
+  const layouts = findLayouts(pathname);
+  if (layouts.some((layout) => layout.shouldHydrate)) return null;
+  const owners = new Set([route.pattern, ...layouts.map((layout) => layout.pattern)]);
+  if ((getManifest().slots || []).some((slot) => owners.has(slot.ownerPattern))) return null;
+  return { ...match, layouts };
+}
+
+async function fetchFarmNavigationDocument(path, context) {
+  farmNavigationStreamGeneration++;
+  const url = new URL(path, window.location.href);
+  const match = farmDocumentNavigationRoute(url.pathname);
+  const container = document.getElementById('root');
+  if (!match || !container) return null;
+  const deploymentId = window.__FARM_DEPLOYMENT_ID__;
+  const request = async (keepLayouts) => {
+    // A refresh renders every layout; so does a page whose layout React owns, which the swap
+    // replaces whole.
+    const identities =
+      keepLayouts && !context.refresh && !activeLayoutShouldHydrate
+        ? readLayoutIdentities(container)
+        : [];
+    const response = await fetch(url.pathname + url.search, {
+      signal: context.signal,
+      redirect: 'manual',
+      headers: createFarmDeploymentRequestHeaders(deploymentId, {
+        Accept: 'text/html',
+        'F-Stream': 'flush',
+        ...getFarmIslandValueHeaders(),
+        ...(identities.length ? { 'F-Layouts': JSON.stringify(identities) } : {}),
+      }),
+    });
+    if (isFarmDeploymentMismatchResponse(response, deploymentId)) {
+      const error = createFarmDeploymentMismatchError(response, deploymentId || 'unknown');
+      window.dispatchEvent(new CustomEvent('farm:deployment-mismatch', { detail: error }));
+      throw error;
+    }
+    // A redirect, an error or anything but HTML: the router loads the document instead.
+    if (
+      !response.ok ||
+      !response.body ||
+      !(response.headers.get('content-type') || '').includes('text/html')
+    ) {
+      throw new Error('Failed to fetch the page: ' + response.status);
+    }
+    const stream = await readFarmNavigationStream(response.body, response.headers.get('F-Flush'));
+    const doc = new DOMParser().parseFromString(stream.shell, 'text/html');
+    return { stream, doc, nextRoot: doc.getElementById('root') };
+  };
+  let result = await request(true);
+  if (result.nextRoot && !fitsFarmSegment(container, result.nextRoot)) {
+    result.stream.cancel?.();
+    result = await request(false);
+  }
+  if (!result.nextRoot) {
+    result.stream.cancel?.();
+    throw new Error('The page has no #root');
+  }
+  const { stream, doc, nextRoot } = result;
+  const description = doc.querySelector('meta[name="description"]')?.getAttribute('content');
+  return {
+    props: { params: match.params },
+    modulePath: match.route.modulePath,
+    isClientComponent: false,
+    pageShouldHydrate: false,
+    layoutShouldHydrate: false,
+    shouldHydrate: false,
+    islandStrategy: 'load',
+    renderPlan: match.route.renderPlan,
+    fragment: {
+      html: nextRoot.innerHTML,
+      layoutPatterns: Array.from(nextRoot.querySelectorAll('[data-farm-layout-boundary="true"]'))
+        .map((boundary) => boundary.getAttribute('data-farm-layout-pattern'))
+        .filter(Boolean),
+    },
+    metadata: { title: doc.title, ...(description ? { description } : {}) },
+    layoutModules: match.layouts.map((layout) => layout.modulePath),
+    farmDocument: { stream: stream.next ? stream : null },
+  };
+}
+
+// Adds the flushes after a streamed navigation's shell, as the production client does: React's
+// staged Suspense content and the scripts that reveal it.${
+        isolatedHydrationEnabled
+          ? " The islands React reveals hydrate as they\n// appear, and the ones it removes (a replaced fallback) are released."
+          : ""
+      }
+async function streamFarmDevNavigation(stream, root, generation) {
+  const isCurrent = () => generation === farmNavigationStreamGeneration && root.isConnected;
+  ${
+    isolatedHydrationEnabled
+      ? `let streaming = true;
+  const removed = new Set();
+  let queued = false;
+  const run = () => {
+    queued = false;
+    if (!isCurrent()) return observer.disconnect();
+    for (const node of removed) if (!node.isConnected) disposeFarmIsolatedClientBoundaries(node);
+    removed.clear();
+    if (!streaming && !root.querySelector('div[hidden][id^="S:"]')) observer.disconnect();
+    hydrateFarmIsolatedClientBoundaries(root).catch((error) => {
+      console.error('[Farm.js] Hydrating streamed islands failed:', error);
+    });
+  };
+  const observer = new MutationObserver((records) => {
+    for (const record of records) for (const node of record.removedNodes) removed.add(node);
+    if (queued) return;
+    queued = true;
+    queueMicrotask(run);
+  });
+  observer.observe(root, { childList: true, subtree: true });`
+      : "const observer = { disconnect() {} };"
+  }
+  try {
+    for (let flush = await stream.next(); flush !== null; flush = await stream.next()) {
+      if (!isCurrent()) {
+        observer.disconnect();
+        return stream.cancel();
+      }
+      const parsed = new DOMParser().parseFromString('<div id="root">' + flush, 'text/html');
+      const fragment = document.createDocumentFragment();
+      for (const node of Array.from(parsed.getElementById('root').childNodes)) fragment.appendChild(node);
+      activateFragmentScripts(fragment);
+      root.appendChild(fragment);
+    }
+  } catch (error) {
+    ${isolatedHydrationEnabled ? "streaming = false;" : ""}
+    if (!isCurrent()) return observer.disconnect();
+    console.error('[Farm.js] A streamed navigation failed:', error);
+    ${isolatedHydrationEnabled ? "farmIsolatedHydrationRuntime.endStream?.(root);\n    if (!queued) run();" : ""}
+    return;
+  }
+  if (!isCurrent()) return observer.disconnect();
+  ${isolatedHydrationEnabled ? "streaming = false;\n  farmIsolatedHydrationRuntime.endStream?.(root);\n  if (!queued) run();" : "observer.disconnect();"}
+}
+`
+    : ""
+}
+
 let activeLayoutPatterns = readActiveLayoutPatterns();
 let activeLayoutShouldHydrate = window.__FARM_LAYOUT_SHOULD_HYDRATE__ === true;
 
@@ -6280,6 +6480,7 @@ async function renderPage(pageData, info) {
   const container = document.getElementById('root');
   if (!container) return;
   cancelPendingPageHydration();
+  ${islandValues ? "const farmStreamGeneration = ++farmNavigationStreamGeneration;" : ""}
   const destination = window.location.pathname + window.location.search;
 
   if (pageData.interception) {
@@ -6415,8 +6616,12 @@ async function renderPage(pageData, info) {
         delete window.__FARM_REACT_ROOT__;
         ${
           isolatedHydrationEnabled
-            ? "isolatedHydrationScope = replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns, info?.refresh === true) || container;"
-            : "replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);"
+            ? islandValues
+              ? "isolatedHydrationScope = (pageData.farmDocument ? replaceNavigationBoundary(container, fragment, readLayoutIdentities(container), readLayoutIdentities(fragment), info?.refresh === true, findLayoutBoundaryByIdentity) : replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns, info?.refresh === true)) || container;"
+              : "isolatedHydrationScope = replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns, info?.refresh === true) || container;"
+            : islandValues
+              ? "if (pageData.farmDocument) replaceNavigationBoundary(container, fragment, readLayoutIdentities(container), readLayoutIdentities(fragment), false, findLayoutBoundaryByIdentity); else replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);"
+              : "replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);"
         }
       }
 
@@ -6480,6 +6685,7 @@ async function renderPage(pageData, info) {
     activeLayoutPatterns = layoutPatterns;
     activeLayoutShouldHydrate = layoutShouldHydrate;
     window.__FARM_LOADING_MODULE__ = route.loadingModulePath || null;
+    ${islandValues ? "if (pageData.farmDocument?.stream) void streamFarmDevNavigation(pageData.farmDocument.stream, container, farmStreamGeneration);" : ""}
     return true;
   };
 

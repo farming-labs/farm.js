@@ -75,7 +75,9 @@ describe("app CSS in the native tier", () => {
     expect(row!.style).toMatchObject({ display: "flex", flexDirection: "column", rowGap: 2 });
     const span = byTag(row!, "span")[0]!;
     expect(span.style).toMatchObject({ color: "#5d645f", fontSize: 14 });
+    // Its own color holds in dark mode too: body's dark text color does not override it.
     expect(byTag(tree.root, "p")[1]!.style).toMatchObject({ color: "#c0392b" });
+    expect(byTag(tree.root, "p")[1]!.dark?.color ?? "#c0392b").toBe("#c0392b");
   });
 
   it("wraps .actions, and reports what the cascade cannot express", () => {
@@ -129,6 +131,26 @@ describe("app CSS in the native tier", () => {
     expect(createFarmNativeTree(page(`<p class="wide">x</p>`), url, [css]).unsupported).toEqual([
       '<p> selector "@media (min-width: 900px) .wide"',
     ]);
+  });
+
+  it("reads the background shorthand as a build minifies it", () => {
+    // A production build writes `background: transparent` as `background:0 0`.
+    const css = `.row{background:#fff}.row.plain{background:0 0}.row.none{background:none}`;
+    const tree = createFarmNativeTree(
+      page(`<p class="row plain">a</p><p class="row none">b</p><p class="row">c</p>`),
+      url,
+      [css],
+    );
+    expect(tree.unsupported).toEqual([]);
+    expect(byTag(tree.root, "p").map((p) => p.style?.backgroundColor)).toEqual([
+      "transparent",
+      "transparent",
+      "#fff",
+    ]);
+    expect(
+      createFarmNativeTree(page(`<p class="hero">x</p>`), url, [".hero{background:url(a.png)}"])
+        .unsupported,
+    ).toEqual(["<p> background: url(a.png)"]);
   });
 
   it("leaves layered Tailwind classes to the table, and ignores classes no rule styles", () => {

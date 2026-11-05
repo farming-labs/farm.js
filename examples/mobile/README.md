@@ -43,6 +43,17 @@ screens send no cookies and no `Origin` header yet. `/settings/device` (`page.kt
 placeholder: Farm does not build platform screens yet. Native files are type-checked on their own
 (`tsconfig.native.json`), so the web `tsconfig.json` never needs `react-native`.
 
+`mobile.native.auto` is `"on"`: the routes the analyzer proves render natively (`/`, `/notes`,
+`/notes/[id]`, `/about`, `/feed`, `/navigation/step/[n]`, `/docs/[...slug]`) are `server` screens,
+which the server renders and the shell draws with native views (Android views, UIKit on iOS).
+`pnpm report` lists every route's tier. `/settings`, `/notes/new`, and
+`/navigation` use client-side state and stay web.
+
+`mobile.shells` is on: `pnpm build:mobile` renders `src/app/(styled)/loading.tsx` inside the
+`(styled)` layout as one page shell for every styled route. The app shows it while a web screen's
+document loads and keeps it while offline. `/lab/*` and `/stations/[id]` have no loading file
+under their layouts, so they get none.
+
 Verified with `pnpm dev:mobile` on an Android 15 emulator (SwiftShader software rendering, no GPU):
 
 - `/map` (`page.native.tsx`) and `/camera` (`page.android.tsx`) render as React Native, `/map`

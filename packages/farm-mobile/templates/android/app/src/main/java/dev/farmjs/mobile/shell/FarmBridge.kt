@@ -25,7 +25,8 @@ interface FarmPlugin {
 interface BridgeListener {
     fun onVisit(bridge: FarmBridge, url: Uri, replace: Boolean)
     fun onRendered(bridge: FarmBridge, token: Int, title: String, pageMs: Double)
-    fun onRouterReady(bridge: FarmBridge, title: String)
+    /** [client] is the mobile client entry the document loaded, when it loaded one. */
+    fun onRouterReady(bridge: FarmBridge, title: String, client: String?)
     fun onTitle(bridge: FarmBridge, title: String)
     fun onRenderError(bridge: FarmBridge, token: Int, url: String, message: String)
 }
@@ -111,7 +112,12 @@ class FarmBridge(
                     message.optString("title"),
                     message.optDouble("ms"),
                 )
-                "router-ready" -> listener?.onRouterReady(this, message.optString("title"))
+                "router-ready" -> listener?.onRouterReady(
+                    this,
+                    message.optString("title"),
+                    // optString turns a JSON null into "null".
+                    if (message.isNull("client")) null else message.optString("client").ifEmpty { null },
+                )
                 "title" -> listener?.onTitle(this, message.optString("title"))
                 "error" -> {
                     Log.w(TAG, "render error: ${message.optString("message")}")

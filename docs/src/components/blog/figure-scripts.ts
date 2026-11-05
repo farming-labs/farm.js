@@ -21,7 +21,9 @@ export type FigureKind =
   | "landing-markdown"
   | "landing-strata"
   | "agent-layers"
-  | "agent-authorize";
+  | "agent-authorize"
+  | "ast-native"
+  | "mobile-arch";
 export type IconKey =
   | "stripe"
   | "cloudflare"
@@ -1956,6 +1958,238 @@ const agentAuthorize: FigureSpec = {
   },
 };
 
+/* ---------- the mobile analyzer: which tier a screen gets ---------- */
+
+// Each row maps a web element to its native view, or flags one that cannot port.
+// The rows fade in as the pulse lands, so a reader watches the analyzer sort the page.
+const AST_PORTS: [string, string][] = [
+  ["div", "View"],
+  ["img", "Image"],
+  ["input", "TextInput"],
+  ["ul", "List"],
+];
+const AST_BLOCKS = ["canvas", "iframe", "window", "arbitrary CSS"];
+const astRow = (a: string, b: string | null, t: number, at: number) =>
+  t < at
+    ? ""
+    : `<span style="display:flex;justify-content:space-between;gap:0.6em;opacity:${ease(
+        prog(t, at, 0.3),
+      ).toFixed(2)}"><span>${a}</span><span style="color:${b ? "#8fb8a0" : "#9a9a9a"}">${
+        b ? `&rarr; ${b}` : "&#x2715;"
+      }</span></span>`;
+const AST = { fork: 1.15, merge: 3.0, out: 3.9 };
+
+const astNative: FigureSpec = {
+  duration: 6.1,
+  stage: { w: 1010, h: 560 },
+  label:
+    "The analyzer maps each element to a native view, flags what it cannot, and picks a tier per screen: native if it needs no JavaScript, react-native if it needs the device, web if anything blocks",
+  panels: [
+    { id: "page", x: 24, y: 234, w: 140, h: 92, title: "page.tsx" },
+    { id: "analyze", x: 212, y: 234, w: 152, h: 92, title: "Analyze" },
+    { id: "ports", x: 412, y: 80, w: 214, h: 140, title: "Maps to native" },
+    { id: "blocks", x: 412, y: 340, w: 214, h: 140, title: "Cannot port" },
+    { id: "decide", x: 672, y: 234, w: 150, h: 92, title: "Decide" },
+    { id: "native", x: 870, y: 84, w: 140, h: 88, title: "native" },
+    { id: "rn", x: 870, y: 236, w: 140, h: 88, title: "react-native" },
+    { id: "web", x: 870, y: 388, w: 140, h: 88, title: "web" },
+  ],
+  wires: {
+    pa: [
+      [164, 280],
+      [212, 280],
+    ],
+    ap: [
+      [364, 280],
+      [388, 280],
+      [388, 150],
+      [412, 150],
+    ],
+    ab: [
+      [364, 280],
+      [388, 280],
+      [388, 410],
+      [412, 410],
+    ],
+    pd: [
+      [626, 150],
+      [648, 150],
+      [648, 280],
+      [672, 280],
+    ],
+    bd: [
+      [626, 410],
+      [648, 410],
+      [648, 280],
+      [672, 280],
+    ],
+    dn: [
+      [822, 280],
+      [846, 280],
+      [846, 128],
+      [870, 128],
+    ],
+    dr: [
+      [822, 280],
+      [870, 280],
+    ],
+    dw: [
+      [822, 280],
+      [846, 280],
+      [846, 432],
+      [870, 432],
+    ],
+  },
+  frame: (t) => {
+    const arrive = AST.fork + PULSE;
+    const hot = (at: number): PanelState | undefined =>
+      t >= at + PULSE && t < at + PULSE + 0.5 ? "hot" : undefined;
+    const examining = t >= arrive && t < AST.merge ? ("hot" as PanelState) : undefined;
+    return {
+      slots: {
+        page: "your web page",
+        analyze: "Oxc &rarr; AST",
+        ports: AST_PORTS.map(([a, b], i) => astRow(a, b, t, arrive + i * 0.22)).join(""),
+        blocks: AST_BLOCKS.map((a, i) => astRow(a, null, t, arrive + i * 0.22)).join(""),
+        decide: "needs JS? blocked?",
+        native: "server-rendered, no JS",
+        rn: "runs on the device",
+        web: "a WebView",
+      },
+      wires: {
+        pa: wire(t, 0.1, [[0.35]]),
+        ap: wire(t, AST.fork - 0.3, [[AST.fork]]),
+        ab: wire(t, AST.fork - 0.3, [[AST.fork]]),
+        pd: wire(t, AST.merge - 0.3, [[AST.merge]]),
+        bd: wire(t, AST.merge - 0.3, [[AST.merge]]),
+        dn: wire(t, AST.out - 0.2, [[AST.out]]),
+        dr: wire(t, AST.out - 0.2, [[AST.out + 0.12]]),
+        dw: wire(t, AST.out - 0.2, [[AST.out + 0.24]]),
+      },
+      states: {
+        page: hot(0),
+        analyze: hot(0.35),
+        ports: examining,
+        blocks: examining,
+        decide: hot(AST.merge),
+        native: hot(AST.out),
+        rn: hot(AST.out + 0.12),
+        web: hot(AST.out + 0.24),
+      },
+    };
+  },
+};
+
+// A runtime companion to ast-native: how a screen actually runs on the device. The navigator picks
+// one of three screen kinds by route; a web screen is a WebView that reaches the one backend over
+// the origin-scoped bridge; the device-capability channel is drawn but ships nothing yet.
+const MA = { tap: 0.3, fork: 1.2, web: 2.4, server: 3.2, ret: 3.9, plug: 4.7 };
+/** A body line that fades in once t passes `at`; each is its own block so lines stack. */
+const maSub = (s: string, t: number, at: number, color = "#c6c6c6") =>
+  t < at
+    ? ""
+    : `<span style="display:block;opacity:${ease(prog(t, at, 0.3)).toFixed(
+        2,
+      )};color:${color}">${s}</span>`;
+
+const mobileArch: FigureSpec = {
+  duration: 7,
+  stage: { w: 1020, h: 600 },
+  label:
+    "A screen on the device: the native navigator picks one of three screen kinds by route; a web screen is a WebView that talks to your one backend over the origin-scoped bridge, and the device-capability channel ships no plugins yet",
+  panels: [
+    { id: "tap", x: 24, y: 252, w: 150, h: 96, title: "A tap" },
+    { id: "nav", x: 214, y: 252, w: 176, h: 96, title: "Navigator" },
+    { id: "web", x: 440, y: 60, w: 188, h: 96, title: "Web screen" },
+    { id: "native", x: 440, y: 252, w: 188, h: 96, title: "Native screen" },
+    { id: "plat", x: 440, y: 444, w: 188, h: 96, title: "page.kt · page.swift" },
+    { id: "bridge", x: 676, y: 60, w: 180, h: 96, title: "__farmBridge" },
+    { id: "server", x: 880, y: 60, w: 140, h: 96, title: "mobile.server" },
+    { id: "plug", x: 676, y: 252, w: 180, h: 96, title: "native.<name>" },
+  ],
+  wires: {
+    tn: [
+      [174, 300],
+      [214, 300],
+    ],
+    nw: [
+      [390, 300],
+      [415, 300],
+      [415, 108],
+      [440, 108],
+    ],
+    nn: [
+      [390, 300],
+      [440, 300],
+    ],
+    np: [
+      [390, 300],
+      [415, 300],
+      [415, 492],
+      [440, 492],
+    ],
+    wb: [
+      [628, 108],
+      [676, 108],
+    ],
+    bs: [
+      [856, 108],
+      [880, 108],
+    ],
+    bp: [
+      [766, 156],
+      [766, 252],
+    ],
+  },
+  frame: (t) => {
+    const hot = (a: number, b: number): PanelState | undefined =>
+      t >= a && t < b ? "hot" : undefined;
+    const dim = (at: number): PanelState | undefined => (t >= at ? "dim" : undefined);
+    return {
+      slots: {
+        tap: maSub("Link · navigateTo", t, 0),
+        nav:
+          maSub("routes &rarr; one screen", t, MA.tap) +
+          maSub("farm-routes.json", t, MA.tap + 0.15, "#7a7a7a"),
+        web: maSub("a WebView", t, MA.fork) + maSub("ships today", t, MA.fork + 0.2, "#8fb8a0"),
+        native:
+          maSub("React Native", t, MA.fork + 0.2) +
+          maSub("Android dev only", t, MA.fork + 0.35, "#c9a77a"),
+        plat:
+          maSub("fully native", t, MA.fork + 0.4) +
+          maSub("placeholder &mdash; not built", t, MA.fork + 0.55, "#9a9a9a"),
+        bridge:
+          maSub("origin-scoped", t, MA.web) + maSub("nav · call", t, MA.web + 0.15, "#7a7a7a"),
+        server:
+          maSub("SSR · auth · data", t, MA.server) +
+          maSub("your one backend", t, MA.server + 0.15, "#7a7a7a"),
+        plug:
+          maSub("device plugins", t, MA.plug) +
+          maSub("none ship yet &#x2715;", t, MA.plug + 0.15, "#9a9a9a"),
+      },
+      wires: {
+        tn: wire(t, 0.05, [[MA.tap]]),
+        nw: wire(t, MA.fork - 0.3, [[MA.fork]]),
+        nn: wire(t, MA.fork - 0.3, [[MA.fork + 0.12]]),
+        np: wire(t, MA.fork - 0.3, [[MA.fork + 0.24]]),
+        wb: wire(t, MA.web - 0.3, [[MA.web]]),
+        bs: wire(t, MA.server - 0.3, [[MA.server], [MA.ret, false]]),
+        bp: wire(t, MA.plug - 0.3, [[MA.plug]], true),
+      },
+      states: {
+        tap: hot(0, MA.tap + PULSE),
+        nav: hot(MA.tap + PULSE, MA.fork + PULSE),
+        web: hot(MA.web - 0.1, MA.ret + PULSE),
+        native: dim(MA.fork + 0.2 + PULSE),
+        plat: dim(MA.fork + 0.4 + PULSE),
+        bridge: hot(MA.web + PULSE, MA.server + PULSE),
+        server: hot(MA.server, MA.ret + PULSE),
+        plug: dim(MA.plug + PULSE),
+      },
+    };
+  },
+};
+
 export const FIGURES: Record<FigureKind, FigureSpec> = {
   integration,
   agents,
@@ -1976,6 +2210,8 @@ export const FIGURES: Record<FigureKind, FigureSpec> = {
   "landing-strata": landingStrata,
   "agent-layers": agentLayers,
   "agent-authorize": agentAuthorize,
+  "ast-native": astNative,
+  "mobile-arch": mobileArch,
 };
 
 // The two callers stack, so a phone reads the refused run above the one that completes.

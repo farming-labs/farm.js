@@ -553,10 +553,18 @@ export function resolveFarmNativeDeclaration(
     case "border-bottom":
     case "border-left":
       return border(value, property[7]!.toUpperCase() + property.slice(8));
-    case "background":
     case "background-color": {
       const parsed = cssColor(value);
-      return parsed ? { backgroundColor: parsed } : value === "none" ? null : undefined;
+      return parsed ? { backgroundColor: parsed } : undefined;
+    }
+    case "background": {
+      const parsed = cssColor(value);
+      if (parsed) return { backgroundColor: parsed };
+      // The shorthand resets the color. `none` and a zero position, which minifiers write for
+      // `transparent`, set nothing else a native view draws.
+      return value.split(/\s+/).every((part) => /^(?:none|0(?:%|px)?)$/.test(part))
+        ? { backgroundColor: "transparent" }
+        : undefined;
     }
     case "display":
       if (value === "flex" || value === "inline-flex") return { display: "flex" };

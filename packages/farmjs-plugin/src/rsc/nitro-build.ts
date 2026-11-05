@@ -24,6 +24,7 @@ import {
   FARM_NODE_ENV_MODULE_SOURCE,
 } from "@farm.js/core/internal/production-node-env";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
+import { finalizeFarmRscMobileClient, patchFarmRscMobileShellClient } from "./mobile-client.js";
 
 const MANIFEST_FILENAME = "__vite_rsc_assets_manifest.js";
 const MIN_MANIFEST_BYTES = 100; // real manifest is ~500+, stub is 64
@@ -420,6 +421,7 @@ async function traceRscBundleDependencies(
  * server output render the same document. Only placeholders are replaced, so it is idempotent.
  */
 function patchRscServerBundles(
+  root: string,
   rscDir: string,
   ssrDir: string,
   publicDir: string,
@@ -468,15 +470,25 @@ function patchRscServerBundles(
       // ignore
     }
   }
+  const assetsDirName = assetsDir ?? "assets";
+  const assetsRoot = path.join(publicDir, assetsDirName);
+  let clientCssHref = "";
+  if (existsSync(assetsRoot)) {
+    const files = readdirSync(assetsRoot);
+    const cssFile = files.find((f) => f.endsWith(".css"));
+    if (cssFile) clientCssHref = `/${assetsDirName}/${cssFile}`;
+  }
+  // An app with a `mobile` block: the server learns the mobile entry its shell documents load.
+  // Only a build with the mobile entry has the placeholder, so other apps are left as they are.
+  patchFarmRscMobileShellClient(rscDir, () =>
+    finalizeFarmRscMobileClient({
+      root,
+      clientDir: publicDir,
+      webEntry: clientEntryHref,
+      stylesheet: clientCssHref,
+    }),
+  );
   if (existsSync(ssrIndexPath)) {
-    const assetsDirName = assetsDir ?? "assets";
-    const assetsRoot = path.join(publicDir, assetsDirName);
-    let clientCssHref = "";
-    if (existsSync(assetsRoot)) {
-      const files = readdirSync(assetsRoot);
-      const cssFile = files.find((f) => f.endsWith(".css"));
-      if (cssFile) clientCssHref = `/${assetsDirName}/${cssFile}`;
-    }
     try {
       let ssrCode = readFileSync(ssrIndexPath, "utf-8");
       // Only the assignment: the bundle also compares against the placeholder, and a second
@@ -672,6 +684,7 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
 
   if (ssrPath) {
     patchRscServerBundles(
+      path.resolve(root),
       path.dirname(path.resolve(rendererPath)),
       path.dirname(path.resolve(ssrPath)),
       publicDir,

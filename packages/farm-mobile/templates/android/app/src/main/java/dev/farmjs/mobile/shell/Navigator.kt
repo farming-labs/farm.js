@@ -34,6 +34,8 @@ class Navigator(
     private val modalLayer: FrameLayout,
     private val pool: WebViewPool?,
     private val newPage: () -> Page,
+    /** Page shells for cold document loads; null without mobile.shells. */
+    private val shells: PageShells? = null,
 ) {
     private val stackCount = config.tabs.size.coerceAtLeast(1)
     private val stacks = List(stackCount) { ArrayList<Screen>() }
@@ -54,6 +56,32 @@ class Navigator(
     private var animating = false
     private var selectingTab = false
     private val main = Handler(Looper.getMainLooper())
+
+    /** Paint the shell's chrome, tab bar, and every screen in the current theme. */
+    fun applyTheme() {
+        val background = ContextCompat.getColor(context, R.color.farm_background)
+        containers.forEach { it.setBackgroundColor(background) }
+        applyTabBarTheme()
+        stacks.forEach { stack -> stack.forEach(Screen::applyTheme) }
+        modal?.applyTheme()
+    }
+
+    /** The tab bar's colors, from the shell palette rather than the theme it was created with. */
+    fun applyTabBarTheme() {
+        val surface = ContextCompat.getColor(context, R.color.farm_surface)
+        val accent = ContextCompat.getColor(context, R.color.farm_accent)
+        val text = ContextCompat.getColor(context, R.color.farm_text)
+        val tint = android.content.res.ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+            intArrayOf(accent, (text and 0x00FFFFFF) or 0xB3000000.toInt()),
+        )
+        bottomNav.setBackgroundColor(surface)
+        bottomNav.itemIconTintList = tint
+        bottomNav.itemTextColor = tint
+        bottomNav.itemActiveIndicatorColor = android.content.res.ColorStateList.valueOf(
+            ContextCompat.getColor(context, R.color.farm_background),
+        )
+    }
 
     /** Runs once, when the first tab's page is interactive (used to start warming the pool). */
     var onFirstReady: (() -> Unit)? = null
@@ -274,7 +302,7 @@ class Navigator(
 
         override fun fallback(reason: String) = onMain {
             Log.w(TAG, "native screen ${it.nativeModule} failed, showing the web screen for ${url.path}: $reason")
-            it.showWeb(newPage(), url.toString())
+            it.showWeb(newPage(), url.toString(), shells?.html(config.match(url)))
         }
 
         override fun setTitle(title: String) = onMain { it.toolbar.title = title }
@@ -287,7 +315,8 @@ class Navigator(
     /**
      * Fill [screen] with [url] and call [ready] when it should animate in:
      * a warm page waits for its in-place render (capped), a cold page
-     * animates right away and shows a progress bar while the document loads,
+     * animates right away and shows its route's page shell, or a progress
+     * bar, while the document loads,
      * a native screen is ready at once.
      */
     private fun show(screen: Screen, url: String, label: String, onContent: () -> Unit = {}, ready: () -> Unit) {
@@ -317,10 +346,12 @@ class Navigator(
             screen.render(url)
             main.postDelayed({ fire() }, WARM_WAIT_MS)
         } else {
+            // A warm render never shows a shell: the running page is already there.
+            val shell = shells?.html(config.match(Uri.parse(url)))
             screen.onPainted = {
-                Log.i(TAG, "$label warm=false visit->firstPaint=${SystemClock.uptimeMillis() - started}ms")
+                Log.i(TAG, "$label warm=false shell=${shell != null} visit->firstPaint=${SystemClock.uptimeMillis() - started}ms")
             }
-            screen.load(url)
+            screen.load(url, shell)
             fire()
         }
     }

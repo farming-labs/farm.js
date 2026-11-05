@@ -19,6 +19,7 @@ export {
   resolveTabIcon,
   MAIN_ACTIVITY,
   NATIVE_BUNDLE_ASSET,
+  PAGE_SHELLS_DIR,
   SHELL_NAMESPACE,
 } from "./templates.js";
 

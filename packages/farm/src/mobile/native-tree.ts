@@ -250,11 +250,15 @@ class Converter {
     style: FarmNativeStyle | undefined,
     dark: FarmNativeStyle | undefined,
   ): FarmNativeNode {
+    // Only what the dark theme changes.
+    const changed =
+      dark &&
+      Object.fromEntries(Object.entries(dark).filter(([key, value]) => style?.[key] !== value));
     return {
       type,
       tag: element.tag,
       ...(style && Object.keys(style).length > 0 ? { style } : {}),
-      ...(dark && Object.keys(dark).length > 0 ? { dark } : {}),
+      ...(changed && Object.keys(changed).length > 0 ? { dark: changed } : {}),
     };
   }
 
@@ -306,7 +310,11 @@ class Converter {
     const trimmed = collapse(runs);
     if (trimmed.length === 0) return undefined;
     const style = settleLineHeight({ ...inherited.style, ...box?.style });
-    const dark = { ...inherited.dark, ...box?.dark };
+    const dark = {
+      ...inherited.dark,
+      ...(box ? textOnly(box.style) : {}),
+      ...box?.dark,
+    };
     const node = this.node("Text", element, style, dark);
     node.children = trimmed;
     return node;
@@ -377,7 +385,9 @@ class Converter {
     if (own.style.display === "none") return undefined;
     const passed: Inherited = {
       style: { ...inherited.style, ...textOnly(own.style) },
-      dark: { ...inherited.dark, ...textOnly(own.dark) },
+      // An element's own text style holds in both themes unless it sets a dark one: it overrides
+      // what the dark theme passes down, as CSS does.
+      dark: { ...inherited.dark, ...textOnly(own.style), ...textOnly(own.dark) },
     };
     // Native views do not inherit color: a `border` takes the text color it would on the web.
     const current = (style: FarmNativeStyle | undefined, color: unknown) =>
@@ -502,6 +512,25 @@ function collapse(runs: Array<FarmNativeNode | string>): Array<FarmNativeNode | 
   return out;
 }
 
+/** The text of the page's first `<h1>`: the screen's title when the page has no `<title>`. */
+function firstHeading(node: FarmNativeNode): string | undefined {
+  if (node.tag === "h1") {
+    const text = (node.children ?? [])
+      .map(function flatten(child): string {
+        return typeof child === "string" ? child : (child.children ?? []).map(flatten).join("");
+      })
+      .join("")
+      .trim();
+    return text || undefined;
+  }
+  for (const child of node.children ?? []) {
+    if (typeof child === "string") continue;
+    const found = firstHeading(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 const parsedSheets = new Map<string, FarmNativeStylesheet>();
 
 /** Parse once per stylesheet text: a build's CSS is the same on every request. */
@@ -560,7 +589,11 @@ export function createFarmNativeTree(
   if (children.length > 0) root.children = children;
   return {
     version: 1,
-    ...(title ? { title: decode(title.trim()) } : {}),
+    ...(title?.trim()
+      ? { title: decode(title.trim()) }
+      : firstHeading(root)
+        ? { title: firstHeading(root)! }
+        : {}),
     root,
     unsupported: converter.unsupported,
   };

@@ -93,6 +93,7 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "../document-layout-client";
+import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "../client/navigation-stream-client";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
@@ -1597,23 +1598,12 @@ export async function buildUniversal(
 }
 
 /**
- * Whether this build adds the mobile client (RFC 0004, 7.2): the app has a `mobile` block, and
- * its pages use Farm's own client router. Server components apps keep the web client in a shell
- * for now (their routers do not hand navigations to it), and a desktop build is never loaded by
- * a mobile shell.
+ * Whether this build adds the mobile client (RFC 0004, 7.2): the app has a `mobile` block. Islands
+ * mode builds here with Farm's own client router; the RSC pipeline (`@farm.js/plugin/rsc`) adds
+ * its own mobile entry. A desktop build is never loaded by a mobile shell.
  */
-function shouldBuildFarmMobileClient(
-  config: ResolvedFarmConfig,
-  options: { quiet?: boolean } = {},
-): boolean {
-  if (!config.mobileClient || config.desktop) return false;
-  const mode = resolveFarmServerComponentsMode(config.experimental?.serverComponents);
-  if (mode === undefined) return true;
-  if (!options.quiet)
-    logger.info(
-      `📱 No mobile client for experimental.serverComponents (${mode}) yet; a mobile shell loads the web client.`,
-    );
-  return false;
+function shouldBuildFarmMobileClient(config: ResolvedFarmConfig): boolean {
+  return Boolean(config.mobileClient) && !config.desktop;
 }
 
 /**
@@ -2473,52 +2463,7 @@ async function fetchFarmNavigationDocument(url, headers, recover = true, signal)
   return response;
 }
 
-${
-  streamNavigations
-    ? `// Reads a streamed navigation (F-Stream) up to the end of React's shell. \`next\` then resolves
-// with each later flush as it ends, and null at the end; a document without a marker is all shell.
-// The marker carries the random token the server sent in the F-Flush header, so page content
-// cannot forge a boundary; a response without a valid token is all shell.
-async function readFarmNavigationStream(body, flushToken) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  const marker = typeof flushToken === "string" && /^[0-9a-f]{32}$/.test(flushToken)
-    ? "<!--farm-flush:" + flushToken + "-->"
-    : "";
-  let text = "";
-  let done = false;
-  const next = async function() {
-    for (;;) {
-      const at = marker ? text.indexOf(marker) : -1;
-      if (at !== -1) {
-        const flush = text.slice(0, at);
-        text = text.slice(at + marker.length);
-        return flush;
-      }
-      if (done) {
-        const flush = text;
-        text = "";
-        return flush ? flush : null;
-      }
-      const result = await reader.read();
-      if (result.done) {
-        done = true;
-        text += decoder.decode();
-      } else {
-        text += decoder.decode(result.value, { stream: true });
-      }
-    }
-  };
-  const shell = await next();
-  if (done && !text) return { shell: shell || "" };
-  return {
-    shell: shell,
-    next: next,
-    cancel: function() { reader.cancel().catch(function() {}); },
-  };
-}`
-    : ""
-}
+${streamNavigations ? FARM_NAVIGATION_STREAM_READER_SOURCE : ""}
 
 function clearFarmPrefetchCacheOnDeploymentMismatch(router, error) {
   if (error?.name === "FarmDeploymentMismatchError") {
@@ -5309,6 +5254,14 @@ async function buildSSRInMemory(
       modulePath: entry.modulePath,
     }),
   );
+  // Production pages render without loading files; only a server that renders page shells
+  // (farm build --mobile with mobile.shells) bundles them.
+  const mobileShellLoadingRoutes: UniversalBoundaryRoute[] = config.mobileShells
+    ? Array.from(routeManager.getLoadings().values(), (entry) => ({
+        pattern: entry.pattern,
+        modulePath: entry.modulePath,
+      }))
+    : [];
   const i18nCatalogs = config.i18n.enabled
     ? (await readFarmI18nCatalogs(config.i18n)).catalogs
     : {};
@@ -5465,6 +5418,7 @@ async function buildSSRInMemory(
     i18nCatalogs,
     isolatedClientBoundaryModules,
     hydrationPlanCache,
+    mobileShellLoadingRoutes,
   );
 
   // Find a temporary file path for the virtual entry
@@ -6246,11 +6200,14 @@ function generateVirtualEntryCode(
   i18nCatalogs: FarmI18nCatalogs,
   isolatedClientBoundaryModules: ReadonlySet<string>,
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
+  mobileShellLoadingRoutes: UniversalBoundaryRoute[] = [],
 ): string {
   // Islands mode runs `"use server"` actions posted to a page (RFC 0003).
   const farmIslandsMode =
     resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
-  const farmMobileClient = shouldBuildFarmMobileClient(config, { quiet: true });
+  const farmMobileClient = shouldBuildFarmMobileClient(config);
+  // farm build --mobile with mobile.shells: this server renders page shells for its token.
+  const farmMobileShells = farmMobileClient && config.mobileShells ? config.mobileShells : null;
   const hasCompressionRuntime =
     config.compress && resolveFarmInstrumentationRuntime(preset) === "nodejs";
   // agent.crawlers serves /robots.txt unless a root robots.ts owns it.
@@ -6647,6 +6604,28 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   }`);
   });
 
+  // Loading files, for page shells only (see mobileShellLoadingRoutes).
+  const loadingImports: string[] = [];
+  const loadingRegistrations: string[] = [];
+  if (farmMobileShells) {
+    mobileShellLoadingRoutes.forEach((loadingRoute, index) => {
+      const varName = `loadingRoute${index}`;
+      loadingImports.push(
+        `import * as ${varName} from ${toVirtualEntryImportSpecifier(loadingRoute.modulePath)};`,
+      );
+      const groupScope = getRouteGroupScope(loadingRoute.pattern);
+      loadingRegistrations.push(`
+  {
+    pattern: ${JSON.stringify(stripRouteGroups(loadingRoute.pattern))},${
+      groupScope
+        ? `\n    groupScope: ${JSON.stringify(groupScope)},\n    directoryDepth: ${getRouteDirectoryDepth(loadingRoute.pattern)},`
+        : ""
+    }
+    module: ${varName},
+  }`);
+    });
+  }
+
   const metadataImageImports: string[] = [];
   const metadataImageRegistrations: string[] = [];
 
@@ -6816,6 +6795,48 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
     farmMobileClient
       ? `\nimport { _applyFarmMobileShellClient } from "@farm.js/core/internal/production-runtime";\n// The mobile client documents load when a mobile shell asks for them (RFC 0004, 7.2), filled in\n// once the client build has finished (see buildNitroUniversal). A shell's document stays out of\n// shared caches, which the adapter learns as it does for a guarded response.\nconst farmMobileShellClient = JSON.parse("${FARM_MOBILE_SHELL_CLIENT_PLACEHOLDER}");\nfunction applyFarmMobileShellResponse(request, response, context) {\n  return _applyFarmMobileShellClient(request, response, farmMobileShellClient, () =>\n    context?.onGuardedResponse?.()\n  );\n}`
       : `\n// No mobile block: no mobile client, and documents ignore X-Farm-Shell.\nfunction applyFarmMobileShellResponse(request, response) {\n  return response;\n}`
+  }${
+    farmMobileShells
+      ? `
+import {
+  _checkFarmMobileShellRoute,
+  _isFarmMobileShellRenderRequest,
+} from "@farm.js/core/internal/production-runtime";
+// farm build --mobile with mobile.shells (RFC 0004, 7.2): this server renders a page shell, the
+// route's layouts around its loading file, for requests that carry this build's token. A web
+// build has no token and none of this.
+const farmMobileShellToken = ${JSON.stringify(farmMobileShells.token)};
+const loadingRoutes = [${loadingRegistrations.join(",")}
+];
+
+/**
+ * A request for a page shell: the loading component it renders in place of the page, or a
+ * Response saying why the route has none. Null for every other request.
+ */
+function resolveFarmMobileShellRender(request, route, routePathname) {
+  if (!_isFarmMobileShellRenderRequest(request, farmMobileShellToken)) return null;
+  const loading = getMatchingErrorBoundary(routePathname, loadingRoutes);
+  const reason = _checkFarmMobileShellRoute({
+    requested: request.headers.get("x-farm-shell-route"),
+    route: route.pattern,
+    layouts: getApplicableLayouts(routePathname, route.directory || route.pattern).map(
+      (layout) => layout.pattern,
+    ),
+    loading: loading && loading.route.module.default ? loading.route.pattern : null,
+  });
+  if (reason) {
+    return farmOwnedResponse(reason, {
+      status: 404,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "private, no-store",
+        "X-Farm-Shell-Render": "none",
+      },
+    });
+  }
+  return loading.route.module.default;
+}`
+      : ""
   }${
     farmIslandsMode
       ? `\nimport { getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
@@ -7049,7 +7070,7 @@ ${apiImports.join("\n")}
 ${pageImports.join("\n")}
 ${layoutImports.join("\n")}
 ${routeSlotImports.join("\n")}
-${errorImports.join("\n")}
+${errorImports.join("\n")}${loadingImports.length > 0 ? `\n${loadingImports.join("\n")}` : ""}
 ${metadataImageImports.join("\n")}
 ${applicationMetadataImports.join("\n")}
 ${middlewareImports.join("\n")}
@@ -8443,12 +8464,13 @@ function withFarmDocsRequestCache(response, request, farmLocaleResolution, middl
 
 ${generateRuntimePathMatcherSource()}
 
-function getMatchingErrorBoundary(pathname) {
+// The nearest boundary file for a page path. Page shells pass their loading files.
+function getMatchingErrorBoundary(pathname, boundaries = errorRoutes) {
   const pathSegments = splitRuntimePath(pathname);
   let bestMatch = null;
   let directory;
 
-  for (const errorRoute of errorRoutes) {
+  for (const errorRoute of boundaries) {
     const patternDepth = splitRuntimePath(errorRoute.pattern).length;
     if (patternDepth > pathSegments.length) continue;
     const candidatePath = patternDepth === 0
@@ -10115,8 +10137,16 @@ ${
   }`
       : ""
   }
-  if (matchedRoute) {
-    const trailingSlashLocation = resolveFarmTrailingSlashRedirect(
+  if (matchedRoute) {${
+    farmMobileShells
+      ? `
+    // A page shell request renders the route's loading file in place of its page, with no params,
+    // data, slots, or page metadata; a route without a shell answers why.
+    const farmShellLoading = resolveFarmMobileShellRender(request, matchedRoute.route, routePathname);
+    if (farmShellLoading instanceof Response) return farmShellLoading;`
+      : ""
+  }
+    const trailingSlashLocation = ${farmMobileShells ? "farmShellLoading ? null : " : ""}resolveFarmTrailingSlashRedirect(
       url,
       ${JSON.stringify(config.trailingSlash)}
     );
@@ -10129,7 +10159,23 @@ ${
         middlewareHeaders
       );
     }
-    const { route, params } = matchedRoute;
+    const { route, params } = ${
+      farmMobileShells
+        ? `farmShellLoading
+      ? {
+          route: {
+            ...matchedRoute.route,
+            module: { default: farmShellLoading, viewport: matchedRoute.route.module.viewport },
+            shouldHydrate: false,
+            serverTree: false,
+            rendering: undefined,
+            markdownSource: undefined,
+          },
+          params: {},
+        }
+      : matchedRoute`
+        : "matchedRoute"
+    };
     emitFarmEvent({ type: "route.matched", pathname, route: route.pattern, params });
     
     try {
@@ -10152,7 +10198,11 @@ ${
       const farmKeptLayouts = farmKeptLayoutCount > 1 ? farmKeptLayoutCount : 0;`
           : `const farmKeptLayouts = 0;`
       }
-      const pprConfig = resolvePPRConfig(route);
+      ${
+        farmMobileShells
+          ? "const pprConfig = farmShellLoading ? { enabled: false } : resolvePPRConfig(route);"
+          : "const pprConfig = resolvePPRConfig(route);"
+      }
       const pprBypassReason = pprConfig.enabled
         ? getPPRShellBypassReason(request, middlewareData, middlewareContext)
         : undefined;
@@ -10228,7 +10278,7 @@ ${
       )
         ? (hydrationStrategies[0] || "load")
         : "load";
-      const selectedRouteSlots = matchRouteSlots(
+      const selectedRouteSlots = ${farmMobileShells ? "farmShellLoading ? [] : " : ""}matchRouteSlots(
         routePathname,
         request.headers.get("x-farm-intercept-from"),
       );
@@ -10553,9 +10603,12 @@ ${
                   {
                     "data-farm-layout-boundary": "true",
                     "data-farm-layout-pattern": layout.pattern,
-                    "data-farm-layout-key": farmLayoutKeyOf
-                      ? farmLayoutKeyOf(layout.pattern, params)
-                      : undefined,
+                    // A layout chain that hydrates is drawn by React in the browser
+                    // (document-layout-client.ts), without a key; it renders whole anyway.
+                    "data-farm-layout-key":
+                      farmLayoutKeyOf && !shouldHydrateLayout
+                        ? farmLayoutKeyOf(layout.pattern, params)
+                        : undefined,
                     style: { display: "contents" },
                   },
                   wrappedElement,
@@ -11888,7 +11941,7 @@ async function buildNitroUniversal(
   let nativeStylesheets: Record<string, string> | undefined;
   const encodedDocsModulePreloads = encodeFarmDocsModulePreloads(docsModulePreloads);
   const encodedClientModulePreloads = encodeFarmClientModulePreloads(clientModulePreloads);
-  const encodedMobileShellClient = shouldBuildFarmMobileClient(config, { quiet: true })
+  const encodedMobileShellClient = shouldBuildFarmMobileClient(config)
     ? encodeFarmMobileShellClient(
         await finalizeFarmMobileClient({
           buildDir: path.join(root, distDir),
@@ -12239,7 +12292,7 @@ function toFarmNodeResponse(request, response) {
     ssrOutputDir,
     ssrEntryFile,
   );
-  const configuredNitroRouteRules = shouldBuildFarmMobileClient(config, { quiet: true })
+  const configuredNitroRouteRules = shouldBuildFarmMobileClient(config)
     ? varyFarmNitroCacheRulesByShell(routeRulesToNitroRouteRules(config.routeRules))
     : routeRulesToNitroRouteRules(config.routeRules);
   const prerenderNitroRouteRules = Object.fromEntries(

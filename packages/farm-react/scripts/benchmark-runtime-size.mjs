@@ -1,15 +1,16 @@
-import { brotliCompressSync, gzipSync } from "node:zlib";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import { createFarmRendererPlugin } from "../dist/vite.mjs";
 import { assertRuntimeSizeBudgets } from "./runtime-size-budget.mjs";
+import { measureJavaScriptOutput } from "./javascript-output-size.mjs";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtureRoot = join(packageRoot, "fixtures/runtime-size");
 const resultFile = join(packageRoot, "RUNTIME_SIZE_RESULTS.json");
 const checkOnly = process.argv.includes("--check");
+const chunkAccounting = [];
 
 async function bundle(entry, compiler) {
   const result = await build({
@@ -34,22 +35,14 @@ async function bundle(entry, compiler) {
       },
     },
   });
-  const outputs = Array.isArray(result) ? result : [result];
-  const code = outputs
-    .flatMap((output) => output.output)
-    .filter((output) => output.type === "chunk")
-    .map((output) => output.code)
-    .join("\n");
-  const bytes = Buffer.from(code);
-  if (compiler && code.includes("@farm.js/react/compiler-hmr-registry")) {
+  const measured = measureJavaScriptOutput(result);
+  if (compiler && measured.code.includes("@farm.js/react/compiler-hmr-registry")) {
     throw new Error(`${entry} retained the development refresh registry in production.`);
   }
-  return {
-    code,
-    raw: bytes.length,
-    gzip: gzipSync(bytes, { level: 9 }).length,
-    brotli: brotliCompressSync(bytes).length,
-  };
+  if (measured.chunkAccounting.files.length > 1) {
+    chunkAccounting.push({ entry, compiler, ...measured.chunkAccounting });
+  }
+  return measured;
 }
 
 const [
@@ -729,6 +722,13 @@ const results = {
     },
   },
 };
+
+// Single-chunk reports retain their existing shape and exact byte measurements.
+if (chunkAccounting.length > 0) {
+  results.chunkAccounting = chunkAccounting.sort(
+    (a, b) => a.entry.localeCompare(b.entry) || Number(a.compiler) - Number(b.compiler),
+  );
+}
 
 if (checkOnly) {
   const reference = JSON.parse(await readFile(resultFile, "utf8"));

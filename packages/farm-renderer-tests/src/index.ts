@@ -32,6 +32,17 @@ export interface RendererServerFixture {
     element: unknown,
   ): { html: string; head: string } | Promise<{ html: string; head: string }>;
   generateHydrationScript?: () => string;
+  renderToPipeableStream?(
+    element: unknown,
+    callbacks: {
+      onShellReady(): void;
+      onShellError(error: unknown): void;
+      onError(error: unknown): void;
+    },
+  ): { pipe(destination: NodeJS.WritableStream): void };
+  renderToReadableStream?(
+    element: unknown,
+  ): ReadableStream<Uint8Array> | Promise<ReadableStream<Uint8Array>>;
 }
 
 export interface RendererRootFixture {
@@ -240,6 +251,62 @@ export function defineRendererServerConformance(runtime: RendererServerFixture):
       // `0` is falsy but not ignored by React; it must still render as text.
       const zero = await runtime.renderToString(runtime.createElement("div", null, 0));
       expect(zero).toContain("0");
+    });
+
+    // Farm answers a shell error with the route's error.tsx and a 500 (or with
+    // redirect()/notFound()), which it can only do before the shell is sent.
+    const Throwing = () => {
+      throw new Error(`${runtime.name} shell failed`);
+    };
+    const throwingShell = () =>
+      runtime.createElement(
+        "main",
+        null,
+        runtime.createElement(runtime.markFunctionComponent?.(Throwing) ?? Throwing, null),
+      );
+
+    it("reports a component that throws in the shell as a shell error", async () => {
+      const renderToPipeableStream = runtime.renderToPipeableStream;
+      if (!renderToPipeableStream) return;
+
+      // Farm calls the renderer where a synchronous throw rejects the render
+      // too, so either form reaches the error page.
+      const outcome = await new Promise<string>((resolve) => {
+        const shellError = (error: unknown) => resolve(`shell error: ${(error as Error).message}`);
+        try {
+          renderToPipeableStream(throwingShell(), {
+            onShellReady: () => resolve("shell ready"),
+            onShellError: shellError,
+            onError() {},
+          });
+        } catch (error) {
+          shellError(error);
+        }
+      });
+
+      expect(outcome).toBe(`shell error: ${runtime.name} shell failed`);
+    });
+
+    it("errors the readable stream when a component throws in the shell", async () => {
+      const renderToReadableStream = runtime.renderToReadableStream;
+      if (!renderToReadableStream) return;
+
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", onUnhandled);
+      try {
+        await expect(
+          Promise.resolve()
+            .then(() => renderToReadableStream(throwingShell()))
+            .then((stream) => new Response(stream).text()),
+        ).rejects.toThrow(`${runtime.name} shell failed`);
+        // Unhandled rejections are reported after a macrotask turn.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+      }
+
+      expect(unhandled).toEqual([]);
     });
   });
 }

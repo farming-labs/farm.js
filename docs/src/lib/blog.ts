@@ -87,9 +87,28 @@ export const agentNativeSections = [
   ["try-it-on-farm-js", "Try it"],
 ] as const satisfies BlogSections;
 
-/** Every post, newest first. The index features the first and lists the rest. */
+export const nativePost: BlogPost = {
+  href: "/blog/web-to-native",
+  title: "Your web app, native",
+  description:
+    "Farm's analyzer reads each page and picks a tier: a native screen with no JavaScript, a React Native screen, or a web screen.",
+  ...AUTHOR,
+  date: "Nov 2026",
+  dateTime: "2026-11-04",
+  category: "Engineering",
+};
+
+export const nativeSections = [
+  ["the-three-tiers", "The three tiers"],
+  ["how-the-analyzer-decides", "How the analyzer decides"],
+  ["on-the-device", "On the device"],
+  ["try-it", "Try it"],
+] as const satisfies BlogSections;
+
+/** Every post. The index features the first and lists the rest. */
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
   { post: agentNativePost, sections: agentNativeSections },
+  { post: nativePost, sections: nativeSections },
   { post: launchPost, sections: launchSections },
 ];
 

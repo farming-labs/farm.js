@@ -2179,8 +2179,8 @@ importers:
   packages/farm:
     dependencies:
       '@farm.js/islx':
-        specifier: 0.0.6
-        version: 0.0.6(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
+        specifier: 0.0.7
+        version: 0.0.7(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
       '@farming-labs/orm':
         specifier: 0.0.66
         version: 0.0.66
@@ -2384,6 +2384,9 @@ importers:
         specifier: 12.8.0
         version: 12.8.0
     devDependencies:
+      '@farm.js/native':
+        specifier: workspace:*
+        version: link:../farm-native
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
@@ -6524,8 +6527,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@farm.js/islx@0.0.6(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
-    resolution: {integrity: sha512-4LC/+4PP1u3UgJGQsaQB2s5wOrZotPkK5iH6qw7Cqzj3AWCtvT0N+uMyfbcYqII/qfg2/dMVQsry0J/H9qfRww==}
+  /@farm.js/islx@0.0.7(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
+    resolution: {integrity: sha512-GgraZ+RT277cB5s4o8/ZdfbLlpbDXCZm+V6l10gQLtGCkKMYczATj1BOcWF9qRgOg1TIsvVpORN2NobdV/nHZw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@tanstack/react-router': '>=1.170'

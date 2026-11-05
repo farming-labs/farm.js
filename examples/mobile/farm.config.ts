@@ -20,12 +20,17 @@ export default defineConfig({
       { path: "/notes", title: "Notes", icon: "note.text" },
       { path: "/settings", title: "Settings", icon: "gear" },
     ],
+    // A cold document load shows the route's layouts around src/app/(styled)/loading.tsx first,
+    // and keeps them while offline.
+    shells: true,
     routes: {
       // Each step renders in the screen that shows the wizard instead of pushing a new one.
       "/navigation/step/[n]": { presentation: "replace" },
     },
     native: {
-      auto: "report",
+      // Pages the analyzer proves render natively become `server` screens: the server renders the
+      // page and the shell draws it with native views. Pages with client-side logic stay web.
+      auto: "on",
       routes: {
         // /map is native (page.native.tsx) except on iOS, which keeps the web screen for now.
         "/map": { screen: "native", ios: "web" },

@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.SystemClock
 import android.view.ViewGroup
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -20,6 +21,8 @@ interface PageHost {
     fun onRouterReady(page: Page, title: String) {}
     fun onTitle(page: Page, title: String) {}
     fun onCommitVisible(page: Page) {}
+    /** The document load did not reach the server, such as with no network. */
+    fun onLoadError(page: Page) {}
 }
 
 /** A WebView plus its bridge. Moves from the pool into a screen without reloading. */
@@ -32,6 +35,8 @@ class Page(
     private val openExternal: (Uri) -> Unit,
     /** The mobile client's files from the APK; null under farm dev --mobile. */
     private val bundle: BundledAssets? = null,
+    /** The page shells from the APK; null under farm dev --mobile or without mobile.shells. */
+    private val shells: PageShells? = null,
 ) : BridgeListener {
     val webView = WebView(context)
     val bridge: FarmBridge
@@ -67,6 +72,11 @@ class Page(
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
                 host?.onCommitVisible(this@Page)
+            }
+
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                // The server was not reached; a load cancelled by another one is not an error here.
+                if (request.isForMainFrame && error.errorCode in UNREACHABLE) host?.onLoadError(this@Page)
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
@@ -113,6 +123,28 @@ class Page(
         webView.loadUrl(url, SHELL_HEADERS)
     }
 
+    /**
+     * A view of [html], the page shell of [url]'s route, for the screen to show over this page
+     * until it paints. It runs no JavaScript and never navigates; its stylesheet comes from the
+     * APK like the page's.
+     */
+    fun createShellView(url: String, html: String): WebView = WebView(webView.context).apply {
+        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        setBackgroundColor(ContextCompat.getColor(context, R.color.farm_background))
+        settings.javaScriptEnabled = false
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
+        // The shell is a picture of the page; touches wait for the real one.
+        setOnTouchListener { _, _ -> true }
+        webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                bundle?.respond(request)
+
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = true
+        }
+        loadDataWithBaseURL(url, html, "text/html", "utf-8", null)
+    }
+
     /** Render [url] with the running Farm router. Returns the token echoed by onRendered. */
     fun render(url: String): Int {
         val token = ++nextToken
@@ -148,8 +180,9 @@ class Page(
         }
     }
 
-    override fun onRouterReady(bridge: FarmBridge, title: String) {
+    override fun onRouterReady(bridge: FarmBridge, title: String, client: String?) {
         routerReady = true
+        shells?.observe(client)
         host?.onRouterReady(this, title)
     }
 
@@ -160,5 +193,12 @@ class Page(
     companion object {
         /** Read by the server: documents for a shell load the mobile client. */
         val SHELL_HEADERS = mapOf("X-Farm-Shell" to "android")
+
+        private val UNREACHABLE = setOf(
+            WebViewClient.ERROR_HOST_LOOKUP,
+            WebViewClient.ERROR_CONNECT,
+            WebViewClient.ERROR_TIMEOUT,
+            WebViewClient.ERROR_IO,
+        )
     }
 }

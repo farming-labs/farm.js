@@ -290,13 +290,17 @@ async function loadMetroConfig(
   };
 }
 
-/** Packages a bundle must hold exactly once: two Reacts or two React Natives break the runtime. */
-const SINGLETONS = new Set(["react", "react-native"]);
+/**
+ * Packages a bundle must hold exactly once: two Reacts or two React Natives break the runtime,
+ * and a second `@farm.js/native` (one imported by `@farm.js/auth/client`, say) has no server.
+ */
+const SINGLETONS = new Set(["react", "react-native", "@farm.js/native"]);
 
 type ResolveRequest = (context: any, moduleName: string, platform: string | null) => unknown;
 
 /**
- * Resolves `react` and `react-native` (and their subpaths) from the app, whoever imports them.
+ * Resolves `react`, `react-native` and `@farm.js/native` (and their subpaths) from the app,
+ * whoever imports them.
  * A linked package, such as `@farm.js/native` in a workspace, otherwise gets its own copies
  * from its own `node_modules` and the bundle registers screens with a second React Native.
  */

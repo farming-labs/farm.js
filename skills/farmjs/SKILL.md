@@ -137,8 +137,11 @@ Common config fields:
   `@farm.js/mobile`) and `farm build --mobile` prints the report unless `native.auto` is `"off"`;
   `farm build` of an app with `mobile` also builds the mobile client (`.farm/mobile-client.json`),
   which documents load when the shell sends `X-Farm-Shell`, and `farm build --mobile` bundles its
-  hashed files into the APK (iOS loads them from the server; SSG pages and server components apps
-  keep the web client);
+  hashed files into the APK (iOS loads them from the server; SSG pages keep the web client;
+  server components apps get it too: islands mode as any app, the RSC pipeline as one
+  `farm-mobile-client` entry that runs the web entry, with `clientDir` in the manifest, and
+  without device tokens since it refuses `auth`/`integrations`); the RSC router offers link
+  clicks, `router.push`/`replace` and server action redirects to `delegateNavigation`;
   `--os ios` generates the iOS shell (Xcode project, Swift + UIKit) into `.farm/output/mobile/ios`
   and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; not yet built with `xcodebuild`;
   `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; on Android
@@ -148,7 +151,10 @@ Common config fields:
   the shell keeps tokens in the Keystore/Keychain, `serverFetch` sends `Authorization: Bearer` and
   refreshes once on 401, the server runs a valid bearer as the cookie session; covered for
   `@farm.js/auth` and `@farm.js/better-auth` through an integration's `session(request)`; mount
-  persistent storage at `farm-mobile` in production; `signOut()` revokes) (install
+  persistent storage at `farm-mobile` in production; with `@farm.js/auth`, native screens import
+  `getSession`, `useAuth` and `signOut` from `@farm.js/auth/client` like web pages (Metro resolves
+  its `react-native` build; web bundles unchanged; `signIn`/`signUp` reject natively, sign in on a
+  web screen); `signOut()` from `@farm.js/native` is the low-level forget-this-device call) (install
   `@farm.js/native react-native @react-native/metro-config` as dev deps, React 19.2.8 or later;
   needs NDK 27.1.12297006 and CMake 3.22.1; hooks `useNavigate`, `useRouteParams`,
   `useServerQuery`, `serverFetch`; Metro in dev, Hermes bytecode in builds; a screen that throws
