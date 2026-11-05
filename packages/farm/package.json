@@ -727,6 +727,11 @@
       "import": "./dist/internal/server-fn-transform.mjs",
       "require": "./dist/internal/server-fn-transform.cjs"
     },
+    "./internal/native-server-fns": {
+      "types": "./dist/internal/native-server-fns.d.ts",
+      "import": "./dist/internal/native-server-fns.mjs",
+      "require": "./dist/internal/native-server-fns.cjs"
+    },
     "./internal/islx-server": {
       "types": "./dist/internal/islx-server.d.ts",
       "import": "./dist/internal/islx-server.mjs",

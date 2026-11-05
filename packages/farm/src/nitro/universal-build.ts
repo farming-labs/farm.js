@@ -25,6 +25,8 @@ import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
 import { FARM_MOBILE_SESSION_PLUGIN } from "../mobile/session";
+import { FARM_NATIVE_SERVER_FN_PLUGIN } from "../mobile/native-server-fn-names";
+import { collectFarmNativeServerFns, findFarmNativeScreenFiles } from "../mobile/native-server-fns";
 import { getFarmMarkdownAlternatePath } from "../markdown";
 import { _collectFarmStorageModules } from "../storage";
 import { FARM_API_CATALOG_PATH, resolveFarmApiCatalogInput } from "../api-catalog";
@@ -6975,6 +6977,17 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const mobileSession = (config.plugins || []).some(
     (plugin) => plugin?.name === FARM_MOBILE_SESSION_PLUGIN,
   );
+  // Server functions the native screens import, which their HTTP endpoint may run. The list is
+  // static, so the server bundle holds exactly these modules.
+  const nativeServerFns = (config.plugins || []).some(
+    (plugin) => plugin?.name === FARM_NATIVE_SERVER_FN_PLUGIN,
+  )
+    ? collectFarmNativeServerFns({
+        root: config.root,
+        srcDir: config.srcDir,
+        entries: findFarmNativeScreenFiles(getFarmAppDirectories(config)),
+      })
+    : undefined;
   const integrationImports = `
 ${configModulePath ? `import * as FarmUserConfigModule from ${toVirtualEntryImportSpecifier(configModulePath)};` : ""}
 ${layerConfigImports}
@@ -6982,6 +6995,15 @@ ${integrationRuntimeImport}
 ${nativeAuth.importSource}
 ${nativeMCP.importSource}
 ${mobileSession ? `import { createFarmMobileSessionPlugin as __farmCreateMobileSessionPlugin } from "@farm.js/core/internal/production-runtime";` : ""}
+${nativeServerFns ? `import { createFarmNativeServerFnPlugin as __farmCreateNativeServerFnPlugin } from "@farm.js/core/internal/production-runtime";` : ""}
+${(nativeServerFns ?? []).map((module, index) => `import * as __farmNativeServerFns${index} from ${toVirtualEntryImportSpecifier(module.file)};`).join("\n")}
+${
+  nativeServerFns
+    ? `const __farmNativeServerFnRegistry = Object.assign(Object.create(null), {
+${nativeServerFns.flatMap((module, index) => module.exports.map((entry) => `  ${JSON.stringify(entry.id)}: __farmNativeServerFns${index}[${JSON.stringify(entry.name)}],`)).join("\n")}
+});`
+    : ""
+}
 `;
   const imageRuntime = resolveFarmImageServerRuntime(config.images, preset);
   const imageRuntimeImport =
@@ -7290,6 +7312,11 @@ const configuredPlugins = [
     basePath: ${JSON.stringify(config.basePath)},
     integrations: () => serverRuntimeIntegrations,
   }),`
+      : ""
+  }
+  ${
+    nativeServerFns
+      ? `__farmCreateNativeServerFnPlugin({ resolve: (id) => __farmNativeServerFnRegistry[id] }),`
       : ""
   }
   ${

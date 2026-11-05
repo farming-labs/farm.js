@@ -11,6 +11,7 @@ import {
   farmNativeBundleFiles,
   resolveFarmReactNative,
   resolveSingletonsFromApp,
+  resolveFarmServerFnStubs,
   resolveWatchFolders,
 } from "./index";
 
@@ -233,5 +234,32 @@ describe("resolveSingletonsFromApp", () => {
       ["@farm.js/native", path.join("/app", "package.json")],
       ["@farm.js/native-extra", auth.originModulePath],
     ]);
+  });
+});
+
+describe("resolveFarmServerFnStubs", () => {
+  it("resolves a server function module to its stub, and everything else as before", async () => {
+    const dir = await tempDir();
+    const server = path.join(dir, "server.ts");
+    const helper = path.join(dir, "helper.ts");
+    await writeFile(server, "export const createNote = 1;\n");
+    await writeFile(helper, "export const x = 1;\n");
+    const stub = path.join(dir, "stub.js");
+    const next = (_context: unknown, moduleName: string) => ({
+      type: "sourceFile",
+      filePath: moduleName === "./server" ? server : helper,
+    });
+    const resolve = resolveFarmServerFnStubs(new Map([[realpathSync(server), stub]]), next);
+    // The bundle gets the stub, never the server module.
+    expect(resolve({}, "./server", "android")).toEqual({ type: "sourceFile", filePath: stub });
+    expect(resolve({}, "./helper", "android")).toEqual({ type: "sourceFile", filePath: helper });
+    // A server function module without a stub stops the bundle instead of shipping server code.
+    const guarded = resolveFarmServerFnStubs(
+      new Map(),
+      next,
+      (file) => file === realpathSync(server),
+    );
+    expect(() => guarded({}, "./server", "android")).toThrow(/defines server functions/);
+    expect(guarded({}, "./helper", "android")).toEqual({ type: "sourceFile", filePath: helper });
   });
 });

@@ -17,6 +17,7 @@ import { writeFileIfChanged } from "./write-file-if-changed";
 import type { FarmPlugin } from "./plugin";
 import { resolvePluginRoutes } from "./api/route";
 import { createSyncModelTypeDeclarations } from "./schema-model-types";
+import { FARM_NATIVE_SERVER_FN_PLUGIN } from "./mobile/native-server-fn-names";
 
 export { generateFarmI18nTypes };
 
@@ -117,7 +118,11 @@ export async function generateFarmTypeArtifacts(
     const apiTypesPath = options.apiTypesOutFile
       ? resolve(root, options.apiTypesOutFile)
       : join(root, srcDir, "lib", "api.generated.ts");
-    const pluginRoutes = resolvePluginRoutes(options.plugins);
+    // The native server function endpoint is Farm's transport for native screens, not part of the
+    // app's API: it stays out of the typed client.
+    const pluginRoutes = resolvePluginRoutes(
+      options.plugins?.filter((plugin) => plugin.name !== FARM_NATIVE_SERVER_FN_PLUGIN),
+    );
     const configFiles = [
       ...(options.layers ?? [])
         .map((layer) => layer.configFile)

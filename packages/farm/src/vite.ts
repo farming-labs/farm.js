@@ -1713,6 +1713,18 @@ export function farmPlugin(
       }
 
       const dispatchToDevServer = createFarmDevServerDispatch(server);
+      if (options.mobileClient) {
+        // Server functions that native screens call load where API routes load theirs.
+        const { FARM_DEV_SERVER_MODULE_LOADER } = await import("./mobile/native-server-fns");
+        const load = (file: string) => loadFarmDevModule(server, file);
+        (globalThis as Record<symbol, unknown>)[FARM_DEV_SERVER_MODULE_LOADER] = load;
+        server.httpServer?.once("close", () => {
+          const globals = globalThis as Record<symbol, unknown>;
+          if (globals[FARM_DEV_SERVER_MODULE_LOADER] === load) {
+            delete globals[FARM_DEV_SERVER_MODULE_LOADER];
+          }
+        });
+      }
       apiRouteManager = new APIRouteManager(appDirs, server, {
         plugins: farmConfig.plugins,
         i18n: farmApp.getI18nRuntime(),
