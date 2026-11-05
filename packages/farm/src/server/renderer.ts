@@ -171,6 +171,7 @@ import { createDefaultErrorDiagnostics } from "./error-diagnostics";
 import { handleFarmFormActionRequest } from "../form-actions";
 import { installFarmIslandValues, uninstallFarmIslandValues } from "../client/island-values";
 import { resolveServerActionsConfig } from "../server-action-security";
+import { canBootFarmIslandsClient } from "../islands-client-boot";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
   createFarmCspNonceRewriter,
@@ -478,6 +479,8 @@ function rendererRenderOptions(): FarmRendererRenderOptions | undefined {
  * right after `<body>` hydrates islands as they arrive, and waits for the document otherwise.
  */
 const FARM_DEV_EARLY_CLIENT_SCRIPT = `<script type="module" async src="/@farm/client.js"></script>`;
+/** The boot entry in its place, for a page that hydrates nothing at load (RFC 0003, section 10). */
+const FARM_DEV_BOOT_SCRIPT = `<script type="module" async src="/@farm/client-boot.js" data-farm-runtime="/@farm/client.js"></script>`;
 
 function createDocumentFooter(options: {
   suspenseRevealFallback: string;
@@ -3574,10 +3577,20 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
 </script>`;
+      // Islands mode: a page whose route hydrates nothing as a root starts with the boot entry, as
+      // in production, and the boot holds early clicks in islands itself (RFC 0003, section 10).
+      const bootClient =
+        this.islandValues() &&
+        !staticShellParts &&
+        (req as any).__FARM_PAGE_SHOULD_HYDRATE__ !== true &&
+        (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ !== true &&
+        (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ !== true &&
+        canBootFarmIslandsClient(this.config);
       const hydrationClickQueueScript =
-        isClientComponent ||
-        (req as any).__FARM_SHOULD_HYDRATE__ === true ||
-        (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ === true
+        !bootClient &&
+        (isClientComponent ||
+          (req as any).__FARM_SHOULD_HYDRATE__ === true ||
+          (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ === true)
           ? createPreHydrationClickQueueScript()
           : "";
 
@@ -3625,6 +3638,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       const createLateNavigationRecovery = (navigationError: unknown) =>
         this.createLateNavigationRecoveryHTML(req, navigationError);
       const earlyClient = this.islandValues();
+      const earlyClientScript = bootClient ? FARM_DEV_BOOT_SCRIPT : FARM_DEV_EARLY_CLIENT_SCRIPT;
       const { pipe, abort } = renderToPipeableStream(streamRoot, {
         nonce: cspNonce,
         onShellReady() {
@@ -3663,7 +3677,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
   ${propsScript}
   ${hydrationClickQueueScript}
 </head>
-<body class="">${earlyClient ? `\n  ${FARM_DEV_EARLY_CLIENT_SCRIPT}` : ""}
+<body class="">${earlyClient ? `\n  ${earlyClientScript}` : ""}
   <div id="root">`;
           // A full document opens from React's own <html> instead (documentTransform).
           const securedShell = streamDocument ? "" : stampDocumentHTML(shell);
@@ -3682,7 +3696,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                   ...document,
                   html: document.html.replace(
                     /<body\b[^>]*>/i,
-                    (open) => `${open}\n  ${stampDocumentHTML(FARM_DEV_EARLY_CLIENT_SCRIPT)}`,
+                    (open) => `${open}\n  ${stampDocumentHTML(earlyClientScript)}`,
                   ),
                 }
               : document;
