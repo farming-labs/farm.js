@@ -4,6 +4,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { createEndpoint } from "../api/endpoint";
+import { invokeAPIRouteEndpoint } from "../api/runtime";
 import {
   applyFarmCronVercelCrons,
   cronRoute,
@@ -349,5 +352,117 @@ describe("Farm cron", () => {
     (globalThis as any).__env__ = {};
     const missingSecret = await handler(new Request("https://example.com/api/cleanup"));
     expect(missingSecret.status).toBe(401);
+  });
+});
+
+describe("cronRoute around createEndpoint", () => {
+  const cleanup = () =>
+    createEndpoint(
+      { query: z.object({ olderThanDays: z.coerce.number().int().positive() }) },
+      async ({ query }) => Response.json({ olderThanDays: query.olderThanDays }),
+    );
+
+  it("guards the endpoint and keeps its parsed input", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const GET = cronRoute(cleanup());
+    const url = "https://example.com/api/cleanup?olderThanDays=30";
+
+    const unauthorized = await invokeAPIRouteEndpoint(GET, new Request(url));
+    expect(unauthorized.status).toBe(401);
+
+    const authorized = await invokeAPIRouteEndpoint(
+      GET,
+      new Request(url, { headers: { authorization: "Bearer test-secret" } }),
+    );
+    expect(authorized.status).toBe(200);
+    await expect(authorized.json()).resolves.toEqual({ olderThanDays: 30 });
+  });
+
+  it("keeps the endpoint's validation and metadata", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const endpoint = cleanup();
+    const GET = cronRoute(endpoint);
+
+    const invalid = await invokeAPIRouteEndpoint(
+      GET,
+      new Request("https://example.com/api/cleanup?olderThanDays=soon", {
+        headers: { authorization: "Bearer test-secret" },
+      }),
+    );
+    expect(invalid.status).toBe(400);
+    expect((GET as any).__types).toBe((endpoint as any).__types);
+    expect((GET as any).__sourceHandler).toBe((endpoint as any).__sourceHandler);
+  });
+
+  it("keeps an endpoint's MCP and OpenAPI metadata", () => {
+    const endpoint = createEndpoint(
+      { mcp: true, openapi: { summary: "Clean up sessions" } },
+      async () => Response.json({ ok: true }),
+    );
+    const GET = cronRoute(endpoint);
+    expect((GET as any).__mcp).toBe(true);
+    expect((GET as any).__openapi).toBe((endpoint as any).__openapi);
+    expect((GET as any).__openapi).toEqual({ summary: "Clean up sessions" });
+  });
+
+  it("validates input before the secret, as endpoint middleware does, and never runs the handler", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    let ran = false;
+    const GET = cronRoute(
+      createEndpoint({ query: z.object({ olderThanDays: z.coerce.number() }) }, async () => {
+        ran = true;
+        return Response.json({ ok: true });
+      }),
+    );
+
+    const response = await invokeAPIRouteEndpoint(
+      GET,
+      new Request("https://example.com/api/cleanup?olderThanDays=soon"),
+    );
+    expect(response.status).toBe(400);
+    expect(ran).toBe(false);
+  });
+
+  it("accepts a Request-like object, as a Node server can pass", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const GET = cronRoute(createEndpoint(async () => Response.json({ ok: true }))) as any;
+    const call = (headers: Record<string, string>) =>
+      GET.__farmInvoke({ request: { headers: new Headers(headers) }, context: {} });
+
+    expect((await call({ authorization: "Bearer test-secret" })).handlerExecuted).toBe(true);
+    const denied = await call({});
+    expect(denied.handlerExecuted).toBe(false);
+    expect(denied.result.status).toBe(401);
+  });
+
+  it("guards an imported route's copy and leaves the original route unchanged", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    // An existing route module's export, imported into a cron-only route.
+    const existing = createEndpoint(async () => Response.json({ ok: true }));
+    const cronCopy = cronRoute(existing);
+    const request = () => new Request("https://example.com/api/cleanup");
+
+    expect((await invokeAPIRouteEndpoint(cronCopy, request())).status).toBe(401);
+    expect((await invokeAPIRouteEndpoint(existing, request())).status).toBe(200);
+    expect(cronCopy).not.toBe(existing);
+  });
+
+  it("fails closed for an endpoint when production has no secret", async () => {
+    delete process.env.CRON_SECRET;
+    process.env.NODE_ENV = "production";
+    let ran = false;
+    const GET = cronRoute(
+      createEndpoint(async () => {
+        ran = true;
+        return Response.json({ ok: true });
+      }),
+    );
+
+    const response = await invokeAPIRouteEndpoint(
+      GET,
+      new Request("https://example.com/api/cleanup"),
+    );
+    expect(response.status).toBe(401);
+    expect(ran).toBe(false);
   });
 });
