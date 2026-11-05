@@ -119,6 +119,11 @@ describe("resolveWatchFolders", () => {
     await writePackage(pkg("metro"), { name: "metro", dependencies: { "@babel/core": "1" } });
     await writePackage(pkg("vite"), { name: "vite" });
     await writePackage(pkg("zod"), { name: "zod" });
+    await writePackage(pkg("@farm.js/core"), {
+      name: "@farm.js/core",
+      dependencies: { h3: "1", "react-dom": "1" },
+    });
+    await writePackage(pkg("h3"), { name: "h3" });
     const link = async (from: string, name: string) => {
       const at = path.join(from, "node_modules", name);
       await mkdir(path.dirname(at), { recursive: true });
@@ -129,7 +134,10 @@ describe("resolveWatchFolders", () => {
       dependencies: { zod: "1", "@farm.js/core": "1" },
       devDependencies: { "react-native": "1", vite: "1" },
     });
-    for (const name of ["react", "react-native", "zod", "vite"]) await link(app, name);
+    for (const name of ["react", "react-native", "zod", "vite", "@farm.js/core"]) {
+      await link(app, name);
+    }
+    await link(path.dirname(pkg("@farm.js/core")).replace(/node_modules$/, ""), "h3");
     const rnStore = path.dirname(pkg("react-native"));
     await link(rnStore.replace(/node_modules$/, ""), "react");
     await link(rnStore.replace(/node_modules$/, ""), "@react-native/virtualized-lists");
@@ -139,12 +147,13 @@ describe("resolveWatchFolders", () => {
     // The node_modules holding each package, so pnpm's links to its dependencies are watched too.
     expect(folders).toEqual([
       app,
-      ...["@react-native+virtualized-lists", "react", "react-native", "zod"]
+      ...["@farm.js+core", "@react-native+virtualized-lists", "react", "react-native", "zod"]
         .map((entry) => path.join(store, `${entry}@1.0.0`, "node_modules"))
         .sort(),
     ]);
-    // Build tools and web-only packages stay out.
-    expect(folders.join("\n")).not.toMatch(/metro|vite|farm\.js/);
+    // Build tools and web-only packages stay out; core's native builds import nothing else, so
+    // its dependencies do too.
+    expect(folders.join("\n")).not.toMatch(/metro|vite|h3/);
   });
 });
 
