@@ -42,7 +42,7 @@ farm build                    # --web, the default, unchanged
 | Generated React Native ports                  | Unreleased                     | Android: emitted from portable pages with `auto: "on"`; run on an emulator, not yet on a device. See [Generated ports](#generated-react-native-ports)                         |
 | Server-rendered native screens (`server`)     | Unreleased, Android            | Drawn with Android views from the page the server renders; run on an emulator under `farm dev --mobile`, not yet on a device. iOS shows them as web screens                   |
 | iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                                   |
-| React Native screens                          | Unreleased, dev only           | Android only; runs under `farm dev --mobile` on an emulator, not yet in a production build or on a device (see [React Native screens](#react-native-screens))                 |
+| React Native screens                          | Unreleased, Android            | Android only; on an emulator under `farm dev --mobile` and as a production APK; not yet on a device (see [React Native screens](#react-native-screens))                       |
 | Bundled client assets                         | Unreleased                     | Pages in a production shell run the mobile client; Android serves its files from the APK, iOS from the server (see [Bundled client assets](#bundled-client-assets))           |
 | Page shells                                   | Unreleased                     | `mobile.shells`: a route's layout and loading state, shown before its document and while offline; not yet run on an emulator or simulator (see [Page shells](#page-shells))   |
 | Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                                              |
@@ -680,9 +680,9 @@ pnpm add react@^19.2.8 react-dom@^19.2.8
 
 `@farm.js/native` needs React 19.2.8 or later. React Native 0.88 declares a `react@^19.3.0` peer
 (its renderer is built from React 19.3.0), so on 19.2.8 your package manager warns, but the mobile
-example runs its native screens on 19.2.8 with one React in the dev bundle. That is verified in dev,
-not yet in a production build. Web pages and native screens bundle the app's one `react`, so keep
-`react` and `react-dom` on a single version.
+example runs its native screens on 19.2.8 with one React in the dev bundle. That is verified in dev
+and in a production APK on an emulator. Web pages and native screens bundle the app's one `react`,
+so keep `react` and `react-dom` on a single version.
 
 What is verified, in `examples/mobile` under `farm dev --mobile` on an Android 15 emulator
 (SwiftShader software rendering, no GPU):
@@ -696,9 +696,9 @@ What is verified, in `examples/mobile` under `farm dev --mobile` on an Android 1
   `/map` open takes 611 to 1413 ms (103 to 797 ms on later opens), the first `/camera` open 184 to
   205 ms.
 
-Not verified yet: native screens in a production build (a bytecode build installs and cold-starts,
-but no native screen was opened in it), and real devices, so the emulator numbers say nothing about
-smoothness on a phone.
+In a bytecode build (`farm build --mobile --apk`, a debug APK) against a local production server,
+`/map` opens as React Native with its stations. Not verified yet: real devices, so the emulator
+numbers say nothing about smoothness on a phone.
 
 ```tsx
 // src/app/map/page.native.tsx
@@ -761,6 +761,16 @@ screen, and back returns to it.
   downloaded.
 - **Dev.** `farm dev --mobile` starts Metro next to the dev server (port 8081, or the next free
   one) and the debug app loads the screens from it, with Fast Refresh.
+- **Native modules.** A community React Native module in the app's `dependencies`, such as
+  `@react-native-community/netinfo`, is linked into the Android app: its Java or Kotlin package is
+  registered with React Native, its codegen library is built into `libappmodules.so`, and a
+  native screen imports it as in any React Native app. Farm reads only the app's own
+  `dependencies`, the packages Metro bundles for the screens; `devDependencies` and dependencies of
+  dependencies are never linked, and `@react-native-community/cli` is not needed. A module must
+  support the new architecture (a `codegenConfig` in its `package.json`): one without it, such as
+  `react-native-device-info` 15.0.2, fails the command with an error that names the package
+  instead of being skipped. iOS has no React Native host yet, so modules do nothing there. Not
+  verified yet: an APK build and an emulator run with a linked module.
 - **Runtime.** React Native's new architecture only: Hermes, Fabric, bridgeless. One runtime is
   shared by every native screen, each its own surface. It starts after the first screen shows
   content, so a web start screen pays nothing at launch.
@@ -784,6 +794,12 @@ screen, and back returns to it.
   - The example's screen bundle compiles to 1.23 MB of Hermes bytecode (Metro 18.5 s, `hermesc`
     1.6 s).
   - Only the 64-bit ABIs are built (`arm64-v8a`, `x86_64`), so 32-bit devices are not supported.
+  - An app that links at least one native module builds through React Native's Gradle plugin
+    and its toolchain, loaded from the app's `node_modules`: Android Gradle plugin 9.2.1 and Gradle
+    9.4.1 instead of the shell's 8.7.3 and 8.11.1, and JDK 17 or newer. The plugin compiles itself
+    with a JDK 17 toolchain, so on a machine without JDK 17 the first build also downloads one
+    (about 490 MB in `~/.gradle/jdks`), and Android build-tools 36.0.0. Apps without native modules
+    keep the shell's toolchain and generate the same project as before.
 
 Native files import `react-native`, which a web-only checkout may not have. Keep them out of the
 web type-check and check them on their own:
@@ -824,6 +840,16 @@ empty plugin map), so every such call returns `{ code: "native_unavailable" }`. 
 device plugins will plug into; it is the right-hand channel in the
 [architecture figure](/blog/web-to-native#on-the-device).
 
+**Community React Native modules, on native screens, on Android.** A `page.native.tsx` screen can
+use an installed React Native module, such as `@react-native-community/netinfo`, the same way a
+React Native app does: add it to the app's `dependencies` and import it. Farm links the modules
+into the Android app (see [React Native screens](#react-native-screens)); the permissions a module
+declares in its own manifest are merged into the app's. Web screens cannot call these modules, and
+iOS has no React Native host yet. Verified on an Android 15 emulator with netinfo 12.0.1, in
+`farm dev --mobile` and in a bytecode APK: `/map` shows the connection type and `isConnected`, and
+both change when Wi-Fi, mobile data, or airplane mode are switched off. Not verified yet: real
+devices and Expo modules.
+
 **Reaching a real device feature.** For something like reading SMS you drop to native code, where the
 platform SDK is in reach:
 
@@ -840,7 +866,8 @@ platform SDK is in reach:
 **Web APIs are not a back door either.** The WebView enables only JavaScript and DOM storage, not
 media or geolocation grants, so a web screen cannot quietly use `getUserMedia` or the Geolocation API.
 
-In short: navigation, server data, and auth work across every screen today; device capabilities are
+In short: navigation, server data, and auth work across every screen today. Native screens on
+Android can use community React Native modules; for web screens, device capabilities are
 **designed, not shipped** — the reserved `native.<name>` channel and the native-screen escape hatch,
 both on the roadmap.
 
