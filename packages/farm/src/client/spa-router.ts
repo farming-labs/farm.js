@@ -79,6 +79,15 @@ export interface RouterOptions {
   scrollRestoration?: boolean;
   shouldUseDocumentNavigation?: (pathname: string) => boolean;
   deploymentId?: string;
+  /**
+   * Islands mode in `farm dev`: navigates as the production client does, by fetching the page
+   * itself. Resolves the page's data once its shell arrives, or null for a navigation the page-data
+   * endpoint answers instead.
+   */
+  fetchNavigationDocument?: (
+    path: string,
+    context: { signal: AbortSignal; refresh: boolean },
+  ) => Promise<PageData | null>;
 }
 
 interface CacheEntry {
@@ -205,8 +214,8 @@ export class SPARouter {
     controller: AbortController;
   };
   private scrollElements: Map<string, HTMLElement> = new Map();
-  private options: Required<Omit<RouterOptions, "deploymentId">> &
-    Pick<RouterOptions, "deploymentId">;
+  private options: Required<Omit<RouterOptions, "deploymentId" | "fetchNavigationDocument">> &
+    Pick<RouterOptions, "deploymentId" | "fetchNavigationDocument">;
   private onNavigate?: (data: PageData, info?: FarmNavigationRenderInfo) => Promise<void>;
   private clientPlugins?: Pick<
     FarmClientPluginManager,
@@ -236,6 +245,7 @@ export class SPARouter {
       scrollRestoration: options.scrollRestoration ?? true,
       shouldUseDocumentNavigation: options.shouldUseDocumentNavigation ?? (() => false),
       deploymentId: options.deploymentId ?? readBrowserDeploymentId(),
+      fetchNavigationDocument: options.fetchNavigationDocument,
     };
 
     if (typeof window !== "undefined") {
@@ -391,14 +401,13 @@ export class SPARouter {
       });
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
-      // Fetch page data (from cache or server)
-      const pageData = await this.fetchPageData(
-        fullPath,
-        true,
-        from,
-        refresh,
-        navigation.controller.signal,
-      );
+      // Fetch page data (from cache or server). Islands mode in dev fetches the page itself.
+      const pageData =
+        (await this.options.fetchNavigationDocument?.(fullPath, {
+          signal: navigation.controller.signal,
+          refresh,
+        })) ??
+        (await this.fetchPageData(fullPath, true, from, refresh, navigation.controller.signal));
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
