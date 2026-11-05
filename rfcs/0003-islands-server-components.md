@@ -212,8 +212,10 @@ and a navigation from 29.1 KB to 5.7 KB.
 Measured on the implementation (`benchmarks/server-components-payload`, a 300-page docs app whose
 layout passes a 32 KB tree to two client components, production builds in Chrome): a navigation drops
 from 100.9 KB raw (15.7 KB brotli) to 38.4 KB (12.3 KB), level with `"rsc"` at 37.4 KB (12.0 KB),
-with 28% less first-load JavaScript than `"rsc"`. Segment navigation then removes the layout's HTML:
-8.0 KB raw (2.5 KB brotli) per navigation.
+with 28% less first-load JavaScript than `"rsc"` when first measured. `"rsc"` has since dropped from
+109.1 KB (2026-10-30) to 69.7 KB, so islands mode now loads more (84.6 to 85.7 KB); section 10
+addresses that. Segment navigation then removes the layout's HTML: 8.0 KB raw (2.5 KB brotli) per
+navigation.
 
 ### 4. Hydration: islands, then regions
 
@@ -276,6 +278,61 @@ the action revalidated data the page shows. `<form action>` keeps working before
 The wire is HTML plus serialized props and DOM slot references, so it is not tied to React's tree.
 React ships first. Other renderers adopt the same manifest through their client and server bindings,
 with shared coverage in `@farm.js/renderer-tests`.
+
+### 10. The client runtime loads when a page first needs it
+
+Every islands page loads its whole client at once: React, islx, the router and route hydration. On
+`benchmarks/server-components-payload` (main `d1ab2dae7`, brotli q5) that is 84.6 to 85.7 KB of
+first-load JavaScript, against 69.7 KB in `"rsc"`. React and React DOM are 54.4 KB of either; the
+rest is Farm's runtime, 31.3 KB in islands mode and 15.3 KB in `"rsc"`. A page whose islands wait for
+`visible`, `idle` or `interaction`, or a page with no islands at all, pays the same.
+
+In islands mode a page that needs nothing at load starts with a small boot entry instead (1.6 KB
+brotli, no imports), which loads the runtime on the first of: an island's own trigger (`idle`;
+`visible`, with the scheduler's 200 px margin; a click or submit on an `interaction` island), a
+pointer over a link, or a press or focus on an island or in a form.
+
+- **Which pages.** Production decides per document, from the whole rendered markup: the boot when
+  no island has `load` (or no strategy), no page, layout or route slot hydrates as a root, it is not
+  a PPR shell, and no Suspense boundary is left for the browser (`<!--$?-->`, `<!--$!-->`).
+  Everything else, including any streamed document, gets today's entry, byte for byte: the boot
+  shares no module with the entry and loads it by URL (a module script, not `import()`), so the
+  entry splits into the same chunks with the same hashes. An app with client plugins, a
+  `src/client.ts` or `docs` never uses the boot.
+- **`farm dev`** streams every page, so it cannot judge the markup before the body opens. It sends
+  the boot whenever no page, layout or route slot hydrates as a root, and the boot applies the same
+  rule as the page streams: an island with `load`, or a boundary still pending, starts the runtime
+  at once. Farm's devtools live in the runtime, so on such a page they appear once it loads.
+- **Early clicks.** Until the runtime runs, the boot holds clicks and submits in islands that have
+  not hydrated, in the pre-hydration queue the island scheduler already reads, and the scheduler
+  replays them once the island hydrates. Clicks and forms outside islands are left alone (the dev
+  queue script, which holds every click on the page until route-wide hydration, is not used on
+  these pages). Once the runtime runs the boot lets go, so a failed load leaves native behavior.
+- **Links.** A link the router would take, clicked before the runtime runs, is held and clicked
+  again once it does, so the router decides as for any click. If the runtime fails to load, the
+  browser navigates to the link natively.
+- **Forms** written in server components post natively until the runtime runs, as they do today.
+
+Not changed: `"rsc"` mode, apps on isolated hydration without islands mode, and every page that
+hydrates something at load.
+
+Measured (`benchmarks/server-components-payload`, brotli q5): the benchmark's sections all hydrate
+at load and are unchanged (docs 85.7 KB, shop 85.1 KB, blog 84.6 KB of first-load JavaScript). With
+the blog's like button marked `"interaction"`, a post loads the boot only: 1.6 KB, against 84.6 KB
+before and 69.7 KB in `"rsc"`; the runtime arrives with the first navigation. The same button marked
+`"visible"` changes nothing, because it sits under the title, in view at load.
+
+Acceptance:
+
+- A page whose islands all hydrate later loads under 3 KB of JavaScript until the first trigger
+  (`"rsc"`: 69.7 KB), and requests nothing else until then.
+- Pages that hydrate something at load get the same entry and chunks as before, byte for byte, and
+  hydrate no later.
+- The contract suite passes in both modes, in `farm dev` and production, on Node, Cloudflare and
+  Vercel builds, plus: a page with a `load` island loads the runtime at once; a page whose islands
+  wait loads it only when one is due; a click on an `interaction` island before the runtime loads
+  is replayed; a link clicked before the runtime loads is a client navigation; a runtime that fails
+  to load leaves a native navigation.
 
 ## Fallbacks
 
@@ -431,3 +488,5 @@ navigation), so a navigation from other layouts fetches its own answer.
    share it before it becomes a file instead of staying inline.
 7. **Value file lifetime.** Files are immutable by hash; old ones need a cleanup story per deploy
    target.
+8. **The default island strategy.** With `load` as the default, most pages still load the runtime
+   at once (section 10). Whether islands mode defaults to `visible` is a separate decision.
