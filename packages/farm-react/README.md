@@ -119,6 +119,11 @@ The current compiler handles components that it can prove have:
 - React-managed event handlers; and
 - no refs, effects, or unsupported dynamic child structures.
 
+State-dependent event handler selection, such as `onClick={active ? save : cancel}`, keeps the
+component on React's normal rendering path so replacing, adding, or removing a callback updates
+React's event props. Direct inline handlers that read state when invoked, such as
+`onClick={() => save(active)}`, retain the existing compiled path when otherwise eligible.
+
 The generated component preserves React ownership of initial placement, parent update commits,
 identity-bearing props, events, SSR, and hydration. Local state cells batch updates into a
 microtask; eligible flat destructured primitive props join the same dependency index after React

@@ -8893,7 +8893,13 @@ function analyzeHostTree(
 
       const expression = attribute.value.expression;
       const dependencies = collectStateDependencies(expression, statesByValue);
-      if (dependencies.length === 0 || /^on[A-Z]/.test(name)) continue;
+      if (dependencies.length === 0) continue;
+      if (/^on[A-Z]/.test(name)) {
+        if (!t.isArrowFunctionExpression(expression) && !t.isFunctionExpression(expression)) {
+          return "stateful event handler selection requires React ownership";
+        }
+        continue;
+      }
       if (name === "style") {
         const reason = analyzeStyle(expression, path);
         if (reason) return reason;
