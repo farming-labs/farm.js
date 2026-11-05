@@ -1829,24 +1829,25 @@ export function Chart() {}
     const missingModuleGuard = developmentSource.indexOf("if (!modulePath)", isolatedBootstrap);
     expect(isolatedBootstrap).toBeGreaterThan(-1);
     expect(missingModuleGuard).toBeGreaterThan(isolatedBootstrap);
-    // An islands-only page releases the pre-hydration hold once its load islands are
-    // live, or clicks and submits outside every island stay held forever. It must not
-    // replay held targets into server HTML that no client code owns.
+    // An islands-only page releases the pre-hydration hold once its islands are scheduled,
+    // or clicks and submits outside every island stay held forever. It must not replay held
+    // targets into server HTML that no client code owns.
     const isolatedBranch = developmentSource.slice(
       isolatedBootstrap,
       developmentSource.indexOf("if (!shouldHydrate)", isolatedBootstrap),
     );
     // Islands mode hydrates the document (so islx watches streamed islands); otherwise #root.
+    // The first pass takes no cancellation signal: a navigation disposes the islands it removes
+    // with their DOM, and one in a layout it keeps still waits for its trigger.
     const isolatedHydrate = isolatedBranch.indexOf(
-      'await hydrateFarmIsolatedClientBoundaries(${islandValues ? "document" : "rootContainer"}, hydrationController.signal);',
+      'await hydrateFarmIsolatedClientBoundaries(${islandValues ? "document" : "rootContainer"});',
     );
-    const abortGuard = isolatedBranch.indexOf("if (hydrationController.signal.aborted) return;");
     const release = isolatedBranch.indexOf("markFarmHydrated();");
     expect(isolatedHydrate).toBeGreaterThan(-1);
-    expect(abortGuard).toBeGreaterThan(isolatedHydrate);
-    expect(release).toBeGreaterThan(abortGuard);
+    expect(release).toBeGreaterThan(isolatedHydrate);
     expect(isolatedBranch.indexOf("return;", release)).toBeGreaterThan(release);
     expect(isolatedBranch).not.toContain("replayPreHydrationClicks(");
+    expect(productionSource).toContain("await hydrateFarmIsolatedClientBoundaries(document);");
   });
 
   it("uses a document swap when generated SPA navigation leaves the app root", () => {
