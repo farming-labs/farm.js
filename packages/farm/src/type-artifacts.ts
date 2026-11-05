@@ -17,6 +17,8 @@ import { writeFileIfChanged } from "./write-file-if-changed";
 import type { FarmPlugin } from "./plugin";
 import { resolvePluginRoutes } from "./api/route";
 import { createSyncModelTypeDeclarations } from "./schema-model-types";
+import { scanFarmMobileAppModules } from "./mobile/modules";
+import { createFarmNativeModuleTypeDeclarations } from "./mobile/native-specs";
 
 export { generateFarmI18nTypes };
 
@@ -239,6 +241,13 @@ export async function generateFarmTypeArtifacts(
   if (shouldRefreshUnifiedTypes) {
     const syncModelTypes = createSyncModelTypeDeclarations(options.plugins);
     if (syncModelTypes) unifiedSections.push(syncModelTypes);
+  }
+
+  if (shouldRefreshUnifiedTypes) {
+    const appModules = scanFarmMobileAppModules({ root, srcDir });
+    const nativeTypes =
+      appModules && createFarmNativeModuleTypeDeclarations(appModules.specs, { root });
+    if (nativeTypes) unifiedSections.push(nativeTypes);
   }
 
   if (shouldRefreshUnifiedTypes) {
