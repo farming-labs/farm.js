@@ -34,7 +34,7 @@ pnpm smoke               # checks the mobile decisions and the web build
 | `/map`                   | `page.native.tsx`: a React Native list of stations from `GET /api/stations`; a row opens the web `/stations/[id]`; the device model from the app's `Device` module and a vibrate button. `mobile.native.routes` keeps it web on iOS |
 | `/camera`                | `page.native.tsx` with a `page.android.tsx` override: notes from `GET /api/notes` and a button to the web `/notes/new` modal |
 | `/settings/device`       | `page.kt`: a platform screen on Android                                   |
-| `/lab/packing`           | Only portable elements and inline styles: the analyzer says `port`        |
+| `/lab/packing`           | Only portable elements and inline styles: the analyzer says `port`, and `farm build --mobile` generates its React Native port on Android |
 | `/lab/chart`             | A canvas through a ref, a table, and `window`: the analyzer lists why it stays web |
 
 `/map` and `/camera` are React Native screens built by `@farm.js/native` (Metro in
@@ -106,7 +106,9 @@ The web pages and the native screens share the example's one `react`. The exampl
 from npm has one `react` (core only peers on it), so it can use 19.3 for both.
 
 The root layout has no stylesheet, because the analyzer checks every layout above a route. Styled
-routes get `globals.css` from the `(styled)` route group's layout; `/lab` routes use inline styles.
+routes import `globals.css` from the `(styled)` route group's layout; `/lab` routes use inline
+styles. A production build still links `globals.css` on every page, `/lab` included, so the
+generated port of `/lab/packing` applies its `body` and `input` rules too.
 
 `mobile.server` defaults to `https://field-notes.farmjs.dev`; set `FIELD_NOTES_SERVER` to point
 `farm build --mobile` at your own deployment.

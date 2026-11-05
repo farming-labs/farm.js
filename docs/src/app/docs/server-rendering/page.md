@@ -372,6 +372,17 @@ the authoring rules on this page, so switching between them is a one-line change
 tests (`tests/e2e-server-components`) run against both, in development and in production builds.
 `benchmarks/server-components-payload` compares what each mode sends.
 
+In islands mode a page loads React and Farm's client runtime when it first needs them. A page with
+a client component that hydrates at load, the default, loads them at once, as before. A page whose
+client components all wait for `"interaction"`, `"visible"` or `"idle"` (see
+[Deferred route islands](#deferred-route-islands)), or that has none, starts with a 1.6 KB script
+instead, and loads the runtime when the first one is due, when the pointer reaches a link, or when
+a form gets focus. A click on such a component or on a link before then is held and replayed once
+the runtime runs, and a `<form>` written in a server component posts natively until it does. An
+app with client plugins, a `src/client.ts`, or `docs` loads the runtime on every page. On
+`benchmarks/server-components-payload`, a blog post whose like button waits for `"interaction"`
+loads 1.6 KB of JavaScript instead of 84.6 KB (`"rsc"`: 69.7 KB).
+
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
 The build goes to the deploy target's
 output directory, so `farm start` and platform deploys work unchanged.
