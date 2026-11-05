@@ -1076,8 +1076,10 @@ describe("React Native native modules (autolinking)", () => {
     expect(onLoad).toContain("autolinking_ModuleProvider(name, params)");
     expect(onLoad).toContain("autolinking_cxxModuleProvider(name, jsInvoker)");
     expect(onLoad).toContain("autolinking_registerProviders(registry)");
+    // React Native's Gradle plugin generates PackageList in com.facebook.react, not the app's
+    // package, and the engine does not import it.
     expect(files[ENGINE]).toContain(
-      "packageList = PackageList(activity.application).packages + FarmShellPackage()",
+      "packageList = com.facebook.react.PackageList(activity.application).packages + FarmShellPackage()",
     );
 
     // Dev dependencies and dependencies of dependencies are never linked.

@@ -405,8 +405,10 @@ zipStorePath=wrapper/dists
 }
 
 const PACKAGE_LIST_FROM = "packageList = listOf(MainReactPackage(), FarmShellPackage()),";
+// React Native's Gradle plugin generates PackageList in com.facebook.react, whatever the app's
+// package is.
 const PACKAGE_LIST_TO =
-  "packageList = PackageList(activity.application).packages + FarmShellPackage(),";
+  "packageList = com.facebook.react.PackageList(activity.application).packages + FarmShellPackage(),";
 
 /** The engine with the autolinked packages; `PackageList` includes `MainReactPackage`. */
 function linkPackageList(engine: MobileGeneratedFile): MobileGeneratedFile {
