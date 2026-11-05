@@ -17,8 +17,6 @@ import { writeFileIfChanged } from "./write-file-if-changed";
 import type { FarmPlugin } from "./plugin";
 import { resolvePluginRoutes } from "./api/route";
 import { createSyncModelTypeDeclarations } from "./schema-model-types";
-import { scanFarmMobileAppModules } from "./mobile/modules";
-import { createFarmNativeModuleTypeDeclarations } from "./mobile/native-specs";
 
 export { generateFarmI18nTypes };
 
@@ -243,7 +241,10 @@ export async function generateFarmTypeArtifacts(
     if (syncModelTypes) unifiedSections.push(syncModelTypes);
   }
 
-  if (shouldRefreshUnifiedTypes) {
+  // Only an app with native module specs loads the mobile code, so other apps never pay for it.
+  if (shouldRefreshUnifiedTypes && existsSync(join(root, srcDir, "native"))) {
+    const [{ scanFarmMobileAppModules }, { createFarmNativeModuleTypeDeclarations }] =
+      await Promise.all([import("./mobile/modules"), import("./mobile/native-specs")]);
     const appModules = scanFarmMobileAppModules({ root, srcDir });
     const nativeTypes =
       appModules && createFarmNativeModuleTypeDeclarations(appModules.specs, { root });
