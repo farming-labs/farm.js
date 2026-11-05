@@ -617,6 +617,26 @@ function resolveOwnerSourcePath(resolvedPath: string | null, root?: string): str
   return current;
 }
 
+/**
+ * The client modules a route module renders: itself when it is a client module, otherwise the
+ * client components it renders (through server components it imports). Null when the analysis
+ * cannot list them, such as a package's client component.
+ */
+export function collectFarmRenderedClientModules(
+  modulePath: string,
+  root?: string,
+): string[] | null {
+  const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
+  if (!resolvedPath) return null;
+  if (hasUseClientDirective(readIfExists(resolvedPath))) return [resolvedPath];
+  const collected = collectIsolatedClientBoundaries(resolvedPath, root, {
+    allowDynamicCardinality: true,
+    allowElementProps: true,
+  });
+  if (collected.fallbackReason || collected.costGuardExceeded) return null;
+  return collected.boundaries.map((boundary) => boundary.modulePath);
+}
+
 export function getClientModuleMetadata(modulePath: string, root?: string): ClientModuleMetadata {
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
   return inspectClientModuleMetadata(resolvedPath, root, new Set(), true);

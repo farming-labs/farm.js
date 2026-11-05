@@ -235,7 +235,7 @@ import type { FarmRenderer } from "./renderer";
 import { createFarmReactRefreshPlugins, isFarmReactRefreshActive } from "./react-refresh";
 import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
-import { inferFarmIslandStrategy } from "./island-inference";
+import { inferFarmIslandStrategy, resolveFarmRouteRootStrategy } from "./island-inference";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
   createFarmRouteRenderPlan,
@@ -3227,11 +3227,34 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                       : [],
                   ),
                 ];
-                const hydrationIslandStrategy = hydrationStrategies.every(
-                  (strategy) => strategy === hydrationStrategies[0],
-                )
-                  ? (hydrationStrategies[0] ?? "load")
-                  : "load";
+                // Islands mode resolves the root's strategy as the document render does, so a
+                // root that waits renders the same attributes either way (RFC 0003, section 11).
+                const hydrationIslandStrategy =
+                  resolveFarmServerComponentsMode(
+                    (farmApp?.getConfig() ?? options).experimental?.serverComponents,
+                  ) === "islands"
+                    ? resolveFarmRouteRootStrategy(
+                        route,
+                        { shouldHydrate, islandStrategy: moduleMetadata.islandStrategy ?? null },
+                        layouts.map((layout, index) => ({
+                          pattern: layout.pattern,
+                          modulePath: layout.modulePath,
+                          shouldHydrate: layoutHydrationMetadata[index]?.shouldHydrate === true,
+                          // Manifest entries carry it; metadata read from source does not.
+                          hasIsolatedClientBoundaries:
+                            (
+                              layoutHydrationMetadata[index] as
+                                | { hasIsolatedClientBoundaries?: boolean }
+                                | undefined
+                            )?.hasIsolatedClientBoundaries === true,
+                          islandStrategy: layoutHydrationMetadata[index]?.islandStrategy ?? null,
+                        })),
+                        server.config.root,
+                        true,
+                      )
+                    : hydrationStrategies.every((strategy) => strategy === hydrationStrategies[0])
+                      ? (hydrationStrategies[0] ?? "load")
+                      : "load";
 
                 // Build search params
                 const targetUrl = new URL(targetPath, "http://localhost");

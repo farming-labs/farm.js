@@ -174,6 +174,28 @@ describe("startFarmIslandsBoot", () => {
     expect(load).not.toHaveBeenCalled();
   });
 
+  it("holds clicks in a root that waits, and starts on its press", () => {
+    const load = boot(
+      '<script type="module" data-farm-runtime="/r.js" data-farm-root="root" data-farm-root-strategy="interaction"></script>' +
+        '<div id="root"><p>Cart: 0</p><button type="button">Add</button><a href="/next">Next</a></div>',
+    );
+    expect(load).not.toHaveBeenCalled();
+    const button = document.querySelector("button")!;
+    expect(click(button)).toBe(true);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect((window as QueueWindow).__FARM_PREHYDRATION_CLICK_QUEUE__).toEqual([
+      expect.objectContaining({ target: button, kind: "click" }),
+    ]);
+  });
+
+  it("loads the runtime at once for a root that hydrates at load or cannot be found", () => {
+    expect(
+      boot(
+        '<script type="module" data-farm-runtime="/r.js" data-farm-root="root" data-farm-root-strategy="load"></script><div id="root"></div>',
+      ),
+    ).toHaveBeenCalledTimes(1);
+  });
+
   it("starts loading when a pointer moves over a link", () => {
     const load = boot('<f-island strategy="interaction"></f-island><a href="/next">Next</a>');
     document.querySelector("a")!.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));

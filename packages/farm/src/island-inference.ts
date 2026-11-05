@@ -1,7 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseAst } from "rolldown/parseAst";
-import { resolveImportedModule } from "./utils/client-component";
+import type { FarmIslandStrategy } from "./island";
+import { routeBoundaryCoversDirectory } from "./routing/route-groups";
+import {
+  collectFarmRenderedClientModules,
+  getIslandStrategyExport,
+  resolveImportedModule,
+} from "./utils/client-component";
 
 /**
  * Islands mode: the hydration an island gets when its module sets no `island` export (RFC 0003,
@@ -19,6 +25,8 @@ export interface FarmIslandInference {
   files: string[];
   /** Why the island keeps `"load"`, for diagnostics. */
   reason?: string;
+  /** A route root only: a client module in it declares its own `island` strategy. */
+  declared?: boolean;
 }
 
 type Node = { type: string; [key: string]: any };
@@ -79,6 +87,91 @@ export function inferFarmIslandStrategy(filePath: string, root?: string): FarmIs
     queue.push(...result.imports);
   }
   return { strategy: "interaction", files };
+}
+
+/**
+ * Islands mode: whether a route that hydrates as one root (a layout around a client provider, or a
+ * client page) can wait for an interaction. `owners` are the route modules inside that root, the
+ * page and its layouts; every client component they render must be able to wait. Their server
+ * output is the root's own, so the slot rule for islands does not apply.
+ */
+export function inferFarmRouteRootStrategy(owners: string[], root?: string): FarmIslandInference {
+  const files: string[] = [];
+  const modules: string[] = [];
+  for (const owner of owners) {
+    const rendered = collectFarmRenderedClientModules(owner, root);
+    if (!rendered) {
+      return {
+        strategy: null,
+        files,
+        reason: `${path.basename(owner)}: its client components could not be listed`,
+      };
+    }
+    modules.push(...rendered);
+  }
+  // A module that declares its strategy decides it, as it does for an island.
+  for (const module of modules) {
+    let source: string | null = null;
+    try {
+      source = fs.readFileSync(module, "utf8");
+    } catch {}
+    if (getIslandStrategyExport(source) !== null) return { strategy: null, files, declared: true };
+  }
+  for (const module of modules) {
+    const result = inferFarmIslandStrategy(module, root);
+    files.push(...result.files);
+    if (!result.strategy) return { strategy: null, files, reason: result.reason };
+  }
+  return { strategy: "interaction", files };
+}
+
+/**
+ * The hydration strategy of a route's root: the strategies its page and layouts declare, when they
+ * agree. In islands mode, when none declares one, a route that hydrates as one root (its page is a
+ * client component, or a layout on it hydrates, such as a client provider) waits for an
+ * interaction when every client component inside that root can (RFC 0003, section 11). The client
+ * route table, the server's choice of entry and `farm dev` all read this.
+ */
+export function resolveFarmRouteRootStrategy(
+  route: { modulePath: string; pattern: string; directory?: string },
+  page: { shouldHydrate: boolean; islandStrategy: FarmIslandStrategy | null },
+  layouts: Array<{
+    pattern: string;
+    modulePath: string;
+    shouldHydrate: boolean;
+    hasIsolatedClientBoundaries: boolean;
+    islandStrategy: FarmIslandStrategy | null;
+  }>,
+  root: string,
+  islandsMode: boolean,
+): FarmIslandStrategy {
+  const directory = route.directory ?? route.pattern;
+  const onRoute = layouts.filter((layout) =>
+    routeBoundaryCoversDirectory(layout.pattern, directory),
+  );
+  const declared = [
+    ...(page.islandStrategy ? [page.islandStrategy] : []),
+    ...onRoute.flatMap((layout) =>
+      (layout.shouldHydrate || layout.hasIsolatedClientBoundaries) && layout.islandStrategy
+        ? [layout.islandStrategy]
+        : [],
+    ),
+  ];
+  // The plans report "load" for a hydrating module that declares nothing, so whether anything is
+  // declared is read from the root's modules below.
+  const combined = declared.every((strategy) => strategy === declared[0])
+    ? (declared[0] ?? "load")
+    : "load";
+  const layoutHydrates = onRoute.some((layout) => layout.shouldHydrate);
+  if (!islandsMode || (!page.shouldHydrate && !layoutHydrates)) return combined;
+  // A hydrating layout's root holds the whole layout chain; a client page's root holds the page.
+  const owners = [
+    route.modulePath,
+    ...(layoutHydrates ? onRoute.map((layout) => layout.modulePath) : []),
+  ];
+  const inference = inferFarmRouteRootStrategy(owners, root);
+  if (inference.declared) return combined;
+  return inference.strategy ?? "load";
 }
 
 function inspectFile(file: string, root?: string): CachedFile {
@@ -284,8 +377,9 @@ function isHashHref(value: Node | null): boolean {
 /** What in the module's code an island that waits for a click would get wrong. */
 function hostElementProblem(element: Node): string | null {
   const tag = jsxName(element.name);
-  // A component: its own module decides, through its import; a member name is unknown.
-  if (tag === null) return element.name.type === "JSXMemberExpression" ? "renders <X.Y>" : null;
+  // A component (`<Cart.Provider>` too): its own module decides, through its import, and a
+  // package's import has already failed.
+  if (tag === null) return null;
   if (!/^[a-z]/.test(tag)) return null;
   if (FORM_CONTROLS.has(tag)) return `renders <${tag}>`;
   let href: Node | null | undefined;

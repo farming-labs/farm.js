@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { inferFarmIslandStrategy } from "../island-inference";
+import { inferFarmIslandStrategy, resolveFarmRouteRootStrategy } from "../island-inference";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-island-inference-"));
 let count = 0;
@@ -184,5 +184,76 @@ describe("inferFarmIslandStrategy", () => {
     const future = new Date(Date.now() + 5_000);
     fs.utimesSync(file, future, future);
     expect(inferFarmIslandStrategy(file, appRoot).strategy).toBeNull();
+  });
+});
+
+describe("resolveFarmRouteRootStrategy", () => {
+  /** A route under a layout that hydrates as one root around `provider`, with `page` inside it. */
+  function route(provider: string, page: string, extra: Record<string, string> = {}) {
+    const file = app({
+      "app/shop/page.tsx": page,
+      "app/shop/layout.tsx": `import { CartProvider } from "../../components/cart";
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return <CartProvider>{children}</CartProvider>;
+}`,
+      "components/cart.tsx": provider,
+      ...extra,
+    });
+    const appRoot = path.dirname(path.dirname(path.dirname(path.dirname(file))));
+    const appDir = path.dirname(path.dirname(file));
+    return (declared: "load" | "interaction" | null = "load", islandsMode = true) =>
+      resolveFarmRouteRootStrategy(
+        { modulePath: file, pattern: "/shop" },
+        { shouldHydrate: false, islandStrategy: null },
+        [
+          {
+            pattern: "/shop",
+            modulePath: path.join(appDir, "shop", "layout.tsx"),
+            shouldHydrate: true,
+            hasIsolatedClientBoundaries: false,
+            // What the plans report for a hydrating module that declares nothing.
+            islandStrategy: declared,
+          },
+        ],
+        appRoot,
+        islandsMode,
+      );
+  }
+
+  const provider = client(`import { createContext } from "react";
+const Cart = createContext<string[]>([]);
+export function CartProvider({ children }: { children: React.ReactNode }) {
+  const [items] = useState<string[]>([]);
+  return <Cart.Provider value={items}>{children}</Cart.Provider>;
+}`);
+  const page = `import { AddButton } from "../../components/add";
+export default function Page() { return <AddButton />; }`;
+
+  it("lets a root of components that only react to clicks wait for one", () => {
+    const strategy = route(provider, page, {
+      "components/add.tsx": client(
+        `export function AddButton() { const [n, setN] = useState(0); return <button onClick={() => setN(n + 1)}>{n}</button>; }`,
+      ),
+    });
+    expect(strategy()).toBe("interaction");
+    // Only islands mode infers; the default stays everywhere else.
+    expect(strategy("load", false)).toBe("load");
+  });
+
+  it("keeps load when any client component in the root cannot wait", () => {
+    const strategy = route(provider, page, {
+      "components/add.tsx": client(
+        `export function AddButton() { useEffect(() => {}, []); return <button>Add</button>; }`,
+      ),
+    });
+    expect(strategy()).toBe("load");
+  });
+
+  it("keeps what a module declares", () => {
+    const strategy = route(provider, page, {
+      "components/add.tsx": client(`export const island = "load";
+export function AddButton() { return <button onClick={() => {}}>Add</button>; }`),
+    });
+    expect(strategy()).toBe("load");
   });
 });

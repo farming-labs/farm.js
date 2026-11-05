@@ -82,6 +82,7 @@ import {
   type FarmClientPluginEntryCode,
 } from "../client-plugin-build";
 import { canBootFarmIslandsClient } from "../islands-client-boot";
+import { resolveFarmRouteRootStrategy } from "../island-inference";
 import {
   generateClientCachePersistenceCode,
   resolveFarmClientCacheAdapterEntry,
@@ -1888,6 +1889,8 @@ async function buildClient(
   const layoutAppliesToRoute = routeBoundaryCoversDirectory;
   const routeDirectory = (route: { pattern: string; directory?: string }) =>
     route.directory ?? route.pattern;
+  const islandsMode =
+    resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
 
   const adapterOwnsDocsRuntime = Boolean(
     isReactRenderer(config.renderer) &&
@@ -2010,17 +2013,13 @@ async function buildClient(
         applicableClientLayouts.length > 0
       ) {
         const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
-        const hydrationStrategies = [
-          ...(metadata.islandStrategy ? [metadata.islandStrategy] : []),
-          ...applicableClientLayouts.flatMap((layout) =>
-            layout.islandStrategy ? [layout.islandStrategy] : [],
-          ),
-        ];
-        const islandStrategy = hydrationStrategies.every(
-          (strategy) => strategy === hydrationStrategies[0],
-        )
-          ? (hydrationStrategies[0] ?? "load")
-          : "load";
+        const islandStrategy = resolveFarmRouteRootStrategy(
+          route,
+          metadata,
+          clientLayouts,
+          root,
+          islandsMode,
+        );
         clientPages.push({
           ...route,
           relativePath,
@@ -6520,7 +6519,17 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
     }
     islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},${
       usesFarmServerTree(clientMetadata) ? "\n    serverTree: true," : ""
-    }${renderingDirective ? `\n    rendering: ${JSON.stringify(renderingDirective)},` : ""}
+    }${(() => {
+      // The root waits: the page may still start with the boot entry (RFC 0003, section 11).
+      const rootStrategy = resolveFarmRouteRootStrategy(
+        route,
+        clientMetadata,
+        layoutHydrationPlans.map((layout) => ({ ...layout, ...layout.hydration })),
+        config.root,
+        pageHydrationPlanOptions.serverOwners,
+      );
+      return rootStrategy === "load" ? "" : `\n    rootStrategy: ${JSON.stringify(rootStrategy)},`;
+    })()}${renderingDirective ? `\n    rendering: ${JSON.stringify(renderingDirective)},` : ""}
     ${
       route.source !== undefined
         ? `markdownSource: {
@@ -7726,11 +7735,14 @@ function farmDocumentBootsClient(markup, hydratesAtLoad, routeSlots) {
   return true;
 }
 
-// The boot entry runs the client entry from the URL on its script.
-function renderFarmClientBootScript() {
+// The boot entry runs the client entry from the URL on its script. A root that waits (the element
+// a hydrating layout or client page hydrates) is named with its strategy, for the boot to watch.
+function renderFarmClientBootScript(root, rootStrategy) {
   return stampFarmCspNonce('<script type="module" src="${
     farmClientBoot ? FARM_CLIENT_BOOT_SRC_PLACEHOLDER : ""
-  }" data-farm-runtime="/__farm_client_js_src__"></script>');
+  }" data-farm-runtime="/__farm_client_js_src__"' +
+    (root ? ' data-farm-root="' + root + '" data-farm-root-strategy="' + rootStrategy + '"' : '') +
+    '></script>');
 }
 
 // Renderer options for the response being rendered: its CSP nonce, which the
@@ -10312,11 +10324,12 @@ ${
           layout.shouldHydrate && layout.islandStrategy ? [layout.islandStrategy] : [],
         ),
       ];
-      const hydrationIslandStrategy = hydrationStrategies.every(
+      // A root that waits carries its resolved strategy, inferred ones included.
+      const hydrationIslandStrategy = route.rootStrategy || (hydrationStrategies.every(
         (strategy) => strategy === hydrationStrategies[0],
       )
         ? (hydrationStrategies[0] || "load")
-        : "load";
+        : "load");
       const selectedRouteSlots = ${farmMobileShells ? "farmShellLoading ? [] : " : ""}matchRouteSlots(
         routePathname,
         request.headers.get("x-farm-intercept-from"),
@@ -10996,13 +11009,18 @@ ${
             throw renderedPage.streamErrors[0];
           }
         }
+        // A route that hydrates as one root starts with the boot entry only when that root waits.
+        const farmHydratesRoot = route.shouldHydrate || shouldHydrateLayout;
         farmBootsClient = farmDocumentBootsClient(
           html,
-          route.shouldHydrate || shouldHydrateLayout || Boolean(pprCacheKey),
+          (farmHydratesRoot && !route.rootStrategy) || Boolean(pprCacheKey),
           routeSlotPayload
         );
         const farmEntryScript = farmBootsClient
-          ? renderFarmClientBootScript()
+          ? renderFarmClientBootScript(
+              farmHydratesRoot ? (shouldHydrateLayout ? "root" : "__farm_page__") : "",
+              route.rootStrategy
+            )
           : renderFarmClientEntryScript();
 
         let fullHtml;
