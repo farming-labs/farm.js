@@ -20,6 +20,7 @@ const entry = {
   middleware: "src/middleware/index.ts",
   api: "src/api/index.ts",
   "api/client": "src/api-client.ts",
+  "api/client.native": "src/api-client.native.ts",
   "api/runtime": "src/api/runtime.ts",
   "api/route-manager": "src/api/route-manager.ts",
   router: "src/router.ts",
