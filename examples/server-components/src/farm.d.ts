@@ -31,6 +31,7 @@ export type RoutePath =
   | "/server-query"
   | `/static/${string}`
   | "/stream"
+  | "/timing"
   | "/types"
   | "/values/a"
   | "/values/b"
@@ -55,6 +56,7 @@ export type RoutePattern =
   | "/server-query"
   | "/static/[slug]"
   | "/stream"
+  | "/timing"
   | "/types"
   | "/values/a"
   | "/values/b"
@@ -80,6 +82,7 @@ export type RouteModulePattern =
   | "/server-query"
   | "/static/[slug]"
   | "/stream"
+  | "/timing"
   | "/types"
   | "/values"
   | "/values/a"
