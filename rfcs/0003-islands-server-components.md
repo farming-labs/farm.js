@@ -362,9 +362,16 @@ otherwise wait with it. A press or focus on the island starts hydrating it, so t
 follows usually finds it ready. `farm dev` infers the same and infers again when a file the island
 read changes.
 
-Measured (`benchmarks/server-components-payload`, no change to the app): docs pages load 1.6 KB of
-JavaScript instead of 85.7 KB (`"rsc"`: 69.7 KB), blog posts 1.6 KB instead of 84.6 KB. Shop pages
-are unchanged (85.3 KB): their layout hydrates as one root around a cart provider.
+A route that hydrates as one root (a layout around a client provider, or a client page) gets
+the same treatment as a whole: when no client module in that root declares a strategy, and every
+client component it renders, from the page and from each layout on it, passes the checks above,
+the root waits for an interaction. The boot entry then holds clicks inside the root, as it does
+for an island, and the server names the root and its strategy on the boot script. A navigation
+before the root hydrates fetches the page whole instead of the root's payload.
+
+Measured (`benchmarks/server-components-payload`, no change to the app): docs pages, blog posts and
+shop pages all load 1.7 KB of JavaScript instead of 84.6 to 85.7 KB (`"rsc"`: 69.7 KB). A shop
+navigation before the root hydrates carries 2.0 KB of data instead of 1.6 KB (`"rsc"`: 3.8 KB).
 
 ## Fallbacks
 
