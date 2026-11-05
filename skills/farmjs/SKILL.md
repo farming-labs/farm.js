@@ -147,14 +147,15 @@ Common config fields:
   `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; on Android
   `page.native.tsx`/`page.android.tsx` build as React Native screens, verified in
   `farm dev --mobile` on an Android emulator (not in production bytecode builds or on real
-  devices), signed in through device tokens after a web-screen sign-in (`/__farm/mobile/session`:
+  devices), signed in through device tokens after a sign-in on a web or native screen (`/__farm/mobile/session`:
   the shell keeps tokens in the Keystore/Keychain, `serverFetch` sends `Authorization: Bearer` and
   refreshes once on 401, the server runs a valid bearer as the cookie session; covered for
   `@farm.js/auth` and `@farm.js/better-auth` through an integration's `session(request)`; mount
   persistent storage at `farm-mobile` in production; with `@farm.js/auth`, native screens import
-  `getSession`, `useAuth` and `signOut` from `@farm.js/auth/client` like web pages (Metro resolves
-  its `react-native` build; web bundles unchanged; `signIn`/`signUp` reject natively, sign in on a
-  web screen); `signOut()` from `@farm.js/native` is the low-level forget-this-device call) (install
+  `signIn`, `signUp`, `getSession`, `useAuth` and `signOut` from `@farm.js/auth/client` like web
+  pages (Metro resolves its `react-native` build; web bundles unchanged; native sign-in is posted by
+  the shell, only under `auth.basePath`, and signs web screens in too; social sign-in rejects
+  natively); `signOut()` from `@farm.js/native` is the low-level forget-this-device call) (install
   `@farm.js/native react-native @react-native/metro-config` as dev deps, React 19.2.8 or later;
   needs NDK 27.1.12297006 and CMake 3.22.1; hooks `useNavigate`, `useRouteParams`,
   `useServerQuery`, `serverFetch`; Metro in dev, Hermes bytecode in builds; a screen that throws

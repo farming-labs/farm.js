@@ -1,20 +1,18 @@
 // The React Native screen for /map (module id app/map) on every OS that does not override it;
 // mobile.native.routes keeps iOS on the web screen. Web builds never read this file: it is not a
 // route, not in the generated route types, and not in any web bundle.
-import { serverFetch, useNavigate, useServerQuery } from "@farm.js/native";
+import { useNavigate, useServerQuery } from "@farm.js/native";
 import { useNetInfo } from "@react-native-community/netinfo";
 import { useEffect, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
-import type { Station } from "../../../features/stations/data";
+import { apiClient } from "../../../lib/api";
 import Device from "../../../native/NativeDevice";
 
-type StationSummary = Omit<Station, "readings">;
-
-/** GET /api/stations on mobile.server, the route the web client would call. */
-async function listStations(): Promise<StationSummary[]> {
-  const response = await serverFetch("/api/stations");
-  if (!response.ok) throw new Error(`GET /api/stations answered ${response.status}`);
-  return (await response.json()) as StationSummary[];
+/** GET /api/stations: the typed call the web makes, sent to mobile.server with the device session. */
+async function listStations() {
+  const { data, error } = await apiClient.stations.get();
+  if (error) throw error;
+  return data;
 }
 
 export const metadata = { title: "Map" };

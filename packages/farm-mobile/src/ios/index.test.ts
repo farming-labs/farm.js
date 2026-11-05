@@ -487,6 +487,68 @@ describe("@farm.js/mobile/ios", () => {
     expect(files["App/Page.swift"]!.match(/MobileSession\.shared\?\.sync\(\)/g)).toHaveLength(2);
   });
 
+  it("signs native screens in only under auth.basePath on mobile.server, with no cookie or redirect", async () => {
+    const files = await generated(context({ authBasePath: "/api/auth" }));
+    expect(files["App/FarmBuild.swift"]).toContain('static let authBasePath = "/api/auth"');
+    expect((await generated(context()))["App/FarmBuild.swift"]).toContain(
+      'static let authBasePath = ""',
+    );
+    const session = files["App/MobileSession.swift"]!;
+    const signIn = session.slice(
+      session.indexOf("    func signIn(path: String, body: String)"),
+      session.indexOf("    nonisolated static func isAuthRoute("),
+    );
+    // The path is checked before anything is sent, and the URL is always mobile.server's.
+    expect(signIn).toContain(
+      "guard Self.isAuthRoute(path, authBasePath: FarmBuild.authBasePath) else {",
+    );
+    expect(signIn).toContain(
+      "var request = URLRequest(url: config.url(FarmBuild.basePath + path))",
+    );
+    expect(signIn).toContain('request.httpMethod = "POST"');
+    expect(signIn).toContain("request.httpShouldHandleCookies = false");
+    const sent = signIn.slice(0, signIn.indexOf("let reply = SignInReply("));
+    expect(sent).toContain("try await http.data(for: request)");
+    expect(sent).not.toMatch(/"Cookie"|"Origin"|X-Farm-Mobile/);
+    // The session's URLSession refuses every redirect, so a 3xx comes back as it is.
+    expect(session).toContain(
+      "http = URLSession(configuration: configuration, delegate: RefuseRedirects(), delegateQueue: nil)",
+    );
+    expect(session).toMatch(
+      /willPerformHTTPRedirection response: HTTPURLResponse,\n\s+newRequest request: URLRequest\n\s+\) async -> URLRequest\? \{\n\s+nil\n/,
+    );
+    // A refused sign-in or a redirect keeps no cookie and issues nothing; a success issues the
+    // device token through the same challenge and exchange a web sign-in uses.
+    const refused = signIn.indexOf(
+      "guard (200..<300).contains(response.statusCode), !cookies.isEmpty else { return reply }",
+    );
+    expect(refused).toBeGreaterThan(0);
+    expect(signIn.indexOf("await store.setCookie(cookie)")).toBeGreaterThan(refused);
+    expect(signIn.indexOf("await issue(cookieHeader: header)")).toBeGreaterThan(refused);
+    expect(session.match(/post\("\/__farm\/mobile\/session\/challenge"/g)).toHaveLength(1);
+  });
+
+  it("reaches native sign-in only from native code, never from a WebView page", async () => {
+    const files = await generated(context({ authBasePath: "/api/auth" }));
+    // WebView pages reach native code only through FarmBridge's message handler, which never
+    // touches the device session, and the scene registers no plugins.
+    expect(files["App/FarmBridge.swift"]).not.toMatch(/MobileSession|signIn|session/i);
+    expect(files["App/SceneDelegate.swift"]).toContain("let plugins: [String: FarmPlugin] = [:]");
+    expect(files["App/farm-bridge.js"]).not.toMatch(/signIn|session/i);
+    for (const [file, source] of swiftFiles(files)) {
+      // No type adopts FarmPlugin, so a page's `__farmBridge.call` reaches no native code.
+      expect(source, file).not.toMatch(
+        /(?:class|struct|enum|extension)\s+\w+\s*:[^{]*\bFarmPlugin\b/,
+      );
+      // iOS has no React Native host yet, so nothing calls it; the method waits for that module.
+      if (file !== "App/MobileSession.swift") expect(source, file).not.toMatch(/\.signIn\(/);
+    }
+    expect(files["App/Page.swift"]!.match(/MobileSession\.shared\?\.\w+/g)).toEqual([
+      "MobileSession.shared?.sync",
+      "MobileSession.shared?.sync",
+    ]);
+  });
+
   it("sets FarmBuild.dev only under farm dev, and reads launch overrides only when it is set", async () => {
     const farmBuild = async (ctx: MobileShellContext) =>
       (await generated(ctx))["App/FarmBuild.swift"];
@@ -754,6 +816,49 @@ describe("generated files on this machine's tools", () => {
       const files = swiftFiles(await generated(context())).map(([file]) => path.join(dir, file));
       expect(files.length).toBeGreaterThan(5);
       for (const file of files) await execFileAsync("swiftc", ["-parse", file]);
+    },
+    120_000,
+  );
+
+  it.skipIf(!hasSwiftc || process.platform !== "darwin")(
+    "runs the shell's auth route check: only safe paths under auth.basePath",
+    async () => {
+      const session = (await generated(context()))["App/MobileSession.swift"]!;
+      const check = /    nonisolated static func isAuthRoute\([\s\S]*?\n    \}\n/.exec(session)![0];
+      const accepted = ["/api/auth/sign-in/email", "/api/auth/sign-up/email"];
+      const refused = [
+        "/api/auth",
+        "/api/auth/",
+        "/api/authx/sign-in/email",
+        "/api/notes",
+        "/api/auth/../notes",
+        "/api/auth/%2e%2e/notes",
+        "/api/auth/sign-in/email?callbackURL=https://evil.example",
+        "/api/auth/sign-in/email#x",
+        "/api/auth//evil.example/sign-in",
+        "//evil.example/api/auth/sign-in/email",
+        "https://evil.example/api/auth/sign-in/email",
+        "/api/auth/sign-in/email\n",
+        "/api/auth/sign-\u00e9/email",
+      ];
+      const dir = await tempDir();
+      const cases = [
+        ...accepted.map((path) => [path, "/api/auth"]),
+        ...refused.map((path) => [path, "/api/auth"]),
+        ["/api/auth/sign-in/email", ""],
+      ];
+      const main = `import Foundation
+enum Check {
+${check.replace("nonisolated ", "")}}
+let cases: [(String, String)] = [${cases.map(([p, base]) => `(${JSON.stringify(p)}, ${JSON.stringify(base)})`).join(", ")}]
+print(cases.map { Check.isAuthRoute($0.0, authBasePath: $0.1) ? "1" : "0" }.joined())
+`;
+      await writeFile(path.join(dir, "main.swift"), main);
+      await execFileAsync("swiftc", ["-o", path.join(dir, "check"), path.join(dir, "main.swift")], {
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      const { stdout } = await execFileAsync(path.join(dir, "check"));
+      expect(stdout.trim()).toBe(`${"1".repeat(accepted.length)}${"0".repeat(refused.length)}0`);
     },
     120_000,
   );

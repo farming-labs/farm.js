@@ -81,6 +81,8 @@ enum FarmBuild {
     static let startPath = ${swiftString(context.basePath || "/")}
     /// The app's base path ("" or "/base"), in front of /__farm/mobile/session.
     static let basePath = ${swiftString(context.basePath)}
+    /// auth.basePath, or "" without auth: the only routes native screens sign in to.
+    static let authBasePath = ${swiftString(context.authBasePath ?? "")}
     /// SF Symbols for mobile.tabs, in order.
     static let tabIcons: [String] = [${symbols.join(", ")}]
 }

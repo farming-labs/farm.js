@@ -563,6 +563,7 @@
     },
     "./api/client": {
       "types": "./dist/api/client.d.ts",
+      "react-native": "./dist/api/client.native.mjs",
       "import": "./dist/api/client.mjs",
       "require": "./dist/api/client.cjs"
     },
@@ -826,7 +827,7 @@
   "devDependencies": {
     "@clerk/react": "^6.4.3",
     "@farm.js/renderer-tests": "workspace:*",
-    "@farming-labs/docs": "^0.2.118",
+    "@farming-labs/docs": "^0.2.142",
     "@opentelemetry/sdk-node": "0.221.0",
     "@opentelemetry/sdk-trace-base": "2.10.0",
     "@tailwindcss/vite": "4.3.3",

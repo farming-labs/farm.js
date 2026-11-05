@@ -5,6 +5,7 @@
  */
 import { Component, useEffect, useMemo, type ComponentType, type ReactNode } from "react";
 import { AppRegistry } from "react-native";
+import { serverFetch } from "./index";
 import { describeError, loadFarmScreen } from "./load";
 import { matchFarmRoute } from "./routes";
 import {
@@ -80,6 +81,10 @@ function Screen({
 }
 
 /** Register every native screen of the app with React Native's `AppRegistry`. */
+// `@farm.js/core/api/client` on a native screen sends the app's API calls through `serverFetch`,
+// which it reads here, so core needs no dependency on this package.
+(globalThis as Record<symbol, unknown>)[Symbol.for("farm.native.serverFetch")] = serverFetch;
+
 export function registerFarmScreens(registration: FarmNativeRegistration): void {
   farmApp.basePath = registration.basePath === "/" ? "" : registration.basePath;
   for (const [module, entry] of Object.entries(registration.screens)) {
