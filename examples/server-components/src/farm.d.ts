@@ -32,6 +32,7 @@ export type RoutePath =
   | `/static/${string}`
   | "/stream"
   | "/timing"
+  | "/timing/later"
   | "/types"
   | "/values/a"
   | "/values/b"
@@ -57,6 +58,7 @@ export type RoutePattern =
   | "/static/[slug]"
   | "/stream"
   | "/timing"
+  | "/timing/later"
   | "/types"
   | "/values/a"
   | "/values/b"
@@ -83,6 +85,7 @@ export type RouteModulePattern =
   | "/static/[slug]"
   | "/stream"
   | "/timing"
+  | "/timing/later"
   | "/types"
   | "/values"
   | "/values/a"

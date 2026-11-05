@@ -695,3 +695,101 @@ test("an idle island hydrates without input, and leaves the other islands waitin
   await expect(page.getByTestId("visible")).toHaveAttribute("data-hydrated", "false");
   expect(errors).toEqual([]);
 });
+
+// The client runtime (React, islx, the router) loads when a page first needs it: at once when an
+// island hydrates at load, otherwise on an island's own trigger or a link (RFC 0003, section 10).
+// /timing/later has an interaction island, a link, and a visible island below the fold.
+function scriptRequests(page: Page): string[] {
+  const scripts: string[] = [];
+  page.on("request", (request) => {
+    if (request.resourceType() === "script") scripts.push(new URL(request.url()).pathname);
+  });
+  return scripts;
+}
+
+/** Production's client entry, or farm dev's. */
+function isClientRuntime(pathname: string): boolean {
+  return /^\/farm-client-h[0-9a-f]+\.js$/.test(pathname) || pathname === "/@farm/client.js";
+}
+
+test("a page with an island that hydrates at load loads the client runtime at once", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const scripts = scriptRequests(page);
+  await page.goto("/");
+  await hydrated(page);
+  expect(scripts.filter(isClientRuntime)).toHaveLength(1);
+});
+
+test("a page whose islands all hydrate later loads the client runtime when one is due", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  const scripts = scriptRequests(page);
+  await page.goto("/timing/later");
+  await hydrated(page);
+  expect(scripts.filter(isClientRuntime)).toEqual([]);
+  await page.getByTestId("visible").scrollIntoViewIfNeeded();
+  await expect(page.getByTestId("visible")).toHaveAttribute("data-hydrated", "true");
+  expect(scripts.filter(isClientRuntime)).toHaveLength(1);
+  await expect(page.getByTestId("interaction")).toHaveAttribute("data-hydrated", "false");
+  expect(errors).toEqual([]);
+});
+
+test("a click on an island before the client runtime loads is replayed once it hydrates", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  const scripts = scriptRequests(page);
+  await page.goto("/timing/later");
+  await hydrated(page);
+  expect(scripts.filter(isClientRuntime)).toEqual([]);
+  const island = page.getByTestId("interaction");
+  await island.click();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await expect(island).toHaveText("Interaction: 1");
+  expect(errors).toEqual([]);
+});
+
+test("a link followed before the client runtime loads is a client navigation", async ({ page }) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  const scripts = scriptRequests(page);
+  await page.goto("/timing/later");
+  await hydrated(page);
+  expect(scripts.filter(isClientRuntime)).toEqual([]);
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  // A click with no pointer before it: nothing has started the runtime, so the click is held.
+  await page.getByRole("link", { name: "To timing" }).dispatchEvent("click");
+  await expect(page).toHaveURL(/\/timing$/);
+  await expect(page.getByRole("heading", { name: "Timing", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("a link still navigates when the client runtime fails to load", async ({ page, request }) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const html = await (await request.get("/timing/later")).text();
+  const runtime = /<script[^>]*\sdata-farm-runtime="([^"]+)"/.exec(html)?.[1];
+  expect(runtime).toMatch(/^\/(farm-client-h[0-9a-f]+\.js|@farm\/client\.js)$/);
+  const blocked: string[] = [];
+  await page.route(
+    (url) => url.pathname === runtime,
+    (route) => {
+      blocked.push(route.request().url());
+      return route.abort();
+    },
+  );
+  await page.goto("/timing/later");
+  await hydrated(page);
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  await page.getByRole("link", { name: "To timing" }).dispatchEvent("click");
+  await expect(page).toHaveURL(/\/timing$/);
+  await expect(page.getByRole("heading", { name: "Timing", exact: true })).toBeVisible();
+  // A new document: the browser navigated itself, without the runtime.
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(false);
+  expect(blocked.length).toBeGreaterThan(0);
+});
