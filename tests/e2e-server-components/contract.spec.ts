@@ -196,6 +196,38 @@ test("a client navigation shows a Suspense page before its slow content arrives"
   expect(errors).toEqual([]);
 });
 
+test("a navigation request gets the layouts it keeps as boundaries, and flush markers", async ({
+  baseURL,
+  request,
+}) => {
+  test.skip(
+    mode !== "islands",
+    "islands mode's navigation protocol, the same in dev and production",
+  );
+  // F-Layouts names the layouts the browser shows, by key: the root renders, the rest are kept.
+  const segment = await request.get("/nav/b", {
+    headers: { Accept: "text/html", "F-Layouts": JSON.stringify(["/", "/nav"]) },
+  });
+  const html = await segment.text();
+  expect(html).toContain(
+    'data-farm-layout-pattern="/" data-farm-layout-key="/" style="display:contents"',
+  );
+  expect(html).toContain('data-farm-layout-key="/nav" data-farm-layout-kept="true"');
+  expect(html).toContain("Nav page B");
+  expect(segment.headers()["cache-control"]).toBe("private, no-store");
+
+  // F-Stream: flush marks where each React flush ends, with the token from F-Flush.
+  const streamed = await fetch(`${baseURL}/stream`, {
+    headers: { Accept: "text/html", "F-Stream": "flush" },
+  });
+  const token = streamed.headers.get("f-flush");
+  expect(token).toMatch(/^[0-9a-f]{32}$/);
+  const [shell, ...flushes] = (await streamed.text()).split(`<!--farm-flush:${token}-->`);
+  expect(shell).toContain("Loading slow content");
+  expect(shell).not.toContain("Slow content arrived");
+  expect(flushes.join("")).toContain("Slow content arrived");
+});
+
 test("leaving a streaming page drops the rest of its content", async ({ page }) => {
   test.skip(mode !== "islands" || dev, "islands production navigations stream");
   const errors = collectErrors(page);

@@ -98,6 +98,12 @@ import {
   createLateNotFoundRecovery,
   createLateRedirectRecovery,
 } from "../navigation/late-navigation-recovery";
+import {
+  countFarmKeptLayouts,
+  createFarmFlushToken,
+  farmFlushMarker,
+  getFarmLayoutKey,
+} from "../navigation/segment-navigation";
 import { sendWebResponse } from "./response";
 import { matchesFarmIfNoneMatch } from "../server-http";
 import { renderFarmFontDevHead } from "../font-vite";
@@ -395,6 +401,12 @@ function appendResponseHeader(res: FarmResponse, name: string, value: string): v
   } else {
     res.setHeader(name, [String(current), value]);
   }
+}
+
+/** A request header's first value. */
+function requestHeader(req: FarmRequest, name: string): string | undefined {
+  const value = req.headers?.[name];
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function appendResponseVary(res: FarmResponse, value: string): void {
@@ -815,12 +827,23 @@ export class ServerRenderer {
     );
   }
 
-  private createLayoutBoundary(pattern: string, layoutElement: unknown): unknown {
+  /**
+   * A layout's boundary. Islands mode keys it (the pattern with its params, as the production
+   * server does), so a navigation can name the layouts the browser shows; a layout the browser
+   * keeps is sent as its boundary alone (`kept`).
+   */
+  private createLayoutBoundary(
+    pattern: string,
+    layoutElement: unknown,
+    segment?: { key: string; kept?: boolean },
+  ): unknown {
     return this.rendererRuntime.createElement(
       "div",
       {
         "data-farm-layout-boundary": "true",
         "data-farm-layout-pattern": pattern,
+        ...(segment ? { "data-farm-layout-key": segment.key } : {}),
+        ...(segment?.kept ? { "data-farm-layout-kept": "true" } : {}),
         style: { display: "contents" },
       },
       layoutElement,
@@ -1654,7 +1677,14 @@ export class ServerRenderer {
       const pprBypassReason = renderingConfig.ppr
         ? this.getPPRShellBypassReason(req, middlewareMap, middlewareContext, pluginExposedContext)
         : undefined;
-      const canCachePPRShell = renderingConfig.ppr && !pprBypassReason;
+      // An islands navigation (F-Layouts, F-Stream) gets part of a page or flush markers: it never
+      // reads or stores the cached shell, which full loads share.
+      const islandsNavigationRequest = Boolean(
+        islands &&
+        this.islandValues() &&
+        (requestHeader(req, "f-layouts") || requestHeader(req, "f-stream")),
+      );
+      const canCachePPRShell = renderingConfig.ppr && !pprBypassReason && !islandsNavigationRequest;
       const pprI18nSnapshot = canCachePPRShell ? getFarmI18nClientSnapshot() : undefined;
       const pprShellOptions: PPRShellCacheOptions | undefined = canCachePPRShell
         ? {
@@ -2012,11 +2042,37 @@ export class ServerRenderer {
               islandStrategy: hydrationIslandStrategy,
             });
 
+            // Islands mode: the layouts the navigating browser keeps (F-Layouts), as on the
+            // production server. A static page, a layout that hydrates as a root, or a route
+            // slot always renders whole, and the root layout always renders: it may own the
+            // document, so keeping one layout keeps nothing.
+            const islandsSegments = Boolean(islands && this.islandValues());
+            const keptLayoutCount =
+              islandsSegments &&
+              !renderingConfig.ssg &&
+              !shouldHydrateLayout &&
+              renderedRouteSlots.length === 0
+                ? countFarmKeptLayouts(requestHeader(req, "f-layouts"), layouts, params)
+                : 0;
+            const keptLayouts = keptLayoutCount > 1 ? keptLayoutCount : 0;
             let wrappedElement: any = pageElement;
             for (let i = layoutModules.length - 1; i >= 0; i--) {
               const layoutModule = layoutModules[i];
               const layoutEntry = layouts[i];
               const LayoutComponent = layoutModule.default;
+              // A layout chain that hydrates is rendered by React in the browser
+              // (document-layout-client.ts), which draws its boundaries without a key.
+              const segment =
+                islandsSegments && !shouldHydrateLayout
+                  ? { key: getFarmLayoutKey(layoutEntry.pattern, params) }
+                  : undefined;
+              if (LayoutComponent && i > 0 && i < keptLayouts) {
+                wrappedElement = this.createLayoutBoundary(layoutEntry.pattern, wrappedElement, {
+                  key: segment!.key,
+                  kept: true,
+                });
+                continue;
+              }
               const slotProps: Record<string, any> = {};
               for (const slot of renderedRouteSlots) {
                 if ((slot.ownerDirectory ?? slot.ownerPattern) !== layoutEntry.pattern) continue;
@@ -2053,7 +2109,11 @@ export class ServerRenderer {
                       params,
                       ...slotProps,
                     });
-              wrappedElement = this.createLayoutBoundary(layoutEntry.pattern, wrappedElement);
+              wrappedElement = this.createLayoutBoundary(
+                layoutEntry.pattern,
+                wrappedElement,
+                segment,
+              );
             }
 
             if (shouldHydrateLayout) {
@@ -3371,6 +3431,22 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       for (const [key, value] of Object.entries(options.responseHeaders || {})) {
         res.setHeader(key, value);
       }
+      // Islands mode answers navigations as the production server does: a navigation the
+      // browser streams (F-Stream: flush) gets a marker after each React flush, with the random
+      // token sent in F-Flush, so page content cannot forge one.
+      const islandsMode = Boolean(islands && this.islandValues());
+      const flushToken =
+        islandsMode && requestHeader(req, "f-stream") === "flush" ? createFarmFlushToken() : "";
+      const flushMarker = flushToken ? Buffer.from(farmFlushMarker(flushToken)) : undefined;
+      if (islandsMode) {
+        for (const name of ["F-Values", "F-Layouts", "F-Render", "F-Stream"]) {
+          appendResponseVary(res, name);
+        }
+        if (requestHeader(req, "f-layouts") || flushToken) {
+          res.setHeader("Cache-Control", "private, no-store");
+        }
+        if (flushToken) res.setHeader("F-Flush", flushToken);
+      }
       const htmlParts: string[] = [];
       // Splitting a static shell out of the stream requires knowing where the
       // first dynamic boundary is, and only the renderer that emitted the
@@ -3693,6 +3769,18 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           };
           const writableStream = new Writable({
             write(chunk, encoding, callback) {
+              // A flush marker goes out in order with React's chunks, and stays out of what is
+              // recorded (the PPR shell, the document check).
+              if (flushMarker && chunk === flushMarker) {
+                const marker = documentTransform
+                  ? documentTransform.write(flushMarker.toString())
+                  : flushMarker;
+                res.write(marker, () => {
+                  if (typeof (res as any).flush === "function") (res as any).flush();
+                  callback();
+                });
+                return;
+              }
               if (firstChunk && process.env.FARM_VERBOSE) {
                 console.log(`[FARM STREAM] first pipe chunk at ${Date.now() - streamStartTime}ms`);
                 firstChunk = false;
@@ -3814,6 +3902,8 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           if (typeof (res as any).flush === "function") {
             (res as any).flush();
           }
+          // React calls flush() on its destination after each flush it writes.
+          if (flushMarker) (writableStream as any).flush = () => writableStream.write(flushMarker);
           pipe(writableStream);
         },
         onShellError(error) {
