@@ -171,7 +171,7 @@ test("client components before and inside slow Suspense content both hydrate", a
 test("a client navigation shows a Suspense page before its slow content arrives", async ({
   page,
 }) => {
-  test.skip(mode !== "islands" || dev, "islands production navigations stream");
+  test.skip(mode !== "islands", "islands navigations stream");
   const errors = collectErrors(page);
   await page.goto("/");
   await hydrated(page);
@@ -229,7 +229,7 @@ test("a navigation request gets the layouts it keeps as boundaries, and flush ma
 });
 
 test("leaving a streaming page drops the rest of its content", async ({ page }) => {
-  test.skip(mode !== "islands" || dev, "islands production navigations stream");
+  test.skip(mode !== "islands", "islands navigations stream");
   const errors = collectErrors(page);
   await page.goto("/");
   await hydrated(page);
