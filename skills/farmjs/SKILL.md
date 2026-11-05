@@ -176,7 +176,15 @@ Common config fields:
 - `mobile.modules`: per module (an app module's registered name or a React Native package in
   `dependencies`), `permissions` (full Android names, added to `AndroidManifest.xml` after
   `INTERNET`) and `usage` (`NS...UsageDescription` keys into `Info.plist`); every problem reported
-  at once with the key and fix; no permission table, community modules merge their own manifests
+  at once with the key and fix; no permission table, community modules merge their own manifests;
+  `web: true` (app modules only, a community module is an error) lets web screens call the module
+- Web screens calling app modules: `import { native, NativeUnavailableError, NativeCallError } from
+"@farm.js/core/native"`; `native.<Name>.available()` first, then `native.<Name>.<method>(...args)`
+  for the spec's Promise methods only; Android only (needs a React Native screen in the app, or
+  generation fails), iOS `available()` is false; arguments are checked against the Codegen spec in
+  generated Kotlin before the module runs (`invalid_args`, `unknown_method`, `native_error`, or the
+  module's own reject code); calls run on the module instance native screens use; types come from
+  the specs into `src/farm.d.ts` (`FarmNativeModules`); no file results or event subscriptions yet
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits
