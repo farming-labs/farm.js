@@ -30,10 +30,20 @@ function isModified(event: MouseEvent): boolean {
   return event.metaKey || event.altKey || event.ctrlKey || event.shiftKey;
 }
 
-/** The island `node` is in, when that island has not hydrated yet. */
-function pendingIsland(node: Element): Element | null {
-  const island = node.closest(ISLAND);
-  return island && !node.closest(HYDRATED_ISLAND) ? island : null;
+/** The element a click is held on: as the island scheduler's heldClickTarget (island-runtime.ts). */
+function heldClickTarget(target: Element): Element | null {
+  const link = target.closest("a[href]");
+  if (link) return link.getAttribute("href")?.startsWith("#") ? link : null;
+  return target.closest(FARM_ISLANDS_BOOT_REPLAYABLE_SELECTOR);
+}
+
+/**
+ * The island `node` is in, or the page's root when the route hydrates as one root that waits,
+ * while that island or root has not hydrated yet.
+ */
+function pendingIsland(node: Element, root: Element | null): Element | null {
+  if (node.closest(HYDRATED_ISLAND)) return null;
+  return node.closest(ISLAND) ?? (root?.contains(node) ? root : null);
 }
 
 /** A link the router navigates to: the same checks as its click handler. */
@@ -81,6 +91,11 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   ).__FARM_PREHYDRATION_CLICK_QUEUE__ ??= []) as FarmQueuedInteraction[];
   const cleanups: Array<() => void> = [];
   let loading: Promise<unknown> | undefined;
+  // A route that hydrates as one root that waits (RFC 0003, section 11): the server names the root
+  // element and its strategy on this script, and the root is held and triggered like an island.
+  const script = document.querySelector<HTMLScriptElement>("script[data-farm-runtime]");
+  const rootId = script?.dataset.farmRoot;
+  const root = rootId ? document.getElementById(rootId) : null;
 
   // The runtime holds and replays from here on: its scheduler for islands, its router for links.
   // A capture left in place would hold clicks it never replays, and one left after a failed load
@@ -123,11 +138,8 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
     (event) => {
       const click = event as MouseEvent;
       if (click.defaultPrevented || click.button !== 0 || isModified(click)) return;
-      const target =
-        click.target instanceof Element
-          ? click.target.closest(FARM_ISLANDS_BOOT_REPLAYABLE_SELECTOR)
-          : null;
-      if (!target || target.closest("a[href]") || !pendingIsland(target)) return;
+      const target = click.target instanceof Element ? heldClickTarget(click.target) : null;
+      if (!target || !pendingIsland(target, root)) return;
       hold(event, target, "click");
     },
     true,
@@ -138,7 +150,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       const form = event.target;
       if (event.defaultPrevented || !(form instanceof Element) || form.nodeName !== "FORM") return;
       // A form outside islands posts natively, as it does before any JavaScript runs.
-      if (pendingIsland(form)) hold(event, form, "submit");
+      if (pendingIsland(form, root)) hold(event, form, "submit");
     },
     true,
   );
@@ -150,7 +162,10 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
     const target = event.target;
     if (!(target instanceof Element)) return;
     if (routedLink(target)) void start();
-    else if (event.type !== "mouseover" && (pendingIsland(target) || target.closest("form"))) {
+    else if (
+      event.type !== "mouseover" &&
+      (pendingIsland(target, root) || target.closest("form"))
+    ) {
       void start();
     }
   };
@@ -238,6 +253,13 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   const comments = document.createTreeWalker(document, NodeFilter.SHOW_COMMENT);
   while (!loading && comments.nextNode()) consider(comments.currentNode);
   consider(document.documentElement);
+  if (rootId && !root) void start();
+  else if (root && !loading) {
+    const strategy = script?.dataset.farmRootStrategy;
+    if (strategy === "idle") startWhenIdle();
+    else if (strategy === "visible") observeVisible(root);
+    else if (strategy !== "interaction") void start();
+  }
 
   // A document still streaming (farm dev streams every page): islands and boundaries the parser
   // adds later are judged as they arrive, and visible ones once the document is parsed.
