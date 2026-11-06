@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import * as web from "../../farm-ui/src/tokens";
@@ -90,6 +90,28 @@ function styleOf(html: string, tag: string, index = 0): Record<string, unknown> 
 }
 
 describe("@farm.js/ui on a native screen", () => {
+  it("keeps literal View, Pressable, empty-state and badge text inside native Text", () => {
+    const nodes = [
+      createElement(ui.View, null, "Notes", 3),
+      createElement(ui.Pressable, null, createElement(Fragment, null, "Save", 2)),
+      createElement(ui.List, { items: [], row: () => ({ title: "x" }), empty: "No notes" }),
+      createElement(ui.List, {
+        items: [1],
+        row: () => ({ title: "Creek", badge: 0 }),
+      }),
+    ];
+    for (const node of nodes) {
+      const html = render(node);
+      const parents: string[] = [];
+      for (const token of html.matchAll(/<\/?([\w-]+)[^>]*>|([^<]+)/g)) {
+        if (token[2]) {
+          expect(parents.at(-1), `Raw text ${token[2]} in ${html}`).toBe("rn-text");
+        } else if (token[0].startsWith("</")) parents.pop();
+        else parents.push(token[1]!);
+      }
+    }
+  });
+
   it("resolves the web build's tokens to numbers and colors", () => {
     // The same token tables as @farm.js/ui's web build.
     for (const token of ["none", "xs", "sm", "md", "lg", "xl", "2xl"]) {

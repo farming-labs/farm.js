@@ -8,7 +8,7 @@
  * `style` prop is the web's CSS object; its simple values (lengths, colors, flex) carry over, and
  * `className` has no effect without CSS.
  */
-import type { ReactNode } from "react";
+import { Children, cloneElement, Fragment, isValidElement, type ReactNode } from "react";
 import {
   FlatList,
   Image as NativeImage,
@@ -129,10 +129,21 @@ function boxStyle(props: BoxProps): Style {
   return { ...style, ...toNativeStyle(props.style) };
 }
 
+function nativeChildren(children: ReactNode): ReactNode {
+  return Children.map(children, (child) => {
+    if (typeof child === "string" || typeof child === "number")
+      return <NativeText>{child}</NativeText>;
+    if (isValidElement<{ children?: ReactNode }>(child) && child.type === Fragment) {
+      return cloneElement(child, undefined, nativeChildren(child.props.children));
+    }
+    return child;
+  });
+}
+
 export function View(props: BoxProps & { children?: ReactNode; "aria-label"?: string }) {
   return (
     <NativeView accessibilityLabel={props["aria-label"]} style={boxStyle(props) as ViewStyle}>
-      {props.children}
+      {nativeChildren(props.children)}
     </NativeView>
   );
 }
@@ -228,7 +239,7 @@ export function Pressable(
       // The press feedback a native control gives.
       style={({ pressed }) => ({ ...style, ...(pressed ? { opacity: 0.6 } : {}) }) as ViewStyle}
     >
-      {props.children}
+      {nativeChildren(props.children)}
     </NativePressable>
   );
 }

@@ -40,6 +40,10 @@ can port to a native screen automatically.
 Raw values still pass through (`padding={10}`, `background="#fff"`), and every
 box-like primitive takes a `style` escape hatch merged last.
 
+On native screens, literal strings and numbers inside `View` or `Pressable`, including
+fragments, list empty states and badges, are wrapped in native `Text`. Use `Text` explicitly
+when you need text tokens such as `size`, `weight` or `color`.
+
 ## Theming
 
 Color tokens resolve to CSS custom properties with a built-in fallback, so an
