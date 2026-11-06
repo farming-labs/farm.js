@@ -81,6 +81,13 @@ const ANDROID = {
   "/about": { presentation: "push", screen: "server", source: "analyzer" },
   "/feed": { presentation: "push", screen: "server", source: "analyzer" },
   "/navigation": { presentation: "push", screen: "web", source: "default" },
+  // The analyzer's `port`: Farm generates its React Native screen.
+  "/lab/packing": {
+    presentation: "push",
+    screen: "native",
+    source: "analyzer",
+    module: "app/lab/packing",
+  },
   "/stations/[id]": { presentation: "push", screen: "web", source: "default" },
   "/map": { presentation: "push", screen: "native", source: "config", module: "app/map" },
   "/camera": { presentation: "push", screen: "native", source: "file", module: "app/camera" },
@@ -111,6 +118,16 @@ const notesPattern = new RegExp(rule("/notes").pattern);
 expect(notesPattern.test("/es/notes") && notesPattern.test("/notes"), "/es/notes is the notes tab");
 expect(!new RegExp(rule("/notes/[id]").pattern).test("/es"), "/es is not a note");
 
+expect(
+  row("/lab/packing")?.file === ".farm/output/mobile/ports/app/lab/packing.port.tsx",
+  "/lab/packing screen file is its port",
+);
+const packingPort = await readFile(
+  join(mobileDir, "ports", "src", "app", "lab", "packing", "page.tsx"),
+  "utf8",
+).catch(() => "");
+expect(packingPort.includes("<__FarmDom.input"), "/lab/packing port renames its elements");
+expect(!packingPort.includes("@farm.js/core"), "/lab/packing port does not import @farm.js/core");
 const packing = row("/lab/packing")?.analysis;
 expect(packing?.decision === "port", "/lab/packing is a port");
 expect(JSON.stringify(packing?.wins) === '["input","list"]', "/lab/packing wins: input, list");
@@ -147,6 +164,8 @@ expect((await readJson("native-report.json")).routes.find((entry) => entry.route
 // page.kt is Android only; on iOS its page.tsx passes the native-tier check.
 expect(iosRule("/settings/device")?.screen === "server", "ios /settings/device is a server screen");
 for (const route of SERVER) expect(iosRule(route)?.screen === "server", `ios ${route} is a server screen`);
+// iOS does not host React Native yet, so the port stays web there.
+expect(iosRule("/lab/packing")?.screen === "web", "ios /lab/packing is web");
 
 // ---- web build ------------------------------------------------------------------------------
 
@@ -177,7 +196,13 @@ const mobileClient = /^farm-mobile-client-h[0-9a-f]+\.js$/;
 for await (const file of files(join(root, ".farm", ".output"))) {
   if (mobileClient.test(file.split(/[\\/]/).at(-1))) continue;
   const source = await readFile(file, "utf8");
-  for (const leak of leaks) expect(!source.includes(leak), `${leak} is in the web output: ${file}`);
+  // `native` from @farm.js/core/native (the /settings device card) looks for the shell's bridge
+  // on purpose, and finds none in a browser.
+  const nativeProxy = source.includes("NativeUnavailableError");
+  for (const leak of leaks) {
+    if (nativeProxy && leak === "__farmBridge") continue;
+    expect(!source.includes(leak), `${leak} is in the web output: ${file}`);
+  }
 }
 
 const port = await availablePort();

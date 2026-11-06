@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.51-beta.3",
+  "version": "0.1.60",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -65,6 +65,9 @@
       ],
       "mobile": [
         "./dist/mobile.d.ts"
+      ],
+      "native": [
+        "./dist/native.d.ts"
       ],
       "internal/desktop-guard": [
         "./dist/internal/desktop-guard.d.ts"
@@ -378,6 +381,11 @@
       "import": "./dist/mobile.mjs",
       "require": "./dist/mobile.cjs"
     },
+    "./native": {
+      "types": "./dist/native.d.ts",
+      "import": "./dist/native.mjs",
+      "require": "./dist/native.cjs"
+    },
     "./internal/desktop-guard": {
       "types": "./dist/internal/desktop-guard.d.ts",
       "import": "./dist/internal/desktop-guard.mjs",
@@ -555,6 +563,7 @@
     },
     "./api/client": {
       "types": "./dist/api/client.d.ts",
+      "react-native": "./dist/api/client.native.mjs",
       "import": "./dist/api/client.mjs",
       "require": "./dist/api/client.cjs"
     },
@@ -706,6 +715,11 @@
       "import": "./dist/internal/islands-runtime.mjs",
       "require": "./dist/internal/islands-runtime.cjs"
     },
+    "./internal/islands-boot": {
+      "types": "./dist/internal/islands-boot.d.ts",
+      "import": "./dist/internal/islands-boot.mjs",
+      "require": "./dist/internal/islands-boot.cjs"
+    },
     "./internal/islands-server": {
       "types": "./dist/internal/islands-server.d.ts",
       "import": "./dist/internal/islands-server.mjs",
@@ -720,6 +734,11 @@
       "types": "./dist/internal/server-fn-transform.d.ts",
       "import": "./dist/internal/server-fn-transform.mjs",
       "require": "./dist/internal/server-fn-transform.cjs"
+    },
+    "./internal/native-server-fns": {
+      "types": "./dist/internal/native-server-fns.d.ts",
+      "import": "./dist/internal/native-server-fns.mjs",
+      "require": "./dist/internal/native-server-fns.cjs"
     },
     "./internal/islx-server": {
       "types": "./dist/internal/islx-server.d.ts",
@@ -783,7 +802,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farm.js/islx": "0.0.7",
+    "@farm.js/islx": "0.0.8",
     "@farming-labs/orm": "0.0.66",
     "@farming-labs/orm-runtime": "0.0.66",
     "@formatjs/icu-messageformat-parser": "3.5.15",
@@ -813,7 +832,7 @@
   "devDependencies": {
     "@clerk/react": "^6.4.3",
     "@farm.js/renderer-tests": "workspace:*",
-    "@farming-labs/docs": "^0.2.118",
+    "@farming-labs/docs": "^0.2.143",
     "@opentelemetry/sdk-node": "0.221.0",
     "@opentelemetry/sdk-trace-base": "2.10.0",
     "@tailwindcss/vite": "4.3.3",

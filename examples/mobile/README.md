@@ -22,7 +22,7 @@ pnpm smoke               # checks the mobile decisions and the web build
 | ------------------------ | ------------------------------------------------------------------------- |
 | `/`                      | Home tab: a static page that links every demo, and an external link       |
 | `/notes`                 | Notes tab: a server-rendered list                                         |
-| `/settings`              | Settings tab: i18n (`en`, `es`) with a language switch                    |
+| `/settings`              | Settings tab: i18n (`en`, `es`) with a language switch, and the `Device` module from a web screen |
 | `/about`                 | A static push, from Home or Settings (each tab keeps its own stack)       |
 | `/notes/[id]`            | A dynamic route pushed on the Notes tab                                   |
 | `/notes/new`             | `export const mobile = { presentation: "modal" }`, a form that calls the `createNote` server function and pushes the new note |
@@ -31,10 +31,10 @@ pnpm smoke               # checks the mobile decisions and the web build
 | `/docs/[...slug]`        | A catch-all route                                                         |
 | `/feed`                  | 240 rows, for scroll and frame-time checks                                |
 | `/stations/[id]`         | A programmatic route (`src/farm.routes.tsx`) whose data comes from `data.main` |
-| `/map`                   | `page.native.tsx`: a React Native list of stations from `GET /api/stations`; a row opens the web `/stations/[id]`. `mobile.native.routes` keeps it web on iOS |
-| `/camera`                | `page.native.tsx` with a `page.android.tsx` override: notes from `GET /api/notes` and a button to the web `/notes/new` modal |
+| `/map`                   | `page.native.tsx`: a React Native list of stations from `GET /api/stations`; a row opens the web `/stations/[id]`; the device model from the app's `Device` module and a vibrate button. `mobile.native.routes` keeps it web on iOS |
+| `/camera`                | `page.native.tsx` with a `page.android.tsx` override: notes from `GET /api/notes`, a quick note through the `createNote` server function called by import, and a button to the web `/notes/new` modal |
 | `/settings/device`       | `page.kt`: a platform screen on Android                                   |
-| `/lab/packing`           | Only portable elements and inline styles: the analyzer says `port`        |
+| `/lab/packing`           | Only portable elements and inline styles: the analyzer says `port`, and `farm build --mobile` generates its React Native port on Android |
 | `/lab/chart`             | A canvas through a ref, a table, and `window`: the analyzer lists why it stays web |
 
 `/map` and `/camera` are React Native screens built by `@farm.js/native` (Metro in
@@ -69,9 +69,9 @@ Verified with `pnpm dev:mobile` on an Android 15 emulator (SwiftShader software 
 - The Hermes bytecode build takes 18.5 s in Metro and 1.6 s in `hermesc`, for 1.23 MB of bytecode
   and a 73.7 MB debug APK.
 
-Not verified yet: native screens in a production bytecode build (it installs and cold-starts, but
-no native screen was opened in it), and real devices, so the emulator numbers say nothing about
-smoothness on a phone.
+In a bytecode build (`pnpm build:apk`, a debug APK) against a local production server, `/map` opens
+as React Native with its stations. Not verified yet: real devices, so the emulator numbers say
+nothing about smoothness on a phone.
 
 When a native screen throws while loading, a build shows its web version (`page.tsx`, the web
 twin) and logs `<module id> failed to load: <error>` (`adb logcat -s FarmShell`). In
@@ -79,6 +79,31 @@ twin) and logs `<module id> failed to load: <error>` (`adb logcat -s FarmShell`)
 
 Building the native screens needs the Android NDK 27.1.12297006 (2.4 GB) and CMake 3.22.1 (94 MB),
 which Gradle installs on the first build, for the 73 KB `libappmodules.so`.
+
+`/map` also shows the network type and `isConnected` from `@react-native-community/netinfo`
+(`testID="network-status"`), a community native module. Farm links the modules in the app's
+`dependencies` into the Android app, so the example builds through React Native's Gradle plugin
+(Android Gradle plugin 9.2.1, Gradle 9.4.1, JDK 17 or newer) instead of the shell's own toolchain.
+Netinfo's `ACCESS_NETWORK_STATE` and `ACCESS_WIFI_STATE` permissions are granted at install, with
+no prompt. On an Android 15 emulator, in `pnpm dev:mobile` and in a bytecode APK, `/map` shows
+`wifi` and `true`, then `cellular` with Wi-Fi off and `none` and `false` with all networks off.
+
+`/map` also uses the app's own native module, `Device` (`src/native/NativeDevice.ts`, a Codegen
+spec, and `src/native/DeviceModule.kt`): it shows the phone's model (`testID="device-model"`) and
+a button that vibrates for 200 ms (`testID="vibrate"`). `mobile.modules.Device.permissions` in
+`farm.config.ts` adds `android.permission.VIBRATE` to the manifest, an install-time permission with
+no prompt. Farm copies the module into `farm-app-modules/` in the generated project and links it
+like netinfo. On an Android 15 emulator, in `pnpm dev:mobile` and in a bytecode APK, `/map` shows
+the emulator's model (`sdk_gphone64_arm64`) and `Vibrate` vibrates for 200 ms with no error.
+`src/native/` is type-checked with the native files (`tsconfig.native.json`).
+
+`/settings` (a web screen) calls the same `Device` module from the WebView:
+`mobile.modules.Device.web` in `farm.config.ts` registers it with the Android shell's bridge, and
+`src/app/(styled)/settings/device-card.tsx` shows `native.Device.model()` from
+`@farm.js/core/native` (`data-testid="web-device-model"`) and a `Vibrate` button
+(`data-testid="web-vibrate"`). In a browser and in the iOS shell, `native.Device.available()` is
+false and the card says `not in the app`. `src/farm.d.ts` types `native.Device` from the spec. Not
+verified on an emulator yet.
 
 React versions: this example pins `react` and `react-dom` 19.2.8, the version Farm core is tested
 on. React Native 0.88 declares a `react@^19.3.0` peer (its renderer is built from 19.3.0), so pnpm
@@ -89,7 +114,9 @@ The web pages and the native screens share the example's one `react`. The exampl
 from npm has one `react` (core only peers on it), so it can use 19.3 for both.
 
 The root layout has no stylesheet, because the analyzer checks every layout above a route. Styled
-routes get `globals.css` from the `(styled)` route group's layout; `/lab` routes use inline styles.
+routes import `globals.css` from the `(styled)` route group's layout; `/lab` routes use inline
+styles. A production build still links `globals.css` on every page, `/lab` included, so the
+generated port of `/lab/packing` applies its `body` and `input` rules too.
 
 `mobile.server` defaults to `https://field-notes.farmjs.dev`; set `FIELD_NOTES_SERVER` to point
 `farm build --mobile` at your own deployment.

@@ -69,15 +69,38 @@ function shellSession(): FarmShellSession | undefined {
 
 /**
  * `fetch` against `mobile.server` (the dev server under `farm dev --mobile`): the same HTTP
- * routes the web client calls, such as `serverFetch("/api/notes")`. Once the user signed in on a
- * web screen, it sends the device's session (`Authorization: Bearer`), so protected API routes
- * and server functions see the same user; a 401 refreshes the token once and retries.
+ * routes the web client calls, such as `serverFetch("/api/notes")`. Once the user signed in, on a
+ * web or a native screen, it sends the device's session (`Authorization: Bearer`), so protected
+ * API routes and server functions see the same user; a 401 refreshes the token once and retries.
  */
 export function serverFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetchWithFarmSession(serverUrl(path), init, {
     server: farmApp.server,
     shell: shellSession(),
   });
+}
+
+/** A server function called from a native screen failed, as `createServerFn` reports it. */
+export class FarmServerFnError extends Error {
+  /** A code from the function's `errors`, or `invalid_input`, `server_error`, `not_native`, ... */
+  readonly code: string;
+  readonly status: number;
+  /** The declared error's public data. */
+  readonly data: unknown;
+  /** Where the function redirected, when it called `redirect()`. */
+  readonly redirect?: string;
+
+  constructor(
+    message: string,
+    details: { code: string; status: number; data?: unknown; redirect?: string },
+  ) {
+    super(message);
+    this.name = "FarmServerFnError";
+    this.code = details.code;
+    this.status = details.status;
+    this.data = details.data;
+    if (details.redirect !== undefined) this.redirect = details.redirect;
+  }
 }
 
 /**

@@ -101,7 +101,7 @@ describe("@farm.js/auth/client entries", () => {
     expect(native.has("client.native.js")).toBe(true);
     // The web client is a type-only import here: erased, so Metro never loads better-auth/react.
     expect(runtimeImports(native.get("client.native.js")!).sort()).toEqual(
-      ["./config.js", "@farm.js/native", "react"].sort(),
+      ["./config.js", "@farm.js/native", "@farm.js/native/internal", "react"].sort(),
     );
     expect(runtimeImports(native.get("config.js") ?? "")).toEqual([]);
   });

@@ -229,7 +229,6 @@ export default function Effect({ icon: Icon }) {
       'src/app/chart/page.tsx:7:12 class-name "hover:bg-gray-100" needs the CSS hover: selector',
       'src/app/chart/page.tsx:7:12 class-name "shadow-lg" is a visual effect with no native mapping',
       'src/app/chart/page.tsx:7:12 class-name "w-[37px]" is an arbitrary value',
-      'src/app/chart/page.tsx:7:12 class-name class "card" is not in the native Tailwind subset',
       "src/app/chart/page.tsx:8:12 runtime-class-name <div> builds its class names at runtime",
       'src/app/chart/page.tsx:8:42 style style.display "grid" has no native mapping',
       "src/app/chart/page.tsx:8:59 style style.transform has no native mapping",
@@ -313,15 +312,17 @@ export const getNote = createServerFn({ handler: async ({ id }) => JSON.parse(aw
     expect(rules(routeOf(result, "/drafts"))).toEqual([
       "src/components/widget.tsx:2:16 runtime-class-name <span> builds its class names at runtime",
     ]);
-    // The root layout's stylesheet blocks a route without a native layout to replace it.
+    // A plain stylesheet is the app's CSS, which ports apply; a Sass file is not plain CSS.
     await fs.rm(path.join(root, "src/app/layout.native.tsx"));
-    const again = await report(root);
-    expect(rules(routeOf(again, "/web"))).toEqual([
-      'src/app/layout.tsx:1:1 css-import import "./globals.css" is a stylesheet',
-    ]);
-    expect(routeOf(again, "/notes/[id]").analysis!.blockers.map((blocker) => blocker.file)).toEqual(
-      ["src/app/layout.tsx"],
+    expect(rules(routeOf(await report(root), "/web"))).toEqual([]);
+    await fs.writeFile(
+      path.join(root, "src/app/layout.tsx"),
+      `import "./globals.scss";\n${LAYOUT}`,
     );
+    await fs.writeFile(path.join(root, "src/app/globals.scss"), "");
+    expect(rules(routeOf(await report(root), "/web"))).toEqual([
+      'src/app/layout.tsx:1:1 css-import import "./globals.scss" is a stylesheet',
+    ]);
   });
 
   it("skips routes decided by files, the page, or config, and feeds config ports", async () => {
@@ -352,7 +353,7 @@ export const getNote = createServerFn({ handler: async ({ id }) => JSON.parse(aw
       analysis: { decision: "web", portable: false },
     });
     expect(result.warnings).toEqual([
-      'native.routes["/asked"].screen is "native", but "/asked" has no page.native.tsx and Farm cannot port pages yet, so it stays web. The analyzer would keep it web: src/app/asked/page.tsx:1:42 <video> has no native mapping. This fails the build once native screens ship.',
+      'native.routes["/asked"].screen is "native", but "/asked" has no page.native.tsx and Farm cannot port it yet, so it stays web. The analyzer would keep it web: src/app/asked/page.tsx:1:42 <video> has no native mapping. This fails the build once native screens ship.',
     ]);
     expect(rules(routeOf(result, "/docs"))).toEqual([
       "src/app/docs/page.md:1:1 markdown-page a Markdown page renders HTML from Markdown",

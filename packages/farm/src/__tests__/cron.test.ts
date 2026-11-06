@@ -4,6 +4,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { createEndpoint } from "../api/endpoint";
+import { invokeAPIRouteEndpoint } from "../api/runtime";
 import {
   applyFarmCronVercelCrons,
   cronRoute,
@@ -349,5 +352,380 @@ describe("Farm cron", () => {
     (globalThis as any).__env__ = {};
     const missingSecret = await handler(new Request("https://example.com/api/cleanup"));
     expect(missingSecret.status).toBe(401);
+  });
+});
+
+describe("cronRoute around createEndpoint", () => {
+  const cleanup = () =>
+    createEndpoint(
+      { query: z.object({ olderThanDays: z.coerce.number().int().positive() }) },
+      async ({ query }) => Response.json({ olderThanDays: query.olderThanDays }),
+    );
+
+  it("guards the endpoint and keeps its parsed input", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const GET = cronRoute(cleanup());
+    const url = "https://example.com/api/cleanup?olderThanDays=30";
+
+    const unauthorized = await invokeAPIRouteEndpoint(GET, new Request(url));
+    expect(unauthorized.status).toBe(401);
+
+    const authorized = await invokeAPIRouteEndpoint(
+      GET,
+      new Request(url, { headers: { authorization: "Bearer test-secret" } }),
+    );
+    expect(authorized.status).toBe(200);
+    await expect(authorized.json()).resolves.toEqual({ olderThanDays: 30 });
+  });
+
+  it("keeps the endpoint's validation and metadata", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const endpoint = cleanup();
+    const GET = cronRoute(endpoint);
+
+    const invalid = await invokeAPIRouteEndpoint(
+      GET,
+      new Request("https://example.com/api/cleanup?olderThanDays=soon", {
+        headers: { authorization: "Bearer test-secret" },
+      }),
+    );
+    expect(invalid.status).toBe(400);
+    expect((GET as any).__types).toBe((endpoint as any).__types);
+    expect((GET as any).__sourceHandler).toBe((endpoint as any).__sourceHandler);
+  });
+
+  it("keeps an endpoint's MCP and OpenAPI metadata", () => {
+    const endpoint = createEndpoint(
+      { mcp: true, openapi: { summary: "Clean up sessions" } },
+      async () => Response.json({ ok: true }),
+    );
+    const GET = cronRoute(endpoint);
+    expect((GET as any).__mcp).toBe(true);
+    expect((GET as any).__openapi).toBe((endpoint as any).__openapi);
+    expect((GET as any).__openapi).toEqual({ summary: "Clean up sessions" });
+  });
+
+  it("validates input before the secret, as endpoint middleware does, and never runs the handler", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    let ran = false;
+    const GET = cronRoute(
+      createEndpoint({ query: z.object({ olderThanDays: z.coerce.number() }) }, async () => {
+        ran = true;
+        return Response.json({ ok: true });
+      }),
+    );
+
+    const response = await invokeAPIRouteEndpoint(
+      GET,
+      new Request("https://example.com/api/cleanup?olderThanDays=soon"),
+    );
+    expect(response.status).toBe(400);
+    expect(ran).toBe(false);
+  });
+
+  it("accepts a Request-like object, as a Node server can pass", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const GET = cronRoute(createEndpoint(async () => Response.json({ ok: true }))) as any;
+    const call = (headers: Record<string, string>) =>
+      GET.__farmInvoke({ request: { headers: new Headers(headers) }, context: {} });
+
+    expect((await call({ authorization: "Bearer test-secret" })).handlerExecuted).toBe(true);
+    const denied = await call({});
+    expect(denied.handlerExecuted).toBe(false);
+    expect(denied.result.status).toBe(401);
+  });
+
+  it("guards an imported route's copy and leaves the original route unchanged", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    // An existing route module's export, imported into a cron-only route.
+    const existing = createEndpoint(async () => Response.json({ ok: true }));
+    const cronCopy = cronRoute(existing);
+    const request = () => new Request("https://example.com/api/cleanup");
+
+    expect((await invokeAPIRouteEndpoint(cronCopy, request())).status).toBe(401);
+    expect((await invokeAPIRouteEndpoint(existing, request())).status).toBe(200);
+    expect(cronCopy).not.toBe(existing);
+  });
+
+  it("fails closed for an endpoint when production has no secret", async () => {
+    delete process.env.CRON_SECRET;
+    process.env.NODE_ENV = "production";
+    let ran = false;
+    const GET = cronRoute(
+      createEndpoint(async () => {
+        ran = true;
+        return Response.json({ ok: true });
+      }),
+    );
+
+    const response = await invokeAPIRouteEndpoint(
+      GET,
+      new Request("https://example.com/api/cleanup"),
+    );
+    expect(response.status).toBe(401);
+    expect(ran).toBe(false);
+  });
+});
+
+describe("cronRoute schedule options", () => {
+  const authorized = (
+    url = "https://example.com/api/cleanup",
+    headers: Record<string, string> = {},
+  ) => new Request(url, { headers: { authorization: "Bearer test-secret", ...headers } });
+
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  };
+
+  // A macrotask fence: the in-flight release runs in a microtask after the gated handler
+  // settles, so the next call must start after the queue drains. Not a duration-based sleep.
+  const microtasksDrained = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  it("delivers context.cron with the scheduler headers, the literal input, and a signal", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    let seen: any;
+    const GET = cronRoute(
+      createEndpoint(async ({ context }: any) => {
+        seen = context.cron;
+        return Response.json({ ok: true });
+      }),
+      { schedule: "0 2 * * *", input: { olderThanDays: 30 } },
+    );
+
+    const response = await invokeAPIRouteEndpoint(
+      GET,
+      authorized("https://example.com/api/cleanup", {
+        "x-farm-cron-name": "cleanup",
+        "x-farm-cron-scheduled-at": "1793544000000",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(seen.name).toBe("cleanup");
+    expect(seen.scheduledAt).toEqual(new Date(1793544000000));
+    expect(seen.input).toEqual({ olderThanDays: 30 });
+    expect(seen.signal).toBeInstanceOf(AbortSignal);
+    expect(seen.signal.aborted).toBe(false);
+  });
+
+  it("leaves name and scheduledAt undefined for a direct platform call", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    let seen: any;
+    const GET = cronRoute(
+      createEndpoint(async ({ context }: any) => {
+        seen = context.cron;
+        return Response.json({ ok: true });
+      }),
+      { schedule: "0 2 * * *" },
+    );
+
+    await invokeAPIRouteEndpoint(
+      GET,
+      authorized("https://example.com/api/cleanup", { "x-farm-cron-scheduled-at": "soon" }),
+    );
+    expect(seen.name).toBeUndefined();
+    // A header that is not a millisecond epoch reads as absent, never as an Invalid Date.
+    expect(seen.scheduledAt).toBeUndefined();
+    expect(seen.input).toBeUndefined();
+  });
+
+  it("preserves middleware context next to context.cron", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    let seen: any;
+    const GET = cronRoute(
+      createEndpoint({ middleware: [() => ({ tenant: "acme" })] }, async ({ context }: any) => {
+        seen = context;
+        return Response.json({ ok: true });
+      }),
+      { schedule: "0 2 * * *", input: [1, 2] },
+    );
+
+    const response = await invokeAPIRouteEndpoint(GET, authorized());
+    expect(response.status).toBe(200);
+    expect(seen.tenant).toBe("acme");
+    expect(seen.cron.input).toEqual([1, 2]);
+  });
+
+  it("answers 504 and aborts context.cron.signal when the handler outlives timeoutMs", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const gate = deferred<Response>();
+    let signal: AbortSignal | undefined;
+    const GET = cronRoute(
+      createEndpoint(async ({ context }: any) => {
+        signal = context.cron.signal;
+        return gate.promise;
+      }),
+      { schedule: "0 2 * * *", timeoutMs: 20 },
+    );
+
+    const response = await invokeAPIRouteEndpoint(GET, authorized());
+    expect(response.status).toBe(504);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "The cron handler did not finish within its `timeoutMs` of 20 milliseconds. Raise `timeoutMs` or make the handler finish sooner.",
+    });
+    expect(signal?.aborted).toBe(true);
+    // Let the abandoned handler settle so nothing leaks into other tests.
+    gate.resolve(Response.json({ late: true }));
+  });
+
+  it("keeps the handler's own result when it finishes before timeoutMs", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const GET = cronRoute(
+      createEndpoint(async () => Response.json({ ok: true })),
+      { schedule: "0 2 * * *", timeoutMs: 5_000 },
+    );
+
+    const response = await invokeAPIRouteEndpoint(GET, authorized());
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("skips an overlapping run with 409 and allows the next one after completion", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const gate = deferred<Response>();
+    let runs = 0;
+    const GET = cronRoute(
+      createEndpoint(async () => {
+        runs += 1;
+        return runs === 1 ? gate.promise : Response.json({ ok: true });
+      }),
+      { schedule: "0 2 * * *", name: "overlap-endpoint", overlap: "skip" },
+    );
+
+    const first = invokeAPIRouteEndpoint(GET, authorized());
+    // The first run is parked on the gate; the overlapping call must not run the handler.
+    const skipped = await invokeAPIRouteEndpoint(GET, authorized());
+    expect(skipped.status).toBe(409);
+    await expect(skipped.json()).resolves.toEqual({ skipped: true });
+    expect(runs).toBe(1);
+
+    gate.resolve(Response.json({ ok: true }));
+    expect((await first).status).toBe(200);
+    await microtasksDrained();
+
+    const after = await invokeAPIRouteEndpoint(GET, authorized());
+    expect(after.status).toBe(200);
+    expect(runs).toBe(2);
+  });
+
+  it("holds the overlap mark until a timed-out handler settles", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const gate = deferred<Response>();
+    let runs = 0;
+    const GET = cronRoute(
+      createEndpoint(async () => {
+        runs += 1;
+        return runs === 1 ? gate.promise : Response.json({ ok: true });
+      }),
+      { schedule: "0 2 * * *", name: "overlap-timeout", overlap: "skip", timeoutMs: 20 },
+    );
+
+    const timedOut = await invokeAPIRouteEndpoint(GET, authorized());
+    expect(timedOut.status).toBe(504);
+    // The abandoned first run is still going, so the job still counts as in flight.
+    const skipped = await invokeAPIRouteEndpoint(GET, authorized());
+    expect(skipped.status).toBe(409);
+    expect(runs).toBe(1);
+
+    gate.resolve(Response.json({ late: true }));
+    await microtasksDrained();
+    const after = await invokeAPIRouteEndpoint(GET, authorized());
+    expect(after.status).toBe(200);
+    expect(runs).toBe(2);
+  });
+
+  it("applies timeoutMs and overlap to a plain handler", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const gate = deferred<Response>();
+    let runs = 0;
+    const handler = cronRoute(
+      async () => {
+        runs += 1;
+        return runs === 1 ? gate.promise : Response.json({ ok: true });
+      },
+      { schedule: "0 2 * * *", name: "overlap-plain", overlap: "skip", timeoutMs: 20 },
+    );
+
+    const timedOut = (await handler(authorized())) as Response;
+    expect(timedOut.status).toBe(504);
+    await expect(timedOut.json()).resolves.toEqual({
+      error:
+        "The cron handler did not finish within its `timeoutMs` of 20 milliseconds. Raise `timeoutMs` or make the handler finish sooner.",
+    });
+
+    const skipped = (await handler(authorized())) as Response;
+    expect(skipped.status).toBe(409);
+    await expect(skipped.json()).resolves.toEqual({ skipped: true });
+    expect(runs).toBe(1);
+
+    gate.resolve(Response.json({ late: true }));
+    await microtasksDrained();
+    const after = (await handler(authorized())) as Response;
+    expect(after.status).toBe(200);
+    expect(runs).toBe(2);
+  });
+
+  it("does not share the in-flight mark between unnamed routes", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const gate = deferred<Response>();
+    const first = cronRoute(async () => gate.promise, { overlap: "skip" });
+    const second = cronRoute(async () => Response.json({ ok: true }), { overlap: "skip" });
+
+    const firstPending = first(authorized());
+    const other = (await second(authorized())) as Response;
+    expect(other.status).toBe(200);
+
+    gate.resolve(Response.json({ ok: true }));
+    expect(((await firstPending) as Response).status).toBe(200);
+  });
+
+  it("leaves auth and the handler untouched when enabled is false", async () => {
+    process.env.CRON_SECRET = "test-secret";
+    const GET = cronRoute(
+      createEndpoint(async () => Response.json({ ok: true })),
+      { schedule: "0 2 * * *", enabled: false },
+    );
+
+    const unauthorized = await invokeAPIRouteEndpoint(
+      GET,
+      new Request("https://example.com/api/cleanup"),
+    );
+    expect(unauthorized.status).toBe(401);
+    expect((await invokeAPIRouteEndpoint(GET, authorized())).status).toBe(200);
+  });
+
+  it("keeps the secret options working next to schedule options", async () => {
+    delete process.env.CRON_SECRET;
+    process.env.NIGHTLY_SECRET = "nightly";
+    const GET = cronRoute(
+      createEndpoint(async () => Response.json({ ok: true })),
+      { schedule: "0 2 * * *", secretEnv: "NIGHTLY_SECRET", timeoutMs: 5_000 },
+    );
+
+    const denied = await invokeAPIRouteEndpoint(GET, new Request("https://example.com/api/x"));
+    expect(denied.status).toBe(401);
+    const ok = await invokeAPIRouteEndpoint(
+      GET,
+      new Request("https://example.com/api/x", { headers: { authorization: "Bearer nightly" } }),
+    );
+    expect(ok.status).toBe(200);
+  });
+
+  it("rejects an invalid timeoutMs or overlap when the route is defined", () => {
+    expect(() => cronRoute(async () => Response.json({ ok: true }), { timeoutMs: 0 })).toThrow(
+      "Farm cron `timeoutMs` must be a positive number of milliseconds; received 0. Remove the option or set a positive number.",
+    );
+    expect(() =>
+      cronRoute(async () => Response.json({ ok: true }), { timeoutMs: Number.NaN }),
+    ).toThrow("must be a positive number of milliseconds");
+    expect(() =>
+      cronRoute(async () => Response.json({ ok: true }), { overlap: "queue" as never }),
+    ).toThrow(
+      'Farm cron `overlap` only supports "skip"; received "queue". Remove the option to allow overlapping runs.',
+    );
   });
 });

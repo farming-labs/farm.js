@@ -125,6 +125,7 @@ test("farm config inspect --mobile prints the block and farm-routes.json for an 
       budgets: {},
     },
     shells: false,
+    modules: {},
   });
   // Every route's tier on this OS and what decided it.
   assert.deepEqual(printed.screens, {
@@ -226,6 +227,7 @@ export default {
       { path: "context.json", contents: JSON.stringify({
         command: context.command,
         basePath: context.basePath,
+        authBasePath: context.authBasePath ?? null,
         id: context.mobile.id,
         server: context.manifest.server,
         projectDir: path.relative(context.root, context.projectDir),
@@ -396,7 +398,7 @@ test("farm build --mobile builds the mobile client apart from the web output and
   // The config asks for a native "/notes"; the analyzer proves the page needs no JavaScript, so
   // the shell draws it from the page the server renders, with no warning.
   assert.match(result.output, /\/notes\s+server\s+native\s/);
-  assert.doesNotMatch(result.output, /Farm cannot port pages yet/);
+  assert.doesNotMatch(result.output, /Farm cannot port it yet/);
   // native.auto defaults to "report": the build prints the analyzer table and writes the report.
   assert.match(result.output, /route\s+screen\s+tier\s+decision\s+mapped\s+portable\s+reason/);
   assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
@@ -423,6 +425,7 @@ test("farm build --mobile builds the mobile client apart from the web output and
     {
       command: "build",
       basePath: "",
+      authBasePath: null,
       id: "com.example.notes",
       server: "https://notes.example.com",
       projectDir: path.join(".farm", "output", "mobile", "android"),
@@ -626,6 +629,7 @@ test("farm build --mobile --os ios generates the iOS project and reports what th
     {
       command: "build",
       basePath: "",
+      authBasePath: null,
       id: "com.example.notes",
       server: "https://notes.example.com",
       projectDir: path.join(".farm", "output", "mobile", "ios"),
@@ -678,7 +682,31 @@ test("an app without native screens never loads @farm.js/native and gets no Reac
     await readFile(path.join(root, ".farm", "output", "mobile", "android", "context.json"), "utf8"),
   );
   assert.equal(context.native, null);
+  assert.equal(context.authBasePath, null);
   await assert.rejects(stat(path.join(root, ".farm", "output", "mobile", "native")));
+});
+
+test("the shell gets auth.basePath, the only routes native screens sign in to, when auth is on", async (t) => {
+  const config = BUILD_CONFIG.replace(
+    "telemetry: false,",
+    'telemetry: false,\n  auth: { basePath: "/account/auth" },',
+  );
+  const root = await createApp(t, config);
+  await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
+  await rm(path.join(root, "src/app/feed/page.native.tsx"));
+  await rm(path.join(root, "src/app/feed/page.android.tsx"));
+  await symlink(
+    await realpath(path.resolve(cliRoot, "..", "farm-auth")),
+    path.join(root, "node_modules", "@farm.js", "auth"),
+    "junction",
+  );
+  await installFakeShell(root);
+  const result = await runFarm(["build", "--mobile", "--root", root]);
+  assert.equal(result.code, 0, result.output);
+  const context = JSON.parse(
+    await readFile(path.join(root, ".farm", "output", "mobile", "android", "context.json"), "utf8"),
+  );
+  assert.equal(context.authBasePath, "/account/auth");
 });
 
 test("a native screen without @farm.js/native prints the install command", async (t) => {

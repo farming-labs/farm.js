@@ -137,6 +137,7 @@ const NATIVE_PACKAGE = "@farm.js/native";
 
 interface NativeScreensOptions {
   root: string;
+  srcDir?: string;
   outDir: string;
   screens: FarmMobileNativeScreen[];
   basePath: string;
@@ -257,6 +258,7 @@ async function writeMobileProject(
     command,
     mobile: app.mobile,
     basePath: config.basePath === "/" ? "" : config.basePath,
+    ...(config.auth?.enabled ? { authBasePath: config.auth.basePath } : {}),
     manifest: app.manifest,
     projectDir: path.resolve(
       config.root,
@@ -265,6 +267,7 @@ async function writeMobileProject(
     ...(native ? { native } : {}),
     ...(assets ? { assets } : {}),
     ...(shells ? { shells } : {}),
+    ...(app.appModules ? { appModules: app.appModules } : {}),
   };
   await writeShellFiles(
     context.projectDir,
@@ -336,6 +339,7 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
       nativeBuild ??= await loadFarmNativeBuild(root);
       const metro = await nativeBuild.startFarmNativeDevServer({
         root,
+        srcDir: app.config.srcDir,
         outDir: path.resolve(
           root,
           mobileRuntime.getFarmMobileOutputDirs(app.config.distDir).root,
@@ -533,6 +537,7 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
       nativeBuild ??= await loadFarmNativeBuild(root);
       const built = await nativeBuild.buildFarmNativeScreens({
         root,
+        srcDir: config.srcDir,
         outDir: path.resolve(root, dirs.root, "native"),
         screens,
         basePath: config.basePath === "/" ? "" : config.basePath,

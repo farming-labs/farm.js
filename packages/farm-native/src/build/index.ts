@@ -7,10 +7,12 @@
  * `hermesc` from the app's `react-native` compiles the build bundle to Hermes bytecode.
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 /** One React Native screen: its module id, page route, and absolute source file. */
 export interface FarmNativeScreen {
@@ -166,7 +168,10 @@ const BUILD_TOOLS =
   /^(?:metro(?:-(?!runtime$).*)?|@react-native\/(?:community-cli-plugin|codegen|gradle-plugin|dev-middleware|metro-babel-transformer|babel-preset|metro-config)|@babel\/(?:core|preset-.+|plugin-.+|helper-.+|parser|generator|traverse|template|types)|hermes-compiler|typescript|vite|@types\/.+)$/;
 
 // Farm's web runtime is never part of a React Native bundle.
-const WEB_ONLY = new Set(["@farm.js/core", "@farm.js/cli", "@farm.js/mobile", "react-dom"]);
+const WEB_ONLY = new Set(["@farm.js/cli", "@farm.js/mobile", "react-dom"]);
+// Packages whose React Native builds (the `react-native` export condition) import nothing outside
+// themselves, such as `@farm.js/core/api/client`: watched without their dependencies.
+const SELF_CONTAINED = new Set(["@farm.js/core"]);
 
 /** A package's real directory as Node resolves `name` from `from`, including pnpm's hoisted store. */
 function packageDir(from: string, name: string): string | undefined {
@@ -207,6 +212,7 @@ export function resolveWatchFolders(
     const dir = packageDir(from, name);
     if (!dir || seen.has(dir)) continue;
     seen.add(dir);
+    if (SELF_CONTAINED.has(name)) continue;
     const manifest = readManifest(dir);
     for (const field of ["dependencies", "peerDependencies", "optionalDependencies"] as const) {
       for (const dependency of Object.keys(manifest[field] ?? {})) queue.push([dir, dependency]);
@@ -264,7 +270,13 @@ const QUIET_REPORTER = {
 async function loadMetroConfig(
   root: string,
   toolchain: Toolchain,
-  overrides: { port?: number; watchFolders: string[]; nodeModulesPaths: string[] },
+  overrides: {
+    port?: number;
+    watchFolders: string[];
+    nodeModulesPaths: string[];
+    serverFnStubs?: ReadonlyMap<string, string>;
+    isServerFnModule?: (file: string) => boolean;
+  },
 ): Promise<MetroConfig> {
   const defaults = toolchain.metroConfig.getDefaultConfig(root);
   // An app's metro.config.js, when it has one, wins over these defaults.
@@ -285,7 +297,13 @@ async function loadMetroConfig(
       ...config.resolver,
       blockList: [...blockList, ...BLOCKED],
       nodeModulesPaths: [...config.resolver.nodeModulesPaths, ...overrides.nodeModulesPaths],
-      resolveRequest: resolveSingletonsFromApp(root, config.resolver.resolveRequest),
+      resolveRequest: guardFarmServerImports(
+        resolveFarmServerFnStubs(
+          overrides.serverFnStubs ?? new Map(),
+          resolveSingletonsFromApp(root, config.resolver.resolveRequest),
+          overrides.isServerFnModule,
+        ),
+      ),
     },
   };
 }
@@ -320,6 +338,8 @@ export function resolveSingletonsFromApp(root: string, next?: ResolveRequest): R
 
 export interface FarmNativeBuildOptions {
   root: string;
+  /** The app's source directory, for its `@/` imports. Defaults to `src`. */
+  srcDir?: string;
   /** `.farm/output/mobile/native`: the entry, the JS bundle, and the bytecode. */
   outDir: string;
   screens: readonly FarmNativeScreen[];
@@ -338,6 +358,160 @@ export interface FarmNativeBuild {
   /** Wall time of the Metro bundle and the Hermes compile. */
   bundleMs: number;
   hermesMs: number;
+}
+
+/** `@farm.js/core/internal/native-server-fns`, from the app's own core. */
+interface ServerFnScan {
+  collectFarmNativeServerFns(options: {
+    root: string;
+    srcDir: string;
+    entries: readonly string[];
+  }): Array<{ file: string; exports: Array<{ name: string; id: string }> }>;
+  describeFarmNativeServerFnModule(root: string, file: string, code: string): unknown;
+}
+
+async function loadServerFnScan(root: string): Promise<ServerFnScan | undefined> {
+  let file: string;
+  try {
+    file = createRequire(path.join(root, "package.json")).resolve(
+      "@farm.js/core/internal/native-server-fns",
+    );
+  } catch {
+    // A core without server functions for native screens.
+    return undefined;
+  }
+  return (await import(pathToFileURL(file).href)) as ServerFnScan;
+}
+
+/**
+ * Stubs for the server function modules the screens import, which the resolver puts in their
+ * place (`resolveFarmServerFnStubs`), so the bundle never holds server code. Each export posts to
+ * the app's server. Written before Metro crawls, so it watches them. Keyed by real module path.
+ */
+async function writeServerFnStubs(
+  options: FarmNativeBuildOptions,
+  scan: ServerFnScan | undefined,
+  stubs: Map<string, string>,
+): Promise<void> {
+  stubs.clear();
+  if (!scan) return;
+  const modules = scan.collectFarmNativeServerFns({
+    root: options.root,
+    srcDir: options.srcDir ?? "src",
+    entries: options.screens.map((screen) => screen.file),
+  });
+  const dir = path.join(options.outDir, "server-fns");
+  await mkdir(dir, { recursive: true });
+  for (const module of modules) {
+    const relative = path.relative(options.root, module.file).split(path.sep).join("/");
+    const stub = path.join(
+      dir,
+      `${createHash("sha256").update(relative).digest("hex").slice(0, 16)}.js`,
+    );
+    const source = [
+      `// Generated by @farm.js/native: the server functions in ${relative}, called over HTTP. Do not edit.`,
+      'import { createFarmNativeServerFn } from "@farm.js/native/internal";',
+      ...module.exports.map((entry) =>
+        entry.name === "default"
+          ? `export default createFarmNativeServerFn(${JSON.stringify(entry.id)});`
+          : `export const ${entry.name} = createFarmNativeServerFn(${JSON.stringify(entry.id)});`,
+      ),
+      "",
+    ].join("\n");
+    const current = await readFile(stub, "utf8").catch(() => undefined);
+    if (current !== source) await writeFile(stub, source);
+    stubs.set(realpathSync(module.file), stub);
+  }
+}
+
+/** The `@farm.js/core` entries a native bundle may hold: their React Native builds. */
+const NATIVE_CORE_ENTRIES = new Set(["@farm.js/core/api/client"]);
+
+/**
+ * Stops the bundle when native code imports Farm's server runtime: `@farm.js/core` or any entry
+ * without a React Native build. A server function module always imports it, so a module the stub
+ * swap does not recognize (a namespace import of `createServerFn`, a wrapper factory) stops here
+ * instead of shipping server code. The stubs themselves import only `@farm.js/native`.
+ */
+export function guardFarmServerImports(next: ResolveRequest): ResolveRequest {
+  return (context, moduleName, platform) => {
+    const name = moduleName.split("?")[0]!;
+    if (
+      (name === "@farm.js/core" || name.startsWith("@farm.js/core/")) &&
+      !NATIVE_CORE_ENTRIES.has(name)
+    ) {
+      throw nativeError(
+        `${context?.originModulePath ?? "A native screen's module"} imports ${name}, Farm's server ` +
+          "runtime, which never goes into a native bundle. Native screens call the server through " +
+          "@farm.js/core/api/client, or import server functions defined with createServerFn or " +
+          "createServerQuery imported by name from @farm.js/core.",
+      );
+    }
+    return next(context, moduleName, platform);
+  };
+}
+
+/**
+ * Resolves an import of a server function module to its stub. `isServerFnModule` checks any other
+ * app file the bundle reaches: one that defines server functions but has no stub (a dev session
+ * where a screen just started importing it) stops the bundle rather than ship server code.
+ */
+export function resolveFarmServerFnStubs(
+  stubs: ReadonlyMap<string, string>,
+  next: ResolveRequest,
+  isServerFnModule?: (file: string) => boolean,
+): ResolveRequest {
+  return (context, moduleName, platform) => {
+    const result = next(context, moduleName, platform) as
+      | { type?: string; filePath?: string }
+      | undefined;
+    if (result?.type !== "sourceFile" || !result.filePath) return result;
+    let real = result.filePath;
+    try {
+      real = realpathSync(result.filePath);
+    } catch {}
+    const stub = stubs.get(real);
+    if (stub) return { type: "sourceFile", filePath: stub };
+    if (isServerFnModule?.(real)) {
+      throw nativeError(
+        `${real} defines server functions, and a native screen imports it without its stub. ` +
+          "Restart `farm dev --mobile` so Farm generates it; the native bundle never holds server code.",
+      );
+    }
+    return result;
+  };
+}
+
+/** Whether an app file (not a package) defines server functions, cached by modification time. */
+function serverFnModuleCheck(
+  root: string,
+  scan: ServerFnScan | undefined,
+): ((file: string) => boolean) | undefined {
+  if (!scan) return undefined;
+  const cache = new Map<string, { mtimeMs: number; defines: boolean }>();
+  const appRoot = realpathSync(root);
+  return (file) => {
+    if (
+      !file.startsWith(`${appRoot}${path.sep}`) ||
+      file.includes(`${path.sep}node_modules${path.sep}`) ||
+      file.includes(`${path.sep}.farm${path.sep}`) ||
+      !/\.(?:tsx|ts|jsx|js|mjs)$/.test(file)
+    ) {
+      return false;
+    }
+    let mtimeMs: number;
+    try {
+      mtimeMs = statSync(file).mtimeMs;
+    } catch {
+      return false;
+    }
+    const cached = cache.get(file);
+    if (cached?.mtimeMs === mtimeMs) return cached.defines;
+    const defines =
+      scan.describeFarmNativeServerFnModule(root, file, readFileSync(file, "utf8")) !== undefined;
+    cache.set(file, { mtimeMs, defines });
+    return defines;
+  };
 }
 
 async function writeEntry(options: FarmNativeBuildOptions): Promise<string> {
@@ -396,9 +570,14 @@ export async function buildFarmNativeScreens(
   const toolchain = loadToolchain(options.root, reactNative);
   const platform = options.platform ?? "android";
   const entryFile = await writeEntry(options);
+  const scan = await loadServerFnScan(options.root);
+  const serverFnStubs = new Map<string, string>();
+  await writeServerFnStubs(options, scan, serverFnStubs);
   const config = await loadMetroConfig(options.root, toolchain, {
     watchFolders: resolveWatchFolders(options.root, toolchain.runtimeSeeds),
     nodeModulesPaths: hoistedNodeModules(reactNative.dir),
+    serverFnStubs,
+    isServerFnModule: serverFnModuleCheck(options.root, scan),
   });
   const { js, bytecode: bundle } = farmNativeBundleFiles(options.outDir, platform);
   await mkdir(path.dirname(js), { recursive: true });
@@ -456,11 +635,16 @@ export async function startFarmNativeDevServer(
   const reactNative = resolveFarmReactNative(options.root);
   const toolchain = loadToolchain(options.root, reactNative);
   const entryFile = await writeEntry(options);
+  const scan = await loadServerFnScan(options.root);
+  const serverFnStubs = new Map<string, string>();
+  await writeServerFnStubs(options, scan, serverFnStubs);
   const port = options.port ?? 8081;
   const config = await loadMetroConfig(options.root, toolchain, {
     port,
     watchFolders: resolveWatchFolders(options.root, toolchain.runtimeSeeds),
     nodeModulesPaths: hoistedNodeModules(reactNative.dir),
+    serverFnStubs,
+    isServerFnModule: serverFnModuleCheck(options.root, scan),
   });
   const serverBaseUrl = `http://localhost:${port}`;
   const { middleware, websocketEndpoints } = toolchain.devMiddleware.createDevMiddleware({
@@ -488,6 +672,7 @@ export async function startFarmNativeDevServer(
     port,
     mainModule,
     async update(screens) {
+      await writeServerFnStubs({ ...options, screens }, scan, serverFnStubs);
       await writeEntry({ ...options, screens });
     },
     close: closeWithConnections(httpServer),

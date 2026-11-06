@@ -1,6 +1,6 @@
 /**
  * Signed-in server calls from native screens (RFC 0004, 7.14). The shell owns the tokens: it
- * trades the WebView's cookie session for a device token after a sign-in on a web screen, keeps
+ * trades the WebView's cookie session for a device token after a sign-in on any screen, keeps
  * it in the Android Keystore or the iOS Keychain, and refreshes it. JS sees only the short-lived
  * access token, never the refresh token.
  */

@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/native",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "React Native screens for Farm.js mobile apps: page.native.tsx hooks and the screen bundle build.",
   "keywords": [
     "android",
@@ -30,6 +30,18 @@
       "react-native": "./dist/register.js",
       "import": "./dist/register.js",
       "default": "./dist/register.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "react-native": "./dist/internal.js",
+      "import": "./dist/internal.js",
+      "default": "./dist/internal.js"
+    },
+    "./elements": {
+      "types": "./dist/elements.d.ts",
+      "react-native": "./dist/elements.js",
+      "import": "./dist/elements.js",
+      "default": "./dist/elements.js"
     },
     "./build": {
       "types": "./dist/build/index.d.ts",

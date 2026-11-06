@@ -182,6 +182,34 @@ function debug(...args) {
   ${debugLog}
 }
 
+// A server component that fails while a client navigation renders it: a redirect() becomes a
+// client navigation to its target, and anything else loads the URL as a document, so the server
+// answers with its status and error.tsx. Errors in the first render are left to React.
+class FarmNavigationErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null, payload: props.payload };
+  }
+  static getDerivedStateFromProps(props, state) {
+    return props.payload === state.payload ? null : { error: null, payload: props.payload };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error) {
+    const digest = error && typeof error.digest === 'string' ? error.digest : '';
+    if (digest.startsWith('FARM_REDIRECT;')) {
+      farmNavigateRef.current?.(digest.split(';').slice(2).join(';'), 'replace');
+      return;
+    }
+    location.reload();
+  }
+  render() {
+    if (this.state.error && !this.props.navigated) throw this.state.error;
+    return this.state.error ? null : this.props.children;
+  }
+}
+
 async function main() {
   // Prevent double execution (e.g. script loaded twice)
   if (globalThis.__FARM_RSC_HYDRATED) return;
@@ -283,7 +311,11 @@ async function main() {
       if (payload.root != null) console.warn('[Farm.js] payload.rootContent missing; not using payload.root to avoid duplicate block. Keys:', Object.keys(payload));
       return null;
     }
-    return content;
+    return React.createElement(
+      FarmNavigationErrorBoundary,
+      { payload, navigated: payload !== initial },
+      content,
+    );
   }
   
   // An in-app navigation (a link click, a redirect after a server action). Navigation delegates

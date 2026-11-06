@@ -812,6 +812,14 @@ function getLayoutModules(pageFilePath) {
   return getRouteModules(pageFilePath, layouts, 'layout');
 }
 
+// Flight keeps only the digest onError returns for a server error. A notFound() or redirect() keeps
+// its own, so the request handler still answers 404 or the redirect; other errors are logged as
+// React's default handler logs them.
+function farmRscOnError(error) {
+  if (getFarmRedirectError(error) || isFarmNotFoundError(error)) return error.digest;
+  console.error(error);
+}
+
 function getMatchingBoundary(pageFilePath, modules, kind) {
   // Before page selection (for example, middleware failure), only the root
   // boundary applies. Do not guess a route from a partially processed URL.
@@ -1036,12 +1044,13 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
           return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
         }
         // No client router here, so the redirect has to be a real HTTP
-        // redirect the browser follows on its own.
+        // redirect the browser follows on its own. 303 makes it a GET, as islands mode
+        // answers: a 307 or 308 would post the form again to the target.
         const formRedirect = getFarmRedirectError(e);
         if (formRedirect) {
           debug('Form action redirected:', formRedirect.url);
           return new Response(null, {
-            status: formRedirect.status,
+            status: 303,
             headers: { location: formRedirect.url, 'Cache-Control': 'no-store' },
           });
         }
@@ -1209,7 +1218,7 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
     // Full RSC mode with streaming
     debug('Using RSC streaming mode');
     
-    const rscStream = renderToReadableStream(payload${ctx.actionsEnabled ? ", { temporaryReferences }" : ""});
+    const rscStream = renderToReadableStream(payload, { onError: farmRscOnError${ctx.actionsEnabled ? ", temporaryReferences" : ""} });
     
     if (acceptHeader.includes('text/x-component')) {
       debug('Returning RSC stream for client navigation');
@@ -1323,7 +1332,7 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
                 rootContent: rootInner,
                 metadata: { title: 'Error' },
               };
-              const rscStream = renderToReadableStream(payload);
+              const rscStream = renderToReadableStream(payload, { onError: farmRscOnError });
               const headers = new Headers(errorHeaders);
               headers.set('cache-control', 'private, no-store');
               headers.set('x-content-type-options', 'nosniff');

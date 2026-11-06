@@ -182,19 +182,21 @@ navigation, the navigation itself signals user intent, so Farm loads and renders
 destination immediately instead of leaving the previous route visible while waiting for another
 trigger.
 
-| Strategy      | Hydration trigger                                                     |
-| ------------- | --------------------------------------------------------------------- |
-| `load`        | Immediately. This is the default and compatibility-first behavior.    |
-| `interaction` | The first button-like click; Farm replays that click after hydration. |
-| `visible`     | When the route boundary approaches the viewport.                      |
-| `idle`        | During browser idle time, with a timeout fallback.                    |
+| Strategy      | Hydration trigger                                              |
+| ------------- | -------------------------------------------------------------- |
+| `load`        | Immediately. The default, except as below in islands mode.     |
+| `interaction` | The first button-like click or same-page link; replayed after. |
+| `visible`     | When the route boundary approaches the viewport.               |
+| `idle`        | During browser idle time, with a timeout fallback.             |
 
 With [isolated client hydration](/docs/configuration#isolated-client-hydration), each eligible
 client module keeps its own strategy, including after SPA navigation. Sibling boundaries can mix
 all four strategies: one boundary's trigger never hydrates another, and an interaction click is
 claimed and replayed once by the boundary that contains it. Removing a boundary cancels its pending
 observer, idle callback, or interaction listener. Islands mode
-(`serverComponents: { mode: "islands" }`) keeps each client module's strategy the same way. With
+(`serverComponents: { mode: "islands" }`) keeps each client module's strategy the same way, and gives
+a module without an `island` export `interaction` when its code provably does nothing before a
+click ([React Server Components](#react-server-components) lists the checks). With
 React Server Components (`{ mode: "rsc" }`), React's client hydrates every client component on load
 and the `island` export has no effect.
 
@@ -283,7 +285,10 @@ the same error and serves the page without client JavaScript.
 
 Client components that come from a package, such as the icons in `lucide-react`, cannot be isolated
 yet. An async page renders them as static HTML and still hydrates its own client components as
-islands, and Farm logs which packages it left static.
+islands, and Farm logs which packages it left static. In islands mode every page does the same, and
+so does a layout where each element of the package closes itself and takes no element props, as
+icons do. A package component that wraps content, such as a provider, fails the build instead: render
+it from a local `"use client"` module.
 
 ### Isolated client leaves without RSC
 
@@ -357,7 +362,9 @@ declare one inline: an `async` function with `"use server"` as its first stateme
 component's variables, which travel with it sealed (AES-GCM, bound to the action) rather than as
 form fields the browser could read or change. Every instance of one build shares the sealing key;
 set `ISLX_ACTIONS_KEY` to keep forms on open pages working across deploys. A `<form>` written in a
-server component posts its action without a page load once JavaScript runs. After an
+server component posts its action without a page load once JavaScript runs; React's
+`useFormStatus` reads only a form React renders, so a client component that shows a form's pending
+state renders the `<form>` itself. After an
 action called from JavaScript, the page refreshes, as the form posted without JavaScript would show
 it: islands still on the page keep their state and get their new props, and a `redirect()` from the
 action becomes a client navigation. Props and action arguments are not limited to JSON:
@@ -367,10 +374,29 @@ support them). A promise passed unawaited crosses too: the client component read
 `use()` inside a Suspense boundary, works before it settles, and gets the value with its types
 when it streams in (a rejection arrives without the server's reason). Functions other than server
 actions and class instances do not cross; a client component given one keeps its server HTML and
-is not hydrated. Islands mode needs none of the RSC packages and is experimental. Both modes share
+is not hydrated. A stylesheet that a server page, layout or server component imports (plain CSS or
+a CSS module) goes into the app's one stylesheet in production, though the module itself stays on
+the server. Islands mode needs none of the RSC packages and is experimental. Both modes share
 the authoring rules on this page, so switching between them is a one-line change; the same contract
 tests (`tests/e2e-server-components`) run against both, in development and in production builds.
 `benchmarks/server-components-payload` compares what each mode sends.
+
+In islands mode a page loads React and Farm's client runtime when it first needs them. A client
+component without an `island` export waits for a click when its code provably does nothing before
+one: it uses no effect, `ref`, form field, or handler other than `onClick` and `onSubmit` (a
+handled link only with a `#` link), and imports nothing but React and the app's own files that
+pass the same checks. Copy buttons, like buttons, menu toggles and tables of contents usually
+qualify; anything else hydrates at load, and an explicit `island` export always wins (see
+[Deferred route islands](#deferred-route-islands)). A layout that hydrates as one root (a client
+provider around the pages) waits the same way when every client component inside it, on the page
+too, passes. A page whose client components all wait, or
+that has none, starts with a 1.6 KB script, and loads the runtime when one is clicked, pressed or
+focused, when one that waits for `"visible"` or `"idle"` is due, when the pointer reaches a link,
+or when a form gets focus. A click made before then is held and replayed once the component has
+hydrated, and a `<form>` written in a server component posts natively until the runtime runs. An
+app with client plugins, a `src/client.ts`, or `docs` loads the runtime on every page. On
+`benchmarks/server-components-payload`, with no change to the app, docs, blog and shop pages load
+1.7 KB of JavaScript instead of 84.6 to 85.7 KB (`"rsc"`: 69.7 KB).
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
 The build goes to the deploy target's
