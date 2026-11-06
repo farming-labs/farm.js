@@ -104,7 +104,7 @@ describe("resolveFarmReactNative", () => {
 
 describe("resolveWatchFolders", () => {
   it("watches only the store packages a screen bundle can reach, not the whole workspace", async () => {
-    const workspace = await tempDir();
+    const workspace = path.join(await tempDir(), "metro-vite-h3");
     const store = path.join(workspace, "node_modules", ".pnpm");
     const app = path.join(workspace, "apps", "mobile");
     const pkg = (name: string) =>
@@ -155,7 +155,9 @@ describe("resolveWatchFolders", () => {
     ]);
     // Build tools and web-only packages stay out; core's native builds import nothing else, so
     // its dependencies do too.
-    expect(folders.join("\n")).not.toMatch(/metro|vite|h3/);
+    expect(folders.map((folder) => path.relative(workspace, folder)).join("\n")).not.toMatch(
+      /metro|vite|h3/,
+    );
   });
 });
 
