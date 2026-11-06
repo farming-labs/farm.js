@@ -15,12 +15,14 @@
     "directory": "packages/farm-ui"
   },
   "files": [
-    "dist"
+    "dist",
+    "native.js"
   ],
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "react-native": "./native.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },

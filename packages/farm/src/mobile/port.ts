@@ -234,7 +234,13 @@ export async function emitFarmMobilePort(options: {
         }
         return;
       }
-      if (kind === "type" || specifier === "react" || PURE_PACKAGES.has(packageName(specifier))) {
+      // `@farm.js/ui` has a React Native build Metro resolves, so its components port as they are.
+      if (
+        kind === "type" ||
+        specifier === "react" ||
+        specifier === "@farm.js/ui" ||
+        PURE_PACKAGES.has(packageName(specifier))
+      ) {
         return;
       }
       if (!CORE_LINK.has(specifier)) {

@@ -411,4 +411,32 @@ export default function Notes() {
       '<__FarmDom.ul __farm={{"tw":{"style":{"backgroundColor":"#ffffff"},"dark":{"backgroundColor":"#1d211e"}},"css":{"style":{}}}}>',
     );
   });
+
+  it("ports @farm.js/ui pages as they are: Metro gives them its native build", async () => {
+    const root = await createApp({
+      "src/app/gear/page.tsx": `"use client";
+import { useState } from "react";
+import { List, Pressable, Text, TextInput, View } from "@farm.js/ui";
+export default function Gear() {
+  const [items, setItems] = useState(["Tent"]);
+  const [draft, setDraft] = useState("");
+  return (
+    <View padding="md" gap="sm">
+      <Text size="xl" weight="bold">Gear</Text>
+      <TextInput value={draft} onChange={setDraft} />
+      <Pressable onPress={() => setItems([...items, draft])}><Text>Add</Text></Pressable>
+      <List items={items} row={(item) => ({ title: item })} />
+    </View>
+  );
+}
+`,
+    });
+    const result = await generate(root);
+    expect(result.warnings).toEqual([]);
+    expect(result.screens["/gear"]).toMatchObject({ screen: "native", source: "analyzer" });
+    const page = await fs.readFile(ports(root, "src/app/gear/page.tsx"), "utf8");
+    // No DOM elements to rename: the page is its own native screen.
+    expect(page).toContain('import { List, Pressable, Text, TextInput, View } from "@farm.js/ui";');
+    expect(page).not.toContain("__FarmDom");
+  });
 });
