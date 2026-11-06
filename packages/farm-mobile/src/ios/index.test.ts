@@ -597,6 +597,15 @@ describe("@farm.js/mobile/ios", () => {
     // the tab bar item when the screen is a tab's root.
     expect(files["App/ServerScreens.swift"]).toContain("parent?.navigationItem.title = title");
     expect(files["App/ServerScreens.swift"]).not.toMatch(/parent\?\.title = /);
+    // An info-level selection log does not prove the tree loaded and is not persisted by log show.
+    const server = files["App/ServerScreens.swift"];
+    const completion =
+      'Navigator.log.notice("server screen ready: \\(self.url.path, privacy: .public)")';
+    expect(server).toContain(completion);
+    expect(server.indexOf(completion)).toBeGreaterThan(
+      server.indexOf("scroll.addSubview(content)"),
+    );
+    expect(server.indexOf(completion)).toBeGreaterThan(server.indexOf("loaded = true"));
     expect(files["App/Navigator.swift"]).toContain('screen.navigationItem.title = ""');
     expect(routes).toContain(
       'let screen = (json["screen"] as? String).flatMap { screens.contains($0) ? $0 : nil } ?? web',

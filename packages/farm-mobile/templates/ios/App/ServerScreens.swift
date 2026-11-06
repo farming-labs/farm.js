@@ -1,5 +1,6 @@
 import UIKit
 import WebKit
+import os
 
 /// A screen whose rule is `"server"`: the analyzer proved the page needs no JavaScript, so the
 /// server renders it as for a browser and answers with a tree of views (`native-tree.ts`), drawn
@@ -77,6 +78,8 @@ final class FarmServerScreen: UIViewController {
             // navigationItem, not title: UIViewController.title also renames a tab root's tab bar item.
             if let title = tree["title"] as? String, !title.isEmpty { parent?.navigationItem.title = title }
             loaded = true
+            // Persist completion so simulator checks can distinguish a loaded tree from a pending one.
+            Navigator.log.notice("server screen ready: \(self.url.path, privacy: .public)")
         } catch {
             fallback(String(describing: error))
         }

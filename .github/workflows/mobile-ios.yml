@@ -88,8 +88,14 @@ jobs:
             xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/home-${t}s.png"
           done
           xcrun simctl spawn "$SIMULATOR_UDID" log show --last 5m --style compact \
-            --predicate 'process == "App"' > "$EVIDENCE/app-log.txt" || true
+            --predicate 'process == "App"' > "$EVIDENCE/app-log.txt"
           grep -iE "error|fault|crash" "$EVIDENCE/app-log.txt" | head -50 || true
+
+      - name: Check the home tab drew native views
+        working-directory: examples/mobile
+        run: |
+          cp .farm/output/mobile/farm-routes.json "$EVIDENCE/farm-routes.json"
+          node scripts/check-ios-native.mjs "$EVIDENCE"
 
       - name: Stop the dev server
         if: always()
