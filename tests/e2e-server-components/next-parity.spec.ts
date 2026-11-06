@@ -83,6 +83,16 @@ test("a URL segment spelled like the folder's brackets is that param's value", a
   expect(await response.text()).toContain("Segment [id]");
 });
 
+// css: "should support global css inside server components" and "should support css modules
+// inside server components".
+test("stylesheets a server page and its server components import style the page", async ({
+  page,
+}) => {
+  await page.goto("/next/styled");
+  await expect(page.getByTestId("styled-text")).toHaveCSS("color", "rgb(10, 20, 30)");
+  await expect(page.getByTestId("styled-badge")).toHaveCSS("color", "rgb(40, 50, 60)");
+});
+
 // navigation: "should trigger not-found in a server component"; not-found/basic.
 test("notFound() in a page answers 404 with the app's not-found page", async ({ page }) => {
   expectNoNotFoundPageInRsc();
