@@ -136,15 +136,15 @@ export const GET = cronRoute(
 );
 ```
 
-| Option        | Purpose                                                                                                         |
-| ------------- | --------------------------------------------------------------------------------------------------------------- |
-| `schedule`    | One portable five-field UTC cron expression, or an array. Same syntax and validation as config.                 |
-| `name`        | Job name. Defaults to the route path without the leading `/api/`, here `maintenance/cleanup`.                   |
-| `description` | Human-readable purpose shown by CLI output and the build manifest.                                              |
-| `input`       | JSON literal handed to the handler as `context.cron.input`.                                                     |
+| Option        | Purpose                                                                                                                          |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `schedule`    | One portable five-field UTC cron expression, or an array. Same syntax and validation as config.                                  |
+| `name`        | Job name. Defaults to the route path without the leading `/api/`, here `maintenance/cleanup`.                                    |
+| `description` | Human-readable purpose shown by CLI output and the build manifest.                                                               |
+| `input`       | JSON literal handed to the handler as `context.cron.input`.                                                                      |
 | `timeoutMs`   | Aborts `context.cron.signal` and answers `504` when the handler runs longer. A handler that finishes first keeps its own result. |
-| `overlap`     | `"skip"` answers `409 { "skipped": true }` while a run of the same job is still going, without running the handler. |
-| `enabled`     | `false` keeps the route callable with the same auth but removes it from scheduling outputs.                     |
+| `overlap`     | `"skip"` answers `409 { "skipped": true }` while a run of the same job is still going, without running the handler.              |
+| `enabled`     | `false` keeps the route callable with the same auth but removes it from scheduling outputs.                                      |
 
 `secretEnv`, `secret`, and `allowUnsecured` keep working next to these. `path` is never an option:
 it is the route file's own location.
@@ -156,12 +156,12 @@ fails the build and names the file. A scheduled route cannot sit under a dynamic
 
 In the endpoint form the handler reads `context.cron`:
 
-| Field         | Value                                                                                        |
-| ------------- | -------------------------------------------------------------------------------------------- |
-| `name`        | From the `x-farm-cron-name` header. A direct platform call sends none, so it is optional.    |
-| `scheduledAt` | A `Date` from the `x-farm-cron-scheduled-at` header (a millisecond epoch); also optional.    |
-| `input`       | The literal `input` from the options; `undefined` when unset.                                |
-| `signal`      | An `AbortSignal` that aborts when the handler outlives `timeoutMs`.                          |
+| Field         | Value                                                                                     |
+| ------------- | ----------------------------------------------------------------------------------------- |
+| `name`        | From the `x-farm-cron-name` header. A direct platform call sends none, so it is optional. |
+| `scheduledAt` | A `Date` from the `x-farm-cron-scheduled-at` header (a millisecond epoch); also optional. |
+| `input`       | The literal `input` from the options; `undefined` when unset.                             |
+| `signal`      | An `AbortSignal` that aborts when the handler outlives `timeoutMs`.                       |
 
 A plain `(request) => ...` handler gets no `context.cron`; it reads the same headers from the
 `Request` itself. `timeoutMs` and `overlap` guard both forms.

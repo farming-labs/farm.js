@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { toPosixPath } from "../utils";
 import { createFarmCronManifest, FARM_CRON_MANIFEST, prepareFarmCronForNitro } from "../cron";
 import { mergeFarmCronJobs, resolveProjectCronJobs, scanFarmCronRouteJobs } from "../cron-scan";
 
@@ -58,7 +59,9 @@ describe("scanFarmCronRouteJobs", () => {
         description: "Delete expired sessions every night.",
         input: { olderThanDays: 30, dryRun: false },
         timeoutMs: 60000,
-        filePath: path.join(root, "src", "app", "api", "maintenance", "cleanup", "route.ts"),
+        filePath: toPosixPath(
+          path.join(root, "src", "app", "api", "maintenance", "cleanup", "route.ts"),
+        ),
         enabled: true,
       },
     ]);
@@ -85,7 +88,9 @@ export const GET = scheduled(async () => Response.json({ ok: true }), {
         name: "billing-sync",
         schedule: ["0 0 * * *", "0 12 * * *"],
         path: "/api/billing/sync",
-        filePath: path.join(root, "app-src", "app", "api", "billing", "sync", "route.tsx"),
+        filePath: toPosixPath(
+          path.join(root, "app-src", "app", "api", "billing", "sync", "route.tsx"),
+        ),
         enabled: true,
       },
     ]);
