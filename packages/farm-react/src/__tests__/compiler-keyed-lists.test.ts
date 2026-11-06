@@ -63,7 +63,6 @@ describe("React AOT keyed list compiler", () => {
       '<li key={item.id}><select name={item.label}><option value="a">A</option></select></li>',
       false,
     ],
-    ["custom elements", "<li key={item.id}><farm-badge label={item.label} /></li>", false],
     ["style bindings", "<li key={item.id} style={{ opacity: item.label ? 1 : 0.5 }}>x</li>", false],
   ])(
     "marks %s as cloneable only when cloneNode copies their state",
