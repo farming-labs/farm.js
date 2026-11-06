@@ -1173,13 +1173,18 @@ interface ResolvedImport {
   blocker?: LocalBlocker;
 }
 
-interface AliasEntry {
+/** @internal */
+export interface AliasEntry {
   prefix: string;
   targets: string[];
 }
 
-/** `@/` (Farm's source alias) and tsconfig `compilerOptions.paths`. */
-function readAliases(root: string, srcDir: string): AliasEntry[] {
+/**
+ * `@/` (Farm's source alias) and tsconfig `compilerOptions.paths`.
+ *
+ * @internal Exported for the native server function scan.
+ */
+export function readAliases(root: string, srcDir: string): AliasEntry[] {
   const aliases: AliasEntry[] = [{ prefix: "@/", targets: [path.join(root, srcDir) + path.sep] }];
   try {
     const raw = readFileSync(path.join(root, "tsconfig.json"), "utf8")
@@ -1209,7 +1214,8 @@ function isFile(file: string): boolean {
   }
 }
 
-function resolveFile(base: string): string | undefined {
+/** @internal Exported for the native server function scan. */
+export function resolveFile(base: string): string | undefined {
   if (isFile(base)) return base;
   for (const extension of SCRIPT_EXTENSIONS) if (isFile(base + extension)) return base + extension;
   // TypeScript ESM style: `./x.js` names `./x.ts`.
