@@ -637,6 +637,42 @@ export function collectFarmRenderedClientModules(
   return collected.boundaries.map((boundary) => boundary.modulePath);
 }
 
+const SERVER_MODULE_SOURCE = /\.[cm]?[jt]sx?$/;
+const STYLESHEET_SOURCE = /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)$/;
+
+/**
+ * The stylesheets these server modules import, directly or through the server modules they
+ * import, in import order. In islands mode the client entry leaves pages and layouts out, and the
+ * client bundle is the app's one stylesheet, so it imports these instead. A `"use client"`
+ * module's stylesheets come with the module.
+ */
+export function collectFarmServerStylesheets(
+  modulePaths: readonly string[],
+  root?: string,
+): string[] {
+  const stylesheets = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (file: string) => {
+    if (visited.has(file) || !SERVER_MODULE_SOURCE.test(file)) return;
+    visited.add(file);
+    const content = readIfExists(file);
+    if (!content || hasUseClientDirective(content)) return;
+    for (const specifier of getImportSpecifiers(content)) {
+      // `?url`, `?inline` and `?raw` imports are values, not styles on the page.
+      if (specifier.includes("?")) continue;
+      const imported = resolveImportedModule(file, specifier, root);
+      if (!imported.path) continue;
+      if (STYLESHEET_SOURCE.test(imported.path)) stylesheets.add(imported.path);
+      else if (imported.local) visit(imported.path);
+    }
+  };
+  for (const modulePath of modulePaths) {
+    const resolved = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
+    if (resolved) visit(resolved);
+  }
+  return [...stylesheets];
+}
+
 export function getClientModuleMetadata(modulePath: string, root?: string): ClientModuleMetadata {
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
   return inspectClientModuleMetadata(resolvedPath, root, new Set(), true);

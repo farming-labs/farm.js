@@ -374,7 +374,9 @@ support them). A promise passed unawaited crosses too: the client component read
 `use()` inside a Suspense boundary, works before it settles, and gets the value with its types
 when it streams in (a rejection arrives without the server's reason). Functions other than server
 actions and class instances do not cross; a client component given one keeps its server HTML and
-is not hydrated. Islands mode needs none of the RSC packages and is experimental. Both modes share
+is not hydrated. A stylesheet that a server page, layout or server component imports (plain CSS or
+a CSS module) goes into the app's one stylesheet in production, though the module itself stays on
+the server. Islands mode needs none of the RSC packages and is experimental. Both modes share
 the authoring rules on this page, so switching between them is a one-line change; the same contract
 tests (`tests/e2e-server-components`) run against both, in development and in production builds.
 `benchmarks/server-components-payload` compares what each mode sends.

@@ -6,6 +6,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
 import {
+  collectFarmServerStylesheets,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
   usesFarmServerTree,
@@ -262,6 +263,33 @@ describe("islands mode", () => {
     });
     expect(calls).toHaveLength(3);
     for (const call of calls) expect(call).toContain("{ serverOwners: ");
+  });
+
+  it("lists the stylesheets server pages import, through server modules but not client ones", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-islands-styles-"));
+    roots.push(root);
+    const files: Record<string, string> = {
+      "src/app/page.tsx":
+        'import "./page.css";\nimport { Card } from "../card";\nimport { Button } from "../button";\nimport logo from "./logo.svg?url";\nimport raw from "./raw.css?inline";\nexport default function Page() { return <Card><Button /></Card>; }\n',
+      "src/app/page.css": ".page {}\n",
+      "src/card.tsx":
+        'import styles from "./card.module.css";\nexport function Card({ children }) { return <div className={styles.card}>{children}</div>; }\n',
+      "src/card.module.css": ".card {}\n",
+      "src/button.tsx":
+        '"use client";\nimport "./button.css";\nexport function Button() { return <button />; }\n',
+      "src/button.css": ".button {}\n",
+      "src/app/raw.css": ".raw {}\n",
+      "src/app/logo.svg": "<svg />",
+    };
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), content);
+    }
+
+    expect(collectFarmServerStylesheets([path.join(root, "src/app/page.tsx")], root)).toEqual([
+      path.join(root, "src/app/page.css"),
+      path.join(root, "src/card.module.css"),
+    ]);
   });
 
   describe("a server layout around a client provider", () => {

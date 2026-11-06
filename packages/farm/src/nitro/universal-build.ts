@@ -103,6 +103,7 @@ import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
 import { logger, toPosixPath, toViteModuleId } from "../utils";
 import {
+  collectFarmServerStylesheets,
   describeSuppressedAsyncHydration,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
@@ -2133,6 +2134,17 @@ async function buildClient(
       adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
       resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands",
       platform,
+      islandsMode
+        ? collectFarmServerStylesheets(
+            [
+              ...layoutRoutes.map((layout) => layout.modulePath),
+              ...pageRoutes
+                .filter((route) => !isAdapterDocsRoute(route.pattern))
+                .map((route) => route.modulePath),
+            ],
+            root,
+          )
+        : [],
     );
     const entryName = platform === "mobile" ? FARM_MOBILE_CLIENT_ENTRY_NAME : "farm-client";
 
@@ -3312,6 +3324,8 @@ export function generateClientHydrationEntry(
   islandValues = false,
   /** `"mobile"` for the mobile client a web build adds for an app with a `mobile` block. */
   platform?: FarmPlatform,
+  /** Islands mode: stylesheets the server pages and layouts import (collectFarmServerStylesheets). */
+  serverStylesheets: readonly string[] = [],
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
@@ -3338,9 +3352,28 @@ export function generateClientHydrationEntry(
   // UNRESOLVED_IMPORT. Output validation already treats a missing globals.css
   // as an intentionally style-free application.
   const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
-  const cssImport = existsSync(globalsCssPath)
-    ? `import ${JSON.stringify(toImportPath(globalsCssPath))};`
-    : "";
+  // A CSS module's class map has no side effects, so imported and left unused it is tree-shaken
+  // with its stylesheet, export or not (an app build keeps no entry exports). The entry keeps
+  // each one by storing it.
+  const serverStyleModules: string[] = [];
+  const cssImport = [
+    ...(existsSync(globalsCssPath) ? [globalsCssPath] : []),
+    ...serverStylesheets.filter((stylesheet) => stylesheet !== globalsCssPath),
+  ]
+    .map((stylesheet) => {
+      if (!/\.module\.[a-z]+$/.test(stylesheet)) {
+        return `import ${JSON.stringify(toImportPath(stylesheet))};`;
+      }
+      const binding = `__farmServerStyle${serverStyleModules.length}`;
+      serverStyleModules.push(binding);
+      return `import * as ${binding} from ${JSON.stringify(toImportPath(stylesheet))};`;
+    })
+    .concat(
+      serverStyleModules.length > 0
+        ? [`globalThis.__FARM_SERVER_STYLES__ = [${serverStyleModules.join(", ")}];`]
+        : [],
+    )
+    .join("\n");
 
   // Import layouts for wrapping client components
   const layoutImportStatements: string[] = [];
