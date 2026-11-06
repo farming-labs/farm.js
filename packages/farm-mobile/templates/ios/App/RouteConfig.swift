@@ -13,7 +13,8 @@ struct RouteConfig {
         let pattern: NSRegularExpression
         let presentation: String
         let tab: Int?
-        /// `"web"`, `"native"` (React Native, `page.native.tsx`), or `"platform"` (`page.swift`).
+        /// `"web"`, `"native"` (React Native, `page.native.tsx`), `"platform"` (`page.swift`), or
+        /// `"server"` (drawn from the page the server renders, `FarmServerScreen`).
         let screen: String
         /// The screen's module id, derived from the route, such as `app/notes/[id]`.
         let module: String?
@@ -32,7 +33,7 @@ struct RouteConfig {
     }
 
     static let web = "web"
-    private static let screens: Set<String> = [web, "native", "platform"]
+    private static let screens: Set<String> = [web, "native", "platform", "server"]
 
     /// The mobile client entry the page shells were rendered with, and each route's shell file.
     struct Shells {
@@ -77,7 +78,8 @@ struct RouteConfig {
         return rules.first { $0.matches(path) } ?? RouteConfig.fallback
     }
 
-    private static let fallback = Rule(
+    /// A push of a web screen: unmatched paths, and a server screen that falls back.
+    static let fallback = Rule(
         route: nil,
         pattern: NSRegularExpression.farmMatchAll,
         presentation: "push",

@@ -16,8 +16,7 @@ where a web page is not enough, you can opt one route at a time into a truly nat
 touching the rest of the app.
 
 Mobile is a preview, released in Farm 0.1.50 with `@farm.js/mobile` 0.1.0-beta.0. **What runs
-today is the WebView shell on Android.** The iOS shell generates an Xcode project but has not been
-built with `xcodebuild` yet (see [Run on iOS](#run-on-ios)). React Native screens (not released
+today is the WebView shell on Android.** The iOS shell builds and launches on an iOS simulator in CI (see [Run on iOS](#run-on-ios)). React Native screens (not released
 yet) run under `farm dev --mobile` on an Android emulator only; a production (Hermes bytecode) build
 and real devices are not verified yet. Platform-native screens are designed but not released:
 platform routes render a placeholder. Every section below marks the line between what ships now and
@@ -34,24 +33,24 @@ farm build                    # --web, the default, unchanged
 
 ## Status
 
-| Part                                          | Status                         | Notes                                                                                                                                                                                      |
-| --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                                                                                    |
-| `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                                                                                   |
-| Native-screen analyzer                        | Unreleased                     | Sorts routes into tiers; proven native-tier routes become `server` screens with `native: true` or `auto: "on"`                                                                             |
-| Generated React Native ports                  | Unreleased                     | Android: emitted from portable pages with `auto: "on"`; run on an emulator, not yet on a device. See [Generated ports](#generated-react-native-ports)                                      |
-| Server-rendered native screens (`server`)     | Unreleased, Android            | Drawn with Android views from the page the server renders; run on an emulator under `farm dev --mobile`, not yet on a device. iOS shows them as web screens                                |
-| iOS shell                                     | Unreleased                     | Generates an Xcode project; not yet built with `xcodebuild` (see [Run on iOS](#run-on-ios))                                                                                                |
-| React Native screens                          | Unreleased, Android            | Android only; on an emulator under `farm dev --mobile` and as a production APK; not yet on a device (see [React Native screens](#react-native-screens))                                    |
-| Bundled client assets                         | Unreleased                     | Pages in a production shell run the mobile client; Android serves its files from the APK, iOS from the server (see [Bundled client assets](#bundled-client-assets))                        |
-| Page shells                                   | Unreleased                     | `mobile.shells`: a route's layout and loading state, shown before its document and while offline; not yet run on an emulator or simulator (see [Page shells](#page-shells))                |
-| Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; native sign-in not yet run on an emulator; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                |
-| Server components apps                        | Unreleased                     | Both engines get the mobile client; islands mode also gets device tokens, the RSC pipeline does not (see [Bundled client assets](#bundled-client-assets)); no page shells yet              |
-| Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                                                         |
-| Native `@farm.js/ui`                          | Unreleased, Android            | React Native views on native screens and generated ports; tokens resolve to the web defaults; run in tests, not yet on a device (see [Portable components](#portable-components-farmjsui)) |
-| Native islands                                | Planned                        | `mobile.native.islands` is reserved                                                                                                                                                        |
-| App native modules and `mobile.modules`       | Unreleased, Android            | TurboModules from `src/native/` on React Native screens; generated and Codegen-checked, not yet built into an APK (see [App native modules](#app-native-modules))                          |
-| Device modules for web screens                | Planned                        | `native.<name>` calls from web screens reject as unavailable                                                                                                                               |
+| Part                                          | Status                         | Notes                                                                                                                                                                                                   |
+| --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Android shell with web screens                | **Preview, shipped in 0.1.50** | Tabs, stacks, modals, predictive back, the WebView pool, and the bridge                                                                                                                                 |
+| `mobile` config, screen files, route manifest | **Shipped in 0.1.50**          | `native` and `platform` routes are recorded in `farm-routes.json` and show a placeholder                                                                                                                |
+| Native-screen analyzer                        | Unreleased                     | Sorts routes into tiers; proven native-tier routes become `server` screens with `native: true` or `auto: "on"`                                                                                          |
+| Generated React Native ports                  | Unreleased                     | Android: emitted from portable pages with `auto: "on"`; run on an emulator, not yet on a device. See [Generated ports](#generated-react-native-ports)                                                   |
+| Server-rendered native screens (`server`)     | Unreleased                     | Android: drawn with Android views, run on an emulator under `farm dev --mobile`, not yet on a device. iOS: drawn with UIKit, type-checked (Swift 5 and 6); simulator smoke requires native home content |
+| iOS shell                                     | Unreleased                     | Builds with Xcode 16.4 and launches on an iOS simulator in CI (see [Run on iOS](#run-on-ios))                                                                                                           |
+| React Native screens                          | Unreleased, Android            | Android only; on an emulator under `farm dev --mobile` and as a production APK; not yet on a device (see [React Native screens](#react-native-screens))                                                 |
+| Bundled client assets                         | Unreleased                     | Pages in a production shell run the mobile client; Android serves its files from the APK, iOS from the server (see [Bundled client assets](#bundled-client-assets))                                     |
+| Page shells                                   | Unreleased                     | `mobile.shells`: a route's layout and loading state, shown before its document and while offline; not yet run on an emulator or simulator (see [Page shells](#page-shells))                             |
+| Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; native sign-in not yet run on an emulator; iOS auth flows not yet exercised in the simulator (see [Auth on mobile](#auth-on-mobile))        |
+| Server components apps                        | Unreleased                     | Both engines get the mobile client; islands mode also gets device tokens, the RSC pipeline does not (see [Bundled client assets](#bundled-client-assets)); no page shells yet                           |
+| Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                                                                      |
+| Native `@farm.js/ui`                          | Unreleased, Android            | React Native views on native screens and generated ports; tokens resolve to the web defaults; run in tests, not yet on a device (see [Portable components](#portable-components-farmjsui))              |
+| Native islands                                | Planned                        | `mobile.native.islands` is reserved                                                                                                                                                                     |
+| App native modules and `mobile.modules`       | Unreleased, Android            | TurboModules from `src/native/` on React Native screens; generated and Codegen-checked, not yet built into an APK (see [App native modules](#app-native-modules))                                       |
+| Device modules for web screens                | Planned                        | `native.<name>` calls from web screens reject as unavailable                                                                                                                                            |
 
 ## Requirements
 
@@ -611,7 +610,8 @@ shell ◀── { root: { type: "View", children: [...] } } ──────�
 
 - **Data and auth stay on the server.** The server renders the page through its normal request
   path, middleware and guards included, with the WebViews' cookies. Async pages and server
-  components work, since they run on the server as for the web page.
+  components work, since they run on the server as for the web page. iOS applies the cookie
+  store's host, domain, path, Secure and expiry rules to each server-screen and image request.
 - **Only the page.** The tree is the page's own content: the layouts are web chrome, and the native
   shell draws the bar and tabs.
 - **Styles map at build time.** Tailwind classes resolve to native values from Tailwind's default
@@ -639,8 +639,10 @@ Drawn on Android: `View` (flex column or row, gap, padding, margins, width and h
 `<code>`), `Image`, links and buttons as pressable boxes, and borders, radii, backgrounds, and
 opacity, and wrapping rows (`flex-wrap: wrap`). Not yet: percentages other than `100%`, wrapping
 columns, absolute or sticky positioning, Sass and other non-CSS stylesheet sources in the analyzer,
-forms, and inputs that do anything. iOS shows `server`
-routes as web screens until the iOS shell draws them.
+forms, and inputs that do anything. iOS draws `server` routes with UIKit (stack views,
+attributed labels with tappable links, image views), with the same fallback to the web screen; it
+is type-checked, and CI builds and launches the shell with a native home route. The smoke check
+requires the native content-ready log marker and rejects a fallback to the web screen.
 
 A web server answers these requests only for an app with a `mobile` block, so a web-only app's
 server is unchanged.
@@ -1358,7 +1360,8 @@ without setting `FARM_AUTH_URL`.
 - Native sign-in is email and password (`signIn`, `signUp`). Social and OAuth sign-in need a
   system browser session (follow-up). iOS has the shell side ready but no React Native screens
   yet, so nothing calls it there.
-- Not yet run on a physical device, and the iOS shell has not been built with Xcode.
+- Not yet run on a physical device. The iOS shell builds with Xcode in CI; its auth flows
+  have not been exercised in the simulator.
 
 ## The native-screen report
 
@@ -1544,12 +1547,13 @@ emulator loopback; builds are `https://` only.
 
 ## Run on iOS
 
-`--os ios` generates the iOS shell as an Xcode project. **It has not been built with `xcodebuild`
-yet**: its Swift was type-checked against the Mac Catalyst SDK and run as a Mac Catalyst app, not in
-an iOS simulator.
+`--os ios` generates the iOS shell as an Xcode project. The Mobile iOS CI workflow builds the
+production project, then builds and launches the dev shell on an iOS simulator. It retains
+screenshots and app logs, and requires proof that the native home screen drew its content. Swift
+also type-checks against the Mac Catalyst SDK in Swift 5 and 6 modes.
 
 Building it requires a Mac with Xcode, the iOS 16 or newer SDK, and an iOS simulator runtime; the
-Command Line Tools alone are not enough. Tested with: no Xcode version yet. The app targets iOS 16.
+Command Line Tools alone are not enough. CI has built the shell with Xcode 16.4. The app targets iOS 16.
 
 ```sh
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
@@ -1661,8 +1665,8 @@ route into the React Native tier.
 The config surface, the route manifest, the WebView shell, and the report all work today. These
 parts are designed and still on the way:
 
-- The iOS shell has not been built with `xcodebuild` or run in a simulator yet (see
-  [Run on iOS](#run-on-ios)), and it has no Keychain session.
+- The iOS shell builds and launches in simulator CI (see [Run on iOS](#run-on-ios)). Physical
+  devices and end-to-end Keychain sign-in, refresh and sign-out flows remain unverified.
 - React Native screens run on Android only; there is no iOS React Native host yet, so
   `page.ios.tsx` is not built and `native` screens show a placeholder on iOS.
 - React Native screens are verified under `farm dev --mobile` on an Android emulator only, not in a
@@ -1684,7 +1688,7 @@ parts are designed and still on the way:
 - Native islands (`mobile.native.islands`) and the theme-token pipeline are reserved.
 - Signed-in native screens are tested in unit, dev-server and production-build tests, and the
   Android shell's session code on an emulator under `farm dev --mobile`. The Swift session code
-  has not been built with Xcode (it type-checks against the macOS SDK). See
+  builds with Xcode in CI, but the simulator smoke does not exercise auth. See
   [Auth on mobile](#auth-on-mobile) for which auth integrations are covered.
 - Web screens call app modules with `mobile.modules.<name>.web` on Android only, and the path has
   not run on an emulator yet. Results by reference and event subscriptions are not built.

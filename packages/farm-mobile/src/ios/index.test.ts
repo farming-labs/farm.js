@@ -247,6 +247,7 @@ describe("@farm.js/mobile/ios", () => {
       "App/RouteConfig.swift",
       "App/SceneDelegate.swift",
       "App/ScreenViewController.swift",
+      "App/ServerScreens.swift",
       "App/Theme.swift",
       "App/WebViewPool.swift",
       "App/farm-bridge.js",
@@ -295,6 +296,18 @@ describe("@farm.js/mobile/ios", () => {
     const baseFiles = await generated(base);
     expect(baseFiles["App/FarmBuild.swift"]).toContain('static let startPath = "/docs"');
     expect(baseFiles["App/FarmBuild.swift"]).toContain("static let tabIcons: [String] = []");
+  });
+
+  it("titles the navigation bar from the page, leaving the tab's configured title", async () => {
+    const files = await generated(context());
+    const screen = files["App/ScreenViewController.swift"]!;
+    // UIViewController.title also renames the tab bar item of a tab's root screen.
+    expect(screen).not.toMatch(/\bself\.title = /);
+    expect(screen).not.toMatch(/^\s*(if .*\{ )?title = /m);
+    expect(screen).toContain("navigationItem.title = title");
+    expect(files["App/Navigator.swift"]).toContain(
+      "stack.tabBarItem = UITabBarItem(title: tab.title, image: image, tag: index)",
+    );
   });
 
   it("writes a project file whose objects all resolve, with every source and resource built", async () => {
@@ -582,8 +595,30 @@ describe("@farm.js/mobile/ios", () => {
     const files = await generated(context());
     const routes = files["App/RouteConfig.swift"];
     expect(routes).toContain(
-      'private static let screens: Set<String> = [web, "native", "platform"]',
+      'private static let screens: Set<String> = [web, "native", "platform", "server"]',
     );
+    // "server" rules draw the page the server renders, and fall back to the web screen.
+    expect(files["App/Navigator.swift"]).toContain('if rule.screen == "server" {');
+    expect(files["App/Navigator.swift"]).toContain(
+      "self.showWeb(replacing: screen, url: url, reason: reason)",
+    );
+    expect(files["App/ServerScreens.swift"]).toContain(
+      'static let contentType = "application/vnd.farm.native+json"',
+    );
+    // A server screen titles the navigation bar only: UIViewController.title would also rename
+    // the tab bar item when the screen is a tab's root.
+    expect(files["App/ServerScreens.swift"]).toContain("parent?.navigationItem.title = title");
+    expect(files["App/ServerScreens.swift"]).not.toMatch(/parent\?\.title = /);
+    // An info-level selection log does not prove the tree loaded and is not persisted by log show.
+    const server = files["App/ServerScreens.swift"];
+    const completion =
+      'Navigator.log.notice("server screen ready: \\(self.url.path, privacy: .public)")';
+    expect(server).toContain(completion);
+    expect(server.indexOf(completion)).toBeGreaterThan(
+      server.indexOf("scroll.addSubview(content)"),
+    );
+    expect(server.indexOf(completion)).toBeGreaterThan(server.indexOf("loaded = true"));
+    expect(files["App/Navigator.swift"]).toContain('screen.navigationItem.title = ""');
     expect(routes).toContain(
       'let screen = (json["screen"] as? String).flatMap { screens.contains($0) ? $0 : nil } ?? web',
     );
@@ -789,6 +824,56 @@ describe("page shells", () => {
 });
 
 describe("generated files on this machine's tools", () => {
+  it.skipIf(!hasSwiftc || process.platform !== "darwin")(
+    "sends server screens only cookies valid for the request URL",
+    async () => {
+      const source = (await generated(context()))["App/ServerScreens.swift"]!;
+      const match = /    nonisolated static func matchingCookies\([\s\S]*?\n    \}\n/.exec(
+        source,
+      )![0];
+      const program = `import Foundation
+enum ScreenCookies {
+${match}
+}
+func cookie(_ name: String, _ domain: String, _ path: String = "/", secure: Bool = false, expired: Bool = false) -> HTTPCookie {
+    var properties: [HTTPCookiePropertyKey: Any] = [.name: name, .value: "value", .domain: domain, .path: path]
+    if secure { properties[.secure] = "TRUE" }
+    if expired { properties[.expires] = Date(timeIntervalSince1970: 1) }
+    return HTTPCookie(properties: properties)!
+}
+let cookies = [
+    cookie("host", "notes.example.com"),
+    cookie("domain", ".notes.example.com"),
+    cookie("secure", "notes.example.com", secure: true),
+    cookie("admin", "notes.example.com", "/admin"),
+    cookie("expired", "notes.example.com", expired: true),
+    cookie("other", "other.example.com"),
+]
+let cases: [(String, [String])] = [
+    ("http://notes.example.com/", ["domain", "host"]),
+    ("https://notes.example.com/admin", ["admin", "domain", "host", "secure"]),
+    ("https://notes.example.com/admin/notes", ["admin", "domain", "host", "secure"]),
+    ("https://notes.example.com/administrator", ["domain", "host", "secure"]),
+    ("https://sub.notes.example.com/", ["domain"]),
+    ("https://notes.example.com.evil.test/", []),
+]
+for (address, expected) in cases {
+    let actual = ScreenCookies.matchingCookies(cookies, for: URL(string: address)!).map(\\.name).sorted()
+    precondition(actual == expected, "\\(address): \\(actual) != \\(expected)")
+}
+print("Cookie scope checks passed.")
+`;
+      const dir = await tempDir();
+      const entry = path.join(dir, "cookies.swift");
+      const binary = path.join(dir, "cookies");
+      await writeFile(entry, program);
+      await execFileAsync("swiftc", [entry, "-o", binary]);
+      const { stdout } = await execFileAsync(binary);
+      expect(stdout).toContain("Cookie scope checks passed.");
+    },
+    60_000,
+  );
+
   it.skipIf(!hasPlutil)(
     "passes plutil: Info.plist lints, the project file converts",
     async () => {

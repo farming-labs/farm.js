@@ -143,7 +143,7 @@ Common config fields:
   without device tokens since it refuses `auth`/`integrations`); the RSC router offers link
   clicks, `router.push`/`replace` and server action redirects to `delegateNavigation`;
   `--os ios` generates the iOS shell (Xcode project, Swift + UIKit) into `.farm/output/mobile/ios`
-  and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; not yet built with `xcodebuild`;
+  and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; built and launched in simulator CI with Xcode 16.4;
   `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; on Android
   `page.native.tsx`/`page.android.tsx` build as React Native screens, verified in
   `farm dev --mobile` on an Android emulator (not in production bytecode builds or on real

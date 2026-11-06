@@ -45,9 +45,16 @@ placeholder: Farm does not build platform screens yet. Native files are type-che
 
 `mobile.native.auto` is `"on"`: the routes the analyzer proves render natively (`/`, `/notes`,
 `/notes/[id]`, `/about`, `/feed`, `/navigation/step/[n]`, `/docs/[...slug]`) are `server` screens,
-which the server renders and the Android shell draws with native views (iOS shows them as web
-screens for now). `pnpm report` lists every route's tier. `/settings`, `/notes/new`, and
+which the server renders and the shell draws with native views (Android views, UIKit on iOS).
+`pnpm report` lists every route's tier. `/settings`, `/notes/new`, and
 `/navigation` use client-side state and stay web.
+
+The `Mobile iOS` workflow builds the production simulator project, then launches the dev app.
+Its home-tab check requires a `server` rule and a persisted `server screen ready: /` log from the
+shell after it installs the UIKit content. Missing completion or a web fallback fails the job.
+The artifact keeps `farm-routes.json`, `app-log.txt`, and screenshots; rerun the evidence check
+with `node scripts/check-ios-native.mjs <artifact-directory>` from this example. This checks the
+dev home screen, not production navigation, authentication, or an iOS React Native host.
 
 `mobile.shells` is on: `pnpm build:mobile` renders `src/app/(styled)/loading.tsx` inside the
 `(styled)` layout as one page shell for every styled route. The app shows it while a web screen's

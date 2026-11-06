@@ -64,10 +64,13 @@ replace by rule, back is the system swipe, two pre-warmed WKWebViews back pushes
 other origins open in `SFSafariViewController`. The bridge script is the Android one
 (`templates/shared/farm-bridge.js`), installed as a document-start `WKUserScript` on the server's
 origin only; its `WKScriptMessageHandler` drops messages that are not from the main frame of that
-origin. Native and platform rules show the same placeholder as on Android.
+origin. Server-screen rules render the page's server tree with UIKit; React Native and platform
+rules still show a placeholder on iOS. Server-screen and image requests use the WebView's
+cookies only when their host, domain, path, Secure flag and expiry allow the requested URL.
 
-The generated project has not been built with `xcodebuild` yet: its Swift was type-checked
-against the Mac Catalyst SDK and run as a Mac Catalyst app. Building needs Xcode with the iOS 16 or
+The generated project builds and launches in the Mobile iOS CI workflow. The smoke check requires
+a native home route, its content-ready log marker and no web fallback. Swift is also type-checked
+against the Mac Catalyst SDK. Building locally needs Xcode with the iOS 16 or
 newer SDK and an iOS simulator runtime. When `xcodebuild` and
 `xcrun simctl` are missing, as with the Command Line Tools alone, `farm dev|build --mobile --os ios`
 still writes the project and prints what to install and the commands to run.
