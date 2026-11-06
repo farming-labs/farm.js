@@ -724,7 +724,51 @@ program
 
 const cronCommand = program
   .command("cron")
-  .description("Inspect and manually run framework-native cron routes");
+  .description("Inspect, invoke, and synchronize framework-native cron routes");
+
+cronCommand
+  .command("sync")
+  .description("Plan or apply the deployed manifest's Farm.js Infra schedules")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("--manifest <path>", "Built cron manifest", ".farm/cron-manifest.json")
+  .requiredOption("--url <url>", "Deployed app's public HTTPS origin")
+  .option("--apply", "Replace the endpoint's Infra schedules")
+  .option("--allow-delete", "Allow an applied sync to clear all endpoint schedules")
+  .option("--json", "Print the versioned plan or result as JSON")
+  .addHelpText(
+    "after",
+    '\nWith cron: { infra: "farmjs" }, run after each deployment:\n  farm cron sync --url https://app.example.com          # plan, no network\n  farm cron sync --url https://app.example.com --apply  # replace the endpoint\'s jobs\nNeeds FARMJS_ENVIRONMENT; --apply also needs FARMJS_API_KEY with cron:jobs.\nOptional: FARMJS_PROJECT_ID, FARMJS_API_URL.',
+  )
+  .action(async (options) => {
+    try {
+      const { syncFarmCronJobs } = require("../dist/index.js");
+      const result = await syncFarmCronJobs(options);
+      console.log(
+        options.json
+          ? JSON.stringify(result, null, 2)
+          : [
+              `${result.applied ? "Applied" : "Plan"}: ${result.jobs.length} Infra cron job(s) for ${result.endpoint}`,
+              `Environment: ${result.environment}; project: ${result.projectId || "key scope"}; service: ${result.apiUrl}`,
+              ...result.jobs.map(
+                (job) => `  ${job.name}: ${job.schedule.join(", ")} -> ${job.path}`,
+              ),
+              ...(result.applied
+                ? []
+                : [
+                    result.jobs.length
+                      ? "Run again with --apply after deploying this artifact."
+                      : "This clears the endpoint's Infra schedules. Apply with --apply --allow-delete.",
+                  ]),
+            ].join("\n"),
+      );
+    } catch (error) {
+      const code = error?.name === "FarmCronSyncError" ? ` [${error.code}]` : "";
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to sync cron routes${code}: ${message}`);
+      if (error?.cause instanceof Error) console.error(`Cause: ${error.cause.message}`);
+      process.exitCode = 1;
+    }
+  });
 
 cronCommand
   .command("list")

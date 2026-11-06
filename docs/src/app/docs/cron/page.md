@@ -283,25 +283,90 @@ npx wrangler deploy --config .farm/.output/server/wrangler.json
 
 For a self-hosted app with more than one replica, do not run an in-process scheduler in every replica. Run one dedicated scheduler instance, or configure system cron, a Kubernetes CronJob, or another external scheduler to call the HTTP route.
 
-## Run by Farm.js Infra
+## Choose the scheduler
 
-Connect the app (`FARMJS_API_KEY`, with the `cron:jobs` permission) and Farm.js Infra becomes the
-scheduler: `farm build` registers the job list with Infra and writes **no host scheduler output**,
-so exactly one scheduler fires a job. Infra calls each route on time on every host, Cloudflare
-Pages, Netlify, Lambda, Docker, many replicas, and Vercel's Hobby plan included, retries a failing
-call three times, and keeps 30 days of run history on the dashboard.
+Select who runs the schedules in `farm.config.ts`. The default is the deployment host:
 
-Infra signs each call (`farmjs-signature`), and `cronRoute()` verifies it with the same key, so no
-`CRON_SECRET` is needed. The signature is checked beside the secret; either authorizes.
+```ts title="farm.config.ts"
+import { defineConfig } from "@farm.js/core";
 
-- The build needs the deployment's own https URL: the platform's (`VERCEL_PROJECT_PRODUCTION_URL`,
-  Netlify's `URL`) or an explicit `FARM_SITE_URL`.
-- A failed registration fails the build and says the fix. `FARM_CRON_SCHEDULER=host` keeps the
-  host's schedulers despite the key; `farm dev --cron`, `farm cron list`, and `farm cron run`
-  never touch Infra.
-- The manifest records the choice as `"scheduler": "farmjs" | "host"`.
-- Removing every job: a build that still has the key but zero jobs does not call Infra; delete the
-  jobs on the dashboard, or deploy once with `FARM_CRON_SCHEDULER=host`.
+export default defineConfig({
+  deploy: { target: "vercel" },
+  cron: { infra: "farmjs" }, // Use "host" for the deployment target's scheduler.
+});
+```
+
+Schedules declared with `cronRoute()` are discovered automatically. To keep schedules in config,
+put them under `jobs` when using `infra`:
+
+```ts
+cron: {
+  infra: "farmjs",
+  jobs: {
+    dailyCleanup: {
+      schedule: "0 2 * * *",
+      path: "/api/maintenance/cleanup",
+    },
+  },
+},
+```
+
+The existing flat `cron: { dailyCleanup: { schedule, path } }` form remains supported.
+`cron: false` disables config and route-local schedules. Only `cron.infra` selects the scheduler:
+a `FARMJS_API_KEY` in the environment never switches an app to Infra.
+
+### Run by Farm.js Infra
+
+`farm build` writes `.farm/cron-manifest.json`. With `infra: "farmjs"`, it emits no Farm cron
+entries for the host scheduler. Builds do not contact Infra or need an API key.
+
+Deploy the application, then synchronize the manifest from that exact build:
+
+```bash
+# Set these in your deployment environment; keep the real key out of source control.
+export FARMJS_API_KEY="<server key with cron:jobs permission>"
+export FARMJS_ENVIRONMENT="production"
+export FARMJS_PROJECT_ID="<project id>"
+
+# Review the endpoint, scope, and job list. No network request is made.
+farm cron sync --url https://app.example.com
+
+# Run only after that build is deployed.
+farm cron sync --url https://app.example.com --apply
+```
+
+`--url` is the app's public HTTPS origin. It is explicit so preview builds cannot accidentally
+select the production hostname. Set `FARMJS_ENVIRONMENT` explicitly to the corresponding Infra
+environment (`production`, `staging`, or `development`). Use a separate endpoint with `staging`
+for preview deployments. Project-scoped keys supply their project; otherwise set `FARMJS_PROJECT_ID`.
+`FARMJS_API_URL` overrides the Infra service origin (default `https://app.farmjs.dev`).
+
+Use `--manifest path/to/cron-manifest.json` for custom build directories or downloaded artifacts,
+and `--json` for a versioned plan or result. The command reads the manifest, without loading
+`farm.config.ts` or rescanning routes. Registration failures, redirects, timeouts, and incomplete
+acknowledgements fail the command. Retry the same manifest after resolving the error.
+
+Infra sends signed GET requests to the application's routes. Set the same `FARMJS_API_KEY` in
+the deployed server environment; `cronRoute()` verifies `farmjs-signature`. `CRON_SECRET` remains
+supported for manual or host calls. Infra's per-request `timeoutMs` is 1000–60000 milliseconds;
+route-local `input` stays in the handler and is not sent during registration.
+
+### Remove or move schedules
+
+Sync replaces all jobs for the endpoint within the selected environment/project. Removing a job
+from the next deployed manifest removes it from Infra on the next sync. An empty manifest or a
+manifest built with `infra: "host"` clears the endpoint's Infra jobs:
+
+```bash
+farm cron sync --url https://app.example.com
+farm cron sync --url https://app.example.com --apply --allow-delete
+```
+
+Keep the old endpoint, environment, project, and credential available until cleanup completes.
+If the hostname changes, clear the old endpoint separately. Switching schedulers is not atomic:
+disable the previous host schedule before enabling Infra, or clear Infra before enabling the new
+host schedule. Already running requests may finish. `farm dev --cron`, `farm cron list`, and
+`farm cron run` remain local tooling and never register schedules with Infra.
 
 ## Build Manifest
 
@@ -310,6 +375,7 @@ The manifest is the stable handoff for custom deployment adapters and external a
 ```json title=".farm/cron-manifest.json"
 {
   "schemaVersion": 1,
+  "scheduler": "host",
   "secretEnv": "CRON_SECRET",
   "jobs": [
     {

@@ -780,6 +780,19 @@ describe("farm.js infra cron signatures", () => {
     await expect(authorizeCronRequest(request)).resolves.toBe(true);
   });
 
+  it("does not authorize query input that the Infra signature does not cover", async () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.CRON_SECRET;
+    process.env.FARMJS_API_KEY = "farmjs_test_vector_key";
+    await expect(
+      authorizeCronRequest(
+        signed(`t=${T},v1=${V1}`, `https://example.com${PATH}?all=true`),
+        {},
+        T * 1000,
+      ),
+    ).resolves.toBe(false);
+  });
+
   it("authorizes a signed GET through the route runtime, and 401s an unsigned one", async () => {
     process.env.NODE_ENV = "production";
     delete process.env.CRON_SECRET;

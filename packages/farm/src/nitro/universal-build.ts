@@ -12047,7 +12047,9 @@ async function buildNitroUniversal(
     logger.info(`⏱️  Found ${farmWorkflows.workflows.length} Farm workflow task(s)`);
   }
   if (farmCron.jobs.length > 0 && farmCron.scheduler === "farmjs") {
-    logger.info(`\u23f1\ufe0f  ${farmCron.jobs.length} Farm cron job(s), run by Farm.js Infra`);
+    logger.info(
+      `\u23f1\ufe0f  ${farmCron.jobs.length} Farm cron job(s) for Infra; run farm cron sync after deployment`,
+    );
   } else if (farmCron.jobs.length > 0) {
     logger.info(`⏱️  Configured ${farmCron.jobs.length} Farm cron route(s)`);
   }
@@ -12505,7 +12507,7 @@ function toFarmNodeResponse(request, response) {
         }
       : {}),
     experimental: {
-      tasks: farmWorkflows.workflows.length > 0 || farmCron.jobs.length > 0,
+      tasks: farmWorkflows.workflows.length > 0 || Object.keys(farmCron.tasks).length > 0,
     },
     tasks: {
       ...farmWorkflows.tasks,

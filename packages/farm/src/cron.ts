@@ -1,10 +1,7 @@
 import type { TypedEndpoint } from "./api/endpoint";
-import {
-  registerCronJobsWithInfra,
-  resolveCronEndpointOrigin,
-  resolveCronSchedulerEnv,
-  type FarmCronScheduler,
-} from "./cron-infra";
+import type { ResolvedFarmAPIConfig } from "./api/config";
+import { resolveFarmAPIServerBasePath, resolveFarmAPIServerRoutePath } from "./api/server-path";
+import { applyFarmBasePath } from "./base-path";
 import { farmSecretsMatch } from "./secret-compare";
 import { toPosixPath } from "./utils";
 import {
@@ -13,6 +10,9 @@ import {
 } from "./utils/runtime-env";
 
 export type FarmCronSchedule = string | string[];
+
+/** Who fires the schedules: the deployment target's own scheduler, or Farm.js Infra. */
+export type FarmCronScheduler = "host" | "farmjs";
 
 /** A JSON value, as route-level cron `input` must survive the build manifest unchanged. */
 export type FarmCronInputValue =
@@ -50,7 +50,19 @@ export interface FarmCronJobConfig {
   enabled?: boolean;
 }
 
-export type FarmCronUserConfig = Record<string, FarmCronJobConfig>;
+export interface FarmCronConfig {
+  /**
+   * Who runs the schedules. `farmjs` writes a manifest for `farm cron sync` after deployment;
+   * `host` emits the deployment target's scheduler output. Credentials never select Infra.
+   * @default "host"
+   * @example { infra: "farmjs" }
+   */
+  infra: FarmCronScheduler;
+  /** Named jobs, merged with route-local `cronRoute()` schedules. */
+  jobs?: Record<string, FarmCronJobConfig>;
+}
+
+export type FarmCronUserConfig = Record<string, FarmCronJobConfig> | FarmCronConfig;
 
 export interface FarmCronJob {
   name: string;
@@ -64,6 +76,7 @@ export interface FarmCronJob {
 }
 
 export interface FarmCronResolvedConfig {
+  infra?: FarmCronScheduler;
   enabled: boolean;
   secretEnv: typeof DEFAULT_FARM_CRON_SECRET_ENV;
   jobs: FarmCronJob[];
@@ -148,8 +161,34 @@ export function resolveCronConfig(
     };
   }
 
+  if (typeof cron !== "object" || Array.isArray(cron)) {
+    throw new TypeError("`cron` must be a job map, { infra, jobs }, or false.");
+  }
+  let infra: FarmCronScheduler | undefined;
+  let entries: Record<string, FarmCronJobConfig>;
+  // An object under `infra` is a job named "infra" in the flat job map, which stays valid.
+  if ("infra" in cron && (typeof cron.infra !== "object" || cron.infra === null)) {
+    if (cron.infra !== "host" && cron.infra !== "farmjs") {
+      throw new TypeError(
+        `\`cron.infra\` must be "host" or "farmjs", received ${JSON.stringify(cron.infra)}.`,
+      );
+    }
+    infra = cron.infra;
+    if (Object.keys(cron).some((key) => key !== "infra" && key !== "jobs")) {
+      throw new TypeError("When `cron.infra` is set, place named jobs inside `cron.jobs`.");
+    }
+    const configured =
+      (cron as FarmCronConfig).jobs === undefined ? {} : (cron as FarmCronConfig).jobs;
+    if (!configured || typeof configured !== "object" || Array.isArray(configured)) {
+      throw new TypeError("`cron.jobs` must be a map of job names to configurations.");
+    }
+    entries = configured;
+  } else {
+    entries = cron as Record<string, FarmCronJobConfig>;
+  }
+
   const jobs: FarmCronJob[] = [];
-  for (const [name, job] of Object.entries(cron)) {
+  for (const [name, job] of Object.entries(entries)) {
     if (!job || typeof job !== "object" || Array.isArray(job)) {
       throw new TypeError(`Farm cron ${JSON.stringify(name)} must be a configuration object.`);
     }
@@ -158,6 +197,7 @@ export function resolveCronConfig(
   }
 
   return {
+    ...(infra ? { infra } : {}),
     enabled: jobs.length > 0,
     secretEnv: DEFAULT_FARM_CRON_SECRET_ENV,
     jobs,
@@ -167,6 +207,8 @@ export function resolveCronConfig(
 export async function prepareFarmCronForNitro(config: {
   root?: string;
   distDir?: string;
+  basePath?: string;
+  api?: ResolvedFarmAPIConfig;
   cron?: FarmCronResolvedConfig | FarmCronUserConfig | false;
 }): Promise<PreparedFarmCron> {
   const cron = isResolvedCronConfig(config.cron) ? config.cron : resolveCronConfig(config.cron);
@@ -176,48 +218,36 @@ export async function prepareFarmCronForNitro(config: {
   const path = await import("node:path");
   const manifestPath = path.join(root, distDir, FARM_CRON_MANIFEST);
   const generatedDir = path.join(root, distDir, ".nitro", "farm-cron");
-
-  if (!cron.enabled) {
-    await Promise.all([
-      fs.rm(manifestPath, { force: true }),
-      fs.rm(generatedDir, { recursive: true, force: true }),
-    ]);
-    return {
-      jobs: [],
-      tasks: {},
-      scheduledTasks: {},
-      scheduler: "host",
-    };
+  const scheduler = cron.infra ?? "host";
+  const manifest = createFarmCronManifest(cron, scheduler);
+  if (scheduler === "farmjs") {
+    const apiBasePath = config.api ? resolveFarmAPIServerBasePath(config.api) : "/api";
+    manifest.jobs = manifest.jobs.map((job) => ({
+      ...job,
+      path: applyFarmBasePath(
+        job.path === "/api" || job.path.startsWith("/api/")
+          ? resolveFarmAPIServerRoutePath(job.path, apiBasePath)
+          : job.path,
+        config.basePath || "",
+      ),
+    }));
   }
+  await fs.mkdir(path.dirname(manifestPath), { recursive: true });
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await fs.rm(generatedDir, { recursive: true, force: true });
 
-  // Connected builds hand the schedules to Farm.js Infra and write no host scheduler output,
-  // so exactly one scheduler fires a job. A registration failure fails the build: silently
-  // keeping host crons could double-fire later, and skipping both means the jobs never fire.
-  const infra = resolveCronSchedulerEnv();
-  if (infra.scheduler === "farmjs") {
-    const endpoint = resolveCronEndpointOrigin();
-    if (!endpoint) {
-      throw new Error(
-        "Farm.js Infra schedules this app's cron jobs, but the deployment's own https URL is " +
-          "unknown. Set `FARM_SITE_URL` in the build environment, or keep the host's schedulers " +
-          "with `FARM_CRON_SCHEDULER=host`.",
-      );
-    }
-    await registerCronJobsWithInfra({ jobs: cron.jobs, endpoint, infra });
-    await fs.rm(generatedDir, { recursive: true, force: true });
-    const manifest = createFarmCronManifest(cron, "farmjs");
-    await fs.mkdir(path.dirname(manifestPath), { recursive: true });
-    await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  // Synchronizing is a post-deployment CLI action. A build cannot know whether its artifact
+  // will become live, and must never replace the deployed application's schedules.
+  if (!cron.enabled || scheduler === "farmjs") {
     return {
-      jobs: cron.jobs,
+      jobs: cron.enabled ? cron.jobs : [],
       tasks: {},
       scheduledTasks: {},
       manifestPath,
-      scheduler: "farmjs",
+      scheduler,
     };
   }
 
-  await fs.rm(generatedDir, { recursive: true, force: true });
   await fs.mkdir(generatedDir, { recursive: true });
 
   const tasks: PreparedFarmCron["tasks"] = {};
@@ -232,10 +262,6 @@ export async function prepareFarmCronForNitro(config: {
     };
   }
 
-  const manifest = createFarmCronManifest(cron, "host");
-  await fs.mkdir(path.dirname(manifestPath), { recursive: true });
-  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-
   return {
     jobs: cron.jobs,
     tasks,
@@ -247,13 +273,13 @@ export async function prepareFarmCronForNitro(config: {
 
 export function createFarmCronManifest(
   cron: FarmCronResolvedConfig,
-  scheduler: FarmCronScheduler = "host",
+  scheduler: FarmCronScheduler = cron.infra ?? "host",
 ) {
   return {
     schemaVersion: 1,
     scheduler,
     secretEnv: cron.secretEnv,
-    jobs: cron.jobs.map((job) => ({
+    jobs: (cron.enabled ? cron.jobs : []).map((job) => ({
       name: job.name,
       schedule: job.schedule,
       path: job.path,
@@ -580,7 +606,10 @@ export async function authorizeCronRequest(
   if (!apiKey) return false;
   let pathname: string;
   try {
-    pathname = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    // Infra never schedules query input, and its v1 signature covers only the pathname.
+    if (url.search) return false;
+    pathname = url.pathname;
   } catch {
     return false;
   }

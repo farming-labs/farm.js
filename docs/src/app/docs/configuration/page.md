@@ -1322,6 +1322,12 @@ export default defineConfig({
 });
 ```
 
+Use `cron: { infra: "farmjs", jobs: { ... } }` to select Farm.js Infra, or
+`cron: { infra: "farmjs" }` with route-local schedules. `"host"` is the default.
+Builds only emit scheduler metadata; run `farm cron sync --url https://app.example.com --apply`
+after deployment. See [Cron: choose the scheduler](/docs/cron#choose-the-scheduler) for credentials,
+planning, and cleanup.
+
 See [Cron](/docs/cron) for route protection, local commands, UTC syntax, deployment behavior, and reliability boundaries.
 
 ## Integrations in config
