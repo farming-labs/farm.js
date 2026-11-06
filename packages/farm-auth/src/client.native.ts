@@ -2,10 +2,13 @@
  * `@farm.js/auth/client` for React Native screens (`page.native.tsx`). Metro resolves this file
  * through the `react-native` export condition; web builds never see it, so web bundles do not
  * change. It has the web client's exports and types, and calls the same auth routes through
- * `serverFetch` from `@farm.js/native`, which sends the device's session token.
+ * `serverFetch` from `@farm.js/native`, which sends the device's session token. Sign-in and
+ * sign-up go through the shell's native code, which keeps the session cookie in the WebView and
+ * issues the device token from it.
  */
 import { useSyncExternalStore } from "react";
 import { serverFetch, signOut as forgetDevice } from "@farm.js/native";
+import { shellSignIn } from "@farm.js/native/internal";
 import { normalizeBasePath } from "./config.js";
 import type * as web from "./client.js";
 import type { FarmAuthClientOptions, FarmAuthCredentials, FarmAuthSignUpInput } from "./types.js";
@@ -17,6 +20,8 @@ type SessionData = NonNullable<SessionResult["data"]>;
 type SignOutResult = Awaited<ReturnType<WebClient["signOut"]>>;
 type AuthError = NonNullable<SessionResult["error"]>;
 type RefetchOptions = Parameters<WebAuth["refetch"]>[0];
+type SignInResult = Awaited<ReturnType<WebClient["signIn"]>>;
+type SignUpResult = Awaited<ReturnType<WebClient["signUp"]>>;
 type Result<T> = { data: T; error: null } | { data: null; error: AuthError };
 
 interface SessionState {
@@ -26,9 +31,9 @@ interface SessionState {
   isRefetching: boolean;
 }
 
-const NATIVE_SIGN_IN_UNSUPPORTED =
-  "@farm.js/auth/client: sign in on a web screen; native sign-in is not supported yet. " +
-  "Navigate to your sign-in page, and native screens are signed in through the device token.";
+const SOCIAL_SIGN_IN_UNSUPPORTED =
+  "@farm.js/auth/client: social and OAuth sign-in need a browser session and are not supported " +
+  "on native screens yet. Sign in with email and password, or on a web screen.";
 
 // The ISO timestamps Better Auth's client turns into Dates, so `createdAt` and `expiresAt` are
 // Dates here as on the web.
@@ -64,20 +69,21 @@ export const createFarmAuthClient: typeof web.createFarmAuthClient = (
 ) => {
   const basePath = normalizeBasePath(options.basePath);
 
-  // The status-and-body result Better Auth's client returns, from `serverFetch`. Async, so a
-  // screen that is not rendered yet (no `mobile.server`) rejects instead of throwing.
-  async function request<T>(route: string, init: RequestInit): Promise<Result<T>> {
-    const response = await serverFetch(`${basePath}${route}`, init);
-    const body = parseBody(await response.text());
-    if (response.ok) return { data: (body ?? null) as T, error: null };
+  // The status-and-body result Better Auth's client returns.
+  function toResult<T>(status: number, statusText: string, text: string): Result<T> {
+    const body = parseBody(text);
+    if (status >= 200 && status < 300) return { data: (body ?? null) as T, error: null };
     return {
       data: null,
-      error: {
-        ...(isRecord(body) ? body : {}),
-        status: response.status,
-        statusText: response.statusText,
-      },
+      error: { ...(isRecord(body) ? body : {}), status, statusText },
     };
+  }
+
+  // From `serverFetch`. Async, so a screen that is not rendered yet (no `mobile.server`) rejects
+  // instead of throwing.
+  async function request<T>(route: string, init: RequestInit): Promise<Result<T>> {
+    const response = await serverFetch(`${basePath}${route}`, init);
+    return toResult<T>(response.status, response.statusText, await response.text());
   }
 
   async function loadSession(query?: Record<string, unknown>): Promise<SessionResult> {
@@ -138,12 +144,33 @@ export const createFarmAuthClient: typeof web.createFarmAuthClient = (
 
   const getState = () => state;
 
-  function signIn(_input: FarmAuthCredentials): Promise<never> {
-    return Promise.reject(new Error(NATIVE_SIGN_IN_UNSUPPORTED));
+  /**
+   * The web client's route and body, sent by the shell's native code. On success the WebView has
+   * the session cookie (web screens are signed in too), the device has its token, and `useAuth`
+   * has the user before this resolves. The shell never returns cookies or tokens to JS; the body
+   * is Better Auth's, as the web client gets it.
+   */
+  async function credentials<T>(route: string, input: object): Promise<Result<T>> {
+    if ("provider" in input) throw new Error(SOCIAL_SIGN_IN_UNSUPPORTED);
+    const reply = await shellSignIn(`${basePath}${route}`, input);
+    // The shell has no reason phrase to pass on; HTTP/2 responses on the web have none either.
+    const result = toResult<T>(reply.status, "", reply.body);
+    if (result.error === null) await refetch();
+    return result;
   }
 
-  function signUp(_input: FarmAuthSignUpInput): Promise<never> {
-    return Promise.reject(new Error(NATIVE_SIGN_IN_UNSUPPORTED));
+  function signIn(input: FarmAuthCredentials): Promise<SignInResult> {
+    return credentials<NonNullable<SignInResult["data"]>>(
+      "/sign-in/email",
+      input,
+    ) as Promise<SignInResult>;
+  }
+
+  function signUp(input: FarmAuthSignUpInput): Promise<SignUpResult> {
+    return credentials<NonNullable<SignUpResult["data"]>>(
+      "/sign-up/email",
+      input,
+    ) as Promise<SignUpResult>;
   }
 
   /**

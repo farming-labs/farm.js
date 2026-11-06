@@ -1551,6 +1551,9 @@ shows its built-in not-found page instead.
 
 With experimental RSC enabled, failures before the HTML shell is sent render the nearest
 `error.tsx` through RSC and SSR with status `500` and `Cache-Control: private, no-store`.
+`{ mode: "rsc" }` answers `notFound()` and unmatched URLs with a plain `404` for now, without the
+app's not-found page; `{ mode: "islands" }` renders it. A form posted without JavaScript whose
+action calls `redirect()` gets a `303`, so the browser loads the target with a `GET`.
 RSC loading and error boundaries follow the selected page's file ancestors, including route
 groups and catch-all folders. For example, `/users/[id]/error.tsx` does not handle a sibling
 `/users/new/page.tsx`. Failures before page selection, such as middleware errors, use only the

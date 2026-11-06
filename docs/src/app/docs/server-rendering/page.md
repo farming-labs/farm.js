@@ -359,7 +359,9 @@ declare one inline: an `async` function with `"use server"` as its first stateme
 component's variables, which travel with it sealed (AES-GCM, bound to the action) rather than as
 form fields the browser could read or change. Every instance of one build shares the sealing key;
 set `ISLX_ACTIONS_KEY` to keep forms on open pages working across deploys. A `<form>` written in a
-server component posts its action without a page load once JavaScript runs. After an
+server component posts its action without a page load once JavaScript runs; React's
+`useFormStatus` reads only a form React renders, so a client component that shows a form's pending
+state renders the `<form>` itself. After an
 action called from JavaScript, the page refreshes, as the form posted without JavaScript would show
 it: islands still on the page keep their state and get their new props, and a `redirect()` from the
 action becomes a client navigation. Props and action arguments are not limited to JSON:

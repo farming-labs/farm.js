@@ -33,11 +33,14 @@ describe("server action redirect reaches the browser", () => {
   it("answers a no-JS form submission with a real redirect response", () => {
     const entry = generateRscEntry(context);
 
-    expect(entry).toContain("const formRedirect = getFarmRedirectError(e);");
-    expect(entry).toContain("status: formRedirect.status,");
-    expect(entry).toContain(
+    const start = entry.indexOf("const formRedirect = getFarmRedirectError(e);");
+    const end = entry.indexOf(
       "headers: { location: formRedirect.url, 'Cache-Control': 'no-store' },",
     );
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    // 303, so the browser follows it with a GET instead of posting the form again.
+    expect(entry.slice(start, end)).toContain("status: 303,");
   });
 
   it("navigates through the client router when the action redirected", async () => {

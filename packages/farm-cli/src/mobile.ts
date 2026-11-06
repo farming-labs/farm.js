@@ -257,6 +257,7 @@ async function writeMobileProject(
     command,
     mobile: app.mobile,
     basePath: config.basePath === "/" ? "" : config.basePath,
+    ...(config.auth?.enabled ? { authBasePath: config.auth.basePath } : {}),
     manifest: app.manifest,
     projectDir: path.resolve(
       config.root,

@@ -45,7 +45,7 @@ farm build                    # --web, the default, unchanged
 | React Native screens                          | Unreleased, Android            | Android only; on an emulator under `farm dev --mobile` and as a production APK; not yet on a device (see [React Native screens](#react-native-screens))                                    |
 | Bundled client assets                         | Unreleased                     | Pages in a production shell run the mobile client; Android serves its files from the APK, iOS from the server (see [Bundled client assets](#bundled-client-assets))                        |
 | Page shells                                   | Unreleased                     | `mobile.shells`: a route's layout and loading state, shown before its document and while offline; not yet run on an emulator or simulator (see [Page shells](#page-shells))                |
-| Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                                                           |
+| Signed-in native screens (device tokens)      | Unreleased                     | Android shell run on an emulator under `farm dev --mobile`; native sign-in not yet run on an emulator; iOS not yet built with Xcode (see [Auth on mobile](#auth-on-mobile))                |
 | Server components apps                        | Unreleased                     | Both engines get the mobile client; islands mode also gets device tokens, the RSC pipeline does not (see [Bundled client assets](#bundled-client-assets)); no page shells yet              |
 | Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                                                         |
 | Native `@farm.js/ui`                          | Unreleased, Android            | React Native views on native screens and generated ports; tokens resolve to the web defaults; run in tests, not yet on a device (see [Portable components](#portable-components-farmjsui)) |
@@ -777,11 +777,10 @@ same typed client: `@farm.js/core/api/client` has a React Native build (Metro pi
 `react-native` export condition) whose `createApiClients` sends requests through `serverFetch`
 unless given a `baseURL` or `fetch` of its own. Import the client from `@farm.js/core/api/client`,
 not `@farm.js/core/client`, so one `lib/api.ts` serves both. Native screens send no cookies. Once
-the user has signed in on a web screen, `serverFetch` sends the device's session token, so
-protected routes see the same user (see [Auth on mobile](#auth-on-mobile)). A screen
-navigates by URL only, so `farm-routes.json` always decides what
-opens next: a link from a native screen can open a web screen, a modal, a tab, or another native
-screen, and back returns to it.
+the user has signed in, on a web screen or a native one, `serverFetch` sends the device's session
+token, so protected routes see the same user (see [Auth on mobile](#auth-on-mobile)). A screen
+navigates by URL only, so `farm-routes.json` always decides what opens next: a link from a native
+screen can open a web screen, a modal, a tab, or another native screen, and back returns to it.
 
 - **Build.** `farm build --mobile` writes one entry that registers every native screen under its
   module id, bundles it with Metro, and compiles it to Hermes bytecode with the `hermesc` that
@@ -1129,8 +1128,10 @@ key to different strings. Usage keys outside the `NS...UsageDescription` pattern
 ## Auth on mobile
 
 Web screens sign in exactly as they do in a browser: the session cookie lives in the WebView's
-cookie store. Native screens send no cookies, so after a sign-in on a web screen the shell trades
-that cookie session for a **device token**, and `serverFetch` sends it as `Authorization: Bearer`.
+cookie store. Native screens send no cookies, so after a sign-in the shell trades that cookie
+session for a **device token**, and `serverFetch` sends it as `Authorization: Bearer`. A sign-in
+on a native screen puts its session cookie in the same store, so one sign-in, on either kind of
+screen, signs in both.
 On the server, a request with a valid token runs as the same cookie session, so `auth.user()`,
 `auth.session()`, an integration's `protectedRoutes`, API routes, and server functions all see the
 signed-in user. Nothing to configure: an app with a `mobile` block and a covered auth integration
@@ -1141,37 +1142,67 @@ gets it.
 const response = await serverFetch("/api/notes"); // 401 only if the user is signed out
 ```
 
-With `@farm.js/auth`, native screens import `getSession`, `useAuth` and `signOut` from
-`@farm.js/auth/client`, the same as web pages. Metro resolves the package's `react-native` build,
-which calls the same auth routes through `serverFetch`; web bundles do not change.
+With `@farm.js/auth`, native screens import `signIn`, `signUp`, `getSession`, `useAuth` and
+`signOut` from `@farm.js/auth/client`, the same as web pages. Metro resolves the package's
+`react-native` build; web bundles do not change.
 
 ```tsx
 // src/app/account/page.native.tsx
-import { Button, Text, View } from "react-native";
+import { useState } from "react";
+import { Button, Text, TextInput, View } from "react-native";
 import { useAuth } from "@farm.js/auth/client";
 
 export default function Account() {
-  const { user, isPending, signOut } = useAuth();
+  const { user, isPending, signIn, signOut } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string>();
   if (isPending) return <Text>Loading</Text>;
-  if (!user) return <Text>Signed out</Text>;
+  if (user) {
+    return (
+      <View>
+        <Text>{user.email}</Text>
+        <Button title="Sign out" onPress={() => void signOut()} />
+      </View>
+    );
+  }
   return (
     <View>
-      <Text>{user.email}</Text>
-      <Button title="Sign out" onPress={() => void signOut()} />
+      <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" />
+      <TextInput value={password} onChangeText={setPassword} secureTextEntry />
+      <Button
+        title="Sign in"
+        onPress={async () => {
+          const result = await signIn({ email, password });
+          setError(result.error?.message);
+        }}
+      />
+      {error ? <Text>{error}</Text> : null}
     </View>
   );
 }
 ```
 
-`getSession()` and `useAuth()` return what the web client returns: signed out (no device token,
-or one the server refuses) is `{ data: null, error: null }` and `user: null`. `signIn` and `signUp`
-reject on native screens for now: sign in on a web screen, and the device token signs native
-screens in.
+Every call returns what the web client returns. `signIn` and `signUp` resolve with Better Auth's
+`{ data, error }`: the user on success, and the same `error` (such as `INVALID_EMAIL_OR_PASSWORD`
+with `status: 401`) for a wrong password or a taken email. They reject when the phone is offline,
+as the web client does. On success `useAuth()` has the user before the call resolves. Signed out
+(no device token, or one the server refuses) is `{ data: null, error: null }` from `getSession()`
+and `user: null` from `useAuth()`. Social and OAuth sign-in need a browser session and reject on
+native screens for now; `basePath` applies, `baseURL` does not (native screens always call
+`mobile.server`).
 
 ### How the token is issued
 
-1. The user signs in on a web screen. After the page loads or renders, the shell's native code
-   (never the WebView) reads the WebView's cookies for the server.
+1. The user signs in, on either kind of screen:
+   - **On a web screen**, as in a browser. After the page loads or renders, the shell's native
+     code (never the WebView) reads the WebView's cookies for the server.
+   - **On a native screen**, `signIn` or `signUp` from `@farm.js/auth/client` hands the route and
+     body to the shell. Its native code posts them to `mobile.server` itself: `POST` only, only to
+     a route under `auth.basePath`, with no cookies and no `Origin`, and it never follows a
+     redirect. A success's session cookie goes into the WebView's cookie store, so web screens
+     are signed in too; a refused sign-in keeps no cookie and issues nothing. JS gets back the
+     route's status and body, never a cookie.
 2. It asks `POST /__farm/mobile/session/challenge` for a one-time nonce, sending those cookies. The
    server answers only if the cookies sign someone in.
 3. It sends the nonce to `POST /__farm/mobile/session` with the same cookies, and gets an access
@@ -1188,6 +1219,16 @@ Every endpoint takes `POST` only, needs an `X-Farm-Mobile: <mobile.id>` header, 
 request with an `Origin` or `Sec-Fetch-*` header: browsers send those on every `POST` and every
 `fetch`, so no web page, the app's own included, can mint, refresh, or use a token. Everything is
 sent in headers.
+
+A native sign-in is reachable only from React Native screens: on Android it is a method of the
+`FarmShell` React Native module, which runs in the React Native runtime, and WebView pages talk
+only to the bridge, which has no session methods. Better Auth checks `Origin` only on a request
+that carries cookies, browser fetch metadata, or an `Origin`; the shell's sign-in has none, the
+same request any non-browser client can send, so it needs no `Origin` and gains nothing a script
+with the password could not do. A browser page posting the same route still sends its own
+`Origin`, which Better Auth checks as before. The sign-in body is Better Auth's, the same one web
+JS reads: it includes the session token, which is no credential on its own (the session cookie is
+signed, and `@farm.js/auth` has no bearer plugin).
 
 ### On the server
 
@@ -1270,6 +1311,9 @@ without setting `FARM_AUTH_URL`.
 - The device keeps the cookies it had when the token was issued, plus the rotations its own
   requests receive. A cookie rotated only in the WebView is not copied; the device keeps working
   while its own cookies sign in the same session.
+- Native sign-in is email and password (`signIn`, `signUp`). Social and OAuth sign-in need a
+  system browser session (follow-up). iOS has the shell side ready but no React Native screens
+  yet, so nothing calls it there.
 - Not yet run on a physical device, and the iOS shell has not been built with Xcode.
 
 ## The native-screen report
