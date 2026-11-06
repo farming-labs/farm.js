@@ -251,7 +251,7 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
                 navigator: self
             )
             // The tree's title replaces it once loaded; never show the module id.
-            screen.title = ""
+            screen.navigationItem.title = ""
             holder.screen = screen
             return screen
         }

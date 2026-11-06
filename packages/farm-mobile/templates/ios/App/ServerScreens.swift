@@ -74,7 +74,8 @@ final class FarmServerScreen: UIViewController {
                 content.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
                 content.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
             ])
-            if let title = tree["title"] as? String, !title.isEmpty { parent?.title = title }
+            // navigationItem, not title: UIViewController.title also renames a tab root's tab bar item.
+            if let title = tree["title"] as? String, !title.isEmpty { parent?.navigationItem.title = title }
             loaded = true
         } catch {
             fallback(String(describing: error))

@@ -593,6 +593,11 @@ describe("@farm.js/mobile/ios", () => {
     expect(files["App/ServerScreens.swift"]).toContain(
       'static let contentType = "application/vnd.farm.native+json"',
     );
+    // A server screen titles the navigation bar only: UIViewController.title would also rename
+    // the tab bar item when the screen is a tab's root.
+    expect(files["App/ServerScreens.swift"]).toContain("parent?.navigationItem.title = title");
+    expect(files["App/ServerScreens.swift"]).not.toMatch(/parent\?\.title = /);
+    expect(files["App/Navigator.swift"]).toContain('screen.navigationItem.title = ""');
     expect(routes).toContain(
       'let screen = (json["screen"] as? String).flatMap { screens.contains($0) ? $0 : nil } ?? web',
     );

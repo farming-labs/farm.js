@@ -71,7 +71,8 @@ for (const entry of manifest.rules) {
 // `native.auto: "on"`: the routes the analyzer proves render natively are `server` screens.
 const SERVER = ["/", "/notes", "/notes/[id]", "/about", "/feed", "/navigation/step/[n]", "/docs/[...slug]"];
 const ANDROID = {
-  "/": { presentation: "tab", tab: 0, screen: "server", source: "analyzer" },
+  // The home page requires the native tier itself (`export const mobile`), so dev draws it too.
+  "/": { presentation: "tab", tab: 0, screen: "server", source: "page" },
   "/notes": { presentation: "tab", tab: 1, screen: "server", source: "analyzer" },
   "/settings": { presentation: "tab", tab: 2, screen: "web", source: "default" },
   "/notes/[id]": { presentation: "push", screen: "server", source: "analyzer" },
