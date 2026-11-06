@@ -93,8 +93,9 @@ storage primitives and a production server that runs on Bun or Node. What they l
 way to put that app on a desktop or a phone without rewriting it.
 
 The Electrobun spike (#2303) proved the desktop half works with no core changes: the
-`farm build --preset bun` output runs unmodified inside Electrobun's bundled Bun, and SSR,
-hydration, API routes, server functions and `node:fs` all work in WKWebView. It also needed about
+`farm build --preset bun` output runs unmodified inside Electrobun's bundled Bun. SSR, API routes,
+server functions and `node:fs` run in Bun; WKWebView displays the result and hydrates the client.
+It also needed about
 270 lines of example glue that every desktop app would copy:
 
 - a dev script that runs `farm dev` and the shell together;
@@ -217,6 +218,9 @@ interface FarmUserConfig {
 ```
 
 ```ts
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
 const notesTab = { path: "/notes", title: "Notes", icon: "note.text" };
 const searchTab = { path: "/search", title: "Search", icon: "magnifyingglass" };
 const settingsTab = { path: "/settings", title: "Settings", icon: "gear" };
@@ -230,7 +234,7 @@ export default defineConfig({
     modules: {
       push: os === "ios" ? { apnsKeyId: env.APNS_KEY_ID } : { firebase: "./google-services.json" },
     },
-    version: (await import(`${root}/package.json`)).version,
+    version: JSON.parse(await readFile(join(root, "package.json"), "utf8")).version,
   }),
 });
 ```
@@ -405,7 +409,8 @@ sequenceDiagram
 - The handshake token works once. A second use, or any other token, returns 403.
 - Every request needs the cookie, compared in constant time. This covers pages, server functions,
   API routes, endpoints, RSC and route data requests, and the built-in agent surfaces (`/mcp`,
-  `/.well-known/*`, Markdown mirrors).
+  `/.well-known/*`, Markdown mirrors), as well as static client assets. The shipped desktop
+  server entry checks the guard before the Nitro handler; the dev guard runs before Vite.
 - `Host` must be `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`, which blocks DNS
   rebinding. A present `Origin` on unsafe methods must match the server origin.
 - The guard runs before `runtime.before`, middleware and routing. It is not configurable off; an
@@ -463,8 +468,9 @@ export interface DesktopShell {
 - `package` produces `.app`/`.dmg`, `.exe` and AppImage outputs plus update artifacts when the
   shell supports them.
 
-`desktop.shell` accepts a name (`"electrobun"`, `"electron"`, `"tauri"`) resolved to
-`@farm.js/desktop-<name>`, or a package name for third-party shells. It does not accept an adapter
+`desktop.shell` defaults to `"electrobun"`, so `desktop: {}` selects
+`@farm.js/desktop/electrobun`. A name (`"electrobun"`, `"electron"`, `"tauri"`) resolves to
+`@farm.js/desktop/<name>`; a package name selects a third-party shell. It does not accept an adapter
 object: importing an adapter in `farm.config.ts` would pull it into web server bundles for apps
 whose config is bundled. Electrobun ships first. Electron (`runtime:
 "node"`, in-process in the main process) and Tauri (Bun server as a sidecar) follow.
@@ -473,7 +479,7 @@ whose config is bundled. Electrobun ships first. Electron (`runtime:
 
 ```text
 .farm/output/desktop/
-  server/            Farm server for the shell runtime (entry.mjs, chunks, public/)
+  server/            Nitro output: server/index.mjs, server/chunks/, public/
   shell/             generated shell main and config
   dist/
     Notes.app  Notes.dmg  Notes-setup.exe  Notes.AppImage
@@ -527,9 +533,10 @@ Rules:
 
 The default. A WebView in the native navigator shows the Farm page rendered by `mobile.server`.
 
-- Content-hashed client assets are bundled into the app and served by a local scheme handler
-  (`WebViewAssetLoader` on Android, `WKURLSchemeHandler` on iOS) on an https origin, so only HTML
-  and data cross the network.
+- Android bundles content-hashed client assets and serves matching requests on the server's own
+  origin from the app bundle. Cache misses load from the server. iOS loads assets from the server
+  and uses WebKit's cache: `WKURLSchemeHandler` cannot handle `http` or `https`. Neither platform
+  introduces a second origin. See [the implemented asset model](#the-server-picks-the-client-the-app-bundle-is-a-cache).
 - Routes that can be pre-rendered get a bundled page shell (layout plus loading state). The shell
   shows instantly while the server document loads, and offline it shows the route's offline state
   instead of a blank screen.
@@ -746,6 +753,9 @@ app directory routes, `mobile.tabs`, `mobile.routes`, `mobile.native` and page e
   the bundled native or platform screen.
 - A rule separates which screen (`screen`, `module`) from how it is presented (`presentation`). A
   modal never replaces the root.
+- `"tab"` is a generated presentation for a route listed in `mobile.tabs`; `tab` is its index.
+  It is not a user-selectable `mobile.routes.presentation` value. The public presentation union
+  stays `"push" | "modal" | "replace"`; the manifest adds tab switching for the native navigator.
 - In the app, Farm's client router does not navigate in place. The shell registers
   `delegateNavigation` (#2419), each in-app navigation becomes a `visit` message, and the navigator
   pushes, presents or switches tabs by the matching rule. `shouldOverrideUrlLoading` and its iOS
@@ -978,9 +988,10 @@ must also keep the app within `mobile.native.budgets`.
 
 #### Checks
 
-- Visual diff in CI: for each ported route, the web screen and the native screen render on an
-  emulator with the same fixture data and are compared. A difference over the threshold demotes the
-  route to web, and the report says why.
+- Planned visual diff in CI: for each ported route, the web screen and the native screen render on
+  an emulator with the same fixture data and are compared. A difference over the threshold demotes
+  an analyzer-selected port to web, and the report says why. An explicit page or config native
+  choice fails the check with the route and difference instead; it is never silently demoted.
 - Runtime fallback: the web twin stays in the app, and a crash or contract mismatch on the native
   screen shows it (7.10).
 - The analyzer runs in `farm build --mobile` only, never in `farm dev` or a web build. In
@@ -1118,7 +1129,9 @@ Platform screens rebuild through Gradle or Xcode.
 
 The server for a mobile app is either:
 
-- **self-hosted**: `mobile.server` is the URL of any `--web` deployment of the same app; or
+- **self-hosted**: `mobile.server` is the URL of a `--web` deployment of the same app. The preview
+  has no installed-version compatibility gate yet. The contract-aware design below requires a
+  server build with its current contract and retained contracts for supported mobile builds; or
 - **managed**: Farm.js Infrastructure deploys the Farm server for the app ("deploy my Farm
   server"). This is a future Infra product and out of scope for the first implementation.
 
@@ -1128,13 +1141,19 @@ Rules that hold either way:
   session cookie on the WebView cookie store for the server origin at launch and after refresh;
   native and platform screens send `Authorization: Bearer`. Auth integrations need a token mode
   (issue, refresh and accept bearer tokens) for this to work.
-- **The server-function contract is recorded per build.** `farm build --mobile` writes the
-  server-function and route-data signatures, with input and output schemas, into the app and into
-  the server build. A web deploy that removes or incompatibly changes a function still called by an
-  installed app version fails the check with the affected versions. The same schemas generate the
-  Kotlin and Swift clients for platform screens.
-- **Optional minimum version.** `mobile.minimumVersion` lets the server reject older apps with a
-  response the shell turns into an update prompt.
+- **Planned contract gate, not implemented.** Each web build emits its server-function and
+  route-data contract, and a mobile build embeds the contract it was built against. The app owner
+  retains the manifests for mobile builds it supports, keyed by app id, platform, version and
+  build id, and supplies them to every server deployment. Self-hosting needs the same inputs as
+  managed hosting; a current server manifest alone cannot identify affected installed versions.
+  The deployment check compares the new server with every retained supported contract and fails
+  on an incompatible removal or schema change, naming the affected builds. Missing retained
+  manifests or schemas that cannot be compared must fail the check, not assert compatibility.
+  Retention ends only when the owner explicitly ends support for that build. Storage and CLI
+  configuration for this registry still need a separate implementation proposal. The same schema
+  record is a prerequisite for generated Kotlin and Swift clients.
+- **Planned minimum version, not implemented.** The proposed `mobile.minimumVersion` lets the
+  server reject unsupported apps with a response the shell turns into an update prompt.
 
 ## 8. Capability matrix
 
@@ -1330,8 +1349,9 @@ Made while building bundled client assets (#2472). Narrows 7.2 and 7.12.
   mobile client from the network, where WebKit's cache keeps it. Serving pages themselves from a
   custom scheme would break the server's cookies and origin checks, so iOS bundling waits for a
   measured need on a device.
-- Gaps: prerendered pages are static files the server never sees, so in a shell they load the web
-  client. Server components apps get no mobile client yet. Page shells (7.2) are not built.
+- Current gap: prerendered pages are static files the server never sees, so in a shell they load
+  the web client. Server components apps now get a mobile client (#2493), and page shells shipped
+  in #2496; their simulator verification remains listed in Status above.
 
 ### Device APIs are React Native modules
 
@@ -1561,9 +1581,8 @@ limited, and server secrets would ship in the app binary.
 
 ## Open questions
 
-1. **Default desktop shell.** Electrobun is smaller and Bun-native; Electron has a larger
-   ecosystem, Chromium everywhere and mature auto-update. The adapter interface does not depend on
-   the answer.
+1. **Default desktop shell.** Settled: Electrobun, resolved as `@farm.js/desktop/electrobun`.
+   Electron and Tauri remain future adapters behind the same interface.
 2. **Signing, notarization and auto-update.** Does Farm configure macOS notarization, Windows
    signing and update feeds, or document the shell's own tooling?
 3. **Native bundler.** Decided: Metro. Revisit a Rolldown build behind the same
@@ -1573,9 +1592,10 @@ limited, and server secrets would ship in the app binary.
    like in `@farm.js/integration-utils`.
 5. **Old backend versions in Infra.** How managed hosting keeps a server version alive for
    installed app versions that the contract check says still depend on it.
-6. **Static client assets and the guard.** Nitro serves client chunks before Farm's runtime hooks,
-   so the spike's guard did not cover them. They contain only client code, but the desktop server
-   entry could put the guard in front of static serving for uniformity.
+6. **Static client assets and the guard.** Settled: the generated desktop server entry guards
+   requests before Nitro, including static assets. The dev guard runs before Vite. The original
+   spike used a runtime hook that ran too late; the shipped entry and desktop runtime tests cover
+   this boundary.
 7. **Island placement on Android.** Settled by the scroll-tracking experiment (7.7): root-flow
    islands that scroll with the page, or only placements that do not scroll.
 8. **Modules and islands.** Whether Expo modules link in Farm's host (they need
