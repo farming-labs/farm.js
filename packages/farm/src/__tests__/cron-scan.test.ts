@@ -352,7 +352,7 @@ describe("scanned jobs in build outputs", () => {
     );
     expect(manifest).toEqual({
       schemaVersion: 1,
-      scheduler: "host",
+      provider: "host",
       secretEnv: "CRON_SECRET",
       jobs: [
         { name: "digest", schedule: ["0 9 * * *"], path: "/api/digest", description: null },

@@ -192,7 +192,7 @@ describe("Farm cron", () => {
     );
     expect(manifest).toEqual({
       schemaVersion: 1,
-      scheduler: "host",
+      provider: "host",
       secretEnv: "CRON_SECRET",
       jobs: [
         {

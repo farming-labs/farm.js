@@ -24,14 +24,15 @@ it("hands Infra the canonical route path that host schedulers call", async () =>
   const root = await tempRoot();
   const prepared = await prepareFarmCronForNitro({
     root,
-    cron: { infra: "farmjs", jobs: { cleanup: job } },
+    cron: { provider: "farmjs", jobs: { cleanup: job } },
   });
   const manifest = JSON.parse(await fs.readFile(prepared.manifestPath!, "utf8"));
+  expect(manifest.provider).toBe("farmjs");
   expect(manifest.jobs[0].path).toBe("/api/cleanup");
   expect(prepared.jobs[0].path).toBe("/api/cleanup");
 });
 
-it("selects Infra in config and merges route schedules with explicit jobs", async () => {
+it("selects Infra with cron.provider and merges route schedules with explicit jobs", async () => {
   const root = await tempRoot();
   await fs.mkdir(path.join(root, "src/app/api/digest"), { recursive: true });
   await fs.writeFile(
@@ -43,22 +44,24 @@ it("selects Infra in config and merges route schedules with explicit jobs", asyn
   );
   const resolved = await resolveProjectCronJobs({
     root,
-    cron: { infra: "farmjs", jobs: { cleanup: job } },
+    cron: { provider: "farmjs", jobs: { cleanup: job } },
   });
-  expect(resolved.infra).toBe("farmjs");
+  expect(resolved.provider).toBe("farmjs");
   expect(resolved.jobs.map((j) => j.name)).toEqual(["cleanup", "digest"]);
   expect(resolveCronConfig(resolved)).toBe(resolved);
 });
 
 it("keeps legacy job names and rejects invalid or mixed config", () => {
-  expect(resolveCronConfig({ infra: job, jobs: job }).jobs.map((j) => j.name)).toEqual([
-    "infra",
+  expect(resolveCronConfig({ provider: job, jobs: job }).jobs.map((j) => j.name)).toEqual([
+    "provider",
     "jobs",
   ]);
-  expect(() => resolveCronConfig({ infra: "unknown" } as never)).toThrow(/cron.infra/);
-  expect(() => resolveCronConfig({ infra: "farmjs", cleanup: job } as never)).toThrow(/cron.jobs/);
-  expect(() => resolveCronConfig({ infra: "host", jobs: [] } as never)).toThrow(/cron.jobs/);
-  expect(() => resolveCronConfig({ infra: "host", jobs: null } as never)).toThrow(/cron.jobs/);
+  expect(() => resolveCronConfig({ provider: "unknown" } as never)).toThrow(/cron.provider/);
+  expect(() => resolveCronConfig({ provider: "farmjs", cleanup: job } as never)).toThrow(
+    /cron.jobs/,
+  );
+  expect(() => resolveCronConfig({ provider: "host", jobs: [] } as never)).toThrow(/cron.jobs/);
+  expect(() => resolveCronConfig({ provider: "host", jobs: null } as never)).toThrow(/cron.jobs/);
 });
 
 it("never enables hosted scheduling or registers during a build just because a key exists", async () => {
@@ -70,7 +73,7 @@ it("never enables hosted scheduling or registers during a build just because a k
     root: await tempRoot(),
     cron: { cleanup: job },
   });
-  expect(prepared.scheduler).toBe("host");
+  expect(prepared.provider).toBe("host");
   expect(Object.keys(prepared.tasks)).toHaveLength(1);
   expect(fetch).not.toHaveBeenCalled();
 });
@@ -82,12 +85,12 @@ it("builds Infra output without credentials and keeps empty manifests for cleanu
   const root = await tempRoot();
   const prepared = await prepareFarmCronForNitro({
     root,
-    cron: { infra: "farmjs", jobs: { cleanup: job } },
+    cron: { provider: "farmjs", jobs: { cleanup: job } },
   });
-  expect(prepared.scheduler).toBe("farmjs");
+  expect(prepared.provider).toBe("farmjs");
   expect(prepared.tasks).toEqual({});
   expect(prepared.scheduledTasks).toEqual({});
-  for (const cron of [{ infra: "farmjs" as const }, false as const]) {
+  for (const cron of [{ provider: "farmjs" as const }, false as const]) {
     const empty = await prepareFarmCronForNitro({ root, cron });
     expect(JSON.parse(await fs.readFile(empty.manifestPath!, "utf8")).jobs).toEqual([]);
   }

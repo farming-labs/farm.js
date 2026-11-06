@@ -60,7 +60,7 @@ export async function createNitroConfig(
   });
   const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
   const cloudflareCronConfig =
-    farmCron.scheduler === "host" ? createFarmCronCloudflareConfig(farmCron.jobs) : undefined;
+    farmCron.provider === "host" ? createFarmCronCloudflareConfig(farmCron.jobs) : undefined;
 
   // Create a runtime registry file to store route managers
   // This will be populated at runtime through Nitro hooks

@@ -8,8 +8,11 @@ import {
 
 export type FarmCronSchedule = string | string[];
 
-/** Who fires the schedules: the deployment target's own scheduler, or Farm.js Infra. */
-export type FarmCronScheduler = "host" | "farmjs";
+/**
+ * Who fires the schedules. `host` is the platform chosen by `deploy.target` or the Nitro preset
+ * (Vercel Cron, Cloudflare Cron Triggers, or Nitro scheduled tasks); `farmjs` is Farm.js Infra.
+ */
+export type FarmCronProvider = "host" | "farmjs";
 
 /** A JSON value, as route-level cron `input` must survive the build manifest unchanged. */
 export type FarmCronInputValue =
@@ -49,12 +52,13 @@ export interface FarmCronJobConfig {
 
 export interface FarmCronConfig {
   /**
-   * Who runs the schedules. `farmjs` writes a manifest for `farm cron sync` after deployment;
-   * `host` emits the deployment target's scheduler output. Credentials never select Infra.
+   * Who runs the schedules. `host` uses the scheduler of the platform you deploy to with
+   * `deploy.target` or the Nitro preset. `farmjs` leaves the host output empty and writes a manifest
+   * for `farm cron sync` after deployment. Credentials never select Infra.
    * @default "host"
-   * @example { infra: "farmjs" }
+   * @example { provider: "farmjs" }
    */
-  infra: FarmCronScheduler;
+  provider: FarmCronProvider;
   /** Named jobs, merged with route-local `cronRoute()` schedules. */
   jobs?: Record<string, FarmCronJobConfig>;
 }
@@ -73,7 +77,7 @@ export interface FarmCronJob {
 }
 
 export interface FarmCronResolvedConfig {
-  infra?: FarmCronScheduler;
+  provider?: FarmCronProvider;
   enabled: boolean;
   secretEnv: typeof DEFAULT_FARM_CRON_SECRET_ENV;
   jobs: FarmCronJob[];
@@ -84,8 +88,8 @@ export interface PreparedFarmCron {
   tasks: Record<string, { handler: string; description: string }>;
   scheduledTasks: Record<string, string | string[]>;
   manifestPath?: string;
-  /** Who fires the jobs: the host's schedulers, or Farm.js Infra (then the host outputs stay empty). */
-  scheduler: FarmCronScheduler;
+  /** Who fires the jobs: the deploy platform, or Farm.js Infra (then the host outputs stay empty). */
+  provider: FarmCronProvider;
 }
 
 export interface FarmCronRouteOptions {
@@ -159,20 +163,20 @@ export function resolveCronConfig(
   }
 
   if (typeof cron !== "object" || Array.isArray(cron)) {
-    throw new TypeError("`cron` must be a job map, { infra, jobs }, or false.");
+    throw new TypeError("`cron` must be a job map, { provider, jobs }, or false.");
   }
-  let infra: FarmCronScheduler | undefined;
+  let provider: FarmCronProvider | undefined;
   let entries: Record<string, FarmCronJobConfig>;
-  // An object under `infra` is a job named "infra" in the flat job map, which stays valid.
-  if ("infra" in cron && (typeof cron.infra !== "object" || cron.infra === null)) {
-    if (cron.infra !== "host" && cron.infra !== "farmjs") {
+  // An object under `provider` is a job named "provider" in the flat job map, which stays valid.
+  if ("provider" in cron && (typeof cron.provider !== "object" || cron.provider === null)) {
+    if (cron.provider !== "host" && cron.provider !== "farmjs") {
       throw new TypeError(
-        `\`cron.infra\` must be "host" or "farmjs", received ${JSON.stringify(cron.infra)}.`,
+        `\`cron.provider\` must be "host" (the deploy platform's scheduler) or "farmjs" (Farm.js Infra), received ${JSON.stringify(cron.provider)}.`,
       );
     }
-    infra = cron.infra;
-    if (Object.keys(cron).some((key) => key !== "infra" && key !== "jobs")) {
-      throw new TypeError("When `cron.infra` is set, place named jobs inside `cron.jobs`.");
+    provider = cron.provider;
+    if (Object.keys(cron).some((key) => key !== "provider" && key !== "jobs")) {
+      throw new TypeError("When `cron.provider` is set, place named jobs inside `cron.jobs`.");
     }
     const configured =
       (cron as FarmCronConfig).jobs === undefined ? {} : (cron as FarmCronConfig).jobs;
@@ -194,7 +198,7 @@ export function resolveCronConfig(
   }
 
   return {
-    ...(infra ? { infra } : {}),
+    ...(provider ? { provider } : {}),
     enabled: jobs.length > 0,
     secretEnv: DEFAULT_FARM_CRON_SECRET_ENV,
     jobs,
@@ -213,23 +217,23 @@ export async function prepareFarmCronForNitro(config: {
   const path = await import("node:path");
   const manifestPath = path.join(root, distDir, FARM_CRON_MANIFEST);
   const generatedDir = path.join(root, distDir, ".nitro", "farm-cron");
-  const scheduler = cron.infra ?? "host";
+  const provider = cron.provider ?? "host";
   // Infra calls the canonical route path, like Vercel crons and Nitro tasks: the server answers
   // it whatever `basePath` or `api.basePath` add, and the signature covers that pathname.
-  const manifest = createFarmCronManifest(cron, scheduler);
+  const manifest = createFarmCronManifest(cron, provider);
   await fs.mkdir(path.dirname(manifestPath), { recursive: true });
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   await fs.rm(generatedDir, { recursive: true, force: true });
 
   // Synchronizing is a post-deployment CLI action. A build cannot know whether its artifact
   // will become live, and must never replace the deployed application's schedules.
-  if (!cron.enabled || scheduler === "farmjs") {
+  if (!cron.enabled || provider === "farmjs") {
     return {
       jobs: cron.enabled ? cron.jobs : [],
       tasks: {},
       scheduledTasks: {},
       manifestPath,
-      scheduler,
+      provider,
     };
   }
 
@@ -252,17 +256,17 @@ export async function prepareFarmCronForNitro(config: {
     tasks,
     scheduledTasks: createCronScheduledTasks(cron.jobs),
     manifestPath,
-    scheduler: "host",
+    provider: "host",
   };
 }
 
 export function createFarmCronManifest(
   cron: FarmCronResolvedConfig,
-  scheduler: FarmCronScheduler = cron.infra ?? "host",
+  provider: FarmCronProvider = cron.provider ?? "host",
 ) {
   return {
     schemaVersion: 1,
-    scheduler,
+    provider,
     secretEnv: cron.secretEnv,
     jobs: (cron.enabled ? cron.jobs : []).map((job) => ({
       name: job.name,

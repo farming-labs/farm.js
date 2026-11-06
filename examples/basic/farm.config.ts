@@ -128,7 +128,7 @@ export default defineConfig({
     },
   },
   cron: {
-    infra: 'host',
+    provider: 'host',
     jobs: {
       dailyCleanup: {
         schedule: '0 2 * * *',

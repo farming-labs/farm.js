@@ -21,7 +21,7 @@ const job = {
   timeoutMs: 25000,
 };
 
-async function fixture(t, { scheduler = "farmjs", jobs = [job], handler } = {}) {
+async function fixture(t, { provider = "farmjs", jobs = [job], handler } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cron-sync-"));
   const originalEnv = { ...process.env };
   const requests = [];
@@ -47,7 +47,7 @@ async function fixture(t, { scheduler = "farmjs", jobs = [job], handler } = {}) 
   process.env.FARMJS_PROJECT_ID = "proj_test";
   process.env.FARMJS_API_KEY = "farmjs_test_only";
   await mkdir(path.join(root, ".farm"));
-  const manifest = { schemaVersion: 1, scheduler, secretEnv: "CRON_SECRET", jobs };
+  const manifest = { schemaVersion: 1, provider, secretEnv: "CRON_SECRET", jobs };
   await writeFile(path.join(root, ".farm/cron-manifest.json"), JSON.stringify(manifest));
   return { root, requests, options: { root, url: "https://app.example.com" }, manifest };
 }
@@ -62,7 +62,7 @@ test("plans without credentials or network, then applies the built manifest with
   const plan = await syncFarmCronJobs(options);
   assert.equal(plan.schemaVersion, 1);
   assert.equal(plan.applied, false);
-  assert.equal(plan.scheduler, "farmjs");
+  assert.equal(plan.provider, "farmjs");
   assert.equal(requests.length, 0);
   await assert.rejects(syncFarmCronJobs({ ...options, apply: true }), /FARMJS_API_KEY/);
   process.env.FARMJS_API_KEY = "farmjs_test_only";
@@ -82,10 +82,10 @@ test("plans without credentials or network, then applies the built manifest with
 });
 
 for (const variant of [
-  { scheduler: "farmjs", jobs: [] },
-  { scheduler: "host", jobs: [job] },
+  { provider: "farmjs", jobs: [] },
+  { provider: "host", jobs: [job] },
 ]) {
-  test(`clears the endpoint for ${variant.scheduler} with ${variant.jobs.length} manifest jobs only when explicitly allowed`, async (t) => {
+  test(`clears the endpoint for ${variant.provider} with ${variant.jobs.length} manifest jobs only when explicitly allowed`, async (t) => {
     const { requests, options } = await fixture(t, variant);
     assert.equal((await syncFarmCronJobs(options)).jobs.length, 0);
     await assert.rejects(syncFarmCronJobs({ ...options, apply: true }), /--allow-delete/);
@@ -123,7 +123,7 @@ test("rejects missing, unsupported, duplicate and invalid manifests before sendi
   );
   for (const value of [
     { ...manifest, schemaVersion: 2 },
-    { ...manifest, scheduler: "other" },
+    { ...manifest, provider: "other" },
     { ...manifest, jobs: [job, job] },
     { ...manifest, jobs: [{ ...job, path: "/../admin" }] },
     { ...manifest, jobs: [{ ...job, timeoutMs: 10 }] },

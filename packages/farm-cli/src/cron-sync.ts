@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { isIP } from "node:net";
 import path from "node:path";
-import { resolveCronConfig, type FarmCronJob, type FarmCronScheduler } from "@farm.js/core/cron";
+import { resolveCronConfig, type FarmCronJob, type FarmCronProvider } from "@farm.js/core/cron";
 
 const DEFAULT_FARMJS_API_URL = "https://app.farmjs.dev";
 const FARMJS_ENVIRONMENTS = ["production", "staging", "development"] as const;
@@ -27,7 +27,7 @@ export interface FarmCronSyncResult {
   apiUrl: string;
   environment: string;
   projectId: string | null;
-  scheduler: FarmCronScheduler;
+  provider: FarmCronProvider;
   jobs: FarmCronJob[];
   accepted?: number;
 }
@@ -89,7 +89,7 @@ function origin(value: string, key: string, api = false): string {
   return url.origin;
 }
 
-function readManifest(value: unknown): { scheduler: FarmCronScheduler; jobs: FarmCronJob[] } {
+function readManifest(value: unknown): { provider: FarmCronProvider; jobs: FarmCronJob[] } {
   const invalid = (reason: string) =>
     new FarmCronSyncError(
       "INVALID_MANIFEST",
@@ -98,9 +98,9 @@ function readManifest(value: unknown): { scheduler: FarmCronScheduler; jobs: Far
   if (!record(value) || value.schemaVersion !== 1 || !Array.isArray(value.jobs)) {
     throw invalid("expected `schemaVersion: 1` and a `jobs` array");
   }
-  const scheduler = value.scheduler ?? "host";
-  if (scheduler !== "host" && scheduler !== "farmjs") {
-    throw invalid('`scheduler` must be "host" or "farmjs"');
+  const provider = value.provider ?? "host";
+  if (provider !== "host" && provider !== "farmjs") {
+    throw invalid('`provider` must be "host" or "farmjs"');
   }
   const names = new Set<string>();
   const jobs = value.jobs.map((entry: unknown): FarmCronJob => {
@@ -137,7 +137,7 @@ function readManifest(value: unknown): { scheduler: FarmCronScheduler; jobs: Far
       timeoutMs !== undefined &&
       (typeof timeoutMs !== "number" ||
         !Number.isInteger(timeoutMs) ||
-        (scheduler === "farmjs" && (timeoutMs < 1_000 || timeoutMs > 60_000)))
+        (provider === "farmjs" && (timeoutMs < 1_000 || timeoutMs > 60_000)))
     ) {
       throw new FarmCronSyncError(
         "INVALID_MANIFEST",
@@ -147,7 +147,7 @@ function readManifest(value: unknown): { scheduler: FarmCronScheduler; jobs: Far
     return { ...resolved, ...(timeoutMs === undefined ? {} : { timeoutMs }) };
   });
   // A host manifest means Infra should run nothing for this endpoint.
-  return { scheduler, jobs: scheduler === "farmjs" ? jobs : [] };
+  return { provider, jobs: provider === "farmjs" ? jobs : [] };
 }
 
 function printable(value: string): string {
@@ -202,7 +202,7 @@ export async function syncFarmCronJobs(options: SyncFarmCronOptions): Promise<Fa
       { cause },
     );
   }
-  const { scheduler, jobs } = readManifest(manifest);
+  const { provider, jobs } = readManifest(manifest);
   const plan: FarmCronSyncResult = {
     schemaVersion: 1,
     applied: false,
@@ -210,7 +210,7 @@ export async function syncFarmCronJobs(options: SyncFarmCronOptions): Promise<Fa
     apiUrl,
     environment,
     projectId: process.env.FARMJS_PROJECT_ID || null,
-    scheduler,
+    provider,
     jobs,
   };
   if (!options.apply) return plan;

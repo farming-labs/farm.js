@@ -247,15 +247,18 @@ Month and weekday names, six-field expressions, and provider-only extensions are
 ## Production Output
 
 `farm build` validates the config, generates adapter tasks, and writes `.farm/cron-manifest.json`.
+With the default `cron.provider: "host"`, the platform you deploy to runs the schedules:
 
-| Target            | Production behavior                                                                                                                       |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel            | Farm writes each configured path and schedule to Build Output API `crons`. Vercel sends an HTTP GET to the route.                         |
-| Cloudflare Worker | With `deploy.preset: "cloudflare-module"`, Farm writes Wrangler Cron Triggers and dispatches the matching route inside the Worker.        |
-| Cloudflare Pages  | Pages output does not install Cron Triggers. Use `cloudflare-module` or call the route from an external scheduler.                        |
-| Node, Bun, Deno   | Nitro runs schedules in the long-lived server process and internally calls the route.                                                     |
-| Other targets     | Use the generated manifest to configure the provider's scheduler to call the route with GET and bearer auth.                              |
-| Any, connected    | With `FARMJS_API_KEY` at build time, [Farm.js Infra schedules the jobs](#run-by-farmjs-infra) and the host outputs above are not written. |
+| Target            | Production behavior                                                                                                                |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel            | Farm writes each configured path and schedule to Build Output API `crons`. Vercel sends an HTTP GET to the route.                  |
+| Cloudflare Worker | With `deploy.preset: "cloudflare-module"`, Farm writes Wrangler Cron Triggers and dispatches the matching route inside the Worker. |
+| Cloudflare Pages  | Pages output does not install Cron Triggers. Use `cloudflare-module` or call the route from an external scheduler.                 |
+| Node, Bun, Deno   | Nitro runs schedules in the long-lived server process and internally calls the route.                                              |
+| Other targets     | Use the generated manifest to configure the provider's scheduler to call the route with GET and bearer auth.                       |
+
+With `cron.provider: "farmjs"`, none of these outputs are written and
+[Farm.js Infra runs the jobs](#run-by-farmjs-infra) on any target.
 
 Cloudflare Cron Triggers require Worker output:
 
@@ -283,25 +286,30 @@ npx wrangler deploy --config .farm/.output/server/wrangler.json
 
 For a self-hosted app with more than one replica, do not run an in-process scheduler in every replica. Run one dedicated scheduler instance, or configure system cron, a Kubernetes CronJob, or another external scheduler to call the HTTP route.
 
-## Choose the scheduler
+## Choose the provider
 
-Select who runs the schedules in `farm.config.ts`. The default is the deployment host:
+`cron.provider` decides who fires the schedules:
+
+| `provider`         | Who runs the jobs                                                                                                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"host"` (default) | The platform you deploy to with `deploy.target` or `deploy.preset`: Vercel Cron, Cloudflare Cron Triggers, or Nitro scheduled tasks on Node, Bun, and Deno. See [Production Output](#production-output) for each one. |
+| `"farmjs"`         | Farm.js Infra, on any target. The build writes no host cron output, and `farm cron sync` registers the jobs after you deploy.                                                                                         |
 
 ```ts title="farm.config.ts"
 import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   deploy: { target: "vercel" },
-  cron: { infra: "farmjs" }, // Use "host" for the deployment target's scheduler.
+  cron: { provider: "farmjs" }, // "host" would hand the schedules to Vercel Cron instead.
 });
 ```
 
 Schedules declared with `cronRoute()` are discovered automatically. To keep schedules in config,
-put them under `jobs` when using `infra`:
+put them under `jobs` when setting `provider`:
 
 ```ts
 cron: {
-  infra: "farmjs",
+  provider: "farmjs",
   jobs: {
     dailyCleanup: {
       schedule: "0 2 * * *",
@@ -312,12 +320,12 @@ cron: {
 ```
 
 The existing flat `cron: { dailyCleanup: { schedule, path } }` form remains supported.
-`cron: false` disables config and route-local schedules. Only `cron.infra` selects the scheduler:
-a `FARMJS_API_KEY` in the environment never switches an app to Infra.
+`cron: false` disables config and route-local schedules. Only `cron.provider` selects who runs
+them: a `FARMJS_API_KEY` in the environment never switches an app to Infra.
 
 ### Run by Farm.js Infra
 
-`farm build` writes `.farm/cron-manifest.json`. With `infra: "farmjs"`, it emits no Farm cron
+`farm build` writes `.farm/cron-manifest.json`. With `provider: "farmjs"`, it emits no Farm cron
 entries for the host scheduler. Builds do not contact Infra or need an API key.
 
 Deploy the application, then synchronize the manifest from that exact build:
@@ -355,7 +363,7 @@ route-local `input` stays in the handler and is not sent during registration.
 
 Sync replaces all jobs for the endpoint within the selected environment/project. Removing a job
 from the next deployed manifest removes it from Infra on the next sync. An empty manifest or a
-manifest built with `infra: "host"` clears the endpoint's Infra jobs:
+manifest built with `provider: "host"` clears the endpoint's Infra jobs:
 
 ```bash
 farm cron sync --url https://app.example.com
@@ -363,7 +371,7 @@ farm cron sync --url https://app.example.com --apply --allow-delete
 ```
 
 Keep the old endpoint, environment, project, and credential available until cleanup completes.
-If the hostname changes, clear the old endpoint separately. Switching schedulers is not atomic:
+If the hostname changes, clear the old endpoint separately. Switching providers is not atomic:
 disable the previous host schedule before enabling Infra, or clear Infra before enabling the new
 host schedule. Already running requests may finish. `farm dev --cron`, `farm cron list`, and
 `farm cron run` remain local tooling and never register schedules with Infra.
@@ -375,7 +383,7 @@ The manifest is the stable handoff for custom deployment adapters and external a
 ```json title=".farm/cron-manifest.json"
 {
   "schemaVersion": 1,
-  "scheduler": "host",
+  "provider": "host",
   "secretEnv": "CRON_SECRET",
   "jobs": [
     {

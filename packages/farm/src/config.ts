@@ -172,7 +172,7 @@ export type {
 } from "./mobile/config";
 export type {
   FarmCronConfig,
-  FarmCronScheduler,
+  FarmCronProvider,
   FarmCronJobConfig,
   FarmCronResolvedConfig,
   FarmCronUserConfig,

@@ -737,7 +737,7 @@ cronCommand
   .option("--json", "Print the versioned plan or result as JSON")
   .addHelpText(
     "after",
-    '\nWith cron: { infra: "farmjs" }, run after each deployment:\n  farm cron sync --url https://app.example.com          # plan, no network\n  farm cron sync --url https://app.example.com --apply  # replace the endpoint\'s jobs\nNeeds FARMJS_ENVIRONMENT; --apply also needs FARMJS_API_KEY with cron:jobs.\nOptional: FARMJS_PROJECT_ID, FARMJS_API_URL.',
+    '\nWith cron: { provider: "farmjs" }, run after each deployment:\n  farm cron sync --url https://app.example.com          # plan, no network\n  farm cron sync --url https://app.example.com --apply  # replace the endpoint\'s jobs\nNeeds FARMJS_ENVIRONMENT; --apply also needs FARMJS_API_KEY with cron:jobs.\nOptional: FARMJS_PROJECT_ID, FARMJS_API_URL.',
   )
   .action(async (options) => {
     try {

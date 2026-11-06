@@ -10,11 +10,12 @@ build can replace a deployed application's schedules. Removing the final job doe
 
 ## Decisions
 
-- `cron: { infra: "host" | "farmjs", jobs?: { ... } }` selects the scheduler. `host` is the
-  default. Existing `cron: { jobName: { schedule, path } }` declarations remain valid, including
-  jobs named `infra` or `jobs`. Route-local schedules merge with either form.
-- Only `cron.infra` selects the scheduler. The unreleased `FARM_CRON_SCHEDULER` variable is
-  removed, and `FARMJS_API_KEY` alone never opts an app into hosted scheduling.
+- `cron: { provider: "host" | "farmjs", jobs?: { ... } }` selects who runs the schedules. `host`,
+  the default, is the platform chosen by `deploy.target` or `deploy.preset`. Existing
+  `cron: { jobName: { schedule, path } }` declarations remain valid, including jobs named
+  `provider` or `jobs`. Route-local schedules merge with either form.
+- Only `cron.provider` selects who runs the schedules. The unreleased `FARM_CRON_SCHEDULER`
+  variable is removed, and `FARMJS_API_KEY` alone never opts an app into hosted scheduling.
 - Builds only write `.farm/cron-manifest.json` and platform output. Farm.js scheduling emits no
   Farm-owned host timers. An empty or disabled configuration writes an empty manifest.
 - After deploying the matching artifact, `farm cron sync --url https://app.example.com` shows
@@ -36,6 +37,9 @@ Registering during build is convenient but cannot establish that an artifact was
 Automatically registering on server startup can race across replicas and grants runtime credentials
 deployment authority. A new deployment service is outside this change; the existing CLI and Infra
 replace-all API are sufficient.
+
+The key was briefly `cron.infra`, and `cron.scheduler` was considered. `provider` matches
+`images.provider`, and `"host"` names no platform because `deploy` already chooses it.
 
 ## Scope and acceptance criteria
 
