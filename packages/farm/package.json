@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.51-beta.3",
+  "version": "0.1.60",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -734,6 +734,11 @@
       "types": "./dist/internal/server-fn-transform.d.ts",
       "import": "./dist/internal/server-fn-transform.mjs",
       "require": "./dist/internal/server-fn-transform.cjs"
+    },
+    "./internal/native-server-fns": {
+      "types": "./dist/internal/native-server-fns.d.ts",
+      "import": "./dist/internal/native-server-fns.mjs",
+      "require": "./dist/internal/native-server-fns.cjs"
     },
     "./internal/islx-server": {
       "types": "./dist/internal/islx-server.d.ts",

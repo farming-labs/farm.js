@@ -771,9 +771,53 @@ same typed client: `@farm.js/core/api/client` has a React Native build (Metro pi
 unless given a `baseURL` or `fetch` of its own. Import the client from `@farm.js/core/api/client`,
 not `@farm.js/core/client`, so one `lib/api.ts` serves both. Native screens send no cookies. Once
 the user has signed in, on a web screen or a native one, `serverFetch` sends the device's session
-token, so protected routes see the same user (see [Auth on mobile](#auth-on-mobile)). A screen
-navigates by URL only, so `farm-routes.json` always decides what opens next: a link from a native
-screen can open a web screen, a modal, a tab, or another native screen, and back returns to it.
+token, so protected routes see the same user (see [Auth on mobile](#auth-on-mobile)).
+
+Server functions work from native screens as they do in server code: import one and call it.
+
+```tsx
+// src/app/camera/page.android.tsx
+import { createNote } from "../../features/notes/server"; // createServerFn
+
+await createNote({ title: "Photo note" }); // runs on mobile.server, typed as on the web
+```
+
+- **The bundle never holds the server module.** Metro resolves a module that defines server
+  functions to a generated stub, `.farm/output/mobile/native/server-fns/<hash>.js`, whose exports
+  post `{ id, input }` through `serverFetch` to `POST /api/__farm/native/fn`. An id is a hash of
+  the module's path from the app root and the export name, so the app and the server agree without
+  sharing a build. A native bundle may import nothing else of `@farm.js/core` than
+  `@farm.js/core/api/client`: a server module Farm does not recognize as one (a namespace import
+  of `createServerFn`, a wrapper factory around it) imports `@farm.js/core` somewhere, and stops
+  the bundle with a message rather than ship server code. Define the functions native screens
+  import with `createServerFn` or `createServerQuery` imported by name.
+- **The server runs only what native screens import.** Farm follows each native screen's app
+  imports (relative, `@/`, tsconfig paths) to the server function modules it reaches; a production
+  build bundles exactly those, and an id outside them answers `404`.
+- **Same pipeline, same user.** The endpoint is an ordinary API route, so middleware and
+  `runtime.before` hooks run first (the mobile session plugin turns a signed-in device's token into
+  its session), then the function's own input schema, middleware, handler, and output schema.
+  Input and result travel as JSON. A declared error throws a `FarmServerFnError` with its `code`,
+  `status`, and `data`; any other failure throws `server_error` and is logged on the server only.
+- **Only the app calls it.** The endpoint requires `X-Farm-Mobile` and refuses requests with fetch
+  metadata (`Sec-Fetch-*`) or another origin's `Origin`. A browser sends fetch metadata on every
+  request, and a cross-site page cannot add the header without a CORS preflight that carries its
+  own `Origin`, so no page can call a function with a visitor's cookies. Input with `__proto__`,
+  `constructor`, or `prototype` keys is refused, the API route's body size limit applies, and a
+  result that is not JSON answers `server_error`.
+- **Each imported function is a public endpoint.** Anyone who sends the app's request shape can
+  call a function a native screen imports, with any input, as with a server action on the web:
+  check the input (its `input` schema) and the caller's rights (its `middleware`) inside it.
+  Functions no native screen imports are not reachable through this endpoint.
+- Not yet: exports other than server functions from those modules (they are not in the stub), and
+  a `redirect()` in a function (it throws a `FarmServerFnError` with `redirect` set; navigate
+  yourself). A server module a screen starts importing during `farm dev --mobile` stops the native
+  bundle with a message to restart, so server code never reaches the app. The endpoint lives under
+  `/api`, so an app that moves its API base path elsewhere does not get it yet.
+
+A screen navigates by URL only, so `farm-routes.json` always decides what
+opens next: a link from a native screen can open a web screen, a modal, a tab, or another native
+screen, and back returns to it.
 
 - **Build.** `farm build --mobile` writes one entry that registers every native screen under its
   module id, bundles it with Metro, and compiles it to Hermes bytecode with the `hermesc` that
@@ -1619,10 +1663,8 @@ parts are designed and still on the way:
 - `platform` screens show a placeholder naming the module id. Farm does not build `page.kt` or
   `page.swift` yet; `FarmNativeScreens` in the generated project is where they will register.
 - React Native screens use React Native's own components. `@farm.js/ui` components,
-  `layout.native.tsx` providers, intent prefetch, and server functions called by reference are not
-  wired into native screens yet; call them through API routes with the typed `apiClient` (as the
-  web does in apps without server actions). Images imported
-  by native screens are not copied into the app yet; load them by URL.
+  `layout.native.tsx` providers, and intent prefetch are not wired into native screens yet. Images
+  imported by native screens are not copied into the app yet; load them by URL.
 - Page shells are tested in unit and generator tests, and the iOS code type-checks; they have not
   run in a production build on an Android emulator or an iOS simulator yet (see
   [Page shells](#page-shells)). iOS loads the mobile client from the server rather than the app,

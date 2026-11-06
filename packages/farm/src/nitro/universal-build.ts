@@ -25,6 +25,8 @@ import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
 import { FARM_MOBILE_SESSION_PLUGIN } from "../mobile/session";
+import { FARM_NATIVE_SERVER_FN_PLUGIN } from "../mobile/native-server-fn-names";
+import { collectFarmNativeServerFns, findFarmNativeScreenFiles } from "../mobile/native-server-fns";
 import { getFarmMarkdownAlternatePath } from "../markdown";
 import { _collectFarmStorageModules } from "../storage";
 import { FARM_API_CATALOG_PATH, resolveFarmApiCatalogInput } from "../api-catalog";
@@ -103,6 +105,7 @@ import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
 import { logger, toPosixPath, toViteModuleId } from "../utils";
 import {
+  collectFarmServerStylesheets,
   describeSuppressedAsyncHydration,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
@@ -1966,6 +1969,7 @@ async function buildClient(
       })),
     ],
     layoutAppliesToRoute,
+    { serverOwners: islandsMode },
   );
 
   for (const layout of clientLayouts) {
@@ -2133,6 +2137,17 @@ async function buildClient(
       adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
       resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands",
       platform,
+      islandsMode
+        ? collectFarmServerStylesheets(
+            [
+              ...layoutRoutes.map((layout) => layout.modulePath),
+              ...pageRoutes
+                .filter((route) => !isAdapterDocsRoute(route.pattern))
+                .map((route) => route.modulePath),
+            ],
+            root,
+          )
+        : [],
     );
     const entryName = platform === "mobile" ? FARM_MOBILE_CLIENT_ENTRY_NAME : "farm-client";
 
@@ -3312,6 +3327,8 @@ export function generateClientHydrationEntry(
   islandValues = false,
   /** `"mobile"` for the mobile client a web build adds for an app with a `mobile` block. */
   platform?: FarmPlatform,
+  /** Islands mode: stylesheets the server pages and layouts import (collectFarmServerStylesheets). */
+  serverStylesheets: readonly string[] = [],
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
@@ -3338,9 +3355,28 @@ export function generateClientHydrationEntry(
   // UNRESOLVED_IMPORT. Output validation already treats a missing globals.css
   // as an intentionally style-free application.
   const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
-  const cssImport = existsSync(globalsCssPath)
-    ? `import ${JSON.stringify(toImportPath(globalsCssPath))};`
-    : "";
+  // A CSS module's class map has no side effects, so imported and left unused it is tree-shaken
+  // with its stylesheet, export or not (an app build keeps no entry exports). The entry keeps
+  // each one by storing it.
+  const serverStyleModules: string[] = [];
+  const cssImport = [
+    ...(existsSync(globalsCssPath) ? [globalsCssPath] : []),
+    ...serverStylesheets.filter((stylesheet) => stylesheet !== globalsCssPath),
+  ]
+    .map((stylesheet) => {
+      if (!/\.module\.[a-z]+$/.test(stylesheet)) {
+        return `import ${JSON.stringify(toImportPath(stylesheet))};`;
+      }
+      const binding = `__farmServerStyle${serverStyleModules.length}`;
+      serverStyleModules.push(binding);
+      return `import * as ${binding} from ${JSON.stringify(toImportPath(stylesheet))};`;
+    })
+    .concat(
+      serverStyleModules.length > 0
+        ? [`globalThis.__FARM_SERVER_STYLES__ = [${serverStyleModules.join(", ")}];`]
+        : [],
+    )
+    .join("\n");
 
   // Import layouts for wrapping client components
   const layoutImportStatements: string[] = [];
@@ -6430,6 +6466,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       metadata: pageHydrationPlans.get(route.modulePath)!,
     })),
     routeBoundaryCoversDirectory,
+    { serverOwners: pageHydrationPlanOptions.serverOwners },
   );
   const providerServerImports = [
     providerServerModules.hasClerkProvider
@@ -6976,6 +7013,17 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const mobileSession = (config.plugins || []).some(
     (plugin) => plugin?.name === FARM_MOBILE_SESSION_PLUGIN,
   );
+  // Server functions the native screens import, which their HTTP endpoint may run. The list is
+  // static, so the server bundle holds exactly these modules.
+  const nativeServerFns = (config.plugins || []).some(
+    (plugin) => plugin?.name === FARM_NATIVE_SERVER_FN_PLUGIN,
+  )
+    ? collectFarmNativeServerFns({
+        root: config.root,
+        srcDir: config.srcDir,
+        entries: findFarmNativeScreenFiles(getFarmAppDirectories(config)),
+      })
+    : undefined;
   const integrationImports = `
 ${configModulePath ? `import * as FarmUserConfigModule from ${toVirtualEntryImportSpecifier(configModulePath)};` : ""}
 ${layerConfigImports}
@@ -6983,6 +7031,15 @@ ${integrationRuntimeImport}
 ${nativeAuth.importSource}
 ${nativeMCP.importSource}
 ${mobileSession ? `import { createFarmMobileSessionPlugin as __farmCreateMobileSessionPlugin } from "@farm.js/core/internal/production-runtime";` : ""}
+${nativeServerFns ? `import { createFarmNativeServerFnPlugin as __farmCreateNativeServerFnPlugin } from "@farm.js/core/internal/production-runtime";` : ""}
+${(nativeServerFns ?? []).map((module, index) => `import * as __farmNativeServerFns${index} from ${toVirtualEntryImportSpecifier(module.file)};`).join("\n")}
+${
+  nativeServerFns
+    ? `const __farmNativeServerFnRegistry = Object.assign(Object.create(null), {
+${nativeServerFns.flatMap((module, index) => module.exports.map((entry) => `  ${JSON.stringify(entry.id)}: __farmNativeServerFns${index}[${JSON.stringify(entry.name)}],`)).join("\n")}
+});`
+    : ""
+}
 `;
   const imageRuntime = resolveFarmImageServerRuntime(config.images, preset);
   const imageRuntimeImport =
@@ -7291,6 +7348,11 @@ const configuredPlugins = [
     basePath: ${JSON.stringify(config.basePath)},
     integrations: () => serverRuntimeIntegrations,
   }),`
+      : ""
+  }
+  ${
+    nativeServerFns
+      ? `__farmCreateNativeServerFnPlugin({ resolve: (id) => __farmNativeServerFnRegistry[id] }),`
       : ""
   }
   ${

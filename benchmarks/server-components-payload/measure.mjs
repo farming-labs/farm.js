@@ -198,6 +198,11 @@ async function measure(mode, url, browser, scenario) {
     if (bodies.some((entry) => entry.type === "document")) {
       throw new Error(`${mode}: navigation to ${expected} reloaded the document`);
     }
+    // A body the browser could not hand over, or data fetched outside the click, would count as
+    // a free navigation and lower the average.
+    if (!bodies.some((entry) => entry.type === "fetch" || entry.type === "xhr")) {
+      throw new Error(`${mode}: navigation to ${expected} recorded no data`);
+    }
     navigations.push({
       pathname: expected,
       data: sum(bodies, ["fetch", "xhr"]),

@@ -1039,13 +1039,14 @@ function fingerprint(config: ResolvedFarmConfig): string {
 }
 
 describe("mobile on the web", () => {
-  it("resolves the same web config with or without a mobile block, apart from the mobile client flag and session plugin, and never calls the function", async () => {
+  it("resolves the same web config with or without a mobile block, apart from the mobile client flag and its plugins, and never calls the function", async () => {
     const root = await createApp();
     const base: FarmUserConfig = { root, deploymentId: "fixed" };
     const without = await resolveConfig(base, "production");
     // Zero cost: no mobile block, no mobile client and no mobile session plugin, hook, or route.
     expect(without).not.toHaveProperty("mobileClient");
     expect(without.plugins.map((plugin) => plugin.name)).not.toContain("farm:mobile-session");
+    expect(without.plugins.map((plugin) => plugin.name)).not.toContain("farm:native-server-fns");
     let calls = 0;
     for (const mobile of [
       // Malformed on purpose: a web build does not check the block.
@@ -1061,15 +1062,20 @@ describe("mobile on the web", () => {
       );
       // A production build adds the mobile client for it; the block itself is not resolved.
       expect(mobileClient).toBe(true);
-      // The web server of a mobile app serves the native screens' session tokens.
+      // The web server of a mobile app serves the native screens' session tokens and the server
+      // functions they call.
       expect(withMobile.plugins.map((plugin) => plugin.name)).toEqual([
         "farm:mobile-session",
+        "farm:native-server-fns",
         ...without.plugins.map((plugin) => plugin.name),
       ]);
       expect(
         fingerprint({
           ...withMobile,
-          plugins: withMobile.plugins.filter((plugin) => plugin.name !== "farm:mobile-session"),
+          plugins: withMobile.plugins.filter(
+            (plugin) =>
+              plugin.name !== "farm:mobile-session" && plugin.name !== "farm:native-server-fns",
+          ),
         } as typeof without),
       ).toBe(fingerprint(without));
       expect(withMobile).not.toHaveProperty("mobile");

@@ -1,11 +1,16 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
-import { getClientModuleHydrationPlan, usesFarmServerTree } from "../utils/client-component";
+import {
+  collectFarmServerStylesheets,
+  enforceFarmIsolatedHydrationRouteBudget,
+  getClientModuleHydrationPlan,
+  usesFarmServerTree,
+} from "../utils/client-component";
 import { getFarmServerTreeLayoutPatterns } from "../routing/layout-selector";
 import { transformIsolatedClientBoundaryModule } from "../vite";
 
@@ -212,6 +217,81 @@ describe("islands mode", () => {
     expect(output).not.toMatch(/export \{ Counter, helper/);
   });
 
+  it("keeps every island of a page above the root budget, so the page never ships", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-islands-budget-"));
+    roots.push(root);
+    mkdirSync(path.join(root, "src/app"), { recursive: true });
+    writeFileSync(
+      path.join(root, "src/copy.tsx"),
+      '"use client";\nexport function Copy({ text }) { return <button>{text}</button>; }\n',
+    );
+    const pageFile = path.join(root, "src/app/page.tsx");
+    writeFileSync(
+      pageFile,
+      'import { Copy } from "../copy";\nimport { secret } from "../secret";\nexport default function Page() { return <main><p>{secret()}</p><Copy text="1" /><Copy text="2" /><Copy text="3" /><Copy text="4" /><Copy text="5" /></main>; }\n',
+    );
+    const plan = (serverOwners: boolean) => {
+      const metadata = getClientModuleHydrationPlan(pageFile, root, "enabled", {
+        asyncOwnerIslands: true,
+        serverOwners,
+      });
+      enforceFarmIsolatedHydrationRouteBudget(
+        [],
+        [{ pattern: "/", depth: 0, metadata }],
+        () => true,
+        { serverOwners },
+      );
+      return metadata;
+    };
+
+    // Islands mode: five islands, and the page module stays on the server.
+    expect(plan(true)).toMatchObject({ shouldHydrate: false, hasIsolatedClientBoundaries: true });
+    expect(plan(true).isolatedBoundaries).toHaveLength(1);
+    expect(plan(true).fallbackReason).toBeUndefined();
+    // Isolated hydration without islands mode can still hydrate the page whole instead.
+    expect(plan(false)).toMatchObject({ shouldHydrate: true, hasIsolatedClientBoundaries: false });
+  });
+
+  it("skips the root budget wherever the build and the route manager plan routes", () => {
+    // The client build, the server entry and the route manager each plan every route; one call
+    // without the option ships that output's pages whole.
+    const calls = ["nitro/universal-build.ts", "routing/route-manager.ts"].flatMap((file) => {
+      const source = readFileSync(path.join(__dirname, "..", file), "utf-8");
+      return [...source.matchAll(/\n\s*enforceFarmIsolatedHydrationRouteBudget\(/g)].map(
+        (match) => /^[^]*?\n\s*\);/.exec(source.slice(match.index))![0],
+      );
+    });
+    expect(calls).toHaveLength(3);
+    for (const call of calls) expect(call).toContain("{ serverOwners: ");
+  });
+
+  it("lists the stylesheets server pages import, through server modules but not client ones", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-islands-styles-"));
+    roots.push(root);
+    const files: Record<string, string> = {
+      "src/app/page.tsx":
+        'import "./page.css";\nimport { Card } from "../card";\nimport { Button } from "../button";\nimport logo from "./logo.svg?url";\nimport raw from "./raw.css?inline";\nexport default function Page() { return <Card><Button /></Card>; }\n',
+      "src/app/page.css": ".page {}\n",
+      "src/card.tsx":
+        'import styles from "./card.module.css";\nexport function Card({ children }) { return <div className={styles.card}>{children}</div>; }\n',
+      "src/card.module.css": ".card {}\n",
+      "src/button.tsx":
+        '"use client";\nimport "./button.css";\nexport function Button() { return <button />; }\n',
+      "src/button.css": ".button {}\n",
+      "src/app/raw.css": ".raw {}\n",
+      "src/app/logo.svg": "<svg />",
+    };
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), content);
+    }
+
+    expect(collectFarmServerStylesheets([path.join(root, "src/app/page.tsx")], root)).toEqual([
+      path.join(root, "src/app/page.css"),
+      path.join(root, "src/card.module.css"),
+    ]);
+  });
+
   describe("a server layout around a client provider", () => {
     const planLayout = (
       layout: string,
@@ -276,6 +356,57 @@ describe("islands mode", () => {
       expect(plan.islandsError).toMatch(
         /package client boundary acme-theme cannot yet be isolated\. Render it from a local "use client" module/,
       );
+    });
+
+    const iconKit = {
+      "../node_modules/icon-kit/package.json": '{"name":"icon-kit","main":"index.js"}',
+      "../node_modules/icon-kit/index.js":
+        '"use client";\nexport function Github() { return null; }\nexport function ThemeProvider({ children }) { return children; }\n',
+    };
+
+    it("renders a package's icons as static HTML, so an icon-only layout stays on the server", () => {
+      const { plan } = planLayout(
+        'import { Github } from "icon-kit";\nexport default function Layout({ children }) { return <main><a href="/"><Github size={16} /></a>{children}</main>; }\n',
+        iconKit,
+      );
+      expect(plan).toMatchObject({ shouldHydrate: false, staticPackageBoundaries: ["icon-kit"] });
+      expect(plan.islandsError).toBeUndefined();
+      expect(plan.serverTreeLayout).toBeUndefined();
+    });
+
+    it("keeps a layout's islands beside the icons it renders statically", () => {
+      const { root, plan } = planLayout(
+        'import { Nav } from "../nav";\nexport default function Layout({ children }) { return <main><Nav />{children}</main>; }\n',
+        {
+          ...iconKit,
+          "nav.tsx":
+            'import { Github } from "icon-kit";\nimport { Counter } from "./counter";\nexport function Nav() { return <nav><Github /><Counter /></nav>; }\n',
+          "counter.tsx":
+            '"use client";\nexport function Counter() { return <button>1</button>; }\n',
+        },
+      );
+      expect(plan).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+        staticPackageBoundaries: ["icon-kit"],
+        isolatedBoundaries: [{ modulePath: path.join(root, "src/counter.tsx") }],
+      });
+      expect(plan.serverTreeLayout).toBeUndefined();
+    });
+
+    it("still reports a package component that wraps content, or takes an element prop", () => {
+      for (const body of [
+        "<ThemeProvider>{children}</ThemeProvider>",
+        "<main><Github label={<b>x</b>} />{children}</main>",
+      ]) {
+        const { plan } = planLayout(
+          `import { Github, ThemeProvider } from "icon-kit";\nexport default function Layout({ children }) { return ${body}; }\n`,
+          iconKit,
+        );
+        expect(plan.islandsError, body).toMatch(
+          /package client boundary icon-kit cannot yet be isolated/,
+        );
+      }
     });
 
     it("renders the server layouts on the same pages as trees too", () => {

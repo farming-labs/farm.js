@@ -637,6 +637,42 @@ export function collectFarmRenderedClientModules(
   return collected.boundaries.map((boundary) => boundary.modulePath);
 }
 
+const SERVER_MODULE_SOURCE = /\.[cm]?[jt]sx?$/;
+const STYLESHEET_SOURCE = /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)$/;
+
+/**
+ * The stylesheets these server modules import, directly or through the server modules they
+ * import, in import order. In islands mode the client entry leaves pages and layouts out, and the
+ * client bundle is the app's one stylesheet, so it imports these instead. A `"use client"`
+ * module's stylesheets come with the module.
+ */
+export function collectFarmServerStylesheets(
+  modulePaths: readonly string[],
+  root?: string,
+): string[] {
+  const stylesheets = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (file: string) => {
+    if (visited.has(file) || !SERVER_MODULE_SOURCE.test(file)) return;
+    visited.add(file);
+    const content = readIfExists(file);
+    if (!content || hasUseClientDirective(content)) return;
+    for (const specifier of getImportSpecifiers(content)) {
+      // `?url`, `?inline` and `?raw` imports are values, not styles on the page.
+      if (specifier.includes("?")) continue;
+      const imported = resolveImportedModule(file, specifier, root);
+      if (!imported.path) continue;
+      if (STYLESHEET_SOURCE.test(imported.path)) stylesheets.add(imported.path);
+      else if (imported.local) visit(imported.path);
+    }
+  };
+  for (const modulePath of modulePaths) {
+    const resolved = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
+    if (resolved) visit(resolved);
+  }
+  return [...stylesheets];
+}
+
 export function getClientModuleMetadata(modulePath: string, root?: string): ClientModuleMetadata {
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
   return inspectClientModuleMetadata(resolvedPath, root, new Set(), true);
@@ -671,6 +707,7 @@ export function getClientModuleHydrationPlan(
   const layout = collectIsolatedClientBoundaries(resolvedPath, root, {
     allowDynamicCardinality: true,
     allowElementProps: true,
+    staticPackageLeaves: true,
   });
   const routeWide = {
     ...plan,
@@ -690,7 +727,18 @@ export function getClientModuleHydrationPlan(
         : layout.fallbackReason,
     };
   }
-  return { ...routeWide, serverTreeLayout: true, isolatedBoundaries: layout.boundaries };
+  const staticPackages =
+    layout.staticPackages.length > 0 ? { staticPackageBoundaries: layout.staticPackages } : {};
+  // Only package elements rendered as static HTML: nothing in the layout needs the browser.
+  if (layout.boundaries.length === 0) {
+    return { ...routeWide, shouldHydrate: false, islandStrategy: null, ...staticPackages };
+  }
+  return {
+    ...routeWide,
+    serverTreeLayout: true,
+    isolatedBoundaries: layout.boundaries,
+    ...staticPackages,
+  };
 }
 
 function planClientModuleHydration(
@@ -745,6 +793,7 @@ function planClientModuleHydration(
     allowDynamicCardinality: asyncOwner,
     allowElementProps: asyncOwner,
     staticPackageBoundaries: asyncOwner,
+    staticPackageLeaves: options.serverTreeLayouts === true && options.asyncOwnerIslands === true,
   });
   if (inspection.fallbackReason && asyncOwner && options.serverOwners === true) {
     // A server page in islands mode never hydrates as a whole: that bundles the page module and
@@ -793,9 +842,9 @@ function planClientModuleHydration(
   if (asyncOwner) {
     delete plan.suppressedAsyncHydration;
     plan.asyncOwnerIslands = true;
-    if (inspection.staticPackages.length > 0)
-      plan.staticPackageBoundaries = inspection.staticPackages;
   }
+  if (inspection.staticPackages.length > 0)
+    plan.staticPackageBoundaries = inspection.staticPackages;
   return plan;
 }
 
@@ -925,11 +974,18 @@ export function enforceFarmIsolatedHydrationRouteBudget(
   layouts: FarmIsolatedHydrationRouteOwner[],
   routes: FarmIsolatedHydrationRouteOwner[],
   layoutAppliesToRoute: (layoutPattern: string, routePattern: string) => boolean,
+  options: {
+    /**
+     * Islands mode: pages and layouts are server components with no route-wide root to fall back
+     * to (one would ship their server code), so islands are how they hydrate, however many.
+     */
+    serverOwners?: boolean;
+  } = {},
 ): void {
   const boundaryLimit = isolatedHydrationBoundaryLimit();
   const sortedLayouts = [...layouts].sort((left, right) => left.depth - right.depth);
 
-  for (const route of routes) {
+  for (const route of options.serverOwners ? [] : routes) {
     if (route.metadata.mode !== "enabled") continue;
     const applicableLayouts = sortedLayouts.filter((layout) =>
       layoutAppliesToRoute(layout.pattern, route.pattern),
@@ -1379,6 +1435,27 @@ function passesElementValuedProps(content: string | null, localBindings: string[
   return false;
 }
 
+/** Whether every element of these bindings closes itself and takes no element-valued prop. */
+function rendersOnlyLeafElements(content: string | null, localBindings: string[]): boolean {
+  if (!content) return false;
+  const names = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+  for (let index = 0; index < tokens.length - 1; index++) {
+    if (tokens[index].value !== "<" || !names.has(tokens[index + 1].value)) continue;
+    let braceDepth = 0;
+    let cursor = index + 2;
+    for (; cursor < tokens.length; cursor++) {
+      const value = tokens[cursor].value;
+      if (value === "{") braceDepth++;
+      else if (value === "}") braceDepth--;
+      else if (value === "<" && braceDepth > 0) return false;
+      else if (value === ">" && braceDepth === 0) break;
+    }
+    if (cursor >= tokens.length || tokens[cursor - 1]?.value !== "/") return false;
+  }
+  return true;
+}
+
 function hasDynamicJsxCardinality(content: string | null, localBindings: string[]): boolean {
   if (!content || localBindings.length === 0) return false;
   const clientBindings = new Set(localBindings);
@@ -1445,6 +1522,12 @@ function collectIsolatedClientBoundaries(
      * Only for owners with no route-wide fallback, where rejecting leaves everything static.
      */
     staticPackageBoundaries?: boolean;
+    /**
+     * Render a package client component as static server HTML when every element of it closes
+     * itself and takes no element props, such as an icon. Islands mode's layouts: one that wraps
+     * content (a provider) is still rejected, since its client children would lose its context.
+     */
+    staticPackageLeaves?: boolean;
   } = {},
 ): {
   boundaries: IsolatedClientBoundaryReference[];
@@ -1510,7 +1593,11 @@ function collectIsolatedClientBoundaries(
       if (!imported.local) {
         const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
         if (packageMetadata.shouldHydrate) {
-          if (options.staticPackageBoundaries) {
+          if (
+            options.staticPackageBoundaries ||
+            (options.staticPackageLeaves &&
+              rendersOnlyLeafElements(content, importedBindings.get(specifier) ?? []))
+          ) {
             staticPackages.add(specifier);
             continue;
           }

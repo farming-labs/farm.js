@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/agent",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Durable agents for Farm.js, served and built by agent-unit",
   "keywords": [
     "agent-unit",

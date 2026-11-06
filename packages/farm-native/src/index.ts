@@ -80,6 +80,29 @@ export function serverFetch(path: string, init?: RequestInit): Promise<Response>
   });
 }
 
+/** A server function called from a native screen failed, as `createServerFn` reports it. */
+export class FarmServerFnError extends Error {
+  /** A code from the function's `errors`, or `invalid_input`, `server_error`, `not_native`, ... */
+  readonly code: string;
+  readonly status: number;
+  /** The declared error's public data. */
+  readonly data: unknown;
+  /** Where the function redirected, when it called `redirect()`. */
+  readonly redirect?: string;
+
+  constructor(
+    message: string,
+    details: { code: string; status: number; data?: unknown; redirect?: string },
+  ) {
+    super(message);
+    this.name = "FarmServerFnError";
+    this.code = details.code;
+    this.status = details.status;
+    this.data = details.data;
+    if (details.redirect !== undefined) this.redirect = details.redirect;
+  }
+}
+
 /**
  * Forget this device, the low-level half of signing out: the shell revokes its token on the server
  * and deletes it, and clears the server's cookies in the WebView. It does not end the server
