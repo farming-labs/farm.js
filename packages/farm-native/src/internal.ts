@@ -1,8 +1,10 @@
 /**
  * `@farm.js/native/internal`: shell calls for Farm's own packages, such as `@farm.js/auth/client`
- * on native screens. Internal: not a public API, and it can change in any release. Apps sign in
- * with `signIn` and `signUp` from `@farm.js/auth/client`.
+ * on native screens, and the call Farm's generated server function stubs make. Internal: not a
+ * public API, and it can change in any release. Apps sign in with `signIn` and `signUp` from
+ * `@farm.js/auth/client`, and call server functions by importing them.
  */
+import { FarmServerFnError, serverFetch } from "./index";
 import { farmShell } from "./runtime";
 
 /** What the shell answers for a native sign-in: the auth route's status and body, no cookies. */
@@ -29,4 +31,47 @@ export async function shellSignIn(path: string, body: unknown): Promise<FarmShel
   }
   const reply = await shell.signIn(path, JSON.stringify(body ?? {}));
   return { status: Number(reply.status), body: String(reply.body ?? "") };
+}
+
+const SERVER_FN_PATH = "/api/__farm/native/fn";
+
+/**
+ * What Farm's Metro resolver puts in place of a server function a native screen imports:
+ * `await createNote(input)` posts `{ id, input }` to the app's server through
+ * `serverFetch` (with the device session), which runs the function's own pipeline. Input and
+ * result travel as JSON.
+ * @internal
+ */
+export function createFarmNativeServerFn(id: string): (input?: unknown) => Promise<any> {
+  return async (input?: unknown) => {
+    const response = await serverFetch(SERVER_FN_PATH, {
+      method: "POST",
+      // The shell's app id replaces this once it has a session; the server checks it is there.
+      headers: { "content-type": "application/json", "x-farm-mobile": "native" },
+      body: JSON.stringify({ id, input: input ?? null }),
+    });
+    const body = (await response.json().catch(() => null)) as {
+      data?: unknown;
+      redirect?: { url: string; status: number };
+      error?: { code?: string; status?: number; message?: string; data?: unknown };
+    } | null;
+    if (body?.redirect) {
+      throw new FarmServerFnError(`The server function redirected to ${body.redirect.url}.`, {
+        code: "redirect",
+        status: body.redirect.status,
+        redirect: body.redirect.url,
+      });
+    }
+    if (!response.ok || !body || body.error) {
+      throw new FarmServerFnError(
+        body?.error?.message ?? `Server function answered ${response.status}`,
+        {
+          code: body?.error?.code ?? "server_error",
+          status: body?.error?.status ?? response.status,
+          data: body?.error?.data,
+        },
+      );
+    }
+    return body.data;
+  };
 }

@@ -8,6 +8,31 @@ import {
 
 export type FarmCronSchedule = string | string[];
 
+/** A JSON value, as route-level cron `input` must survive the build manifest unchanged. */
+export type FarmCronInputValue =
+  | string
+  | number
+  | boolean
+  | null
+  | FarmCronInputValue[]
+  | { [key: string]: FarmCronInputValue };
+
+/**
+ * What a cron-guarded endpoint handler reads as `context.cron`. Only the endpoint form receives
+ * it; a plain `(request) => ...` handler reads the `x-farm-cron-name` and
+ * `x-farm-cron-scheduled-at` headers itself.
+ */
+export interface FarmCronContext {
+  /** Job name from the `x-farm-cron-name` header; a direct platform call sends none. */
+  name?: string;
+  /** When the scheduler meant to fire, from `x-farm-cron-scheduled-at` (a millisecond epoch). */
+  scheduledAt?: Date;
+  /** The literal `input` from the route options; `undefined` when the options set none. */
+  input: FarmCronInputValue | undefined;
+  /** Aborts when the handler outlives the route's `timeoutMs`. */
+  signal: AbortSignal;
+}
+
 export interface FarmCronJobConfig {
   /** Portable five-field cron expression, or a list of expressions. */
   schedule: FarmCronSchedule;
@@ -26,6 +51,10 @@ export interface FarmCronJob {
   schedule: string[];
   path: string;
   description?: string;
+  /** Literal `input` from route-level options; config entries never carry one. */
+  input?: FarmCronInputValue;
+  /** Route-level `timeoutMs`, carried to the manifest so external schedulers can honor it. */
+  timeoutMs?: number;
 }
 
 export interface FarmCronResolvedConfig {
@@ -48,6 +77,35 @@ export interface FarmCronRouteOptions {
   secret?: string;
   /** Allow a production route without a secret. Defaults to false. */
   allowUnsecured?: boolean;
+  /**
+   * Schedule this route beside its code: one portable five-field UTC cron expression, or a list.
+   * A route with a `schedule` is a cron job, equivalent to a `cron` config entry. The build reads
+   * `schedule`, `name`, `description`, `input`, `timeoutMs`, and `enabled` statically from the
+   * route file, so they must be written as literals in the `cronRoute()` call.
+   */
+  schedule?: FarmCronSchedule;
+  /** Job name. Defaults to the route path without the leading `/api/`. */
+  name?: string;
+  /** Human-readable purpose shown by CLI output and the build manifest. */
+  description?: string;
+  /** JSON literal handed to the handler as `context.cron.input` (endpoint form only). */
+  input?: FarmCronInputValue;
+  /**
+   * Milliseconds the handler may run. When it has not finished, `context.cron.signal` aborts and
+   * the route answers 504; a handler that finishes first keeps its own result.
+   */
+  timeoutMs?: number;
+  /**
+   * `"skip"` answers 409 `{ skipped: true }` while a run of the same job is still going, without
+   * running the handler. Per-process only in v1: replicas and serverless instances do not share
+   * the in-flight set, so it is not a distributed lock.
+   */
+  overlap?: "skip";
+  /**
+   * `false` keeps the route callable with the same auth but removes it from scheduling outputs,
+   * like a disabled `cron` config entry.
+   */
+  enabled?: boolean;
 }
 
 export interface FarmCronCloudflareConfig {
@@ -159,6 +217,8 @@ export function createFarmCronManifest(cron: FarmCronResolvedConfig) {
       schedule: job.schedule,
       path: job.path,
       description: job.description || null,
+      ...(job.timeoutMs !== undefined ? { timeoutMs: job.timeoutMs } : {}),
+      ...(job.input !== undefined ? { input: job.input } : {}),
     })),
   };
 }
@@ -271,8 +331,150 @@ export function isCronRequestAuthorized(
 type FarmCronEndpoint = TypedEndpoint<any, any, any, any, any, any, any, any>;
 
 /**
+ * Jobs with a run still going in this process, keyed by job name, or by route identity when the
+ * options set no name. Per-process by design (v1): a distributed lock belongs to the application.
+ */
+const inFlightCronRuns = new Set<unknown>();
+
+interface FarmCronRunControls {
+  timeoutMs: number | undefined;
+  /** `undefined` means overlapping runs are allowed. */
+  overlapKey: unknown;
+}
+
+function resolveCronRunControls(options: FarmCronRouteOptions): FarmCronRunControls {
+  if (
+    options.timeoutMs !== undefined &&
+    (typeof options.timeoutMs !== "number" ||
+      !Number.isFinite(options.timeoutMs) ||
+      options.timeoutMs <= 0)
+  ) {
+    throw new TypeError(
+      `Farm cron \`timeoutMs\` must be a positive number of milliseconds; received ${JSON.stringify(options.timeoutMs)}. Remove the option or set a positive number.`,
+    );
+  }
+  if (options.overlap !== undefined && options.overlap !== "skip") {
+    throw new TypeError(
+      `Farm cron \`overlap\` only supports "skip"; received ${JSON.stringify(options.overlap)}. Remove the option to allow overlapping runs.`,
+    );
+  }
+  return {
+    timeoutMs: options.timeoutMs,
+    // A fresh object is this route's identity, so unnamed routes never skip each other.
+    overlapKey: options.overlap === "skip" ? (options.name ?? {}) : undefined,
+  };
+}
+
+function cronSkippedResponse(): Response {
+  return Response.json({ skipped: true }, { status: 409 });
+}
+
+function cronTimeoutResponse(timeoutMs: number): Response {
+  return Response.json(
+    {
+      error: `The cron handler did not finish within its \`timeoutMs\` of ${timeoutMs} milliseconds. Raise \`timeoutMs\` or make the handler finish sooner.`,
+    },
+    { status: 504 },
+  );
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    !!value &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as PromiseLike<unknown>).then === "function"
+  );
+}
+
+/**
+ * Run one cron invocation under the route's `overlap` and `timeoutMs` controls. The in-flight
+ * mark is held until the handler itself settles, not until the timeout answers, so a timed-out
+ * run still counts as going for `overlap: "skip"`. The timer is cleared as soon as the handler
+ * settles.
+ */
+function runCronRouteControlled<T>(
+  controls: FarmCronRunControls,
+  controller: AbortController | undefined,
+  run: () => unknown,
+  onSkip: () => T,
+  onTimeout: () => T,
+): unknown {
+  const { overlapKey, timeoutMs } = controls;
+  if (overlapKey !== undefined) {
+    if (inFlightCronRuns.has(overlapKey)) return onSkip();
+    inFlightCronRuns.add(overlapKey);
+  }
+  const release = () => {
+    if (overlapKey !== undefined) inFlightCronRuns.delete(overlapKey);
+  };
+
+  let outcome: unknown;
+  try {
+    outcome = run();
+  } catch (error) {
+    release();
+    throw error;
+  }
+  if (!isThenable(outcome)) {
+    release();
+    return outcome;
+  }
+
+  const pending = Promise.resolve(outcome);
+  if (timeoutMs === undefined) return pending.finally(release);
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      controller?.abort(
+        new Error(
+          `The cron handler did not finish within its \`timeoutMs\` of ${timeoutMs} milliseconds.`,
+        ),
+      );
+      resolve(onTimeout());
+    }, timeoutMs);
+    // After a timeout already resolved, these settle calls are no-ops; they still clear the
+    // timer and release the in-flight mark the moment the abandoned handler settles.
+    pending.then(
+      (value) => {
+        clearTimeout(timer);
+        release();
+        resolve(value as T);
+      },
+      (error) => {
+        clearTimeout(timer);
+        release();
+        reject(error);
+      },
+    );
+  });
+}
+
+function createFarmCronRequestContext(
+  request: Request,
+  options: FarmCronRouteOptions,
+  signal: AbortSignal,
+): FarmCronContext {
+  const name = request.headers.get("x-farm-cron-name") || undefined;
+  const scheduledAtHeader = request.headers.get("x-farm-cron-scheduled-at")?.trim() || "";
+  const scheduledAtMs = /^\d+$/.test(scheduledAtHeader) ? Number(scheduledAtHeader) : Number.NaN;
+  // A header that is not a safe millisecond epoch reads as absent, never as an Invalid Date.
+  const scheduledAt = Number.isSafeInteger(scheduledAtMs) ? new Date(scheduledAtMs) : undefined;
+  return {
+    ...(name !== undefined ? { name } : {}),
+    ...(scheduledAt !== undefined ? { scheduledAt } : {}),
+    input: options.input,
+    signal,
+  };
+}
+
+/**
  * Guards an API route so only the scheduler can call it: a `createEndpoint()` result, which keeps its
  * validation, types and metadata, or a plain handler that receives the `Request`.
+ *
+ * Options may also carry the job's `schedule` and its scheduling fields beside the code; the
+ * build reads them statically, so they must be literals in the call. `timeoutMs` and
+ * `overlap: "skip"` guard both forms at runtime; `context.cron` is endpoint-form only, a plain
+ * handler reads the cron headers from its `Request` itself.
  */
 export function cronRoute<TEndpoint extends FarmCronEndpoint>(
   endpoint: TEndpoint,
@@ -286,13 +488,20 @@ export function cronRoute(
   handler: ((request: Request, ...args: unknown[]) => unknown) | FarmCronEndpoint,
   options: FarmCronRouteOptions = {},
 ): unknown {
-  if (isFarmEndpoint(handler)) return guardCronEndpoint(handler, options);
+  const controls = resolveCronRunControls(options);
+  if (isFarmEndpoint(handler)) return guardCronEndpoint(handler, options, controls);
   const route = handler as (request: Request, ...args: unknown[]) => unknown;
   return (request: Request, ...args: unknown[]) => {
     if (!isCronRequestAuthorized(request, options)) {
       return Promise.resolve(unauthorizedCronResponse());
     }
-    return route(request, ...args);
+    return runCronRouteControlled(
+      controls,
+      undefined,
+      () => route(request, ...args),
+      cronSkippedResponse,
+      () => cronTimeoutResponse(controls.timeoutMs!),
+    );
   };
 }
 
@@ -318,44 +527,89 @@ const FUNCTION_OWN_KEYS = new Set(["length", "name", "prototype", "arguments", "
 /**
  * The same endpoint, with every way of invoking it checking the request first. A context with no
  * request is refused, so a caller that cannot prove it is the scheduler never runs the handler.
+ * An authorized invocation receives `context.cron` and runs under the route's `timeoutMs` and
+ * `overlap` controls.
  */
 function guardCronEndpoint(
   endpoint: FarmCronEndpoint & EndpointInternals,
   options: FarmCronRouteOptions,
+  controls: FarmCronRunControls,
 ): FarmCronEndpoint {
   // Duck-typed: a Node server can pass a Request-like object that is not the global class.
   const allowed = (context: { request?: unknown } | undefined) => {
     const request = context?.request as Request | undefined;
     return typeof request?.headers?.get === "function" && isCronRequestAuthorized(request, options);
   };
+  const withCron = (context: { request?: unknown; context?: unknown }) => {
+    const controller = new AbortController();
+    const cron = createFarmCronRequestContext(
+      context.request as Request,
+      options,
+      controller.signal,
+    );
+    // `allowed()` already proved the duck-typed request; the spread keeps every other field.
+    const invocation = {
+      ...context,
+      context: { ...(context.context as Record<string, unknown> | undefined), cron },
+    } as { request?: Request; context?: unknown };
+    return { controller, invocation };
+  };
   const guarded = function (this: unknown, context?: { request?: unknown }) {
-    return allowed(context)
-      ? (endpoint as (...args: unknown[]) => unknown).call(this, context)
-      : Promise.resolve(unauthorizedCronResponse());
+    if (!allowed(context)) return Promise.resolve(unauthorizedCronResponse());
+    const { controller, invocation } = withCron(context!);
+    return runCronRouteControlled(
+      controls,
+      controller,
+      () => (endpoint as (...args: unknown[]) => unknown).call(this, invocation),
+      cronSkippedResponse,
+      () => cronTimeoutResponse(controls.timeoutMs!),
+    );
   } as unknown as FarmCronEndpoint & EndpointInternals;
   for (const key of Reflect.ownKeys(endpoint)) {
     if (typeof key === "string" && FUNCTION_OWN_KEYS.has(key)) continue;
     Object.defineProperty(guarded, key, Object.getOwnPropertyDescriptor(endpoint, key)!);
   }
-  guarded.__handler = (context) =>
-    allowed(context) ? endpoint.__handler(context) : unauthorizedCronResponse();
+  guarded.__handler = (context) => {
+    if (!allowed(context)) return unauthorizedCronResponse();
+    const { controller, invocation } = withCron(context);
+    return runCronRouteControlled(
+      controls,
+      controller,
+      () => endpoint.__handler(invocation),
+      cronSkippedResponse,
+      () => cronTimeoutResponse(controls.timeoutMs!),
+    );
+  };
   const invoke = endpoint.__farmInvoke;
   if (invoke) {
-    guarded.__farmInvoke = (context) =>
-      allowed(context)
-        ? invoke(context)
-        : {
-            result: unauthorizedCronResponse(),
-            context: context.context,
-            handlerExecuted: false,
-            invalidations: [],
-          };
+    guarded.__farmInvoke = (context) => {
+      // A skipped or timed-out run reports `handlerExecuted: false`: the run was refused or
+      // abandoned, so its result and invalidations are not this response's to claim.
+      const denied = (result: Response) => ({
+        result,
+        context: context.context,
+        handlerExecuted: false,
+        invalidations: [] as const,
+      });
+      if (!allowed(context)) return denied(unauthorizedCronResponse());
+      const { controller, invocation } = withCron(context);
+      return runCronRouteControlled(
+        controls,
+        controller,
+        () => invoke(invocation),
+        () => denied(cronSkippedResponse()),
+        () => denied(cronTimeoutResponse(controls.timeoutMs!)),
+      );
+    };
   }
   return guarded;
 }
 
+/** @internal One segment of a cron job name; route-level names join segments with `/`. */
+export const FARM_CRON_NAME_SEGMENT_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
 function normalizeCronJob(name: string, job: FarmCronJobConfig): FarmCronJob {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name)) {
+  if (!FARM_CRON_NAME_SEGMENT_PATTERN.test(name)) {
     throw new TypeError(
       `Farm cron name ${JSON.stringify(name)} must start with a letter or number and contain only letters, numbers, dots, underscores, or hyphens.`,
     );
@@ -428,7 +682,8 @@ function normalizeCronPath(name: string, value: unknown): string {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
 
-function normalizeCronExpression(name: string, value: unknown): string {
+/** @internal Validate and normalize one cron expression; the build scan reuses config's rules. */
+export function normalizeCronExpression(name: string, value: unknown): string {
   if (typeof value !== "string") {
     throw new TypeError(`Farm cron ${JSON.stringify(name)} schedule must be a string.`);
   }

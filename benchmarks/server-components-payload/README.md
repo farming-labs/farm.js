@@ -36,7 +36,8 @@ a client navigation, and page errors are counted.
 
 ## Results
 
-2026-10-30, Apple M1, macOS 26.2, Node 24.21.0, Chrome 156. Averages; KB = 1024 bytes.
+2026-11-06, Apple M1, macOS 26.2, Node 24.21.0, Chrome 156, on `main` after #2525, #2527 and
+#2544. Averages; KB = 1024 bytes.
 
 Three sections of the app:
 
@@ -49,14 +50,18 @@ Three sections of the app:
 
 ### Bytes (`measure.mjs`)
 
-| Section | Engine    | Document, br (raw) | First-load JS, br | Navigation, br (raw) |
-| ------- | --------- | ------------------ | ----------------- | -------------------- |
-| docs    | `rsc`     | 16.2 KB (76.2 KB)  | 109.1 KB          | 12.0 KB (37.4 KB)    |
-| docs    | `islands` | 15.9 KB (69.7 KB)  | 84.7 KB           | 2.5 KB (7.2 KB)      |
-| shop    | `rsc`     | 5.5 KB (33.0 KB)   | 109.1 KB          | 3.8 KB (13.2 KB)     |
-| shop    | `islands` | 5.6 KB (31.2 KB)   | 83.7 KB           | 1.5 KB (3.4 KB)      |
-| blog    | `rsc`     | 17.8 KB (379.3 KB) | 109.1 KB          | 10.8 KB (203.7 KB)   |
-| blog    | `islands` | 8.9 KB (127.1 KB)  | 83.7 KB           | 8.9 KB (127.3 KB)    |
+| Section | Engine    | Document, br (raw) | First-load JS, br | Navigation data, br (raw) | Navigation JS, br |
+| ------- | --------- | ------------------ | ----------------- | ------------------------- | ----------------- |
+| docs    | `rsc`     | 16.3 KB (76.2 KB)  | 69.9 KB           | 12.0 KB (37.4 KB)         | 0                 |
+| docs    | `islands` | 15.9 KB (69.4 KB)  | 1.7 KB            | 2.5 KB (7.1 KB)           | 8.4 KB            |
+| shop    | `rsc`     | 5.5 KB (33.1 KB)   | 69.9 KB           | 3.8 KB (13.2 KB)          | 0                 |
+| shop    | `islands` | 5.7 KB (31.6 KB)   | 1.7 KB            | 2.0 KB (6.6 KB)           | 8.5 KB            |
+| blog    | `rsc`     | 17.9 KB (379.4 KB) | 69.9 KB           | 10.8 KB (203.7 KB)        | 0                 |
+| blog    | `islands` | 8.9 KB (127.0 KB)  | 1.7 KB            | 8.9 KB (127.2 KB)         | 8.4 KB            |
+
+An islands page whose client components only react to clicks starts with the boot entry (RFC 0003,
+sections 10 and 11). The client runtime, about 84 KB, arrives with the first navigation or click;
+"Navigation JS" spreads it over the ten navigations.
 
 ### Time (`timing.mjs`)
 
@@ -64,27 +69,25 @@ Medians. Chrome with 4x CPU throttling (roughly a mid-range phone). First load i
 of a cold visit until the network and the thread go quiet. Navigation is measured in the page, from
 the click on "Next" to the second animation frame after the new heading is in the DOM, so the new
 page has painted. Server: 16 concurrent document requests for 5 s on one Node process. This run
-had other work on the machine (load average 5 to 7), so absolute numbers are a little high for both.
+had other work on the machine (load average 6 to 8), so absolute numbers are a little high for both.
 
 | Section | Engine    | First load, main thread (script) | Navigation | Server req/s (p50) |
 | ------- | --------- | -------------------------------- | ---------- | ------------------ |
-| docs    | `rsc`     | 161 ms (65 ms)                   | 44 ms      | 331 (42.7 ms)      |
-| docs    | `islands` | 172 ms (67 ms)                   | 45 ms      | 344 (45.3 ms)      |
-| shop    | `rsc`     | 152 ms (68 ms)                   | 43 ms      | 469 (29.3 ms)      |
-| shop    | `islands` | 161 ms (67 ms)                   | 50 ms      | 574 (26.6 ms)      |
-| blog    | `rsc`     | 216 ms (94 ms)                   | 71 ms      | 50 (273.5 ms)      |
-| blog    | `islands` | 169 ms (59 ms)                   | 67 ms      | 343 (40.4 ms)      |
+| docs    | `rsc`     | 180 ms (72 ms)                   | 44 ms      | 301 (43.7 ms)      |
+| docs    | `islands` | 96 ms (4 ms)                     | 45 ms      | 360 (42.4 ms)      |
+| shop    | `rsc`     | 165 ms (72 ms)                   | 43 ms      | 389 (33.9 ms)      |
+| shop    | `islands` | 77 ms (4 ms)                     | 50 ms      | 545 (26.9 ms)      |
+| blog    | `rsc`     | 234 ms (101 ms)                  | 70 ms      | 46 (311.6 ms)      |
+| blog    | `islands` | 104 ms (4 ms)                    | 70 ms      | 310 (48 ms)        |
 
-- Islands ships 22% less JavaScript, and its navigations carry a fifth of RSC's data on docs pages.
-- On a content page (blog) Flight sends every token twice, as HTML and as rows, and React hydrates
-  all of it: islands sends half the document, runs 37% less script on a first load, and its server
-  renders 6.9 times as many pages per second.
-- Where islands is behind: docs and shop first loads take 9 to 11 ms more, because the Farm client
-  router starts on top of React and these pages' heaviest client components (a 300-item sidebar, a
-  product list) hydrate in both engines. Shop navigations paint 7 ms later: the page is rebuilt from
-  its payload in the layout's React root, then the router finishes its own work before the frame.
-- Docs navigations tie: islands puts the new HTML in the DOM sooner, but the router's follow-up work
-  (scripts, hydration setup, scroll) runs before the frame.
+- A first load sends 1.7 KB of JavaScript instead of 69.9 KB, does about half the main-thread work
+  and runs 4 ms of script instead of 72 to 101 ms: nothing on these pages hydrates at load.
+- Navigations carry a fifth of RSC's data on docs pages and half of it on shop pages. On a content
+  page (blog) Flight sends every token twice, as HTML and as rows: islands sends half the document,
+  and its server renders 6.7 times as many pages per second.
+- Where islands is behind: shop navigations paint 7 ms later. The page is rebuilt from its payload
+  in the layout's React root, then the router finishes its own work before the frame. Docs and blog
+  navigations tie.
 - docs: a navigation names the values the browser holds (`F-Values`) and the layouts on screen
   (`F-Layouts`, keyed by pattern and params); the server leaves both out.
 - shop: the catalog travels once, and a navigation leaves it out. The browser rebuilds a shop

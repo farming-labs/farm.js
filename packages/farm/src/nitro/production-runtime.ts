@@ -179,3 +179,4 @@ export { handleFarmFormActionRequest } from "../form-actions";
 export { ignoreFarmHeldValues, installFarmIslandValues } from "../client/island-values";
 export { getSharedLayoutPrefixLength, parseFarmLayoutChainHeader } from "../navigation/render-plan";
 export { createFarmMobileSessionPlugin } from "../mobile/session";
+export { createFarmNativeServerFnPlugin } from "../mobile/native-server-fn-handler";
