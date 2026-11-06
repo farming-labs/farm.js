@@ -20,16 +20,14 @@ async function tempRoot() {
 }
 const job = { schedule: "0 2 * * *", path: "/api/cleanup" };
 
-it("registers the public base and API path without moving canonical route metadata", async () => {
+it("hands Infra the canonical route path that host schedulers call", async () => {
   const root = await tempRoot();
   const prepared = await prepareFarmCronForNitro({
     root,
-    basePath: "/app",
-    api: { baseURL: "/v1", basePath: "/v1" },
     cron: { infra: "farmjs", jobs: { cleanup: job } },
   });
   const manifest = JSON.parse(await fs.readFile(prepared.manifestPath!, "utf8"));
-  expect(manifest.jobs[0].path).toBe("/app/v1/cleanup");
+  expect(manifest.jobs[0].path).toBe("/api/cleanup");
   expect(prepared.jobs[0].path).toBe("/api/cleanup");
 });
 

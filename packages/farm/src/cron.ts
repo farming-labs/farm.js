@@ -1,7 +1,4 @@
 import type { TypedEndpoint } from "./api/endpoint";
-import type { ResolvedFarmAPIConfig } from "./api/config";
-import { resolveFarmAPIServerBasePath, resolveFarmAPIServerRoutePath } from "./api/server-path";
-import { applyFarmBasePath } from "./base-path";
 import { farmSecretsMatch } from "./secret-compare";
 import { toPosixPath } from "./utils";
 import {
@@ -207,8 +204,6 @@ export function resolveCronConfig(
 export async function prepareFarmCronForNitro(config: {
   root?: string;
   distDir?: string;
-  basePath?: string;
-  api?: ResolvedFarmAPIConfig;
   cron?: FarmCronResolvedConfig | FarmCronUserConfig | false;
 }): Promise<PreparedFarmCron> {
   const cron = isResolvedCronConfig(config.cron) ? config.cron : resolveCronConfig(config.cron);
@@ -219,19 +214,9 @@ export async function prepareFarmCronForNitro(config: {
   const manifestPath = path.join(root, distDir, FARM_CRON_MANIFEST);
   const generatedDir = path.join(root, distDir, ".nitro", "farm-cron");
   const scheduler = cron.infra ?? "host";
+  // Infra calls the canonical route path, like Vercel crons and Nitro tasks: the server answers
+  // it whatever `basePath` or `api.basePath` add, and the signature covers that pathname.
   const manifest = createFarmCronManifest(cron, scheduler);
-  if (scheduler === "farmjs") {
-    const apiBasePath = config.api ? resolveFarmAPIServerBasePath(config.api) : "/api";
-    manifest.jobs = manifest.jobs.map((job) => ({
-      ...job,
-      path: applyFarmBasePath(
-        job.path === "/api" || job.path.startsWith("/api/")
-          ? resolveFarmAPIServerRoutePath(job.path, apiBasePath)
-          : job.path,
-        config.basePath || "",
-      ),
-    }));
-  }
   await fs.mkdir(path.dirname(manifestPath), { recursive: true });
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   await fs.rm(generatedDir, { recursive: true, force: true });
