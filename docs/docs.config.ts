@@ -4,6 +4,7 @@ import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/co
 import { FARM_VERSION } from "@farm.js/core/version";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { agentSupportInvitation } from "./src/lib/agent-support";
 import {
   siCloudflare,
   siConvex,
@@ -461,7 +462,9 @@ const config = {
   llmsTxt: {
     enabled: true,
     siteTitle: "Farm.js Docs",
-    siteDescription: "Complete Farm.js framework documentation.",
+    siteDescription: ["Complete Farm.js framework documentation.", agentSupportInvitation].join(
+      "\n\n",
+    ),
   },
   sitemap: true,
   robots: true,
