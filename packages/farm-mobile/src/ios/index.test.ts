@@ -297,6 +297,18 @@ describe("@farm.js/mobile/ios", () => {
     expect(baseFiles["App/FarmBuild.swift"]).toContain("static let tabIcons: [String] = []");
   });
 
+  it("titles the navigation bar from the page, leaving the tab's configured title", async () => {
+    const files = await generated(context());
+    const screen = files["App/ScreenViewController.swift"]!;
+    // UIViewController.title also renames the tab bar item of a tab's root screen.
+    expect(screen).not.toMatch(/\bself\.title = /);
+    expect(screen).not.toMatch(/^\s*(if .*\{ )?title = /m);
+    expect(screen).toContain("navigationItem.title = title");
+    expect(files["App/Navigator.swift"]).toContain(
+      "stack.tabBarItem = UITabBarItem(title: tab.title, image: image, tag: index)",
+    );
+  });
+
   it("writes a project file whose objects all resolve, with every source and resource built", async () => {
     const files = await generated(context());
     const { project, objects, ofType } = parseProject(files);

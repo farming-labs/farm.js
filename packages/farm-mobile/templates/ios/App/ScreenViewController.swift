@@ -40,7 +40,7 @@ final class ScreenViewController: UIViewController, PageHost {
         self.navigator = navigator
         super.init(nibName: nil, bundle: nil)
         page?.host = self
-        if let nativeModule { title = nativeModule }
+        if let nativeModule { navigationItem.title = nativeModule }
     }
 
     @available(*, unavailable)
@@ -136,7 +136,7 @@ final class ScreenViewController: UIViewController, PageHost {
     private func shown(_ title: String) {
         progress.stopAnimating()
         page?.webView.alpha = 1
-        if !title.isEmpty { self.title = title }
+        if !title.isEmpty { navigationItem.title = title }
         let shown = onShown
         onShown = nil
         shown?(title)
@@ -177,7 +177,7 @@ final class ScreenViewController: UIViewController, PageHost {
     }
 
     func page(_ page: Page, title: String) {
-        if !title.isEmpty { self.title = title }
+        if !title.isEmpty { navigationItem.title = title }
     }
 
     func page(_ page: Page, failed error: Error) {
