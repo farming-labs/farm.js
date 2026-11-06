@@ -36,7 +36,7 @@ export function useNavigate(): FarmNavigate {
   return useScreenNavigate(useScreen("useNavigate"));
 }
 
-/** @internal `navigate` for components that may render outside a native screen. */
+/** Not a public API: `navigate` for `@farm.js/ui` components, which may render outside a screen. */
 export function _useNavigateInScreen(): FarmNavigate {
   return useScreenNavigate(useContext(FarmScreenContext));
 }
