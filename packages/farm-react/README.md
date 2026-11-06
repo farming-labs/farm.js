@@ -1128,6 +1128,10 @@ descriptors remain React-owned. This preserves the difference between explicit `
 and an absent value (inherit from the parent). Literal strings on ordinary direct hosts remain
 eligible for compilation.
 
+`title` and `meta` elements inside conditional, keyed, or recursive host descriptors remain
+React-owned. React decides their document placement and cleanup, including React 19 head placement
+and the `itemProp` exception. The compiler does not implement a separate metadata manager.
+
 Conditional blocks have three safe ownership levels. One or more proven host-only direct branches
 may become compiler-owned ranges among static host siblings, including at the exact component root.
 A dedicated container with exactly one conditional child uses the smaller compiler-owned branch
