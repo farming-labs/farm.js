@@ -812,6 +812,56 @@ describe("page shells", () => {
 });
 
 describe("generated files on this machine's tools", () => {
+  it.skipIf(!hasSwiftc || process.platform !== "darwin")(
+    "sends server screens only cookies valid for the request URL",
+    async () => {
+      const source = (await generated(context()))["App/ServerScreens.swift"]!;
+      const match = /    nonisolated static func matchingCookies\([\s\S]*?\n    \}\n/.exec(
+        source,
+      )![0];
+      const program = `import Foundation
+enum ScreenCookies {
+${match}
+}
+func cookie(_ name: String, _ domain: String, _ path: String = "/", secure: Bool = false, expired: Bool = false) -> HTTPCookie {
+    var properties: [HTTPCookiePropertyKey: Any] = [.name: name, .value: "value", .domain: domain, .path: path]
+    if secure { properties[.secure] = "TRUE" }
+    if expired { properties[.expires] = Date(timeIntervalSince1970: 1) }
+    return HTTPCookie(properties: properties)!
+}
+let cookies = [
+    cookie("host", "notes.example.com"),
+    cookie("domain", ".notes.example.com"),
+    cookie("secure", "notes.example.com", secure: true),
+    cookie("admin", "notes.example.com", "/admin"),
+    cookie("expired", "notes.example.com", expired: true),
+    cookie("other", "other.example.com"),
+]
+let cases: [(String, [String])] = [
+    ("http://notes.example.com/", ["domain", "host"]),
+    ("https://notes.example.com/admin", ["admin", "domain", "host", "secure"]),
+    ("https://notes.example.com/admin/notes", ["admin", "domain", "host", "secure"]),
+    ("https://notes.example.com/administrator", ["domain", "host", "secure"]),
+    ("https://sub.notes.example.com/", ["domain"]),
+    ("https://notes.example.com.evil.test/", []),
+]
+for (address, expected) in cases {
+    let actual = ScreenCookies.matchingCookies(cookies, for: URL(string: address)!).map(\\.name).sorted()
+    precondition(actual == expected, "\\(address): \\(actual) != \\(expected)")
+}
+print("Cookie scope checks passed.")
+`;
+      const dir = await tempDir();
+      const entry = path.join(dir, "cookies.swift");
+      const binary = path.join(dir, "cookies");
+      await writeFile(entry, program);
+      await execFileAsync("swiftc", [entry, "-o", binary]);
+      const { stdout } = await execFileAsync(binary);
+      expect(stdout).toContain("Cookie scope checks passed.");
+    },
+    60_000,
+  );
+
   it.skipIf(!hasPlutil)(
     "passes plutil: Info.plist lints, the project file converts",
     async () => {

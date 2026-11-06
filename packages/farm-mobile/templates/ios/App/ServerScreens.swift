@@ -115,12 +115,15 @@ final class FarmServerScreen: UIViewController {
     }()
 
     static func cookies(for url: URL) async -> [HTTPCookie] {
-        guard let host = url.host?.lowercased() else { return [] }
         let all = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
-        return all.filter { cookie in
-            let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            return host == domain || host.hasSuffix(".\(domain)")
-        }
+        return matchingCookies(all, for: url)
+    }
+
+    nonisolated static func matchingCookies(_ all: [HTTPCookie], for url: URL) -> [HTTPCookie] {
+        // Foundation applies host-only, domain, path, Secure and expiry rules without sharing a jar.
+        guard let storage = URLSessionConfiguration.ephemeral.httpCookieStorage else { return [] }
+        for cookie in all { storage.setCookie(cookie) }
+        return storage.cookies(for: url) ?? []
     }
 }
 
