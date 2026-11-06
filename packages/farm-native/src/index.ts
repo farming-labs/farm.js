@@ -103,48 +103,6 @@ export class FarmServerFnError extends Error {
   }
 }
 
-const SERVER_FN_PATH = "/api/__farm/native/fn";
-
-/**
- * @internal What Farm's Metro resolver puts in place of a server function a native screen
- * imports: `await createNote(input)` posts `{ id, input }` to the app's server through
- * `serverFetch` (with the device session), which runs the function's own pipeline. Input and
- * result travel as JSON.
- */
-export function createFarmNativeServerFn(id: string): (input?: unknown) => Promise<any> {
-  return async (input?: unknown) => {
-    const response = await serverFetch(SERVER_FN_PATH, {
-      method: "POST",
-      // The shell's app id replaces this once it has a session; the server checks it is there.
-      headers: { "content-type": "application/json", "x-farm-mobile": "native" },
-      body: JSON.stringify({ id, input: input ?? null }),
-    });
-    const body = (await response.json().catch(() => null)) as {
-      data?: unknown;
-      redirect?: { url: string; status: number };
-      error?: { code?: string; status?: number; message?: string; data?: unknown };
-    } | null;
-    if (body?.redirect) {
-      throw new FarmServerFnError(`The server function redirected to ${body.redirect.url}.`, {
-        code: "redirect",
-        status: body.redirect.status,
-        redirect: body.redirect.url,
-      });
-    }
-    if (!response.ok || !body || body.error) {
-      throw new FarmServerFnError(
-        body?.error?.message ?? `Server function answered ${response.status}`,
-        {
-          code: body?.error?.code ?? "server_error",
-          status: body?.error?.status ?? response.status,
-          data: body?.error?.data,
-        },
-      );
-    }
-    return body.data;
-  };
-}
-
 /**
  * Forget this device, the low-level half of signing out: the shell revokes its token on the server
  * and deletes it, and clears the server's cookies in the WebView. It does not end the server
