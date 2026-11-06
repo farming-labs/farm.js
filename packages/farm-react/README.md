@@ -1125,6 +1125,12 @@ shifting an unrelated compiler binding. These refs do not add attributes to SSR 
 
 Conditional blocks have three safe ownership levels. One or more proven host-only direct branches
 may become compiler-owned ranges among static host siblings, including at the exact component root.
+Script elements in conditional branches or keyed rows remain React-owned, including nested and
+non-executable scripts. React retains responsibility for inert script creation on insertion and
+reinsertion; the compiler does not create these elements through its host descriptors.
+The production browser control is
+`NODE_ENV=production node packages/farm-react/scripts/test-script-ownership-browser.mjs` from the
+workspace root. Set `CHROME_PATH` to use an installed Chrome instead of Playwright's browser.
 A dedicated container with exactly one conditional child uses the smaller compiler-owned branch
 boundary. The more general React-owned conditional path accepts supported events, nested host
 conditionals, keyed lists, and component islands. A compiler-owned host branch may now recursively
