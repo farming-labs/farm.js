@@ -8,6 +8,8 @@ dist/
 build/
 !packages/farm/src/build/
 !packages/farm/src/build/**
+!packages/farm-native/src/build/
+!packages/farm-native/src/build/**
 .next/
 out/
 .farm/

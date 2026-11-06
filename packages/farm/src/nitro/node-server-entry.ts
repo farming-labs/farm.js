@@ -1,10 +1,23 @@
 import type { ResolvedFarmServerConfig } from "../server-http";
 
+/**
+ * Build the entry for a desktop shell instead of a public server. The module then starts
+ * nothing on import: it exports `start()`, binds 127.0.0.1 on an OS-assigned port, puts the
+ * desktop guard in front of every request, and reports the bound port.
+ */
+export interface FarmDesktopServerEntryOptions {
+  /** The app's basePath; the handshake URL lives under it. */
+  basePath: string;
+  /** Module that exports `createFarmDesktopGuard`. */
+  guardModule: string;
+}
+
 export interface FarmNodeServerEntryOptions {
   nitroEntryFile: string;
   nodeAdapterModule: string;
   server: ResolvedFarmServerConfig;
   websocketAdapterModule: string;
+  desktop?: FarmDesktopServerEntryOptions;
 }
 
 export interface FarmBunServerEntryOptions {
@@ -13,6 +26,7 @@ export interface FarmBunServerEntryOptions {
   bunAdapterModule: string;
   server: ResolvedFarmServerConfig;
   websocketAdapterModule: string;
+  desktop?: FarmDesktopServerEntryOptions;
 }
 
 /** Written next to the Node entry and imported first, so it runs before any app module. */
@@ -25,7 +39,14 @@ export const FARM_NODE_ENV_MODULE_FILE = "farm-node-env.mjs";
  */
 export const FARM_NODE_ENV_MODULE_SOURCE = `if (!process.env.NODE_ENV) process.env.NODE_ENV = "production";\n`;
 
-const NODE_SERVER_SOURCE = `const socketPath = process.env.NITRO_UNIX_SOCKET;
+/** Imported first by a desktop entry: `platform()` reads it from any module, the app's included. */
+export const FARM_DESKTOP_ENV_MODULE_FILE = "farm-desktop-env.mjs";
+export const FARM_DESKTOP_ENV_MODULE_SOURCE = `process.env.FARM_PLATFORM = "desktop";\n${FARM_NODE_ENV_MODULE_SOURCE}`;
+
+/** The line a desktop entry run as its own process prints once it listens. */
+export const FARM_DESKTOP_READY_PREFIX = "farm:ready ";
+
+const nodeServerSource = (desktop: boolean) => `const socketPath = process.env.NITRO_UNIX_SOCKET;
 const server = serve({
   manual: true,
   silent: true,
@@ -34,7 +55,7 @@ const server = serve({
   hostname: host,
   node: socketPath ? { path: socketPath } : undefined,
   tls: cert && key ? { cert, key } : undefined,
-  fetch: nitroApp.fetch,
+  fetch: ${desktop ? "(request) => farmDesktopGuard(request) ?? nitroApp.fetch(request)" : "nitroApp.fetch"},
   plugins: [...tracingSrvxPlugins],
 });
 const nodeServer = server.node?.server;
@@ -53,7 +74,20 @@ nodeServer.on("request", (_request, response) => {
 
 if (import.meta._websocket) {
   const { handleUpgrade } = wsAdapter({ resolve: resolveWebsocketHooks });
-  nodeServer.on("upgrade", (request, socket, head) => {
+  nodeServer.on("upgrade", (request, socket, head) => {${
+    desktop
+      ? `
+    const blocked = farmDesktopGuard({
+      method: request.method || "GET",
+      url: request.url || "/",
+      headers: { get: (name) => [request.headers[name]].flat()[0] ?? null },
+    });
+    if (blocked) {
+      socket.end("HTTP/1.1 403 Forbidden\\r\\nConnection: close\\r\\nContent-Length: 0\\r\\n\\r\\n");
+      return;
+    }`
+      : ""
+  }
     handleUpgrade(
       request,
       socket,
@@ -66,7 +100,9 @@ if (import.meta._websocket) {
 
 // Bun.serve's graceful stop waits for in-flight requests and closes idle keep-alive
 // connections itself.
-const BUN_SERVER_SOURCE = `const ws = import.meta._websocket ? wsAdapter({ resolve: resolveWebsocketHooks }) : undefined;
+const bunServerSource = (
+  desktop: boolean,
+) => `const ws = import.meta._websocket ? wsAdapter({ resolve: resolveWebsocketHooks }) : undefined;
 const server = serve({
   manual: true,
   silent: true,
@@ -74,12 +110,20 @@ const server = serve({
   port,
   hostname: host,
   tls: cert && key ? { cert, key } : undefined,
-  fetch: import.meta._websocket
+  fetch: ${
+    desktop
+      ? `(request) =>
+    farmDesktopGuard(request) ??
+    (import.meta._websocket && request.headers.get("upgrade") === "websocket"
+      ? ws.handleUpgrade(request, request.runtime.bun.server)
+      : nitroApp.fetch(request))`
+      : `import.meta._websocket
     ? (request) =>
         request.headers.get("upgrade") === "websocket"
           ? ws.handleUpgrade(request, request.runtime.bun.server)
           : nitroApp.fetch(request)
-    : nitroApp.fetch,
+    : nitroApp.fetch`
+  },
   bun: { websocket: import.meta._websocket ? ws?.websocket : undefined },
   plugins: [...tracingSrvxPlugins],
 });
@@ -115,13 +159,20 @@ function createFarmServerEntry(options: {
   nitroEntryFile: string;
   server: ResolvedFarmServerConfig;
   websocketAdapterModule: string;
+  desktop?: FarmDesktopServerEntryOptions;
 }): string {
   const serverConfig = JSON.stringify(options.server);
   const nitroEntryImport = `./${options.nitroEntryFile.replace(/^\.\//, "")}`;
   const node = options.runtime === "node";
+  const desktop = options.desktop;
+  const envModule = desktop
+    ? `import "./${FARM_DESKTOP_ENV_MODULE_FILE}";\n`
+    : node
+      ? `import "./${FARM_NODE_ENV_MODULE_FILE}";\n`
+      : "";
 
   return `
-${node ? `import "./${FARM_NODE_ENV_MODULE_FILE}";\n` : ""}import "#nitro/virtual/polyfills";
+${envModule}import "#nitro/virtual/polyfills";
 import { ${node ? "NodeRequest, " : ""}serve } from ${JSON.stringify(options.adapterModule)};
 import wsAdapter from ${JSON.stringify(options.websocketAdapterModule)};
 import { resolveWebsocketHooks, useNitroApp, useNitroHooks } from "#nitro/runtime/app";
@@ -130,7 +181,27 @@ import { trapUnhandledErrors } from "#nitro/runtime/error/hooks";
 import { setupCloseHooks } from "#nitro/runtime/shutdown";
 import { startScheduleRunner } from "#nitro/runtime/task";
 import { tracingSrvxPlugins } from "#nitro/virtual/tracing";
-import { farmProductionLifecycle } from ${JSON.stringify(nitroEntryImport)};
+import { farmProductionLifecycle } from ${JSON.stringify(nitroEntryImport)};${
+    desktop
+      ? `
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { createFarmDesktopGuard } from ${JSON.stringify(desktop.guardModule)};
+${DESKTOP_START_SOURCE}
+async function startFarmDesktopServer(options) {
+let farmDesktopBoundPort;
+const farmDesktopGuard = createFarmDesktopGuard({
+  secret: options.secret,
+  handshakeToken: options.handshakeToken,
+  basePath: ${JSON.stringify(desktop.basePath)},
+  port: () => farmDesktopBoundPort,
+});
+if (typeof options.dataDir !== "string" || !options.dataDir) {
+  throw new TypeError("[Farm] start() needs dataDir, the directory appDataDir() returns.");
+}
+process.env.FARM_DESKTOP_DATA_DIR = options.dataDir;`
+      : ""
+  }
 
 const farmServerConfig = ${serverConfig};
 if (!process.env.NITRO_SHUTDOWN_TIMEOUT) {
@@ -240,17 +311,28 @@ if (startupSignal) {
   process.exit(process.exitCode || 0);
 }
 
-const cert = process.env.NITRO_SSL_CERT;
+${
+  desktop
+    ? `// The shell picks the address. HOST and PORT from the user's environment never apply.
+const cert = undefined;
+const key = undefined;
+const port = options.port ?? 0;
+if (!Number.isInteger(port) || port < 0 || port > 65535) {
+  throw new TypeError("[Farm] start() port must be an integer from 0 to 65535.");
+}
+const host = options.host || "127.0.0.1";`
+    : `const cert = process.env.NITRO_SSL_CERT;
 const key = process.env.NITRO_SSL_KEY;
 const configuredPort = Number(process.env.NITRO_PORT || process.env.PORT);
 const port = Number.isFinite(configuredPort) && configuredPort > 0 ? configuredPort : 3000;
-const host = process.env.NITRO_HOST || process.env.HOST;
-${node ? NODE_SERVER_SOURCE : BUN_SERVER_SOURCE}
+const host = process.env.NITRO_HOST || process.env.HOST;`
+}
+${node ? nodeServerSource(Boolean(desktop)) : bunServerSource(Boolean(desktop))}
 setupCloseHooks(server);
 trapUnhandledErrors();
 
 let shutdownPromise;
-async function shutdown(signal) {
+async function shutdown(signal${desktop ? ", exitProcess = true" : ""}) {
   isShuttingDown = true;
   farmProductionLifecycle.beginDrain(signal);
 
@@ -302,7 +384,7 @@ async function shutdown(signal) {
     }
   }
 
-  if (shutdownConfig.forceExit) process.exit(process.exitCode || 0);
+  if (shutdownConfig.forceExit${desktop ? " && exitProcess" : ""}) process.exit(process.exitCode || 0);
 }
 
 if (!shutdownConfig.disabled) {
@@ -316,7 +398,12 @@ if (!shutdownConfig.disabled) {
 try {
   await server.serve();
   const protocol = cert && key ? "https" : "http";
-  const addressInfo = ${node ? "nodeServer.address()" : "server.bun.server?.address"};
+  const addressInfo = ${node ? "nodeServer.address()" : "server.bun.server?.address"};${
+    desktop
+      ? `
+  farmDesktopBoundPort = ${node ? "addressInfo?.port" : "server.bun.server?.port"};`
+      : ""
+  }
   if (typeof addressInfo === "string") {
     console.log(\`Listening on unix socket \${addressInfo}\`);
   } else if (addressInfo) {
@@ -341,7 +428,59 @@ try {
 if (import.meta._tasks) {
   startScheduleRunner({ waitUntil: server.waitUntil });
 }
+${
+  desktop
+    ? `
+const farmDesktopHost = host.includes(":") ? \`[\${host}]\` : host;
+return {
+  origin: \`http://\${farmDesktopHost}:\${farmDesktopBoundPort}\`,
+  port: farmDesktopBoundPort,
+  stop: () => (shutdownPromise ||= shutdown("stop", false)),
+};
+}
 
+${DESKTOP_MAIN_SOURCE}
+`
+    : ""
+}
 export default {};
   `.trim();
 }
+
+/**
+ * `start()` for a desktop shell that imports the server in-process. One server per process;
+ * a second call returns the first one.
+ */
+const DESKTOP_START_SOURCE = `let farmDesktopServer;
+export function start(options = {}) {
+  farmDesktopServer ||= startFarmDesktopServer(options);
+  return farmDesktopServer;
+}`;
+
+/**
+ * A shell that runs the server as its own process (a sidecar) passes the values in the
+ * environment and waits for the ready line, never for a timeout.
+ */
+const DESKTOP_MAIN_SOURCE = `function isFarmDesktopMainModule() {
+  if (typeof import.meta.main === "boolean") return import.meta.main;
+  try {
+    return Boolean(process.argv[1]) && pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url;
+  } catch {
+    return false;
+  }
+}
+
+if (isFarmDesktopMainModule()) {
+  const env = process.env;
+  const server = await start({
+    secret: env.FARM_DESKTOP_SECRET,
+    handshakeToken: env.FARM_DESKTOP_HANDSHAKE_TOKEN,
+    dataDir: env.FARM_DESKTOP_DATA_DIR,
+    port: env.FARM_DESKTOP_PORT ? Number(env.FARM_DESKTOP_PORT) : 0,
+    host: env.FARM_DESKTOP_HOST,
+  });
+  // Child processes the app spawns must not inherit the session secret.
+  delete env.FARM_DESKTOP_SECRET;
+  delete env.FARM_DESKTOP_HANDSHAKE_TOKEN;
+  console.log(${JSON.stringify(FARM_DESKTOP_READY_PREFIX)} + JSON.stringify({ port: server.port }));
+}`;

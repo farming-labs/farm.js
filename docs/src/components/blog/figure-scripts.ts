@@ -19,7 +19,11 @@ export type FigureKind =
   | "agents-site"
   | "agents-observe"
   | "landing-markdown"
-  | "landing-strata";
+  | "landing-strata"
+  | "agent-layers"
+  | "agent-authorize"
+  | "ast-native"
+  | "mobile-arch";
 export type IconKey =
   | "stripe"
   | "cloudflare"
@@ -1776,6 +1780,416 @@ agentsCode.narrow = {
   },
 };
 
+/* ---------- agent-native post: the four layers, and who a tool call runs as ---------- */
+
+// One request, both halves of the answer: what an agent can read, and what it can call. Lines
+// stream in as each pulse lands, so the card shows the exchange rather than a list of features.
+const READ_LINES: [string, string][] = [
+  ["bf-dim", "200 text/markdown"],
+  ["bf-hi", "# Pricing"],
+  ["", "- Hobby: free"],
+  ["", "- Pro: $20 / month"],
+];
+const ACT_LINES: [string, string][] = [
+  ["bf-dim", "tools/list -> 2 tools"],
+  ["bf-hi", "create_project"],
+  ["", 'name: "Invoice redesign"'],
+  ["bf-dim", "201 project-3"],
+];
+const agentLayers: FigureSpec = {
+  duration: 0.5 + BEAT * 0.6 + PULSE + 4 * 0.3 + 0.6 + HOLD,
+  stage: { w: 440, h: 258 },
+  label:
+    "One origin answers an agent twice: the page as Markdown it can read, and a typed tool it can call",
+  panels: [
+    {
+      id: "agent",
+      x: 120,
+      y: 0,
+      w: 200,
+      h: 48,
+      flow: true,
+      icon: "agent",
+      kicker: "Agent",
+      label: "acme.test",
+    },
+    { id: "read", x: 0, y: 96, w: 205, h: 162, title: "Reads" },
+    { id: "act", x: 235, y: 96, w: 205, h: 162, title: "Calls" },
+  ],
+  wires: {
+    read: [
+      [170, 48],
+      [170, 72],
+      [102, 72],
+      [102, 96],
+    ],
+    act: [
+      [270, 48],
+      [270, 72],
+      [337, 72],
+      [337, 96],
+    ],
+  },
+  frame(t) {
+    const asked = 0.5;
+    const acted = asked + BEAT * 0.6;
+    const readAt = asked + PULSE;
+    const actAt = acted + PULSE;
+    const stream = (lines: [string, string][], at: number) =>
+      lines
+        .map(
+          ([cls, text], i) =>
+            `<span class="bf-line${cls ? ` ${cls}` : ""}" style="opacity:${ease(
+              prog(t, at + i * 0.3, 0.3),
+            ).toFixed(3)}">${esc(text)}</span>`,
+        )
+        .join("");
+    const settled = actAt + ACT_LINES.length * 0.3;
+    return {
+      slots: {
+        agent: step(t, 0.2, settled),
+        read: stream(READ_LINES, readAt),
+        "read:meta": t >= readAt ? "/pricing.md" : "",
+        act: stream(ACT_LINES, actAt),
+        "act:meta": t >= actAt ? "/api/mcp" : "",
+      },
+      wires: {
+        read: wire(t, 0.1, [[asked]]),
+        act: wire(t, 0.2, [[acted]]),
+      },
+      states: {
+        agent: busy(t, 0.2, acted),
+        read: busy(t, readAt, readAt + READ_LINES.length * 0.3),
+        act: busy(t, actAt, settled),
+      },
+    };
+  },
+};
+
+// The same tools/call, from two callers, through the one pipeline the HTTP route already had.
+// The reader never reaches the handler: its catalog does not contain the tool.
+const CALL_STEPS: [GlyphKey, string, string][] = [
+  ["swap", "authorize", "per-caller catalog"],
+  ["server", "middleware", "the route's own"],
+  ["file", "schema", "the route's zod"],
+  ["model", "handler", "creates the project"],
+];
+const READER_RESULTS = ["not found", "", "", ""];
+const WRITER_RESULTS = ["2 tools", "demo-writer", "valid", "project-3"];
+const agentAuthorize: FigureSpec = {
+  duration: 0.6 + PULSE + CALL_STEPS.length * BEAT + HOLD,
+  label:
+    "One tools/call for create_project: the reader is refused at authorization, and the writer runs the route's own middleware, schema, and handler",
+  panels: [
+    {
+      id: "call",
+      x: 205,
+      y: 0,
+      w: 350,
+      h: 48,
+      flow: true,
+      icon: "tool",
+      kicker: "tools/call",
+      label: "create_project",
+    },
+    { id: "reader", x: 0, y: 112, w: 365, h: 288, title: "Bearer demo-reader" },
+    { id: "writer", x: 395, y: 112, w: 365, h: 288, title: "Bearer demo-writer" },
+  ],
+  wires: {
+    read: [
+      [330, 48],
+      [330, 80],
+      [182, 80],
+      [182, 112],
+    ],
+    write: [
+      [430, 48],
+      [430, 80],
+      [577, 80],
+      [577, 112],
+    ],
+  },
+  frame(t) {
+    const sent = 0.6;
+    const begin = sent + PULSE;
+    // The reader is stopped by the first step, so only that row ever runs.
+    const rows = (results: string[], stops: boolean) =>
+      CALL_STEPS.map(([icon, name, sub], i) => {
+        const start = begin + i * BEAT;
+        const end = start + BEAT * 0.75;
+        const blocked = stops && i > 0;
+        const finished = t >= end;
+        const last = i === CALL_STEPS.length - 1;
+        if (blocked)
+          return row(icon, name, esc(sub), "", '<span class="bf-st"></span>', "bf-item--wait");
+        const status = stops
+          ? t >= end
+            ? '<span class="bf-st bf-st--no">✕</span>'
+            : step(t, start, end)
+          : step(t, start, end);
+        return row(
+          icon,
+          name,
+          esc(sub),
+          finished ? results[i] : "",
+          status,
+          t >= start && (!finished || last) ? "bf-von" : t < start ? "bf-item--wait" : "",
+        );
+      }).join("");
+    const settled = begin + CALL_STEPS.length * BEAT;
+    return {
+      slots: {
+        call: step(t, 0.2, settled),
+        reader: rows(READER_RESULTS, true),
+        "reader:meta": t >= begin + BEAT * 0.75 ? "refused" : "",
+        writer: rows(WRITER_RESULTS, false),
+        "writer:meta": t >= settled ? "created" : "",
+      },
+      wires: {
+        read: wire(t, 0.1, [[sent]]),
+        write: wire(t, 0.2, [[sent]]),
+      },
+      states: {
+        call: busy(t, 0.2, sent),
+        reader: busy(t, begin, begin + BEAT * 0.75),
+        writer: busy(t, begin, settled),
+      },
+    };
+  },
+};
+
+/* ---------- the mobile analyzer: which tier a screen gets ---------- */
+
+// Each row maps a web element to its native view, or flags one that cannot port.
+// The rows fade in as the pulse lands, so a reader watches the analyzer sort the page.
+const AST_PORTS: [string, string][] = [
+  ["div", "View"],
+  ["img", "Image"],
+  ["input", "TextInput"],
+  ["ul", "List"],
+];
+const AST_BLOCKS = ["canvas", "iframe", "window", "arbitrary CSS"];
+const astRow = (a: string, b: string | null, t: number, at: number) =>
+  t < at
+    ? ""
+    : `<span style="display:flex;justify-content:space-between;gap:0.6em;opacity:${ease(
+        prog(t, at, 0.3),
+      ).toFixed(2)}"><span>${a}</span><span style="color:${b ? "#8fb8a0" : "#9a9a9a"}">${
+        b ? `&rarr; ${b}` : "&#x2715;"
+      }</span></span>`;
+const AST = { fork: 1.15, merge: 3.0, out: 3.9 };
+
+const astNative: FigureSpec = {
+  duration: 6.1,
+  stage: { w: 1010, h: 560 },
+  label:
+    "The analyzer maps each element to a native view, flags what it cannot, and picks a tier per screen: native if it needs no JavaScript, react-native if it needs the device, web if anything blocks",
+  panels: [
+    { id: "page", x: 24, y: 234, w: 140, h: 92, title: "page.tsx" },
+    { id: "analyze", x: 212, y: 234, w: 152, h: 92, title: "Analyze" },
+    { id: "ports", x: 412, y: 80, w: 214, h: 140, title: "Maps to native" },
+    { id: "blocks", x: 412, y: 340, w: 214, h: 140, title: "Cannot port" },
+    { id: "decide", x: 672, y: 234, w: 150, h: 92, title: "Decide" },
+    { id: "native", x: 870, y: 84, w: 140, h: 88, title: "native" },
+    { id: "rn", x: 870, y: 236, w: 140, h: 88, title: "react-native" },
+    { id: "web", x: 870, y: 388, w: 140, h: 88, title: "web" },
+  ],
+  wires: {
+    pa: [
+      [164, 280],
+      [212, 280],
+    ],
+    ap: [
+      [364, 280],
+      [388, 280],
+      [388, 150],
+      [412, 150],
+    ],
+    ab: [
+      [364, 280],
+      [388, 280],
+      [388, 410],
+      [412, 410],
+    ],
+    pd: [
+      [626, 150],
+      [648, 150],
+      [648, 280],
+      [672, 280],
+    ],
+    bd: [
+      [626, 410],
+      [648, 410],
+      [648, 280],
+      [672, 280],
+    ],
+    dn: [
+      [822, 280],
+      [846, 280],
+      [846, 128],
+      [870, 128],
+    ],
+    dr: [
+      [822, 280],
+      [870, 280],
+    ],
+    dw: [
+      [822, 280],
+      [846, 280],
+      [846, 432],
+      [870, 432],
+    ],
+  },
+  frame: (t) => {
+    const arrive = AST.fork + PULSE;
+    const hot = (at: number): PanelState | undefined =>
+      t >= at + PULSE && t < at + PULSE + 0.5 ? "hot" : undefined;
+    const examining = t >= arrive && t < AST.merge ? ("hot" as PanelState) : undefined;
+    return {
+      slots: {
+        page: "your web page",
+        analyze: "Oxc &rarr; AST",
+        ports: AST_PORTS.map(([a, b], i) => astRow(a, b, t, arrive + i * 0.22)).join(""),
+        blocks: AST_BLOCKS.map((a, i) => astRow(a, null, t, arrive + i * 0.22)).join(""),
+        decide: "needs JS? blocked?",
+        native: "server-rendered, no JS",
+        rn: "runs on the device",
+        web: "a WebView",
+      },
+      wires: {
+        pa: wire(t, 0.1, [[0.35]]),
+        ap: wire(t, AST.fork - 0.3, [[AST.fork]]),
+        ab: wire(t, AST.fork - 0.3, [[AST.fork]]),
+        pd: wire(t, AST.merge - 0.3, [[AST.merge]]),
+        bd: wire(t, AST.merge - 0.3, [[AST.merge]]),
+        dn: wire(t, AST.out - 0.2, [[AST.out]]),
+        dr: wire(t, AST.out - 0.2, [[AST.out + 0.12]]),
+        dw: wire(t, AST.out - 0.2, [[AST.out + 0.24]]),
+      },
+      states: {
+        page: hot(0),
+        analyze: hot(0.35),
+        ports: examining,
+        blocks: examining,
+        decide: hot(AST.merge),
+        native: hot(AST.out),
+        rn: hot(AST.out + 0.12),
+        web: hot(AST.out + 0.24),
+      },
+    };
+  },
+};
+
+// A runtime companion to ast-native: how a screen actually runs on the device. The navigator picks
+// one of three screen kinds by route; a web screen is a WebView that reaches the one backend over
+// the origin-scoped bridge; the device-capability channel is drawn but ships nothing yet.
+const MA = { tap: 0.3, fork: 1.2, web: 2.4, server: 3.2, ret: 3.9, plug: 4.7 };
+/** A body line that fades in once t passes `at`; each is its own block so lines stack. */
+const maSub = (s: string, t: number, at: number, color = "#c6c6c6") =>
+  t < at
+    ? ""
+    : `<span style="display:block;opacity:${ease(prog(t, at, 0.3)).toFixed(
+        2,
+      )};color:${color}">${s}</span>`;
+
+const mobileArch: FigureSpec = {
+  duration: 7,
+  stage: { w: 1020, h: 600 },
+  label:
+    "A screen on the device: the native navigator picks one of three screen kinds by route; a web screen is a WebView that talks to your one backend over the origin-scoped bridge, and the device-capability channel ships no plugins yet",
+  panels: [
+    { id: "tap", x: 24, y: 252, w: 150, h: 96, title: "A tap" },
+    { id: "nav", x: 214, y: 252, w: 176, h: 96, title: "Navigator" },
+    { id: "web", x: 440, y: 60, w: 188, h: 96, title: "Web screen" },
+    { id: "native", x: 440, y: 252, w: 188, h: 96, title: "Native screen" },
+    { id: "plat", x: 440, y: 444, w: 188, h: 96, title: "page.kt · page.swift" },
+    { id: "bridge", x: 676, y: 60, w: 180, h: 96, title: "__farmBridge" },
+    { id: "server", x: 880, y: 60, w: 140, h: 96, title: "mobile.server" },
+    { id: "plug", x: 676, y: 252, w: 180, h: 96, title: "native.<name>" },
+  ],
+  wires: {
+    tn: [
+      [174, 300],
+      [214, 300],
+    ],
+    nw: [
+      [390, 300],
+      [415, 300],
+      [415, 108],
+      [440, 108],
+    ],
+    nn: [
+      [390, 300],
+      [440, 300],
+    ],
+    np: [
+      [390, 300],
+      [415, 300],
+      [415, 492],
+      [440, 492],
+    ],
+    wb: [
+      [628, 108],
+      [676, 108],
+    ],
+    bs: [
+      [856, 108],
+      [880, 108],
+    ],
+    bp: [
+      [766, 156],
+      [766, 252],
+    ],
+  },
+  frame: (t) => {
+    const hot = (a: number, b: number): PanelState | undefined =>
+      t >= a && t < b ? "hot" : undefined;
+    const dim = (at: number): PanelState | undefined => (t >= at ? "dim" : undefined);
+    return {
+      slots: {
+        tap: maSub("Link · navigateTo", t, 0),
+        nav:
+          maSub("routes &rarr; one screen", t, MA.tap) +
+          maSub("farm-routes.json", t, MA.tap + 0.15, "#7a7a7a"),
+        web: maSub("a WebView", t, MA.fork) + maSub("ships today", t, MA.fork + 0.2, "#8fb8a0"),
+        native:
+          maSub("React Native", t, MA.fork + 0.2) +
+          maSub("Android dev only", t, MA.fork + 0.35, "#c9a77a"),
+        plat:
+          maSub("fully native", t, MA.fork + 0.4) +
+          maSub("placeholder &mdash; not built", t, MA.fork + 0.55, "#9a9a9a"),
+        bridge:
+          maSub("origin-scoped", t, MA.web) + maSub("nav · call", t, MA.web + 0.15, "#7a7a7a"),
+        server:
+          maSub("SSR · auth · data", t, MA.server) +
+          maSub("your one backend", t, MA.server + 0.15, "#7a7a7a"),
+        plug:
+          maSub("device plugins", t, MA.plug) +
+          maSub("none ship yet &#x2715;", t, MA.plug + 0.15, "#9a9a9a"),
+      },
+      wires: {
+        tn: wire(t, 0.05, [[MA.tap]]),
+        nw: wire(t, MA.fork - 0.3, [[MA.fork]]),
+        nn: wire(t, MA.fork - 0.3, [[MA.fork + 0.12]]),
+        np: wire(t, MA.fork - 0.3, [[MA.fork + 0.24]]),
+        wb: wire(t, MA.web - 0.3, [[MA.web]]),
+        bs: wire(t, MA.server - 0.3, [[MA.server], [MA.ret, false]]),
+        bp: wire(t, MA.plug - 0.3, [[MA.plug]], true),
+      },
+      states: {
+        tap: hot(0, MA.tap + PULSE),
+        nav: hot(MA.tap + PULSE, MA.fork + PULSE),
+        web: hot(MA.web - 0.1, MA.ret + PULSE),
+        native: dim(MA.fork + 0.2 + PULSE),
+        plat: dim(MA.fork + 0.4 + PULSE),
+        bridge: hot(MA.web + PULSE, MA.server + PULSE),
+        server: hot(MA.server, MA.ret + PULSE),
+        plug: dim(MA.plug + PULSE),
+      },
+    };
+  },
+};
+
 export const FIGURES: Record<FigureKind, FigureSpec> = {
   integration,
   agents,
@@ -1794,6 +2208,40 @@ export const FIGURES: Record<FigureKind, FigureSpec> = {
   "agents-observe": agentsObserve,
   "landing-markdown": landingMarkdown,
   "landing-strata": landingStrata,
+  "agent-layers": agentLayers,
+  "agent-authorize": agentAuthorize,
+  "ast-native": astNative,
+  "mobile-arch": mobileArch,
+};
+
+// The two callers stack, so a phone reads the refused run above the one that completes.
+agentAuthorize.narrow = {
+  stage: { w: 360, h: 660 },
+  panels: [
+    {
+      id: "call",
+      x: 10,
+      y: 0,
+      w: 340,
+      h: 48,
+      flow: true,
+      icon: "tool",
+      kicker: "tools/call",
+      label: "create_project",
+    },
+    { id: "reader", x: 10, y: 96, w: 340, h: 250, title: "Bearer demo-reader" },
+    { id: "writer", x: 10, y: 382, w: 340, h: 250, title: "Bearer demo-writer" },
+  ],
+  wires: {
+    read: [
+      [180, 48],
+      [180, 96],
+    ],
+    write: [
+      [180, 346],
+      [180, 382],
+    ],
+  },
 };
 
 /** SVG path with rounded elbows through the given stage points. */

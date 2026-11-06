@@ -24,6 +24,7 @@ A compact map of the main package exports and where to learn more.
 | @farm.js/core/storage         | Key/value clients, drivers, mounts, and `getStorage()`.                              |
 | @farm.js/core/cache           | Data cache, revalidation, cache keys.                                                |
 | @farm.js/cache-redis          | Distributed Redis cache, tag versions, and regeneration leases.                      |
+| @farm.js/convex               | Convex provider, server-rendered queries, Better Auth forwarding, Convex adapters.   |
 | @farm.js/core/after           | Post-response server work with `after()`.                                            |
 | @farm.js/core/og              | Server-only `ImageResponse` for PNG images rendered from JSX (install `@vercel/og`). |
 | @farm.js/core/cron            | Cron route authorization, schedule types, manifests, and deployment adapter helpers. |
@@ -70,6 +71,7 @@ A compact map of the main package exports and where to learn more.
 | `@farm.js/core/after`                                                         | `after` for short work that starts after the current response finishes.                                    |
 | `@farm.js/stripe`, `@farm.js/polar`, `@farm.js/autumn`                        | Dedicated billing integration packages.                                                                    |
 | `@farm.js/auth0`, `@farm.js/authjs`, `@farm.js/better-auth`, `@farm.js/clerk` | Dedicated auth integration packages.                                                                       |
+| `@farm.js/convex`                                                             | `convex`, `convexRateLimitStorage`, `convexStorage`; `/server`, `/client`, `/better-auth`, `/functions`.   |
 | `@farm.js/supabase`, `@farm.js/workos`                                        | Dedicated auth integration packages with generated typed callers.                                          |
 | `@farm.js/email`                                                              | Resend integration and email template helper.                                                              |
 | `@farm.js/jobs`                                                               | Jobs integration, `task`, `defineTasks`, Trigger.dev runtime, Inngest runtime.                             |

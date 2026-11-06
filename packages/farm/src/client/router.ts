@@ -8,6 +8,7 @@ import {
   type FarmNavigationState,
 } from "./spa-router";
 import { notifyHistoryChange, subscribeHistoryChange } from "./history-sync";
+import { hasFarmNavigationDelegates, runFarmNavigationDelegates } from "./navigation-delegate";
 import { getFarmI18nClientState } from "../i18n/client-state";
 import { _peekCurrentRequest } from "../server/request-bridge";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
@@ -96,12 +97,43 @@ function navigateViaRouter(
     return;
   }
 
+  // No Farm SPA router: the RSC router (or none) renders on the history change below. A host's
+  // navigation delegate gets the move first, as Farm's routers offer it, and taking it leaves the
+  // URL as it is. Without a delegate the history write stays synchronous.
+  if (hasFarmNavigationDelegates()) {
+    void writeHistoryUnlessDelegated(url, replace);
+    return;
+  }
+  writeHistory(url, replace);
+}
+
+function writeHistory(url: string, replace: boolean): void {
   if (replace) {
     window.history.replaceState(null, "", url);
   } else {
     window.history.pushState(null, "", url);
   }
   notifyHistoryChange("url-search");
+}
+
+async function writeHistoryUnlessDelegated(url: string, replace: boolean): Promise<void> {
+  const target = new URL(url, window.location.href);
+  const from = window.location.pathname + window.location.search;
+  const to = target.pathname + target.search;
+  // Same page (a hash or nothing changes) and other origins are never offered.
+  if (
+    target.origin === window.location.origin &&
+    to !== from &&
+    (await runFarmNavigationDelegates({
+      url: target.href,
+      from,
+      to,
+      action: replace ? "replace" : "push",
+    }))
+  ) {
+    return;
+  }
+  writeHistory(url, replace);
 }
 
 export function useRouter(options: UseRouterOptions = {}) {

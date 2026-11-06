@@ -30,6 +30,8 @@ export interface PreviewFarmOptions {
   provider?: "farm" | "local";
   expires?: string | number;
   login?: boolean;
+  /** Send a Farm.js Infrastructure API key to a gateway you run (`--trust-gateway`). */
+  trustGateway?: boolean;
 }
 
 export interface PreviewTarget {
@@ -92,6 +94,7 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
     const authorizedPlan = await authorizePreviewGatewayPlan(plan, {
       expiresInMs,
       forceLogin: options.login,
+      trustGateway: options.trustGateway,
       root: options.root,
     });
     logger.info(`Relay: ${authorizedPlan.relayUrl}`);

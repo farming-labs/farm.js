@@ -5,9 +5,31 @@ export interface FarmDevModuleServer {
   // Environment classes contain private fields. Keep this boundary structural
   // so a plugin's Vite peer can differ from core's installed Vite instance.
   environments: Record<string, unknown>;
+  config?: { experimental?: { bundledDev?: boolean } };
 }
 
 const failedModules = new WeakMap<object, Map<string, Promise<unknown>>>();
+const startedContainers = new WeakSet<object>();
+
+interface FarmDevPluginContainer {
+  buildStart?(options?: unknown): Promise<void>;
+}
+
+/**
+ * Vite runs plugins' `buildStart` when the HTTP server starts listening, but Farm loads routes
+ * files and middleware from `configureServer`, earlier. Plugins such as `vite:css` keep state
+ * that `buildStart` creates, so a module that imports a stylesheet failed to transform. Start
+ * the shared client container first, as Vite's own init does. Once per container, so a restart's
+ * new container starts too; later calls return at once.
+ */
+async function startPluginContainer(server: FarmDevModuleServer): Promise<void> {
+  if (server.config?.experimental?.bundledDev) return;
+  const container = (server.environments.client as { pluginContainer?: FarmDevPluginContainer })
+    ?.pluginContainer;
+  if (!container || startedContainers.has(container)) return;
+  await container.buildStart?.();
+  startedContainers.add(container);
+}
 
 /** @internal Distinguishes an unsupported runtime from a module evaluation error. */
 export class FarmDevEnvironmentError extends Error {}
@@ -29,6 +51,7 @@ export async function loadFarmDevModule<T = Record<string, any>>(
     );
   }
   try {
+    await startPluginContainer(server);
     return await runner.import<T>(id);
   } catch (error) {
     // The runner no longer writes the legacy graph's ssrError field. Remember

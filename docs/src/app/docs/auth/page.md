@@ -105,6 +105,18 @@ await signIn({
 });
 ```
 
+### On native screens
+
+React Native screens (`page.native.tsx`) in a [mobile app](/docs/mobile#auth-on-mobile) use the
+same import, `@farm.js/auth/client`. Metro resolves its `react-native` build, which calls the same
+auth routes through `serverFetch` from `@farm.js/native` with the device token, so `signIn`,
+`signUp`, `getSession`, `useAuth` and `signOut` behave as on the web. Sign-in and sign-up go through
+the shell's native code, which keeps the session cookie in the WebView and issues the device token,
+so a native sign-in signs web screens in too. Web bundles are unaffected: Vite and other web
+bundlers never resolve that condition, and `@farm.js/native` is an optional peer only mobile apps
+install. Social and OAuth sign-in reject on native screens for now. `basePath` applies on native
+too; `baseURL` does not, since native screens always call `mobile.server`.
+
 ## Configuration
 
 The default is intentionally useful. Add options only when application policy differs:
@@ -173,6 +185,13 @@ uses its own `VERCEL_URL`. The deployment and branch hostnames stay trusted alon
 deployment URL still works for testing. Set `FARM_AUTH_URL` explicitly when the app is served
 from a domain Vercel does not report, such as a proxy in front of the deployment - the auth
 routes reject any origin that is neither the base URL nor a trusted host.
+
+In `farm dev` without `FARM_AUTH_URL`, the auth routes also trust the origin the dev server is
+serving the request on, so any dev port, the Android emulator's `http://10.0.2.2:<port>`, and a
+LAN address under `farm dev --host` can sign in. Only `localhost`, `*.localhost`, and IP addresses
+qualify, the hosts Vite accepts without `server.allowedHosts`. A custom dev hostname still needs
+`FARM_AUTH_URL`, and a page on another origin is still rejected. Production trusts only
+`FARM_AUTH_URL` and the hosts above.
 
 Better Auth's sign-in rate limit keys on the client address Farm resolves for the request: the
 server's peer address, or the last `X-Forwarded-For` hop (the one your proxy appended) only when

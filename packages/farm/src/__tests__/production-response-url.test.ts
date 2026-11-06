@@ -35,6 +35,8 @@ function runtime(options: { headers?: boolean; warn?: boolean; nonce?: boolean }
     "reportFarmPreloadWarnings",
     "farmGuardedResponse",
     "_withFarmGuardedResponseCache",
+    "applyFarmMobileShellResponse",
+    "context",
     `${generateRuntimePathMatcherSource()}\n${generateConfiguredResponseHeadersRuntimeSource()}\n${generatePreloadResponseRuntimeSource()}\n${source.slice(start, end)}\nreturn prepareResponse;`,
   )(
     new Proxy(URL, {
@@ -68,6 +70,9 @@ function runtime(options: { headers?: boolean; warn?: boolean; nonce?: boolean }
     report,
     false,
     (response: Response) => response,
+    // An app without a mobile block.
+    (_request: Request, response: Response) => response,
+    undefined,
   ) as (request: Request, response: Response | Promise<Response>) => Promise<Response>;
   return { run, parses, normalize, report };
 }

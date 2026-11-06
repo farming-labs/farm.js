@@ -260,6 +260,8 @@ function normalizeUsageProperties(value: unknown): StripeBillingUsageProperties 
 
   const properties: StripeBillingUsageProperties = {};
   for (const [key, entry] of Object.entries(value)) {
+    // Stripe meters read the customer and quantity from these payload keys.
+    if (key === "stripe_customer_id" || key === "value") continue;
     if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean") {
       properties[key] = entry;
     }
@@ -455,6 +457,8 @@ type ResolvedStripeProduct = StripeIntegrationProduct & {
   id: string;
   kind: StripeBillingProductKind;
   public: boolean;
+  /** Checkout sells a product only when it is public or this is set. */
+  purchasable?: boolean;
   planId: string | null;
   seatBilling: "line_item_quantity" | "included_plus_add_on";
 };
@@ -977,6 +981,7 @@ function normalizeBillingProducts(
       unitAmount: product.unitAmount,
       kind: product.kind,
       public: product.public ?? true,
+      purchasable: product.purchasable,
       planId: product.planId ?? null,
       seatBilling: product.seatBilling ?? "line_item_quantity",
       mode,
@@ -1330,6 +1335,13 @@ function normalizeBillingStatus(
       return value;
     case "paid":
       return "active";
+    // Never fall back to the previous (often entitled) status for these. A
+    // paused subscription still exists and resumes with payment, like an
+    // incomplete one; an expired incomplete one ended before it was ever paid.
+    case "paused":
+      return "incomplete";
+    case "incomplete_expired":
+      return "canceled";
     default:
       return fallback;
   }
@@ -1878,14 +1890,14 @@ function createStripeAdapterFromSdk(stripe: Stripe): StripeIntegrationAdapter {
     async reportUsage(input) {
       const occurredAtDate = new Date(input.occurredAt);
       const timestamp = Math.floor(occurredAtDate.getTime() / 1000);
-      const payload: Record<string, string> = {
-        stripe_customer_id: input.customerId,
-        value: String(input.quantity),
-      };
-
+      const payload: Record<string, string> = {};
       for (const [key, value] of Object.entries(input.properties ?? {})) {
         payload[key] = String(value);
       }
+      // The meter reads the customer and quantity from these keys, so they are
+      // written last: properties never bill another customer or a larger value.
+      payload.stripe_customer_id = input.customerId;
+      payload.value = String(input.quantity);
 
       const event = await stripe.billing.meterEvents.create({
         event_name: input.meter.eventName,
@@ -2001,7 +2013,9 @@ function getProduct(
   productId: string,
 ): ResolvedStripeProduct {
   const product = products.find((item) => item.id === productId);
-  if (!product) {
+  // A hidden product (grandfathered price, sales-only plan) is not for sale
+  // to whoever knows its id unless the app says so.
+  if (!product || (!product.public && !product.purchasable)) {
     throw new Error(`Unknown Stripe product "${productId}".`);
   }
   return product;
@@ -4939,6 +4953,11 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
+          // Stripe dedupes meter event identifiers across the whole account, so
+          // a caller's key is kept to its own customer: one customer can never
+          // claim, and so drop, another customer's usage event.
+          const meterEventIdentifier = `${stripeCustomerId}:${idempotencyKey}`;
+
           try {
             let currentPeriodUsed: number | null = null;
             let projectedCurrentPeriodUsed: number | null = null;
@@ -5073,7 +5092,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                 key,
                 currentPeriodStart: pendingProjectionContext.currentPeriodStart,
                 currentPeriodEnd: pendingProjectionContext.currentPeriodEnd,
-                identifier: idempotencyKey,
+                identifier: meterEventIdentifier,
               });
 
               if (existingProjection) {
@@ -5093,7 +5112,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                   quantity: existingProjection.quantity,
                   customerId: prepared.snapshot.stripeCustomerId ?? stripeCustomerId,
                   stripeEventName: meter.eventName,
-                  stripeEventIdentifier: idempotencyKey,
+                  stripeEventIdentifier: meterEventIdentifier,
                   occurredAt: existingProjection.occurredAt,
                   currentPeriodUsed,
                   projectedCurrentPeriodUsed,
@@ -5138,7 +5157,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               key,
               meter,
               quantity,
-              idempotencyKey,
+              idempotencyKey: meterEventIdentifier,
               occurredAt,
               properties: normalizeUsageProperties(body.properties),
             });

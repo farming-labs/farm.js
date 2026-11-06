@@ -6,6 +6,7 @@ import { getFarmDataCache, unstable_cache } from "../cache";
 import { cookies, getCspNonce, headers } from "../headers";
 import { endpoint } from "../integration-api";
 import { createIntegrationServerClient } from "../integration-client";
+import { runWithServerActionRequest } from "../server-action-security";
 import { createServerFn } from "../server-fn";
 import { _runWithCurrentRequest, _runWithFarmCspNonce, getCurrentRequest } from "../server/request";
 
@@ -50,6 +51,47 @@ describe("unstable_cache request reads", () => {
     const load = unstable_cache(async () => whoAmI());
 
     await expect(asVisitor("alice", () => load())).rejects.toThrow(/request\.headers/);
+  });
+
+  // An action is a POST, whose request was handed over raw, so a cached read
+  // stored the first caller's cookie and served it to the next.
+  it("refuses the request a server function gets during an action", async () => {
+    const asAction = (session: string, fn: () => Promise<unknown>) => {
+      const request = new Request("https://app.test/account", {
+        method: "POST",
+        headers: { cookie: `session=${session}` },
+        body: "x",
+      });
+      return _runWithCurrentRequest(request, () => runWithServerActionRequest(request, fn));
+    };
+    const whoAmI = createServerFn({
+      handler: async ({ request }) =>
+        unstable_cache(async () => request?.headers.get("cookie") ?? null, ["who"])(),
+    });
+    const copy = createServerFn({
+      handler: async ({ request }) =>
+        unstable_cache(async () => request?.clone().headers.get("cookie") ?? null, ["copy"])(),
+    });
+
+    await expect(asAction("alice", () => whoAmI())).rejects.toThrow(/request\.headers/);
+    await expect(asAction("bob", () => whoAmI())).rejects.toThrow(/request\.headers/);
+    await expect(asAction("alice", () => copy())).rejects.toThrow(/request\.clone\(\)/);
+  });
+
+  it("keeps an action request's headers and body readable outside the cached function", async () => {
+    const echo = createServerFn({
+      handler: async ({ request }) =>
+        `${request?.headers.get("cookie")}|${await request?.clone().text()}|${await request?.text()}`,
+    });
+    const request = new Request("https://app.test/account", {
+      method: "POST",
+      headers: { cookie: "session=alice" },
+      body: "payload",
+    });
+
+    await expect(
+      _runWithCurrentRequest(request, () => runWithServerActionRequest(request, () => echo())),
+    ).resolves.toBe("session=alice|payload|payload");
   });
 
   // @farm.js/auth's auth.user()/auth.session() and integration clients read the

@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { createFarmSearchParams, type FarmSearchParams } from "./search-params";
 import {
   createFarmCacheKey,
   createRouteDataCacheTag,
@@ -128,7 +129,7 @@ export type ProgrammaticRouteComponentProps<
 > = Omit<PageProps, "params" | "searchParams"> & {
   params: TParams;
   search: TSearch;
-  searchParams: Promise<TSearch>;
+  searchParams: FarmSearchParams<TSearch>;
 } & ([TData] extends [undefined] ? { data?: undefined } : { data: TData });
 
 export type ProgrammaticRouteDataContext<
@@ -1203,28 +1204,38 @@ function createProgrammaticPageComponent(
     ) as unknown as ComponentType<PageProps>;
   }
 
-  const FarmProgrammaticPageContent = async function FarmProgrammaticPageContent(props: PageProps) {
-    try {
-      const resolvedProps = isProgrammaticRoutePropsResolved(props)
-        ? props
-        : await resolveProgrammaticRouteProps(route, props);
-
-      return createElement(Component, stripProgrammaticRoutePropsMarker(resolvedProps));
-    } catch (error) {
-      if (isProgrammaticRedirectSignal(error)) {
-        throw error;
-      }
-
-      if (isProgrammaticNotFoundSignal(error) && route.notFound) {
-        return createElement(route.notFound, createProgrammaticRouteErrorProps(error, props));
-      }
-
-      if (route.error) {
-        return createElement(route.error, createProgrammaticRouteErrorProps(error, props));
-      }
-
+  const renderRouteError = (error: unknown, props: PageProps) => {
+    if (isProgrammaticRedirectSignal(error)) {
       throw error;
     }
+
+    if (isProgrammaticNotFoundSignal(error) && route.notFound) {
+      return createElement(route.notFound, createProgrammaticRouteErrorProps(error, props));
+    }
+
+    if (route.error) {
+      return createElement(route.error, createProgrammaticRouteErrorProps(error, props));
+    }
+
+    throw error;
+  };
+
+  // The server resolves route props before it renders, so this usually renders
+  // synchronously, which renderers without async components (Preact) need.
+  const FarmProgrammaticPageContent = function FarmProgrammaticPageContent(props: PageProps) {
+    if (isProgrammaticRoutePropsResolved(props)) {
+      try {
+        return createElement(Component, stripProgrammaticRoutePropsMarker(props));
+      } catch (error) {
+        return renderRouteError(error, props);
+      }
+    }
+
+    return resolveProgrammaticRouteProps(route, props)
+      .then((resolvedProps) =>
+        createElement(Component, stripProgrammaticRoutePropsMarker(resolvedProps)),
+      )
+      .catch((error) => renderRouteError(error, props));
   };
 
   return markClientStrippedPage(
@@ -1360,7 +1371,7 @@ async function resolveProgrammaticRouteProps(
     ...props,
     params,
     search,
-    searchParams: Promise.resolve(search),
+    searchParams: createFarmSearchParams(search),
   };
   const routeContextProps = {
     ...baseProps,

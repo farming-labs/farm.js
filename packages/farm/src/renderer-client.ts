@@ -30,6 +30,11 @@ import {
 import type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
 
 export type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
+export { delegateNavigation } from "./client/navigation-delegate";
+export type {
+  FarmNavigationDelegate,
+  FarmNavigationDelegateContext,
+} from "./client/navigation-delegate";
 import {
   applyFarmBasePath,
   getFarmBasePath,

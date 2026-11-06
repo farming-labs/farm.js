@@ -4,7 +4,9 @@ import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  createCompiledComponent,
+  createCompiledComponent as createCompleteCompiledComponent,
+  createCompiledComponentWithFeatures,
+  keyedRowsPlainMapReorderHintedRuntimeFeature,
   createCompilerKeyedArrayMapPipeline,
   createCompilerKeyedArrayMapReorder,
   createCompilerKeyedArrayQueuedMapPipeline,
@@ -24,6 +26,7 @@ interface Item {
 }
 
 const roots: Root[] = [];
+let createCompiledComponent = createCompleteCompiledComponent;
 const stressIt = process.env.FARM_REACT_STRESS === "1" ? it : it.skip;
 
 beforeEach(() => {
@@ -563,7 +566,16 @@ function createHarness(initialItems: Item[]) {
   };
 }
 
-describe("compiled keyed-array map and reorder hints", () => {
+describe.each(["complete", "plain"])("map/reorder: %s", (runtime) => {
+  beforeEach(() => {
+    createCompiledComponent =
+      runtime === "complete"
+        ? createCompleteCompiledComponent
+        : (definition) =>
+            createCompiledComponentWithFeatures(definition, [
+              keyedRowsPlainMapReorderHintedRuntimeFeature,
+            ]);
+  });
   it("patches one changed row and reorders the existing DOM in one transaction", async () => {
     const harness = createHarness([
       { id: "a", label: "Alpha", rank: 1 },

@@ -1,0 +1,29 @@
+{
+  "name": "farm-example-convex-integration",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build",
+    "start": "farm start",
+    "type-check": "tsc --noEmit && tsc --noEmit -p convex"
+  },
+  "dependencies": {
+    "@convex-dev/better-auth": "0.12.5",
+    "@farm.js/convex": "workspace:*",
+    "@farm.js/core": "workspace:*",
+    "better-auth": "1.6.11",
+    "convex": "1.48.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "@types/node": "^20.10.5",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "typescript": "^5.3.3",
+    "vite": "8.3.4"
+  }
+}

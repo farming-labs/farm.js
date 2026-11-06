@@ -61,6 +61,7 @@ test("runs a configured route with cron metadata and bearer auth", async () => {
     const headers = new Headers(request.init.headers);
     assert.equal(headers.get("authorization"), "Bearer test-secret");
     assert.equal(headers.get("x-farm-cron-name"), "dailyCleanup");
+    assert.match(headers.get("x-farm-cron-scheduled-at"), /^\d+$/);
     assert.equal(headers.get("x-farm-cron-trigger"), "manual");
     assert.equal(result.status, 200);
     assert.deepEqual(result.body, { deleted: 4 });

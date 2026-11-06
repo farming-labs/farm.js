@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { brotliCompressSync, gzipSync } from "node:zlib";
 import { build } from "vite";
 import { createFarmRendererPlugin } from "../dist/vite.mjs";
+import { measureJavaScriptOutput } from "./javascript-output-size.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/runtime-size");
+const chunkAccounting = [];
 async function bundle(kind, controlFeature) {
   let replaced = false;
   const result = await build({
@@ -23,7 +24,7 @@ async function bundle(kind, controlFeature) {
         transform(code, id) {
           if (!controlFeature || !id.endsWith(`keyed-${kind}.tsx`)) return;
           const control = code.replace(
-            /keyedRows(?:PlainReorderHinted|PrependOnly|FilterOnly|AppendOnly|IdentityFilterOnly|Identity|Membership|MapLookup)RuntimeFeature/g,
+            /keyedRows(?:PlainMapReorderHinted|PlainReorderHinted|PrependOnly|FilterOnly|AppendOnly|IdentityFilterOnly|Identity|Membership|MapLookup)RuntimeFeature/g,
             () => {
               replaced = true;
               return controlFeature;
@@ -40,18 +41,15 @@ async function bundle(kind, controlFeature) {
     },
   });
   if (controlFeature) assert.ok(replaced, "control must replace a specialized compiler feature");
-  const code = [result]
-    .flat()
-    .flatMap((output) => output.output)
-    .filter((output) => output.type === "chunk")
-    .map((output) => output.code)
-    .join("\n");
-  return {
-    code,
-    raw: Buffer.byteLength(code),
-    gzip: gzipSync(code, { level: 9 }).length,
-    brotli: brotliCompressSync(code).length,
-  };
+  const measured = measureJavaScriptOutput(result);
+  if (measured.chunkAccounting.files.length > 1) {
+    chunkAccounting.push({
+      kind,
+      controlFeature: controlFeature ?? null,
+      ...measured.chunkAccounting,
+    });
+  }
+  return measured;
 }
 
 const results = [];
@@ -66,25 +64,29 @@ for (const kind of [
   "slice",
   "reorder",
   "sort",
+  "map-reorder",
 ]) {
   const removalOnly = kind === "filter" || kind === "slice";
   const plainReorder = kind === "reorder" || kind === "sort";
+  const plainMapReorder = kind === "map-reorder";
   const full = await bundle(
     kind,
-    plainReorder
-      ? "keyedRowsReorderHintedRuntimeFeature"
-      : kind === "append"
-        ? "keyedRowsHintedRuntimeFeature"
-        : kind === "prepend"
-          ? "keyedRowsPrependHintedRuntimeFeature"
-          : kind === "identity-filter" || removalOnly
-            ? "keyedRowsFilterHintedRuntimeFeature"
-            : "keyedRowsRuntimeFeature",
+    plainMapReorder
+      ? "keyedRowsMapReorderHintedRuntimeFeature"
+      : plainReorder
+        ? "keyedRowsReorderHintedRuntimeFeature"
+        : kind === "append"
+          ? "keyedRowsHintedRuntimeFeature"
+          : kind === "prepend"
+            ? "keyedRowsPrependHintedRuntimeFeature"
+            : kind === "identity-filter" || removalOnly
+              ? "keyedRowsFilterHintedRuntimeFeature"
+              : "keyedRowsRuntimeFeature",
   );
   const specialized = await bundle(kind);
   assert.ok(
     specialized.code.includes(
-      `keyed-rows:${plainReorder ? "plain-reorder-hinted" : kind === "append" ? "append-only" : kind === "prepend" ? "prepend-only" : removalOnly ? "filter-only" : kind === "identity-filter" ? "identity-filter-only" : kind}`,
+      `keyed-rows:${plainMapReorder ? "plain-map-reorder-hinted" : plainReorder ? "plain-reorder-hinted" : kind === "append" ? "append-only" : kind === "prepend" ? "prepend-only" : removalOnly ? "filter-only" : kind === "identity-filter" ? "identity-filter-only" : kind}`,
     ),
   );
   if (
@@ -92,7 +94,8 @@ for (const kind of [
     kind === "append" ||
     kind === "prepend" ||
     removalOnly ||
-    plainReorder
+    plainReorder ||
+    plainMapReorder
   ) {
     for (const marker of ["Set.prototype.has", "Map.prototype.get"]) {
       assert.ok(full.code.includes(marker), `control must retain ${marker}`);
@@ -100,11 +103,14 @@ for (const kind of [
     }
   }
   assert.ok(specialized.gzip < full.gzip, `${kind} specialization must reduce gzip payload`);
-  if (plainReorder) {
-    assert.ok(full.code.includes("keyed-rows:reorder-hinted"));
+  if (plainReorder || plainMapReorder) {
     assert.ok(
-      full.gzip - specialized.gzip >= 512,
-      `${kind} specialization must save at least 512 B gzip`,
+      full.code.includes(`keyed-rows:${plainMapReorder ? "map-reorder" : "reorder"}-hinted`),
+    );
+    const minimumSaving = plainMapReorder ? 1024 : 512;
+    assert.ok(
+      full.gzip - specialized.gzip >= minimumSaving,
+      `${kind} specialization must save at least ${minimumSaving} B gzip`,
     );
     assert.ok(
       specialized.brotli < full.brotli,
@@ -152,4 +158,34 @@ for (const kind of [
     savedGzip: full.gzip - specialized.gzip,
   });
 }
-console.log(JSON.stringify({ node: process.version, results }, null, 2));
+
+// A combined table catches retained machinery that isolated operation fixtures can miss.
+const table = await bundle("table");
+const conditionalTable = await bundle("table", "keyedRowsConditionalFilterHintedRuntimeFeature");
+assert.ok(table.code.includes("keyed-rows:identity-filter-only"));
+assert.ok(conditionalTable.code.includes("FarmCompiledKeyedRowConditional"));
+for (const marker of [
+  "FarmCompiledKeyedRowConditional",
+  "conditionalListeners",
+  "pruneConditionalListeners",
+]) {
+  assert.ok(!table.code.includes(marker), `plain combined table must not retain ${marker}`);
+}
+assert.ok(table.gzip < conditionalTable.gzip, "plain table must omit conditional gzip payload");
+assert.ok(
+  table.brotli < conditionalTable.brotli,
+  "plain table must omit conditional Brotli payload",
+);
+results.push({
+  kind: "combined-table-conditional-ownership",
+  full: { raw: conditionalTable.raw, gzip: conditionalTable.gzip, brotli: conditionalTable.brotli },
+  specialized: { raw: table.raw, gzip: table.gzip, brotli: table.brotli },
+  savedGzip: conditionalTable.gzip - table.gzip,
+});
+console.log(
+  JSON.stringify(
+    { node: process.version, results, ...(chunkAccounting.length > 0 ? { chunkAccounting } : {}) },
+    null,
+    2,
+  ),
+);

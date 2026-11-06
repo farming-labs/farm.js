@@ -232,6 +232,41 @@ describe("docs pages a path guard covers", () => {
     }
   });
 
+  it("are found in every docs root", async () => {
+    const root = await createFixture();
+    try {
+      await fs.mkdir(path.join(root, "src", "app", "statewire", "docs", "internal"), {
+        recursive: true,
+      });
+      await fs.writeFile(
+        path.join(root, "src", "app", "statewire", "docs", "internal", "page.md"),
+        "# Internal\n",
+      );
+      const docs = await resolveDocsConfig(
+        {
+          entry: "/docs",
+          adapter: { id: "fixture", protocol: 1, server: "fixture/server", react: "fixture/react" },
+          roots: [{ entry: "/statewire/docs" }],
+        },
+        { root, srcDir: "src" },
+      );
+
+      expect(
+        getFarmDocsGuardedPaths(
+          {
+            docs,
+            root,
+            srcDir: "src",
+            middleware: [{ matcher: "/statewire/docs/internal" }],
+          } as never,
+          [],
+        ),
+      ).toEqual(["/statewire/docs/internal"]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  });
+
   it("are left out by the docs handlers a route file or the edge compiler mounts", async () => {
     const root = await createFixture();
     try {

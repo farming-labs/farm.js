@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/preact",
-  "version": "0.1.0-beta.35",
+  "version": "0.1.0-beta.37",
   "description": "Preact renderer for FARMJS applications",
   "keywords": [
     "farmjs",
@@ -58,7 +58,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@babel/core": "^7.28.0",
+    "@babel/core": "^7.29.7",
     "@preact/preset-vite": "2.10.6",
     "preact-render-to-string": "6.7.0"
   },

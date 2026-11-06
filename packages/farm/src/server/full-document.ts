@@ -226,3 +226,105 @@ export function composeFarmFullDocument(
 
   return /^\s*<!doctype/i.test(html) ? html : `<!DOCTYPE html>\n${html}`;
 }
+
+const STREAMED_BODY_MARK = "<!--farm-streamed-body-->";
+
+/**
+ * The opening of a streamed full document: React's output up to (and including) its `<body>`,
+ * composed with Farm's assets like a buffered document. `rootOpened` says whether Farm opened
+ * `#root` (the layout's body does not), which the stream's footer then closes.
+ */
+export function openFarmStreamedDocument(
+  opening: string,
+  assets: FarmFullDocumentAssets,
+): { html: string; rootOpened: boolean } {
+  const { hoisted } = peelDocumentPrefix(opening);
+  const start = opening.search(/<!doctype|<html[\s>]/i);
+  const document = restoreHoistedHead(opening.slice(Math.max(start, 0)), hoisted);
+  const rootOpened = !/<body\b[^>]*>\s*<div\b[^>]*\sid=["']root["']/i.test(document);
+  // Compose the whole document around a mark where the streamed body continues.
+  const composed = composeFarmFullDocument(
+    `${document}${STREAMED_BODY_MARK}</body></html>`,
+    assets,
+  );
+  return { html: composed.slice(0, composed.indexOf(STREAMED_BODY_MARK)), rootOpened };
+}
+
+/**
+ * Streams a layout's own `<html>` document: holds React's output until `<body>`, opens the
+ * document with `open`, then passes the body through. React's closing `</body></html>` (and
+ * Farm's wrapper `</div>`s after it) is dropped: Suspense content React streams later belongs
+ * inside the body, before the footer the caller writes. The production entry does the same
+ * (`createFarmFullDocumentStream`).
+ *
+ * A route expected to render a document may not (its layout changed): output that starts as a
+ * fragment goes out after `fragmentShell`, Farm's usual shell, and `end()` reports `fragment`.
+ */
+export function createFarmStreamedDocumentTransform(
+  open: (opening: string) => { html: string; rootOpened: boolean },
+  fragmentShell: string,
+): {
+  write(text: string): string;
+  end(): { text: string; document: boolean; rootOpened: boolean };
+} {
+  let opening = "";
+  let mode: "pending" | "document" | "fragment" = "pending";
+  let opened = false;
+  let closed = false;
+  let rootOpened = false;
+  const write = (text: string): string => {
+    if (mode === "fragment") return text;
+    if (!opened) {
+      opening += text;
+      if (mode === "pending") {
+        const prefix = classifyFarmDocumentPrefix(opening);
+        if (prefix === "pending") return "";
+        if (prefix === "fragment") {
+          mode = "fragment";
+          const held = opening;
+          opening = "";
+          return fragmentShell + held;
+        }
+        mode = "document";
+      }
+      if (!/<body\b[^>]*>/i.test(opening)) return "";
+      opened = true;
+      text = opening;
+      opening = "";
+      const closeAt = text.search(/<\/body>/i);
+      const head = closeAt >= 0 ? text.slice(0, closeAt) : text;
+      const document = open(head);
+      rootOpened = document.rootOpened;
+      text = document.html + (closeAt >= 0 ? text.slice(closeAt) : "");
+    }
+    if (!closed) {
+      const closeAt = text.search(/<\/body>/i);
+      if (closeAt >= 0) {
+        closed = true;
+        text =
+          text.slice(0, closeAt) +
+          text.slice(closeAt).replace(/^<\/body>\s*(?:<\/html>)?(?:\s*<\/div>)*/i, "");
+      }
+    }
+    return text;
+  };
+  return {
+    write,
+    end() {
+      if (mode === "pending") {
+        // Too little output to tell: it is no document.
+        mode = "fragment";
+        const held = opening;
+        opening = "";
+        return { text: fragmentShell + held, document: false, rootOpened: false };
+      }
+      if (mode === "fragment") return { text: "", document: false, rootOpened: false };
+      if (opened) return { text: "", document: true, rootOpened };
+      // A document that never reached <body> still opens, so the footer lands in a document.
+      const held = opening;
+      opening = "";
+      const text = write(`${held}<body>`);
+      return { text, document: true, rootOpened };
+    },
+  };
+}

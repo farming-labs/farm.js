@@ -5,6 +5,7 @@ import {
   VERCEL_OG_INSTALL_HINT,
   withOptionalPeerCause,
 } from "./optional-peer";
+import type { FarmServerRendererRuntime } from "./renderer";
 import { omitFarmResponseBody } from "./response-body";
 import { matchesFarmIfNoneMatch } from "./server-http";
 
@@ -32,9 +33,16 @@ export type FarmMetadataImageModule = {
   debug?: boolean;
 };
 
+/** The app renderer's element API. Without one, metadata images are built with React. */
+export type FarmMetadataImageRenderer = Pick<
+  FarmServerRendererRuntime,
+  "createElement" | "isValidElement" | "renderToString"
+>;
+
 export type FarmMetadataImageResponseOptions = {
   method?: string;
   ifNoneMatch?: string | null;
+  renderer?: FarmMetadataImageRenderer;
 };
 
 function isResponse(value: unknown): value is Response {
@@ -64,16 +72,26 @@ function isReactElement(value: unknown): value is ReactElement<Record<string, un
   return marker === REACT_ELEMENT_TYPE || marker === REACT_TRANSITIONAL_ELEMENT_TYPE;
 }
 
-async function prepareMetadataImageNode(node: unknown): Promise<unknown> {
+function isMetadataImageElement(
+  value: unknown,
+  renderer: FarmMetadataImageRenderer | undefined,
+): value is ReactElement<Record<string, unknown>> {
+  return renderer ? renderer.isValidElement(value) : isReactElement(value);
+}
+
+async function prepareMetadataImageNode(
+  node: unknown,
+  renderer: FarmMetadataImageRenderer | undefined,
+): Promise<unknown> {
   if (isThenable(node)) {
-    return prepareMetadataImageNode(await node);
+    return prepareMetadataImageNode(await node, renderer);
   }
 
   if (Array.isArray(node)) {
-    return Promise.all(node.map((child) => prepareMetadataImageNode(child)));
+    return Promise.all(node.map((child) => prepareMetadataImageNode(child, renderer)));
   }
 
-  if (!isReactElement(node)) {
+  if (!isMetadataImageElement(node, renderer)) {
     return node;
   }
 
@@ -87,16 +105,16 @@ async function prepareMetadataImageNode(node: unknown): Promise<unknown> {
         "Metadata image components must be stateless function components; React class components are not supported.",
       );
     }
-    return prepareMetadataImageNode(await type(props));
+    return prepareMetadataImageNode(await type(props), renderer);
   }
 
   if (type && typeof type === "object") {
     if (type.$$typeof === REACT_MEMO_TYPE) {
       const { createElement } = await import("react");
-      return prepareMetadataImageNode(createElement(type.type, props));
+      return prepareMetadataImageNode(createElement(type.type, props), renderer);
     }
     if (type.$$typeof === REACT_FORWARD_REF_TYPE) {
-      return prepareMetadataImageNode(await type.render(props, null));
+      return prepareMetadataImageNode(await type.render(props, null), renderer);
     }
     if (type.$$typeof === REACT_LAZY_TYPE) {
       const { createElement } = await import("react");
@@ -111,11 +129,11 @@ async function prepareMetadataImageNode(node: unknown): Promise<unknown> {
           throw suspension;
         }
       }
-      return prepareMetadataImageNode(createElement(resolvedType as any, props));
+      return prepareMetadataImageNode(createElement(resolvedType as any, props), renderer);
     }
   }
 
-  const preparedChildren = await prepareMetadataImageNode(props.children);
+  const preparedChildren = await prepareMetadataImageNode(props.children, renderer);
   const preparedProps: Record<string, unknown> = { ...props };
 
   if (typeof preparedProps.className === "string") {
@@ -124,7 +142,8 @@ async function prepareMetadataImageNode(node: unknown): Promise<unknown> {
   }
   delete preparedProps.children;
 
-  const { createElement } = await import("react");
+  // Preact apps often have no react installed, and Satori reads either element shape.
+  const createElement = renderer?.createElement ?? (await import("react")).createElement;
   return createElement(type, {
     ...preparedProps,
     key: element.key,
@@ -224,9 +243,12 @@ export async function createFarmMetadataImageResponse(
   const cacheControl = resolveCacheControl(imageModule.revalidate);
   const explicitContentType = imageModule.contentType?.split(";", 1)[0]?.trim().toLowerCase();
 
-  if (isReactElement(value) && explicitContentType !== "image/svg+xml") {
+  const { renderer } = options;
+  const isElement = isMetadataImageElement(value, renderer);
+
+  if (isElement && explicitContentType !== "image/svg+xml") {
     const { ImageResponse } = await loadVercelOg();
-    const element = (await prepareMetadataImageNode(value)) as ReactElement;
+    const element = (await prepareMetadataImageNode(value, renderer)) as ReactElement;
     const response = new ImageResponse(element, {
       width: imageModule.size?.width || 1200,
       height: imageModule.size?.height || 630,
@@ -245,9 +267,11 @@ export async function createFarmMetadataImageResponse(
     body = toArrayBuffer(new TextEncoder().encode(value));
   } else if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
     body = toArrayBuffer(value);
-  } else if (isReactElement(value)) {
-    const { renderToStaticMarkup } = await import("react-dom/server");
-    body = toArrayBuffer(new TextEncoder().encode(renderToStaticMarkup(value)));
+  } else if (isElement) {
+    const markup = renderer
+      ? await renderer.renderToString(value)
+      : (await import("react-dom/server")).renderToStaticMarkup(value);
+    body = toArrayBuffer(new TextEncoder().encode(markup));
   } else {
     throw new Error("Metadata image must return a Response, string, bytes, or React element");
   }

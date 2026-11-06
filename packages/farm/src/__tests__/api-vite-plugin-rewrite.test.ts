@@ -299,6 +299,23 @@ describe("dev API dispatch after middleware rewrites", () => {
     expect(JSON.parse(rewritten.body ?? "")).toEqual({ version: "v2" });
   });
 
+  it("dispatches a path with no route of its own that middleware rewrites to one", async () => {
+    const harness = await createDevHarness({
+      "v2/users": `export const GET = async () => Response.json({ version: "v2" });\n`,
+    });
+
+    const rewritten = await harness.dispatch("/api/alias", "/api/v2/users");
+    expect(rewritten.passedToNext).toBe(false);
+    expect(JSON.parse(rewritten.body ?? "")).toEqual({ version: "v2" });
+
+    // Nothing rewritten: the request goes on as before.
+    const missing = await harness.dispatch("/api/missing");
+    expect(missing.passedToNext).toBe(true);
+    // Outside the API base path, middleware is the page pipeline's.
+    const page = await harness.dispatch("/alias", "/api/v2/users");
+    expect(page.passedToNext).toBe(true);
+  });
+
   it("hands rewrites that leave the API surface to the page pipeline", async () => {
     const harness = await createDevHarness({
       "v1/users": `export const GET = async () => Response.json({ version: "v1" });\n`,

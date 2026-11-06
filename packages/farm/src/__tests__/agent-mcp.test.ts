@@ -343,7 +343,6 @@ describe("default MCP registration", () => {
       integrations: [],
       agent: { apiCatalog: null, llmsTxt: true, openapi: null },
       plugins: [],
-      analytics: true,
       defaultMCP: () => resolveFarmDefaultMCPServer(server),
     });
     expect(manifest.mcp.servers).toEqual([

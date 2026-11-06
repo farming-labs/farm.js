@@ -5,11 +5,13 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
+import { definePlugin } from "../plugin";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const testCspPolicy = "default-src 'self'; object-src 'none'";
@@ -163,7 +165,19 @@ export async function middleware(_request, context) {
 }
 `.trim(),
   );
+  // Middleware whose own literal matcher never meets its folder's page: the page still prerenders.
+  await fs.mkdir(path.join(root, "src", "app", "scoped"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "src", "app", "scoped", "middleware.ts"),
+    `
+export async function middleware(_request, context) {
+  context.headers.set("x-scoped-middleware", "yes");
+}
+export const config = { matcher: "/scoped/api/:path*" };
+`.trim(),
+  );
   for (const [route, label] of [
+    ["scoped", "scoped-middleware-page"],
     ["guarded", "app-middleware-page"],
     ["configured", "configured-middleware-page"],
     ["forced-dynamic", "dynamic-rule-page"],
@@ -422,6 +436,106 @@ export default {
   return root;
 }
 
+const concurrentPrerenderPages = ["/", "/a", "/b", "/c", "/d", "/e"];
+
+// Each page waits before it renders and logs when it starts and ends, so the log
+// shows how many routes the prerender worker had in flight at once.
+async function createConcurrentPrerenderFixture(): Promise<string> {
+  const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-ssg-concurrent-"));
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
+  await fs.mkdir(path.join(root, "src", "app"), { recursive: true });
+  await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({ private: true, type: "module" }, null, 2),
+  );
+  await fs.writeFile(path.join(root, "src", "app", "globals.css"), "");
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    `
+export default {
+  srcDir: "src",
+  images: { provider: "none" },
+  security: {
+    csp: {
+      policy: "script-src 'self'; object-src 'none'",
+      nonce: true,
+    },
+  },
+};
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "layout.tsx"),
+    `
+import { getCspNonce } from "@farm.js/core";
+export default function Layout({ children }) {
+  return (
+    <html>
+      <body>
+        {children}
+        <script nonce={getCspNonce()} dangerouslySetInnerHTML={{ __html: "globalThis.__farmConcurrentPrerender = true;" }} />
+      </body>
+    </html>
+  );
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "lib", "prerender-log.ts"),
+    `
+import { appendFileSync } from "node:fs";
+
+export async function renderSlowly(name: string): Promise<string> {
+  const log = process.env.FARM_TEST_PRERENDER_LOG;
+  if (log) appendFileSync(log, "start " + name + "\\n");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  if (log) appendFileSync(log, "end " + name + "\\n");
+  return name;
+}
+`.trim(),
+  );
+  for (const pathname of concurrentPrerenderPages) {
+    const name = pathname === "/" ? "home" : pathname.slice(1);
+    const dir = path.join(root, "src", "app", ...(pathname === "/" ? [] : [name]));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "page.tsx"),
+      `
+import { renderSlowly } from "@/lib/prerender-log";
+export const ssg = true;
+export const metadata = { title: "Page ${name}" };
+export default async function Page() {
+  const name = await renderSlowly(${JSON.stringify(name)});
+  return <main data-page={name}>{Array.from({ length: 50 }, (_, index) => <p key={index}>{name} {index}</p>)}</main>;
+}
+`.trim(),
+    );
+  }
+  return root;
+}
+
+function maxRoutesInFlight(log: string): number {
+  let inFlight = 0;
+  let max = 0;
+  for (const line of log.trim().split("\n")) {
+    inFlight += line.startsWith("start ") ? 1 : -1;
+    max = Math.max(max, inFlight);
+  }
+  return max;
+}
+
+async function readTree(dir: string): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+  for (const entry of await fs.readdir(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    files[path.relative(dir, file)] = (await fs.readFile(file)).toString("base64");
+  }
+  return files;
+}
+
 async function loadFixtureConfig(root: string) {
   const userConfig = await loadConfig(root, undefined, "production");
   return resolveConfig({ ...userConfig, root }, "production");
@@ -648,6 +762,9 @@ describe("production SSG output", () => {
       await expect(
         fs.readFile(path.join(publicDir, "rules", "safe", "index.html"), "utf8"),
       ).resolves.toContain("safe-rule-page");
+      await expect(
+        fs.readFile(path.join(publicDir, "scoped", "index.html"), "utf8"),
+      ).resolves.toContain("scoped-middleware-page");
       await expect(fs.access(path.join(publicDir, "refreshing", "index.html"))).rejects.toThrow();
       for (const route of [
         "guarded",
@@ -956,4 +1073,51 @@ describe("production SSG output", () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 120_000);
+  it("prerenders several routes at once, honors an override, and writes the same files", async () => {
+    const root = await createConcurrentPrerenderFixture();
+    const logPath = path.join(root, "prerender.log");
+    const previousLog = process.env.FARM_TEST_PRERENDER_LOG;
+    process.env.FARM_TEST_PRERENDER_LOG = logPath;
+
+    const buildWith = async (override?: number) => {
+      await fs.rm(logPath, { force: true });
+      let configured: number | undefined;
+      const config = await loadFixtureConfig(root);
+      config.plugins.push(
+        definePlugin({
+          name: "test:prerender-concurrency",
+          build: {
+            configure(nitroConfig) {
+              configured = nitroConfig.prerender?.concurrency;
+              if (override !== undefined) nitroConfig.prerender.concurrency = override;
+              return nitroConfig;
+            },
+          },
+        }),
+      );
+      await build(config, { root, preset: "node-server" });
+      return {
+        configured,
+        inFlight: maxRoutesInFlight(await fs.readFile(logPath, "utf8")),
+        files: await readTree(path.join(root, ".farm", ".output", "public")),
+      };
+    };
+
+    try {
+      const concurrent = await buildWith();
+      const serial = await buildWith(1);
+
+      expect(concurrent.configured).toBe(Math.min(os.availableParallelism(), 8));
+      if (concurrent.configured! > 1) expect(concurrent.inFlight).toBeGreaterThan(1);
+      expect(serial.inFlight).toBe(1);
+      for (const pathname of concurrentPrerenderPages) {
+        expect(Object.keys(serial.files)).toContain(path.join(pathname.slice(1), "index.html"));
+      }
+      expect(concurrent.files).toEqual(serial.files);
+    } finally {
+      if (previousLog === undefined) delete process.env.FARM_TEST_PRERENDER_LOG;
+      else process.env.FARM_TEST_PRERENDER_LOG = previousLog;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 240_000);
 });

@@ -352,14 +352,27 @@ export interface JobsAuthorizeContext {
 }
 
 /**
+ * Allows an HTTP request and names who sent it. An `idempotencyKey` the caller
+ * passes is then kept to that caller, so one user can never claim another's key.
+ */
+export interface JobsAuthorizeCaller {
+  caller: string;
+}
+
+export type JobsAuthorizeDecision = boolean | Response | JobsAuthorizeCaller;
+
+/**
  * Decides whether an HTTP request may use a job route. Return `true` to allow
- * it, `false` to answer 403, or a Response to answer with. The request is a
- * clone, so its body can be read.
+ * it, `{ caller }` to allow it and name the caller, `false` to answer 403, or a
+ * Response to answer with. The request is a clone, so its body can be read.
  */
 export type JobsAuthorize = (
   request: Request,
   context: JobsAuthorizeContext,
-) => boolean | Response | Promise<boolean | Response>;
+) => JobsAuthorizeDecision | Promise<JobsAuthorizeDecision>;
+
+/** Who launched a run: trusted server code, or an HTTP caller `authorize` let in. */
+type JobsCaller = { kind: "server" } | { kind: "http"; id?: string };
 
 export interface JobsIntegrationInputBase<TTasks extends JobsTaskMap> {
   basePath?: string;
@@ -746,10 +759,36 @@ function resolveDebounceOptions(input: JobsDebounceOptions | undefined) {
   };
 }
 
+/**
+ * The idempotency key a launch runs under. Server code is trusted with any key.
+ * An HTTP caller cannot override the task's own key, and a key it picks is
+ * namespaced to the task and to the caller `authorize` named: on Inngest the
+ * key is the event id and on Trigger.dev it returns the existing run, so a raw
+ * caller key could suppress, or read the handle of, someone else's run.
+ */
+function resolveIdempotencyKey(
+  task: JobsNormalizedTask,
+  payload: unknown,
+  requested: string | undefined,
+  caller: JobsCaller,
+): string | undefined {
+  const taskKey = evaluateComputedValue(
+    task.definition.defaults?.idempotencyKey as string | ((value: unknown) => string) | undefined,
+    payload,
+  );
+  if (caller.kind === "server") return requested || taskKey;
+  if (taskKey) return taskKey;
+  if (!requested) return undefined;
+  // encodeURIComponent never emits ":", and an unnamed caller is empty, so no
+  // caller id can forge another caller's namespace.
+  return `farm-http:${task.id}:${caller.id ? encodeURIComponent(caller.id) : ""}:${requested}`;
+}
+
 function resolveLaunchOptions(
   task: JobsNormalizedTask,
   payload: unknown,
   options: JobsTriggerOptions | undefined,
+  caller: JobsCaller,
 ): JobsResolvedLaunchOptions {
   const defaults = task.definition.defaults;
   const resolvedTags = dedupeTags([...(defaults?.tags || []), ...(options?.tags || [])]);
@@ -762,12 +801,7 @@ function resolveLaunchOptions(
       defaults?.concurrencyKey as string | ((value: unknown) => string) | undefined,
       payload,
     ),
-    idempotencyKey:
-      options?.idempotencyKey ||
-      evaluateComputedValue(
-        defaults?.idempotencyKey as string | ((value: unknown) => string) | undefined,
-        payload,
-      ),
+    idempotencyKey: resolveIdempotencyKey(task, payload, options?.idempotencyKey, caller),
     tags: resolvedTags.length > 0 ? resolvedTags : undefined,
     delay: normalizeDelayValue(options?.delay, "delay"),
     debounce: resolveDebounceOptions(options?.debounce),
@@ -782,6 +816,7 @@ function resolveScheduleLaunchOptions(
     after?: string | number;
     options?: JobsScheduleOptions;
   },
+  caller: JobsCaller,
 ) {
   const hasAt = body.at != null;
   const hasAfter = body.after != null;
@@ -798,12 +833,17 @@ function resolveScheduleLaunchOptions(
     throw new JobsRuntimeError("Schedule requests must include exactly one of at or after.", 400);
   }
 
-  const launch = resolveLaunchOptions(task, payload, {
-    delay: scheduledFor,
-    debounce: body.options?.debounce,
-    idempotencyKey: body.options?.idempotencyKey,
-    tags: body.options?.tags,
-  });
+  const launch = resolveLaunchOptions(
+    task,
+    payload,
+    {
+      delay: scheduledFor,
+      debounce: body.options?.debounce,
+      idempotencyKey: body.options?.idempotencyKey,
+      tags: body.options?.tags,
+    },
+    caller,
+  );
   launch.delayMode = hasAt ? "at" : "after";
 
   return {
@@ -1275,6 +1315,32 @@ function createTriggerRuntime(config: TriggerJobsRuntimeConfig): JobsRuntimeAdap
   };
 }
 
+async function assertInngestEventForTask(
+  resolved: { apiBaseUrl: string; signingKey: string },
+  task: JobsNormalizedTask,
+  handleId: string,
+) {
+  const notFound = () =>
+    new JobsRuntimeError(`Run ${handleId} was not found for task "${task.key}".`, 404);
+  let data: unknown;
+  try {
+    data = await requestJSON(`${resolved.apiBaseUrl}/v1/events/${encodeURIComponent(handleId)}`, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${resolved.signingKey}`,
+        accept: "application/json",
+      },
+    });
+  } catch (error) {
+    // Never pass the provider's body for someone else's event through.
+    if (error instanceof JobsRuntimeError && error.status === 404) throw notFound();
+    throw error;
+  }
+  const record = typeof data === "object" && data ? (data as { data?: unknown }).data : undefined;
+  const event = (Array.isArray(record) ? record[0] : record) as { name?: unknown } | undefined;
+  if (!event || typeof event !== "object" || event.name !== task.remoteId) throw notFound();
+}
+
 function createInngestRuntime(config: InngestJobsRuntimeConfig): JobsRuntimeAdapter {
   function resolve() {
     return {
@@ -1402,6 +1468,10 @@ function createInngestRuntime(config: InngestJobsRuntimeConfig): JobsRuntimeAdap
           500,
         );
       }
+
+      // The signing key reads every event in the environment, so a task's
+      // status route only answers for events this task sent.
+      await assertInngestEventForTask(resolved, task, handleId);
 
       const data = await requestJSON(
         `${resolved.apiBaseUrl}/v1/events/${encodeURIComponent(handleId)}/runs`,
@@ -1804,10 +1874,10 @@ async function authorizeJobsRequest(
   request: Request,
   context: FarmIntegrationHandlerContext,
   authorizeContext: JobsAuthorizeContext,
-): Promise<Response | undefined> {
+): Promise<Response | JobsCaller> {
   // Server code calling `api` dispatches in-process and is already trusted.
   if (context.req.get(FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY) === true) {
-    return undefined;
+    return { kind: "server" };
   }
   // A job route starts provider runs with the app's credentials, so an HTTP
   // caller needs the app's say-so.
@@ -1822,7 +1892,15 @@ async function authorizeJobsRequest(
   }
   const decision = await authorize(request.clone(), authorizeContext);
   if (decision instanceof Response) return decision;
-  if (decision === true) return undefined;
+  if (decision === true) return { kind: "http" };
+  if (
+    typeof decision === "object" &&
+    decision !== null &&
+    typeof decision.caller === "string" &&
+    decision.caller.length > 0
+  ) {
+    return { kind: "http", id: decision.caller };
+  }
   return Response.json({ error: "Forbidden" }, { status: 403 });
 }
 
@@ -1852,7 +1930,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
             task: null,
             operation: "tasks",
           });
-          if (blocked) return blocked;
+          if (blocked instanceof Response) return blocked;
           return Response.json(normalizedTasks.map((task) => task.metadata));
         },
       }),
@@ -1868,13 +1946,13 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
               task: task.key,
               operation: "trigger",
             });
-            if (blocked) return blocked;
+            if (blocked instanceof Response) return blocked;
             try {
               const parsed = await parseRequestBody(request);
               const body = normalizeTriggerInput(
                 parsed === undefined ? undefined : readTriggerJsonBody(parsed),
               );
-              const launch = resolveLaunchOptions(task, body.input, body.options);
+              const launch = resolveLaunchOptions(task, body.input, body.options, blocked);
               const triggered = await runtime.trigger(task, body.input, launch);
               return Response.json({
                 handleId: triggered.handleId,
@@ -1899,7 +1977,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
               task: task.key,
               operation: "batchTrigger",
             });
-            if (blocked) return blocked;
+            if (blocked instanceof Response) return blocked;
             try {
               const body = normalizeBatchTriggerInput<TTasks[typeof task.key & keyof TTasks]>(
                 await parseRequestBody(request),
@@ -1924,6 +2002,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                     task,
                     normalizedItem?.input,
                     normalizedItem?.options,
+                    blocked,
                   ),
                 } satisfies JobsResolvedBatchItem;
               });
@@ -1951,13 +2030,18 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
               task: task.key,
               operation: "schedule",
             });
-            if (blocked) return blocked;
+            if (blocked instanceof Response) return blocked;
             try {
               const parsed = await parseRequestBody(request);
               const body = normalizeScheduleInput(
                 parsed === undefined ? undefined : readJsonBody(parsed),
               );
-              const { scheduledFor, launch } = resolveScheduleLaunchOptions(task, body.input, body);
+              const { scheduledFor, launch } = resolveScheduleLaunchOptions(
+                task,
+                body.input,
+                body,
+                blocked,
+              );
               const triggered = await runtime.trigger(task, body.input, launch);
               return Response.json({
                 handleId: triggered.handleId,
@@ -1983,7 +2067,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
               task: task.key,
               operation: "status",
             });
-            if (blocked) return blocked;
+            if (blocked instanceof Response) return blocked;
             try {
               const handleId = new URL(request.url).searchParams.get("handleId") || "";
               if (!handleId) {
@@ -2023,7 +2107,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                 task: task.key,
                 operation: "cancel",
               });
-              if (blocked) return blocked;
+              if (blocked instanceof Response) return blocked;
               try {
                 const body = normalizeCancelInput(await parseRequestBody(request));
                 const handleId = typeof body.handleId === "string" ? body.handleId : "";

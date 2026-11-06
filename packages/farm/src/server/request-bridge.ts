@@ -60,8 +60,13 @@ export function _resolveCurrentRequestForApp(): Request | undefined {
   // The view refuses header reads inside a shared cache function itself, so
   // handing it over there is fine.
   const request = _peekCurrentRequest();
+  return request && _toAppRequestView(request);
+}
+
+/** `request` as app code receives it; see `_resolveCurrentRequestForApp()`. */
+export function _toAppRequestView(request: Request): Request {
   const view = getGlobalState()[APP_REQUEST_VIEW_KEY];
-  return request && view ? view(request) : request;
+  return view ? view(request) : request;
 }
 
 type CspNonceResolver = () => string | undefined;

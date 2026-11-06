@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import React from "react";
 import { describe, expect, it } from "vitest";
+import { createFarmSearchParams } from "../search-params";
 
 // Both client entries are emitted as template literals, so these tests run the
 // emitted source for the initial page props against stubs.
@@ -94,7 +95,7 @@ return pageProps;`,
   });
 
   it("hydrates a client navigation with middleware data as a Map", () => {
-    const renderPage = extractBlock(source, "async function renderPage(pageData) {");
+    const renderPage = extractBlock(source, "async function renderPage(pageData, info) {");
     const revive = renderPage.match(
       /const (\w+) = pageData\.props \? normalizeServerProps\(pageData\.props\)/,
     );
@@ -128,6 +129,7 @@ describe("production client page props", () => {
       "hasHydratableLayout",
       "loadRouteComponent",
       "createFarmRouteState",
+      "createFarmSearchParams",
       "matched",
       "searchParams",
       "serverProps",
@@ -140,6 +142,7 @@ return createMatchedHydrationRoute(matched, "/check", searchParams, undefined, s
       () => false,
       async (route: any) => route.Component,
       (page: any) => ({ page }),
+      createFarmSearchParams,
       { route: { pageShouldHydrate: true, Component: Page }, params },
       searchParams,
       serverProps,

@@ -422,3 +422,58 @@ describe("autumn usage reports under concurrency", () => {
     expect(states.filter((state) => state === "hard_limit_reached")).toHaveLength(16);
   });
 });
+
+describe("autumn report-usage and prepaid quantities", () => {
+  it("refuses to resize a prepaid quantity from a usage report", async () => {
+    const sdk = createFakeSdk({
+      id: "cus_prepaid",
+      balances: { seats: { usage: 1, granted: 5 } },
+      subscriptions: [
+        {
+          id: "sub_1",
+          planId: "autumn_team",
+          status: "active",
+          pastDue: false,
+          canceledAt: null,
+          expiresAt: null,
+          trialEndsAt: null,
+          startedAt: Date.now() - 1000,
+        },
+      ],
+      purchases: [],
+    });
+    sdk.plans.get.mockResolvedValue({
+      id: "autumn_team",
+      items: [
+        {
+          featureId: "seats",
+          price: { amount: 10, interval: "month", billingMethod: "prepaid" },
+        },
+      ],
+    } as never);
+    const integration = autumn({
+      instance: sdk as unknown as AutumnIntegrationInstance,
+      billing: {
+        resolveOwner: () => ({ kind: "user" as const, id: "prepaid-user" }),
+        plans: { free: {}, team: {} },
+        products: {
+          team: { kind: "subscription", planId: "team", autumn: { planId: "autumn_team" } },
+        },
+        meters: { seats: { aggregation: "sum" as const, featureId: "seats" } },
+      },
+    });
+
+    // Any signed-in caller could otherwise buy 500 seats, prorated and
+    // charged at once, by reporting usage.
+    const response = await report(integration, {
+      key: "seats",
+      quantity: 500,
+      idempotencyKey: "seats-1",
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.text()).toMatch(/prepaid quantity.*checkout/);
+    expect(sdk.billing.update).not.toHaveBeenCalled();
+    expect(sdk.track).not.toHaveBeenCalled();
+  });
+});

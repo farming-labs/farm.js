@@ -1,6 +1,8 @@
 export * from "./types";
 export type { FarmAgentUserConfig, FarmAgentJsonLd } from "./agent-config";
 export type { FarmAgentCrawlers, FarmCrawlerPolicy } from "./agent-crawlers";
+export type { FarmAppManifestConfig } from "./app-manifest-config";
+export type { FarmAppManifest, FarmAppManifestServer, FarmAppManifestTool } from "./app-manifest";
 export { defineRenderer, REACT_RENDERER } from "./renderer";
 export type {
   FarmRenderer,
@@ -201,6 +203,19 @@ export * from "./server-query";
 export * from "./server-query-client";
 export * from "./server-action-security";
 export * from "./deployment";
+export {
+  FARM_RSC_INSTALL_HINT,
+  findFarmAppPackageDir,
+  formatFarmRscBlockingMessage,
+  formatFarmRscFallbackMessage,
+  inspectFarmServerComponents,
+  type FarmServerComponentsStatus,
+} from "./server-components-status";
+export type {
+  FarmServerComponentsConfig,
+  FarmServerComponentsMode,
+  FarmServerComponentsOptions,
+} from "./server-components-mode";
 export type {
   FarmImageConfig,
   FarmImageFormat,
@@ -306,6 +321,7 @@ export type {
   ShutdownPayload,
 } from "./plugin";
 export type { MiddlewareProps, PagePropsWithMiddleware, PageProps } from "./types";
+export type { FarmSearchParams } from "./search-params";
 export type {
   FarmUserConfig,
   ResolvedFarmConfig,

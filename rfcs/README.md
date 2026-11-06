@@ -7,4 +7,5 @@ implementation changes default behavior.
 | ----------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------- |
 | [0001: Isolated client hydration inside server-rendered layouts](./0001-isolated-client-hydration.md) | Implemented (experimental, off by default) | [#565](https://github.com/farming-labs/farm.js/issues/565) |
 | [0002: Owned page responses and a Node response fast path](./0002-node-response-fast-path.md)         | Implemented in 0.1.29                      |                                                            |
+| [0003: Server components in islands mode](./0003-islands-server-components.md)                        | Implemented in part (experimental)         |                                                            |
 | [0004: Platforms: one Farm source for web, desktop and mobile](./0004-platforms.md)                   | Draft (target 0.2)                         |                                                            |

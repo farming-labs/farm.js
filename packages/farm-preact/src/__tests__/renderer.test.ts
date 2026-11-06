@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { preact } from "../index";
 import * as serverRuntime from "../server";
 import {
+  ErrorBoundary,
   Suspense,
   createElement,
   generateHydrationScript,
@@ -120,6 +121,35 @@ describe("Preact renderer", () => {
     );
     const unsecured = await new Response(renderToReadableStream(suspended())).text();
     expect(unsecured).toContain("<script>(function(){class e extends HTMLElement");
+  });
+
+  it("fails the shell when a page throws under the route error boundary", async () => {
+    // Farm wraps a route with an error.tsx this way and renders the error page
+    // itself, with its status, once the shell fails.
+    const Page = () => {
+      throw new Error("page failed");
+    };
+    const Layout = (props: { children?: unknown }) => createElement("body", null, props.children);
+    const Fallback = () => createElement("p", null, "fallback");
+    const route = createElement(
+      ErrorBoundary,
+      { Fallback },
+      createElement(
+        "div",
+        { "data-farm-layout-boundary": "true" },
+        createElement(Layout, null, createElement(Page, null)),
+      ),
+    );
+
+    const outcome = await new Promise<string>((resolve) => {
+      renderToPipeableStream(route, {
+        onShellReady: () => resolve("shell ready"),
+        onShellError: (error) => resolve(`shell error: ${(error as Error).message}`),
+        onError() {},
+      });
+    });
+
+    expect(outcome).toBe("shell error: page failed");
   });
 
   it("does not require a renderer-specific hydration bootstrap", () => {

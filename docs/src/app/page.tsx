@@ -469,21 +469,23 @@ const reactCompilerConfigVariants = [
 ] as const satisfies readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
 const reactCompilerConfigSuffix = `  } }),
 });`;
+// benchmarks/compiler, published build, Chromium. Each figure is the weaker of two runs, so the
+// page never claims more than the slowest measurement supports. Re-run it after a renderer release.
 const reactCompilerMetrics = [
   {
-    description: "The compiler reduced the median latency of the benchmarked update path by 88.2%.",
+    description: "Swapping two rows went from 3.8ms to 0.2ms with the compiler on.",
+    label: "Row swap latency",
+    value: "19× faster",
+  },
+  {
+    description: "The median state update went from 0.7ms to 0.2ms.",
     label: "Median update latency",
-    value: "88.2% lower",
+    value: "71% lower",
   },
   {
-    description: "The same state update was 8.5 times faster with the compiler on.",
-    label: "State update speed",
-    value: "8.5× faster",
-  },
-  {
-    description: "The compiled update caused no extra component renders.",
-    label: "Extra renders",
-    value: "0",
+    description: "Script, style and layout work per action cycle went from 17.3ms to 3.6ms.",
+    label: "CPU per action cycle",
+    value: "4.7× less",
   },
 ] as const;
 
@@ -1197,9 +1199,10 @@ function DeveloperExperienceGrid() {
       <FeatureCell
         body={
           <>
-            Farm prepares safe state updates at build time. In our test, they were{" "}
-            <span className="font-mono font-bold text-white">8.5× faster</span> with no extra
-            component renders. React handles anything the compiler cannot safely optimize.
+            Farm prepares safe state updates at build time. In our benchmark a row swap was{" "}
+            <span className="font-mono font-bold text-white">19× faster</span> and the whole action
+            cycle did <span className="font-mono font-bold text-white">4.7× less</span> CPU work.
+            React handles anything the compiler cannot safely optimize.
           </>
         }
         className="border-t border-white/12 lg:border-l"

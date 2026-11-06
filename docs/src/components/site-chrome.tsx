@@ -17,6 +17,11 @@ import type { LucideIcon } from "lucide-react";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import { launchPost } from "../lib/blog";
+import { formatCount, NO_READING, useScrambledText, useSiteStats } from "./site-stats";
+
+// Matches .farm-nav-link, so the stars read as one more nav cell.
+const statLinkClass =
+  "group flex h-11 shrink-0 items-center gap-1.5 border-l border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white";
 
 const navItems = [
   {
@@ -102,6 +107,39 @@ function GithubIcon({ className }: { className?: string }) {
   return <BrandIcon className={className} src={githubIconUrl} />;
 }
 
+// GitHub stars as a nav cell, in the nav's "01 / Guide" grammar: icon / 684 stars. The count
+// reads NO_READING until it arrives, then scrambles into it, and again on hover or focus. The
+// count and label keep room for a four-character count, so the header never shifts.
+function GithubStars({ stars }: { stars: number | null | undefined }) {
+  const count = typeof stars === "number" ? formatCount(stars) : undefined;
+  const { ref, replay } = useScrambledText(count);
+  return (
+    <a
+      aria-label={count ? `Farm.js on GitHub, ${count} stars` : "Open Farm.js on GitHub"}
+      className={statLinkClass}
+      href="https://github.com/farming-labs/farm.js"
+      onFocus={replay}
+      onPointerEnter={replay}
+      title="GitHub stars"
+    >
+      <GithubIcon className="size-3.5 opacity-48 transition-opacity duration-150 group-hover:opacity-100" />
+      <span aria-hidden className="text-white/18">
+        /
+      </span>
+      <span className="flex min-w-[10ch] items-center gap-1.5">
+        <span
+          aria-hidden
+          className="normal-case tabular-nums text-white/72 transition-colors duration-150 group-hover:text-white [&>span]:transition-opacity [&>span]:duration-150 [&>span]:ease-out [&>[data-settled=false]]:opacity-35"
+          ref={ref}
+        >
+          {NO_READING}
+        </span>
+        <span>Stars</span>
+      </span>
+    </a>
+  );
+}
+
 export function IndexedLabel({
   index,
   icon: Icon,
@@ -177,6 +215,7 @@ export function AnnouncementBar() {
 }
 
 export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
+  const stats = useSiteStats();
   return (
     <header className="farm-full-rule sticky top-0 z-50 bg-black/94 backdrop-blur-xl">
       <div className="flex h-11 w-full items-stretch">
@@ -201,14 +240,7 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
         </nav>
 
         <div className="ml-auto hidden shrink-0 items-stretch xl:flex">
-          <a
-            aria-label="Open Farm.js on GitHub"
-            className="grid size-11 place-items-center border-l border-white/12 text-white/52 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
-            href="https://github.com/farming-labs/farm.js"
-            title="GitHub"
-          >
-            <GithubIcon className="size-4" />
-          </a>
+          <GithubStars stars={stats?.stars} />
           <a
             className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white bg-clip-padding px-5 font-mono text-[10px] font-normal uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
             href="/docs"

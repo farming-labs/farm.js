@@ -1,3 +1,4 @@
+import { resolveFarmServerComponentsMode } from "./server-components-mode";
 import type { FarmSchemaConfig } from "./schema";
 import { assertPluginDependencies } from "./plugin-dependencies";
 import type {
@@ -8,7 +9,11 @@ import type {
   ResolvedFarmMigrationsConfig,
 } from "./types";
 import type { DocsConfig } from "@farming-labs/docs";
-import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
+import type {
+  FarmDocsResolvedConfig,
+  FarmDocsResolvedRoot,
+  FarmDocsUserConfig,
+} from "./docs/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
 import type { FarmObservabilityUserConfig } from "./observability";
@@ -21,7 +26,7 @@ import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveWorkflowsConfig } from "./workflows";
-import { resolveCronConfig } from "./cron";
+import { resolveProjectCronJobs } from "./cron-scan";
 import { resolveEnv, setEnv } from "./env";
 import {
   resolveMdxConfig,
@@ -100,6 +105,12 @@ import {
 import { isFarmRedirectStatus } from "./navigation-errors";
 import { resolveFarmThemeConfig } from "./theme/config";
 import { resolveFarmAgentConfig, type ResolvedFarmAgentConfig } from "./agent-config";
+import type {
+  FarmDesktopConfigInput,
+  FarmDesktopSetupHost,
+  ResolvedFarmDesktopConfig,
+} from "./desktop/config";
+import type { FarmMobileConfigInput } from "./mobile/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import type { OpenAPISecurityMode } from "./openapi/types";
 import { isReactRenderer, resolveFarmRenderer } from "./renderer";
@@ -113,6 +124,8 @@ export type {
   FarmDocsConfigInput,
   FarmDocsNavigationConfig,
   FarmDocsResolvedConfig,
+  FarmDocsResolvedRoot,
+  FarmDocsRootInput,
   FarmDocsSidebarItem,
   FarmDocsUserConfig,
 } from "./docs/types";
@@ -133,6 +146,30 @@ export type {
   ResolvedFarmMigrationsConfig,
 } from "./types";
 export type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./workflows";
+export type {
+  FarmDesktopConfigInput,
+  FarmDesktopContext,
+  FarmDesktopUserConfig,
+  FarmDesktopWindowConfig,
+  ResolvedFarmDesktopConfig,
+} from "./desktop/config";
+export type {
+  FarmMobileBudgets,
+  FarmMobileConfigInput,
+  FarmMobileContext,
+  FarmMobileNativeAuto,
+  FarmMobileNativeConfig,
+  FarmMobileNativeEngine,
+  FarmMobileNativeRouteConfig,
+  FarmMobileOS,
+  FarmMobilePageConfig,
+  FarmMobilePrefetch,
+  FarmMobilePresentation,
+  FarmMobileRouteConfig,
+  FarmMobileScreen,
+  FarmMobileTab,
+  FarmMobileUserConfig,
+} from "./mobile/config";
 export type { FarmCronJobConfig, FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
 export type {
   FarmRouteRule,
@@ -355,6 +392,21 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   workflows?: FarmWorkflowsUserConfig | boolean;
   preset?: BaseFarmConfig["preset"];
   deploy?: FarmDeployConfig;
+  /**
+   * The native desktop app `farm dev --desktop` and `farm build --desktop` produce: a block, or a
+   * function of `{ os, mode, command, profile, env, root }` that returns one. A web build checks
+   * a static block's shape, never calls the function, and ships neither.
+   */
+  desktop?: FarmDesktopConfigInput;
+  /**
+   * Preview: the native mobile app (RFC 0004), as a block or a function of
+   * `{ os, mode, command, profile, env, root }`, for `farm dev|build --mobile`. Web builds never
+   * call the function or check the block, and ship neither; they also build the mobile client,
+   * which pages load when a mobile shell asks for them. A server of an app with the block
+   * serves `/__farm/mobile/session` so the app's native screens can sign in with device tokens,
+   * and answers the app's native-tier screen requests.
+   */
+  mobile?: FarmMobileConfigInput;
   docs?: FarmDocsUserConfig;
   md?: FarmMarkdownUserConfig | boolean;
   mdx?: FarmMdxUserConfig;
@@ -450,9 +502,25 @@ export interface ResolvedFarmConfig extends Required<
     | "theme"
     | "renderer"
     | "agent"
+    | "desktop"
+    | "mobile"
   >
 > {
   agent: ResolvedFarmAgentConfig;
+  /** Set only in a desktop dev session or build (`--desktop`); `null` on the web. */
+  desktop: ResolvedFarmDesktopConfig | null;
+  /**
+   * @internal True when farm.config has a `mobile` block. A production build then also builds the
+   * mobile client, which documents use when a mobile shell asks for them (RFC 0004, 7.2). The
+   * block itself is never called or checked here.
+   */
+  mobileClient?: boolean;
+  /**
+   * @internal Set only by `farm build --mobile` with `mobile.shells`: the random token its server
+   * renders page shells for (`mobile/shell-render.ts`). A web build has none, so its server has no
+   * shell mode.
+   */
+  mobileShells?: { token: string };
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
   [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
   root: string;
@@ -897,15 +965,19 @@ export async function resolveDocsConfig(
     };
   }
 
-  const inlineDocsConfig = sanitizeDocsConfig(docsOptions.config || {});
+  const fileDocsConfig = omitDocsRoots(loadedConfig?.config);
+  const inlineRawDocsConfig = omitDocsRoots(docsOptions.config);
+  const inlineDocsConfig = sanitizeDocsConfig(inlineRawDocsConfig);
   const directDocsConfig = sanitizeDocsConfig({
     ...docsOptions,
     adapter: undefined,
     enabled: undefined,
+    prerender: undefined,
     config: undefined,
     configPath: undefined,
+    roots: undefined,
   } as Partial<DocsConfig>);
-  const loadedDocsConfig = sanitizeDocsConfig(loadedConfig?.config || {});
+  const loadedDocsConfig = sanitizeDocsConfig(fileDocsConfig);
   const mergedDocsConfig: Partial<DocsConfig> = {
     ...loadedDocsConfig,
     ...inlineDocsConfig,
@@ -914,14 +986,16 @@ export async function resolveDocsConfig(
   // The adapter runs in this process, so it gets the config as written, React elements
   // and functions included; serializing it is the adapter's call.
   const runtimeDocsConfig: Partial<DocsConfig> = {
-    ...(loadedConfig?.config || {}),
-    ...(isRecord(docsOptions.config) ? docsOptions.config : {}),
+    ...fileDocsConfig,
+    ...inlineRawDocsConfig,
     ...omitUndefined({
       ...docsOptions,
       adapter: undefined,
       enabled: undefined,
+      prerender: undefined,
       config: undefined,
       configPath: undefined,
+      roots: undefined,
     }),
   };
 
@@ -942,11 +1016,41 @@ export async function resolveDocsConfig(
   );
   const contentDir =
     configuredContentDir || (await inferDocsContentDir(root, options.srcDir || "src", docsEntry));
+  const configOverrides = { ...inlineDocsConfig, ...directDocsConfig };
+  const configFileName = loadedConfig
+    ? path.relative(root, loadedConfig.configPath) || loadedConfig.configPath
+    : "the docs config";
+  const roots = await resolveDocsRoots(
+    [
+      { field: `roots in ${configFileName}`, roots: docsRootsOf(loadedConfig?.config), file: true },
+      { field: "docs.config.roots", roots: docsRootsOf(docsOptions.config) },
+      { field: "docs.roots", roots: docsOptions.roots },
+    ],
+    {
+      root,
+      srcDir: options.srcDir || "src",
+      mainEntry: entryRoute,
+      mergedDocsConfig,
+      runtimeDocsConfig,
+      configOverrides,
+    },
+  );
+  if (
+    roots.length > 0 &&
+    !(docsOptions.adapter && docsOptions.adapter.server && docsOptions.adapter.react)
+  ) {
+    throw new Error(
+      "Docs roots require a docs adapter such as @farming-labs/farmjs; Farm's built-in docs " +
+        "renderer serves a single docs root. Install the adapter, or remove the roots from " +
+        `${configFileName} and docs.roots.`,
+    );
+  }
 
   return {
     enabled: true,
     entry: entryRoute,
     ...(docsOptions.adapter ? { adapter: docsOptions.adapter } : {}),
+    ...(docsOptions.prerender === true ? { prerender: true } : {}),
     contentDir,
     configPath: loadedConfig?.configPath,
     config: {
@@ -961,8 +1065,115 @@ export async function resolveDocsConfig(
       docsPath: entryRoute,
       ...(contentDir ? { contentDir } : {}),
     },
-    configOverrides: { ...inlineDocsConfig, ...directDocsConfig },
+    configOverrides,
+    ...(roots.length > 0 ? { roots } : {}),
   };
+}
+
+function docsRootsOf(config: unknown): unknown {
+  return isRecord(config) ? config.roots : undefined;
+}
+
+function omitDocsRoots(config: unknown): Partial<DocsConfig> {
+  if (!isRecord(config)) return {};
+  const { roots: _roots, ...rest } = config;
+  return rest as Partial<DocsConfig>;
+}
+
+function omitKeys(value: Record<string, unknown>, keys: Iterable<string>): Record<string, unknown> {
+  const output = { ...value };
+  for (const key of keys) delete output[key];
+  return output;
+}
+
+/**
+ * Each docs root in the order first declared, with the main root's merged config under it.
+ * Lists merge by entry, and for one root `docs.roots` beats `docs.config.roots`, which beats
+ * the config file. A root's own fields beat the main root's, wherever either was set.
+ */
+async function resolveDocsRoots(
+  sources: Array<{ field: string; roots: unknown; file?: boolean }>,
+  options: {
+    root: string;
+    srcDir: string;
+    mainEntry: string;
+    mergedDocsConfig: Partial<DocsConfig>;
+    runtimeDocsConfig: Partial<DocsConfig>;
+    configOverrides: Partial<DocsConfig>;
+  },
+): Promise<FarmDocsResolvedRoot[]> {
+  const declared = new Map<
+    string,
+    { file: Record<string, unknown>; overrides: Record<string, unknown> }
+  >();
+  for (const source of sources) {
+    if (source.roots === undefined) continue;
+    if (!Array.isArray(source.roots)) throw new Error(`${source.field} must be an array.`);
+    const seen = new Set<string>();
+    for (const [index, rootInput] of source.roots.entries()) {
+      const field = `${source.field}[${index}].entry`;
+      if (!isRecord(rootInput) || typeof rootInput.entry !== "string" || !rootInput.entry.trim()) {
+        throw new Error(`${field} must be a route such as "/guides/docs".`);
+      }
+      const entryRoute = normalizeDocsRoute(rootInput.entry);
+      if (entryRoute === "/") {
+        throw new Error(
+          `${field} cannot be "/"; a docs root at "/" leaves no route for the others.`,
+        );
+      }
+      if (entryRoute === options.mainEntry || seen.has(entryRoute)) {
+        throw new Error(
+          `${field} ${JSON.stringify(entryRoute)} is already served by another docs root.`,
+        );
+      }
+      seen.add(entryRoute);
+      const { entry: _entry, ...fields } = rootInput;
+      const layers = declared.get(entryRoute) ?? { file: {}, overrides: {} };
+      if (source.file) layers.file = fields;
+      else layers.overrides = { ...layers.overrides, ...fields };
+      declared.set(entryRoute, layers);
+    }
+  }
+
+  const roots: FarmDocsResolvedRoot[] = [];
+  for (const [entryRoute, { file, overrides }] of declared) {
+    const docsEntry = docsRouteToEntry(entryRoute);
+    const contentDir =
+      normalizeDocsContentDir(
+        (typeof overrides.contentDir === "string" && overrides.contentDir) ||
+          (typeof file.contentDir === "string" && file.contentDir) ||
+          undefined,
+      ) || (await inferDocsContentDir(options.root, options.srcDir, docsEntry));
+    const routeConfig = {
+      entry: docsEntry,
+      docsPath: entryRoute,
+      contentDir,
+    };
+    const rootOverrides = sanitizeDocsConfig(overrides as Partial<DocsConfig>);
+    roots.push({
+      entry: entryRoute,
+      contentDir,
+      config: omitUndefined({
+        ...options.mergedDocsConfig,
+        ...sanitizeDocsConfig(file as Partial<DocsConfig>),
+        ...rootOverrides,
+        ...routeConfig,
+      }) as FarmDocsResolvedRoot["config"],
+      runtimeConfig: omitUndefined({
+        ...options.runtimeDocsConfig,
+        ...file,
+        ...overrides,
+        ...routeConfig,
+      }) as FarmDocsResolvedRoot["config"],
+      // The adapter reads the config file's own root from the config module, so the main
+      // root's overrides leave out whatever that root sets itself.
+      configOverrides: {
+        ...omitKeys(options.configOverrides, Object.keys(file)),
+        ...rootOverrides,
+      } as Partial<DocsConfig>,
+    });
+  }
+  return roots;
 }
 
 function validateRedirectConfigs(redirects: RedirectConfig[], field: string): RedirectConfig[] {
@@ -997,6 +1208,8 @@ export async function resolveConfig(
   userConfig: FarmUserConfig,
   mode: "development" | "production",
 ): Promise<ResolvedFarmConfig> {
+  // An unknown serverComponents mode is a config error, not a silent no-op.
+  resolveFarmServerComponentsMode(userConfig.experimental?.serverComponents);
   const projectRoot = userConfig.root || process.cwd();
   const layerResolution = await resolveFarmLayers(userConfig, {
     root: projectRoot,
@@ -1056,8 +1269,13 @@ export async function resolveConfig(
     );
   }
 
-  const deploy = resolveDeployConfig(userConfig);
   const root = userConfig.root || process.cwd();
+  // `farm dev|build --desktop` installs this (desktop/config.ts); a web build never loads it.
+  const desktopSetup = await (globalThis as FarmDesktopSetupHost)[
+    Symbol.for("@farm.js/core/desktop-setup")
+  ]?.(userConfig, root, mode);
+  if (desktopSetup) userConfig = desktopSetup.userConfig;
+  const deploy = resolveDeployConfig(userConfig, desktopSetup?.deploy);
   const srcDir = userConfig.srcDir || "src";
   setFarmProjectSourceDir(root, srcDir);
   const docs = await resolveDocsConfig(userConfig.docs, { root, srcDir });
@@ -1066,6 +1284,10 @@ export async function resolveConfig(
   const env = resolveEnv(userConfig.env, process.env);
   setEnv(env);
   const api = await resolveFarmAPIConfig(userConfig.api, { root, mode, env });
+  // Route-level `cronRoute()` schedules merge with `cron` config here, so every consumer of the
+  // resolved config (build outputs, the manifest, `farm cron list|run`, `farm dev --cron`) sees
+  // one job list.
+  const cron = await resolveProjectCronJobs({ root, srcDir, cron: userConfig.cron });
   const auth = resolveFarmAuthConfig(userConfig.auth);
   const mcp = resolveFarmMCPConfig(userConfig.mcp);
   if (auth.enabled && userConfig.integrations?.auth) {
@@ -1095,6 +1317,26 @@ export async function resolveConfig(
       (mode === "production" ? await generateBuildId() : "development"),
   );
   const basePath = normalizeFarmConfigBasePath(userConfig.basePath);
+  // Device tokens for the mobile shell's native screens (RFC 0004, 7.14), served by the web
+  // deployment of an app with a `mobile` block. Without the block, no module, route, or hook.
+  const mobileSessionPlugin =
+    userConfig.mobile !== undefined && userConfig.mobile !== null
+      ? (await import("./mobile/session")).createFarmMobileSessionPlugin({
+          basePath,
+          integrations: () => integrations,
+        })
+      : null;
+  // Server functions that the app's native screens import, called over HTTP (dev: loaded by the
+  // dev server; a production build generates its own list).
+  let nativeServerFnAppDirs: readonly string[] = [];
+  const nativeServerFnPlugin =
+    userConfig.mobile !== undefined && userConfig.mobile !== null
+      ? (await import("./mobile/native-server-fn-handler")).createFarmNativeServerFnPlugin({
+          resolve: (await import("./mobile/native-server-fns")).createFarmDevNativeServerFnResolver(
+            { root, srcDir, appDirs: () => nativeServerFnAppDirs },
+          ),
+        })
+      : null;
   const openapi = {
     enabled: false,
     route: "/docs/reference",
@@ -1122,7 +1364,7 @@ export async function resolveConfig(
     md,
     mdx,
     migrations: resolveMigrationsConfig(userConfig.migrations),
-    cron: resolveCronConfig(userConfig.cron),
+    cron,
     workflows: resolveWorkflowsConfig(userConfig.workflows),
     api,
     observability: userConfig.observability ?? false,
@@ -1138,12 +1380,21 @@ export async function resolveConfig(
     experimental: {
       serverComponents: false,
       serverActions: false,
-      isolatedClientHydration: "off",
+      // Islands mode hydrates client components as islands (RFC 0003); an app can still pick
+      // isolatedClientHydration itself.
+      isolatedClientHydration:
+        resolveFarmServerComponentsMode(userConfig.experimental?.serverComponents) === "islands"
+          ? "enabled"
+          : "off",
       ppr: false,
       ...userConfig.experimental,
     },
     agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled }),
+    desktop: desktopSetup?.desktop ?? null,
+    ...(userConfig.mobile !== undefined ? { mobileClient: true } : {}),
     plugins: [
+      ...(mobileSessionPlugin ? [mobileSessionPlugin] : []),
+      ...(nativeServerFnPlugin ? [nativeServerFnPlugin] : []),
       ...resolveIntegrationPlugins(integrations),
       ...(nativeMCPPlugin ? [nativeMCPPlugin] : []),
       ...(userConfig.plugins || []),
@@ -1183,6 +1434,9 @@ export async function resolveConfig(
 
   // Every plugin is known now, including those integrations contribute.
   assertPluginDependencies(resolved.plugins, resolved.integrations as never);
+  if (nativeServerFnPlugin) {
+    nativeServerFnAppDirs = (await import("./layers")).getFarmAppDirectories(resolved);
+  }
 
   return resolved;
 }

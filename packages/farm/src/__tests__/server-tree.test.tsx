@@ -1,6 +1,8 @@
 import React, { act, createContext, use, useContext, useId, useState, type ReactNode } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToReadableStream } from "react-dom/server";
+import * as islands from "../client/islands-runtime";
+import { createIsland } from "../islx/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFarmIsolatedClientBoundary,
@@ -9,7 +11,11 @@ import {
   isolateFarmServerPageGraph,
   wrapFarmIsolatedClientGraph,
 } from "../client/isolated-boundary";
+import { getFarmIslandValueStore } from "../client/island-value-store";
+import { installFarmIslandValues } from "../client/island-values";
+import { installFarmIslandsServer } from "../client/islands-server";
 import { createFarmServerTreeElement, renderFarmServerTreePage } from "../client/server-tree";
+import { _setCurrentRequestResolver } from "../server/request-bridge";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -79,11 +85,23 @@ function CounterSource() {
 }
 
 const modules: Record<string, Record<string, unknown>> = {
-  "/src/page-button.tsx": { __farm_client_boundary_originals__: { PageButton: PageButtonSource } },
-  "/src/card.tsx": { __farm_client_boundary_originals__: { Card: CardSource } },
-  "/src/stars.tsx": { __farm_client_boundary_originals__: { Stars: StarsSource } },
-  "/src/callback.tsx": { __farm_client_boundary_originals__: { Callback: CallbackSource } },
-  "/src/counter.tsx": { __farm_client_boundary_originals__: { Counter: CounterSource } },
+  "/src/page-button.tsx": {
+    PageButton: PageButtonSource,
+    __farm_client_boundary_originals__: { PageButton: PageButtonSource },
+  },
+  "/src/card.tsx": { Card: CardSource, __farm_client_boundary_originals__: { Card: CardSource } },
+  "/src/stars.tsx": {
+    Stars: StarsSource,
+    __farm_client_boundary_originals__: { Stars: StarsSource },
+  },
+  "/src/callback.tsx": {
+    Callback: CallbackSource,
+    __farm_client_boundary_originals__: { Callback: CallbackSource },
+  },
+  "/src/counter.tsx": {
+    Counter: CounterSource,
+    __farm_client_boundary_originals__: { Counter: CounterSource },
+  },
 };
 const PageButton = createFarmIsolatedClientBoundary(
   React,
@@ -229,7 +247,7 @@ describe("server tree pages", () => {
 
   it("hydrates an async page's client components inside the layout's React tree", async () => {
     const html = await renderPage(<HomePage />);
-    expect(html).not.toContain("farm-client-boundary");
+    expect(html).not.toContain("f-island");
     expect(html).toContain("<strong>42</strong>");
 
     const serverUid = /data-uid="([^"]+)"/.exec(html)?.[1];
@@ -293,7 +311,7 @@ describe("server tree pages", () => {
       rest += decoder.decode(chunk.value);
     }
     expect(rest).toContain("slow<!-- -->:<!-- -->closed");
-    expect(rest).toContain("data-farm-server-tree-chunk");
+    expect(rest).toContain('type="f/chunk"');
 
     // A completed render, as the browser has it once the stream ends.
     const { container, errors } = await hydratePage(await renderPage(<Page />));
@@ -320,8 +338,8 @@ describe("server tree pages", () => {
       );
     }
     const html = await renderPage(<Page />);
-    expect(html).toContain("<farm-server-html");
-    expect(html).toContain('data-farm-client-boundary="/src/counter.tsx"');
+    expect(html).toContain("<f-html");
+    expect(html).toContain('<f-island src="/src/counter.tsx"');
 
     const { container, errors, runtime } = await hydratePage(html);
     expect(errors).toEqual([]);
@@ -343,7 +361,7 @@ describe("server tree pages", () => {
     }
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const html = await renderPage(<Page />);
-    expect(html).toMatch(/<farm-server-html[^>]*><button id="callback"/);
+    expect(html).toMatch(/<f-html[^>]*><button id="callback"/);
     const { container, errors } = await hydratePage(html);
     expect(errors).toEqual([]);
     await click(container, "#header");
@@ -370,8 +388,8 @@ describe("server tree pages", () => {
       );
     }
     const html = await renderPage(<Page />);
-    expect(html).toContain("<section><farm-server-html");
-    expect(html).toMatch(/<farm-server-html[^>]*><table>/);
+    expect(html).toContain("<section><f-html");
+    expect(html).toMatch(/<f-html[^>]*><table>/);
     const { container, errors } = await hydratePage(html);
     expect(errors).toEqual([]);
     expect(container.querySelector("td")!.textContent).toBe("cell");
@@ -432,5 +450,220 @@ describe("server tree pages", () => {
     expect(await createFarmServerTreeElement(React, "<p>static</p>", { load, ServerHtml })).toBe(
       null,
     );
+  });
+
+  describe("with island values (islands mode)", () => {
+    // Islands mode runs on islx: the functions its generated code imports.
+    const islandsTree = (page: ReactNode) =>
+      islands.wrapFarmIsolatedClientGraph(
+        React,
+        <Layout>
+          <div id="__farm_page__">{page}</div>
+        </Layout>,
+      );
+    const islandsServerHtml = () =>
+      islands.createFarmServerPageBoundary(
+        React,
+        islands.createFarmIsolatedHydrationRuntime({
+          load,
+          schedule: async ({ hydrate }) => hydrate(),
+        }),
+      );
+    const items = Array.from({ length: 120 }, (_, index) => ({
+      id: `item-${index}`,
+      label: `Catalog entry ${index} with a description long enough to matter`,
+    }));
+    function CatalogSource({ items }: { items: Array<{ id: string; label: string }> }) {
+      const panel = usePanel();
+      return <p id="catalog">{`${items.length} items, ${panel.open ? "open" : "closed"}`}</p>;
+    }
+    modules["/src/catalog.tsx"] = {
+      Catalog: CatalogSource,
+      __farm_client_boundary_originals__: { Catalog: CatalogSource },
+    };
+    // Islands mode compiles client components to islx islands.
+    const Catalog = createIsland(CatalogSource, "/src/catalog.tsx", "Catalog", "load");
+    async function ShopPage() {
+      await Promise.resolve();
+      return (
+        <main>
+          <h1>Shop</h1>
+          <Catalog items={items} />
+        </main>
+      );
+    }
+    installFarmIslandValues();
+    installFarmIslandsServer();
+    const valueKeys = (html: string) =>
+      [...html.matchAll(/<script type="f\/value" name="([0-9a-z]{14})"/g)].map(
+        (match) => match[1]!,
+      );
+    async function renderValuesPage(headers: Record<string, string> = {}) {
+      const request = new Request("http://localhost/shop", { headers });
+      _setCurrentRequestResolver(() => request);
+      try {
+        const page = await islands.renderFarmServerTreePage(React, <ShopPage />, {
+          isolate: (node) => islands.isolateFarmServerPageGraph(React, node),
+        });
+        const stream = await renderToReadableStream(islandsTree(page));
+        await stream.allReady;
+        return await new Response(stream).text();
+      } finally {
+        _setCurrentRequestResolver(undefined);
+      }
+    }
+
+    afterEach(() => {
+      delete (globalThis as Record<symbol, unknown>)[Symbol.for("islx.values")];
+    });
+
+    it("sends a large prop once, before the payload, and hydrates with it", async () => {
+      const html = await renderValuesPage();
+      const payload = /<script type="f\/tree">([^<]*)<\/script>/.exec(html)![1]!;
+      expect(payload).toContain('"$":"r"');
+      expect(payload).not.toContain("Catalog entry 7 with");
+      expect(valueKeys(html).length).toBeGreaterThan(0);
+      expect(html.lastIndexOf('type="f/value"')).toBeLessThan(html.indexOf('type="f/tree"'));
+
+      const container = document.createElement("div");
+      container.innerHTML = html;
+      document.body.append(container);
+      const page = await islands.createFarmServerTreeElement(
+        React,
+        container.querySelector("#__farm_page__")!,
+        { load, ServerHtml: islandsServerHtml() },
+      );
+      const errors: unknown[] = [];
+      let root!: ReturnType<typeof hydrateRoot>;
+      await act(async () => {
+        root = hydrateRoot(container, islandsTree(page), {
+          onRecoverableError: (error) => errors.push(error),
+        });
+      });
+      mountedRoots.push(root);
+      expect(errors).toEqual([]);
+      expect(container.querySelector("#catalog")!.textContent).toBe("120 items, closed");
+      // The page's client component reads the layout's context.
+      await click(container, "#header");
+      expect(container.querySelector("#catalog")!.textContent).toBe("120 items, open");
+    });
+
+    it("rebuilds navigation HTML that leaves out the values the browser holds", async () => {
+      const first = await renderValuesPage();
+      const keys = valueKeys(first);
+      const store = getFarmIslandValueStore();
+      store.ingest(Object.assign(document.createElement("div"), { innerHTML: first }));
+
+      const navigation = await renderValuesPage({ "f-values": keys.join(",") });
+      expect(valueKeys(navigation)).toEqual([]);
+      expect(navigation.length).toBeLessThan(first.length - 5000);
+
+      const page = await islands.createFarmServerTreeElement(
+        React,
+        Object.assign(document.createElement("div"), { innerHTML: navigation }).querySelector(
+          "#__farm_page__",
+        )!,
+        { load, ServerHtml: islandsServerHtml() },
+      );
+      const container = document.createElement("div");
+      document.body.append(container);
+      const { createRoot } = await import("react-dom/client");
+      const root = createRoot(container);
+      await act(async () => root.render(islandsTree(page)));
+      mountedRoots.push(root as unknown as ReturnType<typeof hydrateRoot>);
+      expect(container.querySelector("#catalog")!.textContent).toBe("120 items, closed");
+    });
+  });
+
+  describe("payload-only navigations", () => {
+    async function renderRoute(element: ReactNode, payloadOnly: boolean) {
+      const page = await renderFarmServerTreePage(React, element, {
+        isolate: (node) => isolateFarmServerPageGraph(React, node),
+        payloadOnly,
+      });
+      const stream = await renderToReadableStream(routeTree(page));
+      await stream.allReady;
+      return new Response(stream).text();
+    }
+    async function rebuild(html: string) {
+      const source = Object.assign(document.createElement("div"), { innerHTML: html });
+      const page = await createFarmServerTreeElement(
+        React,
+        source.querySelector("#__farm_page__")!,
+        {
+          load,
+          ServerHtml: createClientRuntime().ServerHtml,
+        },
+      );
+      expect(page).not.toBeNull();
+      const container = document.createElement("div");
+      document.body.append(container);
+      const { createRoot } = await import("react-dom/client");
+      const root = createRoot(container);
+      await act(async () => root.render(routeTree(page)));
+      mountedRoots.push(root as unknown as ReturnType<typeof hydrateRoot>);
+      return container;
+    }
+
+    it("sends the payload without the page's HTML, and the browser rebuilds the same page", async () => {
+      const full = await renderRoute(<HomePage />, false);
+      const payloadOnly = await renderRoute(<HomePage />, true);
+      expect(full).toContain("<h1>Hello</h1>");
+      expect(payloadOnly).not.toContain("<h1>Hello</h1>");
+      expect(payloadOnly).not.toContain('id="card"');
+      expect(payloadOnly).toContain('type="f/tree" partial');
+
+      const fromFull = await rebuild(full);
+      const fromPayload = await rebuild(payloadOnly);
+      // The same page, but for useId, which counts per root.
+      const page = (container: Element) =>
+        container.querySelector("#__farm_page__")!.innerHTML.replace(/data-uid="[^"]+"/g, "");
+      expect(page(fromPayload)).toBe(page(fromFull));
+      // Client components still read the layout's context.
+      await click(fromPayload, "#header");
+      expect(fromPayload.querySelector("#page")!.textContent).toBe("page:open");
+    });
+
+    it("waits for Suspense chunks and sends their payloads", async () => {
+      async function Slow() {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return <PageButton label="slow" />;
+      }
+      async function Page() {
+        return (
+          <React.Suspense fallback={<p id="fallback">loading</p>}>
+            <Slow />
+          </React.Suspense>
+        );
+      }
+      const payloadOnly = await renderRoute(<Page />, true);
+      expect(payloadOnly).toContain('type="f/chunk"');
+      // The fallback travels in the payload, not as HTML.
+      expect(payloadOnly).not.toContain('<p id="fallback">');
+      const container = await rebuild(payloadOnly);
+      expect(container.querySelector("#page")!.textContent).toBe("slow:closed");
+    });
+
+    it("renders the page whole when a chunk fails, so its error boundary applies", async () => {
+      async function Broken(): Promise<never> {
+        throw new Error("chunk failed");
+      }
+      async function Page() {
+        return (
+          <React.Suspense fallback={<p>loading</p>}>
+            <Broken />
+          </React.Suspense>
+        );
+      }
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const page = await renderFarmServerTreePage(React, <Page />, {
+        isolate: (node) => isolateFarmServerPageGraph(React, node),
+        payloadOnly: true,
+      });
+      const stream = await renderToReadableStream(routeTree(page), { onError: () => {} });
+      await stream.allReady;
+      const html = await new Response(stream).text();
+      expect(html).not.toContain('type="f/tree" partial');
+    });
   });
 });

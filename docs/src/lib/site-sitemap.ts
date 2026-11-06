@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "@farm.js/core";
-import { launchPost } from "./blog";
+import { posts } from "./blog";
 import { SITE_URL } from "./site";
 
 /**
@@ -14,8 +14,6 @@ export const SITE_SITEMAP_PATH = "/sitemap-site.xml";
 /** Where robots.txt pointed before the sitemap took its extension back. */
 export const LEGACY_SITE_SITEMAP_PATH = "/sitemap-site";
 
-const posts = [launchPost];
-
 export function getSiteSitemap(): MetadataRoute.Sitemap {
   return [
     { url: `${SITE_URL}/` },
@@ -26,7 +24,8 @@ export function getSiteSitemap(): MetadataRoute.Sitemap {
     { url: `${SITE_URL}/about` },
     { url: `${SITE_URL}/contact` },
     { url: `${SITE_URL}/privacy` },
-    ...posts.map((post) => ({ url: `${SITE_URL}${post.href}`, lastModified: post.dateTime })),
+    // Every post in the collection, so a new one is listed without touching this file.
+    ...posts.map(({ post }) => ({ url: `${SITE_URL}${post.href}`, lastModified: post.dateTime })),
   ];
 }
 

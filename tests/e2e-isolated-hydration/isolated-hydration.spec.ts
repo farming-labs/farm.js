@@ -34,17 +34,15 @@ test("server layout renders but stays out of the client bundle", async ({ page }
 
 test("emits one boundary marker per island with its strategy", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("farm-client-boundary")).toHaveCount(4);
+  await expect(page.locator("f-island")).toHaveCount(4);
   for (const strategy of ["load", "interaction", "visible", "idle"]) {
-    await expect(
-      page.locator(`farm-client-boundary[data-farm-island-strategy="${strategy}"]`),
-    ).toHaveCount(1);
+    await expect(page.locator(`f-island[strategy="${strategy}"]`)).toHaveCount(1);
   }
 });
 
 test("load island hydrates immediately with its serialized props", async ({ page }) => {
   await page.goto("/");
-  const container = page.locator('farm-client-boundary[data-farm-island-strategy="load"]');
+  const container = page.locator('f-island[strategy="load"]');
   await expect(container).toHaveAttribute("data-farm-hydrated", "true");
 
   const counter = page.getByTestId("counter");
@@ -56,8 +54,8 @@ test("load island hydrates immediately with its serialized props", async ({ page
 
 test("interaction island hydrates on first click and replays it", async ({ page }) => {
   await page.goto("/");
-  const container = page.locator('farm-client-boundary[data-farm-island-strategy="interaction"]');
-  const loadContainer = page.locator('farm-client-boundary[data-farm-island-strategy="load"]');
+  const container = page.locator('f-island[strategy="interaction"]');
+  const loadContainer = page.locator('f-island[strategy="load"]');
   // Wait until the eager island is done so the next check is not a race.
   await expect(loadContainer).toHaveAttribute("data-farm-hydrated", "true");
   await expect(container).not.toHaveAttribute("data-farm-hydrated", "true");
@@ -72,8 +70,8 @@ test("interaction island hydrates on first click and replays it", async ({ page 
 
 test("visible island waits for viewport entry", async ({ page }) => {
   await page.goto("/");
-  const container = page.locator('farm-client-boundary[data-farm-island-strategy="visible"]');
-  const loadContainer = page.locator('farm-client-boundary[data-farm-island-strategy="load"]');
+  const container = page.locator('f-island[strategy="visible"]');
+  const loadContainer = page.locator('f-island[strategy="load"]');
   await expect(loadContainer).toHaveAttribute("data-farm-hydrated", "true");
   await expect(container).not.toHaveAttribute("data-farm-hydrated", "true");
 
@@ -85,7 +83,7 @@ test("visible island waits for viewport entry", async ({ page }) => {
 
 test("idle island hydrates after idle without any interaction", async ({ page }) => {
   await page.goto("/");
-  const container = page.locator('farm-client-boundary[data-farm-island-strategy="idle"]');
+  const container = page.locator('f-island[strategy="idle"]');
   // requestIdleCallback carries a 2s timeout fallback in the runtime.
   await expect(container).toHaveAttribute("data-farm-hydrated", "true", { timeout: 10_000 });
   await page.getByTestId("idle").click();

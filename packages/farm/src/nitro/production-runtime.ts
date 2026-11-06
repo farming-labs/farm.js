@@ -1,10 +1,16 @@
 export { _runWithAfterRequest } from "../after";
 export { createFarmAppManifestResponse } from "../app-manifest";
-export { farmPathGuardCoversEndpoint, farmPathGuardCoversPage } from "../middleware/may-handle";
+export {
+  appMiddlewareMayHandlePath,
+  configMiddlewareMayHandlePath,
+  farmPathGuardCoversEndpoint,
+  farmPathGuardCoversPage,
+} from "../middleware/may-handle";
 export { farmSecretsMatch } from "../secret-compare";
 export { createFarmLayoutSelector } from "../routing/layout-selector";
 export { isInRouteGroupScope as isInFarmRouteGroupScope } from "../routing/route-groups";
 export { mergeRouteRenderingDirectiveConfig } from "../route-rendering";
+export { materializeSSGRoutePath } from "../ssg-paths";
 export type { FarmServerConfig } from "../server-http";
 export {
   bufferFarmRequestBody,
@@ -29,6 +35,13 @@ export {
   createLateRedirectRecovery,
 } from "../navigation/late-navigation-recovery";
 export {
+  resolveFarmDocsEngineRouteLabel,
+  resolveFarmDocsRouteLabel,
+  resolveFarmMarkdownRouteLabel,
+  resolveFarmMCPRouteLabel,
+  setFarmRouteLabel,
+} from "../route-label";
+export {
   _getRequestReadCount,
   _runWithCurrentRequest,
   _runWithFarmCspNonce,
@@ -36,6 +49,8 @@ export {
   resolveFarmWebRequestOrigin,
 } from "../server/request";
 export { _resolveCurrentCspNonce } from "../server/request-bridge";
+export { createFarmNativeTreeResponse } from "../mobile/native-tree";
+export { fetchFarmExternalRewrite } from "../server/response";
 export { _runWithAPIRequestRuntime } from "../api/server-context";
 export {
   configureFarmCache,
@@ -61,6 +76,7 @@ export {
   renderMetadataHead,
   renderViewportHead,
   resolveFarmNotFoundMetadata,
+  resolveMetadataTitle,
 } from "../metadata";
 export { ensureFarmDocumentMeta } from "../server/full-document";
 export { createFarmMetadataRouteResponse } from "../metadata-route";
@@ -122,7 +138,7 @@ export {
   manageFarmLinkHeaderPreloads,
   reportFarmPreloadWarnings,
 } from "../preload";
-export { searchParamsToObject } from "../search-params";
+export { createFarmSearchParams, searchParamsToObject } from "../search-params";
 export { parseRoutePath, matchRoute as matchFarmPageRoute } from "../utils";
 export { compareRouteSpecificity, getRoutePatternSpecificity } from "../routing/specificity";
 export { createFarmLegacyRequest } from "./legacy-request";
@@ -143,6 +159,11 @@ export {
   resolveFarmSecurityConfig,
   stampFarmCspNonce,
 } from "../security";
+export { _applyFarmMobileShellClient } from "../mobile/shell-response";
+export {
+  _checkFarmMobileShellRoute,
+  _isFarmMobileShellRenderRequest,
+} from "../mobile/shell-render";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");
@@ -154,3 +175,8 @@ export function appendFarmLinkHeader(headers: Headers, value: string): void {
     headers.set("Link", `${current}, ${value}`);
   }
 }
+export { handleFarmFormActionRequest } from "../form-actions";
+export { ignoreFarmHeldValues, installFarmIslandValues } from "../client/island-values";
+export { getSharedLayoutPrefixLength, parseFarmLayoutChainHeader } from "../navigation/render-plan";
+export { createFarmMobileSessionPlugin } from "../mobile/session";
+export { createFarmNativeServerFnPlugin } from "../mobile/native-server-fn-handler";

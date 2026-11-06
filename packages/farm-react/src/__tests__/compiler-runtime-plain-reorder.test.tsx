@@ -42,20 +42,41 @@ function snapshot(container: HTMLElement) {
   };
 }
 
-describe.each(["hybrid", "static"] as const)(
-  "plain reorder integration in %s mode",
-  (reactivity) => {
+describe.each([
+  ["hybrid", "plain-reorder"],
+  ["static", "plain-reorder"],
+  ["hybrid", "plain-map-reorder"],
+  ["static", "plain-map-reorder"],
+] as const)(
+  "plain keyed runtime integration in %s mode with %s capabilities",
+  (reactivity, runtime) => {
     it.each(["mount", "hydrate", "custom-method"])(
       "matches React through reorder, mixed queued updates, and fallback after %s",
       async (mode) => {
         globalThis.IS_REACT_ACT_ENVIRONMENT = true;
         const { compiled, original, names, reasons, code } = await loadCompiledAndOriginal(
-          source,
+          runtime === "plain-reorder"
+            ? source
+            : source
+                .replace(
+                  "current.toReversed()",
+                  'current.map(row => row.id === "b" ? {...row, label: row.label + "!"} : row).toReversed()',
+                )
+                .replace(
+                  "current.toSorted",
+                  'current.map(row => row.id === "b" ? {...row, rank: row.rank + 2} : row).toSorted',
+                ),
           reactivity,
         );
         expect(names).toEqual(["Rows"]);
         expect(reasons).toEqual([]);
-        expect(code).toContain("keyedRowsPlainReorderHintedRuntimeFeature");
+        expect(code).toContain(
+          runtime === "plain-reorder"
+            ? "keyedRowsPlainReorderHintedRuntimeFeature"
+            : "keyedRowsPlainMapReorderHintedRuntimeFeature",
+        );
+        if (runtime === "plain-map-reorder")
+          expect(code).toContain("createCompilerKeyedArrayMapReorder");
         expect(code).toContain("createCompilerKeyedMapUpdate");
         expect(code).toContain("createCompilerKeyedArrayAppend");
         const views = [];
@@ -66,8 +87,10 @@ describe.each(["hybrid", "static"] as const)(
             { id: "c", label: "Gamma", rank: 1 },
           ];
           if (mode === "custom-method") {
-            Object.defineProperty(initialRows, "toReversed", {
-              value() {
+            Object.defineProperty(initialRows, runtime === "plain-reorder" ? "toReversed" : "map", {
+              value(callback: (value: unknown, index: number, array: unknown[]) => unknown) {
+                if (runtime === "plain-map-reorder")
+                  return Array.prototype.map.call(this, callback);
                 return [this[1], this[2], this[0]];
               },
             });

@@ -222,19 +222,39 @@ export function resolveFarmDocsContentDir(
   return path.join(root, entryDir);
 }
 
+/** The main docs root, then each of `docs.roots`, each as a resolved config of its own. */
+export function getFarmDocsRoots(docs: FarmDocsResolvedConfig): FarmDocsResolvedConfig[] {
+  return [
+    docs,
+    ...(docs.roots ?? []).map((root) => ({
+      ...docs,
+      entry: root.entry,
+      contentDir: root.contentDir,
+      config: root.config,
+      runtimeConfig: root.runtimeConfig,
+      configOverrides: root.configOverrides,
+      roots: undefined,
+    })),
+  ];
+}
+
 export function getFarmDocsRouteTypeEntries(docs: FarmDocsResolvedConfig | undefined): string[] {
   if (!docs?.enabled) return [];
-  const entry = normalizeEntry(docs.entry);
-  if (entry === "/") return ["/", "/[...docs]"];
-  return [entry, `${entry}/[...docs]`];
+  return getFarmDocsRoots(docs).flatMap((root) => {
+    const entry = normalizeEntry(root.entry);
+    if (entry === "/") return ["/", "/[...docs]"];
+    return [entry, `${entry}/[...docs]`];
+  });
 }
 
 export function getFarmDocsDocumentNavigationMatchers(
   docs: FarmDocsResolvedConfig | undefined,
 ): string[] {
   if (!docs?.enabled) return [];
-  const entry = normalizeEntry(docs.entry);
-  return [entry === "/" ? "/(.*)" : `${entry}(.*)`];
+  return getFarmDocsRoots(docs).map((root) => {
+    const entry = normalizeEntry(root.entry);
+    return entry === "/" ? "/(.*)" : `${entry}(.*)`;
+  });
 }
 
 function getRequestSlug(docs: FarmDocsResolvedConfig, request: Request): string {
@@ -354,6 +374,32 @@ function titleFromMarkdown(body: string, fallback: string): string {
   return heading || fallback;
 }
 
+/**
+ * A page's date can come from a `git log` over the whole docs history, so it is resolved
+ * on the first read of `lastModified` rather than for every listing that needs only paths.
+ */
+function createLastModifiedResolver(
+  contentDir: string,
+  sourcePath: string,
+  frontmatter: Record<string, string>,
+): { get(): string | undefined; set(value: string | undefined): void } {
+  let resolved = false;
+  let value: string | undefined;
+  return {
+    get() {
+      if (!resolved) {
+        value = resolveFarmDocsPageLastModified(contentDir, sourcePath, frontmatter);
+        resolved = true;
+      }
+      return value;
+    },
+    set(next) {
+      value = next;
+      resolved = true;
+    },
+  };
+}
+
 export function loadFarmDocsPage(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
@@ -366,6 +412,7 @@ export function loadFarmDocsPage(
   const { frontmatter, body } = parseFrontmatter(source);
   const title = frontmatter.title || titleFromMarkdown(body, titleFromSlug(slug));
   const href = createDocsHref(docs.entry, slug);
+  const lastModified = createLastModifiedResolver(contentDir, sourcePath, frontmatter);
 
   return {
     slug,
@@ -374,7 +421,12 @@ export function loadFarmDocsPage(
     section: frontmatter.section,
     href,
     sourcePath,
-    lastModified: resolveFarmDocsPageLastModified(contentDir, sourcePath, frontmatter),
+    get lastModified() {
+      return lastModified.get();
+    },
+    set lastModified(value) {
+      lastModified.set(value);
+    },
     frontmatter,
     body,
   };
@@ -437,6 +489,7 @@ export function discoverFarmDocsPages(
 
       const source = readFileSync(absolutePath, "utf8");
       const { frontmatter, body } = parseFrontmatter(source);
+      const lastModified = createLastModifiedResolver(contentDir, absolutePath, frontmatter);
       pages.push({
         slug,
         title: frontmatter.title || titleFromMarkdown(body, titleFromSlug(slug)),
@@ -444,7 +497,12 @@ export function discoverFarmDocsPages(
         section: frontmatter.section,
         href: createDocsHref(docs.entry, slug),
         sourcePath: absolutePath,
-        lastModified: resolveFarmDocsPageLastModified(contentDir, absolutePath, frontmatter),
+        get lastModified() {
+          return lastModified.get();
+        },
+        set lastModified(value) {
+          lastModified.set(value);
+        },
       });
     }
   };
@@ -575,8 +633,9 @@ function renderLastUpdatedText(
   position: "footer" | "below-title",
 ): string {
   const config = resolveLastUpdatedDisplayConfig(docs);
+  if (!config.enabled || config.position !== position) return "";
   const formatted = formatLastModifiedDate(page.lastModified);
-  if (!config.enabled || config.position !== position || !formatted) return "";
+  if (!formatted) return "";
 
   const time = `<time datetime="${escapeAttribute(page.lastModified || "")}">${escapeHtml(formatted)}</time>`;
   const label = config.label.trim();
@@ -1118,6 +1177,20 @@ function renderCodeCopyButton(className = "code-copy"): string {
   return `<button class="${className}" type="button" data-code-copy data-copied="false" aria-label="Copy code" title="Copy code"><svg class="code-copy-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><svg class="code-copy-check" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"></path></svg></button>`;
 }
 
+const SCRIPT_URL_SCHEME = /^(?:javascript|vbscript|data):/i;
+
+/**
+ * Whether clicking the link runs script in the docs origin. GitHub drops the same schemes
+ * from Markdown links. Browsers ignore tabs and newlines anywhere in a URL and control
+ * characters or spaces before it, so `java\tscript:` still counts.
+ */
+function isScriptUrl(href: string): boolean {
+  const url = href.replace(/[\t\n\r]/g, "");
+  let start = 0;
+  while (start < url.length && url.charCodeAt(start) <= 0x20) start++;
+  return SCRIPT_URL_SCHEME.test(url.slice(start));
+}
+
 function renderMarkdownDocument(
   body: string,
   depth: number,
@@ -1161,6 +1234,7 @@ function renderMarkdownDocument(
   renderer.codespan = (code) => `<code>${escapeHtml(code)}</code>`;
 
   renderer.link = (href, title, text) => {
+    if (href && isScriptUrl(href)) return text;
     const safeHref = href || "";
     const titleAttribute = title ? ` title="${escapeAttribute(title)}"` : "";
     return `<a href="${escapeAttribute(safeHref)}"${titleAttribute}>${text}</a>`;

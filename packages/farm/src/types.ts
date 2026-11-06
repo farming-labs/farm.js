@@ -1,3 +1,5 @@
+import type { FarmServerComponentsConfig } from "./server-components-mode";
+import type { FarmSearchParams } from "./search-params";
 import type { FarmRenderer } from "./renderer";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { FarmAgentUserConfig } from "./agent-config";
@@ -232,8 +234,8 @@ export interface FarmConfig {
   telemetry?: boolean;
   /**
    * Request and MCP tool analytics for a Farm Infra project. On only when the server
-   * environment links the app to one (`FARMJS_API_KEY` plus `FARMJS_PROJECT_ID`, or a
-   * project's write-only key). Set to false to never send them.
+   * environment sets `FARMJS_API_KEY` (plus `FARMJS_PROJECT_ID` for a key reaching several
+   * projects). Set to false to never send them.
    */
   analytics?: boolean;
   /**
@@ -252,7 +254,12 @@ export interface FarmConfig {
    */
   suppressLintOnLink?: boolean;
   experimental?: {
-    serverComponents?: boolean;
+    /**
+     * React Server Components. `true` is `{ mode: "rsc" }`: `farm dev` and `farm build` run
+     * React's Flight pipeline from `@farm.js/plugin/rsc`. `{ mode: "islands" }` is reserved for
+     * Farm's own engine (RFC 0003). Pages and layouts are server components either way.
+     */
+    serverComponents?: FarmServerComponentsConfig;
     serverActions?: boolean;
     /**
      * Enables Partial Prerendering (static-shell caching). Routes still opt in
@@ -334,7 +341,7 @@ export interface PluginContextProps {
  */
 export interface PageProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
   params: ResolvePageRouteParams<TRoute>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: FarmSearchParams;
   path: string;
   /**
    * Data from middleware.ts in the same directory or parent directories
@@ -360,7 +367,7 @@ export interface PageProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsD
 
 export interface LoadingProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
   params: ResolvePageRouteParams<TRoute>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: FarmSearchParams;
   search?: Record<string, string | string[] | undefined>;
   path: string;
   middleware?: MiddlewareProps;

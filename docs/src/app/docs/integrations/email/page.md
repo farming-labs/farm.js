@@ -15,11 +15,13 @@ Render React Email templates, send with Resend, schedule messages, preview templ
 ```tsx
 import { resend, template } from "@farm.js/email";
 
+function WelcomeEmail({ name }: { name: string }) {
+  return <p>Hello {name}</p>;
+}
+
 const templates = {
-  welcome: template({
-    subject: "Welcome to Farm",
-    component: ({ name }: { name: string }) => <p>Hello {name}</p>,
-  }),
+  // The component comes first, so `data` is typed from its props.
+  welcome: template(WelcomeEmail, { subject: "Welcome to Farm" }),
 };
 
 export const email = resend({
@@ -63,7 +65,7 @@ routes, and webhooks remain integration options in either mode.
 ```ts
 await apiClient.email.send.post({
   body: {
-    template: "welcome",
+    templateId: "welcome",
     to: "ada@example.com",
     data: { name: "Ada" },
   },
@@ -117,11 +119,14 @@ await api.email.schedule.post({
 Templates can supply their own `subject`, `previewText`, `from`, and `replyTo`. The integration also supports global defaults, which keeps common sender details out of every call.
 
 ```tsx
+function InviteEmail({ workspace }: { workspace: string }) {
+  return <p>Join {workspace}</p>;
+}
+
 const templates = {
-  invite: template({
-    subject: ({ workspace }: { workspace: string }) => `Join ${workspace}`,
+  invite: template(InviteEmail, {
+    subject: ({ workspace }) => `Join ${workspace}`,
     previewText: "You were invited to collaborate.",
-    component: ({ workspace }: { workspace: string }) => <p>Join {workspace}</p>,
   }),
 };
 ```
