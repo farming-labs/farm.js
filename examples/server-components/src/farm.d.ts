@@ -38,6 +38,7 @@ export type RoutePath =
   | "/next/query"
   | "/next/redirect"
   | `/next/segment/${string}`
+  | "/next/styled"
   | "/next/target"
   | "/promise"
   | "/search"
@@ -78,6 +79,7 @@ export type RoutePattern =
   | "/next/query"
   | "/next/redirect"
   | "/next/segment/[id]"
+  | "/next/styled"
   | "/next/target"
   | "/promise"
   | "/search"
@@ -119,6 +121,7 @@ export type RouteModulePattern =
   | "/next/query"
   | "/next/redirect"
   | "/next/segment/[id]"
+  | "/next/styled"
   | "/next/target"
   | "/promise"
   | "/search"
