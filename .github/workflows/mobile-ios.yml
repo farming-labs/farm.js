@@ -1,0 +1,105 @@
+name: Mobile iOS
+
+# Builds examples/mobile's iOS shell with Xcode and runs it on an iOS simulator. A Mac with Xcode
+# is the only place the generated Xcode project can be checked, so this runs on GitHub's macOS
+# runners when the mobile shell, its config, or the example changes, and on demand.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packages/farm-mobile/**"
+      - "packages/farm/src/mobile/**"
+      - "packages/farm-cli/src/mobile*.ts"
+      - "examples/mobile/**"
+      - ".github/workflows/mobile-ios.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-simulator:
+    name: iOS simulator
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - run: echo "EVIDENCE=$RUNNER_TEMP/ios-evidence" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+          pnpm --filter @farm.js/mobile build
+          pnpm --filter @farm.js/native build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+
+      - name: Show Xcode and simulators
+        run: |
+          mkdir -p "$EVIDENCE"
+          xcodebuild -version | tee "$EVIDENCE/xcode-version.txt"
+          xcrun simctl list runtimes | tee "$EVIDENCE/runtimes.txt"
+
+      - name: Build the production project with xcodebuild
+        working-directory: examples/mobile
+        env:
+          FIELD_NOTES_SERVER: https://field-notes.farmjs.dev
+        run: pnpm exec farm build --mobile --os ios 2>&1 | tee "$EVIDENCE/farm-build-ios.txt"
+
+      - name: Boot an iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j |
+            jq -r '[.devices | to_entries[] | select(.key | test("iOS")) | .value[] | select(.name | test("^iPhone"))][0].udid')
+          test -n "$udid" && test "$udid" != null
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid"
+          xcrun simctl list devices booted | tee "$EVIDENCE/booted.txt"
+
+      - name: Run the shell with farm dev --mobile --os ios
+        working-directory: examples/mobile
+        run: |
+          pnpm exec farm dev --mobile --os ios --port 3001 > "$EVIDENCE/farm-dev-ios.txt" 2>&1 &
+          echo "FARM_DEV_PID=$!" >> "$GITHUB_ENV"
+          # The CLI builds, installs and launches the app, then prints "Opened <name> on <simulator>."
+          for _ in $(seq 1 180); do
+            grep -q "Opened .* on " "$EVIDENCE/farm-dev-ios.txt" && break
+            if grep -qE "xcodebuild exited|Error:" "$EVIDENCE/farm-dev-ios.txt"; then break; fi
+            sleep 5
+          done
+          cat "$EVIDENCE/farm-dev-ios.txt"
+          grep -q "Opened .* on " "$EVIDENCE/farm-dev-ios.txt"
+
+      - name: Capture the running app
+        run: |
+          xcrun simctl listapps "$SIMULATOR_UDID" | grep -A3 dev.farmjs.examples.fieldnotes | tee "$EVIDENCE/installed.txt"
+          # The first document loads from farm dev over the simulator's shared network; take one
+          # screenshot right away and more as the page settles, so a slow first load still shows.
+          for t in 0 10 30; do
+            sleep "$t"
+            xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/home-${t}s.png"
+          done
+          xcrun simctl spawn "$SIMULATOR_UDID" log show --last 5m --style compact \
+            --predicate 'process == "App"' > "$EVIDENCE/app-log.txt" || true
+          grep -iE "error|fault|crash" "$EVIDENCE/app-log.txt" | head -50 || true
+
+      - name: Stop the dev server
+        if: always()
+        run: |
+          if [ -n "${FARM_DEV_PID:-}" ]; then kill "$FARM_DEV_PID" 2>/dev/null || true; fi
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mobile-ios-${{ github.sha }}
+          path: ${{ runner.temp }}/ios-evidence
+          if-no-files-found: warn
