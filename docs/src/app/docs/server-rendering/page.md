@@ -285,7 +285,10 @@ the same error and serves the page without client JavaScript.
 
 Client components that come from a package, such as the icons in `lucide-react`, cannot be isolated
 yet. An async page renders them as static HTML and still hydrates its own client components as
-islands, and Farm logs which packages it left static.
+islands, and Farm logs which packages it left static. In islands mode every page does the same, and
+so does a layout where each element of the package closes itself and takes no element props, as
+icons do. A package component that wraps content, such as a provider, fails the build instead: render
+it from a local `"use client"` module.
 
 ### Isolated client leaves without RSC
 
