@@ -5425,6 +5425,7 @@ function analyzeKeyedRowTree(
       return "compiled keyed rows support host elements only";
     }
     if (isForeignContent(element)) return "compiled keyed rows do not support SVG yet";
+    if (tag.name === "script") return "script elements require React ownership";
     if (tag.name === "title" || tag.name === "meta") {
       return "document metadata requires React ownership";
     }
@@ -5955,6 +5956,7 @@ function analyzeHostConditionalTree(
       return "compiler-owned conditionals support host elements only";
     }
     if (isForeignContent(element)) return "compiler-owned conditionals do not support SVG yet";
+    if (tag.name === "script") return "script elements require React ownership";
     if (tag.name === "title" || tag.name === "meta") {
       return "document metadata requires React ownership";
     }
@@ -6124,6 +6126,7 @@ function analyzeRecursiveHostTree(
     if (isForeignContent(element)) {
       return "recursive compiler-owned blocks do not support SVG yet";
     }
+    if (tag.name === "script") return "script elements require React ownership";
     if (tag.name === "title" || tag.name === "meta") {
       return "document metadata requires React ownership";
     }
