@@ -248,13 +248,14 @@ Month and weekday names, six-field expressions, and provider-only extensions are
 
 `farm build` validates the config, generates adapter tasks, and writes `.farm/cron-manifest.json`.
 
-| Target            | Production behavior                                                                                                                |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel            | Farm writes each configured path and schedule to Build Output API `crons`. Vercel sends an HTTP GET to the route.                  |
-| Cloudflare Worker | With `deploy.preset: "cloudflare-module"`, Farm writes Wrangler Cron Triggers and dispatches the matching route inside the Worker. |
-| Cloudflare Pages  | Pages output does not install Cron Triggers. Use `cloudflare-module` or call the route from an external scheduler.                 |
-| Node, Bun, Deno   | Nitro runs schedules in the long-lived server process and internally calls the route.                                              |
-| Other targets     | Use the generated manifest to configure the provider's scheduler to call the route with GET and bearer auth.                       |
+| Target            | Production behavior                                                                                                                       |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel            | Farm writes each configured path and schedule to Build Output API `crons`. Vercel sends an HTTP GET to the route.                         |
+| Cloudflare Worker | With `deploy.preset: "cloudflare-module"`, Farm writes Wrangler Cron Triggers and dispatches the matching route inside the Worker.        |
+| Cloudflare Pages  | Pages output does not install Cron Triggers. Use `cloudflare-module` or call the route from an external scheduler.                        |
+| Node, Bun, Deno   | Nitro runs schedules in the long-lived server process and internally calls the route.                                                     |
+| Other targets     | Use the generated manifest to configure the provider's scheduler to call the route with GET and bearer auth.                              |
+| Any, connected    | With `FARMJS_API_KEY` at build time, [Farm.js Infra schedules the jobs](#run-by-farmjs-infra) and the host outputs above are not written. |
 
 Cloudflare Cron Triggers require Worker output:
 
@@ -281,6 +282,26 @@ npx wrangler deploy --config .farm/.output/server/wrangler.json
 ```
 
 For a self-hosted app with more than one replica, do not run an in-process scheduler in every replica. Run one dedicated scheduler instance, or configure system cron, a Kubernetes CronJob, or another external scheduler to call the HTTP route.
+
+## Run by Farm.js Infra
+
+Connect the app (`FARMJS_API_KEY`, with the `cron:jobs` permission) and Farm.js Infra becomes the
+scheduler: `farm build` registers the job list with Infra and writes **no host scheduler output**,
+so exactly one scheduler fires a job. Infra calls each route on time on every host, Cloudflare
+Pages, Netlify, Lambda, Docker, many replicas, and Vercel's Hobby plan included, retries a failing
+call three times, and keeps 30 days of run history on the dashboard.
+
+Infra signs each call (`farmjs-signature`), and `cronRoute()` verifies it with the same key, so no
+`CRON_SECRET` is needed. The signature is checked beside the secret; either authorizes.
+
+- The build needs the deployment's own https URL: the platform's (`VERCEL_PROJECT_PRODUCTION_URL`,
+  Netlify's `URL`) or an explicit `FARM_SITE_URL`.
+- A failed registration fails the build and says the fix. `FARM_CRON_SCHEDULER=host` keeps the
+  host's schedulers despite the key; `farm dev --cron`, `farm cron list`, and `farm cron run`
+  never touch Infra.
+- The manifest records the choice as `"scheduler": "farmjs" | "host"`.
+- Removing every job: a build that still has the key but zero jobs does not call Infra; delete the
+  jobs on the dashboard, or deploy once with `FARM_CRON_SCHEDULER=host`.
 
 ## Build Manifest
 

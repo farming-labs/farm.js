@@ -1,4 +1,10 @@
 import type { TypedEndpoint } from "./api/endpoint";
+import {
+  registerCronJobsWithInfra,
+  resolveCronEndpointOrigin,
+  resolveCronSchedulerEnv,
+  type FarmCronScheduler,
+} from "./cron-infra";
 import { farmSecretsMatch } from "./secret-compare";
 import { toPosixPath } from "./utils";
 import {
@@ -68,6 +74,8 @@ export interface PreparedFarmCron {
   tasks: Record<string, { handler: string; description: string }>;
   scheduledTasks: Record<string, string | string[]>;
   manifestPath?: string;
+  /** Who fires the jobs: the host's schedulers, or Farm.js Infra (then the host outputs stay empty). */
+  scheduler: FarmCronScheduler;
 }
 
 export interface FarmCronRouteOptions {
@@ -178,6 +186,34 @@ export async function prepareFarmCronForNitro(config: {
       jobs: [],
       tasks: {},
       scheduledTasks: {},
+      scheduler: "host",
+    };
+  }
+
+  // Connected builds hand the schedules to Farm.js Infra and write no host scheduler output,
+  // so exactly one scheduler fires a job. A registration failure fails the build: silently
+  // keeping host crons could double-fire later, and skipping both means the jobs never fire.
+  const infra = resolveCronSchedulerEnv();
+  if (infra.scheduler === "farmjs") {
+    const endpoint = resolveCronEndpointOrigin();
+    if (!endpoint) {
+      throw new Error(
+        "Farm.js Infra schedules this app's cron jobs, but the deployment's own https URL is " +
+          "unknown. Set `FARM_SITE_URL` in the build environment, or keep the host's schedulers " +
+          "with `FARM_CRON_SCHEDULER=host`.",
+      );
+    }
+    await registerCronJobsWithInfra({ jobs: cron.jobs, endpoint, infra });
+    await fs.rm(generatedDir, { recursive: true, force: true });
+    const manifest = createFarmCronManifest(cron, "farmjs");
+    await fs.mkdir(path.dirname(manifestPath), { recursive: true });
+    await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    return {
+      jobs: cron.jobs,
+      tasks: {},
+      scheduledTasks: {},
+      manifestPath,
+      scheduler: "farmjs",
     };
   }
 
@@ -196,7 +232,7 @@ export async function prepareFarmCronForNitro(config: {
     };
   }
 
-  const manifest = createFarmCronManifest(cron);
+  const manifest = createFarmCronManifest(cron, "host");
   await fs.mkdir(path.dirname(manifestPath), { recursive: true });
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
@@ -205,12 +241,17 @@ export async function prepareFarmCronForNitro(config: {
     tasks,
     scheduledTasks: createCronScheduledTasks(cron.jobs),
     manifestPath,
+    scheduler: "host",
   };
 }
 
-export function createFarmCronManifest(cron: FarmCronResolvedConfig) {
+export function createFarmCronManifest(
+  cron: FarmCronResolvedConfig,
+  scheduler: FarmCronScheduler = "host",
+) {
   return {
     schemaVersion: 1,
+    scheduler,
     secretEnv: cron.secretEnv,
     jobs: cron.jobs.map((job) => ({
       name: job.name,
@@ -476,6 +517,77 @@ function createFarmCronRequestContext(
  * `overlap: "skip"` guard both forms at runtime; `context.cron` is endpoint-form only, a plain
  * handler reads the cron headers from its `Request` itself.
  */
+/** Header carrying Farm.js Infra's signature on a scheduled call. */
+export const FARM_CRON_SIGNATURE_HEADER = "farmjs-signature";
+const CRON_SIGNATURE_VERSION = "farmjs-cron-v1";
+const CRON_SIGNATURE_WINDOW_SECONDS = 300;
+const CRON_SIGNATURE_PATTERN = /^t=(\d{1,12}),v1=([0-9a-f]{64})$/;
+
+function toHex(buffer: ArrayBuffer): string {
+  let hex = "";
+  for (const byte of new Uint8Array(buffer)) hex += byte.toString(16).padStart(2, "0");
+  return hex;
+}
+
+/**
+ * @internal Exported for tests. `v1` of a scheduled call's `farmjs-signature`: HMAC-SHA256 keyed
+ * with the hex SHA-256 of `FARMJS_API_KEY` (as text), over `farmjs-cron-v1\n<t>\nGET <pathname>`.
+ * Web Crypto only, so the same code runs on Workers.
+ */
+export async function farmCronSignature(
+  apiKey: string,
+  t: number,
+  pathname: string,
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", encoder.encode(apiKey));
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw",
+    encoder.encode(toHex(digest)),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await globalThis.crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(`${CRON_SIGNATURE_VERSION}\n${t}\nGET ${pathname}`),
+  );
+  return toHex(mac);
+}
+
+/**
+ * Whether a scheduler may run this cron request: the configured secret
+ * (`isCronRequestAuthorized`), or Farm.js Infra's `farmjs-signature`, verified with the
+ * `FARMJS_API_KEY` the runtime already has. No key in the runtime means signatures never verify.
+ */
+export async function authorizeCronRequest(
+  request: Request,
+  options: FarmCronRouteOptions = {},
+  now = Date.now(),
+): Promise<boolean> {
+  if (isCronRequestAuthorized(request, options)) return true;
+  const header = request.headers.get(FARM_CRON_SIGNATURE_HEADER);
+  if (!header) return false;
+  // Infra signs GET only; a Request-like object without a method or URL cannot be verified.
+  if (typeof request.method !== "string" || request.method.toUpperCase() !== "GET") return false;
+  if (typeof request.url !== "string") return false;
+  const parsed = CRON_SIGNATURE_PATTERN.exec(header.trim());
+  if (!parsed) return false;
+  const t = Number(parsed[1]);
+  if (Math.abs(now / 1000 - t) > CRON_SIGNATURE_WINDOW_SECONDS) return false;
+  const apiKey = readEnvironmentValue("FARMJS_API_KEY");
+  if (!apiKey) return false;
+  let pathname: string;
+  try {
+    pathname = new URL(request.url).pathname;
+  } catch {
+    return false;
+  }
+  const expected = await farmCronSignature(apiKey, t, pathname);
+  return farmSecretsMatch(parsed[2]!, expected);
+}
+
 export function cronRoute<TEndpoint extends FarmCronEndpoint>(
   endpoint: TEndpoint,
   options?: FarmCronRouteOptions,
@@ -491,9 +603,9 @@ export function cronRoute(
   const controls = resolveCronRunControls(options);
   if (isFarmEndpoint(handler)) return guardCronEndpoint(handler, options, controls);
   const route = handler as (request: Request, ...args: unknown[]) => unknown;
-  return (request: Request, ...args: unknown[]) => {
-    if (!isCronRequestAuthorized(request, options)) {
-      return Promise.resolve(unauthorizedCronResponse());
+  return async (request: Request, ...args: unknown[]) => {
+    if (!(await authorizeCronRequest(request, options))) {
+      return unauthorizedCronResponse();
     }
     return runCronRouteControlled(
       controls,
@@ -536,9 +648,10 @@ function guardCronEndpoint(
   controls: FarmCronRunControls,
 ): FarmCronEndpoint {
   // Duck-typed: a Node server can pass a Request-like object that is not the global class.
-  const allowed = (context: { request?: unknown } | undefined) => {
+  const allowed = async (context: { request?: unknown } | undefined) => {
     const request = context?.request as Request | undefined;
-    return typeof request?.headers?.get === "function" && isCronRequestAuthorized(request, options);
+    if (typeof request?.headers?.get !== "function") return false;
+    return authorizeCronRequest(request, options);
   };
   const withCron = (context: { request?: unknown; context?: unknown }) => {
     const controller = new AbortController();
@@ -554,8 +667,8 @@ function guardCronEndpoint(
     } as { request?: Request; context?: unknown };
     return { controller, invocation };
   };
-  const guarded = function (this: unknown, context?: { request?: unknown }) {
-    if (!allowed(context)) return Promise.resolve(unauthorizedCronResponse());
+  const guarded = async function (this: unknown, context?: { request?: unknown }) {
+    if (!(await allowed(context))) return unauthorizedCronResponse();
     const { controller, invocation } = withCron(context!);
     return runCronRouteControlled(
       controls,
@@ -569,8 +682,8 @@ function guardCronEndpoint(
     if (typeof key === "string" && FUNCTION_OWN_KEYS.has(key)) continue;
     Object.defineProperty(guarded, key, Object.getOwnPropertyDescriptor(endpoint, key)!);
   }
-  guarded.__handler = (context) => {
-    if (!allowed(context)) return unauthorizedCronResponse();
+  guarded.__handler = async (context) => {
+    if (!(await allowed(context))) return unauthorizedCronResponse();
     const { controller, invocation } = withCron(context);
     return runCronRouteControlled(
       controls,
@@ -582,7 +695,7 @@ function guardCronEndpoint(
   };
   const invoke = endpoint.__farmInvoke;
   if (invoke) {
-    guarded.__farmInvoke = (context) => {
+    guarded.__farmInvoke = async (context) => {
       // A skipped or timed-out run reports `handlerExecuted: false`: the run was refused or
       // abandoned, so its result and invalidations are not this response's to claim.
       const denied = (result: Response) => ({
@@ -591,7 +704,7 @@ function guardCronEndpoint(
         handlerExecuted: false,
         invalidations: [] as const,
       });
-      if (!allowed(context)) return denied(unauthorizedCronResponse());
+      if (!(await allowed(context))) return denied(unauthorizedCronResponse());
       const { controller, invocation } = withCron(context);
       return runCronRouteControlled(
         controls,
