@@ -1123,6 +1123,11 @@ Generated callback refs give directly patched host elements stable private targe
 React-owned component may therefore return `null`, a fragment, or multiple host nodes without
 shifting an unrelated compiler binding. These refs do not add attributes to SSR output.
 
+State-dependent `contentEditable` bindings and non-literal `contentEditable` values in host
+descriptors remain React-owned. This preserves the difference between explicit `false` (not editable)
+and an absent value (inherit from the parent). Literal strings on ordinary direct hosts remain
+eligible for compilation.
+
 Conditional blocks have three safe ownership levels. One or more proven host-only direct branches
 may become compiler-owned ranges among static host siblings, including at the exact component root.
 A dedicated container with exactly one conditional child uses the smaller compiler-owned branch

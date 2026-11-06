@@ -5373,12 +5373,15 @@ function isForeignContent(element: t.JSXElement): boolean {
 
 /**
  * Props the runtime's attribute writes don't reproduce: React applies `defaultValue` and
- * `defaultChecked` as properties, and writes booleanish `spellCheck`/`draggable` as
+ * `defaultChecked` as properties, and writes booleanish `spellCheck`/`draggable`/`contentEditable` as
  * "true"/"false" where the runtime writes "" or removes the attribute.
  */
 function reactOwnedAttribute(name: string, attribute: t.JSXAttribute): boolean {
   if (name === "defaultValue" || name === "defaultChecked") return true;
-  return (name === "spellCheck" || name === "draggable") && !t.isStringLiteral(attribute.value);
+  return (
+    (name === "spellCheck" || name === "draggable" || name === "contentEditable") &&
+    !t.isStringLiteral(attribute.value)
+  );
 }
 
 function analyzeKeyedRowTree(
@@ -8894,6 +8897,7 @@ function analyzeHostTree(
       const expression = attribute.value.expression;
       const dependencies = collectStateDependencies(expression, statesByValue);
       if (dependencies.length === 0) continue;
+      if (name === "contentEditable") return "stateful contentEditable requires React ownership";
       if (/^on[A-Z]/.test(name)) {
         if (!t.isArrowFunctionExpression(expression) && !t.isFunctionExpression(expression)) {
           return "stateful event handler selection requires React ownership";
