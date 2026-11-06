@@ -24,10 +24,11 @@ export default function Notes({ notes }) {
 
 - **Web rendering ships today.** Every primitive renders semantic HTML with
   token styling, so it works on the web and on a mobile **web** screen now.
-- **Native rendering is designed, not built yet.** On a mobile **native**
-  screen these components will render native views once the native screen
-  engine lands. Until then, native screens are a preview (see the
-  [Mobile Apps](https://farmjs.dev/docs/mobile) docs).
+- **Native rendering is unreleased.** On a React Native screen, Metro resolves
+  `@farm.js/ui` to its React Native build (from `@farm.js/native`, which apps
+  with native screens install): native views, `List` as a recycling
+  `FlatList`, and tokens resolved to the web defaults. It runs in tests, not
+  yet on a device (see the [Mobile Apps](https://farmjs.dev/docs/mobile) docs).
 
 ## Why these components
 
@@ -38,6 +39,10 @@ can port to a native screen automatically.
 
 Raw values still pass through (`padding={10}`, `background="#fff"`), and every
 box-like primitive takes a `style` escape hatch merged last.
+
+On native screens, literal strings and numbers inside `View` or `Pressable`, including
+fragments, list empty states and badges, are wrapped in native `Text`. Use `Text` explicitly
+when you need text tokens such as `size`, `weight` or `color`.
 
 ## Theming
 
