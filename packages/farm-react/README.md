@@ -1123,6 +1123,11 @@ Generated callback refs give directly patched host elements stable private targe
 React-owned component may therefore return `null`, a fragment, or multiple host nodes without
 shifting an unrelated compiler binding. These refs do not add attributes to SSR output.
 
+State-dependent `contentEditable` bindings and non-literal `contentEditable` values in host
+descriptors remain React-owned. This preserves the difference between explicit `false` (not editable)
+and an absent value (inherit from the parent). Literal strings on ordinary direct hosts remain
+eligible for compilation.
+
 `title` and `meta` elements inside conditional, keyed, or recursive host descriptors remain
 React-owned. React decides their document placement and cleanup, including React 19 head placement
 and the `itemProp` exception. The compiler does not implement a separate metadata manager.
