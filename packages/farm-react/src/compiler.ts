@@ -5425,6 +5425,9 @@ function analyzeKeyedRowTree(
       return "compiled keyed rows support host elements only";
     }
     if (isForeignContent(element)) return "compiled keyed rows do not support SVG yet";
+    if (tag.name === "title" || tag.name === "meta") {
+      return "document metadata requires React ownership";
+    }
     const attributeNames = new Set(
       element.openingElement.attributes
         .filter((attribute): attribute is t.JSXAttribute => t.isJSXAttribute(attribute))
@@ -5952,6 +5955,9 @@ function analyzeHostConditionalTree(
       return "compiler-owned conditionals support host elements only";
     }
     if (isForeignContent(element)) return "compiler-owned conditionals do not support SVG yet";
+    if (tag.name === "title" || tag.name === "meta") {
+      return "document metadata requires React ownership";
+    }
 
     for (const attribute of element.openingElement.attributes) {
       if (t.isJSXSpreadAttribute(attribute)) {
@@ -6117,6 +6123,9 @@ function analyzeRecursiveHostTree(
     }
     if (isForeignContent(element)) {
       return "recursive compiler-owned blocks do not support SVG yet";
+    }
+    if (tag.name === "title" || tag.name === "meta") {
+      return "document metadata requires React ownership";
     }
 
     for (const attribute of element.openingElement.attributes) {
