@@ -1,3 +1,4 @@
+import type { TypedEndpoint } from "./api/endpoint";
 import { farmSecretsMatch } from "./secret-compare";
 import { toPosixPath } from "./utils";
 import {
@@ -266,18 +267,91 @@ export function isCronRequestAuthorized(
   return farmSecretsMatch(bearer, secret) || farmSecretsMatch(headerSecret, secret);
 }
 
+/** A `createEndpoint()` result: Farm's route runtime calls `__handler` with the parsed context. */
+type FarmCronEndpoint = TypedEndpoint<any, any, any, any, any, any, any, any>;
+
+/**
+ * Guards an API route so only the scheduler can call it: a `createEndpoint()` result, which keeps its
+ * validation, types and metadata, or a plain handler that receives the `Request`.
+ */
+export function cronRoute<TEndpoint extends FarmCronEndpoint>(
+  endpoint: TEndpoint,
+  options?: FarmCronRouteOptions,
+): TEndpoint;
 export function cronRoute<TArgs extends unknown[], TResult>(
   handler: (request: Request, ...args: TArgs) => TResult,
+  options?: FarmCronRouteOptions,
+): (request: Request, ...args: TArgs) => TResult | Promise<Response>;
+export function cronRoute(
+  handler: ((request: Request, ...args: unknown[]) => unknown) | FarmCronEndpoint,
   options: FarmCronRouteOptions = {},
-): (request: Request, ...args: TArgs) => TResult | Promise<Response> {
-  return (request, ...args) => {
+): unknown {
+  if (isFarmEndpoint(handler)) return guardCronEndpoint(handler, options);
+  const route = handler as (request: Request, ...args: unknown[]) => unknown;
+  return (request: Request, ...args: unknown[]) => {
     if (!isCronRequestAuthorized(request, options)) {
-      return Promise.resolve(
-        Response.json({ error: "Unauthorized cron request." }, { status: 401 }),
-      );
+      return Promise.resolve(unauthorizedCronResponse());
     }
-    return handler(request, ...args);
+    return route(request, ...args);
   };
+}
+
+function unauthorizedCronResponse(): Response {
+  return Response.json({ error: "Unauthorized cron request." }, { status: 401 });
+}
+
+function isFarmEndpoint(value: unknown): value is FarmCronEndpoint & EndpointInternals {
+  return (
+    typeof value === "function" &&
+    typeof (value as unknown as EndpointInternals).__handler === "function"
+  );
+}
+
+interface EndpointInternals {
+  __handler: (context: { request?: Request }) => unknown;
+  __farmInvoke?: (context: { request?: Request; context?: unknown }) => unknown;
+}
+
+// Function own properties that describe the function itself, not the endpoint.
+const FUNCTION_OWN_KEYS = new Set(["length", "name", "prototype", "arguments", "caller"]);
+
+/**
+ * The same endpoint, with every way of invoking it checking the request first. A context with no
+ * request is refused, so a caller that cannot prove it is the scheduler never runs the handler.
+ */
+function guardCronEndpoint(
+  endpoint: FarmCronEndpoint & EndpointInternals,
+  options: FarmCronRouteOptions,
+): FarmCronEndpoint {
+  // Duck-typed: a Node server can pass a Request-like object that is not the global class.
+  const allowed = (context: { request?: unknown } | undefined) => {
+    const request = context?.request as Request | undefined;
+    return typeof request?.headers?.get === "function" && isCronRequestAuthorized(request, options);
+  };
+  const guarded = function (this: unknown, context?: { request?: unknown }) {
+    return allowed(context)
+      ? (endpoint as (...args: unknown[]) => unknown).call(this, context)
+      : Promise.resolve(unauthorizedCronResponse());
+  } as unknown as FarmCronEndpoint & EndpointInternals;
+  for (const key of Reflect.ownKeys(endpoint)) {
+    if (typeof key === "string" && FUNCTION_OWN_KEYS.has(key)) continue;
+    Object.defineProperty(guarded, key, Object.getOwnPropertyDescriptor(endpoint, key)!);
+  }
+  guarded.__handler = (context) =>
+    allowed(context) ? endpoint.__handler(context) : unauthorizedCronResponse();
+  const invoke = endpoint.__farmInvoke;
+  if (invoke) {
+    guarded.__farmInvoke = (context) =>
+      allowed(context)
+        ? invoke(context)
+        : {
+            result: unauthorizedCronResponse(),
+            context: context.context,
+            handlerExecuted: false,
+            invalidations: [],
+          };
+  }
+  return guarded;
 }
 
 function normalizeCronJob(name: string, job: FarmCronJobConfig): FarmCronJob {

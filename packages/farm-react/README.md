@@ -119,6 +119,11 @@ The current compiler handles components that it can prove have:
 - React-managed event handlers; and
 - no refs, effects, or unsupported dynamic child structures.
 
+State-dependent event handler selection, such as `onClick={active ? save : cancel}`, keeps the
+component on React's normal rendering path so replacing, adding, or removing a callback updates
+React's event props. Direct inline handlers that read state when invoked, such as
+`onClick={() => save(active)}`, retain the existing compiled path when otherwise eligible.
+
 The generated component preserves React ownership of initial placement, parent update commits,
 identity-bearing props, events, SSR, and hydration. Local state cells batch updates into a
 microtask; eligible flat destructured primitive props join the same dependency index after React
@@ -1118,8 +1123,18 @@ Generated callback refs give directly patched host elements stable private targe
 React-owned component may therefore return `null`, a fragment, or multiple host nodes without
 shifting an unrelated compiler binding. These refs do not add attributes to SSR output.
 
+`title` and `meta` elements inside conditional, keyed, or recursive host descriptors remain
+React-owned. React decides their document placement and cleanup, including React 19 head placement
+and the `itemProp` exception. The compiler does not implement a separate metadata manager.
+
 Conditional blocks have three safe ownership levels. One or more proven host-only direct branches
 may become compiler-owned ranges among static host siblings, including at the exact component root.
+Script elements in conditional branches or keyed rows remain React-owned, including nested and
+non-executable scripts. React retains responsibility for inert script creation on insertion and
+reinsertion; the compiler does not create these elements through its host descriptors.
+The production browser control is
+`NODE_ENV=production node packages/farm-react/scripts/test-script-ownership-browser.mjs` from the
+workspace root. Set `CHROME_PATH` to use an installed Chrome instead of Playwright's browser.
 A dedicated container with exactly one conditional child uses the smaller compiler-owned branch
 boundary. The more general React-owned conditional path accepts supported events, nested host
 conditionals, keyed lists, and component islands. A compiler-owned host branch may now recursively

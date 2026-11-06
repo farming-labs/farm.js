@@ -75,6 +75,41 @@ export const GET = cronRoute(async () => {
 });
 ```
 
+`cronRoute()` also wraps an endpoint made with [`createEndpoint`](/docs/api-routes). The endpoint
+keeps its validation, its typed client, and its OpenAPI and MCP metadata; only the scheduler can
+call it:
+
+```ts title="src/app/api/maintenance/cleanup/route.ts"
+import { createEndpoint } from "@farm.js/core/api";
+import { cronRoute } from "@farm.js/core/cron";
+import { z } from "zod";
+
+export const GET = cronRoute(
+  createEndpoint(
+    { query: z.object({ olderThanDays: z.coerce.number().int().positive().default(30) }) },
+    async ({ query }) =>
+      Response.json({ deleted: await deleteSessionsOlderThan(query.olderThanDays) }),
+  ),
+);
+```
+
+To schedule a route you already have, import its export into a cron-only route:
+
+```ts title="src/app/api/cron/cleanup/route.ts"
+import { cronRoute } from "@farm.js/core/cron";
+import { GET as cleanup } from "../../maintenance/cleanup/route";
+
+export const GET = cronRoute(cleanup);
+```
+
+`cronRoute()` returns a guarded copy and leaves the original alone, so `/api/maintenance/cleanup`
+still answers without the secret. When only the scheduler may call a route, wrap it where it is
+defined instead.
+
+The secret is checked where endpoint middleware runs: after the input is validated, before any
+middleware or the handler. Invalid input answers `400` first; valid input without the secret answers
+`401`. In both cases the handler does not run.
+
 `cronRoute()` verifies `Authorization: Bearer <CRON_SECRET>` whenever `CRON_SECRET` exists.
 The standard authentication scheme is case-insensitive, so schedulers may send either `Bearer` or
 `bearer`. Outside development and test it fails closed when the secret is missing, so a forgotten
