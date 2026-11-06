@@ -26,7 +26,7 @@ import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveWorkflowsConfig } from "./workflows";
-import { resolveCronConfig } from "./cron";
+import { resolveProjectCronJobs } from "./cron-scan";
 import { resolveEnv, setEnv } from "./env";
 import {
   resolveMdxConfig,
@@ -1284,6 +1284,10 @@ export async function resolveConfig(
   const env = resolveEnv(userConfig.env, process.env);
   setEnv(env);
   const api = await resolveFarmAPIConfig(userConfig.api, { root, mode, env });
+  // Route-level `cronRoute()` schedules merge with `cron` config here, so every consumer of the
+  // resolved config (build outputs, the manifest, `farm cron list|run`, `farm dev --cron`) sees
+  // one job list.
+  const cron = await resolveProjectCronJobs({ root, srcDir, cron: userConfig.cron });
   const auth = resolveFarmAuthConfig(userConfig.auth);
   const mcp = resolveFarmMCPConfig(userConfig.mcp);
   if (auth.enabled && userConfig.integrations?.auth) {
@@ -1360,7 +1364,7 @@ export async function resolveConfig(
     md,
     mdx,
     migrations: resolveMigrationsConfig(userConfig.migrations),
-    cron: resolveCronConfig(userConfig.cron),
+    cron,
     workflows: resolveWorkflowsConfig(userConfig.workflows),
     api,
     observability: userConfig.observability ?? false,
