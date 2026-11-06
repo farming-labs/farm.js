@@ -31,6 +31,12 @@
       "import": "./dist/register.js",
       "default": "./dist/register.js"
     },
+    "./ui": {
+      "types": "./dist/ui.d.ts",
+      "react-native": "./dist/ui.js",
+      "import": "./dist/ui.js",
+      "default": "./dist/ui.js"
+    },
     "./internal": {
       "types": "./dist/internal.d.ts",
       "react-native": "./dist/internal.js",

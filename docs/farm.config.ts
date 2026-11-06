@@ -1,6 +1,7 @@
 import { defineConfig } from "@farm.js/core";
 import { devtools } from "@farm.js/devtools";
 import { farmDocsRuntimeAdapter } from "@farming-labs/farmjs/runtime";
+import { agentSupportInvitation } from "./src/lib/agent-support";
 
 const siteDescription =
   "Farm.js is the full-stack framework for the web and agents: apps are agent-ready by default and run any agent runtime you bring. Built on Vite and Nitro.";
@@ -24,6 +25,8 @@ export default defineConfig({
       title: "Farm.js",
       summary: siteDescription,
       details: [
+        agentSupportInvitation,
+        "",
         "## Agent Discovery",
         "",
         "- [Agent manifest](/.well-known/agent.json): Farming Labs discovery manifest",
