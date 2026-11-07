@@ -317,10 +317,38 @@ export function createTabIcons(context: MobileShellContext): string {
 }
 
 /**
- * HTTPS only, except under `farm dev --mobile`: the dev server's host, and loopback for
- * `adb reverse`.
+ * `FARM_MOBILE_DEBUG_CA`, a PEM certificate authority a debuggable app also trusts, for testing
+ * an APK against a server with a local certificate (CI serves the app's production build over
+ * HTTPS on the runner). Android applies `debug-overrides` only to debuggable builds, so a
+ * release build never trusts it.
  */
-export function createNetworkSecurityConfig(context: MobileShellContext): string {
+export const DEBUG_CA_RESOURCE = "app/src/main/res/raw/farm_debug_ca.pem";
+
+/** The CA `FARM_MOBILE_DEBUG_CA` names, or undefined when it is unset. */
+export async function readDebugCa(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | undefined> {
+  const file = env.FARM_MOBILE_DEBUG_CA;
+  if (!file) return undefined;
+  const pem = await readFile(file, "utf8").catch((error: Error) => {
+    throw new Error(`FARM_MOBILE_DEBUG_CA: cannot read ${file}: ${error.message}`);
+  });
+  if (!/^-----BEGIN CERTIFICATE-----$/m.test(pem) || /PRIVATE KEY-----/.test(pem)) {
+    throw new Error(
+      `FARM_MOBILE_DEBUG_CA: ${file} must hold PEM certificates only, and never a private key.`,
+    );
+  }
+  return pem;
+}
+
+/**
+ * HTTPS only, except under `farm dev --mobile`: the dev server's host, and loopback for
+ * `adb reverse`. With `debugCa`, debuggable builds also trust `FARM_MOBILE_DEBUG_CA`.
+ */
+export function createNetworkSecurityConfig(
+  context: MobileShellContext,
+  options: { debugCa?: boolean } = {},
+): string {
   const server = new URL(context.manifest.server);
   const cleartext = new Set<string>();
   if (context.command === "dev") {
@@ -334,10 +362,14 @@ export function createNetworkSecurityConfig(context: MobileShellContext): string
   const devConfig = domains
     ? `\n    <domain-config cleartextTrafficPermitted="true">\n${domains}\n    </domain-config>`
     : "";
+  // Added to the system's CAs, in debuggable builds only.
+  const debugConfig = options.debugCa
+    ? `\n    <debug-overrides>\n        <trust-anchors>\n            <certificates src="@raw/farm_debug_ca" />\n        </trust-anchors>\n    </debug-overrides>`
+    : "";
   return `<?xml version="1.0" encoding="utf-8"?>
 <!-- ${XML_GENERATED} -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />${devConfig}
+    <base-config cleartextTrafficPermitted="false" />${devConfig}${debugConfig}
 </network-security-config>
 `;
 }
@@ -498,6 +530,7 @@ async function readTemplateFiles(dir: string, prefix = ""): Promise<MobileGenera
 export async function createAndroidProject(
   context: MobileShellContext,
 ): Promise<MobileGeneratedFile[]> {
+  const debugCa = await readDebugCa();
   const byPath = new Map<string, MobileGeneratedFile>();
   const add = (file: MobileGeneratedFile) => byPath.set(file.path, file);
   (await readTemplateFiles(TEMPLATE_DIR)).forEach(add);
@@ -564,8 +597,9 @@ export async function createAndroidProject(
     { path: "app/src/main/res/values/tabs.xml", contents: createTabIcons(context) },
     {
       path: "app/src/main/res/xml/network_security_config.xml",
-      contents: createNetworkSecurityConfig(context),
+      contents: createNetworkSecurityConfig(context, { debugCa: debugCa !== undefined }),
     },
+    ...(debugCa === undefined ? [] : [{ path: DEBUG_CA_RESOURCE, contents: debugCa }]),
   );
   // The images the screens require(): resources React Native finds by name, as Metro named them.
   const shellFiles = new Set(files.map((file) => file.path));

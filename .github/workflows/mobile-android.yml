@@ -85,14 +85,37 @@ jobs:
           "$SDK/emulator/emulator" -list-avds | tee "$EVIDENCE/avds.txt"
           grep -qx "farm" "$EVIDENCE/avds.txt"
 
+      # A CA made for this run only. The APK is debuggable, so FARM_MOBILE_DEBUG_CA makes it trust
+      # this CA too (network_security_config's debug-overrides); a release build never would.
+      - name: Make the run's certificates
+        run: |
+          "$GITHUB_WORKSPACE/examples/mobile/scripts/ci-tls.sh" "$RUNNER_TEMP/tls"
+          echo "FARM_MOBILE_DEBUG_CA=$RUNNER_TEMP/tls/ca.pem" >> "$GITHUB_ENV"
+
+      # The production APK loads from the app's own production server, built by the same command
+      # and served over HTTPS on this runner, which the emulator reaches as 10.0.2.2.
       - name: Build the APK with farm build --mobile --apk
         working-directory: examples/${{ matrix.example }}
         env:
-          FIELD_NOTES_SERVER: https://field-notes.farmjs.dev
-          TRAIL_GUIDE_SERVER: https://trail-guide.farmjs.dev
+          FIELD_NOTES_SERVER: https://10.0.2.2:3443
+          TRAIL_GUIDE_SERVER: https://10.0.2.2:3443
         run: |
           export JAVA_HOME="$JAVA_HOME_21_X64"
           pnpm exec farm build --mobile --apk 2>&1 | tee "$EVIDENCE/farm-build-android.txt"
+
+      - name: Serve the production build over HTTPS
+        working-directory: examples/${{ matrix.example }}
+        run: |
+          PORT=3100 HOST=127.0.0.1 node .farm/output/mobile/www/server/index.mjs \
+            > "$EVIDENCE/production-server.txt" 2>&1 &
+          echo "PRODUCTION_SERVER_PID=$!" >> "$GITHUB_ENV"
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/https-proxy.mjs" \
+            "$RUNNER_TEMP/tls/server.pem" "$RUNNER_TEMP/tls/server-key.pem" 3443 3100 \
+            > "$EVIDENCE/https-proxy.txt" 2>&1 &
+          echo "HTTPS_PROXY_PID=$!" >> "$GITHUB_ENV"
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/https-ready.mjs" "$RUNNER_TEMP/tls/ca.pem" \
+            https://localhost:3443/ 60 || { cat "$EVIDENCE/production-server.txt" "$EVIDENCE/https-proxy.txt"; exit 1; }
+          cat "$EVIDENCE/production-server.txt" "$EVIDENCE/https-proxy.txt"
 
       - name: Boot the emulator
         run: |
@@ -139,6 +162,36 @@ jobs:
           fi
           "$ADB" devices | tee "$EVIDENCE/devices.txt"
           "$ADB" logcat -c || true
+
+      # The production APK's home tab is a server screen: it must draw native content from the
+      # local production server, over HTTPS with the run's CA.
+      - name: Open the production APK against the local server
+        working-directory: examples/${{ matrix.example }}
+        env:
+          APP_ID: ${{ matrix.app-id }}
+          SERVER_ROUTES: ${{ matrix.server-routes }}
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          mkdir -p "$EVIDENCE/production"
+          cp .farm/output/mobile/farm-routes.json "$EVIDENCE/production/farm-routes.json"
+          "$ADB" install -r ".farm/output/mobile/dist/$APP_ID-debug.apk"
+          "$ADB" logcat -c || true
+          "$ADB" shell am start -W -n "$APP_ID/dev.farmjs.mobile.shell.MainActivity"
+          # The shell logs "open->content=<ms>ms" once the home tab drew, or names a fallback.
+          for _ in $(seq 1 45); do
+            "$ADB" logcat -d -s FarmShell:V AndroidRuntime:E > "$EVIDENCE/production/app-log.txt"
+            grep -qE "open->content=|showing the web screen|FATAL EXCEPTION" "$EVIDENCE/production/app-log.txt" && break
+            sleep 2
+          done
+          "$ADB" exec-out screencap -p > "$EVIDENCE/production-home.png"
+          tail -30 "$EVIDENCE/production/app-log.txt"
+          # farm dev installs its own debug app under the same id later, and its checks read only
+          # its own log.
+          "$ADB" uninstall "$APP_ID" || true
+          "$ADB" logcat -c || true
+          # Split the routes into arguments without globbing: /trails/[id] is a route, not a pattern.
+          set -f
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/check-android-native.mjs" "$EVIDENCE/production" $SERVER_ROUTES
 
       # examples/mobile's React Native screen /map in the APK farm build made. Its trail blaze is
       # an image bundled with the screen (blaze.png): under farm dev Metro serves it, in a build
@@ -217,10 +270,12 @@ jobs:
           set -f
           node "$GITHUB_WORKSPACE/examples/mobile/scripts/check-android-native.mjs" "$EVIDENCE" $SERVER_ROUTES
 
-      - name: Stop the dev server
+      - name: Stop the dev server and the production server
         if: always()
         run: |
-          if [ -n "${FARM_DEV_PID:-}" ]; then kill "$FARM_DEV_PID" 2>/dev/null || true; fi
+          for pid in "${FARM_DEV_PID:-}" "${PRODUCTION_SERVER_PID:-}" "${HTTPS_PROXY_PID:-}"; do
+            if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
+          done
 
       - name: Keep the evidence
         if: always()
