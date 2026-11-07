@@ -385,6 +385,7 @@ const sidebar = [
           { label: "MSW", slug: "plugins/msw", icon: "shield" },
           { label: "Partytown", slug: "plugins/partytown", icon: "zap" },
           { label: "PWA", slug: "plugins/pwa", icon: "smartphone" },
+          { label: "Progress", slug: "plugins/progress", icon: "activity" },
           { label: "Search", slug: "plugins/search", icon: "search" },
           { label: "Scripts", slug: "plugins/scripts", icon: "code" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
