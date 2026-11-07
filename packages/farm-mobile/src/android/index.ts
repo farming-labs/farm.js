@@ -16,6 +16,8 @@ export {
   createRootBuildGradle,
   createStrings,
   createTabIcons,
+  DEBUG_CA_RESOURCE,
+  readDebugCa,
   resolveTabIcon,
   MAIN_ACTIVITY,
   NATIVE_BUNDLE_ASSET,

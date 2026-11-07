@@ -13,6 +13,7 @@ import shell, {
   BUNDLED_ASSETS_DIR,
   BUNDLED_ASSETS_MANIFEST,
   createAndroidProject,
+  DEBUG_CA_RESOURCE,
   listAndroidDevices,
   MAIN_ACTIVITY,
   NATIVE_BUNDLE_ASSET,
@@ -25,6 +26,7 @@ const roots: string[] = [];
 const previousEnv = {
   ANDROID_HOME: process.env.ANDROID_HOME,
   ANDROID_SDK_ROOT: process.env.ANDROID_SDK_ROOT,
+  FARM_MOBILE_DEBUG_CA: process.env.FARM_MOBILE_DEBUG_CA,
 };
 afterEach(async () => {
   for (const [key, value] of Object.entries(previousEnv)) {
@@ -246,6 +248,38 @@ describe("@farm.js/mobile/android", () => {
     )["app/src/main/res/xml/network_security_config.xml"];
     expect(build).toContain('<base-config cleartextTrafficPermitted="false" />');
     expect(build).not.toContain("domain-config");
+  });
+
+  it("trusts FARM_MOBILE_DEBUG_CA in debuggable builds only, and nothing without it", async () => {
+    const ctx = context({
+      command: "build",
+      manifest: { ...context().manifest, server: "https://10.0.2.2:3443" },
+    });
+    const plain = await generated(ctx);
+    expect(plain["app/src/main/res/xml/network_security_config.xml"]).not.toContain(
+      "debug-overrides",
+    );
+    expect(plain[DEBUG_CA_RESOURCE]).toBeUndefined();
+
+    const dir = await tempDir();
+    const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+    await writeFile(path.join(dir, "ca.pem"), pem);
+    process.env.FARM_MOBILE_DEBUG_CA = path.join(dir, "ca.pem");
+    const trusted = await generated(ctx);
+    const config = trusted["app/src/main/res/xml/network_security_config.xml"]!;
+    // debug-overrides: Android adds these anchors to the system's in debuggable builds only.
+    expect(config).toMatch(
+      /<debug-overrides>\s*<trust-anchors>\s*<certificates src="@raw\/farm_debug_ca" \/>\s*<\/trust-anchors>\s*<\/debug-overrides>/,
+    );
+    expect(config).toContain('<base-config cleartextTrafficPermitted="false" />');
+    expect(trusted[DEBUG_CA_RESOURCE]).toBe(pem);
+
+    // A private key never ships, and a missing file says which variable named it.
+    await writeFile(path.join(dir, "key.pem"), `${pem}-----BEGIN PRIVATE KEY-----\n`);
+    process.env.FARM_MOBILE_DEBUG_CA = path.join(dir, "key.pem");
+    await expect(createAndroidProject(ctx)).rejects.toThrow(/never a private key/);
+    process.env.FARM_MOBILE_DEBUG_CA = path.join(dir, "missing.pem");
+    await expect(createAndroidProject(ctx)).rejects.toThrow(/FARM_MOBILE_DEBUG_CA: cannot read/);
   });
 
   it("never exposes the bridge to every frame through addJavascriptInterface", async () => {

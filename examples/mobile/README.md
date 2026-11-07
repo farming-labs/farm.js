@@ -54,7 +54,9 @@ The `Mobile iOS` workflow builds the production simulator project against the ex
 production server, `farm build --mobile`'s Node build, which it serves over HTTPS on the runner
 (`scripts/https-proxy.mjs`, with a certificate from a CA it makes for the run in
 `scripts/ci-tls.sh` and trusts on the simulator; production apps accept only HTTPS). It checks the
-production app's home tab, its React Native screens, and then the dev app. Each home-tab check
+production app's home tab, its React Native screens, and then the dev app. `Mobile Android` does
+the same with the production APK at `https://10.0.2.2:3443`, which trusts the run's CA through
+`FARM_MOBILE_DEBUG_CA` (debuggable builds only). Each home-tab check
 requires a `server` rule and a persisted `server screen ready: /` log from the shell after it
 installs the UIKit content; missing completion or a web fallback fails the job. The artifact keeps
 `farm-routes.json`, `app-log.txt` (`production/` for the production app), and screenshots; rerun a

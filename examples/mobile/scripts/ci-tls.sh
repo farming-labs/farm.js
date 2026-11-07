@@ -23,13 +23,14 @@ CN = localhost
 basicConstraints = critical, CA:TRUE
 keyUsage = critical, keyCertSign, cRLSign
 subjectKeyIdentifier = hash
-# What iOS requires of a server certificate: a subject alternative name, serverAuth, SHA-256,
-# RSA 2048, and at most 825 days of validity.
+# 10.0.2.2 is the runner as the Android emulator reaches it. What iOS requires of a server
+# certificate: a subject alternative name, serverAuth, SHA-256, RSA 2048, and at most 825 days of
+# validity.
 [v3_server]
 basicConstraints = critical, CA:FALSE
 keyUsage = critical, digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
-subjectAltName = DNS:localhost, IP:127.0.0.1, IP:::1
+subjectAltName = DNS:localhost, IP:127.0.0.1, IP:::1, IP:10.0.2.2
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid, issuer
 CNF

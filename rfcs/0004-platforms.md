@@ -1439,7 +1439,10 @@ in Farm's navigator".
   Node build over HTTPS on the runner, with a certificate from a CA made for the run and trusted
   on the simulator (`simctl keychain add-root-cert`), and builds the apps against
   `https://localhost:3443`. Production apps stay HTTPS-only: nothing in the shell or the
-  generated project changes. Android, whose apps trust only the system's CAs, is not covered yet.
+  generated project changes. `Mobile Android` does the same for the production APK, at
+  `https://10.0.2.2:3443` as the emulator reaches the runner. Android apps trust only the system's
+  CAs, so `FARM_MOBILE_DEBUG_CA` bundles a CA into the project and trusts it in the network security
+  config's `debug-overrides`, which Android applies to debuggable builds only.
 - Not done: a device (launch, memory and smoothness on a phone).
 
 ### The iOS project is a generated pbxproj

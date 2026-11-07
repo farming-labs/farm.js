@@ -536,6 +536,15 @@ html[data-farm-shell] .web-tabs {
 Cleartext (`http://`) is allowed only under `farm dev --mobile`, for the dev server and the
 emulator loopback; builds are `https://` only.
 
+To test an APK against a server with a local certificate (a staging server, or your production
+build behind a TLS proxy on your machine), set `FARM_MOBILE_DEBUG_CA` to the PEM file of the
+certificate authority that signed it when you run `farm dev --mobile` or `farm build --mobile`.
+Farm bundles it as `res/raw/farm_debug_ca.pem` and trusts it in the network security config's
+`debug-overrides`, which Android applies only to debuggable builds, such as the APK `--apk`
+builds; a release build never trusts it. The file must hold certificates only: a private key fails
+the command. The `Mobile Android` workflow uses it to load the production APK from the example's
+own production build on the runner.
+
 ## Run on iOS
 
 `--os ios` generates the iOS shell as an Xcode project. The Mobile iOS CI workflow builds the
