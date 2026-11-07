@@ -5428,6 +5428,7 @@ function analyzeKeyedRowTree(
       return "compiled keyed rows support host elements only";
     }
     if (isForeignContent(element)) return "compiled keyed rows do not support SVG yet";
+    if (tag.name.includes("-")) return "custom elements require React ownership";
     if (tag.name === "script") return "script elements require React ownership";
     if (tag.name === "title" || tag.name === "meta") {
       return "document metadata requires React ownership";
@@ -5465,6 +5466,7 @@ function analyzeKeyedRowTree(
       }
       const name = jsxAttributeName(attribute);
       if (!name) return "compiled keyed rows do not support namespaced JSX attributes";
+      if (name === "is") return "customized built-in elements require React ownership";
       if (
         name === "ref" ||
         name === "dangerouslySetInnerHTML" ||
@@ -5959,6 +5961,7 @@ function analyzeHostConditionalTree(
       return "compiler-owned conditionals support host elements only";
     }
     if (isForeignContent(element)) return "compiler-owned conditionals do not support SVG yet";
+    if (tag.name.includes("-")) return "custom elements require React ownership";
     if (tag.name === "script") return "script elements require React ownership";
     if (tag.name === "title" || tag.name === "meta") {
       return "document metadata requires React ownership";
@@ -5971,6 +5974,7 @@ function analyzeHostConditionalTree(
       }
       const name = jsxAttributeName(attribute);
       if (!name) return "compiler-owned conditionals do not support namespaced JSX attributes";
+      if (name === "is") return "customized built-in elements require React ownership";
       if (reactOwnedAttribute(name, attribute)) {
         return `compiler-owned conditional ${name} requires React ownership`;
       }
@@ -6129,6 +6133,7 @@ function analyzeRecursiveHostTree(
     if (isForeignContent(element)) {
       return "recursive compiler-owned blocks do not support SVG yet";
     }
+    if (tag.name.includes("-")) return "custom elements require React ownership";
     if (tag.name === "script") return "script elements require React ownership";
     if (tag.name === "title" || tag.name === "meta") {
       return "document metadata requires React ownership";
@@ -6140,6 +6145,7 @@ function analyzeRecursiveHostTree(
       }
       const name = jsxAttributeName(attribute);
       if (!name) return "recursive compiler-owned blocks do not support namespaced attributes";
+      if (name === "is") return "customized built-in elements require React ownership";
       if (reactOwnedAttribute(name, attribute)) {
         return `recursive compiler-owned block ${name} requires React ownership`;
       }
@@ -8891,11 +8897,13 @@ function analyzeHostTree(
     if (!t.isJSXIdentifier(tag) || !/^[a-z]/.test(tag.name)) {
       return "compiled trees currently support host elements only";
     }
+    if (tag.name.includes("-")) return "custom elements require React ownership";
 
     for (const attribute of element.openingElement.attributes) {
       if (t.isJSXSpreadAttribute(attribute)) return "JSX attribute spreads are not supported yet";
       const name = jsxAttributeName(attribute);
       if (!name) return "namespaced JSX attributes are not supported yet";
+      if (name === "is") return "customized built-in elements require React ownership";
       if (name === "ref" || name === "dangerouslySetInnerHTML") {
         return `${name} requires React ownership`;
       }

@@ -114,16 +114,34 @@ describe("compiled updates block javascript: URLs like React", () => {
         );
       }
     `;
-    const container = await expectSameAsReact(source, "Single", ["#set", "#reset", "#set"]);
+    const container = await expectSameAsReact(
+      source.replace("<farm-link href={url} />", ""),
+      "Single",
+      ["#set", "#reset", "#set"],
+    );
     expect(container.querySelector("#link")!.getAttribute("href")).toBe(BLOCKED);
     expect(container.querySelector("img")!.getAttribute("src")).toBe(BLOCKED);
     expect(container.querySelector("embed")!.getAttribute("src")).toBe(BLOCKED);
     expect(container.querySelector("button[formaction]")!.getAttribute("formaction")).toBe(BLOCKED);
     expect(container.querySelector("form")!.getAttribute("action")).toBe(BLOCKED);
     expect(container.querySelector("object")!.getAttribute("data")).toBe(BLOCKED);
-    // React leaves custom elements and non-URL props alone; so does the compiler.
-    expect(container.querySelector("farm-link")!.getAttribute("href")).not.toBe(BLOCKED);
+    // Non-URL props are not sanitized on the compiled path.
     expect(container.querySelector("div[data]")!.getAttribute("data")).not.toBe(BLOCKED);
+
+    const { compiled, original, names, reasons } = await loadCompiledAndOriginal(source);
+    expect(names).toEqual([]);
+    expect(reasons).toEqual(["custom elements require React ownership"]);
+    const control = await mount(original.Single);
+    const fallback = await mount(compiled.Single);
+    expect(fallback.innerHTML).toBe(control.innerHTML);
+    for (const selector of ["#set", "#reset", "#set"]) {
+      for (const target of [control, fallback]) {
+        await act(async () => target.querySelector<HTMLElement>(selector)!.click());
+      }
+      expect(fallback.innerHTML).toBe(control.innerHTML);
+    }
+    expect(fallback.querySelector("#link")!.getAttribute("href")).toBe(BLOCKED);
+    expect(fallback.querySelector("farm-link")!.getAttribute("href")).not.toBe(BLOCKED);
   });
 
   it("keyed rows, for added rows and updated rows", async () => {
