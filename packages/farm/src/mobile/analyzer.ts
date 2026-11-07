@@ -198,6 +198,8 @@ export interface FarmMobileAnalyzeOptions {
   routes: readonly string[];
   /** Absolute page file per file-based route; routes without one are programmatic. */
   pageFiles: ReadonlyMap<string, string>;
+  /** Routes whose only page is a screen file (RFC 0004, 7.3): not analyzed, not programmatic. */
+  nativeOnlyRoutes?: ReadonlySet<string>;
   /** `experimental.serverComponents` is on: pages and layouts without "use client" render on the server. */
   serverComponents?: boolean;
   /** Content-hash cache of module facts; written back after the run. */
@@ -1522,6 +1524,9 @@ export async function analyzeFarmMobileRoutes(
   const allStylesheets = new Set<string>();
   const unreadStylesheets = new Set<string>();
   for (const [route, { page, layouts }] of entries) {
+    // A native-only route (no page.tsx) has nothing to analyze: its screen file is the decision.
+    // A programmatic route also has no page file, and keeps its blocker row below.
+    if (!page && options.nativeOnlyRoutes?.has(route)) continue;
     const blockers: FarmMobileBlocker[] = [];
     const wins = new Set<FarmMobileWin>();
     const elements: FarmMobileElementCounts = { total: 0, mapped: 0, byKind: {} };

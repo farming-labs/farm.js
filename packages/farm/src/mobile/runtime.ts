@@ -242,7 +242,7 @@ export async function resolveFarmMobileApp(
     componentExtensions: getFarmRendererComponentExtensions(config.renderer),
     platformFiles: true,
   });
-  const routes = [...scan.pages].sort();
+  const routes = [...scan.pages, ...scan.nativeOnlyPages].sort();
   let appModules: FarmMobileAppModules | undefined;
   try {
     appModules = scanFarmMobileAppModules({ root, srcDir: config.srcDir });
@@ -287,6 +287,7 @@ export async function resolveFarmMobileApp(
     routes,
     mobile,
     nativePages: scan.nativePages,
+    nativeOnlyRoutes: scan.nativeOnlyPages,
     pageExports,
   };
   let { screens, warnings } = resolveFarmMobileScreens(screenOptions);
@@ -318,6 +319,7 @@ export async function resolveFarmMobileApp(
       srcDir: config.srcDir,
       routes: portable ? routes : candidates,
       pageFiles: scan.pageFiles,
+      nativeOnlyRoutes: scan.nativeOnlyPages,
       serverComponents:
         resolveFarmServerComponentsMode(config.experimental?.serverComponents) !== undefined,
       cacheFile: path.resolve(root, getFarmMobileOutputDirs(config.distDir).analyzerCache),

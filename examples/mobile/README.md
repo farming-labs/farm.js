@@ -33,6 +33,7 @@ pnpm smoke               # checks the mobile decisions and the web build
 | `/stations/[id]`         | A programmatic route (`src/farm.routes.tsx`) whose data comes from `data.main` |
 | `/map`                   | `page.native.tsx`: a React Native list of stations from `GET /api/stations`; a row opens the web `/stations/[id]`; the device model from the app's `Device` module and a vibrate button. `mobile.native.routes` keeps it web on iOS |
 | `/camera`                | `page.native.tsx` with a `page.android.tsx` override: notes from `GET /api/notes`, a quick note through the `createNote` server function called by import, and a button to the web `/notes/new` modal |
+| `/kit`                   | **Native-only** (RFC 0004, 7.3): `page.native.tsx` with no `page.tsx`. A packing checklist from `@farm.js/ui` as native views; the route exists only in the app, and the web server answers it 404 |
 | `/settings/device`       | `page.kt`: a platform screen on Android                                   |
 | `/lab/packing`           | Only portable elements and inline styles: the analyzer says `port`, and `farm build --mobile` generates its React Native port on Android |
 | `/lab/chart`             | A canvas through a ref, a table, and `window`: the analyzer lists why it stays web |

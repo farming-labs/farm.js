@@ -42,6 +42,8 @@ export interface FarmMobileScreenDecision {
   module?: string;
   /** The tier a config route or the analyzer asked for, while nothing can build it yet. */
   requested?: Exclude<FarmMobileScreen, "web">;
+  /** The route has no `page.tsx` (RFC 0004, 7.3): mobile only, no web screen, no web fallback. */
+  nativeOnly?: boolean;
   presentation: FarmMobilePresentation;
   prefetch: FarmMobilePrefetch;
 }
@@ -60,6 +62,8 @@ export interface FarmMobileScreensOptions {
   mobile: Pick<ResolvedFarmMobileConfig, "routes" | "native">;
   /** Absolute screen files per route. */
   nativePages?: ReadonlyMap<string, PlatformRouteFiles>;
+  /** Routes with screen files and no `page.tsx`; always a subset of `nativePages`' keys. */
+  nativeOnlyRoutes?: ReadonlySet<string>;
   pageExports?: ReadonlyMap<string, FarmMobilePageExport>;
   /** Routes the analyzer would port; used only with `native.auto: "on"`. */
   analyzerPorts?: ReadonlySet<string>;
@@ -141,6 +145,33 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
       presentation: page?.config.presentation ?? configPresentation ?? "push",
       prefetch: page?.config.prefetch ?? native.prefetch,
     };
+
+    if (options.nativeOnlyRoutes?.has(route)) {
+      // No page.tsx: the screen file is the route (RFC 0004, 7.3). There is no web screen to
+      // demote to and no analyzer input, so the file decides, and `"web"` in the config is the
+      // one thing to reject rather than silently point at a page that does not exist.
+      if (tier === "web") {
+        throw new TypeError(
+          `${prefix}: ${where}.${tierKey} is "web", but "${route}" is native-only: it has ` +
+            `${relativeFile(root, (reactFile ?? platformFile)!)} and no page.tsx, so there is ` +
+            "no web screen. Add the page, or remove the config route.",
+        );
+      }
+      const file = reactFile ?? platformFile;
+      if (!file) {
+        // native-only needs page.native.tsx (the scan enforces it), so both OSes land here.
+        throw new TypeError(`${prefix}: "${route}" is native-only but has no screen file.`);
+      }
+      screens[route] = {
+        screen: reactFile ? "native" : "platform",
+        source: "file",
+        file: relativeFile(root, file),
+        module,
+        nativeOnly: true,
+        ...base,
+      };
+      continue;
+    }
 
     if (page?.config.native === false) {
       if (tier !== undefined && tier !== "web") {

@@ -31,6 +31,8 @@ export interface FarmMobileRouteRule {
   source?: FarmMobileScreenSource;
   /** Native module id derived from the route, such as `"app/notes/[id]"`. Not on web screens. */
   module?: string;
+  /** The route has no web page (RFC 0004, 7.3): shells must not fall back to a web screen. */
+  nativeOnly?: true;
   /** Only when the page overrides the manifest's `prefetch`. */
   prefetch?: FarmMobilePrefetch;
 }
@@ -178,6 +180,7 @@ export function createFarmMobileRouteManifest(
       screen: decision.screen,
       source: decision.source,
       ...(decision.module ? { module: decision.module } : {}),
+      ...(decision.nativeOnly ? { nativeOnly: true as const } : {}),
       ...(decision.prefetch !== mobile.native.prefetch ? { prefetch: decision.prefetch } : {}),
     };
   });

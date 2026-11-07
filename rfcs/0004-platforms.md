@@ -638,9 +638,10 @@ src/app/feed/
   native-only route has neither: it cannot be a `server` screen, `screen: "web"` on it is a
   validation error, and its errors stay inside the screen (the React Native error boundary, or the
   shell's error view). Analyzer tiers do not apply; the screen file is the decision.
-  (Implementation note: the preview still requires `page.tsx` — `generate-route-types` fails a
-  native file without one. Lifting that is staged work; the shells' route config must learn
-  entries with no web URL first.)
+  (Implementation note: implemented for `page.native.tsx`; a lone OS or platform file still
+  fails, since the route would be missing on the other OS. The manifest rule carries
+  `nativeOnly: true`; the shells do not read it yet, so a native-only screen that fails to mount
+  falls back to the route's web URL, which the server answers as its not-found page.)
 - A React Native file and a platform file for the same route and OS is a build error.
 - Web and desktop builds never resolve these files. They are not routes, not in the generated
   route types, and not in any web bundle.
@@ -1406,7 +1407,7 @@ changing the model.
 
 ### Native-first routes may drop their web page
 
-Decided 2026-11-07. Amends 7.1 and 7.3; implementation is staged, not merged.
+Decided 2026-11-07. Amends 7.1 and 7.3; the core implementation landed the same day.
 
 - `page.tsx` alone stays the portable authoring path: the web page, the mobile web screen, the
   analyzer's input, and the web twin a native screen falls back to. `page.native.tsx` next to it
@@ -1416,10 +1417,15 @@ Decided 2026-11-07. Amends 7.1 and 7.3; implementation is staged, not merged.
   builds only, no web route types, no web bundle, no fallback — the screen owns its errors.
 - `server` screens and the analyzer stay out of native-only routes by construction: both exist
   only as renderings of a `page.tsx`.
-- Staging: the shells' generated route config must first accept entries with no web URL (today
-  every entry has one); then `generate-route-types` records native-only patterns instead of
-  failing them; then the mobile dev server and the production manifest carry them. Until then the
-  build error stands.
+- Implemented: `generate-route-types` records `page.native.tsx`-only patterns as
+  `nativeOnlyPages` instead of failing them; the screens resolver makes the file the decision,
+  rejects `screen: "web"` config on such a route, and marks the decision and the manifest rule
+  `nativeOnly: true`; the analyzer skips them (a programmatic route still gets its blocker row).
+  `examples/mobile`'s `/kit` is the executable contract, asserted by its smoke: native on both
+  OSes, absent from the web output, a 404 on the web server. Remaining: a lone OS or platform
+  file still needs a `page.tsx` (the route would be missing on the other OS, which the shells'
+  route config cannot express), and the shells do not read `nativeOnly` yet, so a screen that
+  fails to mount falls back to the route's web URL — the server's not-found page.
 
 ## 9. Rollout
 
