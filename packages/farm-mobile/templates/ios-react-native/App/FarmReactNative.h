@@ -50,6 +50,18 @@ NS_SWIFT_UI_ACTOR
     NS_SWIFT_NAME(openModule(_:screen:properties:host:));
 - (void)closeScreen:(NSInteger)screen NS_SWIFT_NAME(closeScreen(_:));
 
+/// A web screen's call to the app module `name` (mobile.modules.<name>.web): `selector` is
+/// Codegen's, such as `vibrate:resolve:reject:`, and `arguments` its parameters before the promise
+/// blocks, already checked against the spec (NSNull for null). Starts the runtime if no native
+/// screen has, and runs once the bundle has loaded, on the module's method queue. `reply` runs
+/// once, on any thread: the resolved value as JSON text, or a rejection's code and message.
+- (void)callModule:(NSString *)name
+          selector:(NSString *)selector
+         arguments:(NSArray *)arguments
+             reply:(void (NS_SWIFT_SENDABLE ^)(NSString *_Nullable json, NSString *_Nullable code,
+                                               NSString *_Nullable message))reply
+    NS_SWIFT_NAME(callModule(_:selector:arguments:reply:));
+
 /// Why the runtime failed, or nil. Set once a fatal JS or native error reached React Native.
 @property (nonatomic, readonly, nullable) NSString *failure;
 /// Runs on the main thread after a failure; every open screen has been sent `farmFallback:`.

@@ -179,6 +179,27 @@ jobs:
           set -f
           node "$GITHUB_WORKSPACE/examples/mobile/scripts/check-ios-native.mjs" "$EVIDENCE" $SERVER_ROUTES
 
+      # A web screen calling the app's own Device module (mobile.modules.Device.web) through the
+      # bridge. Under farm dev: the production app's server has no deployment in CI.
+      - name: Call the Device module from the /settings web screen
+        if: matrix.example == 'mobile'
+        run: |
+          started=$(date '+%Y-%m-%d %H:%M:%S')
+          xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" dev.farmjs.examples.fieldnotes \
+            -FarmOpen /settings
+          # The shell logs "web module Device.model ok in <ms>ms" once the module answered.
+          for _ in $(seq 1 24); do
+            sleep 5
+            xcrun simctl spawn "$SIMULATOR_UDID" log show --start "$started" --style compact \
+              --predicate 'process == "App"' > "$EVIDENCE/settings-log.txt"
+            grep -qE "web module Device\.model (ok|failed)" "$EVIDENCE/settings-log.txt" && break
+          done
+          # Let the page draw the answer.
+          sleep 2
+          xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/settings.png"
+          grep -E "web module|react-native|launch open|fallback|failed" "$EVIDENCE/settings-log.txt" | tail -30 || true
+          grep -E "web module Device\.model ok in [0-9]+ms" "$EVIDENCE/settings-log.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Stop the dev server
         if: always()
         run: |

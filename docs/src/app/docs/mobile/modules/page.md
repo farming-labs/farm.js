@@ -53,10 +53,10 @@ platform SDK is in reach:
 **Web APIs are not a back door either.** The WebView enables only JavaScript and DOM storage, not
 media or geolocation grants, so a web screen cannot quietly use `getUserMedia` or the Geolocation API.
 
-In short: navigation, server data, and auth work across every screen today. Native screens on
-Android can use community React Native modules and the app's own. Web screens on Android can call
-the Promise methods of app modules that opt in; results by reference (files) and subscriptions
-(events) are not built yet, and neither is the iOS side.
+In short: navigation, server data, and auth work across every screen today. Native screens can
+use community React Native modules and the app's own. Web screens can call the Promise methods of
+app modules that opt in, on Android and iOS; results by reference (files) and subscriptions
+(events) are not built yet.
 
 ### App native modules
 
@@ -194,46 +194,57 @@ export function DeviceCard() {
 - **App modules only.** `web: true` on a community module is a config error: its JavaScript runs
   on React Native's runtime, which a web screen does not have. Call it from a native screen.
 - **Arguments are checked before the module runs.** Arguments go over the bridge as a JSON array.
-  The generated Kotlin checks each one against the spec's type (string, number, `Int32` as a whole
-  number, boolean, string or number literal unions and enums, objects with their declared
-  properties, `Object` maps, arrays of a type) and converts objects and arrays to `ReadableMap` and
-  `ReadableArray`. A mismatch rejects with `invalid_args`, naming the argument; the module never
-  sees it.
+  The generated Kotlin (Swift on iOS) checks each one against the spec's type (string, number,
+  `Int32` as a whole number, boolean, string or number literal unions and enums, objects with their
+  declared properties, `Object` maps, arrays of a type) and converts objects and arrays to
+  `ReadableMap` and `ReadableArray` (dictionaries and arrays on iOS). A mismatch rejects with
+  `invalid_args`, naming the argument; the module never sees it.
+- **Object parameters are Android only.** Codegen passes a parameter of an object type with
+  declared properties to Objective-C as a C++ struct, which the iOS shell does not build from JSON,
+  so on iOS that method rejects with `native_unavailable`. Declare the parameter as `Object` to call
+  it from web screens on both OSes; objects inside arrays and maps work on both.
 - **The same module instance as native screens.** The call runs on the module React Native's
-  runtime created for native screens, on its native-modules thread. A call made before the runtime
-  has warmed up starts it, as opening a native screen would.
-- **`available()` first.** It is true only inside the Android shell, for a module this build
-  registered. In a browser, during server rendering, on iOS, or for a module without `web`, it is
-  false and calls reject with `NativeUnavailableError`.
+  runtime created for native screens, on its native-modules thread (on iOS, the module's method
+  queue, by the selector Codegen gives the method). A call made before the runtime has warmed up
+  starts it, as opening a native screen would, and waits until the bundle has loaded (up to 30 s on
+  iOS).
+- **`available()` first.** It is true only inside the mobile shell, for a module this build
+  registered. In a browser, during server rendering, or for a module without `web`, it is false and
+  calls reject with `NativeUnavailableError`. On iOS it is also false in an app without a React
+  Native screen, and for a module with no Objective-C++ class adopting its spec's protocol.
 - **Types come from the spec.** `farm generate` (and every dev start and build) adds each spec's
   Promise methods to `src/farm.d.ts` as `FarmNativeModules`, read with React Native's Codegen, so
   `native.Device.vibrate("200")` is a type error. Without `react-native` installed (a pruned
   production install) the section is left out; it only types web pages.
 - **Free when unused.** `@farm.js/core/native` is its own entry with no imports. A web build that
-  does not import it is unchanged, and the shell adds no Kotlin for apps without a `web` module.
+  does not import it is unchanged, and the shells add no Kotlin or Swift for apps without a `web`
+  module.
 
 Rejections are a `NativeUnavailableError` (`code: "native_unavailable"`) or a `NativeCallError`
 with the shell's or the module's code:
 
-| `code`               | When                                                                                |
-| -------------------- | ----------------------------------------------------------------------------------- |
-| `native_unavailable` | Outside the Android shell, the module has no `web`, or React Native failed to start |
-| `invalid_args`       | The arguments do not match the spec; the module did not run                         |
-| `unknown_method`     | The spec has no Promise method by that name                                         |
-| `native_error`       | The module threw                                                                    |
-| The module's own     | The module called `promise.reject(code, message)`, such as `no_vibrator`            |
+| `code`               | When                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| `native_unavailable` | Outside the mobile shell, the module has no `web`, or React Native failed to start |
+| `invalid_args`       | The arguments do not match the spec; the module did not run                        |
+| `unknown_method`     | The spec has no Promise method by that name                                        |
+| `native_error`       | The module threw                                                                   |
+| The module's own     | The module called `promise.reject(code, message)`, such as `no_vibrator`           |
 
 On Android this needs React Native in the app, which Farm adds when a route has a native screen
-(`page.native.tsx`); `web: true` without one fails the command with that fix. The bridge rules stay
+(`page.native.tsx`); `web: true` without one fails the command with that fix. On iOS, an app
+without one, or without the module's Objective-C++ class, registers no module for web screens:
+`available()` is false there, as in a browser. The bridge rules stay
 those of [The bridge](/docs/mobile/shell#the-bridge): the server origin only, the main frame only, and only the
 registered modules and the methods in their specs.
 
-Not built yet: large results as references (a photo comes back as a URL, not base64), events as
-subscriptions, and the iOS side of the web-screen transport. In the iOS shell, `available()` is false on web
-screens; native screens call the module directly.
+Not built yet: large results as references (a photo comes back as a URL, not base64), and events
+as subscriptions.
 
 Tested in unit and generator tests, and the generated Kotlin compiles against React Native
-0.88.1's `react-android` and the Java specs Codegen generates. Not run on a device or emulator yet.
+0.88.1's `react-android` and the Java specs Codegen generates; not run on a device or emulator yet.
+On iOS, the `Mobile iOS` workflow opens `examples/mobile`'s `/settings` web screen on the
+simulator under `farm dev --mobile --os ios` and checks that `native.Device.model()` answers.
 
 ### `mobile.modules`
 
