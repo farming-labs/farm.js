@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -352,6 +352,12 @@ export interface FarmNativeBuild {
   reactNative: FarmReactNative;
   /** Hermes bytecode, bundled into the app as an asset. */
   bundle: string;
+  /**
+   * The images and other files the screens `require()`, as Metro lays them out for the platform:
+   * `drawable-<density>/` and `raw/` resources on Android, `assets/` next to the bundle on iOS. Undefined
+   * when the screens import none.
+   */
+  assets?: string;
   /** Sizes in bytes. */
   jsBytes: number;
   bytecodeBytes: number;
@@ -557,9 +563,13 @@ function run(command: string, args: string[]): Promise<void> {
 export function farmNativeBundleFiles(
   outDir: string,
   platform: "android" | "ios",
-): { js: string; bytecode: string } {
+): { js: string; bytecode: string; assets: string } {
   const dir = path.join(outDir, "build");
-  return { js: path.join(dir, `${platform}.js`), bytecode: path.join(dir, `${platform}.hbc`) };
+  return {
+    js: path.join(dir, `${platform}.js`),
+    bytecode: path.join(dir, `${platform}.hbc`),
+    assets: path.join(dir, `${platform}-assets`),
+  };
 }
 
 /** Bundle every screen with Metro and compile the result to Hermes bytecode. */
@@ -579,8 +589,10 @@ export async function buildFarmNativeScreens(
     serverFnStubs,
     isServerFnModule: serverFnModuleCheck(options.root, scan),
   });
-  const { js, bytecode: bundle } = farmNativeBundleFiles(options.outDir, platform);
+  const { js, bytecode: bundle, assets } = farmNativeBundleFiles(options.outDir, platform);
   await mkdir(path.dirname(js), { recursive: true });
+  // Metro only adds files, so an image a screen no longer imports would otherwise ship.
+  await rm(assets, { recursive: true, force: true });
   const started = performance.now();
   await toolchain.cliPlugin.unstable_buildBundleWithConfig(
     {
@@ -589,7 +601,7 @@ export async function buildFarmNativeScreens(
       dev: false,
       minify: true,
       bundleOutput: js,
-      assetsDest: path.join(options.outDir, "res"),
+      assetsDest: assets,
       // The bundle's own console output; Metro's progress reporter is quiet.
       resetCache: false,
     },
@@ -602,6 +614,7 @@ export async function buildFarmNativeScreens(
   return {
     reactNative,
     bundle,
+    ...((await readdir(assets).catch(() => [])).length > 0 ? { assets } : {}),
     jsBytes: (await stat(js)).size,
     bytecodeBytes: (await stat(bundle)).size,
     bundleMs,

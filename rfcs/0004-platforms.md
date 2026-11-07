@@ -1397,8 +1397,15 @@ in Farm's navigator".
   declared properties is Android only, because Codegen passes it to Objective-C as a C++ struct.
   CI opens `examples/mobile`'s `/settings` on the simulator under `farm dev` and checks that
   `native.Device.model()` answers.
-- Not done: native screens' images; a device, a release-configuration archive and App Store size
-  (the table's device numbers are the arm64 slices zipped, an estimate).
+- **Images bundled with native screens** (`require("./blaze.png")`). Metro writes them per OS
+  next to the bytecode build (`native/build/<os>-assets`, cleared on every build), and the
+  generators copy them where React Native resolves them: Android resources by name
+  (`res/drawable-<density>/`), iOS `assets/` next to `farm-native.hbc` as one folder reference.
+  Neither shell had copied them before, on either OS; CI checks `examples/mobile`'s `/map` blaze
+  in the built app on an emulator and a simulator. Android's debuggable builds read a `farmOpen`
+  extra, the twin of `-FarmOpen`, for that check.
+- Not done: a device, a release-configuration archive and App Store size (the table's device
+  numbers are the arm64 slices zipped, an estimate).
 
 ### The iOS project is a generated pbxproj
 

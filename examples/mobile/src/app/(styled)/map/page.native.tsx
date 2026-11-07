@@ -3,7 +3,7 @@
 import { useNavigate, useServerQuery } from "@farm.js/native";
 import { useNetInfo } from "@react-native-community/netinfo";
 import { useEffect, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { apiClient } from "../../../lib/api";
 import Device from "../../../native/NativeDevice";
 
@@ -23,6 +23,9 @@ export default function MapScreen() {
   // The app's own native module (src/native/NativeDevice.ts and DeviceModule.kt).
   const [model, setModel] = useState("...");
   const [vibrateError, setVibrateError] = useState<string>();
+  // An image bundled with the screen: Metro picks blaze@2x.png or @3x.png, and farm build --mobile
+  // ships them in the app (Android resources, iOS assets/ next to the bytecode).
+  const [blaze, setBlaze] = useState("loading");
   useEffect(() => {
     Device.model().then(setModel, (error: Error) => setModel(`unavailable (${error.message})`));
   }, []);
@@ -58,6 +61,19 @@ export default function MapScreen() {
         >
           <Text style={styles.vibrateText}>Vibrate</Text>
         </Pressable>
+      </View>
+      <View style={styles.blazeRow}>
+        <Image
+          accessibilityLabel="Trail blaze"
+          onError={(event) => setBlaze(`failed (${event.nativeEvent.error})`)}
+          onLoad={() => setBlaze("loaded")}
+          source={require("./blaze.png")}
+          style={styles.blaze}
+          testID="trail-blaze"
+        />
+        <Text style={styles.deviceText} testID="blaze-status">
+          Bundled image: {blaze}
+        </Text>
       </View>
       {vibrateError ? <Text style={styles.error}>{vibrateError}</Text> : null}
       {error ? <Text style={styles.error}>{error.message}</Text> : null}
@@ -111,6 +127,14 @@ const styles = StyleSheet.create({
     borderColor: "#2f6b3f",
   },
   vibrateText: { color: "#2f6b3f", fontWeight: "600" },
+  blazeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  blaze: { width: 24, height: 36 },
   error: { paddingHorizontal: 16, color: "#b3261e" },
   row: {
     paddingHorizontal: 16,

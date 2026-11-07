@@ -156,6 +156,8 @@ interface NativeBuildModule {
   buildFarmNativeScreens(options: NativeScreensOptions): Promise<{
     reactNative: ReactNativeInfo;
     bundle: string;
+    /** Metro's output for the images the screens import; older builds do not report it. */
+    assets?: string;
     jsBytes: number;
     bytecodeBytes: number;
     bundleMs: number;
@@ -552,6 +554,7 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
         hermesVersion: built.reactNative.hermesVersion,
         modules: screens.map((screen) => screen.module),
         bundle: built.bundle,
+        ...(built.assets ? { assetsDir: built.assets } : {}),
       };
       const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
       runtime.logger.info(

@@ -7,6 +7,7 @@ import { podGlob, podspecList, resolveIosAutolinking } from "./autolinking";
 import {
   createIosProject,
   createReactNativeBuild,
+  IOS_NATIVE_ASSETS_DIR,
   IOS_NATIVE_BUNDLE,
   reactNativeArtifacts,
   reactNativeCacheDir,
@@ -169,6 +170,41 @@ describe("@farm.js/mobile/ios React Native host", () => {
     expect(project["App/FarmReactNativeBuild.swift"]).toContain(
       'static let bundleURL: URL? = Bundle.main.url(forResource: "farm-native", withExtension: "hbc")',
     );
+  });
+
+  it("ships the images the screens import in assets/ next to the bytecode, as a folder", async () => {
+    const root = await app();
+    const bundle = path.join(root, "ios.hbc");
+    await writeFile(bundle, new Uint8Array([0xc6, 0x1f, 0xbc, 0x03]));
+    // Metro's iOS layout: assets/<the image's directory>/<name>@<scale>x.png.
+    const assetsDir = path.join(root, "ios-assets");
+    const dir = path.join(assetsDir, "assets", "src", "app", "(styled)", "map");
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "blaze@3x.png"), new Uint8Array([3]));
+    await writeFile(path.join(dir, "blaze@2x.png"), new Uint8Array([2]));
+    const project = await files(context(root, { native: { ...NATIVE, bundle, assetsDir } }));
+    expect(
+      Object.keys(project).filter((file) => file.startsWith(`App/${IOS_NATIVE_ASSETS_DIR}/`)),
+    ).toEqual([
+      "App/assets/src/app/(styled)/map/blaze@2x.png",
+      "App/assets/src/app/(styled)/map/blaze@3x.png",
+    ]);
+    const pbxproj = project["App.xcodeproj/project.pbxproj"]!;
+    // One folder reference, so the app keeps the paths React Native asks for.
+    expect(pbxproj).toContain("/* assets in Resources */");
+    expect(pbxproj).toMatch(/lastKnownFileType = folder;\s+path = assets;/);
+    expect(pbxproj).not.toContain("blaze");
+    expect(
+      (await files(context(root, { native: { ...NATIVE, bundle } })))[
+        "App.xcodeproj/project.pbxproj"
+      ],
+    ).not.toContain("/* assets in Resources */");
+
+    // Anything outside assets/ is not where React Native looks on iOS.
+    await writeFile(path.join(assetsDir, "stray.png"), new Uint8Array([1]));
+    await expect(
+      createIosProject(context(root, { native: { ...NATIVE, bundle, assetsDir } })),
+    ).rejects.toThrow(/Metro wrote App\/stray\.png outside assets\//);
   });
 
   it("loads screens from Metro under farm dev, on the dev server's host", async () => {

@@ -140,6 +140,38 @@ jobs:
           "$ADB" devices | tee "$EVIDENCE/devices.txt"
           "$ADB" logcat -c || true
 
+      # examples/mobile's React Native screen /map in the APK farm build made. Its trail blaze is
+      # an image bundled with the screen (blaze.png): under farm dev Metro serves it, in a build
+      # React Native reads it from the app's resources, so only the built APK checks the packaging.
+      - name: Open the React Native screen /map in the built APK
+        if: matrix.example == 'mobile'
+        working-directory: examples/mobile
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          ID=dev.farmjs.examples.fieldnotes
+          "$ADB" install -r ".farm/output/mobile/dist/$ID-debug.apk"
+          "$ADB" logcat -c || true
+          "$ADB" shell am start -W -n "$ID/dev.farmjs.mobile.shell.MainActivity" --es farmOpen /map
+          # The shell logs "native app/map open->content=<ms>ms" once the screen drew.
+          for _ in $(seq 1 45); do
+            "$ADB" logcat -d -s FarmShell:V > "$EVIDENCE/map-log.txt"
+            grep -q "native app/map open->content" "$EVIDENCE/map-log.txt" && break
+            sleep 2
+          done
+          # The image decodes after the first frame: poll the screenshot for it.
+          for _ in $(seq 1 10); do
+            "$ADB" exec-out screencap -p > "$EVIDENCE/map.png"
+            node scripts/check-bundled-image.mjs "$EVIDENCE/map.png" > /dev/null 2>&1 && break
+            sleep 1
+          done
+          "$ADB" logcat -d -s FarmShell:V ReactNativeJS:V ReactNative:W AndroidRuntime:E > "$EVIDENCE/map-log.txt"
+          tail -40 "$EVIDENCE/map-log.txt"
+          grep -q "launch open /map" "$EVIDENCE/map-log.txt"
+          grep -q "native app/map open->content" "$EVIDENCE/map-log.txt"
+          node scripts/check-bundled-image.mjs "$EVIDENCE/map.png"
+          # farm dev installs its own debug app under the same id next.
+          "$ADB" uninstall "$ID" || true
+
       - name: Run the shell with farm dev --mobile
         working-directory: examples/${{ matrix.example }}
         run: |
