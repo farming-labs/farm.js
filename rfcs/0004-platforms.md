@@ -1433,6 +1433,13 @@ in Farm's navigator".
   `budgets.appSizeMb: 12` holds for the download and not for the installed size; the budget does
   not say which yet, and nothing checks it.
 
+- **Production apps against the app's own production server in CI.** The production apps had
+  pointed at deployments that do not exist (`field-notes.farmjs.dev`), so CI could not check a
+  production server screen or `/map`'s stations. `Mobile iOS` now serves `farm build --mobile`'s
+  Node build over HTTPS on the runner, with a certificate from a CA made for the run and trusted
+  on the simulator (`simctl keychain add-root-cert`), and builds the apps against
+  `https://localhost:3443`. Production apps stay HTTPS-only: nothing in the shell or the
+  generated project changes. Android, whose apps trust only the system's CAs, is not covered yet.
 - Not done: a device (launch, memory and smoothness on a phone).
 
 ### The iOS project is a generated pbxproj

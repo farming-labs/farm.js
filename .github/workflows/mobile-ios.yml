@@ -67,12 +67,31 @@ jobs:
           xcodebuild -version | tee "$EVIDENCE/xcode-version.txt"
           xcrun simctl list runtimes | tee "$EVIDENCE/runtimes.txt"
 
+      # The production apps load from the app's own production server, built by the same command
+      # and served over HTTPS on this runner (the next step): production apps accept only HTTPS.
       - name: Build the production project with xcodebuild
         working-directory: examples/${{ matrix.example }}
         env:
-          FIELD_NOTES_SERVER: https://field-notes.farmjs.dev
-          TRAIL_GUIDE_SERVER: https://trail-guide.farmjs.dev
+          FIELD_NOTES_SERVER: https://localhost:3443
+          TRAIL_GUIDE_SERVER: https://localhost:3443
         run: pnpm exec farm build --mobile --os ios 2>&1 | tee "$EVIDENCE/farm-build-ios.txt"
+
+      # farm build --mobile's Node build of the app, behind a TLS proxy with a certificate from a
+      # CA made for this run only; the simulator trusts that CA once it boots.
+      - name: Serve the production build over HTTPS
+        working-directory: examples/${{ matrix.example }}
+        run: |
+          "$GITHUB_WORKSPACE/examples/mobile/scripts/ci-tls.sh" "$RUNNER_TEMP/tls"
+          PORT=3100 HOST=127.0.0.1 node .farm/output/mobile/www/server/index.mjs \
+            > "$EVIDENCE/production-server.txt" 2>&1 &
+          echo "PRODUCTION_SERVER_PID=$!" >> "$GITHUB_ENV"
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/https-proxy.mjs" \
+            "$RUNNER_TEMP/tls/server.pem" "$RUNNER_TEMP/tls/server-key.pem" 3443 3100 \
+            > "$EVIDENCE/https-proxy.txt" 2>&1 &
+          echo "HTTPS_PROXY_PID=$!" >> "$GITHUB_ENV"
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/https-ready.mjs" "$RUNNER_TEMP/tls/ca.pem" \
+            https://localhost:3443/ 60 || { cat "$EVIDENCE/production-server.txt" "$EVIDENCE/https-proxy.txt"; exit 1; }
+          cat "$EVIDENCE/production-server.txt" "$EVIDENCE/https-proxy.txt"
 
       # The configuration an App Store build uses, for a device, unsigned: the simulator steps
       # below run the Debug shell. mobile links React Native; mobile-minimal is the shell alone.
@@ -96,6 +115,33 @@ jobs:
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid"
           xcrun simctl list devices booted | tee "$EVIDENCE/booted.txt"
+
+      # The production app's home tab is a server screen: it must draw native content from the
+      # local production server, which needs the run's CA trusted on the simulator.
+      - name: Open the production app against the local server
+        working-directory: examples/${{ matrix.example }}
+        env:
+          APP_ID: ${{ matrix.app-id }}
+          SERVER_ROUTES: ${{ matrix.server-routes }}
+        run: |
+          xcrun simctl keychain "$SIMULATOR_UDID" add-root-cert "$RUNNER_TEMP/tls/ca.pem"
+          xcrun simctl install "$SIMULATOR_UDID" ".farm/output/mobile/dist/$APP_ID-simulator.app"
+          mkdir -p "$EVIDENCE/production"
+          cp .farm/output/mobile/farm-routes.json "$EVIDENCE/production/farm-routes.json"
+          started=$(date '+%Y-%m-%d %H:%M:%S')
+          xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$APP_ID"
+          # The shell logs "server screen ready: /" once the home tab drew, or names a fallback.
+          for _ in $(seq 1 24); do
+            sleep 5
+            xcrun simctl spawn "$SIMULATOR_UDID" log show --start "$started" --style compact \
+              --predicate 'process == "App"' > "$EVIDENCE/production/app-log.txt"
+            grep -qE "server screen ready: /$|showing the web screen" "$EVIDENCE/production/app-log.txt" && break
+          done
+          xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/production-home.png"
+          grep -E "server=|server screen|showing the web screen|failed" "$EVIDENCE/production/app-log.txt" | tail -20 || true
+          # Split the routes into arguments without globbing: /trails/[id] is a route, not a pattern.
+          set -f
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/check-ios-native.mjs" "$EVIDENCE/production" $SERVER_ROUTES
 
       # examples/mobile's React Native screens: /kit (native-only, @farm.js/ui) and /map (netinfo
       # and the app's Device module), opened in the production app.
@@ -217,10 +263,12 @@ jobs:
           grep -E "web module|react-native|launch open|fallback|failed" "$EVIDENCE/settings-log.txt" | tail -30 || true
           grep -E "web module Device\.model ok in [0-9]+ms" "$EVIDENCE/settings-log.txt" | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Stop the dev server
+      - name: Stop the dev server and the production server
         if: always()
         run: |
-          if [ -n "${FARM_DEV_PID:-}" ]; then kill "$FARM_DEV_PID" 2>/dev/null || true; fi
+          for pid in "${FARM_DEV_PID:-}" "${PRODUCTION_SERVER_PID:-}" "${HTTPS_PROXY_PID:-}"; do
+            if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
+          done
 
       - name: Keep the evidence
         if: always()
