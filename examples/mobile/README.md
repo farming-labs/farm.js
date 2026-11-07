@@ -50,12 +50,16 @@ which the server renders and the shell draws with native views (Android views, U
 `pnpm report` lists every route's tier. `/settings`, `/notes/new`, and
 `/navigation` use client-side state and stay web.
 
-The `Mobile iOS` workflow builds the production simulator project, then launches the dev app.
-Its home-tab check requires a `server` rule and a persisted `server screen ready: /` log from the
-shell after it installs the UIKit content. Missing completion or a web fallback fails the job.
-The artifact keeps `farm-routes.json`, `app-log.txt`, and screenshots; rerun the evidence check
-with `node scripts/check-ios-native.mjs <artifact-directory>` from this example. This checks the
-dev home screen, not production navigation, authentication, or an iOS React Native host.
+The `Mobile iOS` workflow builds the production simulator project against the example's own
+production server, `farm build --mobile`'s Node build, which it serves over HTTPS on the runner
+(`scripts/https-proxy.mjs`, with a certificate from a CA it makes for the run in
+`scripts/ci-tls.sh` and trusts on the simulator; production apps accept only HTTPS). It checks the
+production app's home tab, its React Native screens, and then the dev app. Each home-tab check
+requires a `server` rule and a persisted `server screen ready: /` log from the shell after it
+installs the UIKit content; missing completion or a web fallback fails the job. The artifact keeps
+`farm-routes.json`, `app-log.txt` (`production/` for the production app), and screenshots; rerun a
+check with `node scripts/check-ios-native.mjs <artifact-directory>` from this example. It does not
+check authentication.
 
 `mobile.shells` is on: `pnpm build:mobile` renders `src/app/(styled)/loading.tsx` inside the
 `(styled)` layout as one page shell for every styled route. The app shows it while a web screen's
