@@ -2544,15 +2544,24 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
           // The mobile app's native-tier screens: the page, rendered as for a browser, read into
           // a tree of native views. Only for apps with a `mobile` block.
+          // A POST is a form a native-tier screen submitted: its body goes to the page or route.
           if (
             options.mobileClient &&
             !viteModuleRequest &&
-            (requestMethod === "GET" || requestMethod === "HEAD") &&
+            (requestMethod === "GET" || requestMethod === "HEAD" || requestMethod === "POST") &&
             req.headers.accept?.includes(FARM_NATIVE_TREE_CONTENT_TYPE)
           ) {
             const { createFarmNativeTreeResponse } = await import("./mobile/native-tree");
+            const treeBodyInit: RequestInit & { duplex?: "half" } =
+              requestMethod === "POST"
+                ? { body: createFarmNodeRequestBodyStream(req), duplex: "half" }
+                : {};
             const treeResponse = await createFarmNativeTreeResponse({
-              request: new Request(fullUrl, { method: requestMethod, headers: docsHeaders }),
+              request: new Request(fullUrl, {
+                method: requestMethod,
+                headers: docsHeaders,
+                ...treeBodyInit,
+              }),
               // As for the Markdown mirror: this server's own listener, redirects not followed.
               renderPage: (request) =>
                 createFarmDevServerDispatch(server)(

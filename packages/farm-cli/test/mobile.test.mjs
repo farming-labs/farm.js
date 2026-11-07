@@ -865,7 +865,7 @@ test("farm config inspect --mobile --report prints the analyzer table and writes
   );
   assert.match(
     result.output,
-    /\/notes\/new\s+web\s+web\s+web\s+1\/2\s+50%\s+src\/app\/notes\/new\/page\.tsx:1:40 <form> has no native mapping \(\+2 more\)/,
+    /\/notes\/new\s+web\s+web\s+web\s+2\/2\s+100%\s+src\/app\/notes\/new\/page\.tsx:1:53 <input type="file"> has no native mapping/,
   );
   assert.match(result.output, /\/feed\s+native\s+-\s+-\s+src\/app\/feed\/page\.android\.tsx/);
   assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
@@ -877,7 +877,8 @@ test("farm config inspect --mobile --report prints the analyzer table and writes
     report.routes
       .find((entry) => entry.route === "/notes/new")
       .analysis.blockers.map((blocker) => blocker.rule),
-    ["unmapped-element", "unmapped-element"],
+    // The form maps to a native form; its file input does not.
+    ["unmapped-element"],
   );
 
   const wrong = await runFarm(["config", "inspect", "--report", "--root", root]);

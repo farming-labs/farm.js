@@ -52,15 +52,53 @@ shell ◀── { root: { type: "View", children: [...] } } ──────�
 Drawn on Android: `View` (flex column or row, gap, padding, margins, width and height in px or
 `100%`, `flex-1`, alignment, `max-w-*`), `Text` with inline runs (links, `<strong>`, `<em>`,
 `<code>`), `Image`, links as pressable boxes, and borders, radii, backgrounds, and
-opacity, and wrapping rows (`flex-wrap: wrap`). A hidden input draws nothing. A `<button>`,
-`<input>`, or `<textarea>` keeps the route's web screen, since a native-drawn screen only opens
-links and a tap or typed text there would go nowhere: the tree lists it in `unsupported`, and the
-analyzer reports it as `inert-control`. Not yet: percentages other than `100%`, wrapping columns,
-absolute or sticky positioning, Sass and other non-CSS stylesheet sources in the analyzer, and
-forms. iOS draws `server` routes with UIKit (stack views,
+opacity, wrapping rows (`flex-wrap: wrap`), and [forms](#forms-on-server-rendered-screens). Not
+yet: percentages other than `100%`, wrapping columns, absolute or sticky positioning, and Sass and
+other non-CSS stylesheet sources in the analyzer. iOS draws `server` routes with UIKit (stack views,
 attributed labels with tappable links, image views), with the same fallback to the web screen; it
 is type-checked, and CI builds and launches the shell with a native home route. The smoke check
 requires the native content-ready log marker and rejects a fallback to the web screen.
+
+### Forms on server-rendered screens
+
+A plain HTML form works on a server-rendered screen with no JavaScript on the device, so the same
+`page.tsx` posts from a browser and from the app, whichever renderer drew it:
+
+```tsx
+<form method="post" action="/api/reports">
+  <input type="hidden" name="trail" value={trail.id} />
+  <label>
+    Report <textarea name="text" required maxLength={280} />
+  </label>
+  <button>Post report</button>
+</form>
+```
+
+- **The shell submits as a browser does.** A submit button (or Return in a one-line field) sends the
+  form's fields, its hidden inputs, and the button's own `name` and `value`, honoring `action`,
+  `method`, `enctype`, and a button's `formaction`, `formmethod`, and `formenctype`. A GET form
+  visits the action with the fields as its query; a POST sends
+  `application/x-www-form-urlencoded` or `multipart/form-data` with the WebViews' cookies and the
+  page's `Origin`. `required` stops an empty field and `maxlength` limits typing; other validation
+  is the server's.
+- **The server answers as it would the browser.** The POST reaches the page or route with its
+  body, through middleware and guards. A redirect (post/redirect/get) back to the same page loads
+  it again in place; a redirect elsewhere is a visit, so the navigator picks that route's screen. A
+  page rendered for the submission, including a 4xx page with its errors, is drawn in place; a
+  5xx or a failed request shows an alert and keeps what was typed. Cookies the answer sets reach
+  the WebViews.
+- **What keeps the web screen.** Fields other than text (`text`, `email`, `password`, `number`,
+  `search`, `tel`, `url`) and `<textarea>`, such as checkboxes, selects, and files; a
+  `<button type="button">` or `"reset"`; a field or button outside a form, or tied to one with
+  `form="id"`; a form inside a form, `method="dialog"`, or `target="_blank"`; and a function
+  `action`, which React renders as a `javascript:` URL. The tree lists these in `unsupported`, and
+  the analyzer reports them (`inert-control`, `form-action`, `unmapped-element`). The analyzer
+  checks a form's controls within one component: a submit button in a separate component keeps
+  the route web, so keep the form's controls with the `<form>`.
+
+`examples/mobile-minimal`'s trail page posts trail reports to `src/app/api/reports/route.ts` this
+way, and the Mobile Android workflow types a report on the emulator, taps Post report, and requires
+it on the redrawn native screen.
 
 A web server answers these requests only for an app with a `mobile` block, so a web-only app's
 server is unchanged.

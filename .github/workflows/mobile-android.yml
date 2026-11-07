@@ -270,6 +270,13 @@ jobs:
           set -f
           node "$GITHUB_WORKSPACE/examples/mobile/scripts/check-android-native.mjs" "$EVIDENCE" $SERVER_ROUTES
 
+      - name: Submit a native form from the app
+        if: matrix.example == 'mobile-minimal'
+        working-directory: examples/${{ matrix.example }}
+        env:
+          APP_ID: ${{ matrix.app-id }}
+        run: node scripts/check-android-form.mjs "$EVIDENCE" "$APP_ID"
+
       - name: Stop the dev server and the production server
         if: always()
         run: |

@@ -42,7 +42,48 @@ export interface FarmNativeNode {
   alt?: string;
   placeholder?: string;
   value?: string;
+  /** A `<form>`: where and how its submit buttons send it, and its hidden fields. */
+  form?: FarmNativeForm;
+  /** A submit button: a tap sends its form, with this button's own name, value, and overrides. */
+  submit?: FarmNativeSubmitter;
+  /** A field's name: its value is sent as this entry. A field without one is not sent. */
+  name?: string;
+  /** The `<input>` type, when it is not `"text"`: email, password, number, search, tel, or url. */
+  inputType?: string;
+  /** A `<textarea>`. */
+  multiline?: true;
+  required?: true;
+  maxLength?: number;
+  /** A disabled field is not sent and cannot be edited; a disabled button does not submit. */
+  disabled?: true;
+  readOnly?: true;
 }
+
+/** How a form submits, as a browser would send it (HTML's form submission algorithm). */
+export interface FarmNativeForm {
+  /** Absolute http(s) URL; a GET form replaces its query with the fields. */
+  action: string;
+  method: "get" | "post";
+  /** Only when it is not `application/x-www-form-urlencoded`. */
+  enctype?: "multipart/form-data";
+  /** `<input type="hidden">` entries, in document order. */
+  fields?: Array<{ name: string; value: string }>;
+}
+
+/** A submit button's `formaction`, `formmethod`, and `formenctype`, and its own entry. */
+export interface FarmNativeSubmitter {
+  name?: string;
+  value?: string;
+  action?: string;
+  method?: "get" | "post";
+  enctype?: "application/x-www-form-urlencoded" | "multipart/form-data";
+}
+
+const URLENCODED = "application/x-www-form-urlencoded";
+const MULTIPART = "multipart/form-data";
+// The text fields the shells draw; other types (checkbox, file, date) keep the web screen.
+const TEXT_INPUT_TYPES = new Set(["text", "email", "password", "number", "search", "tel", "url"]);
+const CONTROL_TAGS = new Set(["input", "textarea", "select", "button"]);
 
 export interface FarmNativeTree {
   version: 1;
@@ -185,6 +226,9 @@ function settleLineHeight(style: FarmNativeStyle): FarmNativeStyle {
 class Converter {
   readonly unsupported: string[] = [];
 
+  /** The form whose content is being read: its hidden fields collect here. */
+  private form?: { fields: Array<{ name: string; value: string }> };
+
   /** Off while reading the ancestors above the page, which pass down text styles only. */
   reporting = true;
 
@@ -250,6 +294,66 @@ class Converter {
       this.problem(`URL "${value}"`);
       return undefined;
     }
+  }
+
+  /** A form's or button's action: absolute http(s), without a fragment; empty means this page. */
+  private formUrl(value: string | undefined, what: string): string | undefined {
+    let url: URL;
+    try {
+      url = new URL(value ?? "", this.pageUrl);
+    } catch {
+      this.problem(`${what} "${value}"`);
+      return undefined;
+    }
+    // `javascript:` is what React renders for a client function action: it needs the device.
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      this.problem(`${what} "${value}"`);
+      return undefined;
+    }
+    url.hash = "";
+    return url.href;
+  }
+
+  private method(value: string | undefined, what: string): "get" | "post" | undefined {
+    const method = value?.toLowerCase();
+    if (method === undefined || method === "") return undefined;
+    if (method === "get" || method === "post") return method;
+    this.problem(`${what} method "${value}"`);
+    return undefined;
+  }
+
+  private enctype(value: string | undefined, what: string): string | undefined {
+    const enctype = value?.toLowerCase();
+    if (enctype === undefined || enctype === "") return undefined;
+    if (enctype === URLENCODED || enctype === MULTIPART) return enctype;
+    this.problem(`${what} enctype "${value}"`);
+    return undefined;
+  }
+
+  /** What a submit button sends besides its form's fields, and where. */
+  private submitter(element: HtmlElement): FarmNativeSubmitter {
+    const { name, value, formaction, formmethod, formenctype, formtarget } = element.attributes;
+    if (formtarget && formtarget !== "_self") this.problem(`<${element.tag}> formtarget`);
+    const action =
+      formaction === undefined
+        ? undefined
+        : this.formUrl(formaction, `<${element.tag}> formaction`);
+    const method = this.method(formmethod, `<${element.tag}>`);
+    const enctype = this.enctype(formenctype, `<${element.tag}>`) as FarmNativeSubmitter["enctype"];
+    return {
+      ...(name ? { name, value: value ?? "" } : {}),
+      ...(action ? { action } : {}),
+      ...(method ? { method } : {}),
+      ...(enctype ? { enctype } : {}),
+    };
+  }
+
+  /** A `<label>` that wraps a field draws as a box: its text, then the field. */
+  private holdsControl(element: HtmlElement): boolean {
+    return element.children.some(
+      (child) =>
+        typeof child !== "string" && (CONTROL_TAGS.has(child.tag) || this.holdsControl(child)),
+    );
   }
 
   private node(
@@ -371,7 +475,12 @@ class Converter {
       pending = [];
     };
     for (const child of content) {
-      if (typeof child === "string" || (INLINE_TAGS.has(child.tag) && !this.isBlockLink(child))) {
+      if (
+        typeof child === "string" ||
+        (INLINE_TAGS.has(child.tag) &&
+          !this.isBlockLink(child) &&
+          !(child.tag === "label" && this.holdsControl(child)))
+      ) {
         pending.push(child);
         continue;
       }
@@ -383,14 +492,41 @@ class Converter {
     return nodes;
   }
 
+  /** `<input type="submit">`: a button whose label is its value. */
+  private submitButton(
+    element: HtmlElement,
+    passed: Inherited,
+    box: FarmNativeStyle | undefined,
+    boxDark: FarmNativeStyle | undefined,
+  ): FarmNativeNode {
+    const node = this.node("Pressable", element, box, boxDark);
+    const label = this.text(
+      { tag: "#text", attributes: {}, children: [] },
+      [element.attributes.value ?? "Submit"],
+      passed,
+    );
+    if (label) node.children = [label];
+    if (element.attributes.disabled !== undefined) node.disabled = true;
+    else node.submit = this.submitter(element);
+    return node;
+  }
+
   element(
     element: HtmlElement,
     inherited: Inherited,
     flexItem = false,
   ): FarmNativeNode | undefined {
     if (SKIPPED_TAGS.has(element.tag)) return undefined;
-    // A browser draws nothing for a hidden input.
+    if (element.attributes.form !== undefined && CONTROL_TAGS.has(element.tag)) {
+      // A control tied to a form elsewhere in the page by id.
+      this.problem(`<${element.tag}> form="${element.attributes.form}"`);
+    }
+    // A browser draws nothing for a hidden input; inside a form, it is sent with the fields.
     if (element.tag === "input" && element.attributes.type?.toLowerCase() === "hidden") {
+      const { name, value, disabled } = element.attributes;
+      if (this.form && name && disabled === undefined) {
+        this.form.fields.push({ name, value: value ?? "" });
+      }
       return undefined;
     }
     const own = this.stylesOf(element);
@@ -414,6 +550,14 @@ class Converter {
     const boxDark = current(withoutText(own.dark), passed.dark.color ?? passed.style.color);
 
     const flex = own.style.display === "flex";
+    // A label that wraps a field is a box: its text, then the field.
+    if (element.tag === "label" && this.holdsControl(element)) {
+      const node = this.node("View", element, box, boxDark);
+      const children = this.blocks(element.children, passed, flex);
+      if (children.length > 0) node.children = children;
+      return node;
+    }
+
     // A flex item that is inline on the web is a text box of its own.
     const textBox =
       flexItem && INLINE_TAGS.has(element.tag) && element.tag !== "a" && element.tag !== "br";
@@ -433,25 +577,76 @@ class Converter {
       if (!node.src) this.problem("<img> without src");
       return node;
     }
+    if (element.tag === "form") {
+      if (this.form) {
+        this.problem("<form> inside a form");
+        return undefined;
+      }
+      const { action, method, enctype, target } = element.attributes;
+      if (target && target !== "_self") this.problem(`<form> target="${target}"`);
+      const node = this.node("View", element, box, boxDark);
+      const form: FarmNativeForm = {
+        action: this.formUrl(action, "<form> action") ?? "",
+        method: this.method(method, "<form>") ?? "get",
+      };
+      if (this.enctype(enctype, "<form>") === MULTIPART) form.enctype = MULTIPART;
+      this.form = { fields: [] };
+      try {
+        const children = this.blocks(element.children, passed, flex);
+        if (children.length > 0) node.children = children;
+        if (this.form.fields.length > 0) form.fields = this.form.fields;
+      } finally {
+        this.form = undefined;
+      }
+      node.form = form;
+      return node;
+    }
     if (element.tag === "input" || element.tag === "textarea") {
-      // Nothing reads what is typed: the web screen keeps the field working.
-      this.problem(`<${element.tag}> has no form to submit it`);
+      const { attributes } = element;
+      const type = element.tag === "input" ? (attributes.type ?? "text").toLowerCase() : "text";
+      // Nothing reads what is typed outside a form: the web screen keeps the field working.
+      if (!this.form) this.problem(`<${element.tag}> has no form to submit it`);
+      if (type === "submit") return this.submitButton(element, passed, box, boxDark);
+      if (!TEXT_INPUT_TYPES.has(type)) this.problem(`<input type="${type}">`);
       const node = this.node(
         "TextInput",
         element,
         settleLineHeight({ ...passed.style, ...box }),
         boxDark,
       );
-      if (element.attributes.placeholder) node.placeholder = element.attributes.placeholder;
-      const value = element.tag === "textarea" ? textContent(element) : element.attributes.value;
+      if (attributes.name) node.name = attributes.name;
+      if (type !== "text") node.inputType = type;
+      if (element.tag === "textarea") node.multiline = true;
+      if (attributes.placeholder) node.placeholder = attributes.placeholder;
+      const value = element.tag === "textarea" ? textContent(element) : attributes.value;
       if (value) node.value = value;
+      if (attributes.required !== undefined) node.required = true;
+      if (attributes.disabled !== undefined) node.disabled = true;
+      if (attributes.readonly !== undefined) node.readOnly = true;
+      const maxLength = Number(attributes.maxlength);
+      if (attributes.maxlength && Number.isInteger(maxLength) && maxLength >= 0) {
+        node.maxLength = maxLength;
+      }
       return node;
     }
-    if (element.tag === "a" || element.tag === "button") {
-      // A shell opens a Pressable's link; a button has none, so a tap would do nothing.
-      if (element.tag === "button") this.problem("<button> has no link or form to submit");
+    if (element.tag === "button") {
+      const type = (element.attributes.type ?? "submit").toLowerCase();
+      if (!this.form) {
+        // A shell opens a Pressable's link; a button has none, so a tap would do nothing.
+        this.problem("<button> has no link or form to submit");
+      } else if (type !== "submit") {
+        // A reset or script button needs JavaScript, or a form reset the shells do not draw.
+        this.problem(`<button type="${type}">`);
+      }
       const node = this.node("Pressable", element, box, boxDark);
-      if (element.tag === "a") node.href = this.url(element.attributes.href);
+      node.children = this.blocks(element.children, passed, flex);
+      if (element.attributes.disabled !== undefined) node.disabled = true;
+      else node.submit = this.submitter(element);
+      return node;
+    }
+    if (element.tag === "a") {
+      const node = this.node("Pressable", element, box, boxDark);
+      node.href = this.url(element.attributes.href);
       node.children = this.blocks(element.children, passed, flex);
       return node;
     }
@@ -645,8 +840,9 @@ export function farmRequestWantsNativeTree(request: Request): boolean {
 
 /**
  * Answer the shell's request for a page's tree. `renderPage` renders the page for a browser.
- * Responses that are not an HTML page (a redirect, a sign-in gate, an error) go back as they are,
- * so the shell can follow or show them as it would for the web screen.
+ * A POST is a form a native screen submitted: it reaches the page or route with its body, as the
+ * browser's would. Responses that are not an HTML page (a redirect, a sign-in gate, an error) go
+ * back as they are, so the shell can follow or show them as it would for the web screen.
  */
 export async function createFarmNativeTreeResponse(options: {
   request: Request;
@@ -660,15 +856,20 @@ export async function createFarmNativeTreeResponse(options: {
   const headers = new Headers(options.request.headers);
   headers.set("accept", "text/html");
   headers.delete("accept-encoding");
+  // A form a native screen submits: the page or route gets the POST a browser would send, and
+  // answers it as it would for the browser (a page, or a redirect the shell follows).
+  const submitted = options.request.method === "POST";
+  const init: RequestInit & { duplex?: "half" } = submitted
+    ? { method: "POST", headers, body: options.request.body, duplex: "half" }
+    : { method: "GET", headers };
   const page = await options.renderPage(
-    new Request(options.request.url, {
-      method: "GET",
-      headers,
-      signal: options.request.signal,
-    }),
+    new Request(options.request.url, { ...init, signal: options.request.signal }),
   );
+  const cookies = page.headers.getSetCookie?.() ?? [];
   const type = page.headers.get("content-type") ?? "";
-  if (page.status !== 200 || !type.includes("text/html")) return page;
+  // A submission's 4xx page (a form re-rendered with its errors) is its answer too.
+  const drawn = page.status === 200 || (submitted && page.status >= 400 && page.status < 500);
+  if (!drawn || !type.includes("text/html")) return page;
   const html = await page.text();
   const pageUrl = new URL(options.request.url);
   const load =
@@ -694,12 +895,14 @@ export async function createFarmNativeTreeResponse(options: {
         root: { type: "View", tag: "#root" },
         unsupported: [`stylesheet "${source.href}" could not be read`],
       };
-      return new Response(JSON.stringify(tree), {
-        headers: {
-          "Content-Type": `${FARM_NATIVE_TREE_CONTENT_TYPE}; charset=utf-8`,
-          Vary: "Accept",
-        },
+      const out = new Headers({
+        "Content-Type": `${FARM_NATIVE_TREE_CONTENT_TYPE}; charset=utf-8`,
+        Vary: "Accept",
+        "Cache-Control": "no-store",
       });
+      // A submitted form already ran: keep what it set, such as a session.
+      for (const cookie of cookies) out.append("Set-Cookie", cookie);
+      return new Response(JSON.stringify(tree), { headers: out });
     }
     stylesheets.push(css);
   }
@@ -707,11 +910,12 @@ export async function createFarmNativeTreeResponse(options: {
   const out = new Headers({
     "Content-Type": `${FARM_NATIVE_TREE_CONTENT_TYPE}; charset=utf-8`,
     Vary: "Accept",
-    "Cache-Control": page.headers.get("cache-control") ?? "no-store",
+    // The answer to a POST is that submission's result, never a cacheable page.
+    "Cache-Control": (submitted ? undefined : page.headers.get("cache-control")) ?? "no-store",
   });
-  for (const cookie of page.headers.getSetCookie?.() ?? []) out.append("Set-Cookie", cookie);
+  for (const cookie of cookies) out.append("Set-Cookie", cookie);
   return new Response(options.request.method === "HEAD" ? null : JSON.stringify(tree), {
-    status: 200,
+    status: page.status,
     headers: out,
   });
 }

@@ -10,12 +10,15 @@ import os
 final class FarmServerScreen: UIViewController {
     static let contentType = "application/vnd.farm.native+json"
 
-    private let url: URL
+    private var url: URL
     private let visit: (URL) -> Void
     private let fallback: (String) -> Void
     private let scroll = UIScrollView()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private var loaded = false
+    private var submitting = false
+    /// The drawn tree's forms; their fields are delegates the views do not retain.
+    private var forms: [FarmFormScope] = []
 
     init(url: URL, visit: @escaping (URL) -> Void, fallback: @escaping (String) -> Void) {
         self.url = url
@@ -46,12 +49,20 @@ final class FarmServerScreen: UIViewController {
             spinner.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
         ])
         spinner.startAnimating()
-        Task { await load() }
+        Task { await load(url) }
     }
 
-    private func load() async {
+    private func load(_ target: URL) async {
         do {
-            let tree = try await fetch()
+            show(try await fetch(target), url: target)
+        } catch {
+            fallback(String(describing: error))
+        }
+    }
+
+    /// Draw a tree: the page's, or the page a submitted form's answer rendered.
+    private func show(_ tree: [String: Any], url target: URL) {
+        do {
             if let unsupported = tree["unsupported"] as? [String], !unsupported.isEmpty {
                 fallback("the tree cannot express \(unsupported.joined(separator: ", "))")
                 return
@@ -60,8 +71,11 @@ final class FarmServerScreen: UIViewController {
                 fallback("the tree has no root")
                 return
             }
-            let renderer = FarmTreeRenderer(page: url, visit: visit)
+            url = target
+            let renderer = FarmTreeRenderer(page: target, visit: visit, submit: { [weak self] in self?.submit($0) })
             let content = try renderer.node(root, parentRow: false) ?? UIView()
+            forms = renderer.forms
+            for subview in scroll.subviews { subview.removeFromSuperview() }
             if let background = renderer.style(root)["backgroundColor"] {
                 view.backgroundColor = renderer.color(background) ?? Theme.background
             }
@@ -85,8 +99,104 @@ final class FarmServerScreen: UIViewController {
         }
     }
 
+    // MARK: Forms
+
+    private func submit(_ submission: FarmFormSubmission) {
+        if submitting { return }
+        if submission.method == "get" {
+            go(submission.queryURL())
+            return
+        }
+        submitting = true
+        submission.setPending(true)
+        Task {
+            let answer: FarmFormAnswer
+            do {
+                answer = try await send(submission)
+            } catch {
+                answer = .failed("Could not reach the server. Check your connection and try again.")
+            }
+            submitting = false
+            submission.setPending(false)
+            switch answer {
+            case let .redirect(location): go(location)
+            case let .tree(target, tree): show(tree, url: target)
+            case let .failed(message): alert(message)
+            }
+        }
+    }
+
+    /// This page again (a search, or a post/redirect/get) loads in place; another page is a visit.
+    private func go(_ target: URL) {
+        let samePage = target.scheme == url.scheme && target.host == url.host && target.port == url.port
+            && (target.path.isEmpty ? "/" : target.path) == (url.path.isEmpty ? "/" : url.path)
+        if samePage {
+            spinner.startAnimating()
+            Task { await load(target) }
+        } else {
+            visit(target)
+        }
+    }
+
+    private func alert(_ message: String) {
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
+    /// Send a form as a browser would: its entries, the page's origin, and the WebViews' cookies.
+    /// A 307 or 308 sends the body again; any other redirect is a GET the screen visits.
+    private func send(_ submission: FarmFormSubmission) async throws -> FarmFormAnswer {
+        var target = submission.action
+        for _ in 0...5 {
+            var request = URLRequest(url: target, timeoutInterval: 30)
+            request.httpMethod = "POST"
+            request.httpBody = submission.body
+            request.setValue(FarmServerScreen.contentType, forHTTPHeaderField: "Accept")
+            request.setValue(submission.contentType, forHTTPHeaderField: "Content-Type")
+            request.setValue(submission.origin, forHTTPHeaderField: "Origin")
+            let cookies = await FarmServerScreen.cookies(for: target)
+            for (name, value) in HTTPCookie.requestHeaderFields(with: cookies) {
+                request.setValue(value, forHTTPHeaderField: name)
+            }
+            let (data, response) = try await FarmServerScreen.http.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .failed("The server did not answer.") }
+            await FarmServerScreen.store(http, for: target)
+            let status = http.statusCode
+            if (300...399).contains(status) {
+                guard let location = http.value(forHTTPHeaderField: "Location"),
+                      let next = URL(string: location, relativeTo: target)?.absoluteURL
+                else { return .failed("The server answered \(status) without a location.") }
+                if status == 307 || status == 308 {
+                    target = next
+                    continue
+                }
+                return .redirect(next)
+            }
+            let type = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+            // A page the server rendered for the submission, a validation error (4xx) included.
+            if status < 500, type.hasPrefix(FarmServerScreen.contentType),
+               let tree = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                return .tree(target, tree)
+            }
+            return .failed(status >= 500 ? "Something went wrong on the server (\(status)). Try again." : "The server answered \(status).")
+        }
+        return .failed("The server redirected too many times.")
+    }
+
+    /// Cookies a submission's answer set (a session, a flash message) go where the WebViews see them.
+    static func store(_ response: HTTPURLResponse, for url: URL) async {
+        let fields = response.allHeaderFields.reduce(into: [String: String]()) { fields, entry in
+            if let name = entry.key as? String, let value = entry.value as? String { fields[name] = value }
+        }
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        for cookie in HTTPCookie.cookies(withResponseHeaderFields: fields, for: url) {
+            await store.setCookie(cookie)
+        }
+    }
+
     /// The page's tree, with the WebViews' cookies, so a signed-in page renders signed in.
-    private func fetch() async throws -> [String: Any] {
+    private func fetch(_ url: URL) async throws -> [String: Any] {
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.setValue(FarmServerScreen.contentType, forHTTPHeaderField: "Accept")
         let cookies = await FarmServerScreen.cookies(for: url)
@@ -155,10 +265,15 @@ final class FarmTreeRenderer {
     static let href = NSAttributedString.Key("farmHref")
     private let page: URL
     private let visit: (URL) -> Void
+    private let submit: (FarmFormSubmission) -> Void
+    /// Every form drawn, and the one whose content is being drawn.
+    private(set) var forms: [FarmFormScope] = []
+    private var form: FarmFormScope?
 
-    init(page: URL, visit: @escaping (URL) -> Void) {
+    init(page: URL, visit: @escaping (URL) -> Void, submit: @escaping (FarmFormSubmission) -> Void = { _ in }) {
         self.page = page
         self.visit = visit
+        self.submit = submit
     }
 
     func style(_ node: [String: Any]) -> [String: Any] {
@@ -211,6 +326,14 @@ final class FarmTreeRenderer {
         let style = style(node)
         if style["display"] as? String == "none" { return nil }
         let type = node["type"] as? String ?? ""
+        let outer = form
+        if let formNode = node["form"] as? [String: Any] {
+            let scope = FarmFormScope(form: formNode, page: page, submit: submit)
+            forms.append(scope)
+            form = scope
+        }
+        defer { form = outer }
+        let scope = form
         let view: UIView
         switch type {
         case "Text":
@@ -224,12 +347,8 @@ final class FarmTreeRenderer {
             if let source = node["src"] as? String, let url = URL(string: source) { load(url, into: image) }
             view = image
         case "TextInput":
-            let field = UITextField()
-            field.placeholder = node["placeholder"] as? String
-            field.text = node["value"] as? String
-            field.font = font(style)
-            field.textColor = color(of: "color", in: node) ?? Theme.text
-            view = field
+            guard let scope else { throw FarmTreeError.unexpected("a field outside a form") }
+            view = scope.field(node, font: font(style), color: color(of: "color", in: node) ?? Theme.text)
         case "View", "Pressable":
             view = try box(node, style: style)
         default:
@@ -240,6 +359,14 @@ final class FarmTreeRenderer {
             view.isUserInteractionEnabled = true
             view.addGestureRecognizer(Tap(action: { [visit] in visit(url) }))
             view.accessibilityTraits.insert(.link)
+        } else if type == "Pressable", let submitter = node["submit"] as? [String: Any], let scope {
+            view.isUserInteractionEnabled = true
+            scope.buttons.append((view, submitter))
+            view.addGestureRecognizer(Tap(action: { [weak scope] in scope?.submit(submitter) }))
+            view.accessibilityTraits.insert(.button)
+        } else if type == "Pressable", node["disabled"] as? Bool == true {
+            view.accessibilityTraits.insert([.button, .notEnabled])
+            if style["opacity"] == nil { view.alpha = 0.5 }
         }
         return view
     }
@@ -729,4 +856,196 @@ private final class FlowView: UIView {
             invalidateIntrinsicContentSize()
         }
     }
+}
+
+// MARK: - Forms
+
+/// One `<form>` of a server screen: its fields and submit buttons, and how a tap sends them.
+@MainActor
+final class FarmFormScope: NSObject, UITextFieldDelegate {
+    private struct Field {
+        let name: String
+        let read: () -> String
+        let view: UIView
+        let required: Bool
+        let disabled: Bool
+    }
+
+    private let form: [String: Any]
+    private let page: URL
+    private let onSubmit: (FarmFormSubmission) -> Void
+    private var fields: [Field] = []
+    private var maxLengths: [ObjectIdentifier: Int] = [:]
+    var buttons: [(UIView, [String: Any])] = []
+
+    init(form: [String: Any], page: URL, submit: @escaping (FarmFormSubmission) -> Void) {
+        self.form = form
+        self.page = page
+        self.onSubmit = submit
+    }
+
+    func field(_ node: [String: Any], font: UIFont, color: UIColor) -> UIView {
+        let disabled = node["disabled"] as? Bool == true
+        let readOnly = node["readOnly"] as? Bool == true
+        let name = node["name"] as? String ?? ""
+        let required = node["required"] as? Bool == true
+        if node["multiline"] as? Bool == true {
+            let area = UITextView()
+            area.text = node["value"] as? String
+            area.font = font
+            area.textColor = color
+            area.backgroundColor = .clear
+            area.isScrollEnabled = false
+            area.isEditable = !disabled && !readOnly
+            area.heightAnchor.constraint(greaterThanOrEqualToConstant: font.lineHeight * 3).isActive = true
+            fields.append(Field(name: name, read: { [weak area] in area?.text ?? "" }, view: area, required: required, disabled: disabled))
+            return area
+        }
+        let field = UITextField()
+        field.placeholder = node["placeholder"] as? String
+        field.text = node["value"] as? String
+        field.font = font
+        field.textColor = color
+        field.delegate = self
+        field.isEnabled = !disabled && !readOnly
+        // Return submits the form, as Enter does in a browser.
+        field.returnKeyType = .go
+        switch node["inputType"] as? String {
+        case "email":
+            field.keyboardType = .emailAddress
+            field.autocapitalizationType = .none
+            field.textContentType = .emailAddress
+        case "password":
+            field.isSecureTextEntry = true
+            field.textContentType = .password
+        case "number": field.keyboardType = .decimalPad
+        case "tel": field.keyboardType = .phonePad
+        case "url":
+            field.keyboardType = .URL
+            field.autocapitalizationType = .none
+        case "search": field.returnKeyType = .search
+        default: break
+        }
+        if let maxLength = node["maxLength"] as? Int { maxLengths[ObjectIdentifier(field)] = maxLength }
+        fields.append(Field(name: name, read: { [weak field] in field?.text ?? "" }, view: field, required: required, disabled: disabled))
+        return field
+    }
+
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        guard let maxLength = maxLengths[ObjectIdentifier(textField)] else { return true }
+        let current = (textField.text ?? "") as NSString
+        return current.replacingCharacters(in: range, with: string).count <= maxLength
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        // The form's first submit button, or the form itself when it has one field.
+        if let first = buttons.first { submit(first.1) } else if fields.count == 1 { submit(nil) }
+        return false
+    }
+
+    func submit(_ submitter: [String: Any]?) {
+        // A required field left empty stops the submission, as a browser's validation does.
+        if let empty = fields.first(where: { $0.required && !$0.disabled && $0.read().isEmpty }) {
+            empty.view.becomeFirstResponder()
+            empty.view.layer.borderColor = UIColor.systemRed.cgColor
+            empty.view.layer.borderWidth = 1
+            return
+        }
+        var entries: [(String, String)] = []
+        for hidden in form["fields"] as? [[String: Any]] ?? [] {
+            if let name = hidden["name"] as? String { entries.append((name, hidden["value"] as? String ?? "")) }
+        }
+        for field in fields where !field.name.isEmpty && !field.disabled {
+            entries.append((field.name, field.read()))
+        }
+        if let name = submitter?["name"] as? String { entries.append((name, submitter?["value"] as? String ?? "")) }
+        func option(_ key: String) -> String? {
+            (submitter?[key] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? (form[key] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        }
+        let origin = "\(page.scheme ?? "https")://\(page.host ?? "")" + (page.port.map { ":\($0)" } ?? "")
+        let buttons = self.buttons.map { $0.0 }
+        onSubmit(FarmFormSubmission(
+            action: option("action").flatMap { URL(string: $0) } ?? page,
+            method: option("method") ?? "get",
+            enctype: option("enctype") ?? "application/x-www-form-urlencoded",
+            entries: entries,
+            origin: origin,
+            setPending: { pending in
+                for button in buttons {
+                    button.isUserInteractionEnabled = !pending
+                    button.alpha = pending ? 0.5 : 1
+                }
+            }
+        ))
+    }
+}
+
+/// A form's entries, ready to send as HTML's form submission algorithm would.
+@MainActor
+struct FarmFormSubmission {
+    let action: URL
+    let method: String
+    let enctype: String
+    let entries: [(String, String)]
+    let origin: String
+    let setPending: (Bool) -> Void
+    private let boundary = "----FarmFormBoundary" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+
+    init(action: URL, method: String, enctype: String, entries: [(String, String)], origin: String, setPending: @escaping (Bool) -> Void) {
+        self.action = action
+        self.method = method
+        self.enctype = enctype
+        // Newlines in names and values are sent as CRLF.
+        self.entries = entries.map { (FarmFormSubmission.crlf($0.0), FarmFormSubmission.crlf($0.1)) }
+        self.origin = origin
+        self.setPending = setPending
+    }
+
+    private static func crlf(_ text: String) -> String {
+        text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\n", with: "\r\n")
+    }
+
+    private var multipart: Bool { enctype == "multipart/form-data" }
+
+    var contentType: String {
+        multipart ? "multipart/form-data; boundary=\(boundary)" : "application/x-www-form-urlencoded;charset=UTF-8"
+    }
+
+    var body: Data {
+        if !multipart { return Data(urlencoded().utf8) }
+        var out = ""
+        for (name, value) in entries {
+            let escaped = name.replacingOccurrences(of: "\"", with: "%22")
+                .replacingOccurrences(of: "\r", with: "%0D").replacingOccurrences(of: "\n", with: "%0A")
+            out += "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(escaped)\"\r\n\r\n\(value)\r\n"
+        }
+        out += "--\(boundary)--\r\n"
+        return Data(out.utf8)
+    }
+
+    /// A GET form replaces the action's query with its entries.
+    func queryURL() -> URL {
+        guard var components = URLComponents(url: action, resolvingAgainstBaseURL: false) else { return action }
+        let query = urlencoded()
+        components.percentEncodedQuery = query.isEmpty ? nil : query
+        return components.url ?? action
+    }
+
+    /// application/x-www-form-urlencoded: unreserved characters stay, a space is "+".
+    private func urlencoded() -> String {
+        // ASCII only: every other character is sent as its UTF-8 bytes, percent-encoded.
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789*-._ ")
+        func encode(_ text: String) -> String {
+            (text.addingPercentEncoding(withAllowedCharacters: allowed) ?? "").replacingOccurrences(of: " ", with: "+")
+        }
+        return entries.map { "\(encode($0.0))=\(encode($0.1))" }.joined(separator: "&")
+    }
+}
+
+enum FarmFormAnswer {
+    case redirect(URL)
+    case tree(URL, [String: Any])
+    case failed(String)
 }
