@@ -169,8 +169,11 @@ jobs:
           grep -q "launch open /map" "$EVIDENCE/map-log.txt"
           grep -q "native app/map open->content" "$EVIDENCE/map-log.txt"
           node scripts/check-bundled-image.mjs "$EVIDENCE/map.png"
-          # farm dev installs its own debug app under the same id next.
+          # farm dev installs its own debug app under the same id next, and its checks read only
+          # its own log: this app's home tab falls back while CI's production server has no
+          # deployment.
           "$ADB" uninstall "$ID" || true
+          "$ADB" logcat -c || true
 
       - name: Run the shell with farm dev --mobile
         working-directory: examples/${{ matrix.example }}
