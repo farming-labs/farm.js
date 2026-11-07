@@ -354,6 +354,29 @@ and `--json` for a versioned plan or result. The command reads the manifest, wit
 `farm.config.ts` or rescanning routes. Registration failures, redirects, timeouts, and incomplete
 acknowledgements fail the command. Retry the same manifest after resolving the error.
 
+Vercel git deployments have no step after the deploy goes live, and a Sensitive `FARMJS_API_KEY`
+can only be read by builds and functions. There, run the sync at the end of the production build:
+
+```js title="scripts/sync-cron.mjs"
+import { spawnSync } from "node:child_process";
+
+if (process.env.VERCEL_ENV === "production") {
+  const sync = spawnSync("farm", ["cron", "sync", "--url", "https://app.example.com", "--apply"], {
+    stdio: "inherit",
+    env: { ...process.env, FARMJS_ENVIRONMENT: "production" },
+  });
+  if (sync.status !== 0) console.warn("Warning: cron sync failed; Infra keeps the last jobs.");
+}
+```
+
+```json title="package.json"
+{ "scripts": { "build": "farm build && node scripts/sync-cron.mjs" } }
+```
+
+The jobs switch a minute or so before the new deployment is live, so a run in that window can
+miss the new route once; Infra retries it. Preview builds skip the step. farmjs.dev registers its
+own jobs this way.
+
 Infra sends signed GET requests to the application's routes. Set the same `FARMJS_API_KEY` in
 the deployed server environment; `cronRoute()` verifies `farmjs-signature`. `CRON_SECRET` remains
 supported for manual or host calls. Infra's per-request `timeoutMs` is 1000–60000 milliseconds;
