@@ -36,11 +36,15 @@ private object DeviceWebModule : FarmWebModule<NativeDeviceSpec>("Device", Nativ
             "vibrate" -> checkArgs(method, args, VIBRATE).let { a ->
                 { module: NativeDeviceSpec, promise: Promise -> module.vibrate(a[0] as Double, promise) }
             }
+            "pickPhoto" -> checkArgs(method, args, PICK_PHOTO).let { _ ->
+                { module: NativeDeviceSpec, promise: Promise -> module.pickPhoto(promise) }
+            }
             else -> throw unknownMethod(method)
         }
 
     private val MODEL = listOf<FarmWebParam>()
     private val VIBRATE = listOf<FarmWebParam>(FarmWebParam("ms", false, FarmWebType("number")))
+    private val PICK_PHOTO = listOf<FarmWebParam>()
 }
 
 /** Kitchen: the Promise methods of its spec, as web screens send them. */

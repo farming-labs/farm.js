@@ -21,6 +21,10 @@ final class ScreenViewController: UIViewController, PageHost {
     var onShown: ((String) -> Void)?
     /// Called once when a cold document load commits.
     var onPainted: (() -> Void)?
+    /// Releases a native screen's content (such as its React Native surface), once.
+    var onClose: (() -> Void)?
+    /// A native screen's link to the navigator, which its engine holds only weakly.
+    var nativeHost: AnyObject?
     private var awaitedToken = 0
 
     init(
@@ -40,7 +44,7 @@ final class ScreenViewController: UIViewController, PageHost {
         self.navigator = navigator
         super.init(nibName: nil, bundle: nil)
         page?.host = self
-        if let nativeModule { title = nativeModule }
+        if let nativeModule { navigationItem.title = nativeModule }
     }
 
     @available(*, unavailable)
@@ -107,7 +111,15 @@ final class ScreenViewController: UIViewController, PageHost {
         // Popped, or its modal closed: the WebView goes now instead of whenever ARC gets to it.
         if isMovingFromParent || isBeingDismissed || navigationController?.isBeingDismissed == true {
             page?.destroy()
+            closeNative()
         }
+    }
+
+    /// Stop the native content, when the screen goes or its web twin replaces it.
+    func closeNative() {
+        let close = onClose
+        onClose = nil
+        close?()
     }
 
     /// Warm path: render in the running page.
@@ -136,7 +148,7 @@ final class ScreenViewController: UIViewController, PageHost {
     private func shown(_ title: String) {
         progress.stopAnimating()
         page?.webView.alpha = 1
-        if !title.isEmpty { self.title = title }
+        if !title.isEmpty { navigationItem.title = title }
         let shown = onShown
         onShown = nil
         shown?(title)
@@ -177,7 +189,7 @@ final class ScreenViewController: UIViewController, PageHost {
     }
 
     func page(_ page: Page, title: String) {
-        if !title.isEmpty { self.title = title }
+        if !title.isEmpty { navigationItem.title = title }
     }
 
     func page(_ page: Page, failed error: Error) {

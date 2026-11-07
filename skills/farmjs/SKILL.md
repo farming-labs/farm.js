@@ -143,7 +143,7 @@ Common config fields:
   without device tokens since it refuses `auth`/`integrations`); the RSC router offers link
   clicks, `router.push`/`replace` and server action redirects to `delegateNavigation`;
   `--os ios` generates the iOS shell (Xcode project, Swift + UIKit) into `.farm/output/mobile/ios`
-  and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; not yet built with `xcodebuild`;
+  and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; built and launched in simulator CI with Xcode 16.4;
   `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; on Android
   `page.native.tsx`/`page.android.tsx` build as React Native screens, verified in
   `farm dev --mobile` on an Android emulator (not in production bytecode builds or on real
@@ -181,11 +181,16 @@ Common config fields:
   `web: true` (app modules only, a community module is an error) lets web screens call the module
 - Web screens calling app modules: `import { native, NativeUnavailableError, NativeCallError } from
 "@farm.js/core/native"`; `native.<Name>.available()` first, then `native.<Name>.<method>(...args)`
-  for the spec's Promise methods only; Android only (needs a React Native screen in the app, or
-  generation fails), iOS `available()` is false; arguments are checked against the Codegen spec in
-  generated Kotlin before the module runs (`invalid_args`, `unknown_method`, `native_error`, or the
+  for the spec's Promise methods only; Android and iOS (each needs a React Native screen in the
+  app; iOS also the module's Objective-C++ class, else `available()` is false); arguments are
+  checked against the Codegen spec in generated Kotlin or Swift before the module runs (`invalid_args`, `unknown_method`, `native_error`, or the
   module's own reject code); calls run on the module instance native screens use; types come from
-  the specs into `src/farm.d.ts` (`FarmNativeModules`); no file results or event subscriptions yet
+  the specs into `src/farm.d.ts` (`FarmNativeModules`); large results by reference, Android only: the module
+  writes into `cacheDir/farm-files` (by name: app modules cannot import shell classes) and resolves the `file://`
+  URI, the page gets `/__farm/files/<id>` (served by its own WebView, scoped to that page, deleted
+  when the screen closes, passed back as an argument it is the `file://` URI again); `PhotoPicker`
+  from `@farm.js/ui` takes `pick` (such as `native.Device.pickPhoto`) or opens the browser's file
+  input; no event subscriptions yet
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits

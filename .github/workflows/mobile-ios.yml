@@ -1,0 +1,333 @@
+name: Mobile iOS
+
+# Builds each mobile example's iOS shell with Xcode and runs it on an iOS simulator: examples/mobile
+# (Field Notes, the complete example) and examples/mobile-minimal (Trail Guide, the zero-native-code
+# path). A Mac with Xcode is the only place the generated Xcode project can be checked, so this runs
+# on GitHub's macOS runners when the mobile shell, its config, or an example changes, and on demand.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packages/farm-mobile/**"
+      - "packages/farm/src/mobile/**"
+      - "packages/farm-cli/src/mobile*.ts"
+      - "examples/mobile/**"
+      - "examples/mobile-minimal/**"
+      - ".github/workflows/mobile-ios.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push replaces a pull request's run; dispatched runs (measurements) finish.
+  group: mobile-ios-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  ios-simulator:
+    name: iOS simulator (${{ matrix.example }})
+    runs-on: macos-15
+    timeout-minutes: 60
+    # bash -eo pipefail: a failing command piped into tee fails its step.
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      # One example's failure keeps the other's evidence.
+      fail-fast: false
+      matrix:
+        include:
+          - example: mobile
+            app-id: dev.farmjs.examples.fieldnotes
+            server-routes: "/"
+          - example: mobile-minimal
+            app-id: dev.farmjs.examples.trailguide
+            server-routes: "/ /trails/[id]"
+    steps:
+      - run: echo "EVIDENCE=$RUNNER_TEMP/ios-evidence" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+          pnpm --filter @farm.js/mobile build
+          pnpm --filter @farm.js/native build
+          pnpm --filter @farm.js/ui build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+
+      - name: Show Xcode and simulators
+        run: |
+          mkdir -p "$EVIDENCE"
+          xcodebuild -version | tee "$EVIDENCE/xcode-version.txt"
+          xcrun simctl list runtimes | tee "$EVIDENCE/runtimes.txt"
+
+      - name: Build the production project with xcodebuild
+        working-directory: examples/${{ matrix.example }}
+        env:
+          FIELD_NOTES_SERVER: https://field-notes.farmjs.dev
+          TRAIL_GUIDE_SERVER: https://trail-guide.farmjs.dev
+        run: pnpm exec farm build --mobile --os ios 2>&1 | tee "$EVIDENCE/farm-build-ios.txt"
+
+      - name: Boot an iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j |
+            jq -r '[.devices | to_entries[] | select(.key | test("iOS")) | .value[] | select(.name | test("^iPhone"))][0].udid')
+          test -n "$udid" && test "$udid" != null
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid"
+          xcrun simctl list devices booted | tee "$EVIDENCE/booted.txt"
+
+      # examples/mobile's React Native screens: /kit (native-only, @farm.js/ui) and /map (netinfo
+      # and the app's Device module), opened in the production app.
+      - name: Open the React Native screen /kit in the production app
+        if: matrix.example == 'mobile'
+        working-directory: examples/mobile
+        run: |
+          APP=.farm/output/mobile/dist/dev.farmjs.examples.fieldnotes-simulator.app
+          ID=dev.farmjs.examples.fieldnotes
+          xcrun simctl install "$SIMULATOR_UDID" "$APP"
+          # The first launch after an install verifies the app and warms dyld's caches; keep it out
+          # of the numbers.
+          xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$ID"
+          sleep 8
+          # Cold: /kit opens as soon as the first screen shows content, while React Native starts.
+          # Warm: 5 s later, after the runtime has evaluated the bundle.
+          for run in 1 2 3; do
+            for mode in cold warm; do
+              after=0; [ "$mode" = warm ] && after=5000
+              xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$ID" \
+                -FarmOpen /kit -FarmOpenAfter "$after"
+              sleep $(( after / 1000 + 8 ))
+              xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/kit-$mode-$run.png"
+            done
+          done
+          # /map: React Native with an autolinked community module (netinfo) and the app's own
+          # Device TurboModule. A module that did not link throws on import and falls back.
+          xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$ID" -FarmOpen /map
+          sleep 10
+          xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/map.png"
+          xcrun simctl spawn "$SIMULATOR_UDID" log show --last 10m --style compact \
+            --predicate 'process == "App"' > "$EVIDENCE/kit-log.txt"
+          grep -E "react-native|native app/|launch open|fallback|failed" "$EVIDENCE/kit-log.txt" | tail -60 || true
+          {
+            echo "app_kb=$(du -sk "$APP" | cut -f1)"
+            for framework in "$APP"/Frameworks/*.framework; do
+              echo "framework_kb $(basename "$framework")=$(du -sk "$framework" | cut -f1)"
+            done
+            echo "bundle_kb=$(du -sk "$APP/farm-native.hbc" | cut -f1)"
+            # What a phone downloads: the arm64 device slices, zipped as the App Store compresses.
+            RN=.farm/output/mobile/ios/ReactNative
+            mkdir -p "$RUNNER_TEMP/device-slices"
+            for framework in React ReactNativeDependencies hermesvm; do
+              cp -R "$RN/$framework.xcframework/ios-arm64/$framework.framework" "$RUNNER_TEMP/device-slices/"
+            done
+            echo "device_slices_kb=$(du -sk "$RUNNER_TEMP/device-slices" | cut -f1)"
+            ditto -c -k --sequesterRsrc "$RUNNER_TEMP/device-slices" "$RUNNER_TEMP/device-slices.zip"
+            echo "device_slices_zip_kb=$(( $(stat -f %z "$RUNNER_TEMP/device-slices.zip") / 1024 ))"
+          } | tee "$EVIDENCE/kit-size.txt"
+
+      - name: Check /kit rendered as a React Native screen
+        if: matrix.example == 'mobile'
+        working-directory: examples/mobile
+        run: |
+          node scripts/check-ios-react-native.mjs "$EVIDENCE" | tee -a "$GITHUB_STEP_SUMMARY"
+          # /map's trail blaze is an image bundled with the screen (blaze.png): it shows only when
+          # the build put it in the app where React Native looks, assets/ next to the bytecode.
+          node scripts/check-bundled-image.mjs "$EVIDENCE/map.png"
+
+      - name: Run the shell with farm dev --mobile --os ios
+        working-directory: examples/${{ matrix.example }}
+        run: |
+          # The home check reads only the dev app's log, not the production app's /kit launches.
+          echo "DEV_STARTED=$(date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
+          pnpm exec farm dev --mobile --os ios --port 3001 > "$EVIDENCE/farm-dev-ios.txt" 2>&1 &
+          echo "FARM_DEV_PID=$!" >> "$GITHUB_ENV"
+          # The CLI builds, installs and launches the app, then prints "Opened <name> on <simulator>."
+          for _ in $(seq 1 180); do
+            grep -q "Opened .* on " "$EVIDENCE/farm-dev-ios.txt" && break
+            if grep -qE "xcodebuild exited|Error:" "$EVIDENCE/farm-dev-ios.txt"; then break; fi
+            sleep 5
+          done
+          cat "$EVIDENCE/farm-dev-ios.txt"
+          grep -q "Opened .* on " "$EVIDENCE/farm-dev-ios.txt"
+
+      - name: Capture the running app
+        env:
+          APP_ID: ${{ matrix.app-id }}
+        run: |
+          xcrun simctl listapps "$SIMULATOR_UDID" | grep -A3 -F "$APP_ID" | tee "$EVIDENCE/installed.txt"
+          # The first document loads from farm dev over the simulator's shared network; take one
+          # screenshot right away and more as the page settles, so a slow first load still shows.
+          for t in 0 10 30; do
+            sleep "$t"
+            xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/home-${t}s.png"
+          done
+          xcrun simctl spawn "$SIMULATOR_UDID" log show --start "$DEV_STARTED" --style compact \
+            --predicate 'process == "App"' > "$EVIDENCE/app-log.txt"
+          grep -iE "error|fault|crash" "$EVIDENCE/app-log.txt" | head -50 || true
+
+      - name: Check the home tab drew native views
+        working-directory: examples/${{ matrix.example }}
+        env:
+          SERVER_ROUTES: ${{ matrix.server-routes }}
+        run: |
+          cp .farm/output/mobile/farm-routes.json "$EVIDENCE/farm-routes.json"
+          # Split the routes into arguments without globbing: /trails/[id] is a route, not a pattern.
+          set -f
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/check-ios-native.mjs" "$EVIDENCE" $SERVER_ROUTES
+
+      # A web screen calling the app's own Device module (mobile.modules.Device.web) through the
+      # bridge. Under farm dev: the production app's server has no deployment in CI.
+      - name: Call the Device module from the /settings web screen
+        if: matrix.example == 'mobile'
+        run: |
+          started=$(date '+%Y-%m-%d %H:%M:%S')
+          xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" dev.farmjs.examples.fieldnotes \
+            -FarmOpen /settings
+          # The shell logs "web module Device.model ok in <ms>ms" once the module answered.
+          for _ in $(seq 1 24); do
+            sleep 5
+            xcrun simctl spawn "$SIMULATOR_UDID" log show --start "$started" --style compact \
+              --predicate 'process == "App"' > "$EVIDENCE/settings-log.txt"
+            grep -qE "web module Device\.model (ok|failed)" "$EVIDENCE/settings-log.txt" && break
+          done
+          # Let the page draw the answer.
+          sleep 2
+          xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/settings.png"
+          grep -E "web module|react-native|launch open|fallback|failed" "$EVIDENCE/settings-log.txt" | tail -30 || true
+          grep -E "web module Device\.model ok in [0-9]+ms" "$EVIDENCE/settings-log.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop the dev server
+        if: always()
+        run: |
+          if [ -n "${FARM_DEV_PID:-}" ]; then kill "$FARM_DEV_PID" 2>/dev/null || true; fi
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mobile-ios-${{ matrix.example }}-${{ github.sha }}
+          path: ${{ runner.temp }}/ios-evidence
+          if-no-files-found: warn
+
+  # RFC 0004's "how React Native is consumed" comparison: React Native's own app template, built
+  # through CocoaPods from source and with its prebuilt core, Release, for the simulator. Farm's
+  # shell links the prebuilt XCFrameworks without CocoaPods (the job above); this records what the
+  # CocoaPods paths cost on the same runner. It measures and never blocks.
+  cocoapods-baseline:
+    name: React Native via CocoaPods (baseline)
+    runs-on: macos-15
+    timeout-minutes: 60
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      RN_VERSION: 0.88.1
+    steps:
+      - run: echo "EVIDENCE=$RUNNER_TEMP/cocoapods-evidence" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - name: Create the React Native app template
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir -p "$EVIDENCE"
+          npx --yes @react-native-community/cli@latest init Baseline --version "$RN_VERSION" \
+            --skip-git-init --install-pods false --pm npm 2>&1 | tail -20
+          pod --version | tee "$EVIDENCE/cocoapods-version.txt"
+          # Log process start to React Native's first content, the launch number Farm's shell logs.
+          DELEGATE=Baseline/ios/Baseline/AppDelegate.swift
+          # The method may be a single expression (`true`), which a second statement would break.
+          perl -0pi -e 's/(didFinishLaunchingWithOptions[^{]*\{)\s*true\s*\}/$1\n    BaselineTiming.observe()\n    return true\n  }/ or s/(didFinishLaunchingWithOptions[^{]*\{)/$1\n    BaselineTiming.observe()/' "$DELEGATE"
+          cat >> "$DELEGATE" <<'SWIFT'
+
+          enum BaselineTiming {
+            static func sinceProcessStart() -> Int {
+              var info = kinfo_proc()
+              var size = MemoryLayout<kinfo_proc>.stride
+              var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+              sysctl(&mib, u_int(mib.count), &info, &size, nil, 0)
+              let start = info.kp_proc.p_un.__p_starttime
+              var now = timeval()
+              gettimeofday(&now, nil)
+              return (Int(now.tv_sec) - Int(start.tv_sec)) * 1000 + (Int(now.tv_usec) - Int(start.tv_usec)) / 1000
+            }
+
+            static func observe() {
+              let launched = sinceProcessStart()
+              NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("RCTContentDidAppearNotification"), object: nil, queue: .main
+              ) { _ in
+                NSLog("baseline process->didFinishLaunching=%ldms process->first-content=%ldms", launched, sinceProcessStart())
+              }
+            }
+          }
+          SWIFT
+          grep -n "BaselineTiming.observe" "$DELEGATE"
+
+      - name: Boot an iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j |
+            jq -r '[.devices | to_entries[] | select(.key | test("iOS")) | .value[] | select(.name | test("^iPhone"))][0].udid')
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid"
+
+      - name: Build and launch, from source and prebuilt
+        working-directory: ${{ runner.temp }}/Baseline/ios
+        run: |
+          measure() {
+            local mode=$1 prebuilt=$2
+            rm -rf Pods Podfile.lock build
+            local started=$(date +%s)
+            RCT_USE_PREBUILT_RNCORE=$prebuilt RCT_USE_RN_DEP=$prebuilt pod install > "$EVIDENCE/pod-install-$mode.txt" 2>&1
+            local installed=$(date +%s)
+            xcodebuild -workspace Baseline.xcworkspace -scheme Baseline -configuration Release \
+              -destination 'generic/platform=iOS Simulator' -derivedDataPath build -quiet \
+              CODE_SIGNING_ALLOWED=NO build > "$EVIDENCE/xcodebuild-$mode.txt" 2>&1
+            local built=$(date +%s)
+            local app=build/Build/Products/Release-iphonesimulator/Baseline.app
+            echo "$mode pod_install_s=$((installed - started)) build_s=$((built - installed)) app_kb=$(du -sk "$app" | cut -f1) binary_kb=$(du -sk "$app/Baseline" | cut -f1) frameworks_kb=$(du -sk "$app/Frameworks" 2>/dev/null | cut -f1)" | tee -a "$EVIDENCE/baseline.txt"
+            ls -la "$app/Frameworks" >> "$EVIDENCE/frameworks-$mode.txt" 2>&1 || true
+            xcrun simctl install "$SIMULATOR_UDID" "$app"
+            local id
+            id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")
+            xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$id" > /dev/null
+            sleep 8
+            for run in 1 2 3; do
+              xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$id" > /dev/null
+              sleep 8
+            done
+            xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/baseline-$mode.png"
+            xcrun simctl spawn "$SIMULATOR_UDID" log show --last 2m --style compact \
+              --predicate 'process == "Baseline"' > "$EVIDENCE/log-$mode.txt" || true
+            xcrun simctl uninstall "$SIMULATOR_UDID" "$id"
+          }
+          measure source 0
+          measure prebuilt 1
+          {
+            echo '### React Native 0.88.1 app template through CocoaPods (Release, simulator)'
+            echo '```'
+            cat "$EVIDENCE/baseline.txt"
+            for mode in source prebuilt; do
+              echo "$mode launches:"
+              grep -oE "process->didFinishLaunching=[0-9]+ms process->first-content=[0-9]+ms" "$EVIDENCE/log-$mode.txt" || echo "  (no timing logged)"
+            done
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cocoapods-baseline-${{ github.sha }}
+          path: ${{ runner.temp }}/cocoapods-evidence
+          if-no-files-found: warn

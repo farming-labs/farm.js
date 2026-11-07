@@ -1127,8 +1127,23 @@ Custom element tags and customized built-ins using `is` remain React-owned rathe
 compiler attribute writes or host descriptors. React controls property setters, attributes, events,
 and element creation according to the installed React version, including during hydration.
 
+State-dependent `contentEditable` bindings and non-literal `contentEditable` values in host
+descriptors remain React-owned. This preserves the difference between explicit `false` (not editable)
+and an absent value (inherit from the parent). Literal strings on ordinary direct hosts remain
+eligible for compilation.
+
+`title` and `meta` elements inside conditional, keyed, or recursive host descriptors remain
+React-owned. React decides their document placement and cleanup, including React 19 head placement
+and the `itemProp` exception. The compiler does not implement a separate metadata manager.
+
 Conditional blocks have three safe ownership levels. One or more proven host-only direct branches
 may become compiler-owned ranges among static host siblings, including at the exact component root.
+Script elements in conditional branches or keyed rows remain React-owned, including nested and
+non-executable scripts. React retains responsibility for inert script creation on insertion and
+reinsertion; the compiler does not create these elements through its host descriptors.
+The production browser control is
+`NODE_ENV=production node packages/farm-react/scripts/test-script-ownership-browser.mjs` from the
+workspace root. Set `CHROME_PATH` to use an installed Chrome instead of Playwright's browser.
 A dedicated container with exactly one conditional child uses the smaller compiler-owned branch
 boundary. The more general React-owned conditional path accepts supported events, nested host
 conditionals, keyed lists, and component islands. A compiler-owned host branch may now recursively

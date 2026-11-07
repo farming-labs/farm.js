@@ -830,6 +830,7 @@ export class ServerRenderer {
     return collectDevStylesheetUrls(
       graph.idToModuleMap.values(),
       this.devGlobalStylesheetHref() ?? undefined,
+      { cssModules: this.islandValues() },
     );
   }
 

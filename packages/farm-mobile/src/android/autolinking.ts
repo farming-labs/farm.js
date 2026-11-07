@@ -64,7 +64,7 @@ async function readJson(file: string): Promise<Record<string, any> | undefined> 
 }
 
 /** The installed package directory, as Node resolves it from `from`. */
-async function findPackage(name: string, from: string): Promise<string | undefined> {
+export async function findPackage(name: string, from: string): Promise<string | undefined> {
   let dir = from;
   for (;;) {
     const candidate = path.join(dir, "node_modules", name);
@@ -127,10 +127,11 @@ async function findComponentDescriptors(root: string, jsSrcsDir?: string): Promi
   return [...descriptors].sort();
 }
 
-/** `dependency.platforms.android` from the package's `react-native.config.js`, if it has one. */
-async function readPackageConfig(
+/** `dependency.platforms.<os>` from the package's `react-native.config.js`, if it has one. */
+export async function readPackageConfig(
   name: string,
   root: string,
+  os: "android" | "ios" = "android",
 ): Promise<Record<string, any> | null | undefined> {
   const file = ["react-native.config.js", "react-native.config.cjs", "react-native.config.mjs"]
     .map((candidate) => path.join(root, candidate))
@@ -146,7 +147,7 @@ async function readPackageConfig(
       { cause: error },
     );
   }
-  return config?.dependency?.platforms?.android;
+  return config?.dependency?.platforms?.[os];
 }
 
 async function linkPackage(name: string, root: string): Promise<AndroidNativeModule | undefined> {

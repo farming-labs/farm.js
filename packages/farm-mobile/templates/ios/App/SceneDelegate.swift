@@ -5,7 +5,7 @@ import os
 ///   xcrun simctl launch booted <id> -FarmServer http://localhost:3001   load a different Farm server
 ///   xcrun simctl launch booted <id> -FarmPool 0                          disable the warm pool
 /// Every other build ignores them, so nothing can point a `farm build --mobile` app, and the
-/// origin its bridge trusts, at another server.
+/// origin its bridge trusts, at another server. Every build reads `LaunchOpen` instead.
 struct LaunchOptions {
     static let poolSize = 2
 
@@ -26,6 +26,29 @@ struct LaunchOptions {
         }
         let pool = value("-FarmPool").flatMap { Int($0) }.map { max(0, min($0, 4)) } ?? poolSize
         return LaunchOptions(server: server, pool: pool)
+    }
+}
+
+/// A launch option every build reads, because it only does what a tapped link to the app's own
+/// server does:
+///   xcrun simctl launch booted <id> -FarmOpen /kit [-FarmOpenAfter 3000]
+/// visits that path once the first screen shows content (when the native engine starts warming),
+/// or that many milliseconds later. CI opens a native screen cold and warm with it.
+struct LaunchOpen {
+    let path: String
+    let afterMs: Int
+
+    static func read(arguments: [String]) -> LaunchOpen? {
+        func value(_ name: String) -> String? {
+            guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else { return nil }
+            return arguments[index + 1]
+        }
+        // A path on the app's server, never another origin.
+        guard let path = value("-FarmOpen"), path.hasPrefix("/"), !path.hasPrefix("//"),
+              !path.contains("\\")
+        else { return nil }
+        let after = value("-FarmOpenAfter").flatMap { Int($0) }.map { max(0, min($0, 60_000)) } ?? 0
+        return LaunchOpen(path: path, afterMs: after)
     }
 }
 
@@ -67,7 +90,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     ) {
         guard let windowScene = scene as? UIWindowScene else { return }
         // Launch overrides only under farm dev --mobile, never in a farm build --mobile app.
-        let launch = LaunchOptions.read(arguments: ProcessInfo.processInfo.arguments, dev: FarmBuild.dev)
+        let arguments = ProcessInfo.processInfo.arguments
+        let launch = LaunchOptions.read(arguments: arguments, dev: FarmBuild.dev)
+        let open = LaunchOpen.read(arguments: arguments)
         let config: RouteConfig
         do {
             config = try RouteConfig.load(serverOverride: launch.server)
@@ -91,6 +116,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.tintColor = Theme.accent
         window.rootViewController = shell
         self.window = window
+        (UIApplication.shared.delegate as? AppDelegate)?.window = window
         window.makeKeyAndVisible()
 
         // Page shells, bundled by farm build --mobile with mobile.shells.
@@ -112,7 +138,19 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             shells: shells,
             newPage: newPage
         )
-        navigator.onFirstReady = { pool?.start() }
+        // React Native when the app has page.native.tsx screens; warmed after the first screen shows.
+        let engine = createFarmNativeEngine(config: config)
+        FarmNativeScreens.engine = engine
+        navigator.onFirstReady = { [weak navigator] in
+            LaunchTiming.logFirstContent()
+            pool?.start()
+            engine?.warm()
+            guard let open else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(open.afterMs)) {
+                Navigator.log.notice("launch open \(open.path, privacy: .public) after \(open.afterMs)ms")
+                navigator?.visitPath(open.path)
+            }
+        }
         self.navigator = navigator
         shell.show(navigator.rootViewController)
         navigator.start()

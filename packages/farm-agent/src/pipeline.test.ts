@@ -193,7 +193,9 @@ async function expectRunsThroughGuards(origin: string) {
   });
   expect(started.status).toBe(202);
   const { id } = await started.json();
-  expect((await readRun(origin, id, "interrupted")).interrupt?.name).toBe("approve-refund");
+  const interrupted = await readRun(origin, id, "interrupted");
+  expect(interrupted.input, "input stored before resume").toEqual({ orderId: "A1" });
+  expect(interrupted.interrupt?.name).toBe("approve-refund");
 
   const listed = await (
     await fetch(`${origin}/api/agent/runs?status=interrupted`, { headers: PASS })

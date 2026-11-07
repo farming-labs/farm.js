@@ -11,6 +11,8 @@ import {
   farmNativeBundleFiles,
   resolveFarmReactNative,
   resolveSingletonsFromApp,
+  guardFarmServerImports,
+  resolveFarmServerFnStubs,
   resolveWatchFolders,
 } from "./index";
 
@@ -102,7 +104,7 @@ describe("resolveFarmReactNative", () => {
 
 describe("resolveWatchFolders", () => {
   it("watches only the store packages a screen bundle can reach, not the whole workspace", async () => {
-    const workspace = await tempDir();
+    const workspace = path.join(await tempDir(), "metro-vite-h3");
     const store = path.join(workspace, "node_modules", ".pnpm");
     const app = path.join(workspace, "apps", "mobile");
     const pkg = (name: string) =>
@@ -153,7 +155,9 @@ describe("resolveWatchFolders", () => {
     ]);
     // Build tools and web-only packages stay out; core's native builds import nothing else, so
     // its dependencies do too.
-    expect(folders.join("\n")).not.toMatch(/metro|vite|h3/);
+    expect(folders.map((folder) => path.relative(workspace, folder)).join("\n")).not.toMatch(
+      /metro|vite|h3/,
+    );
   });
 });
 
@@ -168,6 +172,16 @@ describe("farmNativeBundleFiles", () => {
     }
     expect(js).toBe(path.join(outDir, "build", "android.js"));
     expect(bytecode).toBe(path.join(outDir, "build", "android.hbc"));
+  });
+
+  it("gives each platform its own asset output, since Metro lays images out per platform", () => {
+    const outDir = path.join("/app", ".farm", "output", "mobile", "native");
+    expect(farmNativeBundleFiles(outDir, "android").assets).toBe(
+      path.join(outDir, "build", "android-assets"),
+    );
+    expect(farmNativeBundleFiles(outDir, "ios").assets).toBe(
+      path.join(outDir, "build", "ios-assets"),
+    );
   });
 });
 
@@ -233,5 +247,52 @@ describe("resolveSingletonsFromApp", () => {
       ["@farm.js/native", path.join("/app", "package.json")],
       ["@farm.js/native-extra", auth.originModulePath],
     ]);
+  });
+});
+
+describe("resolveFarmServerFnStubs", () => {
+  it("resolves a server function module to its stub, and everything else as before", async () => {
+    const dir = await tempDir();
+    const server = path.join(dir, "server.ts");
+    const helper = path.join(dir, "helper.ts");
+    await writeFile(server, "export const createNote = 1;\n");
+    await writeFile(helper, "export const x = 1;\n");
+    const stub = path.join(dir, "stub.js");
+    const next = (_context: unknown, moduleName: string) => ({
+      type: "sourceFile",
+      filePath: moduleName === "./server" ? server : helper,
+    });
+    const resolve = resolveFarmServerFnStubs(new Map([[realpathSync(server), stub]]), next);
+    // The bundle gets the stub, never the server module.
+    expect(resolve({}, "./server", "android")).toEqual({ type: "sourceFile", filePath: stub });
+    expect(resolve({}, "./helper", "android")).toEqual({ type: "sourceFile", filePath: helper });
+    // A server function module without a stub stops the bundle instead of shipping server code.
+    const guarded = resolveFarmServerFnStubs(
+      new Map(),
+      next,
+      (file) => file === realpathSync(server),
+    );
+    expect(() => guarded({}, "./server", "android")).toThrow(/defines server functions/);
+    expect(guarded({}, "./helper", "android")).toEqual({ type: "sourceFile", filePath: helper });
+  });
+});
+
+describe("guardFarmServerImports", () => {
+  it("keeps Farm's server runtime out of a native bundle", () => {
+    const resolve = guardFarmServerImports((_context, moduleName) => ({
+      type: "sourceFile",
+      filePath: `/resolved/${moduleName}`,
+    }));
+    // A server module the stub swap missed: a namespace import, a wrapper factory's own module.
+    for (const name of ["@farm.js/core/server-fn", "@farm.js/core", "@farm.js/core/server-query"]) {
+      expect(() => resolve({ originModulePath: "/app/src/authed.ts" }, name, "android")).toThrow(
+        /\/app\/src\/authed\.ts imports @farm\.js\/core.*never goes into a native bundle/,
+      );
+    }
+    expect(resolve({}, "@farm.js/core/api/client", "android")).toEqual({
+      type: "sourceFile",
+      filePath: "/resolved/@farm.js/core/api/client",
+    });
+    expect(resolve({}, "@farm.js/native", "android")).toMatchObject({ type: "sourceFile" });
   });
 });

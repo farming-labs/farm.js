@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.51-beta.3",
+  "version": "0.1.61",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -735,6 +735,11 @@
       "import": "./dist/internal/server-fn-transform.mjs",
       "require": "./dist/internal/server-fn-transform.cjs"
     },
+    "./internal/native-server-fns": {
+      "types": "./dist/internal/native-server-fns.d.ts",
+      "import": "./dist/internal/native-server-fns.mjs",
+      "require": "./dist/internal/native-server-fns.cjs"
+    },
     "./internal/islx-server": {
       "types": "./dist/internal/islx-server.d.ts",
       "import": "./dist/internal/islx-server.mjs",
@@ -744,6 +749,11 @@
       "types": "./dist/internal/islx-react.d.ts",
       "import": "./dist/internal/islx-react.mjs",
       "require": "./dist/internal/islx-react.cjs"
+    },
+    "./internal/react-cache": {
+      "types": "./dist/internal/react-cache.d.ts",
+      "import": "./dist/internal/react-cache.mjs",
+      "require": "./dist/internal/react-cache.cjs"
     },
     "./internal/form-actions": {
       "types": "./dist/internal/form-actions.d.ts",
@@ -797,7 +807,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farm.js/islx": "0.0.8",
+    "@farm.js/islx": "0.0.9",
     "@farming-labs/orm": "0.0.66",
     "@farming-labs/orm-runtime": "0.0.66",
     "@formatjs/icu-messageformat-parser": "3.5.15",

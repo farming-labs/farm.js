@@ -26,7 +26,7 @@ import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveWorkflowsConfig } from "./workflows";
-import { resolveCronConfig } from "./cron";
+import { resolveProjectCronJobs } from "./cron-scan";
 import { resolveEnv, setEnv } from "./env";
 import {
   resolveMdxConfig,
@@ -170,7 +170,13 @@ export type {
   FarmMobileTab,
   FarmMobileUserConfig,
 } from "./mobile/config";
-export type { FarmCronJobConfig, FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
+export type {
+  FarmCronConfig,
+  FarmCronProvider,
+  FarmCronJobConfig,
+  FarmCronResolvedConfig,
+  FarmCronUserConfig,
+} from "./cron";
 export type {
   FarmRouteRule,
   FarmRouteRuleCors,
@@ -1284,6 +1290,10 @@ export async function resolveConfig(
   const env = resolveEnv(userConfig.env, process.env);
   setEnv(env);
   const api = await resolveFarmAPIConfig(userConfig.api, { root, mode, env });
+  // Route-level `cronRoute()` schedules merge with `cron` config here, so every consumer of the
+  // resolved config (build outputs, the manifest, `farm cron list|run`, `farm dev --cron`) sees
+  // one job list.
+  const cron = await resolveProjectCronJobs({ root, srcDir, cron: userConfig.cron });
   const auth = resolveFarmAuthConfig(userConfig.auth);
   const mcp = resolveFarmMCPConfig(userConfig.mcp);
   if (auth.enabled && userConfig.integrations?.auth) {
@@ -1322,6 +1332,17 @@ export async function resolveConfig(
           integrations: () => integrations,
         })
       : null;
+  // Server functions that the app's native screens import, called over HTTP (dev: loaded by the
+  // dev server; a production build generates its own list).
+  let nativeServerFnAppDirs: readonly string[] = [];
+  const nativeServerFnPlugin =
+    userConfig.mobile !== undefined && userConfig.mobile !== null
+      ? (await import("./mobile/native-server-fn-handler")).createFarmNativeServerFnPlugin({
+          resolve: (await import("./mobile/native-server-fns")).createFarmDevNativeServerFnResolver(
+            { root, srcDir, appDirs: () => nativeServerFnAppDirs },
+          ),
+        })
+      : null;
   const openapi = {
     enabled: false,
     route: "/docs/reference",
@@ -1349,7 +1370,7 @@ export async function resolveConfig(
     md,
     mdx,
     migrations: resolveMigrationsConfig(userConfig.migrations),
-    cron: resolveCronConfig(userConfig.cron),
+    cron,
     workflows: resolveWorkflowsConfig(userConfig.workflows),
     api,
     observability: userConfig.observability ?? false,
@@ -1379,6 +1400,7 @@ export async function resolveConfig(
     ...(userConfig.mobile !== undefined ? { mobileClient: true } : {}),
     plugins: [
       ...(mobileSessionPlugin ? [mobileSessionPlugin] : []),
+      ...(nativeServerFnPlugin ? [nativeServerFnPlugin] : []),
       ...resolveIntegrationPlugins(integrations),
       ...(nativeMCPPlugin ? [nativeMCPPlugin] : []),
       ...(userConfig.plugins || []),
@@ -1418,6 +1440,9 @@ export async function resolveConfig(
 
   // Every plugin is known now, including those integrations contribute.
   assertPluginDependencies(resolved.plugins, resolved.integrations as never);
+  if (nativeServerFnPlugin) {
+    nativeServerFnAppDirs = (await import("./layers")).getFarmAppDirectories(resolved);
+  }
 
   return resolved;
 }

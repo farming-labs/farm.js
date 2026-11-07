@@ -453,11 +453,12 @@ async function outputManifest(dir: string): Promise<Record<string, string>> {
     const file = path.join(entry.parentPath, entry.name);
     const relative = path.relative(dir, file);
     let contents = await fs.readFile(file);
-    // Nitro stamps the build time into nitro.json, and file mtimes into the server entry's
-    // public asset table, whose order also follows the file system. Neither is app code.
+    // Nitro stamps the build time into nitro.json, and file mtimes into the built server's
+    // public asset table, whose order also follows the file system. Neither is app code. The
+    // built server sits beside the compile-cache launcher that `node-server` makes `index.mjs`.
     if (relative === "nitro.json") {
       contents = Buffer.from(contents.toString("utf8").replace(/"date": "[^"]+"/, '"date": ""'));
-    } else if (relative === path.join("server", "index.mjs")) {
+    } else if (relative === path.join("server", "farm-server.mjs")) {
       const lines = contents.toString("utf8").split("\n");
       contents = Buffer.from(
         lines

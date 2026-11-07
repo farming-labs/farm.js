@@ -1322,6 +1322,13 @@ export default defineConfig({
 });
 ```
 
+`cron.provider` picks who runs the schedules. `"host"`, the default, is the platform you deploy to
+with `deploy.target` or `deploy.preset` (Vercel Cron, Cloudflare Cron Triggers, or Nitro tasks).
+`"farmjs"` hands them to Farm.js Infra: use `cron: { provider: "farmjs", jobs: { ... } }`, or
+`cron: { provider: "farmjs" }` with route-local schedules, then run
+`farm cron sync --url https://app.example.com --apply` after deployment. See
+[Cron: choose the provider](/docs/cron#choose-the-provider) for credentials, planning, and cleanup.
+
 See [Cron](/docs/cron) for route protection, local commands, UTC syntax, deployment behavior, and reliability boundaries.
 
 ## Integrations in config

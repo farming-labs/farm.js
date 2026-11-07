@@ -850,6 +850,12 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=12288
 
+      - name: Verify islands from packed artifacts
+        run: pnpm test:packed-islands
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+          TMPDIR: ${{ runner.temp }}
+
       - name: Upload Playwright failure artifacts
         if: ${{ failure() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -858,5 +864,6 @@ jobs:
           path: |
             playwright-report/
             test-results/
+            ${{ runner.temp }}/farm-packed-islands-*/test-results/
           if-no-files-found: ignore
           retention-days: 7

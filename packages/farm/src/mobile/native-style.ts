@@ -720,24 +720,70 @@ export function splitFarmCssDeclarations(css: string): Array<[string, string]> {
   return out;
 }
 
+/** Replace `var(--x, fallback)` with the stylesheet's value, or `undefined` if one is missing. */
+export function substituteFarmNativeVars(
+  value: string,
+  vars: Record<string, string>,
+  depth = 0,
+): string | undefined {
+  if (!value.includes("var(")) return value;
+  if (depth > 8) return undefined;
+  let missing = false;
+  const replaced = value.replace(
+    /var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\))?[^()]*))?\)/g,
+    (_, name: string, fallback?: string) => {
+      const resolved = vars[name] ?? fallback?.trim();
+      if (resolved === undefined) {
+        missing = true;
+        return "";
+      }
+      return resolved;
+    },
+  );
+  return missing ? undefined : substituteFarmNativeVars(replaced, vars, depth + 1);
+}
+
 /**
  * Resolve an inline `style` attribute, as React renders a style object (`padding:12px;color:#111`).
+ * A `var(--x, fallback)` value, as `@farm.js/ui` writes its color tokens, reads the app's `:root`
+ * variables in each theme, then its fallback; `dark` keeps only what the dark theme changes.
  * `unsupported` lists the declarations that did not resolve.
  */
-export function resolveFarmNativeInlineStyle(css: string): {
+export function resolveFarmNativeInlineStyle(
+  css: string,
+  vars: { light: Readonly<Record<string, string>>; dark: Readonly<Record<string, string>> } = {
+    light: {},
+    dark: {},
+  },
+): {
   style: FarmNativeStyle;
+  dark: FarmNativeStyle;
   unsupported: string[];
 } {
   const style: FarmNativeStyle = {};
+  const dark: FarmNativeStyle = {};
   const unsupported: string[] = [];
+  const themes = [
+    [style, vars.light],
+    [dark, { ...vars.light, ...vars.dark }],
+  ] as const;
   for (const [property, raw] of splitFarmCssDeclarations(css)) {
-    const value = raw.toLowerCase();
     if (!property) continue;
-    const resolved = resolveFarmNativeDeclaration(property, value);
-    if (resolved) Object.assign(style, resolved);
-    else if (resolved === undefined) unsupported.push(`${property}: ${value}`);
+    for (const [target, themeVars] of themes) {
+      const value = substituteFarmNativeVars(raw, themeVars)?.toLowerCase();
+      const resolved =
+        value === undefined ? undefined : resolveFarmNativeDeclaration(property, value);
+      if (resolved === undefined) {
+        unsupported.push(`${property}: ${raw.toLowerCase()}`);
+        break;
+      }
+      if (resolved) Object.assign(target, resolved);
+    }
   }
-  return { style, unsupported };
+  for (const key of Object.keys(dark)) {
+    if (dark[key] === style[key]) delete dark[key];
+  }
+  return { style, dark, unsupported };
 }
 
 /** An `oklch(L% C H)` or `oklch(L C H)` color as sRGB hex, as Tailwind 4 writes its colors. */

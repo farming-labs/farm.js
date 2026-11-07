@@ -33,9 +33,19 @@ export type FarmNavigate = (href: string, options?: FarmNavigateOptions) => void
  * component. `/notes/7` is an app path (the base path is added); other origins open outside.
  */
 export function useNavigate(): FarmNavigate {
-  const screen = useScreen("useNavigate");
+  return useScreenNavigate(useScreen("useNavigate"));
+}
+
+/** Not a public API: `navigate` for `@farm.js/ui` components, which may render outside a screen. */
+export function _useNavigateInScreen(): FarmNavigate {
+  return useScreenNavigate(useContext(FarmScreenContext));
+}
+
+function useScreenNavigate(screen: FarmScreenState | null): FarmNavigate {
   return useCallback(
     (href: string, options?: FarmNavigateOptions) => {
+      if (!screen)
+        throw new Error("Navigation works only in a Farm native screen (page.native.tsx).");
       const path =
         href.startsWith("/") && !href.startsWith("//") ? `${screen.basePath}${href}` : href;
       const url = resolveFarmHref(path, screen.url);
@@ -78,6 +88,29 @@ export function serverFetch(path: string, init?: RequestInit): Promise<Response>
     server: farmApp.server,
     shell: shellSession(),
   });
+}
+
+/** A server function called from a native screen failed, as `createServerFn` reports it. */
+export class FarmServerFnError extends Error {
+  /** A code from the function's `errors`, or `invalid_input`, `server_error`, `not_native`, ... */
+  readonly code: string;
+  readonly status: number;
+  /** The declared error's public data. */
+  readonly data: unknown;
+  /** Where the function redirected, when it called `redirect()`. */
+  readonly redirect?: string;
+
+  constructor(
+    message: string,
+    details: { code: string; status: number; data?: unknown; redirect?: string },
+  ) {
+    super(message);
+    this.name = "FarmServerFnError";
+    this.code = details.code;
+    this.status = details.status;
+    this.data = details.data;
+    if (details.redirect !== undefined) this.redirect = details.redirect;
+  }
 }
 
 /**

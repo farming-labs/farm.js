@@ -75,6 +75,8 @@ describe("native module specs for web screens", () => {
           params: [{ name: "ms", optional: false, type: { type: "number" } }],
           returns: { type: "void" },
         },
+        // A file by reference: web screens get a /__farm/files/<id> URL, null when cancelled.
+        { name: "pickPhoto", params: [], returns: { type: "string", nullable: true } },
       ],
       unsupported: [],
     });
@@ -141,7 +143,7 @@ describe("native module specs for web screens", () => {
     ).toBe(`/**
  * Auto-generated from the Codegen specs in src/native: native.<module> from @farm.js/core/native.
  * Web screens reach a module's Promise methods only when mobile.modules.<name>.web is true, and
- * only inside the Android shell; check native.<module>.available() first.
+ * only inside the mobile shell; check native.<module>.available() first.
  */
 declare module "@farm.js/core/native" {
   interface FarmNativeModules {
@@ -235,6 +237,7 @@ export default TurboModuleRegistry.getEnforcing<Spec>("Quiet");
     Device: {
       model(): Promise<string>;
       vibrate(ms: number): Promise<void>;
+      pickPhoto(): Promise<string | null>;
     };
   }
 }`);

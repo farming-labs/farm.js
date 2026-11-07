@@ -40,9 +40,18 @@ class MainActivity : AppCompatActivity() {
         val config = RouteConfig.load(this, if (dev) intent.getStringExtra("server") else null)
         val poolSize = if (dev) intent.getIntExtra("pool", POOL_SIZE) else POOL_SIZE
         val startPath = getString(R.string.farm_start_path)
+        // Debuggable builds (farm build --mobile --apk too) read one more, which only does what a
+        // tapped link to the app's own server does:
+        //   adb shell am start -n <id>/dev.farmjs.mobile.shell.MainActivity --es farmOpen /map
+        // visits that path once the first screen shows content. CI opens a native screen with it.
+        // Other apps can start this activity with extras, so a release build ignores it.
+        val open = intent.takeIf { debuggable }?.getStringExtra("farmOpen")
+            ?.takeIf { it.startsWith("/") && !it.startsWith("//") && '\\' !in it }
         Log.i(Navigator.TAG, "server=${config.server} pool=$poolSize rules=${config.rules.size}")
         // The device token native screens call the server with; issued after a web sign-in.
         MobileSession.init(this, config)
+        // Files web screens received by reference in an earlier run of the app.
+        FarmFiles.clearStale(this)
 
         // Device plugins reachable as native.<name>; none ship yet, so calls reject as unavailable.
         val plugins = emptyMap<String, FarmPlugin>()
@@ -86,6 +95,10 @@ class MainActivity : AppCompatActivity() {
         navigator.onFirstReady = {
             pool?.start()
             engine?.warm()
+            if (open != null) {
+                Log.i(Navigator.TAG, "launch open $open")
+                navigator.visitPath(open)
+            }
         }
 
         if (config.tabs.isEmpty()) {

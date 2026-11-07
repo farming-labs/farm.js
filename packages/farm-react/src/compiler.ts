@@ -5373,12 +5373,15 @@ function isForeignContent(element: t.JSXElement): boolean {
 
 /**
  * Props the runtime's attribute writes don't reproduce: React applies `defaultValue` and
- * `defaultChecked` as properties, and writes booleanish `spellCheck`/`draggable` as
+ * `defaultChecked` as properties, and writes booleanish `spellCheck`/`draggable`/`contentEditable` as
  * "true"/"false" where the runtime writes "" or removes the attribute.
  */
 function reactOwnedAttribute(name: string, attribute: t.JSXAttribute): boolean {
   if (name === "defaultValue" || name === "defaultChecked") return true;
-  return (name === "spellCheck" || name === "draggable") && !t.isStringLiteral(attribute.value);
+  return (
+    (name === "spellCheck" || name === "draggable" || name === "contentEditable") &&
+    !t.isStringLiteral(attribute.value)
+  );
 }
 
 function analyzeKeyedRowTree(
@@ -5426,6 +5429,10 @@ function analyzeKeyedRowTree(
     }
     if (isForeignContent(element)) return "compiled keyed rows do not support SVG yet";
     if (tag.name.includes("-")) return "custom elements require React ownership";
+    if (tag.name === "script") return "script elements require React ownership";
+    if (tag.name === "title" || tag.name === "meta") {
+      return "document metadata requires React ownership";
+    }
     const attributeNames = new Set(
       element.openingElement.attributes
         .filter((attribute): attribute is t.JSXAttribute => t.isJSXAttribute(attribute))
@@ -5955,6 +5962,10 @@ function analyzeHostConditionalTree(
     }
     if (isForeignContent(element)) return "compiler-owned conditionals do not support SVG yet";
     if (tag.name.includes("-")) return "custom elements require React ownership";
+    if (tag.name === "script") return "script elements require React ownership";
+    if (tag.name === "title" || tag.name === "meta") {
+      return "document metadata requires React ownership";
+    }
 
     for (const attribute of element.openingElement.attributes) {
       if (t.isJSXSpreadAttribute(attribute)) {
@@ -6123,6 +6134,10 @@ function analyzeRecursiveHostTree(
       return "recursive compiler-owned blocks do not support SVG yet";
     }
     if (tag.name.includes("-")) return "custom elements require React ownership";
+    if (tag.name === "script") return "script elements require React ownership";
+    if (tag.name === "title" || tag.name === "meta") {
+      return "document metadata requires React ownership";
+    }
 
     for (const attribute of element.openingElement.attributes) {
       if (t.isJSXSpreadAttribute(attribute)) {
@@ -8902,6 +8917,7 @@ function analyzeHostTree(
       const expression = attribute.value.expression;
       const dependencies = collectStateDependencies(expression, statesByValue);
       if (dependencies.length === 0) continue;
+      if (name === "contentEditable") return "stateful contentEditable requires React ownership";
       if (/^on[A-Z]/.test(name)) {
         if (!t.isArrowFunctionExpression(expression) && !t.isFunctionExpression(expression)) {
           return "stateful event handler selection requires React ownership";

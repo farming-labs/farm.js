@@ -42,4 +42,17 @@ describe("collectDevStylesheetUrls", () => {
     ]);
     expect(urls).toEqual([]);
   });
+
+  it("links an islands-mode server component's CSS module as its compiled stylesheet", () => {
+    const urls = collectDevStylesheetUrls(
+      [
+        { id: "/src/badge.module.css", url: "/src/badge.module.css" },
+        { id: "/src/badge.module.css?direct", url: "/src/badge.module.css?direct" },
+        { id: "/src/page.css", url: "/src/page.css" },
+      ],
+      undefined,
+      { cssModules: true },
+    );
+    expect(urls).toEqual(["/src/badge.module.css?direct", "/src/page.css"]);
+  });
 });

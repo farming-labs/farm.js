@@ -41,6 +41,7 @@ import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import type { FarmCacheUserConfig } from "@farm.js/core/cache";
 import type { FarmI18nUserConfig } from "@farm.js/core/i18n";
 import {
+  collectFarmClientPackageImports,
   farmFontImportsPlugin,
   farmImageImportsPlugin,
   generateClientCachePersistenceCode,
@@ -1397,6 +1398,9 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                   "react-dom",
                   "react-dom/client",
                   "rsc-html-stream/client",
+                  // Client components and the packages they use load only once a page renders
+                  // (client references), so they would be found late too.
+                  ...collectFarmClientPackageImports(path.resolve(root, srcDir), root),
                 ],
               },
             },

@@ -315,4 +315,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { collectFarmPackages, pinToArchives, readSmokeOptions, runSmoke };
+module.exports = { collectFarmPackages, packPackage, pinToArchives, readSmokeOptions, runSmoke };

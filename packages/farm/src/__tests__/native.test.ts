@@ -59,7 +59,7 @@ describe("@farm.js/core/native", () => {
       method: "model",
     });
     expect((error as Error).message).toBe(
-      "native.Device.model() is not available here. Web screens reach a native module only inside the Android shell, when mobile.modules.Device.web is true in farm.config.ts. Check native.Device.available() first, and show the web alternative when it is false.",
+      "native.Device.model() is not available here. Web screens reach a native module only inside the mobile shell, when mobile.modules.Device.web is true in farm.config.ts. Check native.Device.available() first, and show the web alternative when it is false.",
     );
   });
 

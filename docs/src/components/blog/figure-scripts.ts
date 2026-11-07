@@ -2083,7 +2083,7 @@ const astNative: FigureSpec = {
 // A runtime companion to ast-native: how a screen actually runs on the device. The navigator picks
 // one of three screen kinds by route; a web screen is a WebView that reaches the one backend over
 // the origin-scoped bridge; the device-capability channel is drawn but ships nothing yet.
-const MA = { tap: 0.3, fork: 1.2, web: 2.4, server: 3.2, ret: 3.9, plug: 4.7 };
+const MA = { tap: 0.3, fork: 1.2, web: 2.2, back: 2.9, srv: 3.7, fn: 4.5, ret: 5.3 };
 /** A body line that fades in once t passes `at`; each is its own block so lines stack. */
 const maSub = (s: string, t: number, at: number, color = "#c6c6c6") =>
   t < at
@@ -2096,16 +2096,16 @@ const mobileArch: FigureSpec = {
   duration: 7,
   stage: { w: 1020, h: 600 },
   label:
-    "A screen on the device: the native navigator picks one of three screen kinds by route; a web screen is a WebView that talks to your one backend over the origin-scoped bridge, and the device-capability channel ships no plugins yet",
+    "A screen on the device: the native navigator picks one of four screen kinds by route, and every kind is served by your one backend — a web screen through the origin-scoped bridge, a server screen by fetching the page's rendered tree, and a React Native screen by calling the server functions it imports",
   panels: [
     { id: "tap", x: 24, y: 252, w: 150, h: 96, title: "A tap" },
     { id: "nav", x: 214, y: 252, w: 176, h: 96, title: "Navigator" },
-    { id: "web", x: 440, y: 60, w: 188, h: 96, title: "Web screen" },
-    { id: "native", x: 440, y: 252, w: 188, h: 96, title: "Native screen" },
-    { id: "plat", x: 440, y: 444, w: 188, h: 96, title: "page.kt · page.swift" },
-    { id: "bridge", x: 676, y: 60, w: 180, h: 96, title: "__farmBridge" },
-    { id: "server", x: 880, y: 60, w: 140, h: 96, title: "mobile.server" },
-    { id: "plug", x: 676, y: 252, w: 180, h: 96, title: "native.<name>" },
+    { id: "web", x: 440, y: 24, w: 188, h: 96, title: "Web screen" },
+    { id: "srv", x: 440, y: 168, w: 188, h: 96, title: "Server screen" },
+    { id: "native", x: 440, y: 312, w: 188, h: 96, title: "React Native" },
+    { id: "plat", x: 440, y: 456, w: 188, h: 96, title: "page.kt · page.swift" },
+    { id: "bridge", x: 676, y: 24, w: 180, h: 96, title: "__farmBridge" },
+    { id: "server", x: 880, y: 144, w: 140, h: 240, title: "mobile.server" },
   ],
   wires: {
     tn: [
@@ -2115,30 +2115,44 @@ const mobileArch: FigureSpec = {
     nw: [
       [390, 300],
       [415, 300],
-      [415, 108],
-      [440, 108],
+      [415, 72],
+      [440, 72],
+    ],
+    ns: [
+      [390, 300],
+      [415, 300],
+      [415, 216],
+      [440, 216],
     ],
     nn: [
       [390, 300],
-      [440, 300],
+      [415, 300],
+      [415, 360],
+      [440, 360],
     ],
     np: [
       [390, 300],
       [415, 300],
-      [415, 492],
-      [440, 492],
+      [415, 504],
+      [440, 504],
     ],
     wb: [
-      [628, 108],
-      [676, 108],
+      [628, 72],
+      [676, 72],
     ],
     bs: [
-      [856, 108],
-      [880, 108],
+      [856, 72],
+      [868, 72],
+      [868, 180],
+      [880, 180],
     ],
-    bp: [
-      [766, 156],
-      [766, 252],
+    sv: [
+      [628, 216],
+      [880, 216],
+    ],
+    fn: [
+      [628, 360],
+      [880, 360],
     ],
   },
   frame: (t) => {
@@ -2151,40 +2165,44 @@ const mobileArch: FigureSpec = {
         nav:
           maSub("routes &rarr; one screen", t, MA.tap) +
           maSub("farm-routes.json", t, MA.tap + 0.15, "#7a7a7a"),
-        web: maSub("a WebView", t, MA.fork) + maSub("ships today", t, MA.fork + 0.2, "#8fb8a0"),
+        web: maSub("a WebView", t, MA.fork) + maSub("ships today", t, MA.fork + 0.15, "#8fb8a0"),
+        srv:
+          maSub("server-rendered views", t, MA.fork + 0.12) +
+          maSub("Android views · UIKit", t, MA.fork + 0.27, "#8fb8a0"),
         native:
-          maSub("React Native", t, MA.fork + 0.2) +
-          maSub("Android dev only", t, MA.fork + 0.35, "#c9a77a"),
+          maSub("Hermes · JSI · modules", t, MA.fork + 0.24) +
+          maSub("Android today", t, MA.fork + 0.39, "#c9a77a"),
         plat:
-          maSub("fully native", t, MA.fork + 0.4) +
-          maSub("placeholder &mdash; not built", t, MA.fork + 0.55, "#9a9a9a"),
+          maSub("fully native", t, MA.fork + 0.36) +
+          maSub("placeholder &mdash; not built", t, MA.fork + 0.51, "#9a9a9a"),
         bridge:
-          maSub("origin-scoped", t, MA.web) + maSub("nav · call", t, MA.web + 0.15, "#7a7a7a"),
+          maSub("origin-scoped", t, MA.web) +
+          maSub("nav · call · opt-in modules", t, MA.web + 0.15, "#7a7a7a"),
         server:
-          maSub("SSR · auth · data", t, MA.server) +
-          maSub("your one backend", t, MA.server + 0.15, "#7a7a7a"),
-        plug:
-          maSub("device plugins", t, MA.plug) +
-          maSub("none ship yet &#x2715;", t, MA.plug + 0.15, "#9a9a9a"),
+          maSub("SSR · auth · data", t, MA.back) +
+          maSub("the rendered tree", t, MA.srv, "#8fb8a0") +
+          maSub("api/__farm/native/fn", t, MA.fn, "#7a7a7a"),
       },
       wires: {
         tn: wire(t, 0.05, [[MA.tap]]),
         nw: wire(t, MA.fork - 0.3, [[MA.fork]]),
-        nn: wire(t, MA.fork - 0.3, [[MA.fork + 0.12]]),
-        np: wire(t, MA.fork - 0.3, [[MA.fork + 0.24]]),
+        ns: wire(t, MA.fork - 0.3, [[MA.fork + 0.12]]),
+        nn: wire(t, MA.fork - 0.3, [[MA.fork + 0.24]]),
+        np: wire(t, MA.fork - 0.3, [[MA.fork + 0.36]]),
         wb: wire(t, MA.web - 0.3, [[MA.web]]),
-        bs: wire(t, MA.server - 0.3, [[MA.server], [MA.ret, false]]),
-        bp: wire(t, MA.plug - 0.3, [[MA.plug]], true),
+        bs: wire(t, MA.back - 0.3, [[MA.back], [MA.ret, false]]),
+        sv: wire(t, MA.srv - 0.3, [[MA.srv]]),
+        fn: wire(t, MA.fn - 0.3, [[MA.fn]]),
       },
       states: {
         tap: hot(0, MA.tap + PULSE),
         nav: hot(MA.tap + PULSE, MA.fork + PULSE),
-        web: hot(MA.web - 0.1, MA.ret + PULSE),
-        native: dim(MA.fork + 0.2 + PULSE),
-        plat: dim(MA.fork + 0.4 + PULSE),
-        bridge: hot(MA.web + PULSE, MA.server + PULSE),
-        server: hot(MA.server, MA.ret + PULSE),
-        plug: dim(MA.plug + PULSE),
+        web: hot(MA.web - 0.1, MA.back + PULSE),
+        srv: hot(MA.srv - 0.1, MA.srv + PULSE + 0.45),
+        native: hot(MA.fn - 0.1, MA.fn + PULSE + 0.45),
+        plat: dim(MA.fork + 0.36 + PULSE),
+        bridge: hot(MA.web + PULSE, MA.back + PULSE),
+        server: hot(MA.back, MA.ret + PULSE),
       },
     };
   },

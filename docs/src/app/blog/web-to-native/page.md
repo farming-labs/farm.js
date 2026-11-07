@@ -20,10 +20,10 @@ Which screens? You do not decide that by hand. A build-time analyzer reads each 
 Every route gets a **tier** — the first one nothing rules out:
 
 - **native** — the server renders the page into native views, with **no JavaScript on the device**. Async pages and server data are fine: they run on the server, exactly as they do for the web page. Ruled out by hooks, event handlers, `"use client"` modules, and anything the analyzer can't map.
-- **react-native** — a React Native screen ported from the page runs its logic on the device. This is the tier for pages that need interactivity — state, handlers — but still map to native. (Report-only today; the emitter that generates these screens is in progress.)
+- **react-native** — a React Native screen ported from the page runs its logic on the device. This is the tier for pages that need interactivity — state, handlers — but still map to native. (The emitter that generates these screens runs on an Android emulator today, not yet on a device.)
 - **web** — a WebView of the page. The fallback, and the floor: every route works here.
 
-A screen is one tier. Every route keeps its `page.tsx`, which stays the web version and the fallback, so adopting native is reversible and never leaves a screen with nothing to show.
+A screen is one tier. Every route keeps its `page.tsx`, which stays the web version and the fallback, so adopting native is reversible and never leaves a screen with nothing to show. A page built from the portable [`@farm.js/ui`](/docs/mobile#portable-components-farmjsui) components ports as it is: on a React Native screen the same `View`, `Text`, and `List` render as native views, with their tokens resolved to the web defaults.
 
 <span id="how-the-analyzer-decides" className="blog-heading-anchor" />
 
@@ -44,16 +44,16 @@ The rule is deliberately conservative — **any doubt is web** — and every blo
 
 The tier decides what a screen _is_. Here is how one _runs_. On the phone your app is a native shell — native tabs, a stack per tab — around a pool of WebViews, with a native **navigator** built from `farm-routes.json`.
 
-<BlogFigure kind="mobile-arch" caption="A tap goes to the native navigator, which picks the screen by route. A web screen is a WebView that reaches your one backend over the origin-scoped bridge; the device-capability channel is reserved but ships nothing yet." />
+<BlogFigure kind="mobile-arch" caption="A tap goes to the native navigator, which picks the screen by route. Every kind is served by your one backend: a web screen through the origin-scoped bridge, which also carries opt-in app-module calls; a server screen by fetching the page's rendered tree; and a React Native screen by calling the server functions it imports." />
 
 A tap on a `Link` is handed to the shell, which asks the navigator what the route maps to:
 
 - A **web screen** is a WebView showing your page from `mobile.server` — the **same backend, SSR, auth, and data** as the web. The shell and the page talk over an origin-scoped bridge (`window.__farmBridge`, main-frame only) that carries navigation, so an in-app link becomes a native push instead of a full document load.
-- A **native screen** is React Native; a **`page.kt` / `page.swift`** screen is fully native. The navigator picks between them by route, the same way the web router does.
+- A **native screen** is drawn from the page your server renders — Android views today, and UIKit on iOS — with no JavaScript on the device. A **React Native** screen runs its logic on the device, and a **`page.kt` / `page.swift`** screen is where fully platform-native code will register. The navigator picks between them by route, the same way the web router does.
 
 Because every screen is served by your one backend over HTTP, there is nothing to keep in sync: your server functions, queries, auth, and theme stay the app's, whatever a screen is made of.
 
-The bridge also reserves a `native.<name>` channel for **device capabilities** — the camera, SMS, contacts. It ships no plugins yet, so those calls return `native_unavailable` today. How to reach a real device feature now, and where that channel is headed, is in [Native device features](/docs/mobile#native-device-features).
+The bridge also reserves a `native.<name>` channel for **device capabilities** — the camera, SMS, contacts. It ships no plugins yet, so those calls return `native_unavailable` today. How to reach a real device feature now, and where that channel is headed, is in [Native device features](/docs/mobile/modules#native-device-features).
 
 <span id="try-it" className="blog-heading-anchor" />
 
@@ -64,6 +64,7 @@ See what the analyzer decides for your own app:
 ```sh
 farm config inspect --mobile --report   # each route's tier, and why
 farm build --mobile                      # the Android project, native screens and all
+farm build --mobile --os ios             # the Xcode project; CI builds it and boots a simulator
 ```
 
 Want a specific screen native? Ask for it, and the build fails with the exact blockers if it can't:
@@ -73,4 +74,4 @@ Want a specific screen native? Ask for it, and the build fails with the exact bl
 export const mobile = { native: true };
 ```
 
-The full tier rules, the mapping table, and the server-rendered native screens live in the [Mobile Apps](/docs/mobile) guide. Mobile is a preview — Android today, iOS and the React Native emitter on the way.
+The full tier rules, the mapping table, and the server-rendered native screens live in the [Mobile Apps](/docs/mobile) guide. Mobile is a preview — the Android shell ships today, and the rest is on `main` on its way to a release: the iOS shell builds with Xcode and draws native-tier pages with UIKit on a simulator in CI, and the React Native emitter runs on an Android emulator.

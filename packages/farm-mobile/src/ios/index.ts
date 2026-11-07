@@ -6,6 +6,7 @@ import {
   type MobilePackageContext,
   type MobileShellContext,
 } from "@farm.js/core/mobile";
+import { linkReactNativeArtifacts } from "./react-native.js";
 import { createIosProject, IOS_PROJECT, IOS_TARGET } from "./templates.js";
 
 export {
@@ -14,15 +15,28 @@ export {
   createInfoPlist,
   createIosProject,
   createProjectFile,
+  createReactNativeBuild,
+  createReactNativeBuildSettings,
   createScheme,
   createTransportSecurity,
   IOS_DEPLOYMENT_TARGET,
+  IOS_NATIVE_BUNDLE,
+  IOS_NATIVE_ASSETS_DIR,
   IOS_PAGE_SHELLS_DIR,
   IOS_PROJECT,
   IOS_TARGET,
   resolveTabSymbol,
   swiftString,
 } from "./templates.js";
+export {
+  ensureReactNativeArtifacts,
+  IOS_REACT_NATIVE_DIR,
+  IOS_REACT_NATIVE_FRAMEWORKS,
+  linkReactNativeArtifacts,
+  reactNativeArtifacts,
+  reactNativeCacheDir,
+  reactNativeFlavor,
+} from "./react-native.js";
 
 /** Derived data inside the generated project, so rebuilds are incremental across runs. */
 const DERIVED_DATA = "build";
@@ -145,6 +159,10 @@ function setupInstructions(context: MobileShellContext): string {
 }
 
 async function xcodebuild(context: MobileShellContext, destination: string): Promise<string> {
+  // React Native screens link React Native's prebuilt XCFrameworks from ReactNative/.
+  if (context.native) {
+    await linkReactNativeArtifacts(context, { log: (message) => console.log(message) });
+  }
   const { code } = await exec("xcodebuild", xcodebuildArgs(destination), {
     cwd: context.projectDir,
   });

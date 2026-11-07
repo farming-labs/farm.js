@@ -137,10 +137,13 @@ const NATIVE_PACKAGE = "@farm.js/native";
 
 interface NativeScreensOptions {
   root: string;
+  srcDir?: string;
   outDir: string;
   screens: FarmMobileNativeScreen[];
   basePath: string;
   locales?: string[];
+  /** Metro's platform: `.ios.tsx` and `.android.tsx` files and React Native's own platform code. */
+  platform?: FarmMobileShellOS;
 }
 
 interface ReactNativeInfo {
@@ -153,6 +156,8 @@ interface NativeBuildModule {
   buildFarmNativeScreens(options: NativeScreensOptions): Promise<{
     reactNative: ReactNativeInfo;
     bundle: string;
+    /** Metro's output for the images the screens import; older builds do not report it. */
+    assets?: string;
     jsBytes: number;
     bytecodeBytes: number;
     bundleMs: number;
@@ -192,18 +197,17 @@ export interface FarmMobileNativeScreen {
 }
 
 /**
- * The routes that render as React Native screens on this OS. Empty for apps without any, and on
- * iOS, whose shell does not host React Native yet and shows a placeholder; those load nothing of
- * React Native and generate the same project as before.
+ * The routes that render as React Native screens on this OS. Empty for apps without any; those
+ * load nothing of React Native and generate the same project as before.
  */
 export function listFarmMobileNativeScreens(
   app: {
     config: { root: string };
     screens: Record<string, { screen: string; module?: string; file?: string }>;
   },
-  os: FarmMobileShellOS = "android",
+  // The decisions are already per OS (`mobile.native.routes[...].ios` and `page.ios.tsx`).
+  _os: FarmMobileShellOS = "android",
 ): FarmMobileNativeScreen[] {
-  if (os !== "android") return [];
   return Object.entries(app.screens)
     .filter(([, decision]) => decision.screen === "native" && decision.module && decision.file)
     .map(([route, decision]) => ({
@@ -338,6 +342,7 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
       nativeBuild ??= await loadFarmNativeBuild(root);
       const metro = await nativeBuild.startFarmNativeDevServer({
         root,
+        srcDir: app.config.srcDir,
         outDir: path.resolve(
           root,
           mobileRuntime.getFarmMobileOutputDirs(app.config.distDir).root,
@@ -346,6 +351,7 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
         screens,
         basePath: app.config.basePath === "/" ? "" : app.config.basePath,
         locales: nativeLocales(app.config),
+        platform: os,
         port: await findMetroPort(),
       });
       // Metro stops with the dev server.
@@ -535,10 +541,12 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
       nativeBuild ??= await loadFarmNativeBuild(root);
       const built = await nativeBuild.buildFarmNativeScreens({
         root,
+        srcDir: config.srcDir,
         outDir: path.resolve(root, dirs.root, "native"),
         screens,
         basePath: config.basePath === "/" ? "" : config.basePath,
         locales: nativeLocales(config),
+        platform: os,
       });
       native = {
         engine: "react-native",
@@ -546,6 +554,7 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
         hermesVersion: built.reactNative.hermesVersion,
         modules: screens.map((screen) => screen.module),
         bundle: built.bundle,
+        ...(built.assets ? { assetsDir: built.assets } : {}),
       };
       const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
       runtime.logger.info(

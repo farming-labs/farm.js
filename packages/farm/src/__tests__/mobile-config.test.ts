@@ -400,12 +400,14 @@ describe("mobile modules", () => {
     });
   }
 
-  it("finds the app's specs, Kotlin, and Swift files in src/native", async () => {
+  it("finds the app's specs, Kotlin, and iOS files in src/native", async () => {
     const root = await createModuleApp({
       "src/native/NativeDevice.ts": SPEC("Device"),
       "src/native/NativeHaptics.ts": SPEC("Haptics"),
       "src/native/DeviceModule.kt": "package com.example.notes\n",
       "src/native/DeviceModule.swift": "import Foundation\n",
+      "src/native/DeviceModule.mm": "#import <Foundation/Foundation.h>\n",
+      "src/native/DeviceModule.h": "#import <Foundation/Foundation.h>\n",
       "src/native/helpers.ts": "export const x = 1;\n",
       "src/native/nested/NativeIgnored.ts": SPEC("Ignored"),
     });
@@ -417,7 +419,11 @@ describe("mobile modules", () => {
         { name: "Haptics", file: path.join(dir, "NativeHaptics.ts") },
       ],
       android: [path.join(dir, "DeviceModule.kt")],
-      ios: [path.join(dir, "DeviceModule.swift")],
+      ios: [
+        path.join(dir, "DeviceModule.h"),
+        path.join(dir, "DeviceModule.mm"),
+        path.join(dir, "DeviceModule.swift"),
+      ],
     });
     // An app without src/native, and an app whose srcDir is the root.
     expect(scanFarmMobileAppModules({ root: await createModuleApp() })).toBeUndefined();
@@ -987,10 +993,31 @@ ${PAGE}`,
     ).rejects.toThrow(/src\/app\/notes\/page\.tsx: mobile\.presentation does not apply to a tab/);
   });
 
-  it("needs a web page next to every native page and one file per platform", async () => {
-    const lonely = await createApp({ "src/app/inbox/page.native.tsx": PAGE });
-    await expect(screensOf(lonely, userConfig())).rejects.toThrow(
-      /src\/app\/inbox\/page\.native\.tsx has no web page next to it\. Add src\/app\/inbox\/page\.tsx/,
+  it("accepts native-only routes from page.native.tsx, on both OSes, off the web", async () => {
+    const root = await createApp({ "src/app/inbox/page.native.tsx": PAGE });
+    for (const os of ["android", "ios"] as const) {
+      expect((await screensOf(root, userConfig(), os))["/inbox"]).toMatchObject({
+        screen: "native",
+        source: "file",
+        file: "src/app/inbox/page.native.tsx",
+        module: "app/inbox",
+        nativeOnly: true,
+      });
+    }
+    // The web route scan never sees the route: no web page, no web route types.
+    const web = await scanRoutePatterns({ root });
+    expect(web.pages.has("/inbox")).toBe(false);
+    // Demoting a native-only route to web would point at a page that does not exist.
+    await expect(
+      screensOf(root, userConfig({ routes: { "/inbox": { screen: "web" } } })),
+    ).rejects.toThrow(/"\/inbox" is native-only/);
+  });
+
+  it("still needs a web page next to lone OS and platform files, and one file per platform", async () => {
+    // page.ios.tsx or page.swift alone would leave the route missing on the other OS.
+    const ios = await createApp({ "src/app/inbox/page.ios.tsx": PAGE });
+    await expect(screensOf(ios, userConfig())).rejects.toThrow(
+      /src\/app\/inbox\/page\.ios\.tsx has no web page next to it\. Add src\/app\/inbox\/page\.tsx .*or src\/app\/inbox\/page\.native\.tsx to make the route native-only/,
     );
     const swift = await createApp({ "src/app/inbox/page.swift": "" });
     await expect(screensOf(swift, userConfig())).rejects.toThrow(
@@ -1039,13 +1066,14 @@ function fingerprint(config: ResolvedFarmConfig): string {
 }
 
 describe("mobile on the web", () => {
-  it("resolves the same web config with or without a mobile block, apart from the mobile client flag and session plugin, and never calls the function", async () => {
+  it("resolves the same web config with or without a mobile block, apart from the mobile client flag and its plugins, and never calls the function", async () => {
     const root = await createApp();
     const base: FarmUserConfig = { root, deploymentId: "fixed" };
     const without = await resolveConfig(base, "production");
     // Zero cost: no mobile block, no mobile client and no mobile session plugin, hook, or route.
     expect(without).not.toHaveProperty("mobileClient");
     expect(without.plugins.map((plugin) => plugin.name)).not.toContain("farm:mobile-session");
+    expect(without.plugins.map((plugin) => plugin.name)).not.toContain("farm:native-server-fns");
     let calls = 0;
     for (const mobile of [
       // Malformed on purpose: a web build does not check the block.
@@ -1061,15 +1089,20 @@ describe("mobile on the web", () => {
       );
       // A production build adds the mobile client for it; the block itself is not resolved.
       expect(mobileClient).toBe(true);
-      // The web server of a mobile app serves the native screens' session tokens.
+      // The web server of a mobile app serves the native screens' session tokens and the server
+      // functions they call.
       expect(withMobile.plugins.map((plugin) => plugin.name)).toEqual([
         "farm:mobile-session",
+        "farm:native-server-fns",
         ...without.plugins.map((plugin) => plugin.name),
       ]);
       expect(
         fingerprint({
           ...withMobile,
-          plugins: withMobile.plugins.filter((plugin) => plugin.name !== "farm:mobile-session"),
+          plugins: withMobile.plugins.filter(
+            (plugin) =>
+              plugin.name !== "farm:mobile-session" && plugin.name !== "farm:native-server-fns",
+          ),
         } as typeof without),
       ).toBe(fingerprint(without));
       expect(withMobile).not.toHaveProperty("mobile");

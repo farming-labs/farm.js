@@ -1,7 +1,12 @@
 import { t } from "@farm.js/core/i18n/server";
 import { Link } from "@farm.js/core/client";
+import type { FarmMobilePageConfig } from "@farm.js/core/mobile";
 
 export const ssg = true;
+
+// Requires the native tier, so farm dev --mobile draws this page with native views too. The
+// analyzer only runs in builds, where native.auto already makes this route a server screen.
+export const mobile = { native: true } satisfies FarmMobilePageConfig;
 
 const demos = [
   { href: "/about", label: "Static page", note: "push" },

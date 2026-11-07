@@ -229,15 +229,56 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
     // MARK: Screens
 
     private func makeScreen(isModal: Bool, rule: RouteConfig.Rule, url: URL) -> ScreenViewController {
-        if rule.isNative {
-            return ScreenViewController(
+        if rule.screen == "server" {
+            let holder = ScreenHolder()
+            let content = FarmServerScreen(
+                url: url,
+                visit: { [weak self] target in
+                    guard let self, let screen = holder.screen else { return }
+                    self.visit(from: screen, url: target, replace: false)
+                },
+                fallback: { [weak self] reason in
+                    guard let self, let screen = holder.screen else { return }
+                    self.showWeb(replacing: screen, url: url, reason: reason)
+                }
+            )
+            let screen = ScreenViewController(
                 page: nil,
-                nativeContent: FarmNativeScreens.make(rule: rule, url: url),
+                nativeContent: content,
                 nativeModule: rule.module ?? url.path,
                 isModal: isModal,
                 isWarm: false,
                 navigator: self
             )
+            // The tree's title replaces it once loaded; never show the module id.
+            screen.navigationItem.title = ""
+            holder.screen = screen
+            return screen
+        }
+        if rule.isNative {
+            let module = rule.module ?? url.path
+            let host = NativeScreenHost(navigator: self, url: url, rule: rule)
+            if let content = FarmNativeScreens.make(rule: rule, url: url, host: host) {
+                let screen = ScreenViewController(
+                    page: nil,
+                    nativeContent: content.viewController,
+                    nativeModule: module,
+                    isModal: isModal,
+                    isWarm: false,
+                    navigator: self
+                )
+                screen.onClose = content.close
+                screen.nativeHost = host
+                // The screen's metadata.title replaces it once rendered; never show the module id.
+                if rule.screen == "native" { screen.navigationItem.title = "" }
+                host.screen = screen
+                return screen
+            }
+            if rule.nativeOnly {
+                Navigator.log.error("native screen \(module, privacy: .public) is unavailable and \(url.path, privacy: .public) has no web screen")
+                return failedScreen(module: module, reason: "the native engine did not start", isModal: isModal)
+            }
+            Navigator.log.warning("\(rule.screen, privacy: .public) screen \(module, privacy: .public) is unavailable; showing \(url.path, privacy: .public) as a web screen")
         }
         let warm = pool?.take()
         return ScreenViewController(
@@ -248,6 +289,53 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
             isWarm: warm != nil,
             navigator: self
         )
+    }
+
+    /// A server or native screen that cannot show its page shows the web screen in its place
+    /// (the web twin).
+    fileprivate func showWeb(replacing screen: ScreenViewController, url: URL, reason: String) {
+        Navigator.log.warning("\(screen.page == nil ? "native" : "web", privacy: .public) screen \(screen.nativeModule ?? "", privacy: .public) failed, showing the web screen for \(url.path, privacy: .public): \(reason, privacy: .public)")
+        let web = makeScreen(isModal: screen.isModal, rule: RouteConfig.fallback, url: url)
+        replace(screen, with: web, url: url)
+    }
+
+    /// A native-only screen that failed: it has no web twin, so it shows why in its place.
+    fileprivate func showFailure(replacing screen: ScreenViewController, url: URL, reason: String) {
+        let module = screen.nativeModule ?? url.path
+        Navigator.log.error("native screen \(module, privacy: .public) failed and \(url.path, privacy: .public) has no web screen: \(reason, privacy: .public)")
+        replace(screen, with: failedScreen(module: module, reason: reason, isModal: screen.isModal), url: url)
+    }
+
+    private func failedScreen(module: String, reason: String, isModal: Bool) -> ScreenViewController {
+        let screen = ScreenViewController(
+            page: nil,
+            nativeContent: MissingNativeScreen(failed: module, reason: reason),
+            nativeModule: module,
+            isModal: isModal,
+            isWarm: false,
+            navigator: self
+        )
+        screen.navigationItem.title = ""
+        return screen
+    }
+
+    private func replace(_ screen: ScreenViewController, with next: ScreenViewController, url: URL) {
+        screen.closeNative()
+        guard let stack = screen.navigationController else { return }
+        next.navigationItem.leftBarButtonItem = screen.navigationItem.leftBarButtonItem
+        show(next, url: url, label: "fallback \(url.path)") {
+            var controllers = stack.viewControllers
+            guard let index = controllers.firstIndex(of: screen) else { return }
+            controllers[index] = next
+            stack.setViewControllers(controllers, animated: false)
+        }
+    }
+
+    /// Visit a path of the app's server from the top of the current stack, as a tapped link would.
+    func visitPath(_ path: String) {
+        let top = modal?.topViewController ?? stacks[current].topViewController
+        guard let from = top as? ScreenViewController else { return }
+        visit(from: from, url: config.url(path), replace: false)
     }
 
     /// Fill `screen` with `url` and call `ready` when it should animate in: a warm page waits for
@@ -294,5 +382,55 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
             screen.load(url, shell: shell)
             fire()
         }
+    }
+}
+
+/// The screen a server screen's callbacks act on, set once it exists.
+@MainActor
+private final class ScreenHolder {
+    weak var screen: ScreenViewController?
+}
+
+/// A native screen's link to the navigator (`FarmNativeHost`), the iOS form of Android's
+/// `Navigator.NativeHost`.
+@MainActor
+private final class NativeScreenHost: FarmNativeHost {
+    weak var screen: ScreenViewController?
+    private weak var navigator: Navigator?
+    private let url: URL
+    private let rule: RouteConfig.Rule
+    private let opened = CACurrentMediaTime()
+    private var shown = false
+
+    init(navigator: Navigator, url: URL, rule: RouteConfig.Rule) {
+        self.navigator = navigator
+        self.url = url
+        self.rule = rule
+    }
+
+    func visit(_ target: URL, replace: Bool) {
+        guard let screen, let navigator else { return }
+        navigator.visit(from: screen, url: target, replace: replace)
+    }
+
+    func fallback(_ reason: String) {
+        guard let screen, let navigator else { return }
+        self.screen = nil
+        if rule.nativeOnly {
+            navigator.showFailure(replacing: screen, url: url, reason: reason)
+        } else {
+            navigator.showWeb(replacing: screen, url: url, reason: reason)
+        }
+    }
+
+    func setTitle(_ title: String) {
+        screen?.navigationItem.title = title
+    }
+
+    func rendered() {
+        guard !shown, let screen else { return }
+        shown = true
+        let ms = Int((CACurrentMediaTime() - opened) * 1000)
+        Navigator.log.notice("native \(screen.nativeModule ?? "", privacy: .public) open->content=\(ms)ms")
     }
 }

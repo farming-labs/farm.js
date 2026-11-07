@@ -128,10 +128,13 @@ export default defineConfig({
     },
   },
   cron: {
-    dailyCleanup: {
-      schedule: '0 2 * * *',
-      path: '/api/maintenance/cleanup',
-      description: 'Delete expired sessions every night.',
+    provider: 'host',
+    jobs: {
+      dailyCleanup: {
+        schedule: '0 2 * * *',
+        path: '/api/maintenance/cleanup',
+        description: 'Delete expired sessions every night.',
+      },
     },
   },
   experimental: {

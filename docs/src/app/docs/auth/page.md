@@ -107,7 +107,7 @@ await signIn({
 
 ### On native screens
 
-React Native screens (`page.native.tsx`) in a [mobile app](/docs/mobile#auth-on-mobile) use the
+React Native screens (`page.native.tsx`) in a [mobile app](/docs/mobile/auth#auth-on-mobile) use the
 same import, `@farm.js/auth/client`. Metro resolves its `react-native` build, which calls the same
 auth routes through `serverFetch` from `@farm.js/native` with the device token, so `signIn`,
 `signUp`, `getSession`, `useAuth` and `signOut` behave as on the web. Sign-in and sign-up go through

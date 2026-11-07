@@ -148,6 +148,7 @@ describe("@farm.js/mobile/android", () => {
       "app/src/main/assets/farm-routes.json",
       "app/src/main/java/dev/farmjs/mobile/shell/BundledAssets.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/FarmBridge.kt",
+      "app/src/main/java/dev/farmjs/mobile/shell/FarmFiles.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/MobileSession.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/NativeEngine.kt",
@@ -261,6 +262,41 @@ describe("@farm.js/mobile/android", () => {
     expect(bridge).toContain('if (dev) Log.i(TAG, "call #');
   });
 
+  it("hands web screens module files by reference, served only to the page that got them", async () => {
+    const files = await generated(context());
+    const shell = (name: string) => files[`app/src/main/java/dev/farmjs/mobile/shell/${name}`]!;
+    const store = shell("FarmFiles.kt");
+    // Only files inside cacheDir/farm-files become references, after resolving `..` and links.
+    expect(store).toContain('File(context.cacheDir, "farm-files")');
+    expect(store).toContain("File(path).canonicalFile");
+    expect(store).toContain("it.path.startsWith(root + File.separator) && it.isFile");
+    // Unguessable ids, one store per page, and a reference never goes to the server.
+    expect(store).toContain("ByteArray(16).also(random::nextBytes)");
+    expect(store).toContain("private val random = SecureRandom()");
+    expect(store).toContain('Regex("^/__farm/files/([A-Za-z0-9_-]{22})$")');
+    expect(store).toContain("if (!config.isAppUrl(url)) return null");
+    expect(store).toContain('if (request.method != "GET" || file == null) return notFound()');
+    expect(store).toContain('"Cache-Control" to "no-store"');
+    // A page passes back only references it received.
+    expect(store).toContain('"$value is not a file this screen received."');
+    // Answers that arrive after the page closed get no reference.
+    expect(store).toContain("is String -> if (closed) value else");
+
+    const bridge = shell("FarmBridge.kt");
+    expect(bridge).toContain("val files = FarmFiles(webView.context, config)");
+    expect(bridge).toContain("plugin.callAsync(method, files.resolve(args), webView, result)");
+    // Rejections pass through untouched.
+    expect(bridge).toContain("val value = if (ok) files.share(answer) else answer");
+
+    const page = shell("Page.kt");
+    expect(page).toContain("bridge.files.respond(request) ?: bundle?.respond(request)");
+    expect(page.indexOf("bridge.files.close()")).toBeGreaterThan(page.indexOf("fun destroy()"));
+    expect(page.indexOf("bridge.files.close()")).toBeLessThan(page.indexOf("webView.destroy()"));
+    expect(shell("MainActivity.kt")).toContain("FarmFiles.clearStale(this)");
+    // The page shell view runs no scripts and never gets references.
+    expect(page.match(/bridge\.files\.respond/g)).toHaveLength(1);
+  });
+
   it("keeps the device session in a Keystore-encrypted store and never hands it to a WebView", async () => {
     const files = await generated(context({ basePath: "/docs" }));
     const shellFile = (name: string, from: Record<string, string>) =>
@@ -308,11 +344,21 @@ describe("@farm.js/mobile/android", () => {
       "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt"
     ];
     expect(activity).toContain("val dev = resources.getBoolean(R.bool.farm_dev)");
-    const overrides = activity.split("\n").filter((line) => /intent\.get\w+Extra\(/.test(line));
+    const overrides = activity
+      .split("\n")
+      .filter((line) => /intent\.get\w+Extra\(/.test(line) && !line.includes('"farmOpen"'));
     expect(overrides).toHaveLength(2);
     for (const line of overrides) expect(line).toMatch(/if \(dev\) intent\.get\w+Extra\(/);
     // A debuggable `farm build --mobile --apk` must not take a server from another app's intent.
     expect(activity).not.toMatch(/if \(debuggable\) intent\./);
+    // farmOpen (CI's launch path) only visits a path on the app's own server, as a tapped link
+    // would, and a release build ignores it.
+    expect(activity).toContain(
+      'val open = intent.takeIf { debuggable }?.getStringExtra("farmOpen")',
+    );
+    expect(activity).toContain(
+      `?.takeIf { it.startsWith("/") && !it.startsWith("//") && '\\\\' !in it }`,
+    );
   });
 
   it("reads screen on every rule, tab roots included, with module ids from the route", async () => {
@@ -665,6 +711,42 @@ describe("React Native screens", () => {
     );
     const paths = files.map((file) => file.path);
     expect(paths).toEqual(paths.toSorted((left, right) => (left < right ? -1 : 1)));
+  });
+
+  it("ships the images the screens import as the resources React Native looks them up by", async () => {
+    const dir = await tempDir();
+    const bundle = path.join(dir, "android.hbc");
+    await writeFile(bundle, new Uint8Array([0xc6, 0x1f, 0xbc, 0x03]));
+    // Metro's Android layout: drawable-<density>/<path as a resource name>.png.
+    const assetsDir = path.join(dir, "android-assets");
+    for (const density of ["xhdpi", "xxhdpi"]) {
+      await mkdir(path.join(assetsDir, `drawable-${density}`), { recursive: true });
+      await writeFile(
+        path.join(assetsDir, `drawable-${density}`, "src_app_map_blaze.png"),
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      );
+    }
+    const files = await createAndroidProject(
+      context({ command: "build", native: native({ bundle, assetsDir }) }),
+    );
+    const byPath = Object.fromEntries(files.map((file) => [file.path, file.contents]));
+    for (const density of ["xhdpi", "xxhdpi"]) {
+      expect([
+        ...(byPath[`app/src/main/res/drawable-${density}/src_app_map_blaze.png`] as Uint8Array),
+      ]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    }
+    // Without images, nothing is added.
+    const plain = await createAndroidProject(
+      context({ command: "build", native: native({ bundle }) }),
+    );
+    expect(plain.some((file) => file.path.includes("drawable-xhdpi/"))).toBe(false);
+
+    // An asset never replaces one of the shell's own resources.
+    await mkdir(path.join(assetsDir, "values"), { recursive: true });
+    await writeFile(path.join(assetsDir, "values", "strings.xml"), "<resources/>");
+    await expect(
+      createAndroidProject(context({ command: "build", native: native({ bundle, assetsDir }) })),
+    ).rejects.toThrow(/would replace the shell's app\/src\/main\/res\/values\/strings\.xml/);
   });
 
   it("points the debug app at Metro under farm dev, with no bundled bytecode", async () => {
@@ -1481,6 +1563,21 @@ class DeviceModule(reactContext: ReactApplicationContext) : NativeDeviceSpec(rea
     await expect(
       createAndroidProject(context({ root: third, native: native(), appModules: unpackaged })),
     ).rejects.toThrow(/src\/native\/DeviceModule\.kt has no package declaration/);
+
+    // The library cannot compile against the shell: fail here, with the fix, not in Gradle.
+    const fourth = await app({ dependencies: {} });
+    const shellImport = await appModules(fourth, {
+      "NativeDevice.ts": DEVICE_SPEC,
+      "DeviceModule.kt": DEVICE_MODULE.replace(
+        "import com.facebook.react.bridge.Promise\n",
+        "import com.facebook.react.bridge.Promise\nimport dev.farmjs.mobile.shell.FarmFiles\n",
+      ),
+    });
+    await expect(
+      createAndroidProject(context({ root: fourth, native: native(), appModules: shellImport })),
+    ).rejects.toThrow(
+      "src/native/DeviceModule.kt imports dev.farmjs.mobile.shell.FarmFiles, a class of Farm's Android shell. App modules build as their own Gradle module (farm-app-modules), which cannot see the shell. Remove the import: write files for web screens into File(context.cacheDir, \"farm-files\") by name, and use React Native's APIs for the rest.",
+    );
   });
 
   it("links the mobile example's Device module, and Codegen generates the class it extends", async () => {
@@ -1665,6 +1762,7 @@ class KitchenModule(reactContext: ReactApplicationContext) : NativeKitchenSpec(r
       expect(calls.map((call) => `${call[1]}.${call[2]}`)).toEqual([
         "NativeDeviceSpec.model",
         "NativeDeviceSpec.vibrate",
+        "NativeDeviceSpec.pickPhoto",
         "NativeKitchenSpec.scalars",
         "NativeKitchenSpec.shapes",
         "NativeKitchenSpec.optional",

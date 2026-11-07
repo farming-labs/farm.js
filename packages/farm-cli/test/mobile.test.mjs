@@ -270,13 +270,14 @@ async function record(options, name) {
   await writeFile(path.join(options.root, name), JSON.stringify({
     outDir: path.relative(options.root, options.outDir),
     basePath: options.basePath,
+    platform: options.platform,
     screens: options.screens.map((screen) => ({ ...screen, file: path.relative(options.root, screen.file) })),
   }));
 }
 
 export async function buildFarmNativeScreens(options) {
   await record(options, "native-build.json");
-  const bundle = path.join(options.outDir, "index.android.hbc");
+  const bundle = path.join(options.outDir, \`index.\${options.platform ?? "android"}.hbc\`);
   await writeFile(bundle, "hbc");
   return { reactNative, bundle, jsBytes: 2048, bytecodeBytes: 3072, bundleMs: 1, hermesMs: 1 };
 }
@@ -453,6 +454,8 @@ test("farm build --mobile builds the mobile client apart from the web output and
   assert.deepEqual(JSON.parse(await readFile(path.join(root, "native-build.json"), "utf8")), {
     outDir: path.join(".farm", "output", "mobile", "native"),
     basePath: "",
+    // Metro bundles for the shell's OS.
+    platform: "android",
     screens: [
       {
         module: "app/feed",
@@ -508,6 +511,8 @@ test("farm build --mobile builds the mobile client apart from the web output and
 /**
  * Every file of a Node build output by its path, as a content hash. Nitro's build date and the
  * dates in its public asset table differ from build to build, so those two files count by name.
+ * The asset table lives in the built server, which `node-server` emits beside the compile-cache
+ * launcher; `server/index.mjs` is that launcher and is hashed, so a build stays reproducible.
  * The text of the app's own code is kept to show where two builds differ.
  */
 async function snapshot(dir) {
@@ -517,7 +522,7 @@ async function snapshot(dir) {
     if (!entry.isFile()) continue;
     const file = path.join(entry.parentPath, entry.name);
     const name = path.relative(dir, file).split(path.sep).join("/");
-    if (["nitro.json", "server/index.mjs"].includes(name)) {
+    if (["nitro.json", "server/farm-server.mjs"].includes(name)) {
       files[name] = "dated";
       continue;
     }
@@ -616,6 +621,7 @@ test("farm build --mobile --os ios generates the iOS project and reports what th
   const root = await createApp(t, BUILD_CONFIG);
   await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
   await installFakeShell(root);
+  await installFakeNativeBuild(root);
   const mobileDir = path.join(root, ".farm", "output", "mobile");
 
   const result = await runFarm(["build", "--mobile", "--os", "ios", "--root", root]);
@@ -633,8 +639,14 @@ test("farm build --mobile --os ios generates the iOS project and reports what th
       id: "com.example.notes",
       server: "https://notes.example.com",
       projectDir: path.join(".farm", "output", "mobile", "ios"),
-      // The iOS shell has no React Native host yet, so /feed is a placeholder there.
-      native: null,
+      // /feed is a React Native screen on iOS too, from page.native.tsx, bundled for ios.
+      native: {
+        engine: "react-native",
+        reactNativeVersion: "0.88.1",
+        hermesVersion: "260318099.0.5",
+        modules: ["app/feed"],
+        bundle: path.join(mobileDir, "native", "index.ios.hbc"),
+      },
       // The shell decides what to bundle; the real iOS shell loads them from the server.
       assets: {
         dir: path.join(".farm", "client"),
@@ -807,23 +819,17 @@ async function checkMobileDev(child, root, port, os) {
   const native = JSON.parse(
     await readFile(path.join(root, ".farm", "output", "mobile", os, "context.json"), "utf8"),
   ).native;
-  if (os === "ios") {
-    // No React Native host on iOS yet: Metro never starts and /feed stays a placeholder.
-    assert.equal(native, null);
-    assert.doesNotMatch(output, /React Native/);
-    await assert.rejects(stat(path.join(root, "native-dev.json")));
-  } else {
-    // Native screens load from Metro in dev, never from a bundled file.
-    assert.equal(native.bundle, undefined);
-    assert.equal(native.devServer.mainModule, ".farm/output/mobile/native/index");
-    assert.ok(native.devServer.port >= 8081, JSON.stringify(native));
-    assert.deepEqual(
-      JSON.parse(await readFile(path.join(root, "native-dev.json"), "utf8")).screens.map(
-        (screen) => screen.module,
-      ),
-      ["app/feed"],
-    );
-  }
+  // Both shells host React Native: native screens load from Metro in dev, for the shell's
+  // platform, never from a bundled file.
+  assert.equal(native.bundle, undefined);
+  assert.equal(native.devServer.mainModule, ".farm/output/mobile/native/index");
+  assert.ok(native.devServer.port >= 8081, JSON.stringify(native));
+  const dev = JSON.parse(await readFile(path.join(root, "native-dev.json"), "utf8"));
+  assert.equal(dev.platform, os);
+  assert.deepEqual(
+    dev.screens.map((screen) => screen.module),
+    ["app/feed"],
+  );
 
   // The emulator reaches the host loopback as 10.0.2.2, which maps to 127.0.0.1.
   const page = await fetch(`http://127.0.0.1:${port}/notes`);

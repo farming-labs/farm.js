@@ -4,6 +4,7 @@ import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/co
 import { FARM_VERSION } from "@farm.js/core/version";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { agentSupportInvitation } from "./src/lib/agent-support";
 import {
   siCloudflare,
   siConvex,
@@ -203,6 +204,7 @@ const sidebar = [
       { label: "Internationalization", slug: "internationalization", icon: "languages" },
       { label: "Layouts", slug: "layouts", icon: "layout" },
       { label: "Rendering Model", slug: "server-rendering", icon: "monitor" },
+      { label: "Islands and islx", slug: "server-rendering/islands", icon: "network" },
       { label: "Built-in Authentication", slug: "auth", icon: "lock" },
       { label: "Images", slug: "images", icon: "image" },
       { label: "Fonts", slug: "fonts", icon: "file" },
@@ -342,7 +344,17 @@ const sidebar = [
       { label: "Instant Preview", slug: "preview", icon: "terminal" },
       { label: "Deployment", slug: "deployment", icon: "cloud" },
       { label: "Desktop Apps", slug: "desktop", icon: "monitor" },
-      { label: "Mobile Apps", slug: "mobile", icon: "smartphone" },
+      {
+        label: "Mobile Apps",
+        icon: "smartphone",
+        children: [
+          { label: "Overview", slug: "mobile", icon: "smartphone" },
+          { label: "The Web Shell", slug: "mobile/shell", icon: "layout" },
+          { label: "Native Screens", slug: "mobile/native-screens", icon: "layers" },
+          { label: "Device Features", slug: "mobile/modules", icon: "plug" },
+          { label: "Auth on Mobile", slug: "mobile/auth", icon: "lock" },
+        ],
+      },
     ],
   },
   {
@@ -461,7 +473,9 @@ const config = {
   llmsTxt: {
     enabled: true,
     siteTitle: "Farm.js Docs",
-    siteDescription: "Complete Farm.js framework documentation.",
+    siteDescription: ["Complete Farm.js framework documentation.", agentSupportInvitation].join(
+      "\n\n",
+    ),
   },
   sitemap: true,
   robots: true,

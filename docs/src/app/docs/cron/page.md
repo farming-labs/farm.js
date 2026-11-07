@@ -110,6 +110,66 @@ The secret is checked where endpoint middleware runs: after the input is validat
 middleware or the handler. Invalid input answers `400` first; valid input without the secret answers
 `401`. In both cases the handler does not run.
 
+## Schedule in the Route
+
+`cronRoute()` can carry the schedule beside the code. A route whose options set `schedule` is a
+cron job, equivalent to a `cron` config entry; config entries and route options merge into one job
+list for `farm cron list`, `farm dev --cron`, the build manifest, and deployment output. The same
+job name in both places fails the build.
+
+```ts title="src/app/api/maintenance/cleanup/route.ts"
+import { createEndpoint } from "@farm.js/core/api";
+import { cronRoute } from "@farm.js/core/cron";
+
+export const GET = cronRoute(
+  createEndpoint(async ({ context }) =>
+    Response.json({ deleted: await deleteSessionsOlderThan(context.cron.input.olderThanDays) }),
+  ),
+  {
+    schedule: "0 2 * * *",
+    name: "cleanup",
+    description: "Delete expired sessions every night.",
+    input: { olderThanDays: 30 },
+    timeoutMs: 60_000,
+    overlap: "skip",
+  },
+);
+```
+
+| Option        | Purpose                                                                                                                          |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `schedule`    | One portable five-field UTC cron expression, or an array. Same syntax and validation as config.                                  |
+| `name`        | Job name. Defaults to the route path without the leading `/api/`, here `maintenance/cleanup`.                                    |
+| `description` | Human-readable purpose shown by CLI output and the build manifest.                                                               |
+| `input`       | JSON literal handed to the handler as `context.cron.input`.                                                                      |
+| `timeoutMs`   | Aborts `context.cron.signal` and answers `504` when the handler runs longer. A handler that finishes first keeps its own result. |
+| `overlap`     | `"skip"` answers `409 { "skipped": true }` while a run of the same job is still going, without running the handler.              |
+| `enabled`     | `false` keeps the route callable with the same auth but removes it from scheduling outputs.                                      |
+
+`secretEnv`, `secret`, and `allowUnsecured` keep working next to these. `path` is never an option:
+it is the route file's own location.
+
+The build reads `schedule`, `name`, `description`, `input`, `timeoutMs`, and `enabled` statically
+from the source, without running the module. Write them as literals in the call; a computed value
+fails the build and names the file. A scheduled route cannot sit under a dynamic segment such as
+`[id]`, because a scheduler cannot fill route params.
+
+In the endpoint form the handler reads `context.cron`:
+
+| Field         | Value                                                                                     |
+| ------------- | ----------------------------------------------------------------------------------------- |
+| `name`        | From the `x-farm-cron-name` header. A direct platform call sends none, so it is optional. |
+| `scheduledAt` | A `Date` from the `x-farm-cron-scheduled-at` header (a millisecond epoch); also optional. |
+| `input`       | The literal `input` from the options; `undefined` when unset.                             |
+| `signal`      | An `AbortSignal` that aborts when the handler outlives `timeoutMs`.                       |
+
+A plain `(request) => ...` handler gets no `context.cron`; it reads the same headers from the
+`Request` itself. `timeoutMs` and `overlap` guard both forms.
+
+`overlap: "skip"` is per-process in v1. Replicas and serverless instances do not share the
+in-flight set, so it is not a distributed lock; the [reliability model](#reliability-model) still
+applies.
+
 `cronRoute()` verifies `Authorization: Bearer <CRON_SECRET>` whenever `CRON_SECRET` exists.
 The standard authentication scheme is case-insensitive, so schedulers may send either `Bearer` or
 `bearer`. Outside development and test it fails closed when the secret is missing, so a forgotten
@@ -187,6 +247,7 @@ Month and weekday names, six-field expressions, and provider-only extensions are
 ## Production Output
 
 `farm build` validates the config, generates adapter tasks, and writes `.farm/cron-manifest.json`.
+With the default `cron.provider: "host"`, the platform you deploy to runs the schedules:
 
 | Target            | Production behavior                                                                                                                |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -195,6 +256,9 @@ Month and weekday names, six-field expressions, and provider-only extensions are
 | Cloudflare Pages  | Pages output does not install Cron Triggers. Use `cloudflare-module` or call the route from an external scheduler.                 |
 | Node, Bun, Deno   | Nitro runs schedules in the long-lived server process and internally calls the route.                                              |
 | Other targets     | Use the generated manifest to configure the provider's scheduler to call the route with GET and bearer auth.                       |
+
+With `cron.provider: "farmjs"`, none of these outputs are written and
+[Farm.js Infra runs the jobs](#run-by-farmjs-infra) on any target.
 
 Cloudflare Cron Triggers require Worker output:
 
@@ -222,6 +286,119 @@ npx wrangler deploy --config .farm/.output/server/wrangler.json
 
 For a self-hosted app with more than one replica, do not run an in-process scheduler in every replica. Run one dedicated scheduler instance, or configure system cron, a Kubernetes CronJob, or another external scheduler to call the HTTP route.
 
+## Choose the provider
+
+`cron.provider` decides who fires the schedules:
+
+| `provider`         | Who runs the jobs                                                                                                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"host"` (default) | The platform you deploy to with `deploy.target` or `deploy.preset`: Vercel Cron, Cloudflare Cron Triggers, or Nitro scheduled tasks on Node, Bun, and Deno. See [Production Output](#production-output) for each one. |
+| `"farmjs"`         | Farm.js Infra, on any target. The build writes no host cron output, and `farm cron sync` registers the jobs after you deploy.                                                                                         |
+
+```ts title="farm.config.ts"
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  deploy: { target: "vercel" },
+  cron: { provider: "farmjs" }, // "host" would hand the schedules to Vercel Cron instead.
+});
+```
+
+Schedules declared with `cronRoute()` are discovered automatically. To keep schedules in config,
+put them under `jobs` when setting `provider`:
+
+```ts
+cron: {
+  provider: "farmjs",
+  jobs: {
+    dailyCleanup: {
+      schedule: "0 2 * * *",
+      path: "/api/maintenance/cleanup",
+    },
+  },
+},
+```
+
+The existing flat `cron: { dailyCleanup: { schedule, path } }` form remains supported.
+`cron: false` disables config and route-local schedules. Only `cron.provider` selects who runs
+them: a `FARMJS_API_KEY` in the environment never switches an app to Infra.
+
+### Run by Farm.js Infra
+
+`farm build` writes `.farm/cron-manifest.json`. With `provider: "farmjs"`, it emits no Farm cron
+entries for the host scheduler. Builds do not contact Infra or need an API key.
+
+Deploy the application, then synchronize the manifest from that exact build:
+
+```bash
+# Set these in your deployment environment; keep the real key out of source control.
+export FARMJS_API_KEY="<server key with cron:jobs permission>"
+export FARMJS_ENVIRONMENT="production"
+export FARMJS_PROJECT_ID="<project id>"
+
+# Review the endpoint, scope, and job list. No network request is made.
+farm cron sync --url https://app.example.com
+
+# Run only after that build is deployed.
+farm cron sync --url https://app.example.com --apply
+```
+
+`--url` is the app's public HTTPS origin. It is explicit so preview builds cannot accidentally
+select the production hostname. Set `FARMJS_ENVIRONMENT` explicitly to the corresponding Infra
+environment (`production`, `staging`, or `development`). Use a separate endpoint with `staging`
+for preview deployments. Project-scoped keys supply their project; otherwise set `FARMJS_PROJECT_ID`.
+`FARMJS_API_URL` overrides the Infra service origin (default `https://app.farmjs.dev`).
+
+Use `--manifest path/to/cron-manifest.json` for custom build directories or downloaded artifacts,
+and `--json` for a versioned plan or result. The command reads the manifest, without loading
+`farm.config.ts` or rescanning routes. Registration failures, redirects, timeouts, and incomplete
+acknowledgements fail the command. Retry the same manifest after resolving the error.
+
+Vercel git deployments have no step after the deploy goes live, and a Sensitive `FARMJS_API_KEY`
+can only be read by builds and functions. There, run the sync at the end of the production build:
+
+```js title="scripts/sync-cron.mjs"
+import { spawnSync } from "node:child_process";
+
+if (process.env.VERCEL_ENV === "production") {
+  const sync = spawnSync("farm", ["cron", "sync", "--url", "https://app.example.com", "--apply"], {
+    stdio: "inherit",
+    env: { ...process.env, FARMJS_ENVIRONMENT: "production" },
+  });
+  if (sync.status !== 0) console.warn("Warning: cron sync failed; Infra keeps the last jobs.");
+}
+```
+
+```json title="package.json"
+{ "scripts": { "build": "farm build && node scripts/sync-cron.mjs" } }
+```
+
+The jobs switch a minute or so before the new deployment is live, so a run in that window can
+miss the new route once; Infra retries it. Preview builds skip the step. farmjs.dev registers its
+own jobs this way.
+
+Infra sends signed GET requests to the application's routes. Set the same `FARMJS_API_KEY` in
+the deployed server environment; `cronRoute()` verifies `farmjs-signature`. `CRON_SECRET` remains
+supported for manual or host calls. Infra's per-request `timeoutMs` is 1000–60000 milliseconds;
+route-local `input` stays in the handler and is not sent during registration.
+
+### Remove or move schedules
+
+Sync replaces all jobs for the endpoint within the selected environment/project. Removing a job
+from the next deployed manifest removes it from Infra on the next sync. An empty manifest or a
+manifest built with `provider: "host"` clears the endpoint's Infra jobs:
+
+```bash
+farm cron sync --url https://app.example.com
+farm cron sync --url https://app.example.com --apply --allow-delete
+```
+
+Keep the old endpoint, environment, project, and credential available until cleanup completes.
+If the hostname changes, clear the old endpoint separately. Switching providers is not atomic:
+disable the previous host schedule before enabling Infra, or clear Infra before enabling the new
+host schedule. Already running requests may finish. `farm dev --cron`, `farm cron list`, and
+`farm cron run` remain local tooling and never register schedules with Infra.
+
 ## Build Manifest
 
 The manifest is the stable handoff for custom deployment adapters and external automation.
@@ -229,6 +406,7 @@ The manifest is the stable handoff for custom deployment adapters and external a
 ```json title=".farm/cron-manifest.json"
 {
   "schemaVersion": 1,
+  "provider": "host",
   "secretEnv": "CRON_SECRET",
   "jobs": [
     {

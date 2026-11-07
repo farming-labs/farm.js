@@ -133,6 +133,7 @@ import {
   resolveModuleSourcePath,
   getIslandStrategyExport,
   hasUseClientDirective,
+  isFarmPackageClientBoundary,
   isIsolatableClientBoundarySource,
   resolveFarmIsolatedClientHydrationMode,
   stripUseClientDirective,
@@ -193,6 +194,9 @@ import { farmFontImportsPlugin } from "./font-vite";
 import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
+import { rewriteFormStatusImports, type AstNode } from "@farm.js/islx/compiler";
+import { rewriteFarmPackageClientImports } from "./islands-package-references";
+import { rewriteFarmReactCacheImport } from "./islands-react-cache-transform";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { renderFarmLocaleAlternateLinks } from "./i18n/alternates";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
@@ -367,6 +371,15 @@ export function farmI18nClientBridgePlugin(): Plugin {
 /** Core entries whose runtime must never ship to the browser. */
 const FARM_SERVER_ONLY_ENTRIES = new Set(["@farm.js/core/og"]);
 
+/**
+ * The `server-only` package marks a module that must never reach the browser. It is written for
+ * React Server Components, where server code resolves its empty `react-server` build and anything
+ * else gets one that throws. Farm renders server code on its normal server pipeline too (islands
+ * mode, SSR), so a server graph gets an empty module, and a browser graph that imports it fails.
+ */
+const SERVER_ONLY_PACKAGE = "server-only";
+const FARM_SERVER_ONLY_PACKAGE_ID = "\0farm:server-only";
+
 const FARM_PLATFORM_ENTRY = "@farm.js/core/platform";
 const FARM_PLATFORM_CLIENT_ID = "\0farm:platform-client";
 
@@ -403,6 +416,8 @@ export function farmServerOnlyEntriesPlugin(
     config() {
       return {
         optimizeDeps: { rolldownOptions: { plugins: [farmBrowserBuiltinsOptimizerPlugin()] } },
+        // Resolve `server-only` here rather than in Node, which would load its throwing build.
+        ssr: { noExternal: [SERVER_ONLY_PACKAGE] },
       };
     },
     configResolved(config) {
@@ -410,6 +425,15 @@ export function farmServerOnlyEntriesPlugin(
     },
     resolveId(id, importer, options) {
       if (id === FARM_PLATFORM_ENTRY) return options?.ssr ? null : FARM_PLATFORM_CLIENT_ID;
+      if (id === SERVER_ONLY_PACKAGE) {
+        // Vite's dependency scan walks every route file as if it were browser code.
+        if (options?.ssr || (options as { scan?: boolean } | undefined)?.scan) {
+          return FARM_SERVER_ONLY_PACKAGE_ID;
+        }
+        this.error(
+          `${importer ?? "A module"} imports "server-only", so it must not reach the browser, but client code imports it. Move what the client needs out of that module, or call it from a server component, server function or API route.`,
+        );
+      }
       if (!options?.ssr && isBuiltin(id)) {
         return resolveFarmBrowserBuiltin(this, id, importer, options);
       }
@@ -429,6 +453,7 @@ export function farmServerOnlyEntriesPlugin(
       return null;
     },
     load(id) {
+      if (id === FARM_SERVER_ONLY_PACKAGE_ID) return "export {};";
       if (id === FARM_PLATFORM_CLIENT_ID) {
         return createFarmPlatformClientModule(options.platform ?? resolveFarmPlatform());
       }
@@ -517,6 +542,7 @@ function createRequestFromNodeRequest(
   });
 }
 
+export { collectFarmClientPackageImports } from "./utils/client-component";
 export { createFarmNodeRequestAbortSignal } from "./server-http";
 // The font call compiler and static image imports, for pipelines that build without farmPlugin
 // (React Server Components).
@@ -1044,6 +1070,21 @@ export function transformIsolatedClientBoundaryModule(options: {
    */
   inferredInteraction?: boolean;
 }): string | null {
+  // Islands mode: a server component's form around an island reports its submit to the island's
+  // useFormStatus, which then comes from islx instead of react-dom. Both builds rewrite it.
+  if (options.slots) {
+    try {
+      const rewritten = rewriteFormStatusImports({
+        code: options.code,
+        id: options.moduleReference,
+        parse: options.parse as (code: string) => AstNode,
+        from: "@farm.js/core/internal/islx-react",
+      });
+      if (rewritten) options = { ...options, code: rewritten.code };
+    } catch {
+      return null;
+    }
+  }
   let ast: FarmModuleAstNode;
   try {
     ast = options.parse(options.code);
@@ -1713,6 +1754,18 @@ export function farmPlugin(
       }
 
       const dispatchToDevServer = createFarmDevServerDispatch(server);
+      if (options.mobileClient) {
+        // Server functions that native screens call load where API routes load theirs.
+        const { FARM_DEV_SERVER_MODULE_LOADER } = await import("./mobile/native-server-fns");
+        const load = (file: string) => loadFarmDevModule(server, file);
+        (globalThis as Record<symbol, unknown>)[FARM_DEV_SERVER_MODULE_LOADER] = load;
+        server.httpServer?.once("close", () => {
+          const globals = globalThis as Record<symbol, unknown>;
+          if (globals[FARM_DEV_SERVER_MODULE_LOADER] === load) {
+            delete globals[FARM_DEV_SERVER_MODULE_LOADER];
+          }
+        });
+      }
       apiRouteManager = new APIRouteManager(appDirs, server, {
         plugins: farmConfig.plugins,
         i18n: farmApp.getI18nRuntime(),
@@ -3978,6 +4031,38 @@ export const manifest = getManifest();
       // Islands mode: `"use server"` modules register as actions on the server and become stubs in
       // the browser (RFC 0003). The RSC engine has its own transform.
       const actionConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
+      // Islands mode: a server module's imports of package client components point at their
+      // client references, so they render as islands, as RSC renders them as client references.
+      let rewrotePackageImports = false;
+      if (
+        resolveFarmServerComponentsMode(actionConfig.experimental?.serverComponents) ===
+          "islands" &&
+        !id.includes("/node_modules/") &&
+        !id.startsWith("\0") &&
+        /\.[cm]?[jt]sx?(?:$|\?)/.test(id) &&
+        !hasUseClientDirective(code)
+      ) {
+        const file = id.split("?", 1)[0]!;
+        const projectRoot = actionConfig.root || server?.config.root || process.cwd();
+        const referenced = rewriteFarmPackageClientImports({
+          code,
+          file,
+          root: projectRoot,
+          isClientPackage: (specifier) => isFarmPackageClientBoundary(file, specifier, projectRoot),
+        });
+        if (referenced !== null) {
+          code = referenced;
+          rewrotePackageImports = true;
+        }
+        // Server code only: in the browser React's own cache is the one RSC has there too.
+        if (transformOptions?.ssr === true) {
+          const cached = rewriteFarmReactCacheImport(code, file);
+          if (cached !== null) {
+            code = cached;
+            rewrotePackageImports = true;
+          }
+        }
+      }
       if (
         islandsServerFns() &&
         !isFarmServerFnBoundaryId(id) &&
@@ -4051,7 +4136,7 @@ export const manifest = getManifest();
       }
 
       let transformedCode = code;
-      let transformed = false;
+      let transformed = rewrotePackageImports;
 
       if (typeof fontImports.transform === "function") {
         const fontResult = await fontImports.transform.call(

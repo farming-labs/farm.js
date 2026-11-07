@@ -32,7 +32,8 @@ pnpm smoke               # checks the mobile decisions and the web build
 | `/feed`                  | 240 rows, for scroll and frame-time checks                                |
 | `/stations/[id]`         | A programmatic route (`src/farm.routes.tsx`) whose data comes from `data.main` |
 | `/map`                   | `page.native.tsx`: a React Native list of stations from `GET /api/stations`; a row opens the web `/stations/[id]`; the device model from the app's `Device` module and a vibrate button. `mobile.native.routes` keeps it web on iOS |
-| `/camera`                | `page.native.tsx` with a `page.android.tsx` override: notes from `GET /api/notes` and a button to the web `/notes/new` modal |
+| `/camera`                | `page.native.tsx` with a `page.android.tsx` override: notes from `GET /api/notes`, a quick note through the `createNote` server function called by import, and a button to the web `/notes/new` modal |
+| `/kit`                   | **Native-only** (RFC 0004, 7.3): `page.native.tsx` with no `page.tsx`. A packing checklist from `@farm.js/ui` as native views; the route exists only in the app, and the web server answers it 404 |
 | `/settings/device`       | `page.kt`: a platform screen on Android                                   |
 | `/lab/packing`           | Only portable elements and inline styles: the analyzer says `port`, and `farm build --mobile` generates its React Native port on Android |
 | `/lab/chart`             | A canvas through a ref, a table, and `window`: the analyzer lists why it stays web |
@@ -45,9 +46,16 @@ placeholder: Farm does not build platform screens yet. Native files are type-che
 
 `mobile.native.auto` is `"on"`: the routes the analyzer proves render natively (`/`, `/notes`,
 `/notes/[id]`, `/about`, `/feed`, `/navigation/step/[n]`, `/docs/[...slug]`) are `server` screens,
-which the server renders and the Android shell draws with native views (iOS shows them as web
-screens for now). `pnpm report` lists every route's tier. `/settings`, `/notes/new`, and
+which the server renders and the shell draws with native views (Android views, UIKit on iOS).
+`pnpm report` lists every route's tier. `/settings`, `/notes/new`, and
 `/navigation` use client-side state and stay web.
+
+The `Mobile iOS` workflow builds the production simulator project, then launches the dev app.
+Its home-tab check requires a `server` rule and a persisted `server screen ready: /` log from the
+shell after it installs the UIKit content. Missing completion or a web fallback fails the job.
+The artifact keeps `farm-routes.json`, `app-log.txt`, and screenshots; rerun the evidence check
+with `node scripts/check-ios-native.mjs <artifact-directory>` from this example. This checks the
+dev home screen, not production navigation, authentication, or an iOS React Native host.
 
 `mobile.shells` is on: `pnpm build:mobile` renders `src/app/(styled)/loading.tsx` inside the
 `(styled)` layout as one page shell for every styled route. The app shows it while a web screen's
@@ -104,6 +112,13 @@ the emulator's model (`sdk_gphone64_arm64`) and `Vibrate` vibrates for 200 ms wi
 (`data-testid="web-vibrate"`). In a browser and in the iOS shell, `native.Device.available()` is
 false and the card says `not in the app`. `src/farm.d.ts` types `native.Device` from the spec. Not
 verified on an emulator yet.
+
+`Choose a photo` on `/settings` is `PhotoPicker` from `@farm.js/ui`. In the Android app it calls
+`native.Device.pickPhoto()`, which opens the system photo picker (no permission needed), copies
+the photo into `farm-files`, and resolves its `file://` URI; the page gets it by reference, as
+`/__farm/files/<id>`, and shows it with `Image`. In a browser the same picker opens the browser's
+file picker. `/kit` (a native screen) uses the same `PhotoPicker` with `Device.pickPhoto()` and
+shows the `file://` URI directly.
 
 React versions: this example pins `react` and `react-dom` 19.2.8, the version Farm core is tested
 on. React Native 0.88 declares a `react@^19.3.0` peer (its renderer is built from 19.3.0), so pnpm
