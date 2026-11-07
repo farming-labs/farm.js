@@ -14,5 +14,6 @@ export interface ProgressRuntime {
   show(): void;
   hide(): void;
   fail(): void;
+  cancel(): void;
   close(): void;
 }

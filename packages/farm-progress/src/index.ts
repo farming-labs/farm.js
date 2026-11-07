@@ -35,8 +35,11 @@ export function progress(options: ProgressOptions = {}) {
           return runtime.startProgressRuntime(config, window);
         },
         navigation: {
-          before({ state }) {
+          before({ state, signal }) {
             state.show();
+            // Core aborts a navigation without `rendered` or `error` when a hash
+            // link or a link to the current page cancels it.
+            signal.addEventListener("abort", () => state.cancel(), { once: true });
           },
           rendered({ state }) {
             state.hide();

@@ -59,5 +59,7 @@ progress({
 - A navigation that fails flashes the bar red and then hides it.
 - A second navigation started while the first is still in flight keeps the bar up and
   restarts it from the beginning.
+- A navigation canceled without a new one, such as by a hash link or a link to the current
+  page, completes the bar and hides it.
 - The bar is removed when the page closes or the plugin is replaced during development.
   Configure navigation progress in one `progress()` instance per app.

@@ -20,7 +20,10 @@ describe("progress Farm plugin", () => {
     const plugin = progress();
     const state = { show: vi.fn(), hide: vi.fn(), fail: vi.fn(), close: vi.fn() };
 
-    (plugin.client?.navigation?.before as Function)?.({ state });
+    (plugin.client?.navigation?.before as Function)?.({
+      state,
+      signal: new AbortController().signal,
+    });
     (plugin.client?.navigation?.rendered as Function)?.({ state });
     (plugin.client?.navigation?.error as Function)?.({ state });
     (plugin.client?.close as Function)?.({ state });

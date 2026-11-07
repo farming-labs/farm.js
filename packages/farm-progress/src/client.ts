@@ -21,6 +21,7 @@ export function startProgressRuntime(
   let trickleHandle: number | undefined;
   let finishHandle: number | undefined;
   let width = 0;
+  let generation = 0;
   let closed = false;
 
   function removeStaleElements(): void {
@@ -67,6 +68,7 @@ export function startProgressRuntime(
 
   function show(): void {
     if (closed) return;
+    generation += 1;
     clearFinish();
     if (delayHandle !== undefined) return;
     runtimeWindow.clearInterval(trickleHandle);
@@ -124,6 +126,16 @@ export function startProgressRuntime(
     }, ERROR_FLASH_MS);
   }
 
+  function cancel(): void {
+    if (closed) return;
+    // A superseding navigation aborts this one right before its own show(), so
+    // only finish the bar when no show() arrived by the next task.
+    const canceled = generation;
+    runtimeWindow.setTimeout(() => {
+      if (generation === canceled) hide();
+    }, 0);
+  }
+
   function close(): void {
     if (closed) return;
     closed = true;
@@ -133,5 +145,5 @@ export function startProgressRuntime(
     removeElement();
   }
 
-  return { show, hide, fail, close };
+  return { show, hide, fail, cancel, close };
 }
