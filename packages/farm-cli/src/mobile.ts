@@ -142,6 +142,8 @@ interface NativeScreensOptions {
   screens: FarmMobileNativeScreen[];
   basePath: string;
   locales?: string[];
+  /** Metro's platform: `.ios.tsx` and `.android.tsx` files and React Native's own platform code. */
+  platform?: FarmMobileShellOS;
 }
 
 interface ReactNativeInfo {
@@ -193,18 +195,17 @@ export interface FarmMobileNativeScreen {
 }
 
 /**
- * The routes that render as React Native screens on this OS. Empty for apps without any, and on
- * iOS, whose shell does not host React Native yet and shows a placeholder; those load nothing of
- * React Native and generate the same project as before.
+ * The routes that render as React Native screens on this OS. Empty for apps without any; those
+ * load nothing of React Native and generate the same project as before.
  */
 export function listFarmMobileNativeScreens(
   app: {
     config: { root: string };
     screens: Record<string, { screen: string; module?: string; file?: string }>;
   },
-  os: FarmMobileShellOS = "android",
+  // The decisions are already per OS (`mobile.native.routes[...].ios` and `page.ios.tsx`).
+  _os: FarmMobileShellOS = "android",
 ): FarmMobileNativeScreen[] {
-  if (os !== "android") return [];
   return Object.entries(app.screens)
     .filter(([, decision]) => decision.screen === "native" && decision.module && decision.file)
     .map(([route, decision]) => ({
@@ -348,6 +349,7 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
         screens,
         basePath: app.config.basePath === "/" ? "" : app.config.basePath,
         locales: nativeLocales(app.config),
+        platform: os,
         port: await findMetroPort(),
       });
       // Metro stops with the dev server.
@@ -542,6 +544,7 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
         screens,
         basePath: config.basePath === "/" ? "" : config.basePath,
         locales: nativeLocales(config),
+        platform: os,
       });
       native = {
         engine: "react-native",

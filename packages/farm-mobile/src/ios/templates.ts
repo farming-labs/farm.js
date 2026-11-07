@@ -7,9 +7,39 @@ import { crc32, deflateSync } from "node:zlib";
 import type { MobileGeneratedFile, MobileShellContext } from "@farm.js/core/mobile";
 import { createBridgeScript } from "../shared/bridge.js";
 import { createPageShellFiles } from "../shared/shells.js";
+import {
+  IOS_REACT_NATIVE_DIR,
+  IOS_REACT_NATIVE_FRAMEWORKS,
+  IOS_REACT_NATIVE_HEADERS,
+  reactNativeFlavor,
+} from "./react-native.js";
 
 /** Static project files (the Swift shell and the asset catalog), copied as they are. */
 export const TEMPLATE_DIR = fileURLToPath(new URL("../../templates/ios/", import.meta.url));
+
+/** Files added or replaced for apps with React Native screens. */
+export const IOS_REACT_NATIVE_TEMPLATE_DIR = fileURLToPath(
+  new URL("../../templates/ios-react-native/", import.meta.url),
+);
+
+/** The Hermes bytecode `farm build --mobile` bundles into the app (`FarmReactNativeBuild`). */
+export const IOS_NATIVE_BUNDLE = "App/farm-native.hbc";
+
+/** The bridging header that shows the Objective-C host (`FarmReactNative.h`) to Swift. */
+const BRIDGING_HEADER = "FarmReactNative-Bridging-Header.h";
+
+/**
+ * React Native's own compile flags for code built against its headers (folly's, from
+ * `NewArchitectureHelper.folly_compiler_flags`, and the new architecture's).
+ */
+const REACT_NATIVE_DEFINES = [
+  "FOLLY_MOBILE=1",
+  "FOLLY_USE_LIBCPP=1",
+  "FOLLY_CFG_NO_COROUTINES=1",
+  "FOLLY_HAVE_CLOCK_GETTIME=1",
+  "RCT_NEW_ARCH_ENABLED=1",
+  "USE_HERMES=1",
+];
 
 /** The Xcode target, scheme, and module. The app's `mobile.id` is only its bundle ID. */
 export const IOS_TARGET = "App";
@@ -85,6 +115,42 @@ enum FarmBuild {
     static let authBasePath = ${swiftString(context.authBasePath ?? "")}
     /// SF Symbols for mobile.tabs, in order.
     static let tabIcons: [String] = [${symbols.join(", ")}]
+}
+`;
+}
+
+/**
+ * Where the React Native host loads its bundle: Metro under `farm dev --mobile`, on the dev
+ * server's host, or the Hermes bytecode in the app.
+ */
+export function createReactNativeBuild(context: MobileShellContext): string {
+  const native = context.native!;
+  let source: string;
+  if (context.command === "dev" && native.devServer) {
+    const server = new URL(context.manifest.server);
+    const metro = new URL(`http://${server.host}`);
+    metro.port = String(native.devServer.port);
+    metro.pathname = `/${native.devServer.mainModule}.bundle`;
+    metro.search = new URLSearchParams({
+      platform: "ios",
+      dev: "true",
+      minify: "false",
+      app: context.mobile.id,
+    }).toString();
+    source = `URL(string: ${swiftString(metro.toString())})`;
+  } else {
+    source = 'Bundle.main.url(forResource: "farm-native", withExtension: "hbc")';
+  }
+  return `// ${GENERATED}
+import Foundation
+
+enum FarmReactNativeBuild {
+    /// React Native ${native.reactNativeVersion}, Hermes ${native.hermesVersion}.
+    static let reactNativeVersion = ${swiftString(native.reactNativeVersion)}
+    /// Module ids with a React Native screen.
+    static let modules: [String] = [${[...native.modules].sort().map(swiftString).join(", ")}]
+    /// Metro under farm dev --mobile, the bundled Hermes bytecode otherwise.
+    static let bundleURL: URL? = ${source}
 }
 `;
 }
@@ -227,11 +293,41 @@ export const IOS_PAGE_SHELLS_DIR = "farm-shells";
 const FILE_TYPES: Record<string, { type: string; phase?: "sources" | "resources" }> = {
   [IOS_PAGE_SHELLS_DIR]: { type: "folder", phase: "resources" },
   ".swift": { type: "sourcecode.swift", phase: "sources" },
+  ".mm": { type: "sourcecode.cpp.objcpp", phase: "sources" },
+  ".h": { type: "sourcecode.c.h" },
+  ".hbc": { type: "file", phase: "resources" },
   ".xcassets": { type: "folder.assetcatalog", phase: "resources" },
   ".json": { type: "text.json", phase: "resources" },
   ".js": { type: "sourcecode.javascript", phase: "resources" },
   ".plist": { type: "text.plist.xml" },
 };
+
+/**
+ * The app target's settings for the React Native host: the Objective-C++ glue compiles against
+ * React Native's headers with its own flags, and Swift sees only `FarmReactNative.h`. `RCT_DEV`
+ * matches the artifacts' flavor, since React Native's headers otherwise derive it from `DEBUG`.
+ */
+export function createReactNativeBuildSettings(
+  context: MobileShellContext,
+): Record<string, PbxValue> {
+  const dev = reactNativeFlavor(context) === "debug" ? 1 : 0;
+  return {
+    CLANG_CXX_LANGUAGE_STANDARD: "c++20",
+    CLANG_CXX_LIBRARY: "libc++",
+    GCC_PREPROCESSOR_DEFINITIONS: [
+      "$(inherited)",
+      ...REACT_NATIVE_DEFINES,
+      `RCT_DEV=${dev}`,
+      `RCT_DEV_MENU=${dev}`,
+    ],
+    HEADER_SEARCH_PATHS: [
+      "$(inherited)",
+      ...IOS_REACT_NATIVE_HEADERS.map((dir) => `$(SRCROOT)/${IOS_REACT_NATIVE_DIR}/${dir}`),
+    ],
+    OTHER_CPLUSPLUSFLAGS: ["$(inherited)", "-Wno-comma", "-Wno-shorten-64-to-32"],
+    SWIFT_OBJC_BRIDGING_HEADER: `${IOS_TARGET}/${BRIDGING_HEADER}`,
+  };
+}
 
 /**
  * `App.xcodeproj/project.pbxproj` for the files under `App/`: one iOS app target, Swift sources,
@@ -278,6 +374,36 @@ export function createProjectFile(context: MobileShellContext, files: readonly s
     (kind.phase === "sources" ? sources : resources).push(build);
   }
 
+  // React Native's XCFrameworks, from ReactNative/ next to the project (react-native.ts): linked,
+  // and embedded in the app's Frameworks folder.
+  const frameworkFiles: string[] = [];
+  const embedFiles: string[] = [];
+  const frameworkRefs: string[] = [];
+  if (context.native) {
+    for (const framework of IOS_REACT_NATIVE_FRAMEWORKS) {
+      const ref = add(`file:${IOS_REACT_NATIVE_DIR}/${framework}`, framework, {
+        isa: "PBXFileReference",
+        lastKnownFileType: "wrapper.xcframework",
+        path: framework,
+        sourceTree: "<group>",
+      });
+      frameworkRefs.push(ref);
+      frameworkFiles.push(
+        add(`build:frameworks:${framework}`, `${framework} in Frameworks`, {
+          isa: "PBXBuildFile",
+          fileRef: ref,
+        }),
+      );
+      embedFiles.push(
+        add(`build:embed:${framework}`, `${framework} in Embed Frameworks`, {
+          isa: "PBXBuildFile",
+          fileRef: ref,
+          settings: { ATTRIBUTES: ["CodeSignOnCopy", "RemoveHeadersOnCopy"] },
+        }),
+      );
+    }
+  }
+
   const product = add("product", `${IOS_TARGET}.app`, {
     isa: "PBXFileReference",
     explicitFileType: "wrapper.application",
@@ -297,9 +423,19 @@ export function createProjectFile(context: MobileShellContext, files: readonly s
     name: "Products",
     sourceTree: "<group>",
   });
+  const reactNativeGroup = context.native
+    ? [
+        add("group:react-native", IOS_REACT_NATIVE_DIR, {
+          isa: "PBXGroup",
+          children: frameworkRefs,
+          path: IOS_REACT_NATIVE_DIR,
+          sourceTree: "<group>",
+        }),
+      ]
+    : [];
   const mainGroup = add("group:main", "", {
     isa: "PBXGroup",
-    children: [appGroup, productsGroup],
+    children: [appGroup, ...reactNativeGroup, productsGroup],
     sourceTree: "<group>",
   });
   names.delete(mainGroup);
@@ -312,8 +448,21 @@ export function createProjectFile(context: MobileShellContext, files: readonly s
       runOnlyForDeploymentPostprocessing: 0,
     });
   const sourcesPhase = phase("PBXSourcesBuildPhase", "Sources", sources);
-  const frameworksPhase = phase("PBXFrameworksBuildPhase", "Frameworks", []);
+  const frameworksPhase = phase("PBXFrameworksBuildPhase", "Frameworks", frameworkFiles);
   const resourcesPhase = phase("PBXResourcesBuildPhase", "Resources", resources);
+  const embedPhase = context.native
+    ? [
+        add("phase:Embed Frameworks", "Embed Frameworks", {
+          isa: "PBXCopyFilesBuildPhase",
+          buildActionMask: 2147483647,
+          dstPath: "",
+          dstSubfolderSpec: 10,
+          files: embedFiles,
+          name: "Embed Frameworks",
+          runOnlyForDeploymentPostprocessing: 0,
+        }),
+      ]
+    : [];
 
   const shared: Record<string, PbxValue> = {
     ALWAYS_SEARCH_USER_PATHS: "NO",
@@ -366,6 +515,7 @@ export function createProjectFile(context: MobileShellContext, files: readonly s
     SUPPORTED_PLATFORMS: "iphoneos iphonesimulator",
     SWIFT_VERSION: "5.0",
     TARGETED_DEVICE_FAMILY: "1,2",
+    ...(context.native ? createReactNativeBuildSettings(context) : {}),
   };
   const targetDebug = add("config:target:Debug", "Debug", {
     isa: "XCBuildConfiguration",
@@ -397,7 +547,7 @@ export function createProjectFile(context: MobileShellContext, files: readonly s
   const nativeTarget = add("target", IOS_TARGET, {
     isa: "PBXNativeTarget",
     buildConfigurationList: targetList,
-    buildPhases: [sourcesPhase, frameworksPhase, resourcesPhase],
+    buildPhases: [sourcesPhase, frameworksPhase, resourcesPhase, ...embedPhase],
     buildRules: [],
     dependencies: [],
     name: IOS_TARGET,
@@ -592,7 +742,23 @@ async function createAppModuleFiles(context: MobileShellContext): Promise<Mobile
 export async function createIosProject(
   context: MobileShellContext,
 ): Promise<MobileGeneratedFile[]> {
-  const files = await readTemplateFiles(TEMPLATE_DIR);
+  let files = await readTemplateFiles(TEMPLATE_DIR);
+  if (context.native) {
+    // The React Native host replaces the engine stub (NativeEngine.swift) and adds its glue.
+    const overlay = await readTemplateFiles(IOS_REACT_NATIVE_TEMPLATE_DIR);
+    const replaced = new Set(overlay.map((file) => file.path));
+    files = [...files.filter((file) => !replaced.has(file.path)), ...overlay];
+    files.push({
+      path: `${IOS_TARGET}/FarmReactNativeBuild.swift`,
+      contents: createReactNativeBuild(context),
+    });
+    if (context.native.bundle) {
+      files.push({
+        path: IOS_NATIVE_BUNDLE,
+        contents: new Uint8Array(await readFile(context.native.bundle)),
+      });
+    }
+  }
   files.push(
     { path: `${IOS_TARGET}/FarmBuild.swift`, contents: createFarmBuild(context) },
     { path: `${IOS_TARGET}/Info.plist`, contents: createInfoPlist(context) },

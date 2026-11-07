@@ -24,7 +24,7 @@ jobs:
   ios-simulator:
     name: iOS simulator
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - run: echo "EVIDENCE=$RUNNER_TEMP/ios-evidence" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -63,6 +63,51 @@ jobs:
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid"
           xcrun simctl list devices booted | tee "$EVIDENCE/booted.txt"
+
+      - name: Open the React Native screen /kit in the production app
+        working-directory: examples/mobile
+        run: |
+          APP=.farm/output/mobile/dist/dev.farmjs.examples.fieldnotes-simulator.app
+          ID=dev.farmjs.examples.fieldnotes
+          xcrun simctl install "$SIMULATOR_UDID" "$APP"
+          # The first launch after an install verifies the app and warms dyld's caches; keep it out
+          # of the numbers.
+          xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$ID"
+          sleep 8
+          # Cold: /kit opens as soon as the first screen shows content, while React Native starts.
+          # Warm: 5 s later, after the runtime has evaluated the bundle.
+          for run in 1 2 3; do
+            for mode in cold warm; do
+              after=0; [ "$mode" = warm ] && after=5000
+              xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$ID" \
+                -FarmOpen /kit -FarmOpenAfter "$after"
+              sleep $(( after / 1000 + 8 ))
+              xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/kit-$mode-$run.png"
+            done
+          done
+          xcrun simctl spawn "$SIMULATOR_UDID" log show --last 10m --style compact \
+            --predicate 'process == "App"' > "$EVIDENCE/kit-log.txt"
+          grep -E "react-native|native app/|launch open|fallback|failed" "$EVIDENCE/kit-log.txt" | tail -60 || true
+          {
+            echo "app_kb=$(du -sk "$APP" | cut -f1)"
+            for framework in "$APP"/Frameworks/*.framework; do
+              echo "framework_kb $(basename "$framework")=$(du -sk "$framework" | cut -f1)"
+            done
+            echo "bundle_kb=$(du -sk "$APP/farm-native.hbc" | cut -f1)"
+            # What a phone downloads: the arm64 device slices, zipped as the App Store compresses.
+            RN=.farm/output/mobile/ios/ReactNative
+            mkdir -p "$RUNNER_TEMP/device-slices"
+            for framework in React ReactNativeDependencies hermesvm; do
+              cp -R "$RN/$framework.xcframework/ios-arm64/$framework.framework" "$RUNNER_TEMP/device-slices/"
+            done
+            echo "device_slices_kb=$(du -sk "$RUNNER_TEMP/device-slices" | cut -f1)"
+            ditto -c -k --sequesterRsrc "$RUNNER_TEMP/device-slices" "$RUNNER_TEMP/device-slices.zip"
+            echo "device_slices_zip_kb=$(( $(stat -f %z "$RUNNER_TEMP/device-slices.zip") / 1024 ))"
+          } | tee "$EVIDENCE/kit-size.txt"
+
+      - name: Check /kit rendered as a React Native screen
+        working-directory: examples/mobile
+        run: node scripts/check-ios-react-native.mjs "$EVIDENCE" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Run the shell with farm dev --mobile --os ios
         working-directory: examples/mobile
