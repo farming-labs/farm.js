@@ -7,6 +7,35 @@ the Bumpp list keep their independently managed versions. Release preparation sy
 dependencies to the actual version of each workspace package instead of forcing those packages into
 the shared version.
 
+## Bump independently versioned packages
+
+Public packages under `packages/` that are not listed in `bump.config.ts`, such as
+`@farm.js/mobile`, `@farm.js/native`, `@farm.js/ui`, and `@farm.js/react`, keep their own versions.
+Bump only the ones whose shipped files changed since the previous release tag, and do it before
+starting the shared release so release preparation syncs starters to the new versions.
+
+Do not use Bumpp for these packages. Run from the repository root, it merges the `bump.config.ts`
+file list into the command line and bumps the entire shared group; run from inside a package
+directory with an explicit version, it can exit without changing anything. Use the
+independent-bump script instead:
+
+```bash
+node scripts/bump-independent.js --changed-since v0.1.60
+```
+
+This lists every independent package with changes since the tag, ignoring tests, snapshots,
+READMEs, and manifests whose only change is their version, and prints a suggested command for each
+package that still needs a bump:
+
+```bash
+node scripts/bump-independent.js packages/farm-ui 0.1.0-beta.3
+```
+
+The bump form accepts a package name or directory, rewrites only that manifest's `version` line,
+prints the diff, and refuses shared-group packages and versions that do not increase. Run the
+listing again until every package reports that it has been bumped, then review `git diff` and
+continue with the shared release. Unchanged independent packages keep their current versions.
+
 ## Stable release
 
 ```bash
@@ -52,8 +81,9 @@ the system temporary directory as `farm-packed-react-compiler-on.png` and
 The existing `pnpm test:packed-app` still checks the basic starter without requiring a browser.
 
 After those gates pass, make the independent version promotion as a dedicated release change,
-not a shared-group bump. Use the versioning tool for the chosen non-prerelease version and run
-`scripts/sync-release-versions.js` so starter dependencies follow the actual React package version.
+not a shared-group bump. Run `node scripts/bump-independent.js @farm.js/react <version>` with the
+chosen non-prerelease version and run `scripts/sync-release-versions.js` so starter dependencies
+follow the actual React package version.
 Review that only the intended package and its consumers change. Update the stability page's package
 classification when promoting; the default React renderer in core is already stable.
 
@@ -143,6 +173,13 @@ Run the release verification and package dry-run before starting Bumpp:
 pnpm release:check
 pnpm publish:dry-run
 ```
+
+`pnpm release:check` builds and runs the whole workspace test suite, and some suites, such as the
+farmjs-plugin RSC build tests, exhaust Node's default heap and crash a vitest worker with
+"JavaScript heap out of memory". The script therefore sets `NODE_OPTIONS=--max-old-space-size=12288`
+for its build and test stages, matching the CI jobs in `.github/workflows/ci.yml`; it replaces any
+`NODE_OPTIONS` already set in your shell for those stages. Run it on a machine with at least 16 GB
+of memory and keep other heavy processes closed.
 
 The package dry-run packs every public package into a temporary directory and removes the
 archives afterward. It does not consult npm, so packages are checked even when their current
