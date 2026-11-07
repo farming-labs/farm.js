@@ -38,11 +38,11 @@ export default defineConfig({
 
 ## Options
 
-| Option    | Default     | Description                                                              |
-| --------- | ----------- | ------------------------------------------------------------------------ |
-| `delayMs` | `150`       | Wait this long before showing the bar, so fast navigations never flash.  |
-| `color`   | `"#2563eb"` | Any CSS color for the bar, including a `var(--...)` token.               |
-| `height`  | `3`         | Bar height in pixels.                                                    |
+| Option    | Default     | Description                                                             |
+| --------- | ----------- | ----------------------------------------------------------------------- |
+| `delayMs` | `150`       | Wait this long before showing the bar, so fast navigations never flash. |
+| `color`   | `"#2563eb"` | Any CSS color for the bar, including a `var(--...)` token.              |
+| `height`  | `3`         | Bar height in pixels.                                                   |
 
 A failed navigation flashes the bar red and then hides it. The bar is removed when the
 page closes or the plugin is replaced during development.
