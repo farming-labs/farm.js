@@ -8,6 +8,7 @@ import path from "node:path";
 import { isSecretDocsConfigKey } from "./config-secrets";
 import { docsEngine, loadFarmDocsEngine } from "./engine";
 import { resolveDocsConfig } from "../config";
+import { cloneFarmRequest } from "../server-http";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./types";
 import {
   discoverFarmDocsPages,
@@ -194,7 +195,7 @@ function isDocsCloudAction(action: string | undefined): boolean {
 
 async function readJson(request: Request): Promise<unknown> {
   try {
-    return await request.clone().json();
+    return await cloneFarmRequest(request).json();
   } catch {
     return undefined;
   }

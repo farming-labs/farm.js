@@ -366,8 +366,30 @@ export function withFarmRequestClientAddress<T extends Request>(
   return requestWithShape;
 }
 
-export function cloneFarmRequestWithContext(request: Request): Request {
+/**
+ * Clones of a request, kept alive for as long as the request itself.
+ *
+ * The undici in Node 22.13 to 22.20 (before undici 6.22.0) and early Node 24 registers a clone for
+ * finalization with the original's body stream: once the clone is garbage collected, an original
+ * nobody has read yet is cancelled and reads as an empty or already-used body. Farm reads a clone
+ * (to parse typed input, or to let a guard see the body) and hands the original on to the route,
+ * so a collection in between lost the route's body.
+ */
+const liveRequestClones = new WeakMap<Request, Request[]>();
+
+/** `request.clone()` whose clone cannot cancel the original's body when it is collected. */
+export function cloneFarmRequest(request: Request): Request {
   const cloned = request.clone();
+  if (request.body) {
+    const clones = liveRequestClones.get(request);
+    if (clones) clones.push(cloned);
+    else liveRequestClones.set(request, [cloned]);
+  }
+  return cloned;
+}
+
+export function cloneFarmRequestWithContext(request: Request): Request {
+  const cloned = cloneFarmRequest(request);
   copyRequestContext(request, cloned);
   return cloned;
 }
