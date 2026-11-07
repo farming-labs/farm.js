@@ -1,9 +1,9 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MobileShellContext } from "@farm.js/core/mobile";
-import { podGlob, podspecList } from "./autolinking";
+import { podGlob, podspecList, resolveIosAutolinking } from "./autolinking";
 import {
   createIosProject,
   createReactNativeBuild,
@@ -220,5 +220,40 @@ end`;
       "CoreTelephony",
       "SystemConfiguration",
     ]);
+  });
+
+  it("links only packages with iOS code, and refuses one without codegenConfig", async () => {
+    const root = await app();
+    const install = async (name: string, files: Record<string, string>) => {
+      for (const [file, contents] of Object.entries(files)) {
+        const target = path.join(root, "node_modules", name, file);
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, contents);
+      }
+    };
+    await install("old-module", {
+      "package.json": JSON.stringify({ name: "old-module" }),
+      "old-module.podspec": 's.source_files = "ios/**/*.{h,m}"',
+      "ios/Old.m": "",
+    });
+    await install("android-only", {
+      "package.json": JSON.stringify({ name: "android-only", codegenConfig: { name: "A" } }),
+      "old.podspec": 's.source_files = "ios/*.m"',
+      "react-native.config.js": "module.exports = { dependency: { platforms: { ios: null } } };",
+    });
+    await install("plain-js", { "package.json": JSON.stringify({ name: "plain-js" }) });
+    const write = (dependencies: Record<string, string>) =>
+      writeFile(path.join(root, "package.json"), JSON.stringify({ name: "app", dependencies }));
+    const ctx = context(root, { native: NATIVE });
+
+    // A package with no podspec, or one that opts out of iOS, links nothing: no FarmModules.
+    await write({ "plain-js": "1.0.0", "android-only": "1.0.0" });
+    await expect(resolveIosAutolinking(ctx)).resolves.toBeUndefined();
+    // Without React Native screens nothing is resolved at all.
+    await write({ "old-module": "1.0.0" });
+    await expect(resolveIosAutolinking(context(root))).resolves.toBeUndefined();
+    await expect(resolveIosAutolinking(ctx)).rejects.toThrow(
+      /"old-module" has iOS code but no "codegenConfig"/,
+    );
   });
 });
