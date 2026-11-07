@@ -195,7 +195,8 @@ jobs:
           pod --version | tee "$EVIDENCE/cocoapods-version.txt"
           # Log process start to React Native's first content, the launch number Farm's shell logs.
           DELEGATE=Baseline/ios/Baseline/AppDelegate.swift
-          perl -0pi -e 's/(didFinishLaunchingWithOptions[^{]*\{)/$1\n    BaselineTiming.observe()/' "$DELEGATE"
+          # The method may be a single expression (`true`), which a second statement would break.
+          perl -0pi -e 's/(didFinishLaunchingWithOptions[^{]*\{)\s*true\s*\}/$1\n    BaselineTiming.observe()\n    return true\n  }/ or s/(didFinishLaunchingWithOptions[^{]*\{)/$1\n    BaselineTiming.observe()/' "$DELEGATE"
           cat >> "$DELEGATE" <<'SWIFT'
 
           enum BaselineTiming {
