@@ -313,7 +313,7 @@ end`;
     // The package's Swift is part of the FarmReactNativeHost framework, whose generated header
     // needs React's declarations first, as Objective-C++ does not @import them.
     expect(String(headers[0]!.contents)).toMatch(
-      /#import <React\/RCTBridgeModule\.h>\n#import "FarmReactNativeHost-Swift\.h"\n$/,
+      /#import <React\/RCTBridgeModule\.h>\n#import <FarmReactNativeHost\/FarmReactNativeHost-Swift\.h>\n$/,
     );
   });
 

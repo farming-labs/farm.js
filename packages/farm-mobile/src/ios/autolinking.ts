@@ -14,7 +14,8 @@ import { findPackage, readPackageConfig } from "../android/autolinking.js";
  * Codegen writes their spec glue and the app's dependency provider next to them.
  *
  * Swift sources compile into the same module, the FarmReactNativeHost framework, so a package's
- * Objective-C reaches them through the framework's generated `FarmReactNativeHost-Swift.h`.
+ * Objective-C reaches them through the framework's generated
+ * `<FarmReactNativeHost/FarmReactNativeHost-Swift.h>`.
  * CocoaPods would generate `<Module>-Swift.h` for the pod instead; `FarmModules/FarmSwiftHeaders/`
  * holds that name for each package with Swift, forwarding to the framework's header.
  */
@@ -136,7 +137,7 @@ export function createSwiftHeaderFiles(modules: readonly string[]): MobileGenera
       "// with Clang modules, which Objective-C++ compiles without: import React's first.\n" +
       "#import <UIKit/UIKit.h>\n" +
       "#import <React/RCTBridgeModule.h>\n" +
-      '#import "FarmReactNativeHost-Swift.h"\n';
+      "#import <FarmReactNativeHost/FarmReactNativeHost-Swift.h>\n";
     return [
       { path: `${IOS_MODULES_DIR}/${IOS_SWIFT_HEADERS_DIR}/${module}-Swift.h`, contents },
       { path: `${IOS_MODULES_DIR}/${IOS_SWIFT_HEADERS_DIR}/${module}/${module}-Swift.h`, contents },

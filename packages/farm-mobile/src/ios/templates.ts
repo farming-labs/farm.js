@@ -398,9 +398,9 @@ function createHostTarget(
   const settings: Record<string, PbxValue> = {
     CODE_SIGN_STYLE: "Automatic",
     CURRENT_PROJECT_VERSION: 1,
-    // No Clang module: the framework has no public headers, and its Objective-C reaches its Swift
-    // through the quoted FarmReactNativeHost-Swift.h.
-    DEFINES_MODULE: "NO",
+    // A framework's Objective-C reaches its own Swift as <FarmReactNativeHost/...-Swift.h>, which
+    // Xcode generates and installs only for a framework that defines a module.
+    DEFINES_MODULE: "YES",
     DYLIB_INSTALL_NAME_BASE: "@rpath",
     GENERATE_INFOPLIST_FILE: "YES",
     INSTALL_PATH: "$(LOCAL_LIBRARY_DIR)/Frameworks",
