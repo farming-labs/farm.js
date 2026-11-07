@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/native",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "description": "React Native screens for Farm.js mobile apps: page.native.tsx hooks and the screen bundle build.",
   "keywords": [
     "android",
