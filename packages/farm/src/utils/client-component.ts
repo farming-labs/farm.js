@@ -6,6 +6,11 @@ import {
   farmPackageClientImportExports,
   findFarmPackageClientImports,
 } from "../islands-package-references";
+import {
+  farmReactServerBuildReachesClientModules,
+  findFarmPackageManifest,
+  findFarmReactServerClientNames,
+} from "../islands-react-server-exports";
 import { isFarmIslandStrategy, type FarmIslandStrategy } from "../island";
 import { isReactRenderer, type FarmRenderer } from "../renderer";
 import type { FarmIsolatedClientHydrationMode } from "../types";
@@ -1613,38 +1618,53 @@ function collectIsolatedClientBoundaries(
       if (imported.local) {
         importedBoundaryCount = visit(importedPath);
       } else {
-        const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
-        if (!packageMetadata.shouldHydrate) continue;
-        const references =
+        // A package with a `react-server` build: only the names that build takes from a
+        // "use client" module are client components (islands-react-server-exports.ts).
+        const reactServerClientNames =
           options.packageReferences && projectRoot
-            ? findFarmPackageClientImports(
-                content ?? "",
-                moduleSourcePath,
-                (candidate) => candidate === specifier,
-              )
-            : [];
-        if (references.length > 0) {
-          // Each export renders through its client reference, a local client module, so the
-          // checks below apply as they do to a local import.
+            ? findFarmReactServerClientNames(content ?? "", moduleSourcePath, specifier)
+            : null;
+        if (reactServerClientNames) {
           importedBoundaryCount = 0;
-          for (const reference of references) {
-            for (const exportName of farmPackageClientImportExports(reference)) {
-              importedBoundaryCount += visit(
-                ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
-              );
-            }
+          for (const exportName of reactServerClientNames) {
+            importedBoundaryCount += visit(
+              ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
+            );
           }
-        } else if (
-          options.staticPackageBoundaries ||
-          (options.staticPackageLeaves &&
-            rendersOnlyLeafElements(content, importedBindings.get(specifier) ?? []))
-        ) {
-          staticPackages.add(specifier);
-          continue;
         } else {
-          fallbackReason = `package client boundary ${specifier} cannot yet be isolated`;
-          fallbackHint = `Render it from a local "use client" module (a providers.tsx that renders the ${specifier} component)`;
-          return 0;
+          const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
+          if (!packageMetadata.shouldHydrate) continue;
+          const references =
+            options.packageReferences && projectRoot
+              ? findFarmPackageClientImports(
+                  content ?? "",
+                  moduleSourcePath,
+                  (candidate) => candidate === specifier,
+                )
+              : [];
+          if (references.length > 0) {
+            // Each export renders through its client reference, a local client module, so the
+            // checks below apply as they do to a local import.
+            importedBoundaryCount = 0;
+            for (const reference of references) {
+              for (const exportName of farmPackageClientImportExports(reference)) {
+                importedBoundaryCount += visit(
+                  ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
+                );
+              }
+            }
+          } else if (
+            options.staticPackageBoundaries ||
+            (options.staticPackageLeaves &&
+              rendersOnlyLeafElements(content, importedBindings.get(specifier) ?? []))
+          ) {
+            staticPackages.add(specifier);
+            continue;
+          } else {
+            fallbackReason = `package client boundary ${specifier} cannot yet be isolated`;
+            fallbackHint = `Render it from a local "use client" module (a providers.tsx that renders the ${specifier} component)`;
+            return 0;
+          }
         }
       }
       if (fallbackReason || importedBoundaryCount === 0) continue;
@@ -2408,4 +2428,91 @@ export function collectFarmClientPackageImports(directory: string, root: string)
   };
   walk(directory);
   return [...found].sort();
+}
+
+const clientReachableModules = new Map<string, Set<string>>();
+
+/** Forgets the modules client code reaches (a file changed in development). */
+export function invalidateFarmClientReachableModules(): void {
+  clientReachableModules.clear();
+}
+
+/**
+ * The application modules client code reaches: every `"use client"` module under `directory` and
+ * the local modules it imports, transitively. React Server Components keep those modules in the
+ * client graph, so their package imports resolve as client code there.
+ */
+export function getFarmClientReachableModules(directory: string, root: string): Set<string> {
+  const key = `${path.resolve(root)}\0${path.resolve(directory)}`;
+  const cached = clientReachableModules.get(key);
+  if (cached) return cached;
+  const reachable = new Set<string>();
+  const queue: string[] = [];
+  const walk = (current: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const file = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!entry.name.startsWith(".") && !CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
+      } else if (
+        CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) &&
+        !entry.name.endsWith(".d.ts") &&
+        hasUseClientDirective(readIfExists(file))
+      ) {
+        queue.push(file);
+      }
+    }
+  };
+  walk(directory);
+  while (queue.length > 0) {
+    const file = path.resolve(queue.pop()!);
+    if (reachable.has(file)) continue;
+    reachable.add(file);
+    for (const specifier of getImportSpecifiers(readIfExists(file))) {
+      const imported = resolveImportedModule(file, specifier, root);
+      if (imported.local && imported.path && !reachable.has(path.resolve(imported.path))) {
+        queue.push(imported.path);
+      }
+    }
+  }
+  clientReachableModules.set(key, reachable);
+  return reachable;
+}
+
+/**
+ * What the React Server Components dev server should pre-bundle for the browser:
+ * `collectFarmClientPackageImports`, except packages whose `react-server` build re-exports a
+ * `"use client"` module. The RSC plugin loads that module straight from the package, so those
+ * packages stay out of the pre-bundle (their own dependencies stay in, through `pkg > dep`) and
+ * the browser gets one copy of each.
+ */
+export function resolveFarmClientOptimizeDeps(
+  directory: string,
+  root: string,
+): { include: string[]; exclude: string[] } {
+  const importer = path.join(path.resolve(root), "package.json");
+  const include = new Set<string>();
+  const exclude = new Set<string>();
+  for (const specifier of collectFarmClientPackageImports(directory, root)) {
+    const manifest = findFarmPackageManifest(importer, specifier);
+    if (manifest && farmReactServerBuildReachesClientModules(importer, manifest.name)) {
+      exclude.add(manifest.name);
+      for (const dependency of manifest.dependencies) {
+        include.add(`${manifest.name} > ${dependency}`);
+      }
+    } else {
+      include.add(specifier);
+    }
+  }
+  for (const name of exclude) {
+    for (const entry of include) {
+      if (entry === name || entry.startsWith(`${name}/`)) include.delete(entry);
+    }
+  }
+  return { include: [...include].sort(), exclude: [...exclude].sort() };
 }

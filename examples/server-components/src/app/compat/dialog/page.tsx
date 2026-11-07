@@ -1,6 +1,9 @@
 import * as Dialog from "@radix-ui/react-dialog";
 
-// Radix parts composed in a server component, as in RSC apps.
+// Radix parts composed in a server component, as in RSC apps, including one destructured from the
+// namespace.
+const { Close } = Dialog;
+
 export default function DialogPage() {
   return (
     <section>
@@ -12,7 +15,7 @@ export default function DialogPage() {
           <Dialog.Content>
             <Dialog.Title>Radix title</Dialog.Title>
             <Dialog.Description>Rendered by a server component.</Dialog.Description>
-            <Dialog.Close>Close radix</Dialog.Close>
+            <Close>Close radix</Close>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

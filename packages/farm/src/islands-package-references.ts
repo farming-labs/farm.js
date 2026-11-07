@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseAst } from "rolldown/parseAst";
+import { listFarmPackageExports } from "./islands-react-server-exports";
 
 type AstNode = Record<string, any>;
 
@@ -22,8 +23,12 @@ export interface FarmPackageClientImport {
   defaultLocal?: string;
   /** `import { imported as local } from` */
   named: Array<{ imported: string; local: string }>;
-  /** `import * as local from`, and the members the module reads from it. */
-  namespace?: { local: string; members: string[] };
+  /**
+   * `import * as local from`, and the members the module reads from it. `values` are the exports
+   * of a namespace passed around as a value that are not components (`createDialogScope`): it gets
+   * them from the package itself, as only components render as islands.
+   */
+  namespace?: { local: string; members: string[]; values?: string[] };
 }
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
@@ -115,9 +120,19 @@ export function findFarmPackageClientImports(
     for (const binding of specifiers) {
       if (binding.type === "ImportDefaultSpecifier") entry.defaultLocal = binding.local.name;
       else if (binding.type === "ImportNamespaceSpecifier") {
-        const members = namespaceMembers(program, binding.local.name, node);
+        const read = namespaceMembers(program, binding.local.name, node);
+        // A namespace the module passes around as a value stands for every export.
+        const members = read ?? listFarmPackageExports(file, specifier);
         if (!members || members.some((member) => !IDENTIFIER.test(member))) supported = false;
-        else entry.namespace = { local: binding.local.name, members };
+        else if (read) entry.namespace = { local: binding.local.name, members };
+        else {
+          const component = (name: string) => name === "default" || /^[A-Z]/.test(name);
+          entry.namespace = {
+            local: binding.local.name,
+            members: members.filter(component),
+            values: members.filter((name) => !component(name)),
+          };
+        }
       } else {
         const imported =
           binding.imported?.type === "Identifier" ? binding.imported.name : binding.imported?.value;
@@ -207,6 +222,11 @@ export function rewriteFarmPackageClientImports(options: {
         const local = `__farm_package_reference_${next++}__`;
         lines.push(`import { ${member} as ${local} } from ${reference(entry.specifier, member)};`);
         fields.push(`${member}: ${local}`);
+      }
+      if (entry.namespace.values?.length) {
+        const local = `__farm_package_values_${next++}__`;
+        lines.push(`import * as ${local} from ${JSON.stringify(entry.specifier)};`);
+        for (const value of entry.namespace.values) fields.push(`${value}: ${local}.${value}`);
       }
       lines.push(`const ${entry.namespace.local} = Object.freeze({ ${fields.join(", ")} });`);
     }

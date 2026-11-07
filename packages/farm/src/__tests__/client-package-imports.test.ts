@@ -39,3 +39,25 @@ describe("packages the browser loads once a page renders", () => {
     ]);
   });
 });
+
+describe("modules client code reaches", () => {
+  it("are the use client modules and what they import, not modules only server code imports", async () => {
+    const { getFarmClientReachableModules } = await import("../utils/client-component");
+    const root = project({
+      "src/components/button.tsx":
+        '"use client";\nimport { useLabel } from "../lib/shared";\nexport function Button() { return useLabel(); }\n',
+      "src/lib/shared.ts":
+        'import { helper } from "./deep";\nexport const useLabel = () => helper();\n',
+      "src/lib/deep.ts": "export const helper = () => 1;\n",
+      "src/lib/server-data.ts": "export const read = () => 2;\n",
+      "src/app/page.tsx":
+        'import { read } from "../lib/server-data";\nimport { Button } from "../components/button";\nexport default () => <Button>{read()}</Button>;\n',
+    });
+    const reachable = getFarmClientReachableModules(path.join(root, "src"), root);
+    expect([...reachable].map((file) => path.relative(root, file)).sort()).toEqual([
+      path.join("src", "components", "button.tsx"),
+      path.join("src", "lib", "deep.ts"),
+      path.join("src", "lib", "shared.ts"),
+    ]);
+  });
+});

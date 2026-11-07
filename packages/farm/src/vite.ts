@@ -132,7 +132,9 @@ import {
   getClientModuleMetadata,
   resolveModuleSourcePath,
   getIslandStrategyExport,
+  getFarmClientReachableModules,
   hasUseClientDirective,
+  invalidateFarmClientReachableModules,
   isFarmPackageClientBoundary,
   isIsolatableClientBoundarySource,
   resolveFarmIsolatedClientHydrationMode,
@@ -195,7 +197,14 @@ import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
 import { rewriteFormStatusImports, type AstNode } from "@farm.js/islx/compiler";
-import { rewriteFarmPackageClientImports } from "./islands-package-references";
+import {
+  ensureFarmPackageClientReference,
+  rewriteFarmPackageClientImports,
+} from "./islands-package-references";
+import {
+  farmRelativeImportFiles,
+  rewriteFarmReactServerImports,
+} from "./islands-react-server-exports";
 import { rewriteFarmReactCacheImport } from "./islands-react-cache-transform";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { renderFarmLocaleAlternateLinks } from "./i18n/alternates";
@@ -378,6 +387,9 @@ const FARM_SERVER_ONLY_ENTRIES = new Set(["@farm.js/core/og"]);
  * mode, SSR), so a server graph gets an empty module, and a browser graph that imports it fails.
  */
 const SERVER_ONLY_PACKAGE = "server-only";
+
+/** Files the server graph reached through a package's `react-server` build (islands mode). */
+const farmReactServerFiles = new Set<string>();
 const FARM_SERVER_ONLY_PACKAGE_ID = "\0farm:server-only";
 
 const FARM_PLATFORM_ENTRY = "@farm.js/core/platform";
@@ -542,7 +554,11 @@ function createRequestFromNodeRequest(
   });
 }
 
-export { collectFarmClientPackageImports } from "./utils/client-component";
+export {
+  collectFarmClientPackageImports,
+  resolveFarmClientOptimizeDeps,
+} from "./utils/client-component";
+export { collectDevStylesheetUrls } from "./server/dev-styles";
 export { createFarmNodeRequestAbortSignal } from "./server-http";
 // The font call compiler and static image imports, for pipelines that build without farmPlugin
 // (React Server Components).
@@ -4037,13 +4053,43 @@ export const manifest = getManifest();
       if (
         resolveFarmServerComponentsMode(actionConfig.experimental?.serverComponents) ===
           "islands" &&
-        !id.includes("/node_modules/") &&
+        (!id.includes("/node_modules/") ||
+          (transformOptions?.ssr === true && farmReactServerFiles.has(id.split("?", 1)[0]!))) &&
         !id.startsWith("\0") &&
         /\.[cm]?[jt]sx?(?:$|\?)/.test(id) &&
         !hasUseClientDirective(code)
       ) {
         const file = id.split("?", 1)[0]!;
         const projectRoot = actionConfig.root || server?.config.root || process.cwd();
+        // Server code only: a package's `react-server` build, as React Server Components resolve
+        // it, and the files that build reaches.
+        if (transformOptions?.ssr === true) {
+          if (farmReactServerFiles.has(file)) {
+            for (const child of farmRelativeImportFiles(code, file))
+              farmReactServerFiles.add(child);
+          }
+          // A module client code also reaches stays client code, as it is in React Server
+          // Components' client graph: its packages keep their default build.
+          const serverModule =
+            farmReactServerFiles.has(file) ||
+            !getFarmClientReachableModules(
+              path.resolve(projectRoot, actionConfig.srcDir || "src"),
+              projectRoot,
+            ).has(path.resolve(file));
+          const reactServer = !serverModule
+            ? null
+            : rewriteFarmReactServerImports({
+                code,
+                file,
+                reference: (specifier, exportName) =>
+                  ensureFarmPackageClientReference(projectRoot, specifier, exportName),
+                onServerFile: (serverFile) => farmReactServerFiles.add(serverFile),
+              });
+          if (reactServer !== null) {
+            code = reactServer;
+            rewrotePackageImports = true;
+          }
+        }
         const referenced = rewriteFarmPackageClientImports({
           code,
           file,
@@ -4446,6 +4492,10 @@ if (import.meta.hot) {
       }
     },
 
+    watchChange() {
+      // A module that gains or loses "use client", or an import, changes what client code reaches.
+      invalidateFarmClientReachableModules();
+    },
     async handleHotUpdate(ctx: HmrContext) {
       const { file, server, modules } = ctx;
       if (initialPluginManager) {

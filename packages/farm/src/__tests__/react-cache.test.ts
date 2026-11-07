@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { rewriteFarmReactCacheImport } from "../islands-react-cache-transform";
-import { cache } from "../react-cache";
+import { cache, cacheSignal } from "../react-cache";
+import { _runWithAfterRequest } from "../after";
 import { _runWithCurrentRequest } from "../server/request";
 
 const request = (path: string) => new Request(`http://localhost${path}`);
@@ -54,5 +55,46 @@ describe("cache in islands mode", () => {
     expect(
       rewriteFarmReactCacheImport('import type { cache } from "react";\n', "/app/a.ts"),
     ).toBeNull();
+    // React.cache through a default or namespace import.
+    for (const clause of ["React", "* as React"]) {
+      const member = rewriteFarmReactCacheImport(
+        `import ${clause} from "react";\nexport const load = React.cache(() => 1);\nexport const memo = React.memo;\n`,
+        "/app/src/data.ts",
+      )!;
+      expect(member).toContain("export const load = __farm_react_cache__(() => 1);");
+      expect(member).toContain("export const memo = React.memo;");
+      expect(member).toContain(
+        'import { cache as __farm_react_cache__ } from "@farm.js/core/internal/react-cache";',
+      );
+    }
+  });
+
+  it("gives each request a cacheSignal that aborts once its response has finished", async () => {
+    expect(cacheSignal()).toBeNull();
+    let signal: AbortSignal | null = null;
+    const req = request("/signal");
+    const response = await _runWithAfterRequest(req, () =>
+      _runWithCurrentRequest(req, async () => {
+        signal = cacheSignal();
+        expect(cacheSignal()).toBe(signal);
+        return new Response("done");
+      }),
+    );
+    // Open while the response streams; aborted once it has been read to the end.
+    expect(signal!.aborted).toBe(false);
+    expect(await response.text()).toBe("done");
+    await vi.waitFor(() => expect(signal!.aborted).toBe(true));
+  });
+
+  it("points cacheSignal at Farm's, and leaves other React members alone", () => {
+    const output = rewriteFarmReactCacheImport(
+      'import React, { cacheSignal } from "react";\nexport const s = () => [cacheSignal(), React.cacheSignal(), React.toString()];\n',
+      "/app/src/data.ts",
+    )!;
+    expect(output).toContain(
+      'import { cacheSignal as cacheSignal } from "@farm.js/core/internal/react-cache";',
+    );
+    expect(output).toContain("__farm_react_cache_signal__()");
+    expect(output).toContain("React.toString()");
   });
 });

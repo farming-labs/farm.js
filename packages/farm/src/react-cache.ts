@@ -6,6 +6,7 @@
  * function and arguments for the current request, as RSC keeps it. Outside a request it calls
  * through, as React's does.
  */
+import { after } from "./after";
 import { getCurrentRequestOrNull } from "./server/request";
 
 interface CacheNode {
@@ -58,4 +59,30 @@ export function cache<Fn extends (...args: any[]) => any>(fn: Fn): Fn {
     }
   } as Fn;
   return memoized;
+}
+
+const signals = new WeakMap<Request, AbortController>();
+
+/**
+ * React's `cacheSignal` for server code in islands mode: an `AbortSignal` for the current request
+ * that aborts once its response has finished, when React Server Components end the render's cache
+ * lifetime. Cached work can pass it to `fetch` to stop when nobody needs the result. Outside a
+ * request it returns null, as React's does.
+ */
+export function cacheSignal(): AbortSignal | null {
+  const request = getCurrentRequestOrNull();
+  if (!request) return null;
+  let controller = signals.get(request);
+  if (!controller) {
+    controller = new AbortController();
+    signals.set(request, controller);
+    const aborting = controller;
+    try {
+      after(() => aborting.abort());
+    } catch {
+      // A request without Farm's post-response lifecycle (a test, a bare handler): the signal
+      // stays open, as no render end is known.
+    }
+  }
+  return controller.signal;
 }

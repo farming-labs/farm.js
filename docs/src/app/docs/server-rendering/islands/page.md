@@ -72,29 +72,33 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
 Islands mode runs libraries written for RSC the way their docs show it. Farm shims the RSC-only
 parts:
 
-| Pattern                                                                                                                              | Works | How islands mode does it                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `import "server-only"` in server code                                                                                                | yes   | Server builds get an empty module. A browser build that imports it fails, naming the importer.                                                                                          |
-| `import "client-only"` in a client component                                                                                         | yes   | React's default build has no check to skip.                                                                                                                                             |
-| A package client component in a server component (`next-themes`, `sonner`'s `Toaster`, Radix parts, jotai's `Provider`, `SWRConfig`) | yes   | Farm writes a client reference module for each export (`.farm/client-references/`) and server code imports that, so the export renders as an island, as RSC renders a client reference. |
-| A package provider around server content                                                                                             | yes   | Client components inside it are its descendants and read its context.                                                                                                                   |
-| A package provider in a layout                                                                                                       | yes   | The layout renders as a server tree; the provider keeps its state across navigations.                                                                                                   |
-| `useFormStatus` in a client component inside a server `<form>`                                                                       | yes   | Farm points the import at islx's `useFormStatus`, which reports the server form's submit.                                                                                               |
-| `useId` in client components                                                                                                         | yes   | Ids match the server HTML and are unique across islands.                                                                                                                                |
-| `cache` from `react` in server code                                                                                                  | yes   | Farm points a server module's `cache` import at a request-scoped `cache`, as RSC memoizes it.                                                                                           |
+| Pattern                                                                                                                                 | Works | How islands mode does it                                                                                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A package that ships a `react-server` build (react-tweet's server `Tweet`, react-i18next, react-hook-form, swr, `@apollo/client/react`) | yes   | A server module's import resolves to that build, and so do the packages it imports. Names it takes from a `"use client"` module stay client components. React itself keeps one build for server and client components. |
+| `import "server-only"` in server code                                                                                                   | yes   | Server builds get an empty module. A browser build that imports it fails, naming the importer.                                                                                                                         |
+| `import "client-only"`                                                                                                                  | yes   | A client component gets its empty build; a server component gets its `react-server` build, which throws, as RSC rejects it.                                                                                            |
+| A package client component in a server component (`next-themes`, `sonner`'s `Toaster`, Radix parts, jotai's `Provider`, `SWRConfig`)    | yes   | Farm writes a client reference module for each export (`.farm/client-references/`) and server code imports that, so the export renders as an island, as RSC renders a client reference.                                |
+| A package provider around server content                                                                                                | yes   | Client components inside it are its descendants and read its context.                                                                                                                                                  |
+| A package provider in a layout                                                                                                          | yes   | The layout renders as a server tree; the provider keeps its state across navigations.                                                                                                                                  |
+| `useFormStatus` in a client component inside a server `<form>`                                                                          | yes   | Farm points the import at islx's `useFormStatus`, which reports the server form's submit.                                                                                                                              |
+| `useId` in client components                                                                                                            | yes   | Ids match the server HTML and are unique across islands.                                                                                                                                                               |
+| `cache` from `react` in server code, or `React.cache`                                                                                   | yes   | Farm points them at a request-scoped `cache`, as RSC memoizes it, in app server code and in the `react-server` builds it reaches.                                                                                      |
+| `cacheSignal()` from `react` in server code                                                                                             | yes   | It returns the request's `AbortSignal`, which aborts when the response ends, as RSC's does after a render.                                                                                                             |
+| A namespace import passed around as a value (`const { Close } = Dialog`)                                                                | yes   | Its components become client references; its other exports (`createDialogScope`) come from the package.                                                                                                                |
 
 `tests/e2e-server-components/compat.spec.ts` runs these against both engines.
 
 ### Known differences
 
-- **The `react-server` export condition.** Server code in islands mode resolves packages with
-  their default build. A package that ships a different build under `react-server` gets its default
-  one.
-- **`client-only` in a server component** is not rejected, as RSC rejects it.
-- **`React.cache` through a default or namespace import** (`React.cache(fn)`) keeps React's own,
-  which calls `fn` every time outside RSC. Import `cache` by name. Package code keeps React's.
-- **`cacheSignal()`** returns `null`, as React's default build does.
-- **A namespace import used as a value** (`const parts = Dialog`) cannot become client
-  references. Use its members (`Dialog.Root`) or named imports.
+- **A module both server and client components import** is one module in islands mode, where RSC
+  has a copy in each graph. Farm treats a module that any `"use client"` module reaches as client
+  code, so its imports keep the packages' default builds, and a server component that uses it gets
+  those too. Modules only server code imports get the `react-server` builds.
+- **Package code that calls React's `cache`** outside a `react-server` build keeps React's own,
+  which calls the function every time outside RSC.
+- **`cacheSignal()` outside a request** (at module scope, in a build step) returns `null`. In RSC
+  its signal aborts when the render finishes; in islands mode, when the response ends.
+- **A namespace passed around as a value** carries the package's non-component exports
+  (`createDialogScope`) as the real functions. RSC gives client references that throw when called.
 - **Package client components always hydrate,** including ones that only render markup (icons),
   as RSC sends them as client components too. Each one is an island.

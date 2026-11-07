@@ -4,7 +4,6 @@ import { expect, test, type Page } from "@playwright/test";
 // keyboard input before hydration, element props, nested client trees, long lists,
 // failing actions, CSS modules, optimistic updates and form status.
 const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" : "rsc";
-const dev = process.env.FARM_SERVER_COMPONENTS_SERVER === "dev";
 
 function collectErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -182,10 +181,6 @@ test("an action that throws rejects the call in the client component", async ({ 
 test("a CSS module in a client component styles its server HTML before hydration", async ({
   page,
 }) => {
-  test.skip(
-    mode === "rsc" && dev,
-    "the rsc dev server injects a client component's CSS module from JavaScript, so its HTML is unstyled until scripts run",
-  );
   await page.route(/\.m?js(\?|$)/, (route) => route.abort());
   await page.goto("/battle/css");
   const toggle = page.getByTestId("styled-toggle");

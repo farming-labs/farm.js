@@ -41,12 +41,13 @@ import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import type { FarmCacheUserConfig } from "@farm.js/core/cache";
 import type { FarmI18nUserConfig } from "@farm.js/core/i18n";
 import {
-  collectFarmClientPackageImports,
+  collectDevStylesheetUrls,
   farmFontImportsPlugin,
   farmImageImportsPlugin,
   generateClientCachePersistenceCode,
   getPublicFarmImageConfig,
   resolveFarmClientCacheAdapterEntry,
+  resolveFarmClientOptimizeDeps,
   resolveFarmImageConfig,
   resolveFarmImageProviderForRuntime,
   resolveFarmImageServerRuntime,
@@ -1065,6 +1066,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           env: getResolvedEnv(),
         });
         const srcDir = c.srcDir ?? "src";
+        const clientOptimizeDeps = resolveFarmClientOptimizeDeps(path.resolve(root, srcDir), root);
         const outDir = c.outDir ?? "dist";
         const deploymentId = normalizeFarmDeploymentId(
           options.deploymentId ||
@@ -1400,8 +1402,11 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                   "rsc-html-stream/client",
                   // Client components and the packages they use load only once a page renders
                   // (client references), so they would be found late too.
-                  ...collectFarmClientPackageImports(path.resolve(root, srcDir), root),
+                  ...clientOptimizeDeps.include,
                 ],
+                // Packages whose react-server build re-exports a "use client" module: the plugin
+                // loads that module from the package, so pre-bundling them would add a copy.
+                exclude: clientOptimizeDeps.exclude,
               },
             },
           },
@@ -1718,6 +1723,30 @@ if (document.readyState === 'loading') {
         }
 
         logInfo("Dev server middleware ready");
+        // The stylesheets the SSR environment's modules import, for entries/ssr.ts to link in the
+        // head: a client component's CSS module otherwise arrives with its JavaScript, so its
+        // server HTML is unstyled until scripts run. Removed when this server closes.
+        const devStyles = () =>
+          collectDevStylesheetUrls(
+            server.environments.ssr?.moduleGraph.idToModuleMap.values() ?? [],
+            undefined,
+            {
+              cssModules: true,
+            },
+          )
+            .map(
+              (href) =>
+                `<link rel="stylesheet" href="${href.replace(/"/g, "&quot;")}" data-farm-dev-style>`,
+            )
+            .join("");
+        (
+          globalThis as { __FARM_RSC_DEV_CLIENT_STYLES__?: () => string }
+        ).__FARM_RSC_DEV_CLIENT_STYLES__ = devStyles;
+        server.httpServer?.once("close", () => {
+          const scope = globalThis as { __FARM_RSC_DEV_CLIENT_STYLES__?: () => string };
+          if (scope.__FARM_RSC_DEV_CLIENT_STYLES__ === devStyles)
+            delete scope.__FARM_RSC_DEV_CLIENT_STYLES__;
+        });
         const serverStartTime = Date.now();
         let bannerPrinted = false;
 

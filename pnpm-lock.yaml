@@ -1556,6 +1556,9 @@ importers:
 
   examples/server-components:
     dependencies:
+      '@farm-fixtures/rsc-kit':
+        specifier: link:./fixtures/rsc-kit
+        version: link:fixtures/rsc-kit
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
