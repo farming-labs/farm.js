@@ -1,9 +1,14 @@
 import { Link } from "@farm.js/core/client";
 import { ThemeProvider } from "next-themes";
-import type { ReactNode } from "react";
+import type { ComponentProps } from "react";
 
 // A package provider in a layout, around the pages: it keeps its state across navigations.
-export default function ThemedLayout({ children }: { children: ReactNode }) {
+// `children` is typed from the provider, which next-themes types against its own @types/react.
+export default function ThemedLayout({
+  children,
+}: {
+  children: ComponentProps<typeof ThemeProvider>["children"];
+}) {
   return (
     <ThemeProvider attribute="data-theme" defaultTheme="light" enableSystem={false}>
       <nav>
