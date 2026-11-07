@@ -128,7 +128,7 @@ jobs:
           xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/map.png"
           xcrun simctl spawn "$SIMULATOR_UDID" log show --last 10m --style compact \
             --predicate 'process == "App"' > "$EVIDENCE/kit-log.txt"
-          grep -E "react-native|native app/|launch open|fallback|failed" "$EVIDENCE/kit-log.txt" | tail -60 || true
+          grep -E "react-native|native app/|launch open|fallback|failed|FarmSwiftSample" "$EVIDENCE/kit-log.txt" | tail -60 || true
           {
             echo "app_kb=$(du -sk "$APP" | cut -f1)"
             for framework in "$APP"/Frameworks/*.framework; do

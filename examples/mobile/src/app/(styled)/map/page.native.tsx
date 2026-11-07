@@ -2,6 +2,7 @@
 // this file: it is not a route, not in the generated route types, and not in any web bundle.
 import { useNavigate, useServerQuery } from "@farm.js/native";
 import { useNetInfo } from "@react-native-community/netinfo";
+import { swiftTimeZone } from "farm-swift-sample";
 import { useEffect, useState } from "react";
 import { FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { apiClient } from "../../../lib/api";
@@ -26,6 +27,11 @@ export default function MapScreen() {
   // An image bundled with the screen: Metro picks blaze@2x.png or @3x.png, and farm build --mobile
   // ships them in the app (Android resources, iOS assets/ next to the bytecode).
   const [blaze, setBlaze] = useState("loading");
+  // A module written in Swift (modules/farm-swift-sample), linked on iOS only.
+  const [swift, setSwift] = useState("...");
+  useEffect(() => {
+    swiftTimeZone().then(setSwift, (error: Error) => setSwift(`unavailable (${error.message})`));
+  }, []);
   useEffect(() => {
     Device.model().then(setModel, (error: Error) => setModel(`unavailable (${error.message})`));
   }, []);
@@ -75,6 +81,9 @@ export default function MapScreen() {
           Bundled image: {blaze}
         </Text>
       </View>
+      <Text style={styles.network} testID="swift-module">
+        Swift module: {swift}
+      </Text>
       {vibrateError ? <Text style={styles.error}>{vibrateError}</Text> : null}
       {error ? <Text style={styles.error}>{error.message}</Text> : null}
       <FlatList

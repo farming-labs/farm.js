@@ -31,8 +31,7 @@ React Native app does: add it to the app's `dependencies` and import it. Farm li
 into the Android app (see [React Native screens](/docs/mobile/native-screens#react-native-screens)); the permissions a module
 declares in its own manifest are merged into the app's. On iOS, Farm compiles each module's podspec
 `source_files` into the app and runs React Native's Codegen for it, without CocoaPods (see
-[React Native screens on iOS](/docs/mobile#react-native-screens-on-ios)); modules with Swift sources
-are not linked yet. Web screens cannot call these modules. Verified on an Android 15 emulator with netinfo 12.0.1, in
+[React Native screens on iOS](/docs/mobile#react-native-screens-on-ios)), Swift sources included. Web screens cannot call these modules. Verified on an Android 15 emulator with netinfo 12.0.1, in
 `farm dev --mobile` and in a bytecode APK: `/map` shows the connection type and `isConnected`, and
 both change when Wi-Fi, mobile data, or airplane mode are switched off. Not verified yet: real
 devices and Expo modules.
