@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/autumn",
-  "version": "0.1.61",
+  "version": "0.1.62",
   "description": "Autumn billing integration for Farm.js",
   "license": "MIT",
   "repository": {
