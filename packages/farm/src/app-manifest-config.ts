@@ -40,6 +40,13 @@ export interface FarmAppManifestConfig {
   agent?: boolean;
   /** Plugin names. `false` serves `plugins: null`. */
   plugins?: boolean;
+  /**
+   * Where the app is served: `FARM_SITE_URL`, else the host's production address (Vercel,
+   * Render or Railway), read per request. `false` serves `site: null`.
+   *
+   * @default true
+   */
+  site?: boolean;
 }
 
 export interface ResolvedFarmAppManifestConfig {
@@ -50,6 +57,7 @@ export interface ResolvedFarmAppManifestConfig {
   integrations: boolean;
   agent: boolean;
   plugins: boolean;
+  site: boolean;
 }
 
 const NAME = "agent.manifest";
@@ -106,7 +114,11 @@ export function resolveFarmAppManifestConfig(
     throw new TypeError(`${NAME} must be true, false, or an options object.`);
   }
   const config = isObject(input) ? input : {};
-  checkKeys(config, ["app", "packages", "mcp", "webmcp", "integrations", "agent", "plugins"], NAME);
+  checkKeys(
+    config,
+    ["app", "packages", "mcp", "webmcp", "integrations", "agent", "plugins", "site"],
+    NAME,
+  );
   const packages = config.packages;
   if (packages !== undefined && typeof packages !== "boolean" && packages !== "names") {
     throw new TypeError(`${NAME}.packages must be true, false, or "names".`);
@@ -128,5 +140,6 @@ export function resolveFarmAppManifestConfig(
     integrations: readBoolean(config.integrations, `${NAME}.integrations`),
     agent: readBoolean(config.agent, `${NAME}.agent`),
     plugins: readBoolean(config.plugins, `${NAME}.plugins`),
+    site: readBoolean(config.site, `${NAME}.site`),
   };
 }

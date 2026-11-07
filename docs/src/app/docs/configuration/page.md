@@ -712,8 +712,10 @@ such as the [docs engine](/docs/docs-engine)'s endpoint, join the catalog throug
 Every app serves `/.well-known/farmjs.json` (and, for Farm 0.1.34's readers, `/.well-known/farmjs`)
 to any client: Farm's version and the installed `@farm.js/*` packages, the renderer and base path,
 the MCP tools Farm serves with their JSON Schemas, WebMCP browser tools, each integration's
-category and provider (never its configuration), and plugin names.
-[Farm Infra analytics](/docs/infra-analytics) lists every field.
+category and provider (never its configuration), plugin names, and the site's public origin from
+`FARM_SITE_URL` or the host's production address.
+[Farm Infra analytics](/docs/infra-analytics) lists every field, and
+[Site URL](/docs/infra-analytics#site-url) shows where the origin comes from.
 
 There is one public document, and everyone gets the same one, Farm Infra included. It lists only
 what an anonymous client could already find. An MCP server that requires `authorize`, or a public
@@ -733,6 +735,7 @@ route.
 | `integrations` | `boolean`                                   | `false` serves `integrations: null`.                                                                                                                |
 | `agent`        | `boolean`                                   | `false` serves `agent: null`.                                                                                                                       |
 | `plugins`      | `boolean`                                   | `false` serves `plugins: null`.                                                                                                                     |
+| `site`         | `boolean`                                   | `false` serves `site: null`.                                                                                                                        |
 
 A hidden section stays in the document as `null`, so readers can tell "hidden by the app" from an
 empty list, which means there is nothing to show:
@@ -772,7 +775,8 @@ export default defineConfig({
   "webmcp": { "enabled": true, "tools": [{ "name": "list_todos", "inputSchemaSource": "none" }] },
   "integrations": [{ "key": "billing", "category": "payment", "type": "stripe" }],
   "agent": { "apiCatalog": null, "llmsTxt": true, "openapi": null },
-  "plugins": null
+  "plugins": null,
+  "site": { "url": "https://acme.com" }
 }
 ```
 

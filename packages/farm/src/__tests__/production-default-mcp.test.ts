@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig, type FarmConfig } from "../config";
 
@@ -111,8 +111,13 @@ async function withRoot<T>(run: (root: string) => Promise<T>): Promise<T> {
   }
 }
 
+afterEach(() => vi.unstubAllEnvs());
+
 describe("production default MCP server", () => {
   it("serves the same tools as development and lists them for discovery", async () => {
+    for (const name of ["FARM_SITE_URL", "VERCEL_PROJECT_PRODUCTION_URL"]) {
+      vi.stubEnv(name, undefined);
+    }
     await withRoot(async (root) => {
       const handler = await buildApp(root, {});
       const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -158,9 +163,22 @@ describe("production default MCP server", () => {
       const manifest = await handler.fetch(
         new Request("https://acme.test/.well-known/farmjs.json"),
       );
-      expect(((await manifest.json()) as any).mcp.servers).toEqual([
+      const document = (await manifest.json()) as any;
+      expect(document.mcp.servers).toEqual([
         expect.objectContaining({ path: "/mcp", authorization: "none" }),
       ]);
+      expect(document.site).toEqual({ url: null });
+      // The built server reads the site URL per request, so a host's runtime value shows up.
+      const site = async () =>
+        (
+          (await (
+            await handler.fetch(new Request("https://acme.test/.well-known/farmjs.json"))
+          ).json()) as any
+        ).site;
+      vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "acme-site.vercel.app");
+      expect(await site()).toEqual({ url: "https://acme-site.vercel.app" });
+      vi.stubEnv("FARM_SITE_URL", "https://acme.example.com");
+      expect(await site()).toEqual({ url: "https://acme.example.com" });
     });
   }, 240_000);
 

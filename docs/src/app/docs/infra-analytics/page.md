@@ -143,9 +143,10 @@ including the ones nothing has called yet, without the app sending anything. It 
   as `stripe`. Never its configuration.
 - `agent`: the API catalog, `llms.txt` and OpenAPI spec, when they're on.
 - `plugins`: the names of the app's plugins.
+- `site.url`: the public origin the app is served from, or `null`. See [Site URL](#site-url).
 
-It never includes environment values, keys, file paths, integration configuration or anything a
-request carries.
+It never includes keys, file paths, integration configuration or anything a request carries. The
+only value it reads from the environment is the site's own public origin.
 
 Anyone can read it, in `farm dev` and in production, with or without `FARMJS_API_KEY`, and every
 reader gets the same document. It's served with CORS for any origin, an `ETag`, and
@@ -168,6 +169,31 @@ can hide browser tools. Hidden tools are hidden from Farm Infra too.
 
 Turn the manifest off with `agent: { manifest: false }`. Farm Infra then can't list the app's tools
 either.
+
+### Site URL
+
+`site.url` tells Farm Infra and other readers where the app lives, read when each request is
+served:
+
+| Source                          | Set by                        | Example                       |
+| ------------------------------- | ----------------------------- | ----------------------------- |
+| `FARM_SITE_URL`                 | You                           | `https://acme.com`            |
+| `VERCEL_PROJECT_PRODUCTION_URL` | Vercel, on every deployment   | `acme.com` (`https://` added) |
+| `RENDER_EXTERNAL_URL`           | Render                        | `https://acme.onrender.com`   |
+| `RAILWAY_PUBLIC_DOMAIN`         | Railway, with a public domain | `acme.up.railway.app`         |
+
+Farm names the first usable one, in this order. Only a public `https` origin is usable: no path,
+query, credentials, IP address, `localhost` or single-label host. `FARM_SITE_URL` decides alone when
+it's set: an invalid one serves `url: null` rather than a host's guess. Put the app's base path in
+`basePath`, not in the URL; readers join the two.
+
+On Vercel the production address is served by preview deployments too, so a preview names the
+production site. Netlify sets its `URL` for the build only, so a Netlify app sets `FARM_SITE_URL`.
+On Cloudflare, set it as a Worker variable.
+
+An empty **Site URL** on a Farm Infra project is filled from `site.url` once Farm Infra has
+confirmed that the address serves a Farm manifest too. A Site URL you set is never replaced.
+`agent: { manifest: { site: false } }` serves `site: null`.
 
 Farm 0.1.34 served the manifest at `/.well-known/farmjs`. That path still answers the same way, so
 tools that read it there keep working; new readers should use `/.well-known/farmjs.json`.

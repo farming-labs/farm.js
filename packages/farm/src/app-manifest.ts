@@ -2,8 +2,9 @@
  * `/.well-known/farmjs.json`: one document describing a Farm app, so tools can discover it
  * instead of each rebuilding the picture: Farm's version, renderer and packages, the app's
  * MCP servers with every tool (however it was defined) and its schemas, their resources and
- * prompts, its WebMCP browser tools, its integrations, its agent surfaces and its plugins.
- * Never environment values, settings or secrets.
+ * prompts, its WebMCP browser tools, its integrations, its agent surfaces, its plugins and
+ * the public origin it's served from. Never settings or secrets; the origin is the only value
+ * read from the environment (`FARM_SITE_URL`, or the host's production address).
  *
  * Anyone may read it, in development and production alike, and everyone, Farm Infra
  * included, gets the same document (`agent.manifest: false` turns it off). It lists only what
@@ -19,7 +20,9 @@ import {
 } from "./app-manifest-config";
 import type { FarmAppManifestWebMCPTool } from "./app-manifest-webmcp";
 import { _listFarmMCPCatalogs, type FarmMCPCatalogDetails } from "./mcp-catalog";
+import { normalizeFarmProductionSiteOrigin } from "./product-telemetry";
 import { createFarmWeakETag, matchesFarmIfNoneMatch } from "./server-http";
+import { readFarmEnvironmentValue } from "./utils/runtime-env";
 import { FARM_VERSION } from "./version";
 
 export const FARM_APP_MANIFEST_PATH = "/.well-known/farmjs.json";
@@ -90,6 +93,12 @@ export interface FarmAppManifest {
   integrations: { key: string; category: string; type: string }[] | null;
   agent: { apiCatalog: string | null; llmsTxt: boolean; openapi: string | null } | null;
   plugins: string[] | null;
+  /**
+   * The app's public origin, read when the request is served: `FARM_SITE_URL`, else the host's
+   * production address (Vercel, Render, Railway). `url` is `null` when none is set or it isn't a
+   * public https origin without a path; the app's base path is `app.basePath`.
+   */
+  site: { url: string | null } | null;
 }
 
 /** What the manifest reads from config; serializable, so a production build embeds it. */
@@ -207,7 +216,39 @@ export function createFarmAppManifest(input: FarmAppManifestInput): FarmAppManif
     integrations: sections.integrations ? input.integrations : null,
     agent: sections.agent ? input.agent : null,
     plugins: sections.plugins ? input.plugins : null,
+    site: sections.site ? { url: resolveFarmSiteUrl() } : null,
   };
+}
+
+/** A host's bare domain (`farmjs.dev`) as an https URL; a full URL as given. */
+function asUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+/**
+ * Where the app is served, read per request because it's runtime config: `FARM_SITE_URL` when
+ * set (even when invalid, so an explicit choice is never replaced by a guess), else the address
+ * a host gives the running server: Vercel's `VERCEL_PROJECT_PRODUCTION_URL`, Render's
+ * `RENDER_EXTERNAL_URL` or Railway's `RAILWAY_PUBLIC_DOMAIN`. Netlify sets its `URL` for the
+ * build only, so a Netlify app sets `FARM_SITE_URL`. Only a public https origin is named.
+ */
+function resolveFarmSiteUrl(): string | null {
+  const read = readFarmEnvironmentValue;
+  const explicit = read("FARM_SITE_URL");
+  const candidates = explicit?.trim()
+    ? [explicit]
+    : [
+        asUrl(read("VERCEL_PROJECT_PRODUCTION_URL")),
+        read("RENDER_EXTERNAL_URL"),
+        asUrl(read("RAILWAY_PUBLIC_DOMAIN")),
+      ];
+  for (const candidate of candidates) {
+    const origin = candidate ? normalizeFarmProductionSiteOrigin(candidate) : undefined;
+    if (origin) return origin;
+  }
+  return null;
 }
 
 type MCPSection = Exclude<ResolvedFarmAppManifestConfig["mcp"], false>;
