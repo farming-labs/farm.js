@@ -122,7 +122,8 @@ final class ReactNativeEngine: FarmNativeEngine {
     /// a load already running on another thread finish first.
     private func loadNow() -> FarmReactNativeRuntime? {
         if runtime == nil && loadFailure == nil {
-            finishLoading(failure: ReactNativeEngine.loadFramework(), started: CACurrentMediaTime())
+            let started = CACurrentMediaTime()
+            finishLoading(failure: ReactNativeEngine.loadFramework(), started: started)
         }
         return runtime
     }
