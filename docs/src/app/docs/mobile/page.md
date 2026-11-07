@@ -329,8 +329,12 @@ and every box-like primitive takes a `style` escape hatch.
 **Status:** web rendering ships; native rendering is unreleased. On a React Native screen, Metro
 resolves `@farm.js/ui` to its React Native build (the `react-native` export condition, implemented
 in `@farm.js/native/ui`): `View`, `Text` (with real `numberOfLines`), `Image` (paths load from
-`mobile.server`), `Pressable` (an `href` navigates through the shell), `TextInput` (`onChange`
-still gets the string), and `List` as a recycling `FlatList`. Tokens resolve to the same values as
+`mobile.server`; without a size it takes the image's natural size, and given one side it keeps the
+aspect ratio, as an `img` does), `Pressable` (an `href` navigates through the shell), `TextInput`
+(`onChange` still gets the string), and `List` as a recycling `FlatList`. `Text as="h1"` to `h6`,
+and `View`'s `as` (`nav`, `main`, `section`, ...) or `role`, set the native `role`, so screen
+readers announce the same headings and landmarks; `align` and `justify` accept CSS's `start` and
+`end` there too. Tokens resolve to the same values as
 the web build's defaults (`padding="md"` is 12, `surface` is `#f6f6f6`); a CSS theme's
 `--farm-color-*` overrides and `className` do not reach native views yet. A `page.tsx` built from
 `@farm.js/ui` [ports](/docs/mobile/native-screens#generated-react-native-ports) as it is, since Metro gives it the native

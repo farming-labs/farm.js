@@ -8,7 +8,15 @@
  * `style` prop is the web's CSS object; its simple values (lengths, colors, flex) carry over, and
  * `className` has no effect without CSS.
  */
-import { Children, cloneElement, Fragment, isValidElement, type ReactNode } from "react";
+import {
+  Children,
+  cloneElement,
+  Fragment,
+  isValidElement,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   FlatList,
   Image as NativeImage,
@@ -18,6 +26,7 @@ import {
   View as NativeView,
   type ImageStyle,
   type TextStyle,
+  type ViewProps,
   type ViewStyle,
 } from "react-native";
 import { toNativeStyle } from "./elements";
@@ -100,6 +109,36 @@ interface BoxProps {
   style?: Style;
 }
 
+/**
+ * CSS alignment keywords React Native spells differently. `start` and `end` work in CSS flexbox
+ * but not in Yoga, which wants `flex-start` and `flex-end`.
+ */
+const FLEX_ALIGN: Record<string, string> = { start: "flex-start", end: "flex-end" };
+
+function flexAlign(value: string | undefined): string | undefined {
+  return value == null ? undefined : (FLEX_ALIGN[value] ?? value);
+}
+
+/** The ARIA role a web element carries on its own, so the native view announces the same. */
+const ELEMENT_ROLES: Record<string, string> = {
+  nav: "navigation",
+  main: "main",
+  article: "article",
+  aside: "complementary",
+  section: "region",
+  h1: "heading",
+  h2: "heading",
+  h3: "heading",
+  h4: "heading",
+  h5: "heading",
+  h6: "heading",
+};
+
+/** An explicit `role` wins, as on the web; otherwise the `as` element's own role. */
+function roleOf(role: string | undefined, as: string | undefined): ViewProps["role"] {
+  return (role ?? (as != null ? ELEMENT_ROLES[as] : undefined)) as ViewProps["role"];
+}
+
 function boxStyle(props: BoxProps): Style {
   const style: Style = {};
   const set = (key: string, value: unknown) => {
@@ -113,8 +152,8 @@ function boxStyle(props: BoxProps): Style {
   set("marginVertical", space(props.marginY));
   set("gap", space(props.gap));
   set("flexDirection", props.direction);
-  set("alignItems", props.align);
-  set("justifyContent", props.justify);
+  set("alignItems", flexAlign(props.align));
+  set("justifyContent", flexAlign(props.justify));
   set("flex", props.flex);
   if (props.grow) style.flexGrow = 1;
   if (props.wrap) style.flexWrap = "wrap";
@@ -140,9 +179,15 @@ function nativeChildren(children: ReactNode): ReactNode {
   });
 }
 
-export function View(props: BoxProps & { children?: ReactNode; "aria-label"?: string }) {
+export function View(
+  props: BoxProps & { children?: ReactNode; "aria-label"?: string; role?: string; as?: string },
+) {
   return (
-    <NativeView accessibilityLabel={props["aria-label"]} style={boxStyle(props) as ViewStyle}>
+    <NativeView
+      accessibilityLabel={props["aria-label"]}
+      role={roleOf(props.role, props.as)}
+      style={boxStyle(props) as ViewStyle}
+    >
       {nativeChildren(props.children)}
     </NativeView>
   );
@@ -155,6 +200,8 @@ export function Text(props: {
   color?: string;
   align?: string;
   numberOfLines?: number;
+  /** The web element; `h1` to `h6` make the native text a heading for screen readers. */
+  as?: string;
   style?: Style;
 }) {
   const style: Style = { ...toNativeStyle(props.style) };
@@ -172,6 +219,7 @@ export function Text(props: {
   if (props.align != null) style.textAlign = props.align;
   return (
     <NativeText
+      role={roleOf(undefined, props.as)}
       style={style as TextStyle}
       numberOfLines={props.numberOfLines}
       ellipsizeMode={props.numberOfLines != null ? "tail" : undefined}
@@ -189,6 +237,27 @@ const FIT: Record<string, "cover" | "contain" | "stretch" | "center"> = {
   "scale-down": "contain",
 };
 
+/** The image's width and height in pixels, once read; undefined while loading or on failure. */
+function useNaturalSize(uri: string | undefined): { width: number; height: number } | undefined {
+  const [size, setSize] = useState<{ uri: string; width: number; height: number }>();
+  useEffect(() => {
+    if (uri == null) return;
+    let current = true;
+    NativeImage.getSize(
+      uri,
+      (width, height) => {
+        if (current && width > 0 && height > 0) setSize({ uri, width, height });
+      },
+      // An image that cannot be read stays unsized, as it would draw nothing anyway.
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [uri]);
+  return size && size.uri === uri ? size : undefined;
+}
+
 export function Image(props: {
   src: string;
   alt?: string;
@@ -204,6 +273,18 @@ export function Image(props: {
   if (props.width != null) style.width = length(props.width);
   if (props.height != null) style.height = length(props.height);
   if (props.radius != null) style.borderRadius = radius(props.radius);
+  // React Native draws a remote or file image at 0x0 until it is given a size. The web's img takes
+  // its natural size, or keeps its aspect ratio when given one side, so read the size from the file.
+  const sized = style.width != null && style.height != null;
+  const natural = useNaturalSize(sized ? undefined : uri);
+  if (natural) {
+    if (style.width == null && style.height == null) {
+      style.width = natural.width;
+      style.height = natural.height;
+    } else {
+      style.aspectRatio = natural.width / natural.height;
+    }
+  }
   return (
     <NativeImage
       source={{ uri }}
@@ -358,7 +439,9 @@ export function List<T>(props: {
   row: (item: T, index: number) => ListRow;
   keyExtractor?: (item: T, index: number) => string | number;
   empty?: ReactNode;
+  /** Reserved, as on the web: no pull-to-refresh yet. */
   refreshable?: boolean;
+  /** Reserved, as on the web: no search bar yet. */
   searchable?: boolean;
 }) {
   return (

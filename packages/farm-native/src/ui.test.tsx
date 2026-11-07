@@ -199,6 +199,24 @@ describe("@farm.js/ui on a native screen", () => {
     expect(onChange).toHaveBeenCalledWith("ada@example.com");
   });
 
+  it("spells CSS start and end alignment the way Yoga reads it", () => {
+    const html = render(createElement(ui.View, { align: "start", justify: "end" }));
+    expect(styleOf(html, "view")).toEqual({ alignItems: "flex-start", justifyContent: "flex-end" });
+    const raw = render(createElement(ui.View, { align: "center", justify: "space-between" }));
+    expect(styleOf(raw, "view")).toEqual({ alignItems: "center", justifyContent: "space-between" });
+  });
+
+  it("gives native views the role their web element or role prop carries", () => {
+    expect(render(createElement(ui.Text, { as: "h2" }, "Notes"))).toContain('data-role="heading"');
+    expect(render(createElement(ui.Text, { as: "p" }, "Body"))).not.toContain("data-role");
+    expect(render(createElement(ui.View, { as: "nav" }))).toContain('data-role="navigation"');
+    // An explicit role wins over the element's, as on the web.
+    expect(render(createElement(ui.View, { as: "section", role: "list" }))).toContain(
+      'data-role="list"',
+    );
+    expect(render(createElement(ui.View, {}))).not.toContain("data-role");
+  });
+
   it("picks a photo through pick, and is disabled without it", async () => {
     const onPick = vi.fn();
     const onError = vi.fn();
