@@ -188,6 +188,9 @@ class Converter {
   /** Off while reading the ancestors above the page, which pass down text styles only. */
   reporting = true;
 
+  /** The `:root` variables of all the page's stylesheets, later sheets winning, as in CSS. */
+  private readonly vars: { light: Record<string, string>; dark: Record<string, string> };
+
   /**
    * `sheets`: the page's stylesheets. Without them, a class the Tailwind table does not know is
    * reported; with them, only one a layered (Tailwind) rule styles is, since a class no rule
@@ -196,7 +199,12 @@ class Converter {
   constructor(
     private readonly pageUrl: URL,
     private readonly sheets?: readonly FarmNativeStylesheet[],
-  ) {}
+  ) {
+    this.vars = {
+      light: Object.assign({}, ...(sheets ?? []).map((sheet) => sheet.vars.light)),
+      dark: Object.assign({}, ...(sheets ?? []).map((sheet) => sheet.vars.dark)),
+    };
+  }
 
   private problem(message: string) {
     if (this.reporting && !this.unsupported.includes(message)) this.unsupported.push(message);
@@ -213,7 +221,7 @@ class Converter {
     for (const problem of cascade?.unsupported ?? []) {
       this.problem(`<${element.tag}> ${problem}`);
     }
-    const inline = resolveFarmNativeInlineStyle(element.attributes.style ?? "");
+    const inline = resolveFarmNativeInlineStyle(element.attributes.style ?? "", this.vars);
     for (const declaration of inline.unsupported) {
       this.problem(`<${element.tag}> style "${declaration}"`);
     }
@@ -224,7 +232,7 @@ class Converter {
       ...cascade?.style,
       ...inline.style,
     };
-    const dark = { ...classes.dark, ...cascade?.dark };
+    const dark = { ...classes.dark, ...cascade?.dark, ...inline.dark };
     // CSS flex lays out in a row unless told otherwise.
     for (const target of [style, dark]) {
       if (target.display === "flex" && target.flexDirection === undefined && !style.flexDirection) {

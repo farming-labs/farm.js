@@ -135,6 +135,7 @@ describe("native tier styles", () => {
         borderBottomRightRadius: 4,
         borderBottomLeftRadius: 4,
       },
+      dark: {},
       unsupported: ["display: grid"],
     });
   });
@@ -142,6 +143,54 @@ describe("native tier styles", () => {
 
 describe("native tier tree", () => {
   const url = new URL("https://notes.example.com/notes");
+
+  it("resolves var() in inline styles from the app's variables, or their fallback", () => {
+    // @farm.js/ui writes its color tokens this way: <Text color="muted"> on a server screen.
+    expect(resolveFarmNativeInlineStyle("color:var(--farm-color-muted, #6b7280)")).toEqual({
+      style: { color: "#6b7280" },
+      dark: {},
+      unsupported: [],
+    });
+    const vars = {
+      light: { "--farm-color-muted": "#475569", "--gap": "12px" },
+      dark: { "--farm-color-muted": "#94A3B8" },
+    };
+    expect(
+      resolveFarmNativeInlineStyle(
+        "color:var(--farm-color-muted, #6b7280);row-gap:var(--gap);column-gap:var(--gap)",
+        vars,
+      ),
+    ).toEqual({
+      style: { color: "#475569", rowGap: 12, columnGap: 12 },
+      // Only what the dark theme changes.
+      dark: { color: "#94a3b8" },
+      unsupported: [],
+    });
+    // A variable without a value or fallback stays unsupported, so the shell shows the web screen.
+    expect(resolveFarmNativeInlineStyle("color:var(--missing)").unsupported).toEqual([
+      "color: var(--missing)",
+    ]);
+  });
+
+  it("draws @farm.js/ui color tokens on a server screen instead of falling back", () => {
+    const url = new URL("https://app.test/");
+    const html = page(`<span style="color:var(--farm-color-muted, #6b7280)">One page.tsx</span>`);
+    const plain = createFarmNativeTree(html, url);
+    expect(plain.unsupported).toEqual([]);
+    // The span is an inline run of the page's text block.
+    const run = (tree: typeof plain) =>
+      (tree.root.children?.[0] as typeof tree.root)?.children?.[0];
+    expect(run(plain)).toMatchObject({ tag: "span", style: { color: "#6b7280" } });
+    const themed = createFarmNativeTree(html, url, [
+      ":root{--farm-color-muted:#475569}" +
+        "@media (prefers-color-scheme: dark){:root{--farm-color-muted:#94a3b8}}",
+    ]);
+    expect(themed.unsupported).toEqual([]);
+    expect(run(themed)).toMatchObject({
+      style: { color: "#475569" },
+      dark: { color: "#94a3b8" },
+    });
+  });
 
   it("reads only the page, with inherited text styles and absolute links", () => {
     const tree = createFarmNativeTree(
