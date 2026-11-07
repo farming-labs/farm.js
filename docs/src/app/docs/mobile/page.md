@@ -616,6 +616,20 @@ sources are not linked yet and fail the build with a message naming them.
 An app without React Native routes on iOS gets no React Native: no download, no framework, and the
 same project as before.
 
+What React Native costs on a phone, measured on the Release configuration archived for a device
+(arm64, unsigned) in the `Mobile iOS` workflow:
+
+| Release app for a device                  | `examples/mobile` (React Native, 4 screens) | `examples/mobile-minimal` (no React Native) |
+| ----------------------------------------- | ------------------------------------------- | ------------------------------------------- |
+| Installed                                 | 20.7 MB                                     | 0.4 MB                                      |
+| Download (the app zipped as an IPA)       | 5.8 MB                                      | 0.1 MB                                      |
+| Download, executable counted uncompressed | 6.1 MB                                      | 0.4 MB                                      |
+| React Native's frameworks                 | 18.7 MB: React 11.4, Hermes 6.1, deps 1.2   | none                                        |
+| Screens as Hermes bytecode                | 1.4 MB                                      | none                                        |
+
+The App Store encrypts the executable, which then no longer compresses, so the third row is the
+closer download estimate. The App Store's own figure for a signed build may differ.
+
 `xcrun simctl launch booted <id> -FarmOpen /kit` opens a path once the first screen shows content,
 in any build, as a tapped link would; `-FarmOpenAfter 3000` waits that many milliseconds longer.
 

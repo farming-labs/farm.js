@@ -1322,7 +1322,7 @@ in Farm's navigator".
   | ------------------------------------------ | ------------------------------------------------------- |
   | Simulator app (arm64 and x86_64)           | 43.6 MB: React 23.6, hermesvm 12.3, dependencies 2.6 MB |
   | Hermes bytecode, four screens              | 1.4 MB                                                  |
-  | React Native's arm64 device slices         | 20.4 MB, 5.2 MB zipped                                  |
+  | React Native's arm64 device slices         | 20.4 MB, 5.2 MB zipped (an estimate; see below)         |
   | `farm build --mobile --os ios`, end to end | 70 to 87 s, the uncached React Native download included |
 
   The comparison, measured in the same workflow (`cocoapods-baseline` job, run C): React Native
@@ -1408,8 +1408,26 @@ in Farm's navigator".
   Neither shell had copied them before, on either OS; CI checks `examples/mobile`'s `/map` blaze
   in the built app on an emulator and a simulator. Android's debuggable builds read a `farmOpen`
   extra, the twin of `-FarmOpen`, for that check.
-- Not done: a device, a release-configuration archive and App Store size (the table's device
-  numbers are the arm64 slices zipped, an estimate).
+- **The Release app for a device, measured.** `Mobile iOS` archives the Release configuration
+  for `generic/platform=iOS`, unsigned, for `examples/mobile` and for `examples/mobile-minimal`
+  (no React Native), and measures the `.app`. The configuration compiles with optimizations,
+  whole-module Swift and assertions off, React Native's host and the linked modules included,
+  with no change. React Native, not the shell, is the size:
+
+  | Release, arm64 device                     | `examples/mobile`, 4 React Native screens   | `examples/mobile-minimal` |
+  | ----------------------------------------- | ------------------------------------------- | ------------------------- |
+  | Installed                                 | 20.7 MB                                     | 0.4 MB                    |
+  | Download, the `.app` zipped as an IPA     | 5.8 MB                                      | 0.1 MB                    |
+  | Download, executable counted uncompressed | 6.1 MB                                      | 0.4 MB                    |
+  | Embedded frameworks                       | 18.7 MB: React 11.4, hermesvm 6.1, deps 1.2 | none                      |
+  | Hermes bytecode / main executable         | 1.4 MB / 0.6 MB                             | none / 0.4 MB             |
+
+  The App Store encrypts the executable, which then does not compress, so the third row is the
+  download to expect; Apple's own figure needs a signed upload. `examples/mobile`'s
+  `budgets.appSizeMb: 12` holds for the download and not for the installed size; the budget does
+  not say which yet, and nothing checks it.
+
+- Not done: a device (launch, memory and smoothness on a phone).
 
 ### The iOS project is a generated pbxproj
 
@@ -1635,8 +1653,7 @@ Next, in order, and what blocks it:
 - Build a release APK with R8 and run it. The generated project minifies release builds with no
   keep rules, and no release APK has been built yet.
 - Run native sign-in (#2507) and page shells (#2496) on an Android emulator.
-- The iOS React Native host past the spike: a device, a release archive with App Store size,
-  memory with several native screens, lazy loading of React Native's frameworks if launch cost
+- The iOS React Native host past the spike: a device, memory with several native screens, lazy loading of React Native's frameworks if launch cost
   matters on a device, and modules with Swift sources.
 
 Managed backend hosting in Infra comes after phase 6. iOS has macOS CI with Xcode once #2556
