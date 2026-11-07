@@ -258,9 +258,14 @@ export async function syncFarmCronJobs(options: SyncFarmCronOptions): Promise<Fa
   }
   try {
     if (!response.ok) {
+      // Infra's own message names the fix, such as a missing permission or the URL a key is
+      // bound to; the general checks are only for a refusal that doesn't say why.
+      const reason =
+        (await describeRefusal(response)) ||
+        " Check the key's `cron:jobs` permission, `FARMJS_ENVIRONMENT`, and `FARMJS_PROJECT_ID`.";
       throw new FarmCronSyncError(
         "SYNC_FAILED",
-        `Infra refused the sync with HTTP ${response.status}.${await describeRefusal(response)} Check the key's \`cron:jobs\` permission, \`FARMJS_ENVIRONMENT\`, and \`FARMJS_PROJECT_ID\`.`,
+        `Infra refused the sync with HTTP ${response.status}.${reason}`,
       );
     }
     let result: unknown;
