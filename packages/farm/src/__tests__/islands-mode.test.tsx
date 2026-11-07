@@ -50,7 +50,7 @@ describe("islands mode", () => {
       /<f-slot name="[^"]+s0" style="display:contents"><p>Server comment<\/p><\/f-slot>/,
     );
     const props = JSON.parse(
-      /<script type="f\/props" for="[^"]+">([^<]*)<\/script>/.exec(html)![1]!,
+      /<script type="f\/props" for="[^"]+"[^>]*>([^<]*)<\/script>/.exec(html)![1]!,
     );
     expect(props.title).toBe("Comments");
     expect(props.children).toEqual({ $: "s", v: expect.stringMatching(/s0$/) });
@@ -181,6 +181,29 @@ describe("islands mode", () => {
     expect(page.isolatedBoundaries).toEqual([
       { modulePath: path.join(root, "src/counter.tsx"), islandStrategy: "load" },
     ]);
+  });
+
+  it("points useFormStatus at islx's in islands mode, so a server form around the island reports to it", async () => {
+    const { parseSync } = await import("vite");
+    const transform = (slots: boolean) =>
+      transformIsolatedClientBoundaryModule({
+        code: [
+          '"use client";',
+          'import { createPortal, useFormStatus } from "react-dom";',
+          "export function Submit() { return useFormStatus().pending ? null : createPortal(null, document.body); }",
+        ].join("\n"),
+        moduleReference: "/src/submit.tsx",
+        islandStrategy: "load",
+        parse: (code) => (parseSync("submit.tsx", code) as { program: unknown }).program as never,
+        slots,
+      })!;
+    const islands = transform(true);
+    expect(islands).toContain('import { createPortal } from "react-dom";');
+    expect(islands).toContain(
+      'import { useFormStatus as useFormStatus } from "@farm.js/core/internal/islx-react";',
+    );
+    // Isolated hydration without islands keeps React's hook: its forms are React's.
+    expect(transform(false)).toContain('import { createPortal, useFormStatus } from "react-dom";');
   });
 
   it("wraps export-list and re-exported components as islands", async () => {

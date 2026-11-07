@@ -407,7 +407,13 @@ async function main() {
   }
   debug('Hydrating application');
   globalThis.__FARM_RSC_HYDRATED = true;
-  hydrateRoot(rootElForHydrate, React.createElement(BrowserRoot), {
+  // The server renders #root inside <html>{[<head>, <body>]}</html>. That two-child fork is part of
+  // every useId below it, so the client hydrates #root at the same position (second of two) and
+  // its ids match the HTML's. A document the root layout owns is hydrated whole, as rendered.
+  const hydrated = initial.ownsDocument
+    ? React.createElement(BrowserRoot)
+    : [null, React.createElement(BrowserRoot, { key: 'root' })];
+  hydrateRoot(rootElForHydrate, hydrated, {
     formState: initial.formState,
   });
   

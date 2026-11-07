@@ -333,7 +333,11 @@ built on [islx](https://github.com/farming-labs/islx), its renderer-agnostic wir
 it renders on Farm's normal pipeline, sends static output once as HTML, and hydrates only client
 components. Client components hydrate while the page streams: one above slow Suspense
 content is interactive before that content arrives, in `farm dev` and in production. A client component that receives server output (`children`, or any element prop) keeps
-that output as a slot of the existing HTML instead of receiving it again, and a server page under a
+that output as a slot of the existing HTML instead of receiving it again. Client components inside
+that output are its descendants, as in RSC: they read its context (a client provider in a page,
+around server content, reaches the consumers in it) and keep their own state, and output it does
+not render at first (a tab, a closed panel) is there when it does. `useId` returns the ids in the
+server HTML, unique across client components. A server page under a
 layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
 components read the provider's context. That layout, and the other server layouts on its pages,
 render as server trees too: the browser rebuilds them from the HTML, so their modules and their
@@ -362,9 +366,11 @@ declare one inline: an `async` function with `"use server"` as its first stateme
 component's variables, which travel with it sealed (AES-GCM, bound to the action) rather than as
 form fields the browser could read or change. Every instance of one build shares the sealing key;
 set `ISLX_ACTIONS_KEY` to keep forms on open pages working across deploys. A `<form>` written in a
-server component posts its action without a page load once JavaScript runs; React's
-`useFormStatus` reads only a form React renders, so a client component that shows a form's pending
-state renders the `<form>` itself. After an
+server component posts its action without a page load once JavaScript runs, and a client
+component inside it (a submit button) reads its pending state with `useFormStatus` from
+`react-dom`: islands mode points that import at islx's, which reports the server form's submit and
+is React's anywhere else. A namespace call (`ReactDOM.useFormStatus()`) reads only a form React
+renders. After an
 action called from JavaScript, the page refreshes, as the form posted without JavaScript would show
 it: islands still on the page keep their state and get their new props, and a `redirect()` from the
 action becomes a client navigation. Props and action arguments are not limited to JSON:
