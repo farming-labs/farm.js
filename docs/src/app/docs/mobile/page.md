@@ -275,7 +275,11 @@ tint, whether the tab bar shows. It styles the native frame, not the page conten
 | a fully native screen (platform APIs, maximum performance) | `page.kt` / `page.swift`            |
 
 Whatever you add, `page.tsx` stays: it is the web version of the route and the fallback if the native
-screen cannot load (the "web twin"). A native file with no `page.tsx` next to it is a build error.
+screen cannot load (the "web twin"). A native file with no `page.tsx` next to it is a build error
+today. [RFC 0004](https://github.com/farming-labs/farm.js/blob/main/rfcs/0004-platforms.md) now
+accepts **native-only routes** — a `page.native.tsx` with no web page, for a screen that has no web
+audience: the route then exists only in mobile builds, with no web twin to fall back to — but that
+is staged work, so until it lands the build error stands.
 
 > **Heads up:** most of the native screens above are designed but **not built yet**.
 > `page.native.tsx` runs as a React Native screen only under `farm dev --mobile` on an Android
@@ -536,7 +540,8 @@ A route's tier is decided at build time. The first source that decides wins, per
 ### Files
 
 The files in a route folder ([The files that make a screen](#the-files-that-make-a-screen)) select
-the tier. `page.tsx` is required; a native file without one is an error, and so is a React Native
+the tier. `page.tsx` is required; a native file without one is an error (native-only routes are
+accepted by RFC 0004 but not built yet), and so is a React Native
 file and a platform file for the same route and OS. Web and desktop builds never resolve these
 files: they are not routes, not in the generated route types, and not in any web bundle.
 `src/native/` holds the app's own native modules ([App native modules](#app-native-modules)).

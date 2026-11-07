@@ -522,8 +522,10 @@ Rules:
 
 - A screen's content is one tier. Native views inside a web screen are only allowed as islands
   (7.7); free-form mixed content breaks gestures, accessibility order and keyboard handling.
-- Every route keeps its `page.tsx`. It is the web page, the mobile web screen, and the runtime
-  fallback for the route's native screen (the web twin, 7.10).
+- A route with a `page.tsx` keeps it everywhere: it is the web page, the mobile web screen, and
+  the runtime fallback for the route's native screen (the web twin, 7.10). A route may instead be
+  **native-only** — a React Native or platform screen file with no `page.tsx` (7.3) — and then it
+  exists only in mobile builds, with no web twin to fall back to.
 - React Native is in the app only if at least one route resolves to a React Native screen. An app
   of web and platform screens ships no JS engine besides the system WebView.
 
@@ -627,8 +629,17 @@ src/app/feed/
 - `page.native.tsx` next to `page.tsx` makes the route native on mobile, unless the page export or
   the config says otherwise (precedence below). `page.ios.tsx` or `page.android.tsx` replaces it
   on that OS. Either one alone makes the route native on that OS only; the other OS stays web.
-- `page.tsx` is required. A native file without one is a build error, because the route would have
-  no web page and no fallback.
+- `page.tsx` is optional: a React Native or platform file without one makes the route
+  **native-only**. The route exists only in mobile builds, and only on the OSes that have a screen
+  file (`page.native.tsx` covers both). Web and desktop builds do not have the route: it is not in
+  the generated web route types, not in any web bundle, and the web deployment answers it like any
+  unknown path. Because the web twin is what runtime fallback and `server` screens render, a
+  native-only route has neither: it cannot be a `server` screen, `screen: "web"` on it is a
+  validation error, and its errors stay inside the screen (the React Native error boundary, or the
+  shell's error view). Analyzer tiers do not apply; the screen file is the decision.
+  (Implementation note: the preview still requires `page.tsx` — `generate-route-types` fails a
+  native file without one. Lifting that is staged work; the shells' route config must learn
+  entries with no web URL first.)
 - A React Native file and a platform file for the same route and OS is a build error.
 - Web and desktop builds never resolve these files. They are not routes, not in the generated
   route types, and not in any web bundle.
@@ -1372,6 +1383,41 @@ Made 2026-11-05. Replaces the 2026-11-01 text of 7.5.
   process boundary. Direct calls belong to native screens.
 - Order: autolinking on Android, then app TurboModules and `mobile.modules`, then the web-screen
   transport with file references and subscriptions. iOS follows when its shell hosts React Native.
+
+### Server functions are called by import from native screens
+
+Made 2026-11-06, merged with the Android React Native host work. Narrows 7.2 and 7.14 without
+changing the model.
+
+- A `page.native.tsx` imports a `createServerFn` or `createServerQuery` function and calls it,
+  exactly as server-side code does. Metro resolves the module that defines server functions to a
+  generated stub, so the app bundle never holds server code; each stub export posts
+  `{ id, input }` through `serverFetch` to `POST /api/__farm/native/fn`, with the device session.
+- The endpoint is a plugin API route only for apps with a `mobile` block, so middleware and
+  `runtime.before` run first. It runs only functions native screens statically import, refuses
+  requests a browser would send (fetch metadata, another origin), and rejects prototype-polluting
+  input. The stub swap recognizes only functions defined with the imported-by-name factories; a
+  native bundle that reaches any other part of `@farm.js/core` fails the bundle, so a miss fails
+  closed.
+- `@farm.js/core/api/client` has a React Native build picked through the `react-native` export
+  condition, so the app's typed `lib/api.ts` serves web pages and native screens alike.
+
+### Native-first routes may drop their web page
+
+Decided 2026-11-07. Amends 7.1 and 7.3; implementation is staged, not merged.
+
+- `page.tsx` alone stays the portable authoring path: the web page, the mobile web screen, the
+  analyzer's input, and the web twin a native screen falls back to. `page.native.tsx` next to it
+  opts the route into React Native. Nothing changes for routes that have both.
+- A screen that has no web audience should not be forced to carry a web page. A
+  `page.native.tsx` (or OS/platform file) with no `page.tsx` becomes a native-only route: mobile
+  builds only, no web route types, no web bundle, no fallback — the screen owns its errors.
+- `server` screens and the analyzer stay out of native-only routes by construction: both exist
+  only as renderings of a `page.tsx`.
+- Staging: the shells' generated route config must first accept entries with no web URL (today
+  every entry has one); then `generate-route-types` records native-only patterns instead of
+  failing them; then the mobile dev server and the production manifest carry them. Until then the
+  build error stands.
 
 ## 9. Rollout
 
