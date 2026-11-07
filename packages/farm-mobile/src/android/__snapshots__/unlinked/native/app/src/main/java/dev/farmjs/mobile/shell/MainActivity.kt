@@ -43,6 +43,8 @@ class MainActivity : AppCompatActivity() {
         Log.i(Navigator.TAG, "server=${config.server} pool=$poolSize rules=${config.rules.size}")
         // The device token native screens call the server with; issued after a web sign-in.
         MobileSession.init(this, config)
+        // Files web screens received by reference in an earlier run of the app.
+        FarmFiles.clearStale(this)
 
         // Device plugins reachable as native.<name>; none ship yet, so calls reject as unavailable.
         val plugins = emptyMap<String, FarmPlugin>()

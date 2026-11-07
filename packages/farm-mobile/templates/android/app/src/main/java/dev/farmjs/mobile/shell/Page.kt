@@ -84,7 +84,8 @@ class Page(
             }
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                bundle?.respond(request)
+                // Files this page received by reference (/__farm/files/<id>), then bundled client files.
+                bridge.files.respond(request) ?: bundle?.respond(request)
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (!request.isForMainFrame || request.isRedirect) return false
@@ -156,6 +157,8 @@ class Page(
     fun destroy() {
         host = null
         bridge.listener = null
+        // The screen closed: its file references stop working, and their files are deleted.
+        bridge.files.close()
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
     }

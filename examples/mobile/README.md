@@ -113,6 +113,13 @@ the emulator's model (`sdk_gphone64_arm64`) and `Vibrate` vibrates for 200 ms wi
 false and the card says `not in the app`. `src/farm.d.ts` types `native.Device` from the spec. Not
 verified on an emulator yet.
 
+`Choose a photo` on `/settings` is `PhotoPicker` from `@farm.js/ui`. In the Android app it calls
+`native.Device.pickPhoto()`, which opens the system photo picker (no permission needed), copies
+the photo into `farm-files`, and resolves its `file://` URI; the page gets it by reference, as
+`/__farm/files/<id>`, and shows it with `Image`. In a browser the same picker opens the browser's
+file picker. `/kit` (a native screen) uses the same `PhotoPicker` with `Device.pickPhoto()` and
+shows the `file://` URI directly.
+
 React versions: this example pins `react` and `react-dom` 19.2.8, the version Farm core is tested
 on. React Native 0.88 declares a `react@^19.3.0` peer (its renderer is built from 19.3.0), so pnpm
 warns, but the native screens run on 19.2.8 in dev; `@farm.js/native` peers on `react@>=19.2.8`.
