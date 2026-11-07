@@ -8,22 +8,25 @@ NS_ASSUME_NONNULL_BEGIN
 /// What a native screen asks of the navigator. Called on the main thread.
 NS_SWIFT_UI_ACTOR
 @protocol FarmReactNativeScreenHost <NSObject>
-- (void)farmVisit:(NSString *)url replace:(BOOL)replace;
-- (void)farmFallback:(NSString *)reason;
-- (void)farmSetTitle:(NSString *)title;
-- (void)farmRendered;
+- (void)farmVisit:(NSString *)url replace:(BOOL)replace NS_SWIFT_NAME(farmVisit(_:replace:));
+- (void)farmFallback:(NSString *)reason NS_SWIFT_NAME(farmFallback(_:));
+- (void)farmSetTitle:(NSString *)title NS_SWIFT_NAME(farmSetTitle(_:));
+- (void)farmRendered NS_SWIFT_NAME(farmRendered());
 @end
 
 /// The device session, for the FarmShell module's session methods. Implemented in Swift by
 /// MobileSession's adapter. Called on the main thread; replies may come on any thread.
 NS_SWIFT_UI_ACTOR
 @protocol FarmReactNativeSession <NSObject>
-- (void)farmSession:(void (^)(NSString *_Nullable appId, NSString *_Nullable accessToken))reply;
-- (void)farmRefreshSession:(NSString *)failedToken reply:(void (^)(NSString *_Nullable token))reply;
-- (void)farmSignOut:(void (^)(void))reply;
+- (void)farmSession:(void (^)(NSString *_Nullable appId, NSString *_Nullable accessToken))reply
+    NS_SWIFT_NAME(farmSession(_:));
+- (void)farmRefreshSession:(NSString *)failedToken
+                     reply:(void (^)(NSString *_Nullable token))reply NS_SWIFT_NAME(farmRefreshSession(_:reply:));
+- (void)farmSignOut:(void (^)(void))reply NS_SWIFT_NAME(farmSignOut(_:));
 - (void)farmSignIn:(NSString *)path
               body:(NSString *)body
-             reply:(void (^)(NSInteger status, NSString *_Nullable body, NSString *_Nullable error))reply;
+             reply:(void (^)(NSInteger status, NSString *_Nullable body, NSString *_Nullable error))reply
+    NS_SWIFT_NAME(farmSignIn(_:body:reply:));
 @end
 
 /// One React Native runtime (Hermes, Fabric, bridgeless) shared by every native screen; each screen
@@ -36,15 +39,16 @@ NS_SWIFT_UI_ACTOR
 - (instancetype)init NS_UNAVAILABLE;
 
 /// Creates the runtime and evaluates the bundle, ahead of the first native screen.
-- (void)warm;
+- (void)warm NS_SWIFT_NAME(warm());
 
 /// A surface's view for `module` (such as `app/kit`) with the screen's initial props, or nil when
 /// the runtime failed. `screen` addresses `host` from JS until `closeScreen:`.
 - (nullable UIView *)openModule:(NSString *)module
                          screen:(NSInteger)screen
                      properties:(NSDictionary<NSString *, id> *)properties
-                           host:(id<FarmReactNativeScreenHost>)host;
-- (void)closeScreen:(NSInteger)screen;
+                           host:(id<FarmReactNativeScreenHost>)host
+    NS_SWIFT_NAME(openModule(_:screen:properties:host:));
+- (void)closeScreen:(NSInteger)screen NS_SWIFT_NAME(closeScreen(_:));
 
 /// Why the runtime failed, or nil. Set once a fatal JS or native error reached React Native.
 @property (nonatomic, readonly, nullable) NSString *failure;
