@@ -112,7 +112,7 @@ describe("@farm.js/mobile/ios React Native host", () => {
       Object.keys(project).some((file) => /FarmReactNative|farm-native|FarmModules/.test(file)),
     ).toBe(false);
     expect(pbxproj).not.toMatch(
-      /xcframework|Embed Frameworks|c\+\+20|BRIDGING_HEADER|HEADER_SEARCH_PATHS/,
+      /xcframework|Embed Frameworks|c\+\+20|BRIDGING_HEADER|HEADER_SEARCH_PATHS|FarmReactNativeHost/,
     );
     // The engine stub: no JS engine ships.
     expect(project["App/NativeEngine.swift"]).toContain(
@@ -129,7 +129,7 @@ describe("@farm.js/mobile/ios React Native host", () => {
     expect(project[IOS_NATIVE_BUNDLE]).toBe("<4 bytes>");
     for (const file of [
       "App/FarmReactNative.h",
-      "App/FarmReactNative.mm",
+      "FarmReactNativeHost/FarmReactNative.mm",
       "App/FarmReactNative-Bridging-Header.h",
       "App/FarmReactNativeBuild.swift",
     ]) {
@@ -169,6 +169,33 @@ describe("@farm.js/mobile/ios React Native host", () => {
     expect(pbxproj).toContain('"RCT_DEV=0"');
     expect(pbxproj).toContain('"FOLLY_MOBILE=1"');
     expect(pbxproj).toContain("FarmReactNative.mm in Sources");
+
+    // React Native loads lazily: the host framework links it, the app embeds both and links neither.
+    const objects = (isa: string) =>
+      [
+        ...pbxproj.matchAll(
+          new RegExp(`\\w+ /\\* [^*]+ \\*/ = \\{\\s+isa = ${isa};[\\s\\S]*?\\n\\t\\t\\};`, "g"),
+        ),
+      ].map((match) => match[0]);
+    const [appTarget, hostTarget] = ["App", "FarmReactNativeHost"].map(
+      (name) => objects("PBXNativeTarget").find((target) => target.includes(`name = ${name};`))!,
+    );
+    expect(hostTarget).toContain('productType = "com.apple.product-type.framework";');
+    expect(appTarget).toMatch(/dependencies = \(\s+\w+ \/\* PBXTargetDependency \*\/,\s+\);/);
+    const linked = objects("PBXFrameworksBuildPhase");
+    // The app's Frameworks phase is empty; the host's links the three XCFrameworks.
+    expect(linked.filter((phase) => /files = \(\s+\);/.test(phase))).toHaveLength(1);
+    expect(linked.find((phase) => phase.includes("React.xcframework in Frameworks"))).toBeDefined();
+    expect(pbxproj).toContain("/* FarmReactNativeHost.framework in Embed Frameworks */");
+    // The host's settings carry React Native's; the app keeps only the bridging header.
+    expect(pbxproj).toContain('"$(SRCROOT)/App"');
+    expect(pbxproj).toContain("SKIP_INSTALL = YES;");
+    // Swift never names the host's class, which would link it: it loads the framework and looks
+    // the class up by name.
+    const engine = project["App/NativeEngine.swift"]!;
+    expect(engine).toContain("NSClassFromString(FarmReactNativeRuntimeClass)");
+    expect(engine).toContain("loadAndReturnError()");
+    expect(engine).not.toMatch(/\bFarmReactNative\(/);
     expect(pbxproj).toContain("farm-native.hbc in Resources");
     // No linked module: the empty dependency provider, no FarmModules.
     expect(pbxproj).not.toContain("FARM_LINKED_MODULES");
@@ -265,7 +292,7 @@ end`;
     ]);
   });
 
-  it("names a Swift pod's module as CocoaPods does, and forwards its -Swift.h to the app's", () => {
+  it("names a Swift pod's module as CocoaPods does, and forwards its -Swift.h to the host's", () => {
     expect(podModuleName('s.name = "RNStoreReview"', "/p/RNStoreReview.podspec")).toBe(
       "RNStoreReview",
     );
@@ -283,10 +310,10 @@ end`;
       "FarmModules/FarmSwiftHeaders/RNFoo-Swift.h",
       "FarmModules/FarmSwiftHeaders/RNFoo/RNFoo-Swift.h",
     ]);
-    // The shell's declarations in App-Swift.h need WebKit, which Objective-C++ does not
-    // @import: the shim imports it before the app's header.
+    // The package's Swift is part of the FarmReactNativeHost framework, whose generated header
+    // needs React's declarations first, as Objective-C++ does not @import them.
     expect(String(headers[0]!.contents)).toMatch(
-      /#import <WebKit\/WebKit\.h>\n#import <React\/RCTBridgeModule\.h>\n#import "App-Swift\.h"\n$/,
+      /#import <React\/RCTBridgeModule\.h>\n#import "FarmReactNativeHost-Swift\.h"\n$/,
     );
   });
 

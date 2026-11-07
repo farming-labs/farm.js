@@ -2,6 +2,11 @@
 // for apps with React Native screens. New architecture only: Hermes bytecode, Fabric and
 // bridgeless TurboModules, from React Native's prebuilt XCFrameworks. One runtime is shared by
 // every native screen, each its own surface.
+//
+// Built into FarmReactNativeHost.framework with the linked modules and linked against React
+// Native; the app embeds the framework without linking it and loads it when the engine warms, so
+// launching the app loads none of React Native. The app finds this class by name
+// (FarmReactNativeRuntimeClass) and uses it only through FarmReactNativeRuntime.
 #import "FarmReactNative.h"
 
 #import <React/RCTAssert.h>
@@ -466,8 +471,10 @@ static const int64_t FarmLoadTimeoutSeconds = 30;
 
 #pragma mark - Engine
 
-@interface FarmReactNative ()
+@interface FarmReactNative : NSObject <FarmReactNativeRuntime>
 @property (nonatomic, readwrite, nullable) NSString *failure;
+@property (nonatomic, copy, nullable) void (^onFailure)(NSString *reason);
+@property (nonatomic, copy, nullable) void (^onStarted)(void);
 @end
 
 @implementation FarmReactNative {
@@ -483,61 +490,63 @@ static const int64_t FarmLoadTimeoutSeconds = 30;
   id<NSObject> _bundleObserver;
 }
 
-+ (id<FarmReactNativeSession>)session
-{
-  return FarmSession;
-}
-
-+ (void)setSession:(id<FarmReactNativeSession>)session
+- (void)setSession:(id<FarmReactNativeSession>)session
 {
   FarmSession = session;
 }
 
-- (instancetype)initWithBundleURL:(NSURL *)bundleURL dev:(BOOL)dev
+- (instancetype)init
 {
   if (self = [super init]) {
-    _dev = dev;
     _views = [NSMutableDictionary new];
     _pendingCalls = [NSMutableArray new];
-    _delegate = [FarmReactNativeDelegate new];
-    _delegate.farmBundleURL = bundleURL;
-#if FARM_LINKED_MODULES
-    id<RCTDependencyProvider> generated = [RCTAppDependencyProvider new];
-#else
-    id<RCTDependencyProvider> generated = nil;
-#endif
-    __weak FarmReactNativeDelegate *weakDelegate = _delegate;
-    _delegate.dependencyProvider = [[FarmDependencyProvider alloc] initWithProvider:generated
-                                                                            resolve:^Class(NSString *name) {
-                                                                              return [weakDelegate
-                                                                                  getModuleClassFromName:name.UTF8String];
-                                                                            }];
-    __weak FarmReactNative *weakSelf = self;
-    // RCTInstance posts this on the JS thread once the bundle ran (and again after a reload).
-    _bundleObserver = [NSNotificationCenter.defaultCenter addObserverForName:@"RCTInstanceDidLoadBundle"
-                                                                      object:nil
-                                                                       queue:NSOperationQueue.mainQueue
-                                                                  usingBlock:^(NSNotification *note) {
-                                                                    [weakSelf bundleLoaded];
-                                                                  }];
-    _delegate.farmStarted = ^{
-      void (^started)(void) = weakSelf.onStarted;
-      if (started) {
-        started();
-      }
-    };
-    if (!dev) {
-      // A build reports fatal errors to the navigator instead of crashing: open screens show
-      // their web twin, and later opens do too (RFC 0004, decisions: the web twin).
-      RCTSetFatalHandler(^(NSError *error) {
-        [weakSelf fail:error.localizedDescription ?: @"React Native fatal error"];
-      });
-      RCTSetFatalExceptionHandler(^(NSException *exception) {
-        [weakSelf fail:[NSString stringWithFormat:@"%@: %@", exception.name, exception.reason]];
-      });
-    }
   }
   return self;
+}
+
+- (void)setUpWithBundleURL:(NSURL *)bundleURL dev:(BOOL)dev
+{
+  if (_delegate) {
+    return;
+  }
+  _dev = dev;
+  _delegate = [FarmReactNativeDelegate new];
+  _delegate.farmBundleURL = bundleURL;
+#if FARM_LINKED_MODULES
+  id<RCTDependencyProvider> generated = [RCTAppDependencyProvider new];
+#else
+  id<RCTDependencyProvider> generated = nil;
+#endif
+  __weak FarmReactNativeDelegate *weakDelegate = _delegate;
+  _delegate.dependencyProvider = [[FarmDependencyProvider alloc] initWithProvider:generated
+                                                                          resolve:^Class(NSString *name) {
+                                                                            return [weakDelegate
+                                                                                getModuleClassFromName:name.UTF8String];
+                                                                          }];
+  __weak FarmReactNative *weakSelf = self;
+  // RCTInstance posts this on the JS thread once the bundle ran (and again after a reload).
+  _bundleObserver = [NSNotificationCenter.defaultCenter addObserverForName:@"RCTInstanceDidLoadBundle"
+                                                                    object:nil
+                                                                     queue:NSOperationQueue.mainQueue
+                                                                usingBlock:^(NSNotification *note) {
+                                                                  [weakSelf bundleLoaded];
+                                                                }];
+  _delegate.farmStarted = ^{
+    void (^started)(void) = weakSelf.onStarted;
+    if (started) {
+      started();
+    }
+  };
+  if (!dev) {
+    // A build reports fatal errors to the navigator instead of crashing: open screens show
+    // their web twin, and later opens do too (RFC 0004, decisions: the web twin).
+    RCTSetFatalHandler(^(NSError *error) {
+      [weakSelf fail:error.localizedDescription ?: @"React Native fatal error"];
+    });
+    RCTSetFatalExceptionHandler(^(NSException *exception) {
+      [weakSelf fail:[NSString stringWithFormat:@"%@: %@", exception.name, exception.reason]];
+    });
+  }
 }
 
 /// The factory and its host, created on first use.
