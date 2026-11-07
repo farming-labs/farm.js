@@ -240,6 +240,7 @@ describe("@farm.js/mobile/ios", () => {
       "App/FarmBuild.swift",
       "App/Info.plist",
       "App/MobileSession.swift",
+      "App/NativeEngine.swift",
       "App/NativeScreens.swift",
       "App/Navigator.swift",
       "App/Page.swift",
@@ -576,9 +577,11 @@ describe("@farm.js/mobile/ios", () => {
         expect(source).not.toContain("UserDefaults");
       }
     }
-    expect(scene).toContain(
-      "LaunchOptions.read(arguments: ProcessInfo.processInfo.arguments, dev: FarmBuild.dev)",
-    );
+    expect(scene).toContain("let arguments = ProcessInfo.processInfo.arguments");
+    expect(scene).toContain("LaunchOptions.read(arguments: arguments, dev: FarmBuild.dev)");
+    // -FarmOpen, the one option every build reads, only visits a path of the app's own server.
+    expect(scene).toContain("LaunchOpen.read(arguments: arguments)");
+    expect(scene).toContain('path.hasPrefix("/"), !path.hasPrefix("//")');
     expect(scene.match(/ProcessInfo\.processInfo\.arguments/g)).toHaveLength(1);
     // The first statement of read() returns the defaults outside dev builds.
     const read = scene.slice(scene.indexOf("static func read("));
@@ -638,7 +641,7 @@ describe("@farm.js/mobile/ios", () => {
     );
     const screens = files["App/NativeScreens.swift"];
     expect(screens).toContain("Farm does not build page.swift screens yet.");
-    expect(screens).toContain("Farm does not build page.native.tsx screens yet.");
+    expect(screens).toContain("The native screen \\(module) is not in this build.");
     expect(files["App/Page.swift"]).toContain(
       "func webViewWebContentProcessDidTerminate(_ webView: WKWebView)",
     );

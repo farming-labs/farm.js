@@ -258,8 +258,8 @@ screen, and back returns to it.
   support the new architecture (a `codegenConfig` in its `package.json`): one without it, such as
   `react-native-device-info` 15.0.2, fails the command with an error that names the package
   instead of being skipped. The app's own modules in `src/native/` link the same way
-  ([App native modules](/docs/mobile/modules#app-native-modules)). iOS has no React Native host yet, so modules do
-  nothing there. A debug APK with netinfo and an app module, and one with an app module alone,
+  ([App native modules](/docs/mobile/modules#app-native-modules)). iOS links the same packages without CocoaPods
+  ([React Native screens on iOS](/docs/mobile#react-native-screens-on-ios)). A debug APK with netinfo and an app module, and one with an app module alone,
   build and run on an Android 15 emulator.
 - **Runtime.** React Native's new architecture only: Hermes, Fabric, bridgeless. One runtime is
   shared by every native screen, each its own surface. It starts after the first screen shows

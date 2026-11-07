@@ -56,7 +56,10 @@ export interface FarmMobileAppModules {
   specs: FarmMobileAppModuleSpec[];
   /** Absolute paths of the Kotlin files (`*.kt`), linked into the Android app. */
   android: string[];
-  /** Absolute paths of the Swift files (`*.swift`), copied but not built: iOS has no host yet. */
+  /**
+   * Absolute paths of the iOS files (`*.mm`, `*.m`, `*.h`, `*.swift`), built into the iOS app.
+   * A TurboModule is an Objective-C++ class that adopts its Codegen spec's `Native<Name>Spec`.
+   */
   ios: string[];
 }
 
@@ -115,7 +118,7 @@ export function scanFarmMobileAppModules(options: {
     .filter((entry) => entry.endsWith(".kt"))
     .map((entry) => path.join(dir, entry));
   const ios = entries
-    .filter((entry) => entry.endsWith(".swift"))
+    .filter((entry) => /\.(?:mm|m|h|swift)$/.test(entry))
     .map((entry) => path.join(dir, entry));
   if (specs.length === 0 && android.length === 0 && ios.length === 0) return undefined;
   return { dir, specs, android, ios };

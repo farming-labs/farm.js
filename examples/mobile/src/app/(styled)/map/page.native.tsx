@@ -1,6 +1,5 @@
-// The React Native screen for /map (module id app/map) on every OS that does not override it;
-// mobile.native.routes keeps iOS on the web screen. Web builds never read this file: it is not a
-// route, not in the generated route types, and not in any web bundle.
+// The React Native screen for /map (module id app/map) on Android and iOS. Web builds never read
+// this file: it is not a route, not in the generated route types, and not in any web bundle.
 import { useNavigate, useServerQuery } from "@farm.js/native";
 import { useNetInfo } from "@react-native-community/netinfo";
 import { useEffect, useState } from "react";
