@@ -75,6 +75,8 @@ describe("native module specs for web screens", () => {
           params: [{ name: "ms", optional: false, type: { type: "number" } }],
           returns: { type: "void" },
         },
+        // A file by reference: web screens get a /__farm/files/<id> URL, null when cancelled.
+        { name: "pickPhoto", params: [], returns: { type: "string", nullable: true } },
       ],
       unsupported: [],
     });
@@ -235,6 +237,7 @@ export default TurboModuleRegistry.getEnforcing<Spec>("Quiet");
     Device: {
       model(): Promise<string>;
       vibrate(ms: number): Promise<void>;
+      pickPhoto(): Promise<string | null>;
     };
   }
 }`);

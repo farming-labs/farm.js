@@ -51,7 +51,7 @@ farm build                    # --web, the default, unchanged
 | Native-only routes                            | Unreleased                     | `page.native.tsx` with no `page.tsx`: the route exists only in the app, on both OSes, and the web deployment answers it as not found; the shells' error fallback does not read `nativeOnly` yet         |
 | Native islands                                | Planned                        | `mobile.native.islands` is reserved                                                                                                                                                                     |
 | App native modules and `mobile.modules`       | Unreleased, Android            | TurboModules from `src/native/` on React Native screens; generated and Codegen-checked, not yet built into an APK (see [App native modules](/docs/mobile/modules#app-native-modules))                   |
-| Device modules for web screens                | Planned                        | `native.<name>` calls from web screens reject as unavailable                                                                                                                                            |
+| Device modules for web screens                | Unreleased, Android            | `native.<name>` calls to app modules with `web: true`, and large results as [file references](/docs/mobile/modules#files-by-reference); events planned; iOS answers unavailable                         |
 
 ## Requirements
 
@@ -294,7 +294,7 @@ screen owns its errors. An OS file (`page.ios.tsx`) or a platform file alone sti
 ## Portable components (`@farm.js/ui`)
 
 `@farm.js/ui` gives you a small set of primitives — `View`, `Text`, `Image`, `Pressable`,
-`TextInput`, and `List` — that render as **DOM on the web** and, on a mobile **native** screen, as
+`TextInput`, `List`, and `PhotoPicker` — that render as **DOM on the web** and, on a mobile **native** screen, as
 **native views**. The import is the same; the screen tier decides the host. This is the recommended
 way to build a screen you want to work everywhere, because you write it once:
 
@@ -339,6 +339,32 @@ components. Prefer `@farm.js/ui` over importing `react-native` directly: the raw
 Native primitives are the lower-level escape hatch, used inside a hand-written
 [`page.native.tsx`](#the-files-that-make-a-screen) when you need something the portable set does not
 cover.
+
+`PhotoPicker` is an unstyled control (the same token props as `Pressable`) that hands `onPick` a
+photo URL `Image` can show. On the web it is a label around an `accept="image/*"` file input and
+gives an object URL, revoked on the next pick and on unmount. Given `pick`, an app module's method
+that resolves a photo's URL or null, it calls that instead: on a web screen in the Android app
+`native.Device.pickPhoto` returns a [file reference](/docs/mobile/modules#files-by-reference), and
+on a native screen `Device.pickPhoto` returns a `file://` URI. Without `pick` the native build is
+disabled, since React Native has no file input.
+
+```tsx
+// The server render has no shell, so check for the module after hydration.
+const [inApp, setInApp] = useState(false);
+useEffect(() => setInApp(native.Device.available()), []);
+
+<PhotoPicker
+  pick={inApp ? native.Device.pickPhoto : undefined}
+  onPick={setPhoto}
+  padding="sm"
+  radius="md"
+>
+  Choose a photo
+</PhotoPicker>;
+{
+  photo ? <Image src={photo} alt="Your photo" radius="card" /> : null;
+}
+```
 
 ## How a web screen renders
 

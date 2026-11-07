@@ -8,6 +8,11 @@ export interface Spec extends TurboModule {
   model(): Promise<string>;
   /** Vibrates for `ms` milliseconds. */
   vibrate(ms: number): Promise<void>;
+  /**
+   * Opens the system photo picker and resolves with the photo's `file://` URI, or null when the
+   * user backs out. Web screens get it as a `/__farm/files/<id>` URL instead, by reference.
+   */
+  pickPhoto(): Promise<string | null>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>("Device");

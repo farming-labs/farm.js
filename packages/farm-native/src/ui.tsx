@@ -244,6 +244,40 @@ export function Pressable(
   );
 }
 
+/**
+ * The web's `PhotoPicker` as a native button. A native screen has no file input, so it picks
+ * through `pick`, such as an app module's `Device.pickPhoto`; without `pick` it is disabled. The
+ * `file://` URI a module resolves loads in `Image` as is.
+ */
+export function PhotoPicker(
+  props: BoxProps & {
+    children?: ReactNode;
+    onPick: (uri: string) => void;
+    pick?: () => Promise<string | null | undefined>;
+    onError?: (error: unknown) => void;
+    disabled?: boolean;
+    "aria-label"?: string;
+  },
+) {
+  const { pick, onPick, onError } = props;
+  const style = boxStyle(props);
+  return (
+    <NativePressable
+      accessibilityRole="button"
+      accessibilityLabel={props["aria-label"]}
+      disabled={props.disabled === true || !pick}
+      onPress={() => {
+        pick?.().then((uri) => {
+          if (uri) onPick(uri);
+        }, onError);
+      }}
+      style={({ pressed }) => ({ ...style, ...(pressed ? { opacity: 0.6 } : {}) }) as ViewStyle}
+    >
+      {nativeChildren(props.children)}
+    </NativePressable>
+  );
+}
+
 const KEYBOARDS: Record<
   string,
   "default" | "email-address" | "numeric" | "phone-pad" | "url" | "web-search"

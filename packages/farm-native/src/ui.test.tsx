@@ -199,6 +199,34 @@ describe("@farm.js/ui on a native screen", () => {
     expect(onChange).toHaveBeenCalledWith("ada@example.com");
   });
 
+  it("picks a photo through pick, and is disabled without it", async () => {
+    const onPick = vi.fn();
+    const onError = vi.fn();
+    const results = [
+      Promise.resolve("file:///data/user/0/app/cache/farm-files/photo.jpg"),
+      Promise.resolve(null),
+      Promise.reject(new Error("no_activity")),
+    ];
+    const html = render(
+      createElement(
+        ui.PhotoPicker,
+        { pick: () => results.shift()!, onPick, onError, padding: "sm", "aria-label": "photo" },
+        "Choose a photo",
+      ),
+    );
+    expect(html).toContain('data-accessibilityrole="button"');
+    expect(html).toContain('data-disabled="false"');
+    expect(html).toContain("<rn-text>Choose a photo</rn-text>");
+    expect(styleOf(html, "pressable")).toEqual({ padding: 8 });
+    for (let i = 0; i < 3; i++) handlers.photo!.onPress!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onPick.mock.calls).toEqual([["file:///data/user/0/app/cache/farm-files/photo.jpg"]]);
+    expect(onError).toHaveBeenCalledWith(new Error("no_activity"));
+
+    const without = render(createElement(ui.PhotoPicker, { onPick, "aria-label": "no pick" }));
+    expect(without).toContain('data-disabled="true"');
+  });
+
   it("renders List rows through a FlatList, and loads images from the app's server", () => {
     farmApp.server = "https://notes.example.com";
     const notes = [

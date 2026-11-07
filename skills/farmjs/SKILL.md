@@ -185,7 +185,12 @@ Common config fields:
   generation fails), iOS `available()` is false; arguments are checked against the Codegen spec in
   generated Kotlin before the module runs (`invalid_args`, `unknown_method`, `native_error`, or the
   module's own reject code); calls run on the module instance native screens use; types come from
-  the specs into `src/farm.d.ts` (`FarmNativeModules`); no file results or event subscriptions yet
+  the specs into `src/farm.d.ts` (`FarmNativeModules`); large results by reference: the module
+  writes into `FarmFiles.directory(context)` (`cacheDir/farm-files`) and resolves the `file://`
+  URI, the page gets `/__farm/files/<id>` (served by its own WebView, scoped to that page, deleted
+  when the screen closes, passed back as an argument it is the `file://` URI again); `PhotoPicker`
+  from `@farm.js/ui` takes `pick` (such as `native.Device.pickPhoto`) or opens the browser's file
+  input; no event subscriptions yet
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits

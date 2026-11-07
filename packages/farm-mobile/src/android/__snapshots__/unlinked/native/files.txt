@@ -5,6 +5,7 @@ app/src/main/assets/farm-bridge.js
 app/src/main/assets/farm-routes.json
 app/src/main/java/dev/farmjs/mobile/shell/BundledAssets.kt
 app/src/main/java/dev/farmjs/mobile/shell/FarmBridge.kt
+app/src/main/java/dev/farmjs/mobile/shell/FarmFiles.kt
 app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt
 app/src/main/java/dev/farmjs/mobile/shell/MobileSession.kt
 app/src/main/java/dev/farmjs/mobile/shell/NativeEngine.kt

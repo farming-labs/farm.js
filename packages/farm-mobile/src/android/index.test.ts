@@ -148,6 +148,7 @@ describe("@farm.js/mobile/android", () => {
       "app/src/main/assets/farm-routes.json",
       "app/src/main/java/dev/farmjs/mobile/shell/BundledAssets.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/FarmBridge.kt",
+      "app/src/main/java/dev/farmjs/mobile/shell/FarmFiles.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/MobileSession.kt",
       "app/src/main/java/dev/farmjs/mobile/shell/NativeEngine.kt",
@@ -259,6 +260,41 @@ describe("@farm.js/mobile/android", () => {
     // Malformed messages are dropped instead of throwing on the main thread.
     expect(bridge).not.toMatch(/message\.get(String|Int)\(/);
     expect(bridge).toContain('if (dev) Log.i(TAG, "call #');
+  });
+
+  it("hands web screens module files by reference, served only to the page that got them", async () => {
+    const files = await generated(context());
+    const shell = (name: string) => files[`app/src/main/java/dev/farmjs/mobile/shell/${name}`]!;
+    const store = shell("FarmFiles.kt");
+    // Only files inside cacheDir/farm-files become references, after resolving `..` and links.
+    expect(store).toContain('File(context.cacheDir, "farm-files")');
+    expect(store).toContain("File(path).canonicalFile");
+    expect(store).toContain("it.path.startsWith(root + File.separator) && it.isFile");
+    // Unguessable ids, one store per page, and a reference never goes to the server.
+    expect(store).toContain("ByteArray(16).also(random::nextBytes)");
+    expect(store).toContain("private val random = SecureRandom()");
+    expect(store).toContain('Regex("^/__farm/files/([A-Za-z0-9_-]{22})$")');
+    expect(store).toContain("if (!config.isAppUrl(url)) return null");
+    expect(store).toContain('if (request.method != "GET" || file == null) return notFound()');
+    expect(store).toContain('"Cache-Control" to "no-store"');
+    // A page passes back only references it received.
+    expect(store).toContain('"$value is not a file this screen received."');
+    // Answers that arrive after the page closed get no reference.
+    expect(store).toContain("is String -> if (closed) value else");
+
+    const bridge = shell("FarmBridge.kt");
+    expect(bridge).toContain("val files = FarmFiles(webView.context, config)");
+    expect(bridge).toContain("plugin.callAsync(method, files.resolve(args), webView, result)");
+    // Rejections pass through untouched.
+    expect(bridge).toContain("val value = if (ok) files.share(answer) else answer");
+
+    const page = shell("Page.kt");
+    expect(page).toContain("bridge.files.respond(request) ?: bundle?.respond(request)");
+    expect(page.indexOf("bridge.files.close()")).toBeGreaterThan(page.indexOf("fun destroy()"));
+    expect(page.indexOf("bridge.files.close()")).toBeLessThan(page.indexOf("webView.destroy()"));
+    expect(shell("MainActivity.kt")).toContain("FarmFiles.clearStale(this)");
+    // The page shell view runs no scripts and never gets references.
+    expect(page.match(/bridge\.files\.respond/g)).toHaveLength(1);
   });
 
   it("keeps the device session in a Keystore-encrypted store and never hands it to a WebView", async () => {
@@ -1665,6 +1701,7 @@ class KitchenModule(reactContext: ReactApplicationContext) : NativeKitchenSpec(r
       expect(calls.map((call) => `${call[1]}.${call[2]}`)).toEqual([
         "NativeDeviceSpec.model",
         "NativeDeviceSpec.vibrate",
+        "NativeDeviceSpec.pickPhoto",
         "NativeKitchenSpec.scalars",
         "NativeKitchenSpec.shapes",
         "NativeKitchenSpec.optional",

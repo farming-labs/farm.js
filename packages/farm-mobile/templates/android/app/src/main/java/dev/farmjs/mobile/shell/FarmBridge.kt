@@ -69,6 +69,9 @@ class FarmBridge(
     script: String,
 ) {
     var listener: BridgeListener? = null
+
+    /** Files this page received by reference; served by [Page] and closed with it. */
+    val files = FarmFiles(webView.context, config)
     private val main = Handler(Looper.getMainLooper())
     private val fallbackScript: String?
 
@@ -183,7 +186,8 @@ class FarmBridge(
             return
         }
         try {
-            plugin.callAsync(method, args, webView, result)
+            // File references this page received go back to the module as its own file:// URIs.
+            plugin.callAsync(method, files.resolve(args), webView, result)
         } catch (error: FarmCallException) {
             result.reject(error.code, error.message ?: error.code)
         } catch (error: Exception) {
@@ -191,8 +195,10 @@ class FarmBridge(
         }
     }
 
-    private fun respond(id: Int, doc: String?, call: String, args: Any?, started: Long, ok: Boolean, value: Any?) {
+    private fun respond(id: Int, doc: String?, call: String, args: Any?, started: Long, ok: Boolean, answer: Any?) {
         val ms = (System.nanoTime() - started) / 1e6
+        // A file:// URI in farm-files reaches the page as a /__farm/files/<id> reference.
+        val value = if (ok) files.share(answer) else answer
         if (dev) Log.i(TAG, "call #$id $call($args) ok=$ok -> $value (${"%.2f".format(ms)} ms native)")
         val payload = when (value) {
             null -> "null"
