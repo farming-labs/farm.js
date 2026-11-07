@@ -14,6 +14,7 @@
 import {
   resolveFarmNativeDeclaration,
   splitFarmCssDeclarations,
+  substituteFarmNativeVars as substitute,
   type FarmNativeStyle,
 } from "./native-style";
 
@@ -316,25 +317,6 @@ function matches(selector: Selector, element: FarmNativeCssElement): boolean {
     }
   };
   return step(0, element);
-}
-
-/** Replace `var(--x, fallback)` with the stylesheet's value, or `undefined` if one is missing. */
-function substitute(value: string, vars: Record<string, string>, depth = 0): string | undefined {
-  if (!value.includes("var(")) return value;
-  if (depth > 8) return undefined;
-  let missing = false;
-  const replaced = value.replace(
-    /var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\))?[^()]*))?\)/g,
-    (_, name: string, fallback?: string) => {
-      const resolved = vars[name] ?? fallback?.trim();
-      if (resolved === undefined) {
-        missing = true;
-        return "";
-      }
-      return resolved;
-    },
-  );
-  return missing ? undefined : substitute(replaced, vars, depth + 1);
 }
 
 /**

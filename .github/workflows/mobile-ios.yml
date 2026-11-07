@@ -1,8 +1,9 @@
 name: Mobile iOS
 
-# Builds examples/mobile's iOS shell with Xcode and runs it on an iOS simulator. A Mac with Xcode
-# is the only place the generated Xcode project can be checked, so this runs on GitHub's macOS
-# runners when the mobile shell, its config, or the example changes, and on demand.
+# Builds each mobile example's iOS shell with Xcode and runs it on an iOS simulator: examples/mobile
+# (Field Notes, the complete example) and examples/mobile-minimal (Trail Guide, the zero-native-code
+# path). A Mac with Xcode is the only place the generated Xcode project can be checked, so this runs
+# on GitHub's macOS runners when the mobile shell, its config, or an example changes, and on demand.
 on:
   workflow_dispatch:
   pull_request:
@@ -11,6 +12,7 @@ on:
       - "packages/farm/src/mobile/**"
       - "packages/farm-cli/src/mobile*.ts"
       - "examples/mobile/**"
+      - "examples/mobile-minimal/**"
       - ".github/workflows/mobile-ios.yml"
 
 permissions:
@@ -22,9 +24,20 @@ concurrency:
 
 jobs:
   ios-simulator:
-    name: iOS simulator
+    name: iOS simulator (${{ matrix.example }})
     runs-on: macos-15
     timeout-minutes: 45
+    strategy:
+      # One example's failure keeps the other's evidence.
+      fail-fast: false
+      matrix:
+        include:
+          - example: mobile
+            app-id: dev.farmjs.examples.fieldnotes
+            server-routes: "/"
+          - example: mobile-minimal
+            app-id: dev.farmjs.examples.trailguide
+            server-routes: "/ /trails/[id]"
     steps:
       - run: echo "EVIDENCE=$RUNNER_TEMP/ios-evidence" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -39,6 +52,7 @@ jobs:
           pnpm --filter @farm.js/cli build
           pnpm --filter @farm.js/mobile build
           pnpm --filter @farm.js/native build
+          pnpm --filter @farm.js/ui build
         env:
           NODE_OPTIONS: --max-old-space-size=12288
 
@@ -49,9 +63,10 @@ jobs:
           xcrun simctl list runtimes | tee "$EVIDENCE/runtimes.txt"
 
       - name: Build the production project with xcodebuild
-        working-directory: examples/mobile
+        working-directory: examples/${{ matrix.example }}
         env:
           FIELD_NOTES_SERVER: https://field-notes.farmjs.dev
+          TRAIL_GUIDE_SERVER: https://trail-guide.farmjs.dev
         run: pnpm exec farm build --mobile --os ios 2>&1 | tee "$EVIDENCE/farm-build-ios.txt"
 
       - name: Boot an iPhone simulator
@@ -65,7 +80,7 @@ jobs:
           xcrun simctl list devices booted | tee "$EVIDENCE/booted.txt"
 
       - name: Run the shell with farm dev --mobile --os ios
-        working-directory: examples/mobile
+        working-directory: examples/${{ matrix.example }}
         run: |
           pnpm exec farm dev --mobile --os ios --port 3001 > "$EVIDENCE/farm-dev-ios.txt" 2>&1 &
           echo "FARM_DEV_PID=$!" >> "$GITHUB_ENV"
@@ -79,8 +94,10 @@ jobs:
           grep -q "Opened .* on " "$EVIDENCE/farm-dev-ios.txt"
 
       - name: Capture the running app
+        env:
+          APP_ID: ${{ matrix.app-id }}
         run: |
-          xcrun simctl listapps "$SIMULATOR_UDID" | grep -A3 dev.farmjs.examples.fieldnotes | tee "$EVIDENCE/installed.txt"
+          xcrun simctl listapps "$SIMULATOR_UDID" | grep -A3 -F "$APP_ID" | tee "$EVIDENCE/installed.txt"
           # The first document loads from farm dev over the simulator's shared network; take one
           # screenshot right away and more as the page settles, so a slow first load still shows.
           for t in 0 10 30; do
@@ -92,10 +109,14 @@ jobs:
           grep -iE "error|fault|crash" "$EVIDENCE/app-log.txt" | head -50 || true
 
       - name: Check the home tab drew native views
-        working-directory: examples/mobile
+        working-directory: examples/${{ matrix.example }}
+        env:
+          SERVER_ROUTES: ${{ matrix.server-routes }}
         run: |
           cp .farm/output/mobile/farm-routes.json "$EVIDENCE/farm-routes.json"
-          node scripts/check-ios-native.mjs "$EVIDENCE"
+          # Split the routes into arguments without globbing: /trails/[id] is a route, not a pattern.
+          set -f
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/check-ios-native.mjs" "$EVIDENCE" $SERVER_ROUTES
 
       - name: Stop the dev server
         if: always()
@@ -106,6 +127,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: mobile-ios-${{ github.sha }}
+          name: mobile-ios-${{ matrix.example }}-${{ github.sha }}
           path: ${{ runner.temp }}/ios-evidence
           if-no-files-found: warn
