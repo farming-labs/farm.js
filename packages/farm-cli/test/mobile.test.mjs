@@ -508,6 +508,8 @@ test("farm build --mobile builds the mobile client apart from the web output and
 /**
  * Every file of a Node build output by its path, as a content hash. Nitro's build date and the
  * dates in its public asset table differ from build to build, so those two files count by name.
+ * The asset table lives in the built server, which `node-server` emits beside the compile-cache
+ * launcher; `server/index.mjs` is that launcher and is hashed, so a build stays reproducible.
  * The text of the app's own code is kept to show where two builds differ.
  */
 async function snapshot(dir) {
@@ -517,7 +519,7 @@ async function snapshot(dir) {
     if (!entry.isFile()) continue;
     const file = path.join(entry.parentPath, entry.name);
     const name = path.relative(dir, file).split(path.sep).join("/");
-    if (["nitro.json", "server/index.mjs"].includes(name)) {
+    if (["nitro.json", "server/farm-server.mjs"].includes(name)) {
       files[name] = "dated";
       continue;
     }
