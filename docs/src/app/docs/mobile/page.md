@@ -48,6 +48,7 @@ farm build                    # --web, the default, unchanged
 | Server components apps                        | Unreleased                     | Both engines get the mobile client; islands mode also gets device tokens, the RSC pipeline does not (see [Bundled client assets](#bundled-client-assets)); no page shells yet                           |
 | Platform screens (`page.kt`, `page.swift`)    | Planned                        | Show a placeholder                                                                                                                                                                                      |
 | Native `@farm.js/ui`                          | Unreleased, Android            | React Native views on native screens and generated ports; tokens resolve to the web defaults; run in tests, not yet on a device (see [Portable components](#portable-components-farmjsui))              |
+| Native-only routes                            | Unreleased                     | `page.native.tsx` with no `page.tsx`: the route exists only in the app, on both OSes, and the web deployment answers it as not found; the shells' error fallback does not read `nativeOnly` yet         |
 | Native islands                                | Planned                        | `mobile.native.islands` is reserved                                                                                                                                                                     |
 | App native modules and `mobile.modules`       | Unreleased, Android            | TurboModules from `src/native/` on React Native screens; generated and Codegen-checked, not yet built into an APK (see [App native modules](#app-native-modules))                                       |
 | Device modules for web screens                | Planned                        | `native.<name>` calls from web screens reject as unavailable                                                                                                                                            |
@@ -267,15 +268,22 @@ tint, whether the tab bar shows. It styles the native frame, not the page conten
 
 ### Which file should I use?
 
-| You want…                                                  | Add this                            |
-| ---------------------------------------------------------- | ----------------------------------- |
-| the normal case: one page for web and mobile               | just `page.tsx`                     |
-| a native-feeling screen, written in React                  | `page.native.tsx`                   |
-| that native screen, but different per platform             | `page.ios.tsx` / `page.android.tsx` |
-| a fully native screen (platform APIs, maximum performance) | `page.kt` / `page.swift`            |
+| You want…                                                  | Add this                              |
+| ---------------------------------------------------------- | ------------------------------------- |
+| the normal case: one page for web and mobile               | just `page.tsx`                       |
+| a native-feeling screen, written in React                  | `page.native.tsx`                     |
+| that native screen, but different per platform             | `page.ios.tsx` / `page.android.tsx`   |
+| a fully native screen (platform APIs, maximum performance) | `page.kt` / `page.swift`              |
+| an app-only screen, with no web version at all             | `page.native.tsx` alone (native-only) |
 
-Whatever you add, `page.tsx` stays: it is the web version of the route and the fallback if the native
-screen cannot load (the "web twin"). A native file with no `page.tsx` next to it is a build error.
+Whatever you add, `page.tsx` usually stays: it is the web version of the route and the fallback if
+the native screen cannot load (the "web twin"). The one exception is a **native-only route**
+([RFC 0004](https://github.com/farming-labs/farm.js/blob/main/rfcs/0004-platforms.md)): a
+`page.native.tsx` with no `page.tsx` next to it, for a screen that has no web audience. The route
+then exists only in mobile builds, on both OSes — it is not in the web route types, not in any web
+bundle, and the web deployment answers it like any unknown path — and it has no web twin, so the
+screen owns its errors. An OS file (`page.ios.tsx`) or a platform file alone still needs a
+`page.tsx`, since the route would be missing on the other OS.
 
 > **Heads up:** most of the native screens above are designed but **not built yet**.
 > `page.native.tsx` runs as a React Native screen only under `farm dev --mobile` on an Android
@@ -536,7 +544,9 @@ A route's tier is decided at build time. The first source that decides wins, per
 ### Files
 
 The files in a route folder ([The files that make a screen](#the-files-that-make-a-screen)) select
-the tier. `page.tsx` is required; a native file without one is an error, and so is a React Native
+the tier. A `page.native.tsx` with no `page.tsx` makes the route
+[native-only](#the-files-that-make-a-screen); any other native file without a `page.tsx` is an
+error, and so is a React Native
 file and a platform file for the same route and OS. Web and desktop builds never resolve these
 files: they are not routes, not in the generated route types, and not in any web bundle.
 `src/native/` holds the app's own native modules ([App native modules](#app-native-modules)).

@@ -91,6 +91,8 @@ const ANDROID = {
   },
   "/stations/[id]": { presentation: "push", screen: "web", source: "default" },
   "/map": { presentation: "push", screen: "native", source: "config", module: "app/map" },
+  // A native-only route: page.native.tsx with no page.tsx (RFC 0004, 7.3).
+  "/kit": { presentation: "push", screen: "native", source: "file", module: "app/kit", nativeOnly: true },
   "/camera": { presentation: "push", screen: "native", source: "file", module: "app/camera" },
   "/settings/device": {
     presentation: "push",
@@ -161,6 +163,10 @@ const ios = await readJson("farm-routes.json");
 const iosRule = (route) => ios.rules.find((entry) => entry.route === route);
 expect(iosRule("/map")?.screen === "web" && iosRule("/map")?.source === "config", "ios /map is web");
 expect(iosRule("/camera")?.screen === "native", "ios /camera is native");
+expect(
+  iosRule("/kit")?.screen === "native" && iosRule("/kit")?.nativeOnly === true,
+  "ios /kit is native-only",
+);
 expect((await readJson("native-report.json")).routes.find((entry) => entry.route === "/camera")?.file === "src/app/(styled)/camera/page.native.tsx", "ios camera file");
 // page.kt is Android only; on iOS its page.tsx passes the native-tier check.
 expect(iosRule("/settings/device")?.screen === "server", "ios /settings/device is a server screen");
@@ -173,6 +179,7 @@ expect(iosRule("/lab/packing")?.screen === "web", "ios /lab/packing is web");
 await run(["build"]);
 const leaks = [
   "MapScreen",
+  "KitScreen",
   "CameraScreen",
   "AndroidCameraScreen",
   "DeviceScreen",
@@ -271,6 +278,8 @@ try {
   const feed = await (await fetch(`${origin}/feed`)).text();
   expect((feed.match(/Observation \d+/g) ?? []).length === 240, "/feed renders 240 rows");
   expect((await fetch(`${origin}/stations/nope`)).status === 404, "an unknown station is a 404");
+  // A native-only route has no web page: the web deployment answers it like any unknown path.
+  expect((await fetch(`${origin}/kit`)).status === 404, "a native-only route is not a web route");
   // What the /map native screen lists.
   const stations = await (await fetch(`${origin}/api/stations`)).json();
   expect(

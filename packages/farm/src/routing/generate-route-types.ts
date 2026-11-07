@@ -195,6 +195,11 @@ export interface ScannedPlatformRoutePatterns extends ScannedRoutePatterns {
   nativePages: Map<string, PlatformRouteFiles>;
   /** Reserved `layout.native.tsx` files per app directory, such as `/(tabs)`, absolute paths. */
   nativeLayouts: Map<string, PlatformRouteFiles>;
+  /**
+   * Patterns whose only page is a `page.native.tsx` (RFC 0004, 7.3): native-only routes, in
+   * mobile builds only, with no web page and no web fallback. Always a subset of `nativePages`.
+   */
+  nativeOnlyPages: Set<string>;
 }
 
 const PLATFORM_FILE =
@@ -276,17 +281,28 @@ export async function scanRoutePatterns(
   }
 
   if (!options.platformFiles) return { pages, modules };
+  const nativeOnlyPages = new Set<string>();
   for (const [pattern, files] of nativePages) {
-    if (!pages.has(pattern)) {
-      const file = path.relative(root, Object.values(files)[0]!);
-      throw new Error(
-        `${file.replace(/\\/g, "/")} has no web page next to it. Add ${path
-          .join(path.dirname(file), "page.tsx")
-          .replace(/\\/g, "/")}: it is the route's web screen and the fallback on every platform.`,
-      );
+    if (pages.has(pattern)) continue;
+    // A React Native page with no page.tsx is a native-only route (RFC 0004, 7.3): it exists in
+    // mobile builds only, with no web page and no web fallback. `page.native.tsx` covers both
+    // OSes; an OS or platform file alone would leave the route missing on the other OS, which
+    // the shells' route config cannot express yet, so those still need a web page.
+    if (files.native) {
+      nativeOnlyPages.add(pattern);
+      continue;
     }
+    const file = path.relative(root, Object.values(files)[0]!);
+    const dir = path.dirname(file);
+    throw new Error(
+      `${file.replace(/\\/g, "/")} has no web page next to it. Add ${path
+        .join(dir, "page.tsx")
+        .replace(/\\/g, "/")} (the route's web screen and fallback), or ${path
+        .join(dir, "page.native.tsx")
+        .replace(/\\/g, "/")} to make the route native-only on both OSes.`,
+    );
   }
-  return { pages, modules, pageFiles, nativePages, nativeLayouts };
+  return { pages, modules, pageFiles, nativePages, nativeLayouts, nativeOnlyPages };
 }
 
 function scanPlatformRouteFiles(

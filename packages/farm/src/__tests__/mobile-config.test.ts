@@ -987,10 +987,31 @@ ${PAGE}`,
     ).rejects.toThrow(/src\/app\/notes\/page\.tsx: mobile\.presentation does not apply to a tab/);
   });
 
-  it("needs a web page next to every native page and one file per platform", async () => {
-    const lonely = await createApp({ "src/app/inbox/page.native.tsx": PAGE });
-    await expect(screensOf(lonely, userConfig())).rejects.toThrow(
-      /src\/app\/inbox\/page\.native\.tsx has no web page next to it\. Add src\/app\/inbox\/page\.tsx/,
+  it("accepts native-only routes from page.native.tsx, on both OSes, off the web", async () => {
+    const root = await createApp({ "src/app/inbox/page.native.tsx": PAGE });
+    for (const os of ["android", "ios"] as const) {
+      expect((await screensOf(root, userConfig(), os))["/inbox"]).toMatchObject({
+        screen: "native",
+        source: "file",
+        file: "src/app/inbox/page.native.tsx",
+        module: "app/inbox",
+        nativeOnly: true,
+      });
+    }
+    // The web route scan never sees the route: no web page, no web route types.
+    const web = await scanRoutePatterns({ root });
+    expect(web.pages.has("/inbox")).toBe(false);
+    // Demoting a native-only route to web would point at a page that does not exist.
+    await expect(
+      screensOf(root, userConfig({ routes: { "/inbox": { screen: "web" } } })),
+    ).rejects.toThrow(/"\/inbox" is native-only/);
+  });
+
+  it("still needs a web page next to lone OS and platform files, and one file per platform", async () => {
+    // page.ios.tsx or page.swift alone would leave the route missing on the other OS.
+    const ios = await createApp({ "src/app/inbox/page.ios.tsx": PAGE });
+    await expect(screensOf(ios, userConfig())).rejects.toThrow(
+      /src\/app\/inbox\/page\.ios\.tsx has no web page next to it\. Add src\/app\/inbox\/page\.tsx .*or src\/app\/inbox\/page\.native\.tsx to make the route native-only/,
     );
     const swift = await createApp({ "src/app/inbox/page.swift": "" });
     await expect(screensOf(swift, userConfig())).rejects.toThrow(

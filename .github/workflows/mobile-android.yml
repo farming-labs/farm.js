@@ -1,0 +1,156 @@
+name: Mobile Android
+
+# Builds examples/mobile's Android app with Gradle and runs it on an Android emulator, the same
+# evidence the Mobile iOS workflow keeps for the iOS shell: the APK builds, the app launches, the
+# home route draws native content, and the log holds no fatal error. Ubuntu runners have the
+# Android SDK preinstalled and KVM available, so this needs no third-party action.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packages/farm-mobile/**"
+      - "packages/farm/src/mobile/**"
+      - "packages/farm-cli/src/mobile*.ts"
+      - "examples/mobile/**"
+      - ".github/workflows/mobile-android.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-emulator:
+    name: Android emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AVD_IMAGE: system-images;android-35;google_apis;x86_64
+    steps:
+      - run: echo "EVIDENCE=$RUNNER_TEMP/android-evidence" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+          pnpm --filter @farm.js/mobile build
+          pnpm --filter @farm.js/native build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install the emulator and system image
+        run: |
+          mkdir -p "$EVIDENCE"
+          SDK="${ANDROID_HOME:?The runner image should set ANDROID_HOME}"
+          # avdmanager (Java) and the emulator binary can disagree about the AVD home on the
+          # runner; one explicit directory for both ends the argument.
+          echo "ANDROID_AVD_HOME=$RUNNER_TEMP/avd" >> "$GITHUB_ENV"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          MANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$MANAGER" --licenses > /dev/null || true
+          "$MANAGER" "platform-tools" "platforms;android-35" "emulator" "$AVD_IMAGE" \
+            | grep -v '%' | tee "$EVIDENCE/sdkmanager.txt"
+          echo "no" | "$SDK/cmdline-tools/latest/bin/avdmanager" create avd \
+            --name farm --package "$AVD_IMAGE" --device pixel_7 --force
+          "$SDK/emulator/emulator" -list-avds | tee "$EVIDENCE/avds.txt"
+          grep -qx "farm" "$EVIDENCE/avds.txt"
+
+      - name: Build the APK with farm build --mobile --apk
+        working-directory: examples/mobile
+        env:
+          FIELD_NOTES_SERVER: https://field-notes.farmjs.dev
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          pnpm exec farm build --mobile --apk 2>&1 | tee "$EVIDENCE/farm-build-android.txt"
+
+      - name: Boot the emulator
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          "$ANDROID_HOME/emulator/emulator" -avd farm -no-window -no-audio -no-boot-anim \
+            -no-snapshot -no-metrics -camera-back none -camera-front none \
+            -gpu swiftshader_indirect > "$EVIDENCE/emulator.txt" 2>&1 &
+          EMULATOR_PID=$!
+          # Fail with the emulator's own output instead of hanging when it dies at startup.
+          if ! timeout 420 "$ADB" wait-for-device; then
+            echo "::error::The emulator never registered with adb."
+            tail -50 "$EVIDENCE/emulator.txt"
+            exit 1
+          fi
+          boot=""
+          for _ in $(seq 1 90); do
+            kill -0 "$EMULATOR_PID" 2>/dev/null || { tail -50 "$EVIDENCE/emulator.txt"; exit 1; }
+            boot=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            [ "$boot" = "1" ] && break
+            sleep 5
+          done
+          if [ "$boot" != "1" ]; then
+            echo "::error::The emulator did not finish booting."
+            tail -50 "$EVIDENCE/emulator.txt"
+            exit 1
+          fi
+          "$ADB" devices | tee "$EVIDENCE/devices.txt"
+          "$ADB" logcat -c || true
+
+      - name: Run the shell with farm dev --mobile
+        working-directory: examples/mobile
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          pnpm exec farm dev --mobile --port 3001 > "$EVIDENCE/farm-dev-android.txt" 2>&1 &
+          echo "FARM_DEV_PID=$!" >> "$GITHUB_ENV"
+          # The CLI builds, installs and launches the app, then prints "Opened <name> on <serial>."
+          for _ in $(seq 1 180); do
+            grep -q "Opened .* on " "$EVIDENCE/farm-dev-android.txt" && break
+            if grep -qE "gradlew .* exited|Error:" "$EVIDENCE/farm-dev-android.txt"; then break; fi
+            sleep 5
+          done
+          cat "$EVIDENCE/farm-dev-android.txt"
+          grep -q "Opened .* on " "$EVIDENCE/farm-dev-android.txt"
+
+      - name: Capture the running app
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          # The first document loads from farm dev on the host; screenshot right away and as the
+          # page settles, so a slow first load still shows.
+          for t in 0 10 30; do
+            sleep "$t"
+            "$ADB" exec-out screencap -p > "$EVIDENCE/home-${t}s.png"
+          done
+          "$ADB" shell dumpsys activity activities | grep -i fieldnotes | head -5 \
+            | tee "$EVIDENCE/activity.txt" || true
+          "$ADB" logcat -d > "$EVIDENCE/logcat-full.txt"
+          "$ADB" logcat -d -s FarmShell:V AndroidRuntime:E > "$EVIDENCE/app-log.txt"
+          grep -iE "FATAL|crash" "$EVIDENCE/app-log.txt" | head -20 || true
+
+      - name: Check the home route drew native content
+        working-directory: examples/mobile
+        run: |
+          cp .farm/output/mobile/farm-routes.json "$EVIDENCE/farm-routes.json"
+          node scripts/check-android-native.mjs "$EVIDENCE"
+
+      - name: Stop the dev server
+        if: always()
+        run: |
+          if [ -n "${FARM_DEV_PID:-}" ]; then kill "$FARM_DEV_PID" 2>/dev/null || true; fi
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mobile-android-${{ github.sha }}
+          path: ${{ runner.temp }}/android-evidence
+          if-no-files-found: warn
