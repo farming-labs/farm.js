@@ -50,6 +50,19 @@ describe("generated server action security", () => {
     );
   });
 
+  it("hands API routes a clone that cannot cancel the action's request body", () => {
+    const entry = generateRscEntry(context);
+
+    // A plain clone, once collected, cancels the original's unread body on the undici in
+    // Node 22.13 to 22.20, so the server action that reads the original after a declined API
+    // match would see an empty or already-used body.
+    expect(entry).toContain("await handleAPIRequest(cloneFarmRequestWithContext(request))");
+    expect(entry).toMatch(
+      /import \{[^}]*\bcloneFarmRequestWithContext\b[^}]*\} from '@farm\.js\/core\/internal\/production-runtime'/,
+    );
+    expect(entry).not.toContain("request.clone()");
+  });
+
   it("validates and bounds requests before decoding or executing actions", () => {
     const entry = generateRscEntry(context);
 
@@ -186,7 +199,7 @@ describe("generated server action security", () => {
     const actionValidation = entry.indexOf("validateServerActionRequest(request");
     const middleware = entry.indexOf("const middlewareResult = await executeMiddleware(request");
     const apiDispatch = entry.indexOf(
-      "const apiResponse = await handleAPIRequest(request.clone())",
+      "const apiResponse = await handleAPIRequest(cloneFarmRequestWithContext(request))",
     );
     const actionDecode = entry.indexOf("await prepareServerActionRequest(");
     expect(apiClassification).toBeGreaterThan(-1);

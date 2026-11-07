@@ -120,7 +120,7 @@ ${ctx.mobileClient === "entry" ? "import { _applyFarmMobileShellClient } from '@
   matchAPIRouteAtBasePath,
 } from '@farm.js/core/api/runtime';
 import { _runWithAfterRequest } from '@farm.js/core/after';
-import { _runWithAPIRequestRuntime, _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
+import { _runWithAPIRequestRuntime, _runWithCurrentRequest, cloneFarmRequestWithContext, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 import { getFarmRedirectError, isFarmNotFoundError } from '@farm.js/core/internal/production-runtime';
 import {
   parseRoutePath,
@@ -912,7 +912,9 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
     if (imageResponse) return imageResponse;
   }
 
-  const apiResponse = await handleAPIRequest(request.clone());
+  // A plain clone of the request would let some undici versions cancel the original's body when the
+  // declined clone is collected, before a server action reads it.
+  const apiResponse = await handleAPIRequest(cloneFarmRequestWithContext(request));
   if (apiResponse) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }

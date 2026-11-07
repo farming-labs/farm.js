@@ -114,7 +114,7 @@ describe("RSC llms.txt", () => {
   it("answers after middleware and API routes", () => {
     const entry = generateRscEntry({ ...context, llmsTxt: resolveFarmLlmsTxtConfig(true) });
     const middleware = entry.indexOf("await executeMiddleware(request, context)");
-    const api = entry.indexOf("await handleAPIRequest(request.clone())");
+    const api = entry.indexOf("await handleAPIRequest(cloneFarmRequestWithContext(request))");
     const llms = entry.indexOf("await handleFarmLlmsTxtRequest(request, context)");
     expect(middleware).toBeGreaterThan(-1);
     expect(llms).toBeGreaterThan(api);
