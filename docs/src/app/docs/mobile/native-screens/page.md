@@ -35,7 +35,9 @@ shell ◀── { root: { type: "View", children: [...] } } ──────�
   browser gets them (in production, the client CSS the build embedded), and cascades their rules:
   type, class, id, and attribute selectors, compounds, descendant, child, and sibling combinators,
   `:first-child` and `:last-child`, specificity and source order, `:root` variables with `var()`,
-  and `@media (prefers-color-scheme: dark)`. Shorthands such as `margin: 8px 0 4px` and
+  and `@media (prefers-color-scheme: dark)`. Inline `style` attributes read the same variables,
+  then their fallback, so `@farm.js/ui` color tokens (`var(--farm-color-muted, #6b7280)`) draw
+  natively and follow a dark `:root` value. Shorthands such as `margin: 8px 0 4px` and
   `border: 1px solid var(--border)` expand, and `background: none` or its minified `0 0` clears the
   color; `:hover` and `:focus` rules never match a static
   screen; `body` passes its text styles down and gives the screen its background. Rules in

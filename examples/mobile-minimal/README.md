@@ -29,6 +29,12 @@ The home page sets `export const mobile = { native: true }`, so if an edit ever 
 unportable the build fails and names the blocker instead of quietly going web. The other routes
 let the analyzer decide (`native.auto: "on"` in `farm.config.ts`).
 
+The Mobile Android and Mobile iOS workflows build this example and launch it on an emulator and a
+simulator, next to [`examples/mobile`](../mobile). Each run checks that `/` and `/trails/[id]` are
+`server` screens and that the home screen drew native views without a web fallback, and keeps
+`farm-routes.json`, the shell log, and home-screen screenshots as the `mobile-*-mobile-minimal-*`
+artifact.
+
 ## What this example is for
 
 - The authoring model's happy path: `page.tsx` is the web page, the mobile web screen, and —
