@@ -7,8 +7,8 @@
  * if (native.Device.available()) console.log(await native.Device.model());
  * ```
  *
- * A call goes through the mobile shell's bridge to the module's Kotlin class, which checks the
- * arguments against the module's Codegen spec before the module runs. Only modules with
+ * A call goes through the mobile shell's bridge, which checks the arguments against the module's
+ * Codegen spec, to the module's Kotlin or Objective-C++ class. Only modules with
  * `mobile.modules.<name>.web: true` are reachable, and only their methods that return a Promise.
  * In a browser, during server rendering, or in a shell without the module, every call rejects with
  * `NativeUnavailableError`. Nothing here imports React Native.
@@ -42,9 +42,9 @@ interface FarmNativeBridge {
 const UNAVAILABLE = "native_unavailable";
 
 /**
- * A call that cannot reach the module: outside the mobile shell, during server rendering, in a
- * shell built without the module for web screens, or on an OS whose shell does not host modules
- * yet (iOS). `native.<module>.available()` is false in each of these cases.
+ * A call that cannot reach the module: outside the mobile shell, during server rendering, or in a
+ * shell built without the module for web screens (on iOS, also an app without a React Native
+ * screen). `native.<module>.available()` is false in each of these cases.
  */
 export class NativeUnavailableError extends Error {
   override name = "NativeUnavailableError";
@@ -57,7 +57,7 @@ export class NativeUnavailableError extends Error {
   constructor(module: string, method: string, options?: { cause?: unknown }) {
     super(
       `native.${module}.${method}() is not available here. Web screens reach a native module ` +
-        `only inside the Android shell, when mobile.modules.${module}.web is true in ` +
+        `only inside the mobile shell, when mobile.modules.${module}.web is true in ` +
         `farm.config.ts. Check native.${module}.available() first, and show the web ` +
         "alternative when it is false.",
     );

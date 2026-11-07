@@ -8,6 +8,7 @@ import type { MobileGeneratedFile, MobileShellContext } from "@farm.js/core/mobi
 import { createBridgeScript } from "../shared/bridge.js";
 import { createPageShellFiles } from "../shared/shells.js";
 import { IOS_MODULES_DIR, resolveIosAutolinking } from "./autolinking.js";
+import { createIosWebModules } from "./web-modules.js";
 import {
   IOS_REACT_NATIVE_DIR,
   IOS_REACT_NATIVE_FRAMEWORKS,
@@ -844,6 +845,12 @@ export async function createIosProject(
   }
   const linking = await resolveIosAutolinking(context);
   if (linking) files.push(...linking.files);
+  // Web screens' calls to app modules with mobile.modules.<name>.web; nothing without one.
+  const webModules = createIosWebModules(context, files);
+  if (webModules.length > 0) {
+    const replaced = new Set(webModules.map((file) => file.path));
+    files = [...files.filter((file) => !replaced.has(file.path)), ...webModules];
+  }
   files.push(
     { path: `${IOS_TARGET}/FarmBuild.swift`, contents: createFarmBuild(context) },
     { path: `${IOS_TARGET}/Info.plist`, contents: createInfoPlist(context) },

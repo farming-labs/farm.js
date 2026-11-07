@@ -25,7 +25,8 @@ export interface FarmMobileModuleConfig {
    * Lets web screens (`page.tsx` in the shell's WebView) call the module's Promise methods as
    * `native.<name>.<method>()` from `@farm.js/core/native`, with arguments checked against its
    * Codegen spec. App modules in `src/native/` only: community modules need the React Native JS
-   * runtime. Android only for now. Defaults to `false`.
+   * runtime. On iOS, a method with an object-typed parameter is not reachable (Codegen passes it to
+   * Objective-C as a C++ struct). Defaults to `false`.
    */
   web?: boolean;
 }

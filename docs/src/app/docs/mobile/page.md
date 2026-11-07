@@ -51,7 +51,7 @@ farm build                    # --web, the default, unchanged
 | Native-only routes                            | Unreleased                     | `page.native.tsx` with no `page.tsx`: the route exists only in the app, on both OSes, and the web deployment answers it as not found; the shells' error fallback does not read `nativeOnly` yet         |
 | Native islands                                | Planned                        | `mobile.native.islands` is reserved                                                                                                                                                                     |
 | App native modules and `mobile.modules`       |                                | Unreleased                                                                                                                                                                                              | TurboModules from `src/native/` on React Native screens: Kotlin on Android, Objective-C++ on iOS (see [App native modules](/docs/mobile/modules#app-native-modules))                                                        |
-| Device modules for web screens                | Planned                        | `native.<name>` calls from web screens reject as unavailable                                                                                                                                            |
+| Device modules for web screens                | Unreleased                     | App modules with `mobile.modules.<name>.web` answer `native.<name>` calls from web screens, on Android and iOS (see [Web screens call app modules](/docs/mobile/modules#web-screens-call-app-modules))  |
 
 ## Requirements
 
@@ -688,7 +688,9 @@ parts are designed and still on the way:
   Android shell's session code on an emulator under `farm dev --mobile`. The Swift session code
   builds with Xcode in CI, but the simulator smoke does not exercise auth. See
   [Auth on mobile](#auth-on-mobile) for which auth integrations are covered.
-- Web screens call app modules with `mobile.modules.<name>.web` on Android only, and the path has
-  not run on an emulator yet. Results by reference and event subscriptions are not built.
+- Web screens call app modules with `mobile.modules.<name>.web` on Android and iOS. The Android
+  path has not run on an emulator yet; iOS runs it on the simulator under `farm dev`, and an object
+  parameter with declared properties is Android only. Results by reference and event subscriptions
+  are not built.
 - Apps on the RSC pipeline get no device tokens until it runs `auth` and integrations (see
   [Auth on mobile](#auth-on-mobile)), and their pages always load as documents in the WebView pool.

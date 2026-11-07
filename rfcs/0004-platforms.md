@@ -1384,9 +1384,21 @@ in Farm's navigator".
   `-FarmOpenAfter <ms>` later. CI opens `/kit` cold and warm with it; the simulator job could not
   tap before.
 - Generated React Native ports now run on iOS too: the analyzer no longer limits them to Android.
-- Not done: web screens calling app modules (`native.<name>`) on iOS, which needs the iOS side of
-  the bridge's `call` transport; native screens' images; a device, a release-configuration
-  archive and App Store size (the table's device numbers are the arm64 slices zipped, an estimate).
+- **Web screens call app modules on iOS too** (7.5), on the module instance native screens use.
+  The bridge gains an asynchronous plugin (`FarmAsyncPlugin`), and `@farm.js/mobile/ios`
+  generates `FarmWebModules.swift` from the same Codegen read as Android's `FarmWebModules.kt`: it
+  checks a call's JSON arguments against the spec, then `FarmReactNative.mm` calls the module by
+  the Objective-C selector Codegen gives the method (`vibrate:resolve:reject:`), on the module's
+  method queue, once `RCTInstance` has loaded the bundle; a call before the first native screen
+  starts the runtime. Two differences from Android, both falling back to "unavailable": an iOS
+  app without a React Native screen, or without an Objective-C++ class adopting the spec's
+  protocol, registers no module (`available()` is false, as in a browser, rather than failing the
+  build, which would break apps that built for iOS before); and a parameter of an object type with
+  declared properties is Android only, because Codegen passes it to Objective-C as a C++ struct.
+  CI opens `examples/mobile`'s `/settings` on the simulator under `farm dev` and checks that
+  `native.Device.model()` answers.
+- Not done: native screens' images; a device, a release-configuration archive and App Store size
+  (the table's device numbers are the arm64 slices zipped, an estimate).
 
 ### The iOS project is a generated pbxproj
 
@@ -1614,7 +1626,7 @@ Next, in order, and what blocks it:
 - Run native sign-in (#2507) and page shells (#2496) on an Android emulator.
 - The iOS React Native host past the spike: a device, a release archive with App Store size,
   memory with several native screens, lazy loading of React Native's frameworks if launch cost
-  matters on a device, modules with Swift sources, and web screens calling app modules on iOS.
+  matters on a device, and modules with Swift sources.
 
 Managed backend hosting in Infra comes after phase 6. iOS has macOS CI with Xcode once #2556
 merges; Android needs Linux CI with the Android SDK, the NDK and an emulator before its phases

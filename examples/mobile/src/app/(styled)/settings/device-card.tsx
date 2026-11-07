@@ -11,8 +11,8 @@ type DeviceState =
 
 /**
  * The app's own Device module (src/native/NativeDevice.ts) called from this web screen.
- * `mobile.modules.Device.web` in farm.config.ts registers it with the Android shell's bridge. In a
- * browser, and in the iOS shell, `available()` is false.
+ * `mobile.modules.Device.web` in farm.config.ts registers it with the shell's bridge on Android
+ * and iOS. In a browser, `available()` is false.
  */
 export function DeviceCard() {
   // The server render and the first client render agree; the shell is checked after hydration.

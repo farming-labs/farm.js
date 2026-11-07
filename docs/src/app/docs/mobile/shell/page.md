@@ -57,11 +57,11 @@ The messages that matter:
   URL in place, and the page replies when the frame has painted.
 - **`router-ready`**, **`title`**, **`error`** — lifecycle and the document-load fallback above.
 - **`call`** — a call to a native module (`native.<name>.<method>()` from `@farm.js/core/native`),
-  with a request id and the id of the document that sent it. On Android the shell dispatches it to
+  with a request id and the id of the document that sent it. The shell dispatches it to
   the app modules with `mobile.modules.<name>.web` (see
   [Web screens call app modules](/docs/mobile/modules#web-screens-call-app-modules)) and answers when the module's
   Promise settles, only into the document that asked. Any other module answers
-  `native_unavailable`; iOS registers none yet.
+  `native_unavailable`.
 
 ### Bundled client assets
 

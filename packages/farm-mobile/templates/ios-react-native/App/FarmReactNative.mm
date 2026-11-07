@@ -305,6 +305,165 @@ RCT_EXPORT_METHOD(
 
 @end
 
+#pragma mark - Web screens' module calls
+
+typedef void (^FarmModuleReply)(NSString *_Nullable json, NSString *_Nullable code, NSString *_Nullable message);
+
+/// A module call waiting for the bundle to load.
+@interface FarmPendingCall : NSObject
+@property (nonatomic, copy) dispatch_block_t run;
+@property (nonatomic, copy) void (^cancel)(NSString *reason);
+@end
+
+@implementation FarmPendingCall
+@end
+
+/// `reply`, callable from any thread, that answers only the first time.
+static FarmModuleReply FarmOnce(FarmModuleReply reply)
+{
+  __block BOOL settled = NO;
+  NSObject *lock = [NSObject new];
+  return ^(NSString *json, NSString *code, NSString *message) {
+    @synchronized(lock) {
+      if (settled) {
+        return;
+      }
+      settled = YES;
+    }
+    reply(json, code, message);
+  };
+}
+
+/// `value` as JSON text, or nil when it is not JSON.
+static NSString *_Nullable FarmJSON(id _Nullable value)
+{
+  NSArray *wrapped = @[ value ?: (id)[NSNull null] ];
+  if (![NSJSONSerialization isValidJSONObject:wrapped]) {
+    return nil;
+  }
+  NSData *data = [NSJSONSerialization dataWithJSONObject:wrapped options:0 error:nil];
+  NSString *array = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+  // "[<value>]" -> "<value>"
+  return array.length >= 2 ? [array substringWithRange:NSMakeRange(1, array.length - 2)] : nil;
+}
+
+/// The queue a module's methods run on: its own, as React Native gives it, or one shared serial
+/// queue, so web screens' calls keep their order.
+static dispatch_queue_t FarmMethodQueue(id module)
+{
+  if ([module respondsToSelector:@selector(methodQueue)]) {
+    dispatch_queue_t queue = [(id<RCTBridgeModule>)module methodQueue];
+    if (queue && queue != RCTJSThread) {
+      return queue;
+    }
+  }
+  static dispatch_queue_t shared;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    shared = dispatch_queue_create("dev.farmjs.mobile.web-modules", DISPATCH_QUEUE_SERIAL);
+  });
+  return shared;
+}
+
+/// Calls `selector` on `module` with `arguments`, then Codegen's resolve and reject blocks. The
+/// argument types come from the method's own signature: Codegen passes required numbers and
+/// booleans as C values and everything else as objects.
+static void FarmInvoke(id module, NSString *name, NSString *selectorName, NSArray *arguments, FarmModuleReply reply)
+{
+  SEL selector = NSSelectorFromString(selectorName);
+  NSMethodSignature *signature = [module respondsToSelector:selector] ? [module methodSignatureForSelector:selector] : nil;
+  if (!signature || signature.numberOfArguments != arguments.count + 4) {
+    reply(nil,
+          @"native_error",
+          [NSString stringWithFormat:@"The %@ module has no method %@, which its Codegen spec declares.", name, selectorName]);
+    return;
+  }
+  NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+  invocation.selector = selector;
+  for (NSUInteger index = 0; index < arguments.count; index++) {
+    id value = arguments[index] == (id)[NSNull null] ? nil : arguments[index];
+    NSNumber *number = [value isKindOfClass:NSNumber.class] ? value : nil;
+    const char *type = [signature getArgumentTypeAtIndex:index + 2];
+    // Skip qualifiers such as const (r) and in/out (n, N, o).
+    while (*type && strchr("rnNoORV", *type)) {
+      type++;
+    }
+    NSInteger at = (NSInteger)index + 2;
+    switch (*type) {
+      case '@': {
+        [invocation setArgument:&value atIndex:at];
+        break;
+      }
+      case 'd': {
+        double cValue = number.doubleValue;
+        [invocation setArgument:&cValue atIndex:at];
+        break;
+      }
+      case 'f': {
+        float cValue = number.floatValue;
+        [invocation setArgument:&cValue atIndex:at];
+        break;
+      }
+      case 'q':
+      case 'l': {
+        long long cValue = number.longLongValue;
+        [invocation setArgument:&cValue atIndex:at];
+        break;
+      }
+      case 'i': {
+        int cValue = number.intValue;
+        [invocation setArgument:&cValue atIndex:at];
+        break;
+      }
+      case 'B': {
+        bool cValue = number.boolValue;
+        [invocation setArgument:&cValue atIndex:at];
+        break;
+      }
+      case 'c': {
+        // BOOL on x86_64 simulators.
+        signed char cValue = number.boolValue ? 1 : 0;
+        [invocation setArgument:&cValue atIndex:at];
+        break;
+      }
+      default: {
+        reply(nil,
+              @"native_unavailable",
+              [NSString stringWithFormat:@"%@.%@ takes a value web screens cannot pass on iOS (argument %lu).",
+                                         name,
+                                         selectorName,
+                                         (unsigned long)index + 1]);
+        return;
+      }
+    }
+  }
+  RCTPromiseResolveBlock resolve = ^(id result) {
+    NSString *json = FarmJSON(result);
+    if (json) {
+      reply(json, nil, nil);
+    } else {
+      reply(nil, @"native_error", @"The result is not JSON.");
+    }
+  };
+  RCTPromiseRejectBlock reject = ^(NSString *code, NSString *message, NSError *error) {
+    // React Native's own code for a rejection without one.
+    reply(nil, code ?: @"EUNSPECIFIED", message ?: error.localizedDescription ?: @"Native call failed.");
+  };
+  [invocation setArgument:&resolve atIndex:(NSInteger)arguments.count + 2];
+  [invocation setArgument:&reject atIndex:(NSInteger)arguments.count + 3];
+  [invocation retainArguments];
+  dispatch_async(FarmMethodQueue(module), ^{
+    @try {
+      [invocation invokeWithTarget:module];
+    } @catch (NSException *exception) {
+      reply(nil, @"native_error", [NSString stringWithFormat:@"%@: %@", exception.name, exception.reason]);
+    }
+  });
+}
+
+/// How long a web screen's call waits for React Native to load its bundle.
+static const int64_t FarmLoadTimeoutSeconds = 30;
+
 #pragma mark - Engine
 
 @interface FarmReactNative ()
@@ -317,6 +476,11 @@ RCT_EXPORT_METHOD(
   BOOL _dev;
   BOOL _hostCreated;
   NSMutableDictionary<NSNumber *, RCTSurfaceHostingView *> *_views;
+  /// Set once React Native has evaluated the bundle, so its modules answer.
+  BOOL _bundleLoaded;
+  CFTimeInterval _hostStarted;
+  NSMutableArray<FarmPendingCall *> *_pendingCalls;
+  id<NSObject> _bundleObserver;
 }
 
 + (id<FarmReactNativeSession>)session
@@ -334,6 +498,7 @@ RCT_EXPORT_METHOD(
   if (self = [super init]) {
     _dev = dev;
     _views = [NSMutableDictionary new];
+    _pendingCalls = [NSMutableArray new];
     _delegate = [FarmReactNativeDelegate new];
     _delegate.farmBundleURL = bundleURL;
 #if FARM_LINKED_MODULES
@@ -348,6 +513,13 @@ RCT_EXPORT_METHOD(
                                                                                   getModuleClassFromName:name.UTF8String];
                                                                             }];
     __weak FarmReactNative *weakSelf = self;
+    // RCTInstance posts this on the JS thread once the bundle ran (and again after a reload).
+    _bundleObserver = [NSNotificationCenter.defaultCenter addObserverForName:@"RCTInstanceDidLoadBundle"
+                                                                      object:nil
+                                                                       queue:NSOperationQueue.mainQueue
+                                                                  usingBlock:^(NSNotification *note) {
+                                                                    [weakSelf bundleLoaded];
+                                                                  }];
     _delegate.farmStarted = ^{
       void (^started)(void) = weakSelf.onStarted;
       if (started) {
@@ -387,6 +559,7 @@ RCT_EXPORT_METHOD(
   }
   _hostCreated = YES;
   CFTimeInterval started = CACurrentMediaTime();
+  _hostStarted = started;
   @try {
     [self.factory.rootViewFactory initializeReactHostWithLaunchOptions:nil
                                                    bundleConfiguration:[RCTBundleConfiguration defaultConfiguration]
@@ -435,11 +608,88 @@ RCT_EXPORT_METHOD(
   [view.surface stop];
 }
 
+- (void)dealloc
+{
+  if (_bundleObserver) {
+    [NSNotificationCenter.defaultCenter removeObserver:_bundleObserver];
+  }
+}
+
+- (void)bundleLoaded
+{
+  if (!_bundleLoaded) {
+    os_log(FarmLog(),
+           "react-native bundle loaded in %ldms",
+           (long)((CACurrentMediaTime() - (_hostStarted ?: CACurrentMediaTime())) * 1000));
+  }
+  _bundleLoaded = YES;
+  NSArray<FarmPendingCall *> *pending = [_pendingCalls copy];
+  [_pendingCalls removeAllObjects];
+  for (FarmPendingCall *call in pending) {
+    call.run();
+  }
+}
+
+- (void)callModule:(NSString *)name
+          selector:(NSString *)selector
+         arguments:(NSArray *)arguments
+             reply:(void (^)(NSString *, NSString *, NSString *))reply
+{
+  FarmModuleReply once = FarmOnce(reply);
+  NSString *unavailable = [NSString stringWithFormat:@"React Native is not running, so %@ is unavailable", name];
+  if (!(self.failure && !_dev)) {
+    [self warm];
+  }
+  if (self.failure && !_dev) {
+    once(nil, @"native_unavailable", [NSString stringWithFormat:@"%@: %@", unavailable, self.failure]);
+    return;
+  }
+  __weak FarmReactNative *weakSelf = self;
+  dispatch_block_t run = ^{
+    FarmReactNative *strongSelf = weakSelf;
+    RCTHost *host = strongSelf ? strongSelf.factory.rootViewFactory.reactHost : nil;
+    id module = nil;
+    @try {
+      module = [host.moduleRegistry moduleForName:name.UTF8String];
+    } @catch (NSException *exception) {
+      once(nil, @"native_error", [NSString stringWithFormat:@"%@: %@", exception.name, exception.reason]);
+      return;
+    }
+    if (!module) {
+      once(nil, @"native_unavailable", [NSString stringWithFormat:@"The app has no native module \"%@\".", name]);
+      return;
+    }
+    FarmInvoke(module, name, selector, arguments, once);
+  };
+  if (_bundleLoaded) {
+    run();
+    return;
+  }
+  FarmPendingCall *call = [FarmPendingCall new];
+  call.run = run;
+  call.cancel = ^(NSString *reason) {
+    once(nil, @"native_unavailable", [NSString stringWithFormat:@"%@: %@", unavailable, reason]);
+  };
+  [_pendingCalls addObject:call];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(FarmLoadTimeoutSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    FarmReactNative *strongSelf = weakSelf;
+    if (strongSelf && [strongSelf->_pendingCalls containsObject:call]) {
+      [strongSelf->_pendingCalls removeObject:call];
+      call.cancel([NSString stringWithFormat:@"it did not load in %llds", FarmLoadTimeoutSeconds]);
+    }
+  });
+}
+
 - (void)fail:(NSString *)reason
 {
   os_log_error(FarmLog(), "react-native failed, native screens fall back to web: %{public}@", reason);
   FarmOnMain(^{
     self.failure = reason;
+    NSArray<FarmPendingCall *> *pending = [self->_pendingCalls copy];
+    [self->_pendingCalls removeAllObjects];
+    for (FarmPendingCall *call in pending) {
+      call.cancel(reason);
+    }
     NSArray<id<FarmReactNativeScreenHost>> *open = FarmScreens().allValues;
     [FarmScreens() removeAllObjects];
     for (id<FarmReactNativeScreenHost> host in open) {

@@ -36,7 +36,7 @@ export default defineConfig({
     // The app's own Device module (src/native/: DeviceModule.kt on Android, DeviceModule.mm on
     // iOS) vibrates, so the Android manifest declares VIBRATE, an install-time permission with no
     // prompt. `web: true` lets web screens call it too, as native.Device from
-    // @farm.js/core/native (/settings on Android).
+    // @farm.js/core/native (/settings).
     modules: {
       Device: { permissions: ["android.permission.VIBRATE"], web: true },
     },
