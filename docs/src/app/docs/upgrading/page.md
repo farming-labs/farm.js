@@ -57,6 +57,67 @@ These changes landed between the last beta and 0.1.0. Most apps need no code cha
   by Farm.
 - **DevTools version.** `@farm.js/devtools` is now released with core and shares its version.
 
+## Behavior changes within 0.1
+
+The section above covers the last beta to 0.1.0. These landed in later 0.1 patches. Each names the
+release that introduced it, so skip anything at or below the version you are coming from.
+
+### Agent surfaces answer by default
+
+At 0.1.0 these were off unless you opted in. An app with no `agent` block now answers all of them:
+
+| Surface                               | Since                                     | What it serves                                                                                                           |
+| ------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Markdown mirrors, `llms.txt`, JSON-LD | 0.1.28                                    | Every static page as Markdown, by `.md` or `Accept: text/markdown`, plus an index of them                                |
+| `/.well-known/farmjs.json`            | 0.1.32, sections configurable from 0.1.42 | Farm's version, the installed `@farm.js/*` packages, the renderer, base path, integrations by category, and plugin names |
+| `/sitemap.xml`                        | 0.1.36                                    | Your static pages, when the docs engine is not serving its own                                                           |
+| `/mcp`                                | 0.1.36                                    | A read-only MCP server that lists, searches and reads your public pages                                                  |
+
+None of this serves content an anonymous visitor could not already reach. A page behind a guard
+answers the guard's own response to a Markdown request, and `llms-full.txt` keeps its entry without
+a body, because the generated files are built from requests that carry no cookies or credentials.
+Nothing new is writable, and discovery never grants permission.
+
+A guarded page's title and description do still appear in `llms.txt`, since those come from the
+metadata you wrote rather than from the page's content. Use `exclude` below to drop the route
+entirely when even that is too much.
+
+That is still a larger public surface than the app had at 0.1.0, which matters for an internal
+tool or a staging deployment. Turn off what you do not want:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  agent: {
+    llmsTxt: false,
+    sitemap: false,
+    mcp: false,
+    jsonLd: false,
+    manifest: false,
+  },
+});
+```
+
+To keep the surfaces but hide a route from the generated indexes, exclude it instead:
+`agent: { llmsTxt: { exclude: ["/account"] } }`. See
+[agent readiness](/docs/configuration#agent-readiness).
+
+### Configuration that is now rejected
+
+These were accepted and silently did nothing. They now fail when the config, an integration, or a
+middleware file loads, so an app that carried one builds today and fails after the upgrade.
+
+- **Regex matcher strings** (0.1.39, with more forms in 0.1.40). Next-style strings such as
+  `/((?!api|_next).*)` compiled to a literal that matched no path, so the middleware never ran.
+  Pass a `RegExp` instead. The error names the matcher.
+- **`createEndpoint`'s `use` option** (0.1.40). It was ignored. Pass `middleware` instead.
+
+### `FARM_VITE_BUILDER=rollup`
+
+Removed in 0.1.14, when core moved development and production onto one Vite 8. `rollup` now fails
+with an actionable message; `rolldown` is still accepted. The Rollup fallback for an incomplete
+client bundle is gone too: a bundle that stays incomplete after the sequential retry fails the
+build instead of rebuilding with Rollup.
+
 ## Feature packages the app installs
 
 Starting with 0.1.22, `@farm.js/core` no longer installs the packages behind optional features.
