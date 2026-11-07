@@ -865,7 +865,7 @@ test("farm config inspect --mobile --report prints the analyzer table and writes
   );
   assert.match(
     result.output,
-    /\/notes\/new\s+web\s+web\s+web\s+1\/2\s+50%\s+src\/app\/notes\/new\/page\.tsx:1:40 <form> has no native mapping \(\+1 more\)/,
+    /\/notes\/new\s+web\s+web\s+web\s+1\/2\s+50%\s+src\/app\/notes\/new\/page\.tsx:1:40 <form> has no native mapping \(\+2 more\)/,
   );
   assert.match(result.output, /\/feed\s+native\s+-\s+-\s+src\/app\/feed\/page\.android\.tsx/);
   assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
