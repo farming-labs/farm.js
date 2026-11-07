@@ -173,6 +173,16 @@ describe("farmNativeBundleFiles", () => {
     expect(js).toBe(path.join(outDir, "build", "android.js"));
     expect(bytecode).toBe(path.join(outDir, "build", "android.hbc"));
   });
+
+  it("gives each platform its own asset output, since Metro lays images out per platform", () => {
+    const outDir = path.join("/app", ".farm", "output", "mobile", "native");
+    expect(farmNativeBundleFiles(outDir, "android").assets).toBe(
+      path.join(outDir, "build", "android-assets"),
+    );
+    expect(farmNativeBundleFiles(outDir, "ios").assets).toBe(
+      path.join(outDir, "build", "ios-assets"),
+    );
+  });
 });
 
 describe("closeWithConnections", () => {

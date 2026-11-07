@@ -197,6 +197,21 @@ not `@farm.js/core/client`, so one `lib/api.ts` serves both. Native screens send
 the user has signed in, on a web screen or a native one, `serverFetch` sends the device's session
 token, so protected routes see the same user (see [Auth on mobile](/docs/mobile#auth-on-mobile)).
 
+Images a native screen imports ship with the app, as in a React Native app:
+
+```tsx
+// src/app/map/page.native.tsx, next to blaze@2x.png and blaze@3x.png
+<Image source={require("./blaze.png")} style={{ width: 24, height: 36 }} />
+```
+
+Metro picks the scales the device needs. Under `farm dev --mobile` it serves the files. In a
+`farm build --mobile` app they are in the app where React Native looks for them: Android
+resources (`res/drawable-<density>/`, named from the image's path) and, on iOS, `assets/` next to
+the screens' bytecode. A build ships only the images the screens still import. Images by URL
+(`source={{ uri }}`) load over the network as usual. The `Mobile Android` and `Mobile iOS`
+workflows open `examples/mobile`'s `/map` in the built app on an emulator and a simulator and
+check that its bundled image shows.
+
 Server functions work from native screens as they do in server code: import one and call it.
 
 ```tsx

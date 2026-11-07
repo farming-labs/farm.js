@@ -122,6 +122,12 @@ class Navigator(
         }
     }
 
+    /** Visit [path] on the app's server from the screen on top, as a tapped link to it would. */
+    fun visitPath(path: String) {
+        val from = modal ?: stacks[current].lastOrNull() ?: return
+        visit(from, Uri.parse(config.url(path)), replace = false)
+    }
+
     /** Links to other origins open in Custom Tabs; other schemes go to the app that handles them. */
     fun openExternal(url: Uri) {
         Log.i(TAG, "external $url")

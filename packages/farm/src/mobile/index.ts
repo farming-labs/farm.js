@@ -67,6 +67,12 @@ export interface MobileNativeScreens {
   modules: string[];
   /** `farm build --mobile`: the screens' Hermes bytecode, bundled into the app. */
   bundle?: string;
+  /**
+   * `farm build --mobile`: the directory of images and other files the screens `require()`, as
+   * Metro laid them out for the OS, copied into the app next to the bytecode. Absent when they
+   * import none; under `farm dev --mobile` Metro serves them.
+   */
+  assetsDir?: string;
   /** `farm dev --mobile`: the Metro server the debug app loads the screens from. */
   devServer?: {
     port: number;

@@ -136,7 +136,11 @@ jobs:
       - name: Check /kit rendered as a React Native screen
         if: matrix.example == 'mobile'
         working-directory: examples/mobile
-        run: node scripts/check-ios-react-native.mjs "$EVIDENCE" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: |
+          node scripts/check-ios-react-native.mjs "$EVIDENCE" | tee -a "$GITHUB_STEP_SUMMARY"
+          # /map's trail blaze is an image bundled with the screen (blaze.png): it shows only when
+          # the build put it in the app where React Native looks, assets/ next to the bytecode.
+          node scripts/check-bundled-image.mjs "$EVIDENCE/map.png"
 
       - name: Run the shell with farm dev --mobile --os ios
         working-directory: examples/${{ matrix.example }}

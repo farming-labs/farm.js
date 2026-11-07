@@ -9,6 +9,7 @@ import {
 } from "./autolinking.js";
 import { createAndroidWebModules } from "./web-modules.js";
 import { createBundledAssetFiles } from "../shared/assets.js";
+import { createNativeAssetFiles } from "../shared/native-assets.js";
 import { createBridgeScript } from "../shared/bridge.js";
 import { createPageShellFiles } from "../shared/shells.js";
 
@@ -54,6 +55,8 @@ export const PAGE_SHELLS_DIR = "app/src/main/assets/farm-shells";
 
 /** The Hermes bytecode asset the React Native engine loads (`ReactNativeEngine.BUNDLE_ASSET`). */
 export const NATIVE_BUNDLE_ASSET = "app/src/main/assets/farm-native.hbc";
+/** Where the images React Native screens import go: Android resources (`drawable-<density>/`). */
+const NATIVE_RESOURCES = "app/src/main/res";
 
 /**
  * React Native's Android artifacts are built with Kotlin 2.2, whose metadata Kotlin 2.0 cannot
@@ -564,6 +567,14 @@ export async function createAndroidProject(
       contents: createNetworkSecurityConfig(context),
     },
   );
+  // The images the screens require(): resources React Native finds by name, as Metro named them.
+  const shellFiles = new Set(files.map((file) => file.path));
+  for (const file of await createNativeAssetFiles(context.native?.assetsDir, NATIVE_RESOURCES)) {
+    if (shellFiles.has(file.path)) {
+      throw new Error(`A native screen's asset would replace the shell's ${file.path}.`);
+    }
+    files.push(file);
+  }
   return files.sort((left, right) =>
     left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
   );

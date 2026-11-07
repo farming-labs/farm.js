@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
 import type { MobileGeneratedFile, MobileShellContext } from "@farm.js/core/mobile";
 import { createBridgeScript } from "../shared/bridge.js";
+import { createNativeAssetFiles } from "../shared/native-assets.js";
 import { createPageShellFiles } from "../shared/shells.js";
 import { IOS_MODULES_DIR, resolveIosAutolinking } from "./autolinking.js";
 import { createIosWebModules } from "./web-modules.js";
@@ -292,8 +293,16 @@ function pbxValue(value: PbxValue, indent: string, names: Map<string, string>): 
 /** Page shells (`mobile.shells`), read by `PageShells.swift`; a folder reference in the bundle. */
 export const IOS_PAGE_SHELLS_DIR = "farm-shells";
 
+/**
+ * The images React Native screens import, as Metro lays them out for iOS: `assets/<path>@2x.png`,
+ * which React Native resolves next to the bytecode in the app (`farm-native.hbc`). A folder
+ * reference, so the app keeps the paths.
+ */
+export const IOS_NATIVE_ASSETS_DIR = "assets";
+
 const FILE_TYPES: Record<string, { type: string; phase?: "sources" | "resources" }> = {
   [IOS_PAGE_SHELLS_DIR]: { type: "folder", phase: "resources" },
+  [IOS_NATIVE_ASSETS_DIR]: { type: "folder", phase: "resources" },
   ".swift": { type: "sourcecode.swift", phase: "sources" },
   ".mm": { type: "sourcecode.cpp.objcpp", phase: "sources" },
   ".m": { type: "sourcecode.c.objc", phase: "sources" },
@@ -841,6 +850,12 @@ export async function createIosProject(
         path: IOS_NATIVE_BUNDLE,
         contents: new Uint8Array(await readFile(context.native.bundle)),
       });
+    }
+    for (const file of await createNativeAssetFiles(context.native.assetsDir, IOS_TARGET)) {
+      if (!file.path.startsWith(`${IOS_TARGET}/${IOS_NATIVE_ASSETS_DIR}/`)) {
+        throw new Error(`Metro wrote ${file.path} outside ${IOS_NATIVE_ASSETS_DIR}/ for iOS.`);
+      }
+      files.push(file);
     }
   }
   const linking = await resolveIosAutolinking(context);

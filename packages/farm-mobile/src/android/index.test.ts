@@ -344,11 +344,21 @@ describe("@farm.js/mobile/android", () => {
       "app/src/main/java/dev/farmjs/mobile/shell/MainActivity.kt"
     ];
     expect(activity).toContain("val dev = resources.getBoolean(R.bool.farm_dev)");
-    const overrides = activity.split("\n").filter((line) => /intent\.get\w+Extra\(/.test(line));
+    const overrides = activity
+      .split("\n")
+      .filter((line) => /intent\.get\w+Extra\(/.test(line) && !line.includes('"farmOpen"'));
     expect(overrides).toHaveLength(2);
     for (const line of overrides) expect(line).toMatch(/if \(dev\) intent\.get\w+Extra\(/);
     // A debuggable `farm build --mobile --apk` must not take a server from another app's intent.
     expect(activity).not.toMatch(/if \(debuggable\) intent\./);
+    // farmOpen (CI's launch path) only visits a path on the app's own server, as a tapped link
+    // would, and a release build ignores it.
+    expect(activity).toContain(
+      'val open = intent.takeIf { debuggable }?.getStringExtra("farmOpen")',
+    );
+    expect(activity).toContain(
+      `?.takeIf { it.startsWith("/") && !it.startsWith("//") && '\\\\' !in it }`,
+    );
   });
 
   it("reads screen on every rule, tab roots included, with module ids from the route", async () => {
@@ -701,6 +711,42 @@ describe("React Native screens", () => {
     );
     const paths = files.map((file) => file.path);
     expect(paths).toEqual(paths.toSorted((left, right) => (left < right ? -1 : 1)));
+  });
+
+  it("ships the images the screens import as the resources React Native looks them up by", async () => {
+    const dir = await tempDir();
+    const bundle = path.join(dir, "android.hbc");
+    await writeFile(bundle, new Uint8Array([0xc6, 0x1f, 0xbc, 0x03]));
+    // Metro's Android layout: drawable-<density>/<path as a resource name>.png.
+    const assetsDir = path.join(dir, "android-assets");
+    for (const density of ["xhdpi", "xxhdpi"]) {
+      await mkdir(path.join(assetsDir, `drawable-${density}`), { recursive: true });
+      await writeFile(
+        path.join(assetsDir, `drawable-${density}`, "src_app_map_blaze.png"),
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      );
+    }
+    const files = await createAndroidProject(
+      context({ command: "build", native: native({ bundle, assetsDir }) }),
+    );
+    const byPath = Object.fromEntries(files.map((file) => [file.path, file.contents]));
+    for (const density of ["xhdpi", "xxhdpi"]) {
+      expect([
+        ...(byPath[`app/src/main/res/drawable-${density}/src_app_map_blaze.png`] as Uint8Array),
+      ]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    }
+    // Without images, nothing is added.
+    const plain = await createAndroidProject(
+      context({ command: "build", native: native({ bundle }) }),
+    );
+    expect(plain.some((file) => file.path.includes("drawable-xhdpi/"))).toBe(false);
+
+    // An asset never replaces one of the shell's own resources.
+    await mkdir(path.join(assetsDir, "values"), { recursive: true });
+    await writeFile(path.join(assetsDir, "values", "strings.xml"), "<resources/>");
+    await expect(
+      createAndroidProject(context({ command: "build", native: native({ bundle, assetsDir }) })),
+    ).rejects.toThrow(/would replace the shell's app\/src\/main\/res\/values\/strings\.xml/);
   });
 
   it("points the debug app at Metro under farm dev, with no bundled bytecode", async () => {
