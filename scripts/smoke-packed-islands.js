@@ -38,6 +38,8 @@ try {
   // Keep the fixture and test paths unchanged, including the assertions about prerendered files.
   for (const relative of [
     `${fixture}/src`,
+    // Local packages the fixture links (`link:./fixtures/...`).
+    `${fixture}/fixtures`,
     `${fixture}/farm.config.ts`,
     `${fixture}/tsconfig.json`,
     "playwright.server-components.config.ts",
