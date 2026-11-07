@@ -1,0 +1,12 @@
+{
+  "name": "farm-swift-sample",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A React Native module written in Swift, as community modules are: examples/mobile links it on iOS to check Swift linking without CocoaPods.",
+  "main": "src/index.ts",
+  "codegenConfig": {
+    "name": "FarmSwiftSampleSpec",
+    "type": "modules",
+    "jsSrcsDir": "src"
+  }
+}

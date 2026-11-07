@@ -1365,9 +1365,15 @@ in Farm's navigator".
   React Native's own codegen (`generate-codegen-artifacts.js -t ios`) writes the packages' spec
   glue and `RCTAppDependencyProvider`; the app's specs become one more codegen library,
   `FarmAppSpec`, so an iOS TurboModule is an Objective-C++ class in `src/native/` that adopts its
-  `Native<Name>Spec` (`DeviceModule.mm` in the example). Packages with Swift sources fail with an
-  error for now: they need their own Clang module, which copying into the app target cannot give
-  them.
+  `Native<Name>Spec` (`DeviceModule.mm` in the example). Swift sources compile into the app's
+  module with everything else: React Native's prebuilt `React.framework` is a Clang module
+  (`framework module React`, an Objective-C umbrella), so `import React` works without CocoaPods,
+  and `FarmModules/FarmSwiftHeaders/` gives each package with Swift the `<Module>-Swift.h` name
+  CocoaPods would generate, forwarding to the app's `App-Swift.h`. Limits of sharing one module:
+  two packages with the same Swift type name collide, and a package's Swift sees its own
+  Objective-C headers only through React's exports, not a bridging header of its own. CI calls
+  `examples/mobile/modules/farm-swift-sample`, laid out as community Swift modules are (an
+  Objective-C++ class adopting the spec, calling Swift through `<Module>-Swift.h`), from `/map`.
 - **No React Native without React Native routes.** When no route resolves to a React Native screen
   on iOS, the project is the one before this change plus `NativeEngine.swift`, a stub that returns
   no engine: no framework reference, no Objective-C++, no bytecode, no download.
@@ -1654,7 +1660,7 @@ Next, in order, and what blocks it:
   keep rules, and no release APK has been built yet.
 - Run native sign-in (#2507) and page shells (#2496) on an Android emulator.
 - The iOS React Native host past the spike: a device, memory with several native screens, lazy loading of React Native's frameworks if launch cost
-  matters on a device, and modules with Swift sources.
+  matters on a device.
 
 Managed backend hosting in Infra comes after phase 6. iOS has macOS CI with Xcode once #2556
 merges; Android needs Linux CI with the Android SDK, the NDK and an emulator before its phases

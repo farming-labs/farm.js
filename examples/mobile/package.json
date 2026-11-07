@@ -20,6 +20,7 @@
     "@farm.js/core": "workspace:*",
     "@farm.js/ui": "workspace:*",
     "@react-native-community/netinfo": "12.0.1",
+    "farm-swift-sample": "link:./modules/farm-swift-sample",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "zod": "^4.6.7"
