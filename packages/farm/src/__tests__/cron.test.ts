@@ -9,6 +9,8 @@ import { createEndpoint } from "../api/endpoint";
 import { invokeAPIRouteEndpoint } from "../api/runtime";
 import {
   applyFarmCronVercelCrons,
+  authorizeCronRequest,
+  farmCronSignature,
   cronRoute,
   createFarmCronCloudflareConfig,
   createFarmCronCloudflareTriggers,
@@ -190,6 +192,7 @@ describe("Farm cron", () => {
     );
     expect(manifest).toEqual({
       schemaVersion: 1,
+      provider: "host",
       secretEnv: "CRON_SECRET",
       jobs: [
         {
@@ -727,5 +730,83 @@ describe("cronRoute schedule options", () => {
     ).toThrow(
       'Farm cron `overlap` only supports "skip"; received "queue". Remove the option to allow overlapping runs.',
     );
+  });
+});
+
+describe("farm.js infra cron signatures", () => {
+  const T = 1793544000;
+  const PATH = "/api/maintenance/cleanup";
+  const V1 = "95b6333037586f03f89df8cab6af8181596d196dee44cd38e04bf234e6b84765";
+  const signed = (header: string, url = `https://example.com${PATH}`, method = "GET") =>
+    new Request(url, { method, headers: { "farmjs-signature": header } });
+
+  it("matches the contract's test vector (infra pins the same one)", async () => {
+    await expect(farmCronSignature("farmjs_test_vector_key", T, PATH)).resolves.toBe(V1);
+  });
+
+  it("authorizes a correctly signed GET within the window", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.FARMJS_API_KEY = "farmjs_test_vector_key";
+    await expect(authorizeCronRequest(signed(`t=${T},v1=${V1}`), {}, T * 1000)).resolves.toBe(true);
+    await expect(
+      authorizeCronRequest(signed(`t=${T},v1=${V1}`), {}, (T + 299) * 1000),
+    ).resolves.toBe(true);
+  });
+
+  it("refuses skewed, wrong-path, non-GET, malformed, and keyless requests", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.FARMJS_API_KEY = "farmjs_test_vector_key";
+    const header = `t=${T},v1=${V1}`;
+    await expect(authorizeCronRequest(signed(header), {}, (T + 301) * 1000)).resolves.toBe(false);
+    await expect(
+      authorizeCronRequest(signed(header, "https://example.com/api/other"), {}, T * 1000),
+    ).resolves.toBe(false);
+    await expect(
+      authorizeCronRequest(signed(header, `https://example.com${PATH}`, "POST"), {}, T * 1000),
+    ).resolves.toBe(false);
+    for (const bad of ["", "t=,v1=", `t=${T}`, `t=${T},v1=zz`, `t=${T},v1=${V1.slice(1)}`]) {
+      await expect(authorizeCronRequest(signed(bad), {}, T * 1000)).resolves.toBe(false);
+    }
+    delete process.env.FARMJS_API_KEY;
+    await expect(authorizeCronRequest(signed(header), {}, T * 1000)).resolves.toBe(false);
+  });
+
+  it("keeps the bearer secret working beside signatures", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.CRON_SECRET = "s3cret";
+    const request = new Request("https://example.com/api/cleanup", {
+      headers: { authorization: "Bearer s3cret" },
+    });
+    await expect(authorizeCronRequest(request)).resolves.toBe(true);
+  });
+
+  it("does not authorize query input that the Infra signature does not cover", async () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.CRON_SECRET;
+    process.env.FARMJS_API_KEY = "farmjs_test_vector_key";
+    await expect(
+      authorizeCronRequest(
+        signed(`t=${T},v1=${V1}`, `https://example.com${PATH}?all=true`),
+        {},
+        T * 1000,
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it("authorizes a signed GET through the route runtime, and 401s an unsigned one", async () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.CRON_SECRET;
+    process.env.FARMJS_API_KEY = "farmjs_test_vector_key";
+    const GET = cronRoute(createEndpoint(async () => Response.json({ ok: true })));
+    const now = Math.floor(Date.now() / 1000);
+    const url = "https://example.com/api/maintenance/cleanup";
+    const v1 = await farmCronSignature("farmjs_test_vector_key", now, PATH);
+    const authorized = await invokeAPIRouteEndpoint(
+      GET,
+      new Request(url, { headers: { "farmjs-signature": `t=${now},v1=${v1}` } }),
+    );
+    expect(authorized.status).toBe(200);
+    const unsigned = await invokeAPIRouteEndpoint(GET, new Request(url));
+    expect(unsigned.status).toBe(401);
   });
 });

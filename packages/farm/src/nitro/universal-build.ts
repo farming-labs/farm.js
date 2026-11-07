@@ -133,6 +133,7 @@ import {
 import {
   applyFarmCronVercelCrons,
   createFarmCronCloudflareConfig,
+  type FarmCronJob,
   mergeScheduledTasks,
   prepareFarmCronForNitro,
 } from "../cron";
@@ -12045,17 +12046,22 @@ async function buildNitroUniversal(
   if (farmWorkflows.workflows.length > 0) {
     logger.info(`⏱️  Found ${farmWorkflows.workflows.length} Farm workflow task(s)`);
   }
-  if (farmCron.jobs.length > 0) {
+  if (farmCron.jobs.length > 0 && farmCron.provider === "farmjs") {
+    logger.info(
+      `\u23f1\ufe0f  ${farmCron.jobs.length} Farm cron job(s) for Infra; run farm cron sync after deployment`,
+    );
+  } else if (farmCron.jobs.length > 0) {
     logger.info(`⏱️  Configured ${farmCron.jobs.length} Farm cron route(s)`);
   }
-  if (preset === "cloudflare-pages" && farmCron.jobs.length > 0) {
+  if (preset === "cloudflare-pages" && farmCron.jobs.length > 0 && farmCron.provider === "host") {
     logger.warn(
       "Cloudflare Pages does not install Cron Triggers. Use the cloudflare-module preset or an external scheduler with .farm/cron-manifest.json.",
     );
   }
 
   const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
-  const cloudflareCronConfig = createFarmCronCloudflareConfig(farmCron.jobs);
+  const cloudflareCronConfig =
+    farmCron.provider === "host" ? createFarmCronCloudflareConfig(farmCron.jobs) : undefined;
 
   // The client build has fully settled by now (fonts merged, output
   // validated), so the stylesheet href baked into server code can carry the
@@ -12501,7 +12507,7 @@ function toFarmNodeResponse(request, response) {
         }
       : {}),
     experimental: {
-      tasks: farmWorkflows.workflows.length > 0 || farmCron.jobs.length > 0,
+      tasks: farmWorkflows.workflows.length > 0 || Object.keys(farmCron.tasks).length > 0,
     },
     tasks: {
       ...farmWorkflows.tasks,
@@ -12885,7 +12891,15 @@ function toFarmNodeResponse(request, response) {
   // Post-process for Vercel Build Output API v3
   // Move server/ to functions/__nitro.func/ and update config.json
   if (isVercel) {
-    await postProcessVercelOutput(root, outputDir, fs, config, farmWorkflows, routeRuntimeManifest);
+    await postProcessVercelOutput(
+      root,
+      outputDir,
+      fs,
+      config,
+      farmWorkflows,
+      routeRuntimeManifest,
+      farmCron.provider === "host" ? farmCron.jobs : [],
+    );
   }
 
   logger.success(`✅ Nitro build completed with preset: ${preset}`);
@@ -13027,6 +13041,7 @@ async function postProcessVercelOutput(
   config: ResolvedFarmConfig,
   farmWorkflows: PreparedFarmWorkflows,
   routeRuntimeManifest: FarmRouteRuntimeManifest,
+  cronJobs: FarmCronJob[],
 ) {
   const serverDir = path.join(outputDir, "server");
   const functionsDir = path.join(outputDir, "functions");
@@ -13082,10 +13097,7 @@ async function postProcessVercelOutput(
     vercelConfig,
     farmWorkflows.workflows,
   );
-  const vercelConfigWithCrons = applyFarmCronVercelCrons(
-    vercelConfigWithWorkflowCrons,
-    config.cron.jobs,
-  );
+  const vercelConfigWithCrons = applyFarmCronVercelCrons(vercelConfigWithWorkflowCrons, cronJobs);
 
   await fs.writeFile(configPath, JSON.stringify(vercelConfigWithCrons, null, 2));
 

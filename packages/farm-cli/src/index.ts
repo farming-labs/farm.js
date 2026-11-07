@@ -121,6 +121,12 @@ export {
   type RunFarmCronOptions,
 } from "./cron";
 export {
+  syncFarmCronJobs,
+  FarmCronSyncError,
+  type SyncFarmCronOptions,
+  type FarmCronSyncResult,
+} from "./cron-sync";
+export {
   createFrameworkMigrationPlan,
   inspectFrameworkMigrations,
   migrateFarm,

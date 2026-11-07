@@ -59,7 +59,8 @@ export async function createNitroConfig(
     distDir,
   });
   const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
-  const cloudflareCronConfig = createFarmCronCloudflareConfig(farmCron.jobs);
+  const cloudflareCronConfig =
+    farmCron.provider === "host" ? createFarmCronCloudflareConfig(farmCron.jobs) : undefined;
 
   // Create a runtime registry file to store route managers
   // This will be populated at runtime through Nitro hooks
@@ -675,7 +676,7 @@ export default defineEventHandler(async (event: H3Event) => {
     },
     // Experimental features
     experimental: {
-      tasks: farmWorkflows.workflows.length > 0 || farmCron.jobs.length > 0,
+      tasks: farmWorkflows.workflows.length > 0 || Object.keys(farmCron.tasks).length > 0,
     },
     wasm: false, // Disable for now to avoid issues
   };

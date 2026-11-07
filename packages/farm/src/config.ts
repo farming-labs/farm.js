@@ -170,7 +170,13 @@ export type {
   FarmMobileTab,
   FarmMobileUserConfig,
 } from "./mobile/config";
-export type { FarmCronJobConfig, FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
+export type {
+  FarmCronConfig,
+  FarmCronProvider,
+  FarmCronJobConfig,
+  FarmCronResolvedConfig,
+  FarmCronUserConfig,
+} from "./cron";
 export type {
   FarmRouteRule,
   FarmRouteRuleCors,
