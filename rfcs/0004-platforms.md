@@ -10,7 +10,7 @@
 
 ## Status
 
-Updated 2026-11-06, after 0.1.60.
+Updated 2026-11-07, after 0.1.61.
 
 - Desktop: merged and released. #2353 (core runtime primitives), #2354
   (`farm dev|build --desktop`), #2355 (Electrobun adapter), #2356 (config-only desktop example),
@@ -51,8 +51,10 @@ Updated 2026-11-06, after 0.1.60.
   the home web screen. Nothing else on iOS has run.
 - Not verified anywhere: a physical device; a release APK with R8; native sign-in (#2507) and page
   shells (#2496) on an emulator or simulator; desktop on Windows and Linux.
-- Not built: the iOS React Native host (native screens, modules and ports are Android only),
-  platform screens (`page.kt`, `page.swift`), native islands, file references and subscriptions
+- In review: the iOS React Native host (see
+  [The iOS React Native host links prebuilt XCFrameworks](#the-ios-react-native-host-links-prebuilt-xcframeworks)),
+  with native screens, autolinked and app modules, and ports on iOS.
+- Not built: platform screens (`page.kt`, `page.swift`), native islands, file references and subscriptions
   for module calls, `layout.native.tsx` providers, intent prefetch, budgets in CI, the contract
   manifest and the remote rule override.
 - Revised 2026-11-01: mobile screens come in tiers chosen per route (web by default, React Native
@@ -62,6 +64,8 @@ Updated 2026-11-06, after 0.1.60.
   islands on mobile.
 - Revised 2026-11-02: implementation decisions for React Native screens and the iOS shell are
   recorded in [Decisions since the 2026-11-01 revision](#decisions-since-the-2026-11-01-revision).
+- Amended 2026-11-07: the iOS React Native host, with how it consumes React Native (prebuilt
+  XCFrameworks, not CocoaPods) and its measured size and cold start.
 
 ## Summary
 
@@ -1260,6 +1264,89 @@ Measured on `examples/mobile` (two screens), macOS arm64, Node 24, React Native 
   screen's content with a WebView of the same URL and logs the reason. In a built app, after a
   runtime failure every native screen opens as web; in dev the next open retries.
 
+### The iOS React Native host links prebuilt XCFrameworks
+
+Decided 2026-11-07 with a spike that renders `examples/mobile`'s `/kit` in the iOS simulator in
+CI. Amends "The iOS project is a generated pbxproj" (no CocoaPods still holds) and gives iOS the
+same model as "React Native 0.88.1 from prebuilt Maven artifacts" and "Native screens are surfaces
+in Farm's navigator".
+
+- **Model.** The same as Android. One shared Hermes runtime (Fabric, bridgeless, no legacy
+  bridge), created by one `RCTReactNativeFactory` and warmed when the first tab shows content,
+  together with the WebView pool. Each React Native screen is a Fabric surface
+  (`RCTSurfaceHostingProxyRootView`) placed in the navigator's own `ScreenViewController`, the
+  container a web screen's WebView uses, so push, pop, swipe back, sheets and tabs run the same
+  code for web and native screens. `NativeScreens.swift` gets Android's engine-neutral hook:
+  `FarmNativeEngine` (`warm`, `open`) and `FarmNativeHost` (`visit`, `fallback`, `setTitle`,
+  `rendered`). The `FarmShell` module answers the same JS calls as Android's, including the device
+  session methods, which go to `MobileSession`.
+- **Objective-C++ behind a plain header.** `FarmReactNative.mm` owns the factory, the surfaces,
+  the `FarmShell` module (through the TurboModule interop layer, as on Android) and the fatal
+  handlers. Swift sees it only through `FarmReactNative.h`, which imports UIKit and nothing of
+  React Native, so the Swift shell never compiles React Native's C++ headers.
+- **How React Native is consumed: prebuilt XCFrameworks, no CocoaPods.** React Native 0.88
+  publishes, for every release, `React.xcframework` with the headers-only
+  `ReactNativeHeaders.xcframework`, `ReactNativeDependencies.xcframework` (folly, glog, boost,
+  fmt, SocketRocket) and Hermes' `hermesvm.xcframework`, to Maven Central. `@farm.js/mobile/ios`
+  downloads the three tarballs for the app's `react-native` and Hermes versions, checks each
+  against the `.sha256` Maven publishes (the check Gradle makes for the Android artifacts), and
+  lays them out once per version and flavor in the user cache
+  (`~/Library/Caches/farm.js/react-native`). The generated project links and embeds them from `ReactNative/`, a link to that
+  cache slot, with fixed build settings: `c++20`, React Native's folly defines, `RCT_DEV` matching
+  the flavor (debug artifacts under `farm dev --mobile` for Fast Refresh, release artifacts for
+  `farm build --mobile`), and two header roots. The dependencies' headers stay inside their
+  framework, whose code signature lists them; moving them out fails the build.
+- **Measured on GitHub's macos-15 runner (Xcode 16.4, iPhone 16 Pro simulator, iOS 18.5)**, see
+  the PR for the run:
+
+  MEASUREMENTS_TABLE
+
+- **Rejected: CocoaPods.** `pod install` rewrites the project it is given, needs Ruby and
+  CocoaPods on every machine that builds the app, and adds a Pods project and workspace that Farm
+  would have to regenerate around, so `farm build --mobile --os ios` would no longer write the
+  whole project itself. With the prebuilt core (`RCT_USE_PREBUILT_RNCORE=1`) CocoaPods links the
+  same XCFrameworks, so it brings no size or speed in exchange; from source it adds the build time
+  in the table.
+- **Rejected for now: React Native's Swift package setup** (`setup-apple-spm.js`, new in 0.88). It
+  consumes the same XCFrameworks but injects packages, an xcconfig and a sync build phase into an
+  existing project and keeps state in `.spm-injected.json`; Farm writes the project from scratch on
+  every run and would be fighting the injector. The XCFramework layout it documents is what Farm
+  links directly.
+- **Autolinking without CocoaPods.** The packages the Android project links: the app's own
+  `dependencies` with iOS code (a podspec, unless `react-native.config.js` says `ios: null`) and
+  the app's modules in `src/native/`. A package's podspec `source_files` (and `exclude_files`) are
+  copied into `FarmModules/<package>/` and compiled into the app target, its `frameworks` are
+  linked, and a package without `codegenConfig` fails with an error naming it, as on Android.
+  React Native's own codegen (`generate-codegen-artifacts.js -t ios`) writes the packages' spec
+  glue and `RCTAppDependencyProvider`; the app's specs become one more codegen library,
+  `FarmAppSpec`, so an iOS TurboModule is an Objective-C++ class in `src/native/` that adopts its
+  `Native<Name>Spec` (`DeviceModule.mm` in the example). Packages with Swift sources fail with an
+  error for now: they need their own Clang module, which copying into the app target cannot give
+  them.
+- **No React Native without React Native routes.** When no route resolves to a React Native screen
+  on iOS, the project is the one before this change plus `NativeEngine.swift`, a stub that returns
+  no engine: no framework reference, no Objective-C++, no bytecode, no download.
+- **Deterministic.** The generated files, the pbxproj included, are byte-identical across runs.
+  The frameworks live outside the generated files, so regenerating never touches them; their
+  version is the app's `react-native` and Hermes, as on Android.
+- **Launch.** React Native's frameworks are linked dynamically, so dyld loads them on every launch,
+  even one that never opens a native screen; the process start to `didFinishLaunching` time above
+  includes that. Loading them only when the engine warms (`dlopen` of a framework that holds the
+  Objective-C++ host) is the follow-up if a device measurement shows it matters.
+- **Web twin and native-only routes.** As on Android: a screen that throws while loading or
+  rendering, or a runtime that fails (a fatal JS or native error reaches `RCTSetFatalHandler` in a
+  build, not a crash), shows the route's web screen. The iOS shell reads `nativeOnly` from
+  `farm-routes.json`: a native-only route has no web screen to fall back to, so it shows why it
+  could not open instead of the server's not-found page.
+- **`-FarmOpen <path>`.** Every build reads one launch argument, which only does what a tapped link
+  to the app's own server does: it visits that path once the first screen shows content, or
+  `-FarmOpenAfter <ms>` later. CI opens `/kit` cold and warm with it; the simulator job could not
+  tap before.
+- Generated React Native ports now run on iOS too: the analyzer no longer limits them to Android.
+- Not done: web screens calling app modules (`native.<name>`) on iOS, which needs the iOS side of
+  the bridge's `call` transport; native screens' images; a device, a release-configuration
+  archive and App Store size (the table's device numbers are the arm64 slices zipped, an estimate).
+
 ### The iOS project is a generated pbxproj
 
 - `@farm.js/mobile/ios` writes `App.xcodeproj` itself: a hand-written, deterministic
@@ -1460,7 +1547,8 @@ Mobile (0.2.x):
    builds (#2444), the shared pre-warmed runtime and the web twin fallback (#2445), the example's
    `/map` and `/camera` (#2446), and auth, the typed API client and server functions from native
    screens (#2503, #2507). In review: `@farm.js/ui` on native screens (#2545). Not started:
-   `layout.native.tsx` providers, intent prefetch, budgets in CI, and the iOS React Native host.
+   `layout.native.tsx` providers, intent prefetch, and budgets in CI. In review: the iOS React
+   Native host, the spike that renders `examples/mobile`'s `/kit` in the iOS simulator in CI.
 9. **Native islands**: `Map`, `Video`, `CameraPreview`, after the scroll-tracking experiment
    (7.7) decides their Android placement. Not started.
 10. **Analyzer stages 1 to 3.** Released on Android: tiers and the native-tier requirement
@@ -1483,8 +1571,9 @@ Next, in order, and what blocks it:
 - Build a release APK with R8 and run it. The generated project minifies release builds with no
   keep rules, and no release APK has been built yet.
 - Run native sign-in (#2507) and page shells (#2496) on an Android emulator.
-- The iOS React Native host. Until it exists, React Native screens, native modules and generated
-  ports are Android only, and iOS shows those routes as web screens.
+- The iOS React Native host past the spike: a device, a release archive with App Store size,
+  memory with several native screens, lazy loading of React Native's frameworks if launch cost
+  matters on a device, modules with Swift sources, and web screens calling app modules on iOS.
 
 Managed backend hosting in Infra comes after phase 6. iOS has macOS CI with Xcode once #2556
 merges; Android needs Linux CI with the Android SDK, the NDK and an emulator before its phases

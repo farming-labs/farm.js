@@ -4,6 +4,10 @@ import os
 
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
+    /// The scene's window, set by SceneDelegate. UIKit code that predates scenes, such as React
+    /// Native's, asks the application delegate for `window`.
+    var window: UIWindow?
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?

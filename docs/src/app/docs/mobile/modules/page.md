@@ -25,12 +25,14 @@ Codegen spec first (see [Web screens call app modules](#web-screens-call-app-mod
 call rejects with `NativeUnavailableError`. It is the right-hand channel in the
 [architecture figure](/blog/web-to-native#on-the-device).
 
-**Community React Native modules, on native screens, on Android.** A `page.native.tsx` screen can
+**Community React Native modules, on native screens.** A `page.native.tsx` screen can
 use an installed React Native module, such as `@react-native-community/netinfo`, the same way a
 React Native app does: add it to the app's `dependencies` and import it. Farm links the modules
 into the Android app (see [React Native screens](/docs/mobile/native-screens#react-native-screens)); the permissions a module
-declares in its own manifest are merged into the app's. Web screens cannot call these modules, and
-iOS has no React Native host yet. Verified on an Android 15 emulator with netinfo 12.0.1, in
+declares in its own manifest are merged into the app's. On iOS, Farm compiles each module's podspec
+`source_files` into the app and runs React Native's Codegen for it, without CocoaPods (see
+[React Native screens on iOS](/docs/mobile#react-native-screens-on-ios)); modules with Swift sources
+are not linked yet. Web screens cannot call these modules. Verified on an Android 15 emulator with netinfo 12.0.1, in
 `farm dev --mobile` and in a bytecode APK: `/map` shows the connection type and `isConnected`, and
 both change when Wi-Fi, mobile data, or airplane mode are switched off. Not verified yet: real
 devices and Expo modules.
@@ -137,8 +139,12 @@ States:
 | Specs and a React Native screen              | `farm-app-modules/` linked through React Native's Gradle plugin |
 | Kotlin or Swift files without a spec         | Unchanged: there is nothing to register                         |
 
-iOS has no React Native host yet. Swift files in `src/native/` are copied to `FarmAppModules/` next
-to the Xcode project, outside its target, so nothing builds or registers them until it has one.
+On iOS, a module is an Objective-C++ class in `src/native/` (`*.mm`, with any `*.h`, `*.m` or
+`*.swift` helpers) that adopts the `Native<Name>Spec` protocol Codegen generates from its spec into
+`FarmAppSpec.h`, registers with `RCT_EXPORT_MODULE(<Name>)`, and returns its spec's JSI glue from
+`getTurboModule:`, as `examples/mobile/src/native/DeviceModule.mm` does. With a React Native screen
+on iOS the files are compiled into the app (`FarmModules/app/`); without one they are copied to
+`FarmAppModules/` next to the Xcode project and not built.
 Web screens call them only when they opt in (next section). Keep `src/native/` out of the web
 `tsconfig.json`: specs import `react-native`.
 
@@ -223,8 +229,8 @@ those of [The bridge](/docs/mobile/shell#the-bridge): the server origin only, th
 registered modules and the methods in their specs.
 
 Not built yet: large results as references (a photo comes back as a URL, not base64), events as
-subscriptions, and the iOS side, which waits for the iOS shell to host React Native. In the iOS
-shell, `available()` is false.
+subscriptions, and the iOS side of the web-screen transport. In the iOS shell, `available()` is false on web
+screens; native screens call the module directly.
 
 Tested in unit and generator tests, and the generated Kotlin compiles against React Native
 0.88.1's `react-android` and the Java specs Codegen generates. Not run on a device or emulator yet.
@@ -261,8 +267,7 @@ mobile: {
 - A runtime permission, such as `android.permission.CAMERA`, is only declared: the module or the
   screen still asks the user for it (React Native's `PermissionsAndroid`). An install-time one,
   such as `VIBRATE`, is granted with the install.
-- Usage strings are written to `Info.plist` now, but no module runs on iOS until the iOS shell hosts
-  React Native.
+- Usage strings are written to `Info.plist`, for the modules React Native screens use on iOS.
 
 Every problem in `modules` is reported at once, each with its key and the fix:
 

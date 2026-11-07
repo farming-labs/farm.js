@@ -116,6 +116,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.tintColor = Theme.accent
         window.rootViewController = shell
         self.window = window
+        (UIApplication.shared.delegate as? AppDelegate)?.window = window
         window.makeKeyAndVisible()
 
         // Page shells, bundled by farm build --mobile with mobile.shells.
