@@ -52,6 +52,36 @@ An independently versioned package is not bumped by this command.
 The first stable release moves the shared group from `0.1.0-beta.N` to `0.1.0`. Packages outside
 `bump.config.ts` stay on their own beta line until they are deliberately promoted.
 
+## Islands server components
+
+Before releasing changes to the ISLX integration or updating `@farm.js/islx`, record these checks
+on the final commit:
+
+```bash
+pnpm build
+pnpm --filter @farm.js/core test
+pnpm --filter @farm.js/core type-check
+pnpm test:e2e:server-components:run
+pnpm test:e2e:rsc:run
+pnpm test:packed-islands
+```
+
+The shared server-components contract runs RSC and islands in development and Node production,
+then islands against Cloudflare's worker output in Miniflare and Vercel's function output locally.
+It covers server-only code, hydration, streaming, navigation, state, actions with and without
+JavaScript, queries, and error boundaries. Local output checks do not verify a hosted deployment.
+The shared browser configuration uses Google Chrome; install it before running these checks.
+
+`test:packed-islands` packs the fixture's Farm dependencies, installs the maintained
+`examples/server-components` app outside the checkout, type-checks it, and runs the same production
+browser contract. ISLX is installed through core's published dependency declaration. The command
+does not publish. It removes successful temporary installs and retains a failed install and its
+browser traces at the path printed in the error. Framework E2E also runs this gate in CI.
+
+These checks supplement `pnpm release:check` and the Node/Linux/Windows CI matrix. Passing them
+does not change the experimental status of islands mode or make it the default for
+`serverComponents: true`.
+
 ## Independent React compiler stable promotion
 
 `@farm.js/react` is not in the shared Bumpp group. Moving its configuration from
