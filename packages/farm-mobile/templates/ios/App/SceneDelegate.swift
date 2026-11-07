@@ -141,6 +141,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let engine = createFarmNativeEngine(config: config)
         FarmNativeScreens.engine = engine
         navigator.onFirstReady = { [weak navigator] in
+            LaunchTiming.logFirstContent()
             pool?.start()
             engine?.warm()
             guard let open else { return }

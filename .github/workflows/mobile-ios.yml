@@ -158,3 +158,117 @@ jobs:
           name: mobile-ios-${{ github.sha }}
           path: ${{ runner.temp }}/ios-evidence
           if-no-files-found: warn
+
+  # RFC 0004's "how React Native is consumed" comparison: React Native's own app template, built
+  # through CocoaPods from source and with its prebuilt core, Release, for the simulator. Farm's
+  # shell links the prebuilt XCFrameworks without CocoaPods (the job above); this records what the
+  # CocoaPods paths cost on the same runner. It measures and never blocks.
+  cocoapods-baseline:
+    name: React Native via CocoaPods (baseline)
+    runs-on: macos-15
+    timeout-minutes: 60
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      RN_VERSION: 0.88.1
+    steps:
+      - run: echo "EVIDENCE=$RUNNER_TEMP/cocoapods-evidence" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - name: Create the React Native app template
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir -p "$EVIDENCE"
+          npx --yes @react-native-community/cli@latest init Baseline --version "$RN_VERSION" \
+            --skip-git-init --install-pods false --pm npm 2>&1 | tail -20
+          pod --version | tee "$EVIDENCE/cocoapods-version.txt"
+          # Log process start to React Native's first content, the launch number Farm's shell logs.
+          DELEGATE=Baseline/ios/Baseline/AppDelegate.swift
+          perl -0pi -e 's/(didFinishLaunchingWithOptions[^{]*\{)/$1\n    BaselineTiming.observe()/' "$DELEGATE"
+          cat >> "$DELEGATE" <<'SWIFT'
+
+          enum BaselineTiming {
+            static func sinceProcessStart() -> Int {
+              var info = kinfo_proc()
+              var size = MemoryLayout<kinfo_proc>.stride
+              var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+              sysctl(&mib, u_int(mib.count), &info, &size, nil, 0)
+              let start = info.kp_proc.p_un.__p_starttime
+              var now = timeval()
+              gettimeofday(&now, nil)
+              return (Int(now.tv_sec) - Int(start.tv_sec)) * 1000 + (Int(now.tv_usec) - Int(start.tv_usec)) / 1000
+            }
+
+            static func observe() {
+              let launched = sinceProcessStart()
+              NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("RCTContentDidAppearNotification"), object: nil, queue: .main
+              ) { _ in
+                NSLog("baseline process->didFinishLaunching=%ldms process->first-content=%ldms", launched, sinceProcessStart())
+              }
+            }
+          }
+          SWIFT
+          grep -n "BaselineTiming.observe" "$DELEGATE"
+
+      - name: Boot an iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j |
+            jq -r '[.devices | to_entries[] | select(.key | test("iOS")) | .value[] | select(.name | test("^iPhone"))][0].udid')
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid"
+
+      - name: Build and launch, from source and prebuilt
+        working-directory: ${{ runner.temp }}/Baseline/ios
+        run: |
+          measure() {
+            local mode=$1 prebuilt=$2
+            rm -rf Pods Podfile.lock build
+            local started=$(date +%s)
+            RCT_USE_PREBUILT_RNCORE=$prebuilt RCT_USE_RN_DEP=$prebuilt pod install > "$EVIDENCE/pod-install-$mode.txt" 2>&1
+            local installed=$(date +%s)
+            xcodebuild -workspace Baseline.xcworkspace -scheme Baseline -configuration Release \
+              -destination 'generic/platform=iOS Simulator' -derivedDataPath build -quiet \
+              CODE_SIGNING_ALLOWED=NO build > "$EVIDENCE/xcodebuild-$mode.txt" 2>&1
+            local built=$(date +%s)
+            local app=build/Build/Products/Release-iphonesimulator/Baseline.app
+            echo "$mode pod_install_s=$((installed - started)) build_s=$((built - installed)) app_kb=$(du -sk "$app" | cut -f1) binary_kb=$(du -sk "$app/Baseline" | cut -f1) frameworks_kb=$(du -sk "$app/Frameworks" 2>/dev/null | cut -f1)" | tee -a "$EVIDENCE/baseline.txt"
+            ls -la "$app/Frameworks" >> "$EVIDENCE/frameworks-$mode.txt" 2>&1 || true
+            xcrun simctl install "$SIMULATOR_UDID" "$app"
+            local id
+            id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")
+            xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$id" > /dev/null
+            sleep 8
+            for run in 1 2 3; do
+              xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$id" > /dev/null
+              sleep 8
+            done
+            xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/baseline-$mode.png"
+            xcrun simctl spawn "$SIMULATOR_UDID" log show --last 2m --style compact \
+              --predicate 'process == "Baseline"' > "$EVIDENCE/log-$mode.txt" || true
+            xcrun simctl uninstall "$SIMULATOR_UDID" "$id"
+          }
+          measure source 0
+          measure prebuilt 1
+          {
+            echo '### React Native 0.88.1 app template through CocoaPods (Release, simulator)'
+            echo '```'
+            cat "$EVIDENCE/baseline.txt"
+            for mode in source prebuilt; do
+              echo "$mode launches:"
+              grep -oE "process->didFinishLaunching=[0-9]+ms process->first-content=[0-9]+ms" "$EVIDENCE/log-$mode.txt" || echo "  (no timing logged)"
+            done
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cocoapods-baseline-${{ github.sha }}
+          path: ${{ runner.temp }}/cocoapods-evidence
+          if-no-files-found: warn

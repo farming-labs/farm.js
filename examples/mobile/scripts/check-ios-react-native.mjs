@@ -27,6 +27,9 @@ for (const line of log.split(/\r?\n/)) {
     after = undefined;
   }
 }
+const launches = [...log.matchAll(/process->didFinishLaunching=(\d+)ms process->first-content=(\d+)ms/g)];
+const preMain = launches.map((match) => Number(match[1]));
+const firstContent = launches.map((match) => Number(match[2]));
 const warmUps = [...log.matchAll(/react-native warm in (\d+)ms/g)].map((match) => Number(match[1]));
 const cold = opens.filter((open) => open.mode === "cold").map((open) => open.ms);
 const warm = opens.filter((open) => open.mode === "warm").map((open) => open.ms);
@@ -50,6 +53,8 @@ console.log(`### iOS React Native host: /kit on the simulator
 | cold open (visit to first content, runtime starting) | ${median(cold)} ms | ${cold.join(", ")} |
 | warm open (runtime already started) | ${median(warm)} ms | ${warm.join(", ")} |
 | runtime start (warm(), bundle evaluated) | ${median(warmUps) ?? "n/a"} ms | ${warmUps.join(", ")} |
+| app launch: process start to didFinishLaunching (dyld loads React Native) | ${median(preMain) ?? "n/a"} ms | ${preMain.join(", ")} |
+| app launch: process start to the first tab's content | ${median(firstContent) ?? "n/a"} ms | ${firstContent.join(", ")} |
 
 | size | |
 | --- | --- |
