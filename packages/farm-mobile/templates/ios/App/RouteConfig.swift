@@ -18,6 +18,8 @@ struct RouteConfig {
         let screen: String
         /// The screen's module id, derived from the route, such as `app/notes/[id]`.
         let module: String?
+        /// A `page.native.tsx` with no `page.tsx`: there is no web twin to fall back to.
+        var nativeOnly = false
 
         /// Shown as a native view instead of a WebView, on any rule, including tab roots.
         var isNative: Bool { screen != RouteConfig.web }
@@ -122,7 +124,8 @@ struct RouteConfig {
             presentation: presentation,
             tab: (json["tab"] as? NSNumber)?.intValue,
             screen: screen,
-            module: screen == web ? nil : module
+            module: screen == web ? nil : module,
+            nativeOnly: screen != web && (json["nativeOnly"] as? Bool ?? false)
         )
     }
 

@@ -21,6 +21,7 @@
  *                  stop before contacting the registry or changing tags.
  */
 const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 const { readPublicPackages } = require("./public-packages");
 
@@ -198,6 +199,50 @@ function assertStableCoreDependencies(packages, getManifest = readRegistryManife
   );
 }
 
+/** Every file a package's manifest promises consumers: main, module, types, bin, and exports. */
+function manifestEntryFiles(manifest) {
+  const files = new Set();
+  const add = (value) => {
+    if (typeof value !== "string" || value.includes("*")) return;
+    files.add(value.replace(/^\.\//, ""));
+  };
+  for (const field of ["main", "module", "types", "typings"]) add(manifest[field]);
+  if (typeof manifest.bin === "string") add(manifest.bin);
+  else if (manifest.bin) Object.values(manifest.bin).forEach(add);
+  const walk = (node) => {
+    if (typeof node === "string") add(node);
+    else if (node && typeof node === "object") Object.values(node).forEach(walk);
+  };
+  walk(manifest.exports);
+  return [...files].sort();
+}
+
+/**
+ * Entry files missing from disk. `pnpm publish` uploads whatever is there and does not build, so a
+ * package whose build failed after clearing `dist/` would otherwise publish with no code in it.
+ */
+function findMissingEntryFiles(packages, exists = fs.existsSync) {
+  const missing = [];
+  for (const pkg of packages) {
+    for (const file of manifestEntryFiles(pkg.manifest)) {
+      if (!exists(path.join(pkg.dir, file))) missing.push({ package: pkg.name, file });
+    }
+  }
+  return missing;
+}
+
+function assertPackagesBuilt(packages, exists) {
+  const missing = findMissingEntryFiles(packages, exists);
+  if (missing.length === 0) return;
+  throw new Error(
+    [
+      "Refusing to publish packages whose entry files are missing (is the workspace built?):",
+      ...missing.map(({ package: name, file }) => `- ${name}: ${file}`),
+      "Run `pnpm build` (or `pnpm --filter <package> build`) and check it finishes without errors.",
+    ].join("\n"),
+  );
+}
+
 function tryPublishPackage(pkg) {
   try {
     execFileSync(
@@ -269,6 +314,8 @@ async function main(args = process.argv.slice(2)) {
     throw new Error("No public packages found under packages/.");
   }
 
+  // Before the dry run too: it is the last look at the tarballs before a real publish.
+  if (!options.verifyOnly) assertPackagesBuilt(packages);
   if (!options.dryRun) assertStableCoreDependencies(packages);
 
   const groups = groupPackagesByDistTag(packages);
@@ -310,6 +357,9 @@ module.exports = {
   groupPackagesByDistTag,
   findStableCoreDependencyMismatches,
   assertStableCoreDependencies,
+  assertPackagesBuilt,
+  findMissingEntryFiles,
+  manifestEntryFiles,
   isMissingRegistryVersion,
   isRetryableStagedPublishError,
   parsePublishBetaArgs,

@@ -90,7 +90,7 @@ const ANDROID = {
     module: "app/lab/packing",
   },
   "/stations/[id]": { presentation: "push", screen: "web", source: "default" },
-  "/map": { presentation: "push", screen: "native", source: "config", module: "app/map" },
+  "/map": { presentation: "push", screen: "native", source: "file", module: "app/map" },
   // A native-only route: page.native.tsx with no page.tsx (RFC 0004, 7.3).
   "/kit": { presentation: "push", screen: "native", source: "file", module: "app/kit", nativeOnly: true },
   "/camera": { presentation: "push", screen: "native", source: "file", module: "app/camera" },
@@ -161,7 +161,8 @@ expect(
 await run(["config", "inspect", "--mobile", "--os", "ios", "--report"]);
 const ios = await readJson("farm-routes.json");
 const iosRule = (route) => ios.rules.find((entry) => entry.route === route);
-expect(iosRule("/map")?.screen === "web" && iosRule("/map")?.source === "config", "ios /map is web");
+// iOS hosts React Native too, so its native screens match Android's.
+expect(iosRule("/map")?.screen === "native" && iosRule("/map")?.source === "file", "ios /map is native");
 expect(iosRule("/camera")?.screen === "native", "ios /camera is native");
 expect(
   iosRule("/kit")?.screen === "native" && iosRule("/kit")?.nativeOnly === true,
@@ -171,8 +172,7 @@ expect((await readJson("native-report.json")).routes.find((entry) => entry.route
 // page.kt is Android only; on iOS its page.tsx passes the native-tier check.
 expect(iosRule("/settings/device")?.screen === "server", "ios /settings/device is a server screen");
 for (const route of SERVER) expect(iosRule(route)?.screen === "server", `ios ${route} is a server screen`);
-// iOS does not host React Native yet, so the port stays web there.
-expect(iosRule("/lab/packing")?.screen === "web", "ios /lab/packing is web");
+expect(iosRule("/lab/packing")?.screen === "native", "ios /lab/packing is a port");
 
 // ---- web build ------------------------------------------------------------------------------
 

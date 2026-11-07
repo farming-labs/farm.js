@@ -31,15 +31,12 @@ export default defineConfig({
       // Pages the analyzer proves render natively become `server` screens: the server renders the
       // page and the shell draws it with native views. Pages with client-side logic stay web.
       auto: "on",
-      routes: {
-        // /map is native (page.native.tsx) except on iOS, which keeps the web screen for now.
-        "/map": { screen: "native", ios: "web" },
-      },
       budgets: { appSizeMb: 12, screenOpenMs: 300, droppedFrames: 2 },
     },
-    // The app's own Device module (src/native/) vibrates, so the Android manifest declares
-    // VIBRATE, an install-time permission with no prompt. `web: true` lets web screens call it
-    // too, as native.Device from @farm.js/core/native (/settings on Android).
+    // The app's own Device module (src/native/: DeviceModule.kt on Android, DeviceModule.mm on
+    // iOS) vibrates, so the Android manifest declares VIBRATE, an install-time permission with no
+    // prompt. `web: true` lets web screens call it too, as native.Device from
+    // @farm.js/core/native (/settings on Android).
     modules: {
       Device: { permissions: ["android.permission.VIBRATE"], web: true },
     },

@@ -344,7 +344,17 @@ const sidebar = [
       { label: "Instant Preview", slug: "preview", icon: "terminal" },
       { label: "Deployment", slug: "deployment", icon: "cloud" },
       { label: "Desktop Apps", slug: "desktop", icon: "monitor" },
-      { label: "Mobile Apps", slug: "mobile", icon: "smartphone" },
+      {
+        label: "Mobile Apps",
+        icon: "smartphone",
+        children: [
+          { label: "Overview", slug: "mobile", icon: "smartphone" },
+          { label: "The Web Shell", slug: "mobile/shell", icon: "layout" },
+          { label: "Native Screens", slug: "mobile/native-screens", icon: "layers" },
+          { label: "Device Features", slug: "mobile/modules", icon: "plug" },
+          { label: "Auth on Mobile", slug: "mobile/auth", icon: "lock" },
+        ],
+      },
     ],
   },
   {

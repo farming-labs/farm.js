@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/ui",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.3",
   "description": "Portable UI primitives for Farm.js apps: View, Text, Image, Pressable, TextInput and List that render as DOM on the web and, on a mobile native screen, as native views.",
   "keywords": [
     "components",

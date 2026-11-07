@@ -1,9 +1,11 @@
 name: Mobile Android
 
-# Builds examples/mobile's Android app with Gradle and runs it on an Android emulator, the same
-# evidence the Mobile iOS workflow keeps for the iOS shell: the APK builds, the app launches, the
-# home route draws native content, and the log holds no fatal error. Ubuntu runners have the
-# Android SDK preinstalled and KVM available, so this needs no third-party action.
+# Builds each mobile example's Android app with Gradle and runs it on an Android emulator:
+# examples/mobile (Field Notes, the complete example) and examples/mobile-minimal (Trail Guide, the
+# zero-native-code path). It keeps the same evidence the Mobile iOS workflow keeps for the iOS
+# shell: the APK builds, the app launches, the home route draws native content, and the log holds
+# no fatal error. Ubuntu runners have the Android SDK preinstalled and KVM available, so this needs
+# no third-party action.
 on:
   workflow_dispatch:
   pull_request:
@@ -12,6 +14,7 @@ on:
       - "packages/farm/src/mobile/**"
       - "packages/farm-cli/src/mobile*.ts"
       - "examples/mobile/**"
+      - "examples/mobile-minimal/**"
       - ".github/workflows/mobile-android.yml"
 
 permissions:
@@ -23,9 +26,20 @@ concurrency:
 
 jobs:
   android-emulator:
-    name: Android emulator
+    name: Android emulator (${{ matrix.example }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      # One example's failure keeps the other's evidence.
+      fail-fast: false
+      matrix:
+        include:
+          - example: mobile
+            app-id: dev.farmjs.examples.fieldnotes
+            server-routes: "/"
+          - example: mobile-minimal
+            app-id: dev.farmjs.examples.trailguide
+            server-routes: "/ /trails/[id]"
     env:
       AVD_IMAGE: system-images;android-35;google_apis;x86_64
     steps:
@@ -42,6 +56,7 @@ jobs:
           pnpm --filter @farm.js/cli build
           pnpm --filter @farm.js/mobile build
           pnpm --filter @farm.js/native build
+          pnpm --filter @farm.js/ui build
         env:
           NODE_OPTIONS: --max-old-space-size=12288
 
@@ -71,9 +86,10 @@ jobs:
           grep -qx "farm" "$EVIDENCE/avds.txt"
 
       - name: Build the APK with farm build --mobile --apk
-        working-directory: examples/mobile
+        working-directory: examples/${{ matrix.example }}
         env:
           FIELD_NOTES_SERVER: https://field-notes.farmjs.dev
+          TRAIL_GUIDE_SERVER: https://trail-guide.farmjs.dev
         run: |
           export JAVA_HOME="$JAVA_HOME_21_X64"
           pnpm exec farm build --mobile --apk 2>&1 | tee "$EVIDENCE/farm-build-android.txt"
@@ -103,11 +119,29 @@ jobs:
             tail -50 "$EVIDENCE/emulator.txt"
             exit 1
           fi
+          # Booted is not online: the app loads from farm dev at 10.0.2.2, the host's loopback, and
+          # the guest network can come up after boot. Wait until the guest opens a TCP connection
+          # to the host's adb server (127.0.0.1:5037), which always listens, so a fast launch does
+          # not race it into ERR_ADDRESS_UNREACHABLE.
+          online=""
+          for _ in $(seq 1 60); do
+            if "$ADB" shell 'echo | toybox nc -w 2 10.0.2.2 5037' > "$EVIDENCE/host-probe.txt" 2>&1; then
+              online=1
+              break
+            fi
+            sleep 2
+          done
+          if [ -z "$online" ]; then
+            echo "::error::The emulator never reached the host at 10.0.2.2."
+            cat "$EVIDENCE/host-probe.txt"
+            "$ADB" shell ip route | tee "$EVIDENCE/routes.txt" || true
+            exit 1
+          fi
           "$ADB" devices | tee "$EVIDENCE/devices.txt"
           "$ADB" logcat -c || true
 
       - name: Run the shell with farm dev --mobile
-        working-directory: examples/mobile
+        working-directory: examples/${{ matrix.example }}
         run: |
           export JAVA_HOME="$JAVA_HOME_21_X64"
           pnpm exec farm dev --mobile --port 3001 > "$EVIDENCE/farm-dev-android.txt" 2>&1 &
@@ -122,6 +156,8 @@ jobs:
           grep -q "Opened .* on " "$EVIDENCE/farm-dev-android.txt"
 
       - name: Capture the running app
+        env:
+          APP_ID: ${{ matrix.app-id }}
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
           # The first document loads from farm dev on the host; screenshot right away and as the
@@ -130,17 +166,21 @@ jobs:
             sleep "$t"
             "$ADB" exec-out screencap -p > "$EVIDENCE/home-${t}s.png"
           done
-          "$ADB" shell dumpsys activity activities | grep -i fieldnotes | head -5 \
+          "$ADB" shell dumpsys activity activities | grep -iF "$APP_ID" | head -5 \
             | tee "$EVIDENCE/activity.txt" || true
           "$ADB" logcat -d > "$EVIDENCE/logcat-full.txt"
           "$ADB" logcat -d -s FarmShell:V AndroidRuntime:E > "$EVIDENCE/app-log.txt"
           grep -iE "FATAL|crash" "$EVIDENCE/app-log.txt" | head -20 || true
 
       - name: Check the home route drew native content
-        working-directory: examples/mobile
+        working-directory: examples/${{ matrix.example }}
+        env:
+          SERVER_ROUTES: ${{ matrix.server-routes }}
         run: |
           cp .farm/output/mobile/farm-routes.json "$EVIDENCE/farm-routes.json"
-          node scripts/check-android-native.mjs "$EVIDENCE"
+          # Split the routes into arguments without globbing: /trails/[id] is a route, not a pattern.
+          set -f
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/check-android-native.mjs" "$EVIDENCE" $SERVER_ROUTES
 
       - name: Stop the dev server
         if: always()
@@ -151,6 +191,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: mobile-android-${{ github.sha }}
+          name: mobile-android-${{ matrix.example }}-${{ github.sha }}
           path: ${{ runner.temp }}/android-evidence
           if-no-files-found: warn

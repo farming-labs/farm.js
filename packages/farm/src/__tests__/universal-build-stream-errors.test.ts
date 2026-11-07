@@ -650,7 +650,6 @@ describe("streamed navigation flush markers", () => {
   const encoder = new TextEncoder();
   const token = "0123456789abcdef0123456789abcdef";
   const marker = `<!--farm-flush:${token}-->`;
-  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
   it("marks the end of each React flush on the readable-stream path", async () => {
     let late!: ReadableStreamDefaultController<Uint8Array>;
@@ -669,19 +668,27 @@ describe("streamed navigation flush markers", () => {
     };
     const { renderFarmElement } = instantiateStreamRenderer({ node: false, web: true });
     const rendered = await renderFarmElement(server, null, "/stream", token);
-    void (async () => {
-      await tick();
-      late.enqueue(encoder.encode('<div hidden id="S:0">a</div>'));
-      late.enqueue(encoder.encode("<script>$RC(0)</script>"));
-      await tick();
-      late.enqueue(encoder.encode('<div hidden id="S:1">b</div>'));
-      late.close();
-    })();
-    expect(await new Response(rendered.stream).text()).toBe(
-      `<main>shell</main>${marker}` +
-        `<div hidden id="S:0">a</div><script>$RC(0)</script>${marker}` +
-        '<div hidden id="S:1">b</div>',
-    );
+    const reader = rendered.stream!.getReader();
+    const decoder = new TextDecoder();
+    // Reads up to the next marker (or the end). React's next flush is only released once the
+    // previous one has been read, so a slow consumer cannot find two flushes already queued.
+    const readFlush = async () => {
+      let text = "";
+      while (!text.endsWith(marker)) {
+        const result = await reader.read();
+        if (result.done) break;
+        text += decoder.decode(result.value, { stream: true });
+      }
+      return text;
+    };
+    expect(await readFlush()).toBe(`<main>shell</main>${marker}`);
+    late.enqueue(encoder.encode('<div hidden id="S:0">a</div>'));
+    late.enqueue(encoder.encode("<script>$RC(0)</script>"));
+    expect(await readFlush()).toBe(`<div hidden id="S:0">a</div><script>$RC(0)</script>${marker}`);
+    late.enqueue(encoder.encode('<div hidden id="S:1">b</div>'));
+    late.close();
+    // The last flush ends with the stream, not a marker.
+    expect(await readFlush()).toBe('<div hidden id="S:1">b</div>');
   });
 
   it("marks the shell and each flush() React calls on the pipeable path", async () => {

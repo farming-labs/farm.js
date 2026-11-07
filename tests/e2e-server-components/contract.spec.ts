@@ -360,10 +360,15 @@ test("a large value shared by two client components survives client navigation",
   page,
 }) => {
   const errors = collectErrors(page);
-  const documents: string[] = [];
-  page.on("response", async (response) => {
-    const type = response.request().resourceType();
-    if (type === "document" || type === "fetch") documents.push(await response.text());
+  // The document and navigation requests, replayed with the same headers once the test is done:
+  // the server answers from them (F-Values, F-Layouts), and Chrome may already have dropped a
+  // response body by the time a listener asks for it.
+  const requests: Array<Promise<{ url: string; headers: Record<string, string> }>> = [];
+  page.on("request", (request) => {
+    const type = request.resourceType();
+    if (type === "document" || type === "fetch") {
+      requests.push(request.allHeaders().then((headers) => ({ url: request.url(), headers })));
+    }
   });
   await page.goto("/values/a");
   await hydrated(page);
@@ -378,6 +383,15 @@ test("a large value shared by two client components survives client navigation",
   expect(errors).toEqual([]);
 
   if (mode === "islands") {
+    const documents: string[] = [];
+    for (const { url, headers } of await Promise.all(requests)) {
+      const sent = Object.fromEntries(
+        Object.entries(headers).filter(
+          ([name]) => !["host", "connection", "content-length"].includes(name),
+        ),
+      );
+      documents.push(await (await page.request.get(url, { headers: sent })).text());
+    }
     // The list travels once, keyed by content. A navigation never sends it again: the server
     // leaves out the layout the browser keeps, and values the browser holds.
     const [first, ...navigations] = documents;
