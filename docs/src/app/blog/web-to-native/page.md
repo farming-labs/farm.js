@@ -44,7 +44,7 @@ The rule is deliberately conservative — **any doubt is web** — and every blo
 
 The tier decides what a screen _is_. Here is how one _runs_. On the phone your app is a native shell — native tabs, a stack per tab — around a pool of WebViews, with a native **navigator** built from `farm-routes.json`.
 
-<BlogFigure kind="mobile-arch" caption="A tap goes to the native navigator, which picks the screen by route. A web screen is a WebView that reaches your one backend over the origin-scoped bridge; the device-capability channel is reserved but ships nothing yet." />
+<BlogFigure kind="mobile-arch" caption="A tap goes to the native navigator, which picks the screen by route. Every kind is served by your one backend: a web screen through the origin-scoped bridge, which also carries opt-in app-module calls; a server screen by fetching the page's rendered tree; and a React Native screen by calling the server functions it imports." />
 
 A tap on a `Link` is handed to the shell, which asks the navigator what the route maps to:
 
