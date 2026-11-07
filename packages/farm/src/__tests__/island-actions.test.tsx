@@ -72,7 +72,7 @@ describe("server actions as island props", () => {
   it("sends an action as a reference and hydrates it as a callable stub", async () => {
     const html = renderToString(<TodoForm action={addTodo} count={2} />);
     const props = JSON.parse(
-      /<script type="f\/props" for="[^"]+">([^<]*)<\/script>/.exec(html)![1]!,
+      /<script type="f\/props" for="[^"]+"[^>]*>([^<]*)<\/script>/.exec(html)![1]!,
     );
     expect(props.action).toEqual({ $: "a", v: "add-todo-id" });
     expect(html).not.toContain("formData.get");

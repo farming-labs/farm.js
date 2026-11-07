@@ -146,7 +146,7 @@ describe("content-addressed island values", () => {
     expect(key).toMatch(/^[0-9a-z]{14}$/);
     // The value script comes before the island, and the props only name it.
     expect(html.indexOf('type="f/value"')).toBeLessThan(html.indexOf("<f-island"));
-    const props = /<script type="f\/props" for="[^"]+">([^<]*)<\/script>/.exec(html)![1]!;
+    const props = /<script type="f\/props" for="[^"]+"[^>]*>([^<]*)<\/script>/.exec(html)![1]!;
     expect(JSON.parse(props)).toEqual({ tree: { $: "r", v: key }, label: "Docs" });
 
     serve({ "f-values": key! });
