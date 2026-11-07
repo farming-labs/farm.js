@@ -750,6 +750,11 @@
       "import": "./dist/internal/islx-react.mjs",
       "require": "./dist/internal/islx-react.cjs"
     },
+    "./internal/react-cache": {
+      "types": "./dist/internal/react-cache.d.ts",
+      "import": "./dist/internal/react-cache.mjs",
+      "require": "./dist/internal/react-cache.cjs"
+    },
     "./internal/form-actions": {
       "types": "./dist/internal/form-actions.d.ts",
       "import": "./dist/internal/form-actions.mjs",

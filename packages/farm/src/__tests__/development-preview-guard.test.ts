@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveConfig, type ViteDevServer } from "vite";
+import { isFileServingAllowed, resolveConfig, type ViteDevServer } from "vite";
 import { getFarmDevFsDeny, VITE_DEFAULT_FS_DENY } from "../dev-preview-guard";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
@@ -187,6 +187,12 @@ describe("development server file exposure", () => {
   }, 60_000);
 });
 
+const FARM_DENY = [
+  "**/.farm/!(client-references)/**",
+  "**/.farm/client-references?*/**",
+  "**/.farm/*",
+];
+
 describe("development fs.deny", () => {
   it("restates Vite's own defaults when the app has not configured the list", async () => {
     const resolved = await resolveConfig({ configFile: false, logLevel: "silent" }, "serve");
@@ -194,15 +200,36 @@ describe("development fs.deny", () => {
 
     expect(getFarmDevFsDeny(undefined, { root: "/app" })).toEqual([
       ...VITE_DEFAULT_FS_DENY,
-      "**/.farm/**",
+      ...FARM_DENY,
     ]);
     // Vite appends a plugin's list to the app's own, so only Farm's entries are returned then.
     expect(getFarmDevFsDeny(["secret/**"], { root: "/app", distDir: "dist" })).toEqual([
-      "**/.farm/**",
+      ...FARM_DENY,
       `${path.resolve("/app", "dist").replace(/\\/g, "/")}/**`,
     ]);
-    expect(getFarmDevFsDeny(["secret/**"], { root: "/app", distDir: "." })).toEqual([
-      "**/.farm/**",
-    ]);
+    expect(getFarmDevFsDeny(["secret/**"], { root: "/app", distDir: "." })).toEqual(FARM_DENY);
+  });
+
+  it("serves only the generated client references from .farm", async () => {
+    const config = await resolveConfig(
+      {
+        configFile: false,
+        logLevel: "silent",
+        root: "/app",
+        server: { fs: { allow: ["/app"], deny: getFarmDevFsDeny(undefined, { root: "/app" }) } },
+      },
+      "serve",
+    );
+    const served = (file: string) => isFileServingAllowed(config, file);
+    expect(served("/app/.farm/client-references/next-themes/ThemeProvider.tsx")).toBe(true);
+    expect(served("/app/src/app/page.tsx")).toBe(true);
+    for (const file of [
+      "/app/.farm/cache/client-boundaries.json",
+      "/app/.farm/client-module-preloads.json",
+      "/app/.farm/.output/server/index.mjs",
+      "/app/.farm/client-references-copy/secret.ts",
+    ]) {
+      expect(served(file)).toBe(false);
+    }
   });
 });

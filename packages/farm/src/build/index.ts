@@ -312,6 +312,7 @@ async function createProjectModuleServer(
   root: string,
   buildLifetime: AbortSignal,
 ): Promise<ViteDevServer> {
+  const { farmServerOnlyEntriesPlugin } = await import("../vite");
   const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
     ssr: true,
     buildLifetime,
@@ -334,6 +335,9 @@ async function createProjectModuleServer(
           publicDir: config.publicDir,
         }),
         farmEnvironmentFunctionsPlugin(),
+        // Route modules load here at build time (rendering config, prerendering): `server-only`
+        // resolves as it does in the server build.
+        farmServerOnlyEntriesPlugin(),
       ],
       server: {
         middlewareMode: true,

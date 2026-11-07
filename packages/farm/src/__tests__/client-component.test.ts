@@ -1199,6 +1199,35 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
       ).toBe("package client boundary icon-kit cannot yet be isolated");
     });
 
+    it("renders package client components through their client references in islands mode", () => {
+      const { root, componentsFile } = markdownProject(
+        'import { Icon } from "icon-kit";\nimport { CopyButton } from "./components/copy-button";\nexport const components = { Icon, CopyButton };\n',
+      );
+      const packageRoot = path.join(root, "node_modules", "icon-kit");
+      fs.mkdirSync(packageRoot, { recursive: true });
+      fs.writeFileSync(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({ name: "icon-kit", exports: "./index.js" }),
+      );
+      fs.writeFileSync(
+        path.join(packageRoot, "index.js"),
+        '"use client";\nexport function Icon() { return null; }\n',
+      );
+
+      const plan = getMarkdownPageHydrationPlan(componentsFile, root, "off", {
+        asyncOwnerIslands: true,
+        packageReferences: true,
+      });
+      expect(plan.fallbackReason).toBeUndefined();
+      expect(plan.staticPackageBoundaries).toBeUndefined();
+      expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath).sort()).toEqual(
+        [
+          path.join(root, ".farm", "client-references", "icon-kit", "Icon.tsx"),
+          path.join(root, "src", "components", "copy-button.tsx"),
+        ].sort(),
+      );
+    });
+
     it("keeps an async page's islands beside package client components it renders statically", () => {
       const { root } = markdownProject("export const components = {};\n");
       const packageRoot = path.join(root, "node_modules", "icon-kit");
