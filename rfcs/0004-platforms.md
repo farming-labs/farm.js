@@ -1266,8 +1266,9 @@ Measured on `examples/mobile` (two screens), macOS arm64, Node 24, React Native 
 
 ### The iOS React Native host links prebuilt XCFrameworks
 
-Decided 2026-11-07 with a spike that renders `examples/mobile`'s `/kit` in the iOS simulator in
-CI. Amends "The iOS project is a generated pbxproj" (no CocoaPods still holds) and gives iOS the
+Decided 2026-11-07 with a spike that renders `examples/mobile`'s `/kit` (native-only,
+`@farm.js/ui`) and `/map` (netinfo and the app's `Device` TurboModule) in the iOS simulator in CI,
+from a `farm build --mobile --os ios` app. Amends "The iOS project is a generated pbxproj" (no CocoaPods still holds) and gives iOS the
 same model as "React Native 0.88.1 from prebuilt Maven artifacts" and "Native screens are surfaces
 in Farm's navigator".
 
@@ -1296,17 +1297,57 @@ in Farm's navigator".
   the flavor (debug artifacts under `farm dev --mobile` for Fast Refresh, release artifacts for
   `farm build --mobile`), and two header roots. The dependencies' headers stay inside their
   framework, whose code signature lists them; moving them out fails the build.
-- **Measured on GitHub's macos-15 runner (Xcode 16.4, iPhone 16 Pro simulator, iOS 18.5)**, see
-  the PR for the run:
+- **Measured on GitHub's macos-15 runner (Xcode 16.4, iPhone 16 Pro simulator, iOS 18.5)**, in
+  the Mobile iOS workflow (runs A, B and C are three dispatches of the spike's branch):
 
-  MEASUREMENTS_TABLE
+  | Farm, prebuilt XCFrameworks, `farm build --mobile --os ios` | run A                | run B (3 macOS jobs at once) | run C                 |
+  | ----------------------------------------------------------- | -------------------- | ---------------------------- | --------------------- |
+  | Cold first React Native screen: visit to first render       | 96 ms (71, 96, 115)  | 107 ms (52, 107, 270)        | 107 ms (95, 107, 152) |
+  | Warm React Native screen: runtime started 5 s earlier       | 45 ms (40, 45, 54)   | 119 ms (110, 119, 284)       | 60 ms (49, 60, 76)    |
+  | `/map` with netinfo and `Device`: visit to first render     | not run              | 106 ms                       | 87 ms                 |
+  | Launch: process start to `didFinishLaunching`               | 548 ms (480 to 1169) | 805 ms (602 to 1386)         | 794 ms (583 to 1062)  |
+  | Launch: process start to the first tab's content            | 641 ms (555 to 1384) | 930 ms (673 to 1609)         | 946 ms (674 to 1373)  |
+
+  Medians, with the runs; "visit" is the navigator's visit, "first render" the screen's first
+  commit (`FarmShell.rendered`). The cold open starts the runtime with the first tab, so it
+  includes evaluating the bundle; warm-open noise in run B is the WebView pool and the home
+  screen loading at the same moment. Farm builds the shell in the Debug configuration (Swift
+  unoptimized) against release React Native. Size, the same in every run:
+
+  | Size                                       |                                                         |
+  | ------------------------------------------ | ------------------------------------------------------- |
+  | Simulator app (arm64 and x86_64)           | 43.6 MB: React 23.6, hermesvm 12.3, dependencies 2.6 MB |
+  | Hermes bytecode, four screens              | 1.4 MB                                                  |
+  | React Native's arm64 device slices         | 20.4 MB, 5.2 MB zipped                                  |
+  | `farm build --mobile --os ios`, end to end | 70 to 87 s, the uncached React Native download included |
+
+  The comparison, measured in the same workflow (`cocoapods-baseline` job, run C): React Native
+  0.88.1's own app template, Release, built for the simulator through CocoaPods both ways. Launch
+  "first content" there is React Native's first root render (`RCTContentDidAppearNotification`),
+  medians of 4.
+
+  | React Native 0.88.1 template via CocoaPods    | from source                              | prebuilt core (`RCT_USE_PREBUILT_RNCORE=1`) |
+  | --------------------------------------------- | ---------------------------------------- | ------------------------------------------- |
+  | `pod install`                                 | 202 s                                    | 136 s                                       |
+  | `xcodebuild`, clean                           | 1840 s (31 min)                          | 131 s                                       |
+  | Simulator app                                 | 35.5 MB (binary 20.6 MB, Hermes 12.2 MB) | 41.5 MB (frameworks 38.4 MB)                |
+  | Launch: process start to `didFinishLaunching` | 397 ms (323 to 612)                      | 512 ms (458 to 1133)                        |
+  | Launch: process start to first content        | 484 ms (402 to 888)                      | 647 ms (583 to 1310)                        |
+
+  Read together: React Native's dynamic XCFrameworks cost about 6 MB and about 115 ms of dyld at
+  launch on the simulator against a static source build, whoever links them, and save about 29
+  minutes of clean build; Farm's direct linking lands where CocoaPods with the prebuilt core does
+  (43.6 MB with the WebView shell and four screens of bytecode, 550 to 800 ms to
+  `didFinishLaunching`) without `pod install` or Ruby.
 
 - **Rejected: CocoaPods.** `pod install` rewrites the project it is given, needs Ruby and
   CocoaPods on every machine that builds the app, and adds a Pods project and workspace that Farm
   would have to regenerate around, so `farm build --mobile --os ios` would no longer write the
-  whole project itself. With the prebuilt core (`RCT_USE_PREBUILT_RNCORE=1`) CocoaPods links the
-  same XCFrameworks, so it brings no size or speed in exchange; from source it adds the build time
-  in the table.
+  whole project itself. With the prebuilt core it links the same XCFrameworks, so it brings no size
+  or launch win in exchange for `pod install` (136 s). From source it is 6 MB smaller and about
+  115 ms faster to launch on the simulator, at 31 minutes per clean build: a trade to revisit only
+  if a device measurement shows the launch cost matters, and then lazily loading the frameworks is
+  the cheaper fix.
 - **Rejected for now: React Native's Swift package setup** (`setup-apple-spm.js`, new in 0.88). It
   consumes the same XCFrameworks but injects packages, an xcconfig and a sync build phase into an
   existing project and keeps state in `.spm-injected.json`; Farm writes the project from scratch on
