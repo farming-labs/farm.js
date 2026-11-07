@@ -117,6 +117,8 @@ jobs:
       - name: Run the shell with farm dev --mobile --os ios
         working-directory: examples/mobile
         run: |
+          # The home check reads only the dev app's log, not the production app's /kit launches.
+          echo "DEV_STARTED=$(date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
           pnpm exec farm dev --mobile --os ios --port 3001 > "$EVIDENCE/farm-dev-ios.txt" 2>&1 &
           echo "FARM_DEV_PID=$!" >> "$GITHUB_ENV"
           # The CLI builds, installs and launches the app, then prints "Opened <name> on <simulator>."
@@ -137,7 +139,7 @@ jobs:
             sleep "$t"
             xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/home-${t}s.png"
           done
-          xcrun simctl spawn "$SIMULATOR_UDID" log show --last 5m --style compact \
+          xcrun simctl spawn "$SIMULATOR_UDID" log show --start "$DEV_STARTED" --style compact \
             --predicate 'process == "App"' > "$EVIDENCE/app-log.txt"
           grep -iE "error|fault|crash" "$EVIDENCE/app-log.txt" | head -50 || true
 

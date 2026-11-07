@@ -52,7 +52,7 @@ console.log(`### iOS React Native host: /kit on the simulator
 | --- | --- | --- |
 | cold open (visit to first content, runtime starting) | ${median(cold)} ms | ${cold.join(", ")} |
 | warm open (runtime already started) | ${median(warm)} ms | ${warm.join(", ")} |
-| runtime start (warm(), bundle evaluated) | ${median(warmUps) ?? "n/a"} ms | ${warmUps.join(", ")} |
+| host start (warm() to hostDidStart; the bundle runs after) | ${median(warmUps) ?? "n/a"} ms | ${warmUps.join(", ")} |
 | app launch: process start to didFinishLaunching (dyld loads React Native) | ${median(preMain) ?? "n/a"} ms | ${preMain.join(", ")} |
 | app launch: process start to the first tab's content | ${median(firstContent) ?? "n/a"} ms | ${firstContent.join(", ")} |
 
