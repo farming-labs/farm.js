@@ -90,6 +90,11 @@ jobs:
               xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/kit-$mode-$run.png"
             done
           done
+          # /map: React Native with an autolinked community module (netinfo) and the app's own
+          # Device TurboModule. A module that did not link throws on import and falls back.
+          xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$ID" -FarmOpen /map
+          sleep 10
+          xcrun simctl io "$SIMULATOR_UDID" screenshot "$EVIDENCE/map.png"
           xcrun simctl spawn "$SIMULATOR_UDID" log show --last 10m --style compact \
             --predicate 'process == "App"' > "$EVIDENCE/kit-log.txt"
           grep -E "react-native|native app/|launch open|fallback|failed" "$EVIDENCE/kit-log.txt" | tail -60 || true

@@ -15,6 +15,16 @@ const failure = log
   .find((line) => /react-native failed|native screen app\/kit failed|app\/kit could not open|unavailable and/.test(line));
 assert(!failure, `/kit did not render as a React Native screen:\n${failure}\nInspect kit-log.txt.`);
 
+// /map links netinfo and the app's Device module; a module missing on iOS fails its import.
+const mapFailure = log
+  .split(/\r?\n/)
+  .find((line) => /native screen app\/map failed|showing the web screen for \/map/.test(line));
+assert(!mapFailure, `/map fell back to its web screen:\n${mapFailure}\nInspect kit-log.txt and map.png.`);
+assert(
+  /native app\/map open->content=\d+ms/.test(log),
+  "/map never reached first content. Inspect kit-log.txt and map.png.",
+);
+
 // Each launch logs "launch open /kit after <ms>ms", then the surface's first content.
 const opens = [];
 let after;
