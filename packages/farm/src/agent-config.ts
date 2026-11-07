@@ -125,7 +125,8 @@ export interface FarmAgentUserConfig {
   aiCatalog?: boolean;
   /**
    * Serve `/.well-known/farmjs.json`: Farm's version and packages, the app's MCP tools and
-   * their schemas, WebMCP browser tools, integration providers and plugin names. Everyone,
+   * their schemas, WebMCP browser tools, integration providers, plugin names and its public
+   * site URL (`FARM_SITE_URL` or the host's production address). Everyone,
    * Farm Infra included, gets the same public document; an MCP server that requires
    * `authorize` or sits behind a guard is listed by identity only. An object hides sections
    * (served as `null`), package versions, schemas or single servers and tools. `false` turns
