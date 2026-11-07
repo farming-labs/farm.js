@@ -121,6 +121,7 @@ For a bug fix, add a regression test and confirm it fails for the reported mecha
 - Do not create, push, or merge a pull request unless the developer explicitly asks.
 - One concern per PR. Keep drive-by refactors, dependency upgrades, generated churn, and unrelated formatting out of the diff.
 - Use a conventional, plain-language title: `<type>(<scope>): <observable outcome>`, for example `fix(middleware): continue after a function matcher returns false`.
+- Name the branch `<type>/<topic>` with the title's type and a few words naming the change, for example `fix/middleware-function-matcher`. If a session or tool assigned a generated name such as `<user>/<adjective>-<name>-<suffix>`, rename the branch to this form before the first push.
 - Write the human-authored description before any bot summary. A generated summary does not replace the implementation record.
 - Link the owning issue when one exists. Non-trivial features should have an agreed problem statement before implementation.
 - UI and documentation presentation changes need screenshots; interaction, streaming, hydration, or timing changes need a short recording or reproducible browser test when visual evidence is material.
