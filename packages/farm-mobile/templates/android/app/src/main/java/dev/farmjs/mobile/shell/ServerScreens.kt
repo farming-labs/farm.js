@@ -37,6 +37,10 @@ import android.view.ViewOutlineProvider
 import android.view.inputmethod.EditorInfo
 import android.webkit.CookieManager
 import androidx.appcompat.app.AlertDialog
+import androidx.core.view.AccessibilityDelegateCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -68,7 +72,7 @@ object FarmServerScreens {
     fun open(context: Context, host: FarmNativeHost, url: Uri): FarmNativeContent {
         val screen = TreeScreen(context, host, url)
         screen.load(url)
-        return FarmNativeContent(screen.frame, title = "", close = { screen.closed = true })
+        return FarmNativeContent(screen.frame, title = "", close = { screen.closed = true }, refresh = screen::reload)
     }
 
     internal fun background(work: () -> Unit) = network.execute(work)
@@ -170,6 +174,30 @@ private class TreeScreen(private val context: Context, private val host: FarmNat
     /** What was typed, by form and field, so drawing the tree again keeps it. */
     private val typed = mutableMapOf<String, String>()
 
+    /** Pull to refresh, or a modal above it closed: load this page again over what is shown. */
+    fun reload() {
+        if (!shown || closed) return
+        val url = page
+        FarmServerScreens.background {
+            val result = runCatching { FarmServerScreens.fetch(url) }
+            FarmServerScreens.onMain {
+                if (closed) return@onMain
+                // A failed refresh keeps what is shown, as a browser keeps the page it had.
+                result.onSuccess { show(url, it) }
+                refresher?.isRefreshing = false
+            }
+        }
+    }
+
+    private var refresher: SwipeRefreshLayout? = null
+
+    /** The drawn tree, under a pull-to-refresh. */
+    private fun refreshable(content: View): View = SwipeRefreshLayout(context).apply {
+        addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        setOnRefreshListener { reload() }
+        refresher = this
+    }
+
     fun load(url: Uri) {
         val spinner = ProgressBar(context)
         frame.removeAllViews()
@@ -195,7 +223,7 @@ private class TreeScreen(private val context: Context, private val host: FarmNat
         val root = tree.getJSONObject("root")
         page = url
         typed.clear()
-        val draw = { Renderer(context, host, url, typed, ::submit).screen(root) }
+        val draw = { refreshable(Renderer(context, host, url, typed, ::submit).screen(root)) }
         runCatching(draw)
             .onSuccess { view ->
                 frame.removeAllViews()
@@ -377,6 +405,7 @@ private class Renderer(
             form = outer
         }
         decorate(view, style)
+        accessibility(view, node, type)
         if (type == "Pressable") {
             val href = node.optString("href")
             val submit = node.optJSONObject("submit")
@@ -397,6 +426,30 @@ private class Renderer(
         }
         view.layoutParams = layout(style, parentRow)
         return view
+    }
+
+    /** What a screen reader gets, from the page's headings, labels, and hidden content. */
+    private fun accessibility(view: View, node: JSONObject, type: String) {
+        if (node.optInt("heading", 0) > 0) ViewCompat.setAccessibilityHeading(view, true)
+        if (node.optBoolean("hidden")) {
+            view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            return
+        }
+        val label = node.optString("label").ifEmpty { null }
+        val button = type == "Pressable" && node.has("submit")
+        if (label != null && view !is EditText) view.contentDescription = label
+        if (button || (label != null && view is EditText)) {
+            ViewCompat.setAccessibilityDelegate(view, object : AccessibilityDelegateCompat() {
+                override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfoCompat) {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                    if (button) info.className = android.widget.Button::class.java.name
+                    // A field's label, then its placeholder, as a browser exposes them.
+                    if (host is EditText && label != null) {
+                        info.hintText = listOfNotNull(label, host.hint?.toString()).joinToString(", ")
+                    }
+                }
+            })
+        }
     }
 
     private fun draw(node: JSONObject, type: String, style: JSONObject): View {
@@ -865,10 +918,17 @@ private class TreeFrame(context: Context) : FrameLayout(context) {
         if (next == night) return
         night = next
         val draw = render ?: return
-        val scrollY = (getChildAt(0) as? ScrollView)?.scrollY ?: 0
+        val scrollY = scrollOf(getChildAt(0))?.scrollY ?: 0
         val view = runCatching(draw).getOrNull() ?: return
         removeAllViews()
         addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        (view as? ScrollView)?.post { view.scrollTo(0, scrollY) }
+        scrollOf(view)?.let { scroll -> scroll.post { scroll.scrollTo(0, scrollY) } }
+    }
+
+    /** The tree's scroll view, under its pull-to-refresh. */
+    private fun scrollOf(view: View?): ScrollView? = when (view) {
+        is ScrollView -> view
+        is ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { scrollOf(view.getChildAt(it)) }
+        else -> null
     }
 }

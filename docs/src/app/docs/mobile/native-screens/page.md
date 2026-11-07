@@ -100,6 +100,18 @@ A plain HTML form works on a server-rendered screen with no JavaScript on the de
 way, and the Mobile Android workflow types a report on the emulator, taps Post report, and requires
 it on the redrawn native screen.
 
+### Refresh and accessibility
+
+- **Pull to refresh** loads the page's tree again over what is shown; a failed refresh keeps it.
+  Closing a modal refreshes the server screen under it, as it does a web screen, so a list shows
+  the note a modal form just saved.
+- **Screen readers get what the browser exposes.** `<h1>`–`<h6>` and `role="heading"` are headings
+  (TalkBack and VoiceOver heading navigation); `aria-label` names a link, button, or image; a
+  field's wrapping `<label>`, `<label for>`, or `aria-label` names the field; submit buttons are
+  buttons. `aria-hidden="true"`, `role="presentation"`, and `alt=""` hide a view from screen
+  readers while it is still drawn, as in a browser; an element with the `hidden` attribute is not
+  drawn at all. Inline runs inside a text block (a link in a paragraph) are read with their block.
+
 A web server answers these requests only for an app with a `mobile` block, so a web-only app's
 server is unchanged.
 

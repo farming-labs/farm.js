@@ -15,6 +15,7 @@ final class FarmServerScreen: UIViewController {
     private let fallback: (String) -> Void
     private let scroll = UIScrollView()
     private let spinner = UIActivityIndicatorView(style: .medium)
+    private let refresher = UIRefreshControl()
     private var loaded = false
     private var submitting = false
     /// The drawn tree's forms; their fields are delegates the views do not retain.
@@ -36,6 +37,8 @@ final class FarmServerScreen: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = Theme.background
         scroll.alwaysBounceVertical = true
+        refresher.addAction(UIAction { [weak self] _ in self?.refresh() }, for: .valueChanged)
+        scroll.refreshControl = refresher
         scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
         spinner.translatesAutoresizingMaskIntoConstraints = false
@@ -96,6 +99,20 @@ final class FarmServerScreen: UIViewController {
             Navigator.log.notice("server screen ready: \(self.url.path, privacy: .public)")
         } catch {
             fallback(String(describing: error))
+        }
+    }
+
+    /// Pull to refresh, or a modal above it closed: load this page again over what is shown.
+    func refresh() {
+        guard loaded else {
+            refresher.endRefreshing()
+            return
+        }
+        let target = url
+        Task {
+            // A failed refresh keeps what is shown, as a browser keeps the page it had.
+            if let tree = try? await fetch(target) { show(tree, url: target) }
+            refresher.endRefreshing()
         }
     }
 
@@ -355,6 +372,15 @@ final class FarmTreeRenderer {
             throw FarmTreeError.unexpected("node \(type)")
         }
         try decorate(view, node: node, style: style)
+        // What a screen reader gets, from the page's headings, labels, and hidden content.
+        if let level = node["heading"] as? Int, level > 0 { view.accessibilityTraits.insert(.header) }
+        if node["hidden"] as? Bool == true {
+            view.accessibilityElementsHidden = true
+            view.isAccessibilityElement = false
+        } else if let label = node["label"] as? String, !label.isEmpty {
+            view.accessibilityLabel = label
+            view.isAccessibilityElement = true
+        }
         if type == "Pressable", let href = node["href"] as? String, let url = URL(string: href) {
             view.isUserInteractionEnabled = true
             view.addGestureRecognizer(Tap(action: { [visit] in visit(url) }))

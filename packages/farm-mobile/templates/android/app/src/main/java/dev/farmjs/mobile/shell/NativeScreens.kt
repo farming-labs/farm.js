@@ -32,7 +32,13 @@ interface FarmNativeHost {
 }
 
 /** A native screen's content: its view, an optional initial title, and how to release it. */
-class FarmNativeContent(val view: View, val title: String? = null, val close: () -> Unit = {})
+class FarmNativeContent(
+    val view: View,
+    val title: String? = null,
+    val close: () -> Unit = {},
+    /** Load the screen's content again, as a web page reloads; null when it has nothing to load. */
+    val refresh: (() -> Unit)? = null,
+)
 
 /**
  * The engine for `"native"` screens, such as React Native. There is one per app, created by

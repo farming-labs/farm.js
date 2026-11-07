@@ -217,7 +217,7 @@ final class Navigator: NSObject, UITabBarControllerDelegate, UIAdaptivePresentat
         sheet.dismiss(animated: true)
         // The screen under the modal may show data the modal changed.
         if refresh, let top = stacks[current].topViewController as? ScreenViewController {
-            top.page?.bridge.refresh()
+            top.refresh()
         }
     }
 
