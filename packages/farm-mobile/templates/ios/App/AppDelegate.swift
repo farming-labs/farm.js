@@ -9,7 +9,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         LaunchTiming.didFinishLaunching = LaunchTiming.sinceProcessStart()
-        true
+        return true
     }
 
     func application(
@@ -25,6 +25,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 
 /// Launch timings from the kernel's process start, logged once the first screen shows content.
 /// `didFinishLaunching` includes dyld loading the app's frameworks, such as React Native's.
+@MainActor
 enum LaunchTiming {
     static var didFinishLaunching: Int?
 
