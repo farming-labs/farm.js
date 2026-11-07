@@ -1365,11 +1365,13 @@ in Farm's navigator".
   React Native's own codegen (`generate-codegen-artifacts.js -t ios`) writes the packages' spec
   glue and `RCTAppDependencyProvider`; the app's specs become one more codegen library,
   `FarmAppSpec`, so an iOS TurboModule is an Objective-C++ class in `src/native/` that adopts its
-  `Native<Name>Spec` (`DeviceModule.mm` in the example). Swift sources compile into the app's
-  module with everything else: React Native's prebuilt `React.framework` is a Clang module
+  `Native<Name>Spec` (`DeviceModule.mm` in the example). Swift sources compile into one module
+  with everything else linked (the `FarmReactNativeHost` framework since React Native loads
+  lazily, below): React Native's prebuilt `React.framework` is a Clang module
   (`framework module React`, an Objective-C umbrella), so `import React` works without CocoaPods,
   and `FarmModules/FarmSwiftHeaders/` gives each package with Swift the `<Module>-Swift.h` name
-  CocoaPods would generate, forwarding to the app's `App-Swift.h`. Limits of sharing one module:
+  CocoaPods would generate, forwarding to `<FarmReactNativeHost/FarmReactNativeHost-Swift.h>`.
+  Limits of sharing one module:
   two packages with the same Swift type name collide, and a package's Swift sees its own
   Objective-C headers only through React's exports, not a bridging header of its own. CI calls
   `examples/mobile/modules/farm-swift-sample`, laid out as community Swift modules are (an
@@ -1380,10 +1382,20 @@ in Farm's navigator".
 - **Deterministic.** The generated files, the pbxproj included, are byte-identical across runs.
   The frameworks live outside the generated files, so regenerating never touches them; their
   version is the app's `react-native` and Hermes, as on Android.
-- **Launch.** React Native's frameworks are linked dynamically, so dyld loads them on every launch,
-  even one that never opens a native screen; the process start to `didFinishLaunching` time above
-  includes that. Loading them only when the engine warms (`dlopen` of a framework that holds the
-  Objective-C++ host) is the follow-up if a device measurement shows it matters.
+- **Launch, amended: React Native loads lazily.** The spike linked React Native's frameworks into
+  the app, so dyld loaded them on every launch, even one that never opens a native screen. The
+  host (`FarmReactNative.mm`) and the linked modules, Swift included, now build into a
+  `FarmReactNativeHost` framework target that links React Native; the app embeds it and the
+  XCFrameworks without linking any of them, and Swift reaches the host only through
+  `FarmReactNative.h`'s protocols and its class name. `NativeEngine.swift` loads the framework
+  (`Bundle.loadAndReturnError()`) off the main thread when the engine warms, or at once when a
+  native screen or a web screen's module call comes first; a framework that cannot load leaves
+  native screens on their web twin. CI fails if the app's executable links React Native.
+  Measured on the simulator: the framework load takes 65 to 86 ms with warm caches, work that
+  now happens after the first tab shows content instead of before `didFinishLaunching`. The
+  launch medians between CI runs (846 ms before, 722 ms after) are within the runners' noise, so
+  only a device can size the launch saving. The cost: a native screen opened as the app launches
+  waits for the load (cold `/kit` median 68 ms before, 156 ms after); warm opens are unchanged.
 - **Web twin and native-only routes.** As on Android: a screen that throws while loading or
   rendering, or a runtime that fails (a fatal JS or native error reaches `RCTSetFatalHandler` in a
   build, not a crash), shows the route's web screen. The iOS shell reads `nativeOnly` from
@@ -1666,8 +1678,8 @@ Next, in order, and what blocks it:
 - Build a release APK with R8 and run it. The generated project minifies release builds with no
   keep rules, and no release APK has been built yet.
 - Run native sign-in (#2507) and page shells (#2496) on an Android emulator.
-- The iOS React Native host past the spike: a device, memory with several native screens, lazy loading of React Native's frameworks if launch cost
-  matters on a device.
+- The iOS React Native host past the spike: a device (the launch saving of lazy loading, launch
+  and memory with several native screens).
 
 Managed backend hosting in Infra comes after phase 6. iOS has macOS CI with Xcode once #2556
 merges; Android needs Linux CI with the Android SDK, the NDK and an emulator before its phases
