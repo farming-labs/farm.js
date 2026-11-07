@@ -5,6 +5,8 @@
 #import "FarmReactNative.h"
 
 #import <React/RCTAssert.h>
+#import <React/RCTBridge+Private.h>
+#import <React/RCTBridge.h>
 #import <React/RCTBridgeModule.h>
 #import <React/RCTBundleManager.h>
 #import <React/RCTDevMenu.h>
@@ -184,40 +186,65 @@ RCT_EXPORT_METHOD(
 
 #pragma mark - Dependencies
 
-/// What codegen's RCTAppDependencyProvider answers for an app that links no native module.
+/// The app's dependency provider: Codegen's RCTAppDependencyProvider when the app links native
+/// modules, else empty, which is what Codegen answers for an app that links none. Modules
+/// "requiring main queue setup" are set up eagerly by name, so only names that resolve to a
+/// class are passed on: Codegen lists React Native's own SampleTurboModule, which the prebuilt
+/// framework does not contain (a CocoaPods source build compiles it), and a debug build shows a
+/// RedBox for the failed lookup.
 @interface FarmDependencyProvider : NSObject <RCTDependencyProvider>
+- (instancetype)initWithProvider:(nullable id<RCTDependencyProvider>)provider
+                         resolve:(Class _Nullable (^)(NSString *name))resolve;
 @end
 
-@implementation FarmDependencyProvider
+@implementation FarmDependencyProvider {
+  id<RCTDependencyProvider> _provider;
+  Class _Nullable (^_resolve)(NSString *);
+}
+
+- (instancetype)initWithProvider:(id<RCTDependencyProvider>)provider resolve:(Class (^)(NSString *))resolve
+{
+  if (self = [super init]) {
+    _provider = provider;
+    _resolve = [resolve copy];
+  }
+  return self;
+}
 
 - (NSArray<NSString *> *)imageURLLoaderClassNames
 {
-  return @[];
+  return _provider ? _provider.imageURLLoaderClassNames : @[];
 }
 
 - (NSArray<NSString *> *)imageDataDecoderClassNames
 {
-  return @[];
+  return _provider ? _provider.imageDataDecoderClassNames : @[];
 }
 
 - (NSArray<NSString *> *)URLRequestHandlerClassNames
 {
-  return @[];
+  return _provider ? _provider.URLRequestHandlerClassNames : @[];
 }
 
 - (NSArray<NSString *> *)unstableModulesRequiringMainQueueSetup
 {
-  return @[];
+  NSMutableArray<NSString *> *modules = [NSMutableArray new];
+  for (NSString *name in _provider ? _provider.unstableModulesRequiringMainQueueSetup : @[]) {
+    if (_resolve(name)) {
+      [modules addObject:name];
+    }
+  }
+  return modules;
 }
 
 - (NSDictionary<NSString *, Class<RCTComponentViewProtocol>> *)thirdPartyFabricComponents
 {
-  return @{};
+  return _provider ? _provider.thirdPartyFabricComponents : @{};
 }
 
 - (NSDictionary<NSString *, id<RCTModuleProvider>> *)moduleProviders
 {
-  return @{};
+  return _provider ? _provider.moduleProviders : @{};
 }
 
 @end
@@ -246,7 +273,23 @@ RCT_EXPORT_METHOD(
   if (strcmp(name, "FarmShell") == 0) {
     return FarmShellModule.class;
   }
-  return [super getModuleClassFromName:name];
+  Class core = [super getModuleClassFromName:name];
+  if (core) {
+    return core;
+  }
+  // Modules that register with RCT_EXPORT_MODULE: linked packages such as netinfo, the app's
+  // own (DeviceModule.mm), and React Native's own, which the runtime looks up by name when it
+  // sets up the ones that ask for the main queue. CocoaPods apps reach them the same way.
+  static NSDictionary<NSString *, Class> *registered;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    NSMutableDictionary<NSString *, Class> *byName = [NSMutableDictionary new];
+    for (Class moduleClass in RCTGetModuleClasses()) {
+      byName[RCTBridgeModuleNameForClass(moduleClass)] = moduleClass;
+    }
+    registered = byName;
+  });
+  return registered[@(name)];
 }
 
 - (void)hostDidStart:(RCTHost *)host
@@ -294,10 +337,16 @@ RCT_EXPORT_METHOD(
     _delegate = [FarmReactNativeDelegate new];
     _delegate.farmBundleURL = bundleURL;
 #if FARM_LINKED_MODULES
-    _delegate.dependencyProvider = [RCTAppDependencyProvider new];
+    id<RCTDependencyProvider> generated = [RCTAppDependencyProvider new];
 #else
-    _delegate.dependencyProvider = [FarmDependencyProvider new];
+    id<RCTDependencyProvider> generated = nil;
 #endif
+    __weak FarmReactNativeDelegate *weakDelegate = _delegate;
+    _delegate.dependencyProvider = [[FarmDependencyProvider alloc] initWithProvider:generated
+                                                                            resolve:^Class(NSString *name) {
+                                                                              return [weakDelegate
+                                                                                  getModuleClassFromName:name.UTF8String];
+                                                                            }];
     __weak FarmReactNative *weakSelf = self;
     _delegate.farmStarted = ^{
       void (^started)(void) = weakSelf.onStarted;
