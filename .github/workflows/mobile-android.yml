@@ -63,13 +63,13 @@ jobs:
           echo "no" | "$SDK/cmdline-tools/latest/bin/avdmanager" create avd \
             --name farm --package "$AVD_IMAGE" --device pixel_7 --force
 
-      - name: Build the production APK with farm build --mobile
+      - name: Build the APK with farm build --mobile --apk
         working-directory: examples/mobile
         env:
           FIELD_NOTES_SERVER: https://field-notes.farmjs.dev
         run: |
           export JAVA_HOME="$JAVA_HOME_21_X64"
-          pnpm exec farm build --mobile 2>&1 | tee "$EVIDENCE/farm-build-android.txt"
+          pnpm exec farm build --mobile --apk 2>&1 | tee "$EVIDENCE/farm-build-android.txt"
 
       - name: Boot the emulator
         run: |
