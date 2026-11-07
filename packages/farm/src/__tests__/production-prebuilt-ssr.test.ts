@@ -5193,23 +5193,28 @@ export default defineConfig({
           }
           expect(await fs.readFile(markerPath, "utf8")).toContain("request:start");
 
+          // Listen for exit before signalling: the server can finish draining and exit while the
+          // response body is still being read, and a listener added after that never fires.
+          const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+            (resolve) => {
+              productionServer.once("exit", (code, signal) => resolve({ code, signal }));
+            },
+          );
           productionServer.kill("SIGTERM");
           const response = await request;
           expect(response.status).toBe(200);
           await expect(response.text()).resolves.toBe("drained response");
 
-          const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-            (resolve, reject) => {
-              const timeout = setTimeout(() => {
+          let timeout: ReturnType<typeof setTimeout> | undefined;
+          const exit = await Promise.race([
+            exited,
+            new Promise<never>((_resolve, reject) => {
+              timeout = setTimeout(() => {
                 productionServer.kill("SIGKILL");
                 reject(new Error(`Production server did not shut down:\n${output.join("")}`));
               }, 5_000);
-              productionServer.once("exit", (code, signal) => {
-                clearTimeout(timeout);
-                resolve({ code, signal });
-              });
-            },
-          );
+            }),
+          ]).finally(() => clearTimeout(timeout));
           expect(exit).toEqual({ code: 0, signal: null });
           expect((await fs.readFile(markerPath, "utf8")).trim().split("\n")).toEqual([
             "runtime:ready",
