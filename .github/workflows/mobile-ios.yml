@@ -74,6 +74,19 @@ jobs:
           TRAIL_GUIDE_SERVER: https://trail-guide.farmjs.dev
         run: pnpm exec farm build --mobile --os ios 2>&1 | tee "$EVIDENCE/farm-build-ios.txt"
 
+      # The configuration an App Store build uses, for a device, unsigned: the simulator steps
+      # below run the Debug shell. mobile links React Native; mobile-minimal is the shell alone.
+      - name: Archive the Release app for a device and measure it
+        working-directory: examples/${{ matrix.example }}/.farm/output/mobile/ios
+        run: |
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+            -destination generic/platform=iOS -derivedDataPath "$RUNNER_TEMP/release-build" \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" -quiet archive CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$EVIDENCE/archive-release.txt"
+          "$GITHUB_WORKSPACE/examples/mobile/scripts/measure-ios-release.sh" \
+            "$RUNNER_TEMP/App.xcarchive" "${{ matrix.example }}" \
+            | tee "$EVIDENCE/release-size.md" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Boot an iPhone simulator
         run: |
           udid=$(xcrun simctl list devices available -j |
