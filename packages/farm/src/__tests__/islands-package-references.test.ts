@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import fs, { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -50,6 +50,40 @@ describe("package client references", () => {
         isClientPackage,
       ),
     ).toEqual([]);
+  });
+
+  it("makes a namespace passed around as a value stand for every export of the package, with client references for its components", () => {
+    const root = tempRoot();
+    const files: Record<string, string> = {
+      "node_modules/ui-parts/package.json": JSON.stringify({
+        name: "ui-parts",
+        exports: { ".": { import: "./index.js" } },
+      }),
+      "node_modules/ui-parts/index.js":
+        '"use client";\nexport * from "./root.js";\nexport { Trigger } from "./trigger.js";\n',
+      "node_modules/ui-parts/root.js": "export function Root() {}\nexport const version = 1;\n",
+      "node_modules/ui-parts/trigger.js": "export function Trigger() {}\n",
+    };
+    for (const [file, contents] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), contents);
+    }
+    const imports = findFarmPackageClientImports(
+      'import * as Parts from "ui-parts";\nexport const parts = Parts;\n',
+      path.join(root, "src/page.tsx"),
+      (specifier) => specifier === "ui-parts",
+    );
+    // `version` is not a component, so it comes from the package itself rather than a reference.
+    expect(imports.map(farmPackageClientImportExports)).toEqual([["Root", "Trigger"]]);
+    const output = rewriteFarmPackageClientImports({
+      code: 'import * as Parts from "ui-parts";\nexport const parts = Parts;\n',
+      file: path.join(root, "src/page.tsx"),
+      root,
+      isClientPackage: (specifier) => specifier === "ui-parts",
+    })!;
+    expect(output).toContain('import * as __farm_package_values_2__ from "ui-parts";');
+    expect(output).toContain("version: __farm_package_values_2__.version");
+    expect(output).toContain("Root: __farm_package_reference_0__");
   });
 
   it("points the imports at client references that re-export each one with use client", () => {

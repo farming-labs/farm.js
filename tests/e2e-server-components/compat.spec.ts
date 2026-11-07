@@ -1,8 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" : "rsc";
-const dev = process.env.FARM_SERVER_COMPONENTS_SERVER === "dev";
-
 // Libraries written for React Server Components, used the way their docs show for RSC: package
 // client components (providers, Radix parts, a toaster) straight from server components,
 // `server-only` and `client-only` imports, and SWR's server fallback.
@@ -87,10 +84,6 @@ test("SWRConfig from a server component gives a client component its fallback da
   page,
   request,
 }) => {
-  test.skip(
-    mode === "rsc" && dev,
-    "rsc dev loads swr's react-server config module raw while useSWR comes pre-bundled: two SWR contexts (production bundles one)",
-  );
   expect(await (await request.get("/compat/swr")).text()).toContain("swr: Ada from the server");
   const errors = await open(page, "/compat/swr");
   await expect(page.getByTestId("swr-user")).toHaveText("swr: Ada from the server");
@@ -116,13 +109,40 @@ test("a package provider in a layout keeps its state across client navigations",
   expect(errors).toEqual([]);
 });
 
-test("cache() from react runs once per request in server components", async ({ page }) => {
+test("cache() from react runs once per request in server components, and cacheSignal() is live", async ({
+  page,
+}) => {
   const errors = await open(page, "/compat/cache");
   const first = await page.getByTestId("cache-first").textContent();
   expect(first).toMatch(/^entry 1: [0-9a-f-]{36}$/);
   await expect(page.getByTestId("cache-second")).toHaveText(first!);
+  // React.cache through a namespace import memoizes the same way.
+  const member = await page.getByTestId("cache-member-first").textContent();
+  await expect(page.getByTestId("cache-member-second")).toHaveText(member!);
+  await expect(page.getByTestId("cache-signal")).toHaveText("signal live");
   // Another request runs it again.
   await page.reload();
   await expect(page.getByTestId("cache-first")).not.toHaveText(first!);
+  expect(errors).toEqual([]);
+});
+
+test("a package's react-server build renders server code, and its use client exports hydrate", async ({
+  page,
+  request,
+}) => {
+  const html = await (await request.get("/compat/rsc-kit")).text();
+  expect(html).toContain("hello islands from the server build");
+  expect(html).toContain("kit quote about engines, rendered on the server");
+  expect(html).not.toContain("client fallback");
+  const errors = await open(page, "/compat/rsc-kit");
+  const value = page.getByTestId("kit-value");
+  await expect(value).toHaveText("kit value: from server");
+  await value.click();
+  await expect(value).toHaveText("kit value: from server!");
+  // A shared module only client components use keeps the package's build for client code.
+  const label = page.getByTestId("kit-label");
+  await expect(label).toHaveText("kit hook clicks: 0");
+  await label.click();
+  await expect(label).toHaveText("kit hook clicks: 1");
   expect(errors).toEqual([]);
 });
