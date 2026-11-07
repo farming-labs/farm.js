@@ -14,6 +14,7 @@ import {
   lstat,
   mkdir,
   readdir,
+  readFile,
   readlink,
   rename,
   rm,
@@ -36,8 +37,17 @@ export const IOS_REACT_NATIVE_FRAMEWORKS = [
   "hermesvm.xcframework",
 ] as const;
 
-/** Header roots in `ReactNative/`: React Native's own namespaces, then folly, glog and boost. */
-export const IOS_REACT_NATIVE_HEADERS = ["Headers", "DependencyHeaders"] as const;
+/**
+ * Header roots in `ReactNative/`: React Native's own namespaces, then folly, glog and boost, which
+ * stay inside the dependencies framework because its code signature lists them.
+ */
+export const IOS_REACT_NATIVE_HEADERS = [
+  "Headers",
+  "ReactNativeDependencies.xcframework/Headers",
+] as const;
+
+/** Bumped when the cache slot's layout changes, so an older slot is laid out again. */
+const LAYOUT = 2;
 
 /**
  * Debug artifacts (React Native's dev support: Metro, Fast Refresh, the dev menu) for
@@ -156,8 +166,8 @@ async function required(dir: string, name: string, artifact: string): Promise<st
  * first use:
  *
  *   React.xcframework, ReactNativeDependencies.xcframework, hermesvm.xcframework
- *   Headers/            ReactNativeHeaders.xcframework's headers (<react/...>, <ReactCommon/...>)
- *   DependencyHeaders/  ReactNativeDependencies' headers (<folly/...>, <glog/...>, ...)
+ *   Headers/            ReactNativeHeaders.xcframework's headers (<react/...>, <ReactCommon/...>);
+ *                       the dependencies' (<folly/...>, <glog/...>) stay in their framework
  */
 export async function ensureReactNativeArtifacts(
   native: Pick<MobileNativeScreens, "reactNativeVersion" | "hermesVersion">,
@@ -170,7 +180,13 @@ export async function ensureReactNativeArtifacts(
     `${native.reactNativeVersion}-hermes-${native.hermesVersion}`,
     flavor,
   );
-  if (existsSync(path.join(slot, ".complete"))) return slot;
+  const marker = path.join(slot, ".complete");
+  if (existsSync(marker)) {
+    const done = JSON.parse(await readFile(marker, "utf8").catch(() => "{}")) as {
+      layout?: number;
+    };
+    if (done.layout === LAYOUT) return slot;
+  }
 
   const staging = `${slot}.staging-${process.pid}`;
   await rm(staging, { recursive: true, force: true });
@@ -207,8 +223,8 @@ export async function ensureReactNativeArtifacts(
       "ReactNativeDependencies.xcframework",
       "The dependencies tarball",
     );
-    // The headers sit beside the slices; Xcode expects only slices and Info.plist there.
-    await rename(path.join(deps, "Headers"), path.join(layout, "DependencyHeaders"));
+    // Its headers sit beside the slices and stay there: Xcode checks the framework's signature,
+    // which lists them.
     await rename(deps, path.join(layout, "ReactNativeDependencies.xcframework"));
     await rename(
       await required(path.join(staging, "hermes"), "hermesvm.xcframework", "The Hermes tarball"),
@@ -216,7 +232,7 @@ export async function ensureReactNativeArtifacts(
     );
     await writeFile(
       path.join(layout, ".complete"),
-      `${JSON.stringify({ ...native, flavor }, null, 2)}\n`,
+      `${JSON.stringify({ reactNativeVersion: native.reactNativeVersion, hermesVersion: native.hermesVersion, flavor, layout: LAYOUT }, null, 2)}\n`,
     );
     await rm(slot, { recursive: true, force: true });
     await mkdir(path.dirname(slot), { recursive: true });

@@ -154,7 +154,9 @@ describe("@farm.js/mobile/ios React Native host", () => {
       'SWIFT_OBJC_BRIDGING_HEADER = "App/FarmReactNative-Bridging-Header.h";',
     );
     expect(pbxproj).toContain('"$(SRCROOT)/ReactNative/Headers"');
-    expect(pbxproj).toContain('"$(SRCROOT)/ReactNative/DependencyHeaders"');
+    expect(pbxproj).toContain(
+      '"$(SRCROOT)/ReactNative/ReactNativeDependencies.xcframework/Headers"',
+    );
     // A build links release React Native, so its headers must not see RCT_DEV from DEBUG=1.
     expect(pbxproj).toContain('"RCT_DEV=0"');
     expect(pbxproj).toContain('"FOLLY_MOBILE=1"');
