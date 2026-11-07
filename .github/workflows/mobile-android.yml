@@ -56,12 +56,19 @@ jobs:
         run: |
           mkdir -p "$EVIDENCE"
           SDK="${ANDROID_HOME:?The runner image should set ANDROID_HOME}"
+          # avdmanager (Java) and the emulator binary can disagree about the AVD home on the
+          # runner; one explicit directory for both ends the argument.
+          echo "ANDROID_AVD_HOME=$RUNNER_TEMP/avd" >> "$GITHUB_ENV"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
           MANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
           yes | "$MANAGER" --licenses > /dev/null || true
           "$MANAGER" "platform-tools" "platforms;android-35" "emulator" "$AVD_IMAGE" \
             | grep -v '%' | tee "$EVIDENCE/sdkmanager.txt"
           echo "no" | "$SDK/cmdline-tools/latest/bin/avdmanager" create avd \
             --name farm --package "$AVD_IMAGE" --device pixel_7 --force
+          "$SDK/emulator/emulator" -list-avds | tee "$EVIDENCE/avds.txt"
+          grep -qx "farm" "$EVIDENCE/avds.txt"
 
       - name: Build the APK with farm build --mobile --apk
         working-directory: examples/mobile
@@ -73,17 +80,31 @@ jobs:
 
       - name: Boot the emulator
         run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
           "$ANDROID_HOME/emulator/emulator" -avd farm -no-window -no-audio -no-boot-anim \
-            -no-snapshot -gpu swiftshader_indirect > "$EVIDENCE/emulator.txt" 2>&1 &
-          "$ANDROID_HOME/platform-tools/adb" wait-for-device
-          for _ in $(seq 1 60); do
-            boot=$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            -no-snapshot -no-metrics -camera-back none -camera-front none \
+            -gpu swiftshader_indirect > "$EVIDENCE/emulator.txt" 2>&1 &
+          EMULATOR_PID=$!
+          # Fail with the emulator's own output instead of hanging when it dies at startup.
+          if ! timeout 420 "$ADB" wait-for-device; then
+            echo "::error::The emulator never registered with adb."
+            tail -50 "$EVIDENCE/emulator.txt"
+            exit 1
+          fi
+          boot=""
+          for _ in $(seq 1 90); do
+            kill -0 "$EMULATOR_PID" 2>/dev/null || { tail -50 "$EVIDENCE/emulator.txt"; exit 1; }
+            boot=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             [ "$boot" = "1" ] && break
             sleep 5
           done
-          test "$boot" = "1"
-          "$ANDROID_HOME/platform-tools/adb" devices | tee "$EVIDENCE/devices.txt"
-          "$ANDROID_HOME/platform-tools/adb" logcat -c || true
+          if [ "$boot" != "1" ]; then
+            echo "::error::The emulator did not finish booting."
+            tail -50 "$EVIDENCE/emulator.txt"
+            exit 1
+          fi
+          "$ADB" devices | tee "$EVIDENCE/devices.txt"
+          "$ADB" logcat -c || true
 
       - name: Run the shell with farm dev --mobile
         working-directory: examples/mobile
