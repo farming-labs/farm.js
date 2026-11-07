@@ -18,6 +18,7 @@
     "test:renderers": "node scripts/test-renderers.mjs",
     "test:packed-integrations": "node scripts/smoke-packed-integrations.js",
     "test:packed-app": "node scripts/smoke-packed-app.js",
+    "test:packed-islands": "node scripts/smoke-packed-islands.js",
     "test:packed-compiler": "node scripts/smoke-packed-app.js --template react-compiler",
     "test:ci": "node scripts/run-tests.js",
     "test:deploy-runtimes": "pnpm --filter @farm.js/core build:runtime && pnpm --dir packages/farm exec vitest run --config vitest.deploy-runtimes.config.ts",
