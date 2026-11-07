@@ -501,3 +501,92 @@ export function defineRendererServerQueryConformance(options: {
     });
   });
 }
+
+/** What `createFarmNativeTreeResponse` answers: the parts of the tree this conformance reads. */
+export interface RendererNativeTreeNode {
+  type: string;
+  tag?: string;
+  href?: string;
+  name?: string;
+  form?: { action: string; method: string; fields?: Array<{ name: string; value: string }> };
+  submit?: Record<string, unknown>;
+  children?: Array<RendererNativeTreeNode | string>;
+}
+
+/**
+ * The native tier draws a page from the HTML the server renders, so it must read every renderer's
+ * markup the same way: its comment markers, hydration keys, and fragment boundaries included.
+ * `toTree` turns a page's HTML into the native tree, as a mobile app's server would answer it.
+ */
+export function defineRendererNativeTreeConformance(
+  runtime: RendererServerFixture,
+  toTree: (html: string) => Promise<{ unsupported: string[]; root: RendererNativeTreeNode }>,
+): void {
+  describe(`${runtime.name} native tree conformance`, () => {
+    it("draws a static page, a list, a link, and a form the same as any renderer", async () => {
+      const h = runtime.createElement;
+      const Trail = (props: Record<string, unknown>) =>
+        h("li", null, h("a", { href: `/trails/${String(props.id)}` }, props.name as string));
+      runtime.markFunctionComponent?.(Trail);
+      const trails = [
+        { id: "creek", name: "Creek Loop" },
+        { id: "ridge", name: "Ridge Traverse" },
+      ];
+      const html = await runtime.renderToString(
+        h(
+          "main",
+          null,
+          h("h1", null, "Trails"),
+          // Adjacent text and values: renderers separate them with comment markers.
+          h("p", null, "Hello ", "Ada", "!"),
+          false,
+          null,
+          h(
+            "ul",
+            null,
+            trails.map((trail) => h(Trail, { key: trail.id, id: trail.id, name: trail.name })),
+          ),
+          h(
+            "form",
+            { method: "post", action: "/api/reports" },
+            h("input", { type: "hidden", name: "trail", value: "creek" }),
+            h("textarea", { name: "text" }),
+            h("button", null, "Post"),
+          ),
+        ),
+      );
+      const tree = await toTree(html);
+      expect(tree.unsupported).toEqual([]);
+      const text = (node: RendererNativeTreeNode | string): string =>
+        typeof node === "string" ? node : (node.children ?? []).map(text).join("");
+      const find = (
+        node: RendererNativeTreeNode | string,
+        test: (node: RendererNativeTreeNode) => boolean,
+      ): RendererNativeTreeNode[] =>
+        typeof node === "string"
+          ? []
+          : [
+              ...(test(node) ? [node] : []),
+              ...(node.children ?? []).flatMap((child) => find(child, test)),
+            ];
+      expect(find(tree.root, (node) => node.tag === "h1").map(text)).toEqual(["Trails"]);
+      expect(find(tree.root, (node) => node.tag === "p").map(text)).toEqual(["Hello Ada!"]);
+      expect(
+        find(tree.root, (node) => node.href !== undefined).map((link) => [link.href, text(link)]),
+      ).toEqual([
+        ["https://app.example/trails/creek", "Creek Loop"],
+        ["https://app.example/trails/ridge", "Ridge Traverse"],
+      ]);
+      const [form] = find(tree.root, (node) => node.form !== undefined);
+      expect(form?.form).toEqual({
+        action: "https://app.example/api/reports",
+        method: "post",
+        fields: [{ name: "trail", value: "creek" }],
+      });
+      expect(find(form!, (node) => node.type === "TextInput").map((field) => field.name)).toEqual([
+        "text",
+      ]);
+      expect(find(form!, (node) => node.submit !== undefined).map(text)).toEqual(["Post"]);
+    });
+  });
+}
