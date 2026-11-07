@@ -353,9 +353,10 @@ function BenchmarkAreaChart() {
         </span>
 
         <p className="my-6 text-2xl font-medium leading-tight tracking-normal text-white sm:text-3xl">
-          Farm.js leads the benchmark app across latency and output size.{" "}
+          Farm.js starts, builds and ships the least of the benchmark app.{" "}
           <span className="text-white/42">
-            Raw medians for startup, build, boot, SSR, and HTML.
+            Raw medians for startup, build, boot, SSR, and HTML. The tiles below name the framework
+            to beat where one is faster.
           </span>
         </p>
 
