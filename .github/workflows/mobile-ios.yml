@@ -17,7 +17,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: mobile-ios-${{ github.ref }}
+  # A new push replaces a pull request's run; dispatched runs (measurements) finish.
+  group: mobile-ios-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
   cancel-in-progress: true
 
 jobs:
