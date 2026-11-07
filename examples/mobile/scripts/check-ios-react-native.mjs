@@ -24,6 +24,11 @@ assert(
   /native app\/map open->content=\d+ms/.test(log),
   "/map never reached first content. Inspect kit-log.txt and map.png.",
 );
+// /map calls modules/farm-swift-sample, a module written in Swift as community modules are.
+assert(
+  /FarmSwiftSample answered from Swift: \S+/.test(log),
+  "/map's Swift module never answered: it did not link or did not register. Inspect kit-log.txt and map.png.",
+);
 
 // Each launch logs "launch open /kit after <ms>ms", then the surface's first content.
 const opens = [];

@@ -8,7 +8,7 @@ import type { MobileGeneratedFile, MobileShellContext } from "@farm.js/core/mobi
 import { createBridgeScript } from "../shared/bridge.js";
 import { createNativeAssetFiles } from "../shared/native-assets.js";
 import { createPageShellFiles } from "../shared/shells.js";
-import { IOS_MODULES_DIR, resolveIosAutolinking } from "./autolinking.js";
+import { IOS_MODULES_DIR, IOS_SWIFT_HEADERS_DIR, resolveIosAutolinking } from "./autolinking.js";
 import { createIosWebModules } from "./web-modules.js";
 import {
   IOS_REACT_NATIVE_DIR,
@@ -326,6 +326,8 @@ export function createReactNativeBuildSettings(
   context: MobileShellContext,
   /** With linked modules (`FarmModules/`): the system frameworks they need. */
   linked?: readonly string[],
+  /** A linked package has Swift: its `<Module>-Swift.h` lives in `FarmModules/FarmSwiftHeaders`. */
+  swiftHeaders = false,
 ): Record<string, PbxValue> {
   const dev = reactNativeFlavor(context) === "debug" ? 1 : 0;
   const modules: Record<string, PbxValue> = linked
@@ -354,6 +356,7 @@ export function createReactNativeBuildSettings(
       ...(linked
         ? [`$(SRCROOT)/${IOS_MODULES_DIR}`, `$(SRCROOT)/${IOS_MODULES_DIR}/ReactCodegen/**`]
         : []),
+      ...(swiftHeaders ? [`$(SRCROOT)/${IOS_MODULES_DIR}/${IOS_SWIFT_HEADERS_DIR}`] : []),
     ],
     OTHER_CPLUSPLUSFLAGS: ["$(inherited)", "-Wno-comma", "-Wno-shorten-64-to-32"],
     SWIFT_OBJC_BRIDGING_HEADER: `${IOS_TARGET}/${BRIDGING_HEADER}`,
@@ -607,6 +610,9 @@ export function createProjectFile(
       ? createReactNativeBuildSettings(
           context,
           linksModules ? (options.frameworks ?? []) : undefined,
+          moduleFiles.some((file) =>
+            file.startsWith(`${IOS_MODULES_DIR}/${IOS_SWIFT_HEADERS_DIR}/`),
+          ),
         )
       : {}),
   };

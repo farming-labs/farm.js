@@ -3,9 +3,16 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MobileShellContext } from "@farm.js/core/mobile";
-import { podGlob, podspecList, resolveIosAutolinking } from "./autolinking";
+import {
+  createSwiftHeaderFiles,
+  podGlob,
+  podModuleName,
+  podspecList,
+  resolveIosAutolinking,
+} from "./autolinking";
 import {
   createIosProject,
+  createProjectFile,
   createReactNativeBuild,
   IOS_NATIVE_ASSETS_DIR,
   IOS_NATIVE_BUNDLE,
@@ -258,6 +265,45 @@ end`;
     ]);
   });
 
+  it("names a Swift pod's module as CocoaPods does, and forwards its -Swift.h to the app's", () => {
+    expect(podModuleName('s.name = "RNStoreReview"', "/p/RNStoreReview.podspec")).toBe(
+      "RNStoreReview",
+    );
+    expect(podModuleName("s.name = 'react-native-foo'", "/p/x.podspec")).toBe("react_native_foo");
+    expect(
+      podModuleName('s.name = "react-native-foo"\n  s.module_name = "RNFoo"', "/p/x.podspec"),
+    ).toBe("RNFoo");
+    // A computed name: the podspec's file name, which CocoaPods requires to match.
+    expect(podModuleName('s.name = package["name"]', "/p/RNBar.podspec")).toBe("RNBar");
+
+    const headers = createSwiftHeaderFiles(["RNFoo", "RNBar", "RNFoo"]);
+    expect(headers.map((file) => file.path)).toEqual([
+      "FarmModules/FarmSwiftHeaders/RNBar-Swift.h",
+      "FarmModules/FarmSwiftHeaders/RNBar/RNBar-Swift.h",
+      "FarmModules/FarmSwiftHeaders/RNFoo-Swift.h",
+      "FarmModules/FarmSwiftHeaders/RNFoo/RNFoo-Swift.h",
+    ]);
+    expect(String(headers[0]!.contents)).toMatch(/#import "App-Swift\.h"\n$/);
+  });
+
+  it("compiles a package's Swift into the app and searches its -Swift.h shims", async () => {
+    const ctx = context(await app(), { native: NATIVE });
+    const files = [
+      "App/AppDelegate.swift",
+      "FarmModules/farm-swift-sample/ios/FarmSwiftSample.mm",
+      "FarmModules/farm-swift-sample/ios/FarmSwiftSampleClock.swift",
+      "FarmModules/FarmSwiftHeaders/FarmSwiftSample-Swift.h",
+      "FarmModules/FarmSwiftHeaders/FarmSwiftSample/FarmSwiftSample-Swift.h",
+    ];
+    const pbxproj = createProjectFile(ctx, files, { frameworks: [] });
+    expect(pbxproj).toContain("FarmSwiftSampleClock.swift in Sources");
+    expect(pbxproj).toContain('"$(SRCROOT)/FarmModules/FarmSwiftHeaders"');
+    // Without a Swift package, the project is as before.
+    expect(createProjectFile(ctx, files.slice(0, 2), { frameworks: [] })).not.toContain(
+      "FarmSwiftHeaders",
+    );
+  });
+
   it("links only packages with iOS code, and refuses one without codegenConfig", async () => {
     const root = await app();
     const install = async (name: string, files: Record<string, string>) => {
@@ -291,5 +337,15 @@ end`;
     await expect(resolveIosAutolinking(ctx)).rejects.toThrow(
       /"old-module" has iOS code but no "codegenConfig"/,
     );
+    // A package with Swift sources links: here it stops only at React Native's codegen, which
+    // this app does not have installed.
+    await install("swift-module", {
+      "package.json": JSON.stringify({ name: "swift-module", codegenConfig: { name: "S" } }),
+      "SwiftModule.podspec": 's.name = "SwiftModule"\ns.source_files = "ios/*.{h,mm,swift}"',
+      "ios/SwiftModule.mm": "",
+      "ios/Clock.swift": "",
+    });
+    await write({ "swift-module": "1.0.0" });
+    await expect(resolveIosAutolinking(ctx)).rejects.toThrow(/need React Native's codegen/);
   });
 });

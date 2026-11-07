@@ -610,8 +610,16 @@ checks them against the published SHA-256, and caches them in `~/Library/Caches/
 Installed React Native modules are linked from the app's `dependencies`: each package's podspec
 `source_files` are compiled into the app and React Native's Codegen writes their glue. The app's
 own TurboModules on iOS are Objective-C++ classes in `src/native/` that adopt their spec's
-`Native<Name>Spec` protocol, such as `DeviceModule.mm` in `examples/mobile`. Packages with Swift
-sources are not linked yet and fail the build with a message naming them.
+`Native<Name>Spec` protocol, such as `DeviceModule.mm` in `examples/mobile`.
+
+Swift sources compile into the app too, as one module with it, so a package's Swift can
+`import React` and its Objective-C reaches the Swift through `<Module>-Swift.h`, the header
+CocoaPods would generate, which Farm forwards to the app's own `App-Swift.h`. The app's own
+Objective-C++ in `src/native/` imports `App-Swift.h` directly. Because every package's Swift
+shares the app's module, two packages that declare the same Swift type name do not build
+together, and a package's Swift sees its own Objective-C only through what React exports.
+`examples/mobile/modules/farm-swift-sample` is a module laid out as community Swift modules are,
+and `/map` calls it on the simulator in CI.
 
 An app without React Native routes on iOS gets no React Native: no download, no framework, and the
 same project as before.
