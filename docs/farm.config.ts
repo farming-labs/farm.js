@@ -88,4 +88,7 @@ export default defineConfig({
   deploy: {
     target: "vercel",
   },
+  // Route-local schedules (`cronRoute(..., { schedule })`) run on Farm.js Infra; after a
+  // production deploy, `farm cron sync --url https://farmjs.dev --apply` registers them.
+  cron: { provider: "farmjs" },
 });
