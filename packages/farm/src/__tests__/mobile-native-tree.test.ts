@@ -309,6 +309,26 @@ describe("native tier tree", () => {
     ]);
   });
 
+  it("keeps the web screen for a button or field nothing submits", () => {
+    // A shell only opens links: a tap on this button, or text typed here, would go nowhere.
+    const tree = createFarmNativeTree(
+      page(`<button class="px-4">Save</button><input placeholder="Title"><textarea>a</textarea>`),
+      url,
+    );
+    expect(tree.unsupported).toEqual([
+      "<button> has no link or form to submit",
+      "<input> has no form to submit it",
+      "<textarea> has no form to submit it",
+    ]);
+    // A link still draws, and a hidden input draws nothing, as in a browser.
+    const links = createFarmNativeTree(
+      page(`<a href="/notes/1">Open</a><input type="hidden" name="id" value="1">`),
+      url,
+    );
+    expect(links.unsupported).toEqual([]);
+    expect(JSON.stringify(links.root)).not.toContain("TextInput");
+  });
+
   it("answers with the tree, and passes redirects and errors through", async () => {
     const response = await createFarmNativeTreeResponse({
       request: new Request(url, { headers: { accept: "application/vnd.farm.native+json" } }),

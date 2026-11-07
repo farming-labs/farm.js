@@ -503,6 +503,28 @@ export default function Home() {
     expect(routeOf(result, "/pill").analysis!.tier).toBe("native");
   });
 
+  it("keeps a button or field nothing submits off the native tier, as the tree draws it", async () => {
+    const root = await createApp({
+      "src/app/page.tsx": `export default function Home() {
+  return <div><input placeholder="Title" /><button className="px-4">Save</button></div>;
+}
+`,
+      "src/app/link/page.tsx": `export default function Link() {
+  return <a href="/" className="px-4">Home</a>;
+}
+`,
+    });
+    const result = await report(root);
+    const home = routeOf(result, "/").analysis!;
+    expect(home.nativeBlockers.map((blocker) => `${blocker.rule} ${blocker.message}`)).toEqual([
+      "inert-control <input> has no link or form to submit on a native-tier screen",
+      "inert-control <button> has no link or form to submit on a native-tier screen",
+    ]);
+    // A React Native port could still wire them up; only the server-drawn tier is out.
+    expect(home.tier).toBe("react-native");
+    expect(routeOf(result, "/link").analysis!.tier).toBe("native");
+  });
+
   it("parses each module once per run and reuses facts by content hash", async () => {
     const files: Record<string, string> = {
       "src/components/shared.tsx": `export function Shared() { return <p>shared</p>; }\n`,
