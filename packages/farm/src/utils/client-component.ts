@@ -2394,7 +2394,8 @@ export function collectFarmClientPackageImports(directory: string, root: string)
         if (!CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
         continue;
       }
-      if (!CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) || entry.name.endsWith(".d.ts")) continue;
+      if (!CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) || entry.name.endsWith(".d.ts"))
+        continue;
       const content = readIfExists(file);
       if (!content) continue;
       const client = hasUseClientDirective(content);
