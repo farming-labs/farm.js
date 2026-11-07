@@ -18,7 +18,7 @@ cat > server.ext <<'EXT'
 basicConstraints=CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
-subjectAltName=DNS:localhost,IP:127.0.0.1
+subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1
 EXT
 openssl req -newkey rsa:2048 -sha256 -nodes -keyout server-key.pem -out server.csr \
   -subj "/CN=localhost" 2>/dev/null

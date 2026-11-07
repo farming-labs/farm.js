@@ -94,7 +94,7 @@ jobs:
             sleep 1
           done
           cat "$EVIDENCE/production-server.txt" "$EVIDENCE/https-proxy.txt"
-          curl -sf --cacert "$RUNNER_TEMP/tls/ca.pem" -o /dev/null -w "GET / %{http_code}\n" https://localhost:3443/
+          curl -sSf --cacert "$RUNNER_TEMP/tls/ca.pem" -o /dev/null -w "GET / %{http_code}\n" https://localhost:3443/
 
       # The configuration an App Store build uses, for a device, unsigned: the simulator steps
       # below run the Debug shell. mobile links React Native; mobile-minimal is the shell alone.
