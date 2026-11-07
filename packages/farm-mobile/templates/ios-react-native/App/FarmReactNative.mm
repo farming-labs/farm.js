@@ -15,6 +15,10 @@
 #import <React_RCTAppDelegate/RCTReactNativeFactory.h>
 #import <ReactCommon/RCTHost.h>
 #import <os/log.h>
+#if FARM_LINKED_MODULES
+// Codegen's provider for the linked packages and the app's own modules (FarmModules/).
+#import <ReactAppDependencyProvider/RCTAppDependencyProvider.h>
+#endif
 
 static os_log_t FarmLog(void)
 {
@@ -180,7 +184,7 @@ RCT_EXPORT_METHOD(
 
 #pragma mark - Dependencies
 
-/// What codegen's RCTAppDependencyProvider answers for an app without third-party modules.
+/// What codegen's RCTAppDependencyProvider answers for an app that links no native module.
 @interface FarmDependencyProvider : NSObject <RCTDependencyProvider>
 @end
 
@@ -289,7 +293,11 @@ RCT_EXPORT_METHOD(
     _views = [NSMutableDictionary new];
     _delegate = [FarmReactNativeDelegate new];
     _delegate.farmBundleURL = bundleURL;
+#if FARM_LINKED_MODULES
+    _delegate.dependencyProvider = [RCTAppDependencyProvider new];
+#else
     _delegate.dependencyProvider = [FarmDependencyProvider new];
+#endif
     __weak FarmReactNative *weakSelf = self;
     _delegate.farmStarted = ^{
       void (^started)(void) = weakSelf.onStarted;

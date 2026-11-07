@@ -7,6 +7,7 @@ import { crc32, deflateSync } from "node:zlib";
 import type { MobileGeneratedFile, MobileShellContext } from "@farm.js/core/mobile";
 import { createBridgeScript } from "../shared/bridge.js";
 import { createPageShellFiles } from "../shared/shells.js";
+import { IOS_MODULES_DIR, resolveIosAutolinking } from "./autolinking.js";
 import {
   IOS_REACT_NATIVE_DIR,
   IOS_REACT_NATIVE_FRAMEWORKS,
@@ -294,7 +295,11 @@ const FILE_TYPES: Record<string, { type: string; phase?: "sources" | "resources"
   [IOS_PAGE_SHELLS_DIR]: { type: "folder", phase: "resources" },
   ".swift": { type: "sourcecode.swift", phase: "sources" },
   ".mm": { type: "sourcecode.cpp.objcpp", phase: "sources" },
+  ".m": { type: "sourcecode.c.objc", phase: "sources" },
+  ".c": { type: "sourcecode.c.c", phase: "sources" },
+  ".cpp": { type: "sourcecode.cpp.cpp", phase: "sources" },
   ".h": { type: "sourcecode.c.h" },
+  ".hpp": { type: "sourcecode.cpp.h" },
   ".hbc": { type: "file", phase: "resources" },
   ".xcassets": { type: "folder.assetcatalog", phase: "resources" },
   ".json": { type: "text.json", phase: "resources" },
@@ -309,9 +314,20 @@ const FILE_TYPES: Record<string, { type: string; phase?: "sources" | "resources"
  */
 export function createReactNativeBuildSettings(
   context: MobileShellContext,
+  /** With linked modules (`FarmModules/`): the system frameworks they need. */
+  linked?: readonly string[],
 ): Record<string, PbxValue> {
   const dev = reactNativeFlavor(context) === "debug" ? 1 : 0;
+  const modules: Record<string, PbxValue> = linked
+    ? {
+        OTHER_LDFLAGS: [
+          "$(inherited)",
+          ...linked.flatMap((framework) => ["-framework", framework]),
+        ],
+      }
+    : {};
   return {
+    ...modules,
     CLANG_CXX_LANGUAGE_STANDARD: "c++20",
     CLANG_CXX_LIBRARY: "libc++",
     GCC_PREPROCESSOR_DEFINITIONS: [
@@ -319,10 +335,15 @@ export function createReactNativeBuildSettings(
       ...REACT_NATIVE_DEFINES,
       `RCT_DEV=${dev}`,
       `RCT_DEV_MENU=${dev}`,
+      ...(linked ? ["FARM_LINKED_MODULES=1"] : []),
     ],
     HEADER_SEARCH_PATHS: [
       "$(inherited)",
       ...IOS_REACT_NATIVE_HEADERS.map((dir) => `$(SRCROOT)/${IOS_REACT_NATIVE_DIR}/${dir}`),
+      // <ReactCodegen/...> and <ReactAppDependencyProvider/...>, then each spec's own header.
+      ...(linked
+        ? [`$(SRCROOT)/${IOS_MODULES_DIR}`, `$(SRCROOT)/${IOS_MODULES_DIR}/ReactCodegen/**`]
+        : []),
     ],
     OTHER_CPLUSPLUSFLAGS: ["$(inherited)", "-Wno-comma", "-Wno-shorten-64-to-32"],
     SWIFT_OBJC_BRIDGING_HEADER: `${IOS_TARGET}/${BRIDGING_HEADER}`,
@@ -334,7 +355,11 @@ export function createReactNativeBuildSettings(
  * and bundle resources (the asset catalog, farm-routes.json, farm-bridge.js). Object ids derive
  * from the file names, so the same files give the same project.
  */
-export function createProjectFile(context: MobileShellContext, files: readonly string[]): string {
+export function createProjectFile(
+  context: MobileShellContext,
+  files: readonly string[],
+  options: { frameworks?: readonly string[] } = {},
+): string {
   const entries = [
     ...new Set(
       files
@@ -423,6 +448,59 @@ export function createProjectFile(context: MobileShellContext, files: readonly s
     name: "Products",
     sourceTree: "<group>",
   });
+  // Linked native modules and their Codegen output (autolinking.ts): one group per folder.
+  const moduleFiles = files.filter((file) => file.startsWith(`${IOS_MODULES_DIR}/`)).sort();
+  const linksModules = moduleFiles.length > 0;
+  const groupChildren = new Map<string, string[]>();
+  const childrenOf = (dir: string) => {
+    let list = groupChildren.get(dir);
+    if (!list) groupChildren.set(dir, (list = []));
+    return list;
+  };
+  for (const file of moduleFiles) {
+    const kind = FILE_TYPES[path.extname(file)];
+    if (!kind) throw new Error(`No Xcode file type for ${file}`);
+    const name = path.posix.basename(file);
+    const ref = add(`file:${file}`, name, {
+      isa: "PBXFileReference",
+      lastKnownFileType: kind.type,
+      path: name,
+      sourceTree: "<group>",
+    });
+    childrenOf(path.posix.dirname(file)).push(ref);
+    if (kind.phase === "sources") {
+      sources.push(
+        add(`build:${file}`, `${name} in Sources`, { isa: "PBXBuildFile", fileRef: ref }),
+      );
+    }
+  }
+  // Folders deepest first, so a folder's group exists before its parent lists it.
+  const dirs = new Set<string>();
+  for (const file of moduleFiles) {
+    for (let dir = path.posix.dirname(file); dir !== "."; dir = path.posix.dirname(dir))
+      dirs.add(dir);
+  }
+  const groupIds = new Map<string, string>();
+  for (const dir of [...dirs].sort(
+    (left, right) => right.split("/").length - left.split("/").length || (left < right ? -1 : 1),
+  )) {
+    const children = [...childrenOf(dir)];
+    const subgroups = [...groupIds.entries()]
+      .filter(([child]) => path.posix.dirname(child) === dir)
+      .sort(([left], [right]) => (left < right ? -1 : 1))
+      .map(([, id]) => id);
+    groupIds.set(
+      dir,
+      add(`group:${dir}`, path.posix.basename(dir), {
+        isa: "PBXGroup",
+        children: [...subgroups, ...children],
+        path: path.posix.basename(dir),
+        sourceTree: "<group>",
+      }),
+    );
+  }
+  const modulesGroup = linksModules ? [groupIds.get(IOS_MODULES_DIR)!] : [];
+
   const reactNativeGroup = context.native
     ? [
         add("group:react-native", IOS_REACT_NATIVE_DIR, {
@@ -435,7 +513,7 @@ export function createProjectFile(context: MobileShellContext, files: readonly s
     : [];
   const mainGroup = add("group:main", "", {
     isa: "PBXGroup",
-    children: [appGroup, ...reactNativeGroup, productsGroup],
+    children: [appGroup, ...modulesGroup, ...reactNativeGroup, productsGroup],
     sourceTree: "<group>",
   });
   names.delete(mainGroup);
@@ -515,7 +593,12 @@ export function createProjectFile(context: MobileShellContext, files: readonly s
     SUPPORTED_PLATFORMS: "iphoneos iphonesimulator",
     SWIFT_VERSION: "5.0",
     TARGETED_DEVICE_FAMILY: "1,2",
-    ...(context.native ? createReactNativeBuildSettings(context) : {}),
+    ...(context.native
+      ? createReactNativeBuildSettings(
+          context,
+          linksModules ? (options.frameworks ?? []) : undefined,
+        )
+      : {}),
   };
   const targetDebug = add("config:target:Debug", "Debug", {
     isa: "XCBuildConfiguration",
@@ -759,6 +842,8 @@ export async function createIosProject(
       });
     }
   }
+  const linking = await resolveIosAutolinking(context);
+  if (linking) files.push(...linking.files);
   files.push(
     { path: `${IOS_TARGET}/FarmBuild.swift`, contents: createFarmBuild(context) },
     { path: `${IOS_TARGET}/Info.plist`, contents: createInfoPlist(context) },
@@ -777,13 +862,15 @@ export async function createIosProject(
     },
     { path: `${IOS_PROJECT}/project.xcworkspace/contents.xcworkspacedata`, contents: WORKSPACE },
     ...createPageShellFiles(context.shells, `${IOS_TARGET}/${IOS_PAGE_SHELLS_DIR}`),
-    ...(await createAppModuleFiles(context)),
+    // Built only with React Native screens (FarmModules/app); otherwise kept next to the project.
+    ...(context.native ? [] : await createAppModuleFiles(context)),
   );
   files.push({
     path: `${IOS_PROJECT}/project.pbxproj`,
     contents: createProjectFile(
       context,
       files.map((file) => file.path),
+      { frameworks: linking?.frameworks ?? [] },
     ),
   });
   return files.sort((left, right) =>

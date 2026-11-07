@@ -25,6 +25,10 @@ jobs:
     name: iOS simulator
     runs-on: macos-15
     timeout-minutes: 60
+    # bash -eo pipefail: a failing command piped into tee fails its step.
+    defaults:
+      run:
+        shell: bash
     steps:
       - run: echo "EVIDENCE=$RUNNER_TEMP/ios-evidence" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
