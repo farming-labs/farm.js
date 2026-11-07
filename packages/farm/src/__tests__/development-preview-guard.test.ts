@@ -211,25 +211,27 @@ describe("development fs.deny", () => {
   });
 
   it("serves only the generated client references from .farm", async () => {
+    // A real absolute root, so Windows resolves the same paths Vite will (D:/app/...).
+    const root = path.resolve("/app");
     const config = await resolveConfig(
       {
         configFile: false,
         logLevel: "silent",
-        root: "/app",
-        server: { fs: { allow: ["/app"], deny: getFarmDevFsDeny(undefined, { root: "/app" }) } },
+        root,
+        server: { fs: { allow: [root], deny: getFarmDevFsDeny(undefined, { root }) } },
       },
       "serve",
     );
-    const served = (file: string) => isFileServingAllowed(config, file);
-    expect(served("/app/.farm/client-references/next-themes/ThemeProvider.tsx")).toBe(true);
-    expect(served("/app/src/app/page.tsx")).toBe(true);
+    const served = (file: string) => isFileServingAllowed(config, path.join(root, file));
+    expect(served(".farm/client-references/next-themes/ThemeProvider.tsx")).toBe(true);
+    expect(served("src/app/page.tsx")).toBe(true);
     for (const file of [
-      "/app/.farm/cache/client-boundaries.json",
-      "/app/.farm/client-module-preloads.json",
-      "/app/.farm/.output/server/index.mjs",
-      "/app/.farm/client-references-copy/secret.ts",
+      ".farm/cache/client-boundaries.json",
+      ".farm/client-module-preloads.json",
+      ".farm/.output/server/index.mjs",
+      ".farm/client-references-copy/secret.ts",
     ]) {
-      expect(served(file)).toBe(false);
+      expect(served(file), file).toBe(false);
     }
   });
 });
