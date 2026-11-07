@@ -12,7 +12,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
-import dev.farmjs.mobile.shell.FarmFiles
 import dev.farmjs.mobile.specs.NativeDeviceSpec
 import java.io.File
 import java.util.UUID
@@ -45,7 +44,7 @@ class DeviceModule(reactContext: ReactApplicationContext) : NativeDeviceSpec(rea
 
     /**
      * The system photo picker: no permission, and the user picks one photo. The photo is copied
-     * into FarmFiles.directory, so its file:// URI loads in a native screen's Image and reaches a
+     * into cacheDir/farm-files, so its file:// URI loads in a native screen's Image and reaches a
      * web screen as a /__farm/files/<id> URL.
      */
     override fun pickPhoto(promise: Promise) {
@@ -78,7 +77,10 @@ class DeviceModule(reactContext: ReactApplicationContext) : NativeDeviceSpec(rea
     private fun copy(picked: Uri): File {
         val resolver = reactApplicationContext.contentResolver
         val extension = resolver.getType(picked)?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) } ?: "jpg"
-        val file = File(FarmFiles.directory(reactApplicationContext), "photo-${UUID.randomUUID()}.$extension")
+        // The folder the shell serves to web screens by reference. App modules build as their own
+        // Gradle module, so it is named here rather than reached through the shell's classes.
+        val dir = File(reactApplicationContext.cacheDir, "farm-files").apply { mkdirs() }
+        val file = File(dir, "photo-${UUID.randomUUID()}.$extension")
         val input = resolver.openInputStream(picked) ?: error("no data")
         input.use { source -> file.outputStream().use { source.copyTo(it) } }
         return file

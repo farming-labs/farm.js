@@ -186,7 +186,7 @@ Common config fields:
   checked against the Codegen spec in generated Kotlin or Swift before the module runs (`invalid_args`, `unknown_method`, `native_error`, or the
   module's own reject code); calls run on the module instance native screens use; types come from
   the specs into `src/farm.d.ts` (`FarmNativeModules`); large results by reference, Android only: the module
-  writes into `FarmFiles.directory(context)` (`cacheDir/farm-files`) and resolves the `file://`
+  writes into `cacheDir/farm-files` (by name: app modules cannot import shell classes) and resolves the `file://`
   URI, the page gets `/__farm/files/<id>` (served by its own WebView, scoped to that page, deleted
   when the screen closes, passed back as an argument it is the `file://` URI again); `PhotoPicker`
   from `@farm.js/ui` takes `pick` (such as `native.Device.pickPhoto`) or opens the browser's file

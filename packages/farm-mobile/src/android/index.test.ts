@@ -1517,6 +1517,21 @@ class DeviceModule(reactContext: ReactApplicationContext) : NativeDeviceSpec(rea
     await expect(
       createAndroidProject(context({ root: third, native: native(), appModules: unpackaged })),
     ).rejects.toThrow(/src\/native\/DeviceModule\.kt has no package declaration/);
+
+    // The library cannot compile against the shell: fail here, with the fix, not in Gradle.
+    const fourth = await app({ dependencies: {} });
+    const shellImport = await appModules(fourth, {
+      "NativeDevice.ts": DEVICE_SPEC,
+      "DeviceModule.kt": DEVICE_MODULE.replace(
+        "import com.facebook.react.bridge.Promise\n",
+        "import com.facebook.react.bridge.Promise\nimport dev.farmjs.mobile.shell.FarmFiles\n",
+      ),
+    });
+    await expect(
+      createAndroidProject(context({ root: fourth, native: native(), appModules: shellImport })),
+    ).rejects.toThrow(
+      "src/native/DeviceModule.kt imports dev.farmjs.mobile.shell.FarmFiles, a class of Farm's Android shell. App modules build as their own Gradle module (farm-app-modules), which cannot see the shell. Remove the import: write files for web screens into File(context.cacheDir, \"farm-files\") by name, and use React Native's APIs for the rest.",
+    );
   });
 
   it("links the mobile example's Device module, and Codegen generates the class it extends", async () => {

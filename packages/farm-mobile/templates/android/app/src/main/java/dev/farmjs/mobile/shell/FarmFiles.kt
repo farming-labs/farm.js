@@ -16,7 +16,7 @@ import org.json.JSONObject
 
 /**
  * Files web screens get by reference (RFC 0004, 7.5). A native module writes a large result, such
- * as a photo, into [directory] and resolves with its `file://` URI, as a React Native module does
+ * as a photo, into `cacheDir/farm-files` and resolves with its `file://` URI, as a React Native module does
  * for native screens. On its way to a web page the bridge swaps that URI for
  * `/__farm/files/<id>`, an unguessable path on the app's origin the page loads like any URL
  * (`<img src>`, `fetch`). This WebView answers it from the file; no bytes cross the bridge as JSON.
@@ -122,12 +122,11 @@ class FarmFiles(private val context: Context, private val config: RouteConfig) {
         private val pages: MutableSet<FarmFiles> = ConcurrentHashMap.newKeySet()
 
         /**
-         * Where a module writes files for web screens: `cacheDir/farm-files`. Created on first use.
-         * Farm owns it: files a page received are deleted when the page closes, and the rest when
-         * the app starts again.
+         * Where a module writes files for web screens: `cacheDir/farm-files`, by that name, since app
+         * modules build as their own Gradle module without the shell's classes. Farm owns it: files a
+         * page received are deleted when the page closes, and the rest when the app starts again.
          */
-        @JvmStatic
-        fun directory(context: Context): File = File(context.cacheDir, "farm-files").apply { mkdirs() }
+        private fun directory(context: Context): File = File(context.cacheDir, "farm-files").apply { mkdirs() }
 
         /** Main thread only: whether this process already cleared files from an earlier run. */
         private var cleared = false

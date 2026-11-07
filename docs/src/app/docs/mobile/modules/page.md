@@ -241,8 +241,9 @@ registered modules and the methods in their specs.
 #### Files by reference
 
 A large result, such as a photo, comes back as a URL, never as base64 through the bridge. The
-module writes the file into `FarmFiles.directory(context)` (`cacheDir/farm-files`) and resolves
-with its `file://` URI, as a React Native module does for native screens:
+module writes the file into `cacheDir/farm-files` and resolves with its `file://` URI, as a React
+Native module does for native screens. It names the folder rather than importing anything from
+Farm: app modules build as their own Gradle module, without the shell's classes.
 
 ```ts
 // src/native/NativeDevice.ts
@@ -254,7 +255,8 @@ export interface Spec extends TurboModule {
 
 ```kotlin
 // src/native/DeviceModule.kt (copying the system photo picker's result)
-val file = File(FarmFiles.directory(reactApplicationContext), "photo-${UUID.randomUUID()}.jpg")
+val dir = File(reactApplicationContext.cacheDir, "farm-files").apply { mkdirs() }
+val file = File(dir, "photo-${UUID.randomUUID()}.jpg")
 // ... write the photo to file ...
 promise.resolve(Uri.fromFile(file).toString())
 ```
