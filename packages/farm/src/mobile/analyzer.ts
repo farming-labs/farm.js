@@ -94,7 +94,8 @@ export type FarmMobileBlockerRule =
   | "unresolved-import"
   | "dynamic-import"
   | "node-builtin"
-  | "client-logic";
+  | "client-logic"
+  | "inert-control";
 
 export type FarmMobileWin = "list" | "input" | "timer";
 
@@ -804,6 +805,7 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
     const props: Record<string, string | number | boolean> = {};
     const style: string[] = [];
     const events: string[] = [];
+    let submits = false;
     for (const attribute of opening.attributes as Node[]) {
       if (attribute.type === "JSXSpreadAttribute") {
         if (isIntrinsic)
@@ -827,6 +829,7 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
       }
       if ((name === "action" || name === "formAction") && isIntrinsic) {
         block(attribute, "form-action", `${name} on <${tag}>`);
+        submits = true;
         continue;
       }
       if (/^on[A-Z]/.test(name)) {
@@ -925,6 +928,22 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
       events.some((event) => event === "onChange" || event === "onInput")
     ) {
       wins.add("input");
+    }
+    // A server-drawn screen opens links; a control with no handler and no form does nothing
+    // there, so the page keeps its web screen. Handlers are blocked above as client logic.
+    if (
+      isIntrinsic &&
+      (tag === "button" || kind === "TextInput") &&
+      events.length === 0 &&
+      !submits &&
+      props.type !== "hidden"
+    ) {
+      block(
+        opening,
+        "inert-control",
+        `<${tag}> has no link or form to submit on a native-tier screen`,
+        "native",
+      );
     }
     if (Object.keys(props).length > 0) node.props = props;
     if (style.length > 0) node.style = style;

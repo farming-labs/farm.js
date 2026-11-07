@@ -389,6 +389,10 @@ class Converter {
     flexItem = false,
   ): FarmNativeNode | undefined {
     if (SKIPPED_TAGS.has(element.tag)) return undefined;
+    // A browser draws nothing for a hidden input.
+    if (element.tag === "input" && element.attributes.type?.toLowerCase() === "hidden") {
+      return undefined;
+    }
     const own = this.stylesOf(element);
     if (own.style.display === "none") return undefined;
     const passed: Inherited = {
@@ -430,6 +434,8 @@ class Converter {
       return node;
     }
     if (element.tag === "input" || element.tag === "textarea") {
+      // Nothing reads what is typed: the web screen keeps the field working.
+      this.problem(`<${element.tag}> has no form to submit it`);
       const node = this.node(
         "TextInput",
         element,
@@ -442,6 +448,8 @@ class Converter {
       return node;
     }
     if (element.tag === "a" || element.tag === "button") {
+      // A shell opens a Pressable's link; a button has none, so a tap would do nothing.
+      if (element.tag === "button") this.problem("<button> has no link or form to submit");
       const node = this.node("Pressable", element, box, boxDark);
       if (element.tag === "a") node.href = this.url(element.attributes.href);
       node.children = this.blocks(element.children, passed, flex);

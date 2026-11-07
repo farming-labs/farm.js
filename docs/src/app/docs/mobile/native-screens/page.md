@@ -51,10 +51,13 @@ shell ◀── { root: { type: "View", children: [...] } } ──────�
 
 Drawn on Android: `View` (flex column or row, gap, padding, margins, width and height in px or
 `100%`, `flex-1`, alignment, `max-w-*`), `Text` with inline runs (links, `<strong>`, `<em>`,
-`<code>`), `Image`, links and buttons as pressable boxes, and borders, radii, backgrounds, and
-opacity, and wrapping rows (`flex-wrap: wrap`). Not yet: percentages other than `100%`, wrapping
-columns, absolute or sticky positioning, Sass and other non-CSS stylesheet sources in the analyzer,
-forms, and inputs that do anything. iOS draws `server` routes with UIKit (stack views,
+`<code>`), `Image`, links as pressable boxes, and borders, radii, backgrounds, and
+opacity, and wrapping rows (`flex-wrap: wrap`). A hidden input draws nothing. A `<button>`,
+`<input>`, or `<textarea>` keeps the route's web screen, since a native-drawn screen only opens
+links and a tap or typed text there would go nowhere: the tree lists it in `unsupported`, and the
+analyzer reports it as `inert-control`. Not yet: percentages other than `100%`, wrapping columns,
+absolute or sticky positioning, Sass and other non-CSS stylesheet sources in the analyzer, and
+forms. iOS draws `server` routes with UIKit (stack views,
 attributed labels with tappable links, image views), with the same fallback to the web screen; it
 is type-checked, and CI builds and launches the shell with a native home route. The smoke check
 requires the native content-ready log marker and rejects a fallback to the web screen.
