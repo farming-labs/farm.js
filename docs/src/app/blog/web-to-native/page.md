@@ -53,7 +53,7 @@ A tap on a `Link` is handed to the shell, which asks the navigator what the rout
 
 Because every screen is served by your one backend over HTTP, there is nothing to keep in sync: your server functions, queries, auth, and theme stay the app's, whatever a screen is made of.
 
-The bridge also reserves a `native.<name>` channel for **device capabilities** — the camera, SMS, contacts. It ships no plugins yet, so those calls return `native_unavailable` today. How to reach a real device feature now, and where that channel is headed, is in [Native device features](/docs/mobile#native-device-features).
+The bridge also reserves a `native.<name>` channel for **device capabilities** — the camera, SMS, contacts. It ships no plugins yet, so those calls return `native_unavailable` today. How to reach a real device feature now, and where that channel is headed, is in [Native device features](/docs/mobile/modules#native-device-features).
 
 <span id="try-it" className="blog-heading-anchor" />
 
