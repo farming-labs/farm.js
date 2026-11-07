@@ -35,6 +35,17 @@ export const VITE_DEFAULT_FS_DENY = [
 ] as const;
 
 /**
+ * Everything in `.farm` but `.farm/client-references`: the generated modules that re-export
+ * package client components for islands mode (`islands-package-references.ts`), which the browser
+ * loads. They hold nothing else.
+ */
+const FARM_DEV_FS_DENY = [
+  "**/.farm/!(client-references)/**",
+  "**/.farm/client-references?*/**",
+  "**/.farm/*",
+] as const;
+
+/**
  * Farm's build output and local state (the auth database, build caches, the Nitro server bundle)
  * live in `.farm` or the configured `distDir`; the dev file server must never hand them out.
  * Returned from the `config` hook, so Vite appends it to an app's own `server.fs.deny` and the
@@ -44,7 +55,7 @@ export function getFarmDevFsDeny(
   userDeny: readonly string[] | undefined,
   options: { root?: string; distDir?: string },
 ): string[] {
-  const deny = ["**/.farm/**"];
+  const deny: string[] = [...FARM_DEV_FS_DENY];
   const root = path.resolve(options.root || process.cwd());
   const distDir = options.distDir ? path.resolve(root, options.distDir) : undefined;
   const relativeDistDir = distDir ? path.relative(root, distDir) : "";

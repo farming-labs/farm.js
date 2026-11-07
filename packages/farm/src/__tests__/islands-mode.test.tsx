@@ -366,18 +366,25 @@ describe("islands mode", () => {
       expect(plan.serverTreeLayout).toBeUndefined();
     });
 
-    it("reports a provider imported from a package, with the local-wrapper fix", () => {
-      const { plan } = planLayout(
-        'import { ThemeProvider } from "acme-theme";\nexport default function Layout({ children }) { return <ThemeProvider>{children}</ThemeProvider>; }\n',
+    const reference = (root: string, specifier: string, exportName: string) =>
+      path.join(root, ".farm/client-references", specifier, `${exportName}.tsx`);
+
+    it("renders a provider imported from a package through its client reference, as RSC does", () => {
+      const { root, plan } = planLayout(
+        // The same layout as the local provider's above, with the provider from a package.
+        'import { ThemeProvider } from "acme-theme";\nimport { secret } from "../secret";\nexport default function Layout({ children }) { return <ThemeProvider><p>{secret()}</p>{children}</ThemeProvider>; }\n',
         {
           "../node_modules/acme-theme/package.json": '{"name":"acme-theme","main":"index.js"}',
           "../node_modules/acme-theme/index.js":
             '"use client";\nexport function ThemeProvider({ children }) { return children; }\n',
         },
       );
-      expect(plan.shouldHydrate).toBe(false);
-      expect(plan.islandsError).toMatch(
-        /package client boundary acme-theme cannot yet be isolated\. Render it from a local "use client" module/,
+      expect(plan.islandsError).toBeUndefined();
+      expect(plan).toMatchObject({ shouldHydrate: true, serverTreeLayout: true });
+      const file = reference(root, "acme-theme", "ThemeProvider");
+      expect(plan.isolatedBoundaries).toEqual([{ modulePath: file, islandStrategy: "load" }]);
+      expect(readFileSync(file, "utf8")).toContain(
+        '"use client";\nexport { ThemeProvider } from "acme-theme";',
       );
     });
 
@@ -387,17 +394,22 @@ describe("islands mode", () => {
         '"use client";\nexport function Github() { return null; }\nexport function ThemeProvider({ children }) { return children; }\n',
     };
 
-    it("renders a package's icons as static HTML, so an icon-only layout stays on the server", () => {
-      const { plan } = planLayout(
+    it("renders a package's leaf components as islands through their client reference", () => {
+      const { root, plan } = planLayout(
         'import { Github } from "icon-kit";\nexport default function Layout({ children }) { return <main><a href="/"><Github size={16} /></a>{children}</main>; }\n',
         iconKit,
       );
-      expect(plan).toMatchObject({ shouldHydrate: false, staticPackageBoundaries: ["icon-kit"] });
       expect(plan.islandsError).toBeUndefined();
+      expect(plan.staticPackageBoundaries).toBeUndefined();
+      expect(plan).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+        isolatedBoundaries: [{ modulePath: reference(root, "icon-kit", "Github") }],
+      });
       expect(plan.serverTreeLayout).toBeUndefined();
     });
 
-    it("keeps a layout's islands beside the icons it renders statically", () => {
+    it("keeps a layout's islands beside the package components it renders", () => {
       const { root, plan } = planLayout(
         'import { Nav } from "../nav";\nexport default function Layout({ children }) { return <main><Nav />{children}</main>; }\n',
         {
@@ -408,27 +420,27 @@ describe("islands mode", () => {
             '"use client";\nexport function Counter() { return <button>1</button>; }\n',
         },
       );
-      expect(plan).toMatchObject({
-        shouldHydrate: false,
-        hasIsolatedClientBoundaries: true,
-        staticPackageBoundaries: ["icon-kit"],
-        isolatedBoundaries: [{ modulePath: path.join(root, "src/counter.tsx") }],
-      });
+      expect(plan).toMatchObject({ shouldHydrate: false, hasIsolatedClientBoundaries: true });
+      expect(plan.isolatedBoundaries?.map((boundary) => boundary.modulePath).sort()).toEqual(
+        [reference(root, "icon-kit", "Github"), path.join(root, "src/counter.tsx")].sort(),
+      );
       expect(plan.serverTreeLayout).toBeUndefined();
     });
 
-    it("still reports a package component that wraps content, or takes an element prop", () => {
-      for (const body of [
-        "<ThemeProvider>{children}</ThemeProvider>",
-        "<main><Github label={<b>x</b>} />{children}</main>",
-      ]) {
-        const { plan } = planLayout(
-          `import { Github, ThemeProvider } from "icon-kit";\nexport default function Layout({ children }) { return ${body}; }\n`,
+    it("renders a package component that wraps content, or takes an element prop, through its reference", () => {
+      for (const [body, exportName] of [
+        ["<ThemeProvider>{children}</ThemeProvider>", "ThemeProvider"],
+        ["<main><Github label={<b>x</b>} />{children}</main>", "Github"],
+      ] as const) {
+        const { root, plan } = planLayout(
+          `import { ${exportName} } from "icon-kit";\nexport default function Layout({ children }) { return ${body}; }\n`,
           iconKit,
         );
-        expect(plan.islandsError, body).toMatch(
-          /package client boundary icon-kit cannot yet be isolated/,
-        );
+        expect(plan.islandsError, body).toBeUndefined();
+        expect(
+          plan.isolatedBoundaries?.map((boundary) => boundary.modulePath),
+          body,
+        ).toEqual([reference(root, "icon-kit", exportName)]);
       }
     });
 
