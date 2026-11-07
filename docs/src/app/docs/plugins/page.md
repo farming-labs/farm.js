@@ -24,6 +24,7 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 | [MSW](/docs/plugins/msw)               | Share request handlers across development SSR and the browser without shipping production mocks.  |
 | [Partytown](/docs/plugins/partytown)   | Move explicitly opted-in third-party scripts from the main thread into a web worker.              |
 | [PWA](/docs/plugins/pwa)               | Generate a route-aware service worker for offline navigation, caching, and safe updates.          |
+| [Progress](/docs/plugins/progress)     | Show a top progress bar while a client navigation is in flight.                                   |
 | [Search](/docs/plugins/search)         | Generate a chunked browser search index from emitted static pages.                                |
 | [Scripts](/docs/plugins/scripts)       | Load external browser SDKs with typed handles, timing, consent, dependencies, and retries.        |
 | [Sentry](/docs/plugins/sentry)         | Report server errors with Farm event and route context, trace requests, and flush on shutdown.    |
