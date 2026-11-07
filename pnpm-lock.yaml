@@ -3187,6 +3187,28 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
+  packages/farm-progress:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      jsdom:
+        specifier: ^25.0.0
+        version: 25.0.1(supports-color@10.2.2)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vite:
+        specifier: 8.3.4
+        version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
+
   packages/farm-pwa:
     dependencies:
       '@farm.js/core':
