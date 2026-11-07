@@ -175,14 +175,22 @@ async function expectGuardedAgentAPI(origin: string) {
   }
 }
 
+// Statuses a run stays in until it is answered, woken or deleted.
+const SETTLED = new Set(["interrupted", "sleeping", "completed", "failed", "cancelled"]);
+
 async function readRun(origin: string, id: string, status: string) {
-  // The run settles in the background; read it until it reaches `status`.
+  // The run settles in the background; read it until it reaches `status`. A run that settles
+  // anywhere else will not get there, so report what it did (a failed run carries its error).
+  let last: { status?: string; error?: { message?: string } } = {};
   for (let attempt = 0; attempt < 100; attempt++) {
     const run = await (await fetch(`${origin}/api/agent/runs/${id}`, { headers: PASS })).json();
     if (run.status === status) return run;
+    last = run;
+    if (SETTLED.has(run.status)) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`run ${id} never reached ${status}`);
+  const error = last.error?.message ? `: ${last.error.message}` : "";
+  throw new Error(`run ${id} is ${last.status ?? "unreadable"}, not ${status}${error}`);
 }
 
 async function expectRunsThroughGuards(origin: string) {
