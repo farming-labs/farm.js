@@ -89,12 +89,9 @@ jobs:
             "$RUNNER_TEMP/tls/server.pem" "$RUNNER_TEMP/tls/server-key.pem" 3443 3100 \
             > "$EVIDENCE/https-proxy.txt" 2>&1 &
           echo "HTTPS_PROXY_PID=$!" >> "$GITHUB_ENV"
-          for _ in $(seq 1 60); do
-            curl -sf --cacert "$RUNNER_TEMP/tls/ca.pem" -o /dev/null https://localhost:3443/ && break
-            sleep 1
-          done
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/https-ready.mjs" "$RUNNER_TEMP/tls/ca.pem" \
+            https://localhost:3443/ 60 || { cat "$EVIDENCE/production-server.txt" "$EVIDENCE/https-proxy.txt"; exit 1; }
           cat "$EVIDENCE/production-server.txt" "$EVIDENCE/https-proxy.txt"
-          curl -sSf --cacert "$RUNNER_TEMP/tls/ca.pem" -o /dev/null -w "GET / %{http_code}\n" https://localhost:3443/
 
       # The configuration an App Store build uses, for a device, unsigned: the simulator steps
       # below run the Debug shell. mobile links React Native; mobile-minimal is the shell alone.
