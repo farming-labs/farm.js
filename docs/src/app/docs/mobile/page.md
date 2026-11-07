@@ -664,8 +664,9 @@ parts are designed and still on the way:
 
 - The iOS shell builds and launches in simulator CI (see [Run on iOS](#run-on-ios)). Physical
   devices and end-to-end Keychain sign-in, refresh and sign-out flows remain unverified.
-- React Native screens on iOS render in simulator CI from a production build (Hermes bytecode);
-  not yet on a device (see [React Native screens on iOS](#react-native-screens-on-ios)).
+- React Native screens on iOS render in simulator CI from a production build (Hermes bytecode):
+  `examples/mobile`'s `/kit` and `/map`, with netinfo and the app's `Device` module. Not yet on a
+  device (see [React Native screens on iOS](#react-native-screens-on-ios)).
 - React Native screens are verified under `farm dev --mobile` on an Android emulator only, not in a
   production (Hermes bytecode) build or on real devices.
 - `platform` screens show a placeholder naming the module id. Farm does not build `page.kt` or
