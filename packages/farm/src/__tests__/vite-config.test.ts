@@ -69,6 +69,23 @@ describe("Farm Vite server-only entries", () => {
     expect(resolveId("@farm.js/core/client", "/app/src/page.tsx", {})).toBeNull();
   });
 
+  it("gives server graphs an empty server-only module and rejects it in the browser graph", async () => {
+    const plugin = farmServerOnlyEntriesPlugin();
+    (plugin.configResolved as (config: { root: string }) => void)({ root: process.cwd() });
+    const resolveId = createResolveId(process.cwd());
+
+    const id = resolveId("server-only", "/app/src/server/db.ts", { ssr: true }) as string;
+    expect(id).toBe("\0farm:server-only");
+    expect((plugin.load as (id: string) => unknown)(id)).toBe("export {};");
+    // Vite's dependency scan reads route files as browser entries; it gets the empty module too.
+    expect(resolveId("server-only", "/app/src/app/page.tsx", { scan: true } as never)).toBe(
+      "\0farm:server-only",
+    );
+    expect(() => resolveId("server-only", "/app/src/server/db.ts", {})).toThrow(
+      '/app/src/server/db.ts imports "server-only", so it must not reach the browser',
+    );
+  });
+
   it("names the install command when a server graph imports @farm.js/core/og without @vercel/og", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-og-missing-"));
     try {

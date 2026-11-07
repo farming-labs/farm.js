@@ -151,6 +151,7 @@ declare module "@farm.js/core/native" {
     Device: {
       model(): Promise<string>;
       vibrate(ms: number): Promise<void>;
+      pickPhoto(): Promise<string | null>;
     };
   }
 }

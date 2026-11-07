@@ -1929,7 +1929,7 @@ async function buildClient(
     resolveFarmMdxComponentsModulePath(resolveMdxConfig(config.mdx), root),
     root,
     isolatedMode,
-    planOptions,
+    { ...planOptions, packageReferences: pagePlanOptions.serverOwners },
   );
   const routePlans = pageRoutes.map((route) => ({
     route,
@@ -6439,7 +6439,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
     resolveFarmMdxComponentsModulePath(resolveMdxConfig(config.mdx), config.root),
     config.root,
     isolatedHydrationMode,
-    hydrationPlanOptions,
+    { ...hydrationPlanOptions, packageReferences: pageHydrationPlanOptions.serverOwners },
   );
   const pageHydrationPlans = new Map(
     pageRoutes.map((route) => [

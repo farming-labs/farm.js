@@ -86,6 +86,7 @@ const entry = {
   "internal/native-server-fns": "src/mobile/native-server-fns.ts",
   "internal/islx-server": "src/islx/server.ts",
   "internal/islx-react": "src/islx/react.ts",
+  "internal/react-cache": "src/react-cache.ts",
   "internal/form-actions": "src/form-actions.ts",
   "internal/form-actions-client": "src/form-actions-client.ts",
   "internal/production-runtime": "src/nitro/production-runtime.ts",

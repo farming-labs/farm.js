@@ -741,7 +741,7 @@ export class RouteManager {
       resolveFarmMdxComponentsModulePath(resolveMdxConfig(this.config.mdx), normalizedProjectRoot),
       normalizedProjectRoot,
       isolatedMode,
-      planOptions,
+      { ...planOptions, packageReferences: islandsMode },
     );
     const routeEntries = Array.from(this.routes.values()).map((entry) => ({
       entry,

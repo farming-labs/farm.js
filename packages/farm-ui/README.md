@@ -20,6 +20,24 @@ export default function Notes({ notes }) {
 }
 ```
 
+## `PhotoPicker`
+
+An unstyled control that picks one photo and hands `onPick` a URL `Image` can show. It takes the
+same token props as `Pressable` and adds no visuals of its own.
+
+```tsx
+<PhotoPicker onPick={setPhoto} padding="sm" radius="md">
+  Choose a photo
+</PhotoPicker>
+```
+
+On the web it is a label around an `accept="image/*"` file input and gives an object URL, revoked
+on the next pick and on unmount. Pass `pick`, an app module's method that resolves a photo's URL
+or null, to pick natively instead: `native.Device.pickPhoto` on a web screen in the Android app
+(the photo comes back by reference, as `/__farm/files/<id>`), or `Device.pickPhoto` on a native
+screen (a `file://` URI). Without `pick` the native build is disabled, since React Native has no
+file input.
+
 ## Status
 
 - **Web rendering ships today.** Every primitive renders semantic HTML with

@@ -238,8 +238,60 @@ without one, or without the module's Objective-C++ class, registers no module fo
 those of [The bridge](/docs/mobile/shell#the-bridge): the server origin only, the main frame only, and only the
 registered modules and the methods in their specs.
 
-Not built yet: large results as references (a photo comes back as a URL, not base64), and events
-as subscriptions.
+#### Files by reference
+
+A large result, such as a photo, comes back as a URL, never as base64 through the bridge. The
+module writes the file into `cacheDir/farm-files` and resolves with its `file://` URI, as a React
+Native module does for native screens. It names the folder rather than importing anything from
+Farm: app modules build as their own Gradle module, without the shell's classes.
+
+```ts
+// src/native/NativeDevice.ts
+export interface Spec extends TurboModule {
+  /** The picked photo's file:// URI, or null when the user backs out. */
+  pickPhoto(): Promise<string | null>;
+}
+```
+
+```kotlin
+// src/native/DeviceModule.kt (copying the system photo picker's result)
+val dir = File(reactApplicationContext.cacheDir, "farm-files").apply { mkdirs() }
+val file = File(dir, "photo-${UUID.randomUUID()}.jpg")
+// ... write the photo to file ...
+promise.resolve(Uri.fromFile(file).toString())
+```
+
+```tsx
+// a web screen
+const url = await native.Device.pickPhoto(); // "/__farm/files/Qm9...", or null
+if (url) setPhoto(url); // <img src={photo} />, or fetch(url) to upload it
+```
+
+- **The bridge swaps the URI for a reference.** A `file://` URI inside `farm-files`, anywhere in a
+  result (a string, or inside an object or array), reaches the page as `/__farm/files/<id>`: a path
+  on the app's origin with a random 128-bit id. The page's WebView answers it from the file in
+  `shouldInterceptRequest`, so a reference never goes to the server, and only bytes cross the
+  process boundary, as for any image.
+- **Scoped to the page that got it.** Another page's WebView answers the same path `404`. A page
+  passes a reference back as an argument, and the module gets its `file://` URI again; a reference
+  the page never received rejects with `invalid_args`.
+- **Dropped when the screen closes.** The page's references stop working and their files are
+  deleted, unless another open page holds the same file. Files left from an earlier run are
+  deleted at launch. On a native screen the module's `file://` URI loads in `Image` as is.
+- **Only `farm-files`.** Other `file://` URIs, `content://` URIs, and paths that leave the folder
+  through `..` or a link stay plain strings, so a module that echoes a string cannot expose other
+  app files. Copy a picked `content://` file into `farm-files` first, as `DeviceModule.kt` does.
+- **Types stay the spec's.** A reference is a string, so the method returns `Promise<string>` (or
+  an object with string properties); no Farm-specific spec type is needed.
+- **Android only.** The iOS shell cannot answer `https` requests (WebKit's scheme handlers take
+  only custom schemes), so on an iOS web screen a `file://` result reaches the page as a plain
+  string it cannot load. Pick there with a file input: `PhotoPicker` without `pick`.
+- Not yet: range requests (a long video loads whole).
+
+[`PhotoPicker`](/docs/mobile#portable-components-farmjsui) from `@farm.js/ui` wraps this: given
+`pick={native.Device.pickPhoto}` it calls the module, and in a browser it opens the file picker.
+
+Not built yet: events as subscriptions, and file references on iOS.
 
 Tested in unit and generator tests, and the generated Kotlin compiles against React Native
 0.88.1's `react-android` and the Java specs Codegen generates; not run on a device or emulator yet.

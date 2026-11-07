@@ -833,6 +833,10 @@ export default TurboModuleRegistry.getEnforcing<Spec>("Haptics");
   as it answers bundled client files, scoped to the screen that asked and dropped when it closes.
   iOS cannot answer `https` requests (7.12) and a custom scheme would be mixed content, so iOS
   returns such results as a native upload to a server route instead (open question 8).
+  Implemented on Android: a module writes into `cacheDir/farm-files` and resolves the file's
+  `file://` URI, exactly as it would for a native screen; the bridge swaps it for the reference on
+  the way to the page and back on the way in, so specs keep plain `string` types. Only that folder
+  is served, so a module that echoes a string exposes no other app file.
 - **Events are subscriptions.** `subscribe` and `unsubscribe` bridge messages, at most one delivery
   per animation frame with the latest value. The shell closes every subscription of a page when its
   document changes, its screen pops, or a pooled WebView moves to another route.
@@ -1592,9 +1596,9 @@ Mobile (0.2.x):
 7. **Native modules.** Device APIs are React Native modules (see
    [Device APIs are React Native modules](#device-apis-are-react-native-modules)). Released:
    autolinking of installed modules (#2523), app TurboModules and `mobile.modules` (#2524), and
-   calls from web screens to modules that opt in (#2528), all on Android. Not started: file
-   references for large results, subscriptions, and `@farm.js/ui` pop-ups and chrome on web
-   screens.
+   calls from web screens to modules that opt in (#2528), all on Android. Implemented, not yet
+   released: file references for large results on Android, with `PhotoPicker` in `@farm.js/ui`.
+   Not started: subscriptions, and `@farm.js/ui` pop-ups and chrome on web screens.
 8. **React Native screens.** Released on Android: `page.native.tsx` and OS overrides, the
    `mobile.native` block and `export const mobile` (#2424), `@farm.js/native` with Metro and Hermes
    builds (#2444), the shared pre-warmed runtime and the web twin fallback (#2445), the example's
