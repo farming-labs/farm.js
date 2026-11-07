@@ -91,6 +91,7 @@ import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
 import type { FarmRequest } from "./types";
 import {
   bufferFarmRequestBody,
+  cloneFarmRequest,
   createFarmRequestBodyErrorResponse,
   readNodeRequestBody,
   resolveFarmServerConfig,
@@ -2669,11 +2670,11 @@ async function readIntegrationValidationBody(
     if (format === "form") {
       return {
         success: true,
-        data: createFormInput(await request.clone().formData()),
+        data: createFormInput(await cloneFarmRequest(request).formData()),
       };
     }
 
-    const text = await request.clone().text();
+    const text = await cloneFarmRequest(request).text();
     if (text.trim().length === 0) {
       return {
         success: true,
@@ -3254,7 +3255,7 @@ export async function dispatchIntegrationRequests(
       { ...runtime, integration },
       // Each dispatch buffers the body it is given, so hand every integration
       // its own clone rather than a Request another dispatch already read.
-      request.clone(),
+      cloneFarmRequest(request),
       {
         currentRequest: options.currentRequest,
         ranMiddleware: options.ranMiddleware,

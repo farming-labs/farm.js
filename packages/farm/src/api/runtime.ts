@@ -7,6 +7,7 @@ import {
 import { isEndpointFailure, type EndpointFailure } from "./endpoint";
 import {
   bufferFarmRequestBody,
+  cloneFarmRequest,
   createFarmRequestBodyErrorResponse,
   DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT,
 } from "../server-http";
@@ -341,7 +342,7 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
 
   if (contentType === "multipart/form-data") {
     try {
-      return { body: formDataToObject(await request.clone().formData()) };
+      return { body: formDataToObject(await cloneFarmRequest(request).formData()) };
     } catch {
       return invalidRequestBody("The request body is not valid multipart form data.");
     }
@@ -349,7 +350,7 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
 
   let text: string;
   try {
-    text = await request.clone().text();
+    text = await cloneFarmRequest(request).text();
   } catch {
     if (contentType === "application/json" || contentType?.endsWith("+json")) {
       return invalidRequestBody("The request body is not valid JSON.");
