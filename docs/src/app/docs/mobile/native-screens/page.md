@@ -420,12 +420,13 @@ Walking the AST, it visits each page, its app modules, and the layouts a `layout
 not replace, and sorts what it finds into two buckets:
 
 - **Ports:** `div`/`section`/… → View, `p`/`span`/headings → Text, `img` → Image, `button`/`a` →
-  Pressable, text `input`/`textarea` → TextInput, `ul`/`ol` → List; `@farm.js/ui` and
+  Pressable, text `input`/`textarea` → TextInput, `ul`/`ol` → List, and, for the native tier, a
+  `form` with a URL action and its submit buttons and hidden fields; `@farm.js/ui` and
   `@farm.js/native`; `Link`, navigation hooks, and server function hooks from `@farm.js/core`; the
   flex, spacing, size, color, border, radius, and type Tailwind subset, with `dark:`; inline styles
   with those properties; `onClick`, and input change handlers; server function modules, which the
   screen calls over the network.
-- **Blocks, so the route stays web:** `canvas`, `iframe`, `video`, `table`, `svg`, `select`, `form`;
+- **Blocks, so the route stays web:** `canvas`, `iframe`, `video`, `table`, `svg`, `select`;
   `dangerouslySetInnerHTML`, element refs, spread props, other DOM events; Sass and other non-CSS
   stylesheets, grid, `fixed`/`sticky`, transitions, responsive and `hover:` variants, arbitrary
   values, runtime class names; `window`, `document`, storage and observer APIs, `useLayoutEffect`,
