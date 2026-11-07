@@ -40,6 +40,13 @@ export interface FarmAppManifestConfig {
   agent?: boolean;
   /** Plugin names. `false` serves `plugins: null`. */
   plugins?: boolean;
+  /**
+   * The app's Farm.js Infra project (`FARMJS_PROJECT_ID`), so Infra can tell its site from
+   * another app's before it saves the address. `false` serves `infra: null`.
+   *
+   * @default true
+   */
+  infra?: boolean;
 }
 
 export interface ResolvedFarmAppManifestConfig {
@@ -50,6 +57,7 @@ export interface ResolvedFarmAppManifestConfig {
   integrations: boolean;
   agent: boolean;
   plugins: boolean;
+  infra: boolean;
 }
 
 const NAME = "agent.manifest";
@@ -106,7 +114,11 @@ export function resolveFarmAppManifestConfig(
     throw new TypeError(`${NAME} must be true, false, or an options object.`);
   }
   const config = isObject(input) ? input : {};
-  checkKeys(config, ["app", "packages", "mcp", "webmcp", "integrations", "agent", "plugins"], NAME);
+  checkKeys(
+    config,
+    ["app", "packages", "mcp", "webmcp", "integrations", "agent", "plugins", "infra"],
+    NAME,
+  );
   const packages = config.packages;
   if (packages !== undefined && typeof packages !== "boolean" && packages !== "names") {
     throw new TypeError(`${NAME}.packages must be true, false, or "names".`);
@@ -128,5 +140,6 @@ export function resolveFarmAppManifestConfig(
     integrations: readBoolean(config.integrations, `${NAME}.integrations`),
     agent: readBoolean(config.agent, `${NAME}.agent`),
     plugins: readBoolean(config.plugins, `${NAME}.plugins`),
+    infra: readBoolean(config.infra, `${NAME}.infra`),
   };
 }

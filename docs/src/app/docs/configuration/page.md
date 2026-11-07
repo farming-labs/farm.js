@@ -724,15 +724,16 @@ route.
 
 `manifest` takes an object to choose what the document shows. Every section is shown by default:
 
-| Option         | Values                                      | Effect                                                                                                                                              |
-| -------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app`          | `boolean` or `{ version, renderer, build }` | `false` serves `app: null`; a field set to `false` is left out. `basePath` always stays.                                                            |
-| `packages`     | `boolean` or `"names"`                      | `"names"` lists the packages with `null` versions.                                                                                                  |
-| `mcp`          | `boolean` or `{ schemas, hide }`            | `schemas: false` drops tools' `inputSchema` and `outputSchema`. `hide` leaves out a server (`"store"`) or one of its tools (`"store/list_orders"`). |
-| `webmcp`       | `boolean` or `{ hide }`                     | `hide` leaves out browser tools by name.                                                                                                            |
-| `integrations` | `boolean`                                   | `false` serves `integrations: null`.                                                                                                                |
-| `agent`        | `boolean`                                   | `false` serves `agent: null`.                                                                                                                       |
-| `plugins`      | `boolean`                                   | `false` serves `plugins: null`.                                                                                                                     |
+| Option         | Values                                      | Effect                                                                                                                                                                          |
+| -------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`          | `boolean` or `{ version, renderer, build }` | `false` serves `app: null`; a field set to `false` is left out. `basePath` always stays.                                                                                        |
+| `packages`     | `boolean` or `"names"`                      | `"names"` lists the packages with `null` versions.                                                                                                                              |
+| `mcp`          | `boolean` or `{ schemas, hide }`            | `schemas: false` drops tools' `inputSchema` and `outputSchema`. `hide` leaves out a server (`"store"`) or one of its tools (`"store/list_orders"`).                             |
+| `webmcp`       | `boolean` or `{ hide }`                     | `hide` leaves out browser tools by name.                                                                                                                                        |
+| `integrations` | `boolean`                                   | `false` serves `integrations: null`.                                                                                                                                            |
+| `agent`        | `boolean`                                   | `false` serves `agent: null`.                                                                                                                                                   |
+| `plugins`      | `boolean`                                   | `false` serves `plugins: null`.                                                                                                                                                 |
+| `infra`        | `boolean`                                   | The Farm.js Infra project from `FARMJS_PROJECT_ID`, read per request (`project: null` when unset), so Infra can confirm a site is this project's. `false` serves `infra: null`. |
 
 A hidden section stays in the document as `null`, so readers can tell "hidden by the app" from an
 empty list, which means there is nothing to show:
@@ -772,7 +773,8 @@ export default defineConfig({
   "webmcp": { "enabled": true, "tools": [{ "name": "list_todos", "inputSchemaSource": "none" }] },
   "integrations": [{ "key": "billing", "category": "payment", "type": "stripe" }],
   "agent": { "apiCatalog": null, "llmsTxt": true, "openapi": null },
-  "plugins": null
+  "plugins": null,
+  "infra": { "project": "proj_0b8e2c7a-4c2e-4f7e-9a51-3d2f1c0b9e8d" }
 }
 ```
 

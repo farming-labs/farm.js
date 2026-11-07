@@ -52,12 +52,12 @@ Site analytics key instead.
 
 ## Environment variables
 
-| Variable             | Purpose                                                                                                           |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `FARMJS_API_KEY`     | A Farm Infra API key with the `analytics:write` permission (`farmjs_…`), or an older write-only key (`fti_…`).    |
-| `FARMJS_PROJECT_ID`  | The project to report to. Only for a key that reaches more than one project.                                      |
-| `FARMJS_ENVIRONMENT` | `production`, `staging` or `development`. Defaults to Vercel's environment (preview is staging), then `NODE_ENV`. |
-| `FARMJS_API_URL`     | Farm Infra's address, if it isn't `https://app.farmjs.dev`. Must be HTTPS, except for localhost.                  |
+| Variable             | Purpose                                                                                                                                                                                                  |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FARMJS_API_KEY`     | A Farm Infra API key with the `analytics:write` permission (`farmjs_…`), or an older write-only key (`fti_…`).                                                                                           |
+| `FARMJS_PROJECT_ID`  | The project to report to. Only for a key that reaches more than one project. The app's public `/.well-known/farmjs.json` names it too (`infra.project`), so Infra can confirm the site is the project's. |
+| `FARMJS_ENVIRONMENT` | `production`, `staging` or `development`. Defaults to Vercel's environment (preview is staging), then `NODE_ENV`.                                                                                        |
+| `FARMJS_API_URL`     | Farm Infra's address, if it isn't `https://app.farmjs.dev`. Must be HTTPS, except for localhost.                                                                                                         |
 
 A value Farm can't use, such as a malformed key or project ID, leaves analytics off and prints one
 warning when the server starts. It never stops the app. If Farm Infra refuses the key, Farm stops

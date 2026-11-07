@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig, type FarmConfig } from "../config";
 
@@ -155,12 +155,16 @@ describe("production default MCP server", () => {
       ]);
       const llms = await handler.fetch(new Request("https://acme.test/llms.txt"));
       expect(await llms.text()).toContain("(https://acme.test/mcp)");
-      const manifest = await handler.fetch(
-        new Request("https://acme.test/.well-known/farmjs.json"),
-      );
-      expect(((await manifest.json()) as any).mcp.servers).toEqual([
+      // The built server names the Infra project from its runtime environment.
+      vi.stubEnv("FARMJS_PROJECT_ID", "proj_0b8e2c7a-4c2e-4f7e-9a51-3d2f1c0b9e8d");
+      const manifest = await handler
+        .fetch(new Request("https://acme.test/.well-known/farmjs.json"))
+        .finally(() => vi.unstubAllEnvs());
+      const document = (await manifest.json()) as any;
+      expect(document.mcp.servers).toEqual([
         expect.objectContaining({ path: "/mcp", authorization: "none" }),
       ]);
+      expect(document.infra).toEqual({ project: "proj_0b8e2c7a-4c2e-4f7e-9a51-3d2f1c0b9e8d" });
     });
   }, 240_000);
 

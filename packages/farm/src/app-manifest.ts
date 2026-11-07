@@ -20,6 +20,7 @@ import {
 import type { FarmAppManifestWebMCPTool } from "./app-manifest-webmcp";
 import { _listFarmMCPCatalogs, type FarmMCPCatalogDetails } from "./mcp-catalog";
 import { createFarmWeakETag, matchesFarmIfNoneMatch } from "./server-http";
+import { readFarmEnvironmentValue } from "./utils/runtime-env";
 import { FARM_VERSION } from "./version";
 
 export const FARM_APP_MANIFEST_PATH = "/.well-known/farmjs.json";
@@ -90,6 +91,11 @@ export interface FarmAppManifest {
   integrations: { key: string; category: string; type: string }[] | null;
   agent: { apiCatalog: string | null; llmsTxt: boolean; openapi: string | null } | null;
   plugins: string[] | null;
+  /**
+   * The app's Farm.js Infra project, read from `FARMJS_PROJECT_ID` when the request is served;
+   * `project` is `null` when it isn't set. Infra matches a site to its project with it.
+   */
+  infra: { project: string | null } | null;
 }
 
 /** What the manifest reads from config; serializable, so a production build embeds it. */
@@ -207,7 +213,17 @@ export function createFarmAppManifest(input: FarmAppManifestInput): FarmAppManif
     integrations: sections.integrations ? input.integrations : null,
     agent: sections.agent ? input.agent : null,
     plugins: sections.plugins ? input.plugins : null,
+    infra: sections.infra ? { project: infraProject() } : null,
   };
+}
+
+/** The same `proj_…` shape the Infra analytics plugin accepts; anything else isn't named. */
+const INFRA_PROJECT = /^proj_[0-9a-f-]{36}$/;
+
+/** Read at request time: the project ID is runtime config, not part of the build. */
+function infraProject(): string | null {
+  const project = readFarmEnvironmentValue("FARMJS_PROJECT_ID")?.trim();
+  return project && INFRA_PROJECT.test(project) ? project : null;
 }
 
 type MCPSection = Exclude<ResolvedFarmAppManifestConfig["mcp"], false>;

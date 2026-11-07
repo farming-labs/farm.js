@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, createHmac } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveFarmAgentConfig } from "../agent-config";
 import {
   createFarmAppManifest,
@@ -122,6 +122,7 @@ describe("app manifest", () => {
         openapi: "/api/openapi.json",
       },
       plugins: ["farm:api-mcp", "farm:webmcp"],
+      infra: { project: null },
     });
   });
 
@@ -485,6 +486,22 @@ describe("agent.manifest sections", () => {
     expect(JSON.stringify(at({ mcp: { schemas: false } }))).not.toContain("inputSchema");
   });
 
+  it("names the app's Infra project from FARMJS_PROJECT_ID, read when it's served", () => {
+    const project = "proj_0b8e2c7a-4c2e-4f7e-9a51-3d2f1c0b9e8d";
+    try {
+      vi.stubEnv("FARMJS_PROJECT_ID", ` ${project} `);
+      expect(createFarmAppManifest(input).infra).toEqual({ project });
+      // Not a project ID: not named.
+      vi.stubEnv("FARMJS_PROJECT_ID", "acme-web");
+      expect(createFarmAppManifest(input).infra).toEqual({ project: null });
+      vi.stubEnv("FARMJS_PROJECT_ID", project);
+      expect(manifestFor({ infra: false }).infra).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(createFarmAppManifest(input).infra).toEqual({ project: null });
+  });
+
   it("hides WebMCP tools by name", () => {
     expect(manifestFor({ webmcp: { hide: ["delete_todo"] } }).webmcp).toEqual({
       enabled: true,
@@ -516,6 +533,7 @@ describe("agent.manifest sections", () => {
       integrations: true,
       agent: true,
       plugins: false,
+      infra: true,
     });
     // Resolved config passes through unchanged.
     expect(
