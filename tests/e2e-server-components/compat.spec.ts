@@ -2,17 +2,6 @@ import { expect, test, type Page } from "@playwright/test";
 
 const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" : "rsc";
 const dev = process.env.FARM_SERVER_COMPONENTS_SERVER === "dev";
-/**
- * Known RSC engine bug, not islands: on a cold `farm dev` with { mode: "rsc" }, Vite finds a
- * package client component only when the browser asks for it, optimizes it again, and the page
- * ends up with two copies of React ("Invalid hook call"). A warm optimizer cache passes. Skipped
- * there until that is fixed; every other engine and server runs these.
- */
-const rscDevPackageBug = () =>
-  test.skip(
-    mode === "rsc" && dev,
-    "rsc dev optimizes package client components late on a cold start and loads React twice",
-  );
 
 // Libraries written for React Server Components, used the way their docs show for RSC: package
 // client components (providers, Radix parts, a toaster) straight from server components,
@@ -50,7 +39,6 @@ test("server-only imports work in server components, and their code stays on the
 test("a package provider used in a server component gives context to client components below it", async ({
   page,
 }) => {
-  rscDevPackageBug();
   const errors = await open(page, "/compat/themes");
   const button = page.getByTestId("next-theme");
   await expect(button).toHaveText("next-theme: light");
@@ -61,7 +49,6 @@ test("a package provider used in a server component gives context to client comp
 });
 
 test("Radix parts composed in a server component open and close", async ({ page }) => {
-  rscDevPackageBug();
   const errors = await open(page, "/compat/dialog");
   await page.getByRole("button", { name: "Open radix" }).click();
   const dialog = page.getByRole("dialog");
@@ -74,7 +61,6 @@ test("Radix parts composed in a server component open and close", async ({ page 
 test("a package Toaster in a server component shows a toast a client component raises", async ({
   page,
 }) => {
-  rscDevPackageBug();
   const errors = await open(page, "/compat/toast");
   await page.getByRole("button", { name: "Show toast" }).click();
   await expect(page.getByText("Saved from a client component")).toBeVisible();
@@ -82,7 +68,6 @@ test("a package Toaster in a server component shows a toast a client component r
 });
 
 test("a query client provider reaches a query below a server component", async ({ page }) => {
-  rscDevPackageBug();
   const errors = await open(page, "/compat/query");
   await expect(page.getByTestId("query-count")).toHaveText("query: 42");
   expect(errors).toEqual([]);
@@ -91,7 +76,6 @@ test("a query client provider reaches a query below a server component", async (
 test("a store provider from a package shares one store between the client components in it", async ({
   page,
 }) => {
-  rscDevPackageBug();
   const errors = await open(page, "/compat/jotai");
   await page.getByTestId("atom-first").click();
   await expect(page.getByTestId("atom-first")).toHaveText("first atom: 1");
@@ -103,7 +87,10 @@ test("SWRConfig from a server component gives a client component its fallback da
   page,
   request,
 }) => {
-  rscDevPackageBug();
+  test.skip(
+    mode === "rsc" && dev,
+    "rsc dev loads swr's react-server config module raw while useSWR comes pre-bundled: two SWR contexts (production bundles one)",
+  );
   expect(await (await request.get("/compat/swr")).text()).toContain("swr: Ada from the server");
   const errors = await open(page, "/compat/swr");
   await expect(page.getByTestId("swr-user")).toHaveText("swr: Ada from the server");

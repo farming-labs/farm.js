@@ -2348,3 +2348,63 @@ export function isFarmPackageClientBoundary(
   if (imported.local || !imported.path) return false;
   return inspectPackageClientBoundary(imported.path, root, new Set()).shouldHydrate;
 }
+
+const CLIENT_PACKAGE_SCAN_EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
+const CLIENT_PACKAGE_SCAN_SKIP = new Set(["node_modules", ".farm", ".git", "dist", ".output"]);
+
+/** The package a bare specifier names: `@scope/name` or `name`, without a subpath. */
+function bareSpecifierPackage(specifier: string): string | null {
+  if (
+    specifier.startsWith(".") ||
+    specifier.startsWith("/") ||
+    specifier.startsWith("#") ||
+    specifier.startsWith("node:") ||
+    specifier.startsWith("virtual:") ||
+    specifier.includes("\0") ||
+    // A package's stylesheet or asset is not a module for the optimizer.
+    /\.(?:css|scss|sass|less|styl|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|json|wasm)$/.test(
+      specifier,
+    )
+  ) {
+    return null;
+  }
+  return specifier;
+}
+
+/**
+ * Packages the browser loads only once a page renders, so Vite's optimizer finds them late,
+ * optimizes again and can leave two copies of React on the page. Under `directory`: every bare
+ * import of a `"use client"` module, and every package a server module imports that is a client
+ * boundary (`"use client"`). Imports a server module makes of anything else stay out: they may
+ * not run in a browser.
+ */
+export function collectFarmClientPackageImports(directory: string, root: string): string[] {
+  const found = new Set<string>();
+  const walk = (current: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") && entry.isDirectory()) continue;
+      const file = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
+        continue;
+      }
+      if (!CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) || entry.name.endsWith(".d.ts")) continue;
+      const content = readIfExists(file);
+      if (!content) continue;
+      const client = hasUseClientDirective(content);
+      for (const specifier of new Set(getImportSpecifiers(content))) {
+        const name = bareSpecifierPackage(specifier);
+        if (!name || found.has(name)) continue;
+        if (client || isFarmPackageClientBoundary(file, name, root)) found.add(name);
+      }
+    }
+  };
+  walk(directory);
+  return [...found].sort();
+}

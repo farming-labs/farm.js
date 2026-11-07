@@ -542,6 +542,7 @@ function createRequestFromNodeRequest(
   });
 }
 
+export { collectFarmClientPackageImports } from "./utils/client-component";
 export { createFarmNodeRequestAbortSignal } from "./server-http";
 // The font call compiler and static image imports, for pipelines that build without farmPlugin
 // (React Server Components).
