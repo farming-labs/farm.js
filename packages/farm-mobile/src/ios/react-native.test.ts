@@ -283,7 +283,11 @@ end`;
       "FarmModules/FarmSwiftHeaders/RNFoo-Swift.h",
       "FarmModules/FarmSwiftHeaders/RNFoo/RNFoo-Swift.h",
     ]);
-    expect(String(headers[0]!.contents)).toMatch(/#import "App-Swift\.h"\n$/);
+    // The shell's declarations in App-Swift.h need WebKit, which Objective-C++ does not
+    // @import: the shim imports it before the app's header.
+    expect(String(headers[0]!.contents)).toMatch(
+      /#import <WebKit\/WebKit\.h>\n#import <React\/RCTBridgeModule\.h>\n#import "App-Swift\.h"\n$/,
+    );
   });
 
   it("compiles a package's Swift into the app and searches its -Swift.h shims", async () => {
