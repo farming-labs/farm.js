@@ -2219,8 +2219,8 @@ importers:
   packages/farm:
     dependencies:
       '@farm.js/islx':
-        specifier: 0.0.8
-        version: 0.0.8(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
+        specifier: 0.0.9
+        version: 0.0.9(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
       '@farming-labs/orm':
         specifier: 0.0.66
         version: 0.0.66
@@ -3818,7 +3818,7 @@ packages:
     resolution: {integrity: sha512-u1Hb6bHjWtkSpiprwVP6YaHC1DTN4RAU3zYkUDUe7WMnJwdyU1pwTL9dFKiSJB9IiLue/EQovmyx6xhU7FFtAQ==}
     hasBin: true
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.10
       astring: 1.9.0
       esquery: 1.7.0
       meriyah: 6.1.4
@@ -6589,8 +6589,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@farm.js/islx@0.0.8(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
-    resolution: {integrity: sha512-8TfwxqMRu5JP/cQkHuhBy6w54pmkPREy6ZR5UctfE3LqsOFyhdGDavh2BiPAG4tX3K17vlP71Nyd+1tLVWabcg==}
+  /@farm.js/islx@0.0.9(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
+    resolution: {integrity: sha512-/mBE6KOBpes3rA1oTnMh19r75R/HCDXSbfom54vtxt0/03Ls5zdyfxIiuRJdhUFrpP0o58pYIOdSSyRA71JFcw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@tanstack/react-router': '>=1.170'
@@ -21907,7 +21907,7 @@ packages:
   /periscopic@4.0.3:
     resolution: {integrity: sha512-iD/CnjEI6TJYwqLXmEVByEbT1RwUGSW3W51t/uWf+2Ag7FMHLqJ1XNhawGaXBf9/gZr+DhF3bTGLOw+03GJnzg==}
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.10
       is-reference: 3.0.3
       zimmerframe: 1.1.4
     dev: false

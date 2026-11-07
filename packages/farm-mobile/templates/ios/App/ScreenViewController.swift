@@ -21,6 +21,10 @@ final class ScreenViewController: UIViewController, PageHost {
     var onShown: ((String) -> Void)?
     /// Called once when a cold document load commits.
     var onPainted: (() -> Void)?
+    /// Releases a native screen's content (such as its React Native surface), once.
+    var onClose: (() -> Void)?
+    /// A native screen's link to the navigator, which its engine holds only weakly.
+    var nativeHost: AnyObject?
     private var awaitedToken = 0
 
     init(
@@ -107,7 +111,15 @@ final class ScreenViewController: UIViewController, PageHost {
         // Popped, or its modal closed: the WebView goes now instead of whenever ARC gets to it.
         if isMovingFromParent || isBeingDismissed || navigationController?.isBeingDismissed == true {
             page?.destroy()
+            closeNative()
         }
+    }
+
+    /// Stop the native content, when the screen goes or its web twin replaces it.
+    func closeNative() {
+        let close = onClose
+        onClose = nil
+        close?()
     }
 
     /// Warm path: render in the running page.

@@ -25,7 +25,8 @@ export interface FarmMobileModuleConfig {
    * Lets web screens (`page.tsx` in the shell's WebView) call the module's Promise methods as
    * `native.<name>.<method>()` from `@farm.js/core/native`, with arguments checked against its
    * Codegen spec. App modules in `src/native/` only: community modules need the React Native JS
-   * runtime. Android only for now. Defaults to `false`.
+   * runtime. On iOS, a method with an object-typed parameter is not reachable (Codegen passes it to
+   * Objective-C as a C++ struct). Defaults to `false`.
    */
   web?: boolean;
 }
@@ -56,7 +57,10 @@ export interface FarmMobileAppModules {
   specs: FarmMobileAppModuleSpec[];
   /** Absolute paths of the Kotlin files (`*.kt`), linked into the Android app. */
   android: string[];
-  /** Absolute paths of the Swift files (`*.swift`), copied but not built: iOS has no host yet. */
+  /**
+   * Absolute paths of the iOS files (`*.mm`, `*.m`, `*.h`, `*.swift`), built into the iOS app.
+   * A TurboModule is an Objective-C++ class that adopts its Codegen spec's `Native<Name>Spec`.
+   */
   ios: string[];
 }
 
@@ -115,7 +119,7 @@ export function scanFarmMobileAppModules(options: {
     .filter((entry) => entry.endsWith(".kt"))
     .map((entry) => path.join(dir, entry));
   const ios = entries
-    .filter((entry) => entry.endsWith(".swift"))
+    .filter((entry) => /\.(?:mm|m|h|swift)$/.test(entry))
     .map((entry) => path.join(dir, entry));
   if (specs.length === 0 && android.length === 0 && ios.length === 0) return undefined;
   return { dir, specs, android, ios };

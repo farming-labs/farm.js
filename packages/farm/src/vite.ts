@@ -193,6 +193,7 @@ import { farmFontImportsPlugin } from "./font-vite";
 import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
+import { rewriteFormStatusImports, type AstNode } from "@farm.js/islx/compiler";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { renderFarmLocaleAlternateLinks } from "./i18n/alternates";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
@@ -1044,6 +1045,21 @@ export function transformIsolatedClientBoundaryModule(options: {
    */
   inferredInteraction?: boolean;
 }): string | null {
+  // Islands mode: a server component's form around an island reports its submit to the island's
+  // useFormStatus, which then comes from islx instead of react-dom. Both builds rewrite it.
+  if (options.slots) {
+    try {
+      const rewritten = rewriteFormStatusImports({
+        code: options.code,
+        id: options.moduleReference,
+        parse: options.parse as (code: string) => AstNode,
+        from: "@farm.js/core/internal/islx-react",
+      });
+      if (rewritten) options = { ...options, code: rewritten.code };
+    } catch {
+      return null;
+    }
+  }
   let ast: FarmModuleAstNode;
   try {
     ast = options.parse(options.code);

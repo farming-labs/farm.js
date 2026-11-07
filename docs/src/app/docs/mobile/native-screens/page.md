@@ -35,7 +35,9 @@ shell ◀── { root: { type: "View", children: [...] } } ──────�
   browser gets them (in production, the client CSS the build embedded), and cascades their rules:
   type, class, id, and attribute selectors, compounds, descendant, child, and sibling combinators,
   `:first-child` and `:last-child`, specificity and source order, `:root` variables with `var()`,
-  and `@media (prefers-color-scheme: dark)`. Shorthands such as `margin: 8px 0 4px` and
+  and `@media (prefers-color-scheme: dark)`. Inline `style` attributes read the same variables,
+  then their fallback, so `@farm.js/ui` color tokens (`var(--farm-color-muted, #6b7280)`) draw
+  natively and follow a dark `:root` value. Shorthands such as `margin: 8px 0 4px` and
   `border: 1px solid var(--border)` expand, and `background: none` or its minified `0 0` clears the
   color; `:hover` and `:focus` rules never match a static
   screen; `body` passes its text styles down and gives the screen its background. Rules in
@@ -256,8 +258,8 @@ screen, and back returns to it.
   support the new architecture (a `codegenConfig` in its `package.json`): one without it, such as
   `react-native-device-info` 15.0.2, fails the command with an error that names the package
   instead of being skipped. The app's own modules in `src/native/` link the same way
-  ([App native modules](/docs/mobile/modules#app-native-modules)). iOS has no React Native host yet, so modules do
-  nothing there. A debug APK with netinfo and an app module, and one with an app module alone,
+  ([App native modules](/docs/mobile/modules#app-native-modules)). iOS links the same packages without CocoaPods
+  ([React Native screens on iOS](/docs/mobile#react-native-screens-on-ios)). A debug APK with netinfo and an app module, and one with an app module alone,
   build and run on an Android 15 emulator.
 - **Runtime.** React Native's new architecture only: Hermes, Fabric, bridgeless. One runtime is
   shared by every native screen, each its own surface. It starts after the first screen shows

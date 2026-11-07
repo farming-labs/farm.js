@@ -191,12 +191,14 @@ export default function Themed() {
     await expect(fs.stat(ports(root))).rejects.toThrow();
   });
 
-  it("ports only for Android, only when asked, and removes ports it no longer makes", async () => {
+  it("ports for both OSes, only when asked, and removes ports it no longer makes", async () => {
     const root = await createApp({ "src/app/page.tsx": PACKING });
+    // The iOS shell hosts React Native too, so a portable page ports there as on Android.
     expect((await generate(root, userConfig(), "ios")).screens["/"]).toMatchObject({
-      screen: "web",
-      requested: "native",
+      screen: "native",
+      source: "analyzer",
     });
+    await fs.stat(ports(root, "app.port.tsx"));
     await generate(root);
     await fs.stat(ports(root, "app.port.tsx"));
     // `auto: "report"` ports nothing, and the stale files go.

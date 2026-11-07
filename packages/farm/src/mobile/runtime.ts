@@ -307,9 +307,9 @@ export async function resolveFarmMobileApp(
       const decision = screens[route]!;
       return decision.source === "default" || decision.requested !== undefined;
     });
-    // Ports need every stylesheet the app bundles, so they read every route's graph.
+    // Ports need every stylesheet the app bundles, so they read every route's graph. Both shells
+    // host React Native screens, so a port runs on either OS.
     const portable =
-      context.os === "android" &&
       mobile.native.engine !== "platform" &&
       (mobile.native.auto === "on" ||
         candidates.some((route) => screens[route]!.requested === "native"));

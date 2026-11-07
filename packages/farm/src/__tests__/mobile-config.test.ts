@@ -400,12 +400,14 @@ describe("mobile modules", () => {
     });
   }
 
-  it("finds the app's specs, Kotlin, and Swift files in src/native", async () => {
+  it("finds the app's specs, Kotlin, and iOS files in src/native", async () => {
     const root = await createModuleApp({
       "src/native/NativeDevice.ts": SPEC("Device"),
       "src/native/NativeHaptics.ts": SPEC("Haptics"),
       "src/native/DeviceModule.kt": "package com.example.notes\n",
       "src/native/DeviceModule.swift": "import Foundation\n",
+      "src/native/DeviceModule.mm": "#import <Foundation/Foundation.h>\n",
+      "src/native/DeviceModule.h": "#import <Foundation/Foundation.h>\n",
       "src/native/helpers.ts": "export const x = 1;\n",
       "src/native/nested/NativeIgnored.ts": SPEC("Ignored"),
     });
@@ -417,7 +419,11 @@ describe("mobile modules", () => {
         { name: "Haptics", file: path.join(dir, "NativeHaptics.ts") },
       ],
       android: [path.join(dir, "DeviceModule.kt")],
-      ios: [path.join(dir, "DeviceModule.swift")],
+      ios: [
+        path.join(dir, "DeviceModule.h"),
+        path.join(dir, "DeviceModule.mm"),
+        path.join(dir, "DeviceModule.swift"),
+      ],
     });
     // An app without src/native, and an app whose srcDir is the root.
     expect(scanFarmMobileAppModules({ root: await createModuleApp() })).toBeUndefined();
