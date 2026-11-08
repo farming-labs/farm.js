@@ -14,10 +14,29 @@ const ADB = path.join(process.env.ANDROID_HOME ?? "", "platform-tools", "adb");
 const adb = (...args) => execFileSync(ADB, args, { encoding: "utf8" });
 const REPORT = "Muddy past the bridge";
 
+/**
+ * Dump the UI. `uiautomator dump` sometimes exits 137 (killed) after writing the file, or fails
+ * while the screen is changing: keep a dump that says it was written, and try again otherwise.
+ */
+function dump() {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      adb("shell", "uiautomator", "dump", "/sdcard/farm-ui.xml");
+    } catch (error) {
+      const written = String(error.stdout ?? "").includes("dumped to");
+      if (!written && attempt < 5) {
+        execFileSync("sleep", ["1"]);
+        continue;
+      }
+      if (!written) throw error;
+    }
+    return adb("shell", "cat", "/sdcard/farm-ui.xml");
+  }
+}
+
 /** The visible UI as uiautomator nodes: class, text, and the center of their bounds. */
 function nodes() {
-  adb("shell", "uiautomator", "dump", "/sdcard/farm-ui.xml");
-  const xml = adb("shell", "cat", "/sdcard/farm-ui.xml");
+  const xml = dump();
   return [...xml.matchAll(/<node\b([^>]*?)\/?>/g)].map(([, attributes]) => {
     const read = (name) => new RegExp(`\\b${name}="([^"]*)"`).exec(attributes)?.[1] ?? "";
     const [x1, y1, x2, y2] = read("bounds").match(/\d+/g)?.map(Number) ?? [0, 0, 0, 0];
