@@ -523,6 +523,38 @@ describe("native tier tree", () => {
     expect(fields).toContain('"label":"Tag"');
   });
 
+  it("resolves links and form actions against the public origin behind a proxy", async () => {
+    // A proxy terminated TLS: the server sees http://, but the shell can only post to https://.
+    const loaded: string[] = [];
+    const response = await createFarmNativeTreeResponse({
+      request: new Request("http://10.0.0.5:3000/notes?tab=all", {
+        headers: { accept: "application/vnd.farm.native+json" },
+      }),
+      origin: "https://notes.example.com",
+      renderPage: (request) => {
+        loaded.push(request.url);
+        if (request.url.endsWith(".css")) {
+          return new Response("p { color: red }", { headers: { "content-type": "text/css" } });
+        }
+        return new Response(
+          page(
+            '<a href="/notes/1">One</a><form method="post" action="/api/notes"><button>Add</button></form>',
+            '<title>Notes</title><link rel="stylesheet" href="/app.css">',
+          ),
+          { headers: { "content-type": "text/html" } },
+        );
+      },
+    });
+    const tree = await response.json();
+    expect(tree.unsupported).toEqual([]);
+    const json = JSON.stringify(tree);
+    expect(json).toContain('"href":"https://notes.example.com/notes/1"');
+    expect(json).toContain('"action":"https://notes.example.com/api/notes"');
+    expect(json).not.toContain("http://10.0.0.5");
+    // The page and its stylesheet still load from this server, as requested.
+    expect(loaded).toEqual(["http://10.0.0.5:3000/notes?tab=all", "http://10.0.0.5:3000/app.css"]);
+  });
+
   it("answers with the tree, and passes redirects and errors through", async () => {
     const response = await createFarmNativeTreeResponse({
       request: new Request(url, { headers: { accept: "application/vnd.farm.native+json" } }),

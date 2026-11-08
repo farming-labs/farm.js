@@ -9999,6 +9999,10 @@ ${
       renderPage: (targetRequest) => fetchFarmInnerRequest(targetRequest, adapterContext),
       // The client CSS this build emitted, embedded once it settled (FARM_NATIVE_STYLESHEETS).
       loadStylesheet: (href) => farmNativeStylesheets[href],
+      // Behind a TLS-terminating proxy, links and form actions use the forwarded origin.
+      origin: resolveFarmWebRequestOrigin(request, {
+        trustProxy: farmServerConfig.trustProxy === true,
+      }),
     });
     return applyProductionMiddlewareHeaders(treeResponse, middlewareHeaders);
   }
