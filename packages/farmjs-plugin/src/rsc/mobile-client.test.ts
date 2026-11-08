@@ -46,6 +46,40 @@ describe("the RSC mobile client", () => {
     expect(source).not.toContain("@farm.js/core/internal/client-runtime");
   });
 
+  it("tells the shell a page is ready once it has loaded, since RSC installs no SPA router", async () => {
+    const [, ...body] = generateMobileShellNavigation().split("\n");
+    const run = (readyState: string) => {
+      const calls: unknown[] = [];
+      const listeners: Record<string, () => void> = {};
+      const bridge = {
+        ready(this: unknown) {
+          calls.push(this);
+        },
+      };
+      new Function(
+        "globalThis",
+        "farmDelegateNavigation",
+        "document",
+        "addEventListener",
+        body.join("\n"),
+      )(
+        { __farmBridge: bridge },
+        () => {},
+        { readyState },
+        (type: string, listener: () => void) => (listeners[type] = listener),
+      );
+      return { bridge, calls, listeners };
+    };
+    const loaded = run("complete");
+    await Promise.resolve();
+    expect(loaded.calls).toEqual([loaded.bridge]);
+    const loading = run("loading");
+    await Promise.resolve();
+    expect(loading.calls).toEqual([]);
+    loading.listeners.load!();
+    expect(loading.calls).toEqual([loading.bridge]);
+  });
+
   it("hands navigations to the shell's bridge, and does nothing in a browser", () => {
     const [imports, ...body] = generateMobileShellNavigation().split("\n");
     expect(imports).toBe(
