@@ -626,6 +626,11 @@ describe("@farm.js/mobile/ios", () => {
     expect(server).toContain("scroll.refreshControl = refresher");
     expect(server).not.toContain("scroll.subviews");
     expect(server).toContain("drawn?.removeFromSuperview()");
+    // Table cells (`flex: <colspan> 1 0`) split a row's width by their grow, so columns line up:
+    // a stack's hugging priority alone gives the free width to one of them.
+    expect(server).toContain(
+      "other.widthAnchor.constraint(equalTo: first.widthAnchor, multiplier: grow / firstGrow)",
+    );
     expect(files["App/Navigator.swift"]).toContain('screen.navigationItem.title = ""');
     expect(routes).toContain(
       'let screen = (json["screen"] as? String).flatMap { screens.contains($0) ? $0 : nil } ?? web',

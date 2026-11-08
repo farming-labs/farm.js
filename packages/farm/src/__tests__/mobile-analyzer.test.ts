@@ -218,10 +218,10 @@ export default function Effect({ icon: Icon }) {
     const result = await report(root);
     expect(rules(routeOf(result, "/chart"))).toEqual([
       "src/app/chart/page.tsx:4:7 unmapped-element <canvas> has no native mapping",
-      "src/app/chart/page.tsx:5:7 unmapped-element <table> has no native mapping",
-      "src/app/chart/page.tsx:5:14 unmapped-element <tbody> has no native mapping",
-      "src/app/chart/page.tsx:5:21 unmapped-element <tr> has no native mapping",
-      "src/app/chart/page.tsx:5:25 unmapped-element <td> has no native mapping",
+      "src/app/chart/page.tsx:5:7 unmapped-element <table> has no React Native port",
+      "src/app/chart/page.tsx:5:14 unmapped-element <tbody> has no React Native port",
+      "src/app/chart/page.tsx:5:21 unmapped-element <tr> has no React Native port",
+      "src/app/chart/page.tsx:5:25 unmapped-element <td> has no React Native port",
       "src/app/chart/page.tsx:6:12 dangerously-set-inner-html dangerouslySetInnerHTML",
       'src/app/chart/page.tsx:7:12 class-name "grid" uses grid layout',
       'src/app/chart/page.tsx:7:12 class-name "grid-cols-2" uses grid layout',
@@ -258,7 +258,7 @@ export default function Effect({ icon: Icon }) {
       "src/app/effect/page.tsx:10:25 dynamic-component <Icon> is a value the analyzer cannot resolve to a component",
     ]);
     expect(result.table).toMatch(
-      /\/chart\s+web\s+web\s+web\s+5\/10\s+50%\s+src\/app\/chart\/page\.tsx:4:7 <canvas> has no native mapping \(\+18 more\)/,
+      /\/chart\s+web\s+web\s+web\s+5\/10\s+50%\s+src\/app\/chart\/page\.tsx:4:7 <canvas> has no native mapping \(\+14 more\)/,
     );
   });
 
@@ -501,6 +501,40 @@ export default function Home() {
       ["<span> with a background, border, padding, or size inside text has no native-tier layout"],
     );
     expect(routeOf(result, "/pill").analysis!.tier).toBe("native");
+  });
+
+  it("draws a table on the native tier, but not in a React Native port", async () => {
+    const root = await createApp({
+      "src/app/page.tsx": `export default function Plans() {
+  return (
+    <table className="w-full table-fixed">
+      <thead><tr><th>Plan</th><th colSpan={2}>Price</th></tr></thead>
+      <tbody style={{ borderCollapse: "collapse" }}><tr><td>Free</td></tr></tbody>
+    </table>
+  );
+}
+`,
+      "src/app/grid/page.tsx": `export default function Grid() {
+  return <div className="table">cells</div>;
+}
+`,
+    });
+    const result = await report(root);
+    const home = routeOf(result, "/").analysis!;
+    expect(home).toMatchObject({ tier: "native", nativeBlockers: [], portable: false });
+    expect(home.blockers.map((blocker) => blocker.message)).toEqual([
+      "<table> has no React Native port",
+      "<thead> has no React Native port",
+      "<tr> has no React Native port",
+      "<th> has no React Native port",
+      "<th> has no React Native port",
+      "<tbody> has no React Native port",
+      "style.borderCollapse has no React Native port",
+      "<tr> has no React Native port",
+      "<td> has no React Native port",
+    ]);
+    // `display: table` on another element is still a layout the native tier does not have.
+    expect(routeOf(result, "/grid").analysis!.tier).toBe("web");
   });
 
   it("keeps a button or field nothing submits off the native tier, as the tree draws it", async () => {
