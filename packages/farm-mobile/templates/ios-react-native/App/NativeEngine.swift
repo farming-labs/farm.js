@@ -8,6 +8,10 @@ private let webModuleLog = Logger(subsystem: "dev.farmjs.mobile.shell", category
 /// only for apps with React Native screens; it replaces the stub an app without them gets. New
 /// architecture only (Hermes, Fabric, bridgeless). One runtime is shared by every native screen,
 /// each its own surface in the navigator's screen, the same container a web screen's WebView uses.
+///
+/// React Native and its host are in FarmReactNativeHost.framework, which the app embeds but does
+/// not link, so launching the app loads none of it. The engine loads the framework when it warms,
+/// off the main thread, or at once when a native screen or a web screen's module call comes first.
 @MainActor
 func createFarmNativeEngine(config: RouteConfig) -> FarmNativeEngine? {
     guard let bundle = FarmReactNativeBuild.bundleURL else {
@@ -20,30 +24,31 @@ func createFarmNativeEngine(config: RouteConfig) -> FarmNativeEngine? {
 @MainActor
 final class ReactNativeEngine: FarmNativeEngine {
     private let config: RouteConfig
-    private let runtime: FarmReactNative
+    private let bundleURL: URL
     private let session = FarmReactNativeSessionAdapter()
     private var nextScreen = 1
     private var warmStarted: CFTimeInterval?
+    /// Nil until FarmReactNativeHost.framework has loaded, and for good if it could not.
+    private var runtime: FarmReactNativeRuntime?
+    private var loadFailure: String?
+    private var loading = false
+    private var waiting: [(FarmReactNativeRuntime?) -> Void] = []
 
     init(config: RouteConfig, bundleURL: URL) {
         self.config = config
-        runtime = FarmReactNative(bundleURL: bundleURL, dev: FarmBuild.dev)
-        FarmReactNative.session = session
-        runtime.onStarted = { [weak self] in
-            guard let self, let started = self.warmStarted else { return }
-            let ms = Int((CACurrentMediaTime() - started) * 1000)
-            Navigator.log.notice("react-native warm in \(ms)ms dev=\(FarmBuild.dev)")
-        }
+        self.bundleURL = bundleURL
     }
 
     func warm() {
         if warmStarted == nil { warmStarted = CACurrentMediaTime() }
-        runtime.warm()
+        load { $0?.warm() }
     }
 
     func open(host: FarmNativeHost, rule: RouteConfig.Rule, url: URL) -> FarmNativeContent? {
         guard let module = rule.module else { return nil }
         if warmStarted == nil { warmStarted = CACurrentMediaTime() }
+        // A screen opens now: wait for the framework if it is still loading.
+        guard let runtime = loadNow() else { return nil }
         let screen = nextScreen
         nextScreen += 1
         let bridge = ScreenBridge(host: host)
@@ -74,17 +79,94 @@ final class ReactNativeEngine: FarmNativeEngine {
         let started = CACurrentMediaTime()
         // Selector names are Codegen's, so the method is the part before the first colon.
         let call = "\(name).\(selector.prefix { $0 != ":" })"
-        runtime.callModule(name, selector: selector, arguments: arguments) { json, code, message in
-            let ms = Int((CACurrentMediaTime() - started) * 1000)
-            if let json {
-                webModuleLog.notice("web module \(call, privacy: .public) ok in \(ms)ms")
-                reply(.json(json))
-            } else {
-                let code = code ?? "native_error"
-                webModuleLog.notice("web module \(call, privacy: .public) failed (\(code, privacy: .public)) in \(ms)ms")
-                reply(.failure(FarmCallError(code: code, message: message ?? "Native call failed.")))
+        load { [weak self] runtime in
+            guard let runtime else {
+                let failure = self?.loadFailure ?? "unknown error"
+                reply(.failure(FarmCallError(
+                    code: "native_unavailable",
+                    message: "React Native did not load, so \(name) is unavailable: \(failure)"
+                )))
+                return
+            }
+            runtime.callModule(name, selector: selector, arguments: arguments) { json, code, message in
+                let ms = Int((CACurrentMediaTime() - started) * 1000)
+                if let json {
+                    webModuleLog.notice("web module \(call, privacy: .public) ok in \(ms)ms")
+                    reply(.json(json))
+                } else {
+                    let code = code ?? "native_error"
+                    webModuleLog.notice("web module \(call, privacy: .public) failed (\(code, privacy: .public)) in \(ms)ms")
+                    reply(.failure(FarmCallError(code: code, message: message ?? "Native call failed.")))
+                }
             }
         }
+    }
+
+    // MARK: Loading FarmReactNativeHost.framework
+
+    /// Runs `then` with the runtime once the framework has loaded (nil if it cannot), loading it
+    /// off the main thread the first time.
+    private func load(_ then: @escaping (FarmReactNativeRuntime?) -> Void) {
+        if runtime != nil || loadFailure != nil { return then(runtime) }
+        waiting.append(then)
+        guard !loading else { return }
+        loading = true
+        let started = CACurrentMediaTime()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let failure = ReactNativeEngine.loadFramework()
+            Task { @MainActor in self.finishLoading(failure: failure, started: started) }
+        }
+    }
+
+    /// The runtime now, loading the framework on this thread if it has not loaded yet; dyld makes
+    /// a load already running on another thread finish first.
+    private func loadNow() -> FarmReactNativeRuntime? {
+        if runtime == nil && loadFailure == nil {
+            let started = CACurrentMediaTime()
+            finishLoading(failure: ReactNativeEngine.loadFramework(), started: started)
+        }
+        return runtime
+    }
+
+    /// Loads FarmReactNativeHost.framework, and with it React Native's frameworks. Nil on success.
+    nonisolated private static func loadFramework() -> String? {
+        guard let url = Bundle.main.privateFrameworksURL?.appendingPathComponent(FarmReactNativeHostFramework),
+              let framework = Bundle(url: url)
+        else { return "\(FarmReactNativeHostFramework) is missing from the app" }
+        do {
+            try framework.loadAndReturnError()
+            return nil
+        } catch {
+            return String(describing: error)
+        }
+    }
+
+    private func finishLoading(failure: String?, started: CFTimeInterval) {
+        if runtime == nil && loadFailure == nil {
+            if let failure {
+                loadFailure = failure
+                Navigator.log.error("react-native failed to load, native screens show their web twin: \(failure, privacy: .public)")
+            } else if let type = NSClassFromString(FarmReactNativeRuntimeClass) as? NSObject.Type,
+                      let made = type.init() as? FarmReactNativeRuntime {
+                made.setUp(bundleURL: bundleURL, dev: FarmBuild.dev)
+                made.setSession(session)
+                made.onStarted = { [weak self] in
+                    guard let self, let started = self.warmStarted else { return }
+                    let ms = Int((CACurrentMediaTime() - started) * 1000)
+                    Navigator.log.notice("react-native warm in \(ms)ms dev=\(FarmBuild.dev)")
+                }
+                runtime = made
+                let ms = Int((CACurrentMediaTime() - started) * 1000)
+                Navigator.log.notice("react-native loaded in \(ms)ms")
+            } else {
+                loadFailure = "\(FarmReactNativeHostFramework) has no \(FarmReactNativeRuntimeClass)"
+                Navigator.log.error("react-native failed to load: \(self.loadFailure ?? "", privacy: .public)")
+            }
+        }
+        loading = false
+        let callbacks = waiting
+        waiting.removeAll()
+        for callback in callbacks { callback(runtime) }
     }
 }
 

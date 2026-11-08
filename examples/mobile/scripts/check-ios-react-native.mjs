@@ -46,6 +46,8 @@ const launches = [...log.matchAll(/process->didFinishLaunching=(\d+)ms process->
 const preMain = launches.map((match) => Number(match[1]));
 const firstContent = launches.map((match) => Number(match[2]));
 const warmUps = [...log.matchAll(/react-native warm in (\d+)ms/g)].map((match) => Number(match[1]));
+// FarmReactNativeHost.framework, and React Native with it, loading when the engine warms.
+const loads = [...log.matchAll(/react-native loaded in (\d+)ms/g)].map((match) => Number(match[1]));
 const cold = opens.filter((open) => open.mode === "cold").map((open) => open.ms);
 const warm = opens.filter((open) => open.mode === "warm").map((open) => open.ms);
 assert(cold.length > 0, "No cold open of /kit reached first content. Inspect kit-log.txt and kit-cold-*.png.");
@@ -68,7 +70,8 @@ console.log(`### iOS React Native host: /kit on the simulator
 | cold open (visit to first content, runtime starting) | ${median(cold)} ms | ${cold.join(", ")} |
 | warm open (runtime already started) | ${median(warm)} ms | ${warm.join(", ")} |
 | host start (warm() to hostDidStart; the bundle runs after) | ${median(warmUps) ?? "n/a"} ms | ${warmUps.join(", ")} |
-| app launch: process start to didFinishLaunching (dyld loads React Native) | ${median(preMain) ?? "n/a"} ms | ${preMain.join(", ")} |
+| React Native's frameworks loading, after the first tab shows content or at a native screen | ${median(loads) ?? "n/a"} ms | ${loads.join(", ")} |
+| app launch: process start to didFinishLaunching | ${median(preMain) ?? "n/a"} ms | ${preMain.join(", ")} |
 | app launch: process start to the first tab's content | ${median(firstContent) ?? "n/a"} ms | ${firstContent.join(", ")} |
 
 | size | |

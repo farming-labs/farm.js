@@ -152,6 +152,17 @@ jobs:
           APP=.farm/output/mobile/dist/dev.farmjs.examples.fieldnotes-simulator.app
           ID=dev.farmjs.examples.fieldnotes
           xcrun simctl install "$SIMULATOR_UDID" "$APP"
+          # React Native loads lazily: the app's executable (and Xcode's debug dylib) links none of
+          # it; only the FarmReactNativeHost framework the engine loads when it warms does.
+          for binary in "$APP/App" "$APP/App.debug.dylib"; do
+            [ -f "$binary" ] && otool -L "$binary"
+          done | tee "$EVIDENCE/app-links.txt"
+          if grep -E "React|hermesvm|FarmReactNativeHost" "$EVIDENCE/app-links.txt"; then
+            echo "::error::The app links React Native at launch."
+            exit 1
+          fi
+          otool -L "$APP/Frameworks/FarmReactNativeHost.framework/FarmReactNativeHost" \
+            | tee "$EVIDENCE/host-links.txt" | grep -q "React.framework/React"
           # The first launch after an install verifies the app and warms dyld's caches; keep it out
           # of the numbers.
           xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" "$ID"

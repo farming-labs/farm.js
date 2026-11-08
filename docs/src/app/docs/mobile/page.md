@@ -607,26 +607,34 @@ third-party dependencies, and Hermes; release artifacts for `farm build`, debug 
 checks them against the published SHA-256, and caches them in `~/Library/Caches/farm.js/react-native`
 (`FARM_REACT_NATIVE_CACHE` overrides it). `ReactNative/` in the project links to that cache.
 
-| Path                     | Contents                                                                  |
-| ------------------------ | ------------------------------------------------------------------------- |
-| `App/FarmReactNative.mm` | The host: the factory, surfaces, the `FarmShell` module, fatal handlers   |
-| `App/FarmReactNative.h`  | Its plain Objective-C API, the only part Swift sees                       |
-| `App/NativeEngine.swift` | The engine the navigator opens native screens with                        |
-| `App/farm-native.hbc`    | The screens as Hermes bytecode (`farm build` only; `farm dev` uses Metro) |
-| `FarmModules/`           | Linked native modules and their Codegen output, when the app has any      |
-| `ReactNative/`           | A link to the cached XCFrameworks                                         |
+| Path                                     | Contents                                                                  |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| `FarmReactNativeHost/FarmReactNative.mm` | The host: the factory, surfaces, the `FarmShell` module, fatal handlers   |
+| `App/FarmReactNative.h`                  | Its plain Objective-C protocols, the only part Swift sees                 |
+| `App/NativeEngine.swift`                 | The engine the navigator opens native screens with                        |
+| `App/farm-native.hbc`                    | The screens as Hermes bytecode (`farm build` only; `farm dev` uses Metro) |
+| `FarmModules/`                           | Linked native modules and their Codegen output, when the app has any      |
+| `ReactNative/`                           | A link to the cached XCFrameworks                                         |
+
+React Native loads lazily. The host and the linked modules build into a `FarmReactNativeHost`
+framework that links React Native; the app embeds it and React Native's frameworks without
+linking any of them, so launching the app loads none of React Native. The engine loads the
+framework in the background once the first tab shows content, or at once when a native screen or
+a web screen's module call comes first, which then waits for it (65 to 90 ms on the simulator).
+If it cannot load, native screens show their web twin.
 
 Installed React Native modules are linked from the app's `dependencies`: each package's podspec
 `source_files` are compiled into the app and React Native's Codegen writes their glue. The app's
 own TurboModules on iOS are Objective-C++ classes in `src/native/` that adopt their spec's
 `Native<Name>Spec` protocol, such as `DeviceModule.mm` in `examples/mobile`.
 
-Swift sources compile into the app too, as one module with it, so a package's Swift can
+Swift sources compile into the host framework too, as one module, so a package's Swift can
 `import React` and its Objective-C reaches the Swift through `<Module>-Swift.h`, the header
-CocoaPods would generate, which Farm forwards to the app's own `App-Swift.h`. The app's own
-Objective-C++ in `src/native/` imports `App-Swift.h` directly. Because every package's Swift
-shares the app's module, two packages that declare the same Swift type name do not build
-together, and a package's Swift sees its own Objective-C only through what React exports.
+CocoaPods would generate, which Farm forwards to the framework's
+`<FarmReactNativeHost/FarmReactNativeHost-Swift.h>`; the app's own Objective-C++ in `src/native/`
+imports that directly. Because every package's Swift shares the module, two packages that declare
+the same Swift type name do not build together, and a package's Swift sees its own Objective-C
+only through what React exports.
 `examples/mobile/modules/farm-swift-sample` is a module laid out as community Swift modules are,
 and `/map` calls it on the simulator in CI.
 
