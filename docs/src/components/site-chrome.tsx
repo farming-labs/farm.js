@@ -26,7 +26,7 @@ const statLinkClass =
 
 const githubUrl = "https://github.com/farming-labs/farm.js";
 // The Farming Labs X account, as listed in the site's Organization `sameAs` (farm.config.ts).
-const xUrl = "https://x.com/KinfishT";
+const xUrl = "https://x.com/farming_labs";
 
 // A square, icon-only cell with the same border and hover as the other header cells.
 const iconLinkClass =
