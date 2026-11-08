@@ -1279,7 +1279,7 @@ function analyzeComponentSource(file: string, source: string, parseSync: ParseSy
       block(
         script.start + hydrate.index,
         "client-logic",
-        "export const hydrate = true hydrates the page in the browser",
+        "it exports hydrate = true, which hydrates the page in the browser",
         "native",
       );
     }

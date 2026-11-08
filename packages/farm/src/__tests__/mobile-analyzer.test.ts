@@ -642,7 +642,7 @@ export const hydrate = true;
       "renderer-component",
     );
     expect(vueBlockers("/counter")).toEqual([
-      "src/app/counter/page.vue:2 client-logic export const hydrate = true hydrates the page in the browser",
+      "src/app/counter/page.vue:2 client-logic it exports hydrate = true, which hydrates the page in the browser",
       "src/app/counter/page.vue:5 inert-control <button> has no link or form to submit on a native-tier screen",
     ]);
     expect(routeOf(vueResult, "/counter").analysis!.tier).toBe("web");
@@ -697,7 +697,7 @@ export const hydrate = true;
     expect(svelteBlockers("/")).toEqual([]);
     expect(svelteResult.screens["/"]).toMatchObject({ screen: "server", source: "page" });
     expect(svelteBlockers("/counter")).toEqual([
-      "client-logic export const hydrate = true hydrates the page in the browser",
+      "client-logic it exports hydrate = true, which hydrates the page in the browser",
       "inert-control <button> has no link or form to submit on a native-tier screen",
     ]);
     expect(svelteBlockers("/raw")).toEqual([
@@ -705,6 +705,17 @@ export const hydrate = true;
       "dangerously-set-inner-html {@html} renders raw HTML",
       "dynamic-component <svelte:element> picks what it renders at runtime",
     ]);
+  });
+
+  it("never reads as a page that opts into hydration when core's bundle includes it", async () => {
+    // Core's main entry loads the analyzer's chunk, and the hydration planner reads the modules a
+    // page imports for an `export const hydrate` opt-in as text: a message spelling it would make
+    // every page that imports @farm.js/core hydrate.
+    const { hasHydrateExport } = await import("../utils/client-component");
+    for (const file of ["analyzer.ts", "component-blocks.ts", "runtime.ts", "screens.ts"]) {
+      const source = await fs.readFile(new URL(`../mobile/${file}`, import.meta.url), "utf8");
+      expect(hasHydrateExport(source), file).toBe(false);
+    }
   });
 
   it("parses each module once per run and reuses facts by content hash", async () => {
