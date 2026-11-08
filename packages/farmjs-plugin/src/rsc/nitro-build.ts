@@ -24,7 +24,11 @@ import {
   FARM_NODE_ENV_MODULE_SOURCE,
 } from "@farm.js/core/internal/production-node-env";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
-import { finalizeFarmRscMobileClient, patchFarmRscMobileShellClient } from "./mobile-client.js";
+import {
+  finalizeFarmRscMobileClient,
+  patchFarmRscMobileShellClient,
+  patchFarmRscNativeStylesheets,
+} from "./mobile-client.js";
 
 const MANIFEST_FILENAME = "__vite_rsc_assets_manifest.js";
 const MIN_MANIFEST_BYTES = 100; // real manifest is ~500+, stub is 64
@@ -488,6 +492,7 @@ function patchRscServerBundles(
       stylesheet: clientCssHref,
     }),
   );
+  patchFarmRscNativeStylesheets(rscDir, publicDir);
   if (existsSync(ssrIndexPath)) {
     try {
       let ssrCode = readFileSync(ssrIndexPath, "utf-8");

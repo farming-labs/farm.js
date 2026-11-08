@@ -530,6 +530,11 @@ interface ModuleFacts {
   tags: string[];
   /** A `.vue` or `.svelte` component's own `<style>` blocks: CSS that styles its classes. */
   styles?: string[];
+  /**
+   * Function `action`/`formAction` values that may be server actions: from `source` (an import),
+   * or a function with its own "use server" when `source` is absent. The route pass decides.
+   */
+  formActions?: Array<{ source?: string; line: number; column: number; message: string }>;
 }
 
 type Node = { type: string; start: number; end: number; [key: string]: any };
@@ -658,6 +663,21 @@ function analyzeSource(
     block(node, "client-logic", message, "native");
   // Inside a `<form>` of this module's JSX: its controls submit it.
   let formDepth = 0;
+  // Functions declared with their own "use server" (inline server actions).
+  const serverFunctions = new Set<string>();
+  // A form action that may be a server action: an imported binding, or a "use server" function.
+  const serverActionReference = (expression: Node | undefined): { source?: string } | undefined => {
+    if (expression?.type === "Identifier") {
+      if (serverFunctions.has(expression.name)) return {};
+      const binding = imported.get(expression.name);
+      return binding ? { source: binding.source } : undefined;
+    }
+    if (expression?.type === "MemberExpression" && expression.object.type === "Identifier") {
+      const binding = imported.get(expression.object.name);
+      return binding?.name === "*" ? { source: binding.source } : undefined;
+    }
+    return undefined;
+  };
   const result = parseSync(file, source, { lang });
   if (result.errors.length > 0) {
     const error = result.errors[0]!;
@@ -667,6 +687,43 @@ function analyzeSource(
   }
   const program = result.program as unknown as Node;
   const wins = new Set<FarmMobileWin>();
+  const usesServer = (body: Node | null | undefined) =>
+    body?.type === "BlockStatement" &&
+    (body.body as Node[]).some(
+      (statement) =>
+        statement.type === "ExpressionStatement" && statement.directive === "use server",
+    );
+  const findServerFunctions = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const child of node) findServerFunctions(child);
+      return;
+    }
+    const current = node as Node;
+    if (current.type === "FunctionDeclaration" && current.id && usesServer(current.body)) {
+      serverFunctions.add(current.id.name);
+    } else if (
+      current.type === "VariableDeclarator" &&
+      current.id?.type === "Identifier" &&
+      (current.init?.type === "ArrowFunctionExpression" ||
+        current.init?.type === "FunctionExpression") &&
+      usesServer(current.init.body)
+    ) {
+      serverFunctions.add(current.id.name);
+    }
+    for (const [key, value] of Object.entries(current)) {
+      if (
+        key !== "type" &&
+        key !== "start" &&
+        key !== "end" &&
+        value &&
+        typeof value === "object"
+      ) {
+        findServerFunctions(value);
+      }
+    }
+  };
+  findServerFunctions(program);
 
   // Top-level bindings: imports and declarations, to resolve JSX component names.
   const imported = new Map<string, { source: string; name: string }>();
@@ -851,9 +908,19 @@ function analyzeSource(
         continue;
       }
       if ((name === "action" || name === "formAction") && isIntrinsic) {
-        // A URL submits as a browser form does; a function needs React on the page.
+        // A URL submits as a browser form does. A server action does too: React renders it as a
+        // form posting its id, which the server runs; any other function needs React on the page.
         if (staticString(value) === undefined) {
-          block(attribute, "form-action", `${name} on <${tag}>`);
+          const reference = serverActionReference(
+            value?.type === "JSXExpressionContainer" ? value.expression : undefined,
+          );
+          if (reference) {
+            (facts.formActions ??= []).push({
+              ...(reference.source !== undefined ? { source: reference.source } : {}),
+              ...locate(starts, attribute.start),
+              message: `${name} on <${tag}>`,
+            });
+          } else block(attribute, "form-action", `${name} on <${tag}>`);
         }
         submits = true;
         continue;
@@ -1994,6 +2061,27 @@ export async function analyzeFarmMobileRoutes(
       }
       if (moduleFacts.serverBoundary && !entry) return;
       for (const blocker of moduleFacts.blockers) add({ file: label, ...blocker });
+      // A server action needs server components (RSC or islands) to render as a submittable
+      // form: one imported from a "use server" or server function module, or declared inline.
+      for (const action of moduleFacts.formActions ?? []) {
+        const target =
+          action.source === undefined
+            ? undefined
+            : (resolved.get(file) ?? []).find((entry) => entry.fact.source === action.source)?.file;
+        const server =
+          options.serverComponents === true &&
+          (action.source === undefined ||
+            (target !== undefined && settled.get(target)?.serverBoundary === true));
+        if (!server) {
+          add({
+            file: label,
+            line: action.line,
+            column: action.column,
+            rule: "form-action",
+            message: action.message,
+          });
+        }
+      }
       if (!layout) {
         for (const appClass of moduleFacts.appClasses)
           appClasses.push({ file: label, ...appClass });
