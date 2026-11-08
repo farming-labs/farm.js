@@ -127,8 +127,20 @@ describe("the RSC mobile client", () => {
     expect(dev).toContain("url.hostname = '127.0.0.1'");
     const entry = generateRscEntry({ ...entryContext, mobileClient: "entry" });
     expect(entry).toContain(
-      "import { _applyFarmMobileShellClient, createFarmNativeTreeResponse } from '@farm.js/core/internal/production-runtime';",
+      "import { _applyFarmMobileShellClient, createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';",
     );
+    // Links and server-action forms use the public origin only under server.trustProxy.
+    expect(entry).toContain(
+      "origin: resolveFarmWebRequestOrigin(request, {\n        trustProxy: false,",
+    );
+    expect(dev).toContain(
+      "origin: resolveFarmWebRequestOrigin(request, {\n        trustProxy: false,",
+    );
+    for (const mobileClient of ["entry", "inline"] as const) {
+      expect(
+        generateRscEntry({ ...entryContext, mobileClient, server: { trustProxy: true } }),
+      ).toContain("origin: resolveFarmWebRequestOrigin(request, {\n        trustProxy: true,");
+    }
     // Native-tier screens: the tree, with the embedded CSS and the page marked for its render only.
     expect(entry).toContain("application/vnd.farm.native+json");
     expect(entry).toContain("farmNativeTreeRenders.add(target)");
