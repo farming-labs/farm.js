@@ -11,7 +11,14 @@ export default defineConfig({
   // /native, which posts its server actions from native views. A web build strips this block.
   mobile: {
     id: "dev.farmjs.examples.servercomponents",
-    server: "https://server-components.farmjs.dev",
+    // CI points the APK at this app's own production server (the Mobile Android workflow).
+    server: process.env.FARM_SERVER_COMPONENTS_MOBILE_SERVER ?? "https://server-components.farmjs.dev",
+    // The app opens on /native. An RSC page never installs the client router, so a web screen
+    // never reports itself ready to the shell; a native first tab does.
+    tabs: [
+      { path: "/native", title: "Notes", icon: "note.text" },
+      { path: "/", title: "Contract", icon: "house" },
+    ],
   },
   experimental: {
     serverComponents: { mode },
