@@ -223,6 +223,8 @@ Object.assign(INTRINSIC_KINDS, {
   a: "Pressable",
   input: "TextInput",
   textarea: "TextInput",
+  // Native-tier screens submit forms as a browser would (native-tree.ts).
+  form: "View",
   ul: "List",
   ol: "List",
 });
@@ -635,6 +637,8 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
   // cannot.
   const needsDevice = (node: { start: number }, message: string) =>
     block(node, "client-logic", message, "native");
+  // Inside a `<form>` of this module's JSX: its controls submit it.
+  let formDepth = 0;
   const result = parseSync(file, source, { lang: scriptLang(file) });
   if (result.errors.length > 0) {
     const error = result.errors[0]!;
@@ -828,7 +832,10 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
         continue;
       }
       if ((name === "action" || name === "formAction") && isIntrinsic) {
-        block(attribute, "form-action", `${name} on <${tag}>`);
+        // A URL submits as a browser form does; a function needs React on the page.
+        if (staticString(value) === undefined) {
+          block(attribute, "form-action", `${name} on <${tag}>`);
+        }
         submits = true;
         continue;
       }
@@ -905,7 +912,9 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
       }
       if (tag === "input" && name === "type") {
         const type = staticString(value);
-        if (type === undefined || !INPUT_TYPES.has(type)) {
+        // Inside a form, a hidden field is sent and a submit input submits.
+        const formType = formDepth > 0 && (type === "hidden" || type === "submit");
+        if (!formType && (type === undefined || !INPUT_TYPES.has(type))) {
           block(
             attribute,
             "unmapped-element",
@@ -931,19 +940,32 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
     }
     // A server-drawn screen opens links; a control with no handler and no form does nothing
     // there, so the page keeps its web screen. Handlers are blocked above as client logic.
+    // A server-drawn screen opens links and submits forms; a button that is not a form's submit
+    // button, or a field outside a form, would do nothing there.
+    const inForm = formDepth > 0;
+    const buttonType = tag === "button" ? (props.type ?? "submit") : undefined;
     if (
       isIntrinsic &&
       (tag === "button" || kind === "TextInput") &&
       events.length === 0 &&
       !submits &&
-      props.type !== "hidden"
+      props.type !== "hidden" &&
+      (!inForm || (buttonType !== undefined && buttonType !== "submit"))
     ) {
       block(
         opening,
         "inert-control",
-        `<${tag}> has no link or form to submit on a native-tier screen`,
+        inForm
+          ? `<button type="${String(buttonType)}"> does nothing on a native-tier screen`
+          : `<${tag}> has no link or form to submit on a native-tier screen`,
         "native",
       );
+    }
+    if (isIntrinsic && tag === "form") {
+      const method = typeof props.method === "string" ? props.method.toLowerCase() : "get";
+      if (props.method === "{expr}" || (method !== "get" && method !== "post")) {
+        block(opening, "form-action", `<form method="${String(props.method)}">`, "native");
+      }
     }
     if (Object.keys(props).length > 0) node.props = props;
     if (style.length > 0) node.style = style;
@@ -982,7 +1004,10 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
         for (const attribute of node.openingElement.attributes as Node[]) {
           visit(attribute.type === "JSXSpreadAttribute" ? attribute.argument : attribute.value);
         }
+        const form = ui.tag === "form";
+        if (form) formDepth += 1;
         visitChildren(node.children, ui);
+        if (form) formDepth -= 1;
         append(parent, ui);
         return ui;
       }

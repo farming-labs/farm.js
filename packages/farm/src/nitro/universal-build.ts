@@ -9989,8 +9989,9 @@ ${
   // The mobile app's native-tier screens: the page, rendered as for a browser, read into a
   // tree of native views.
   const farmNativeStylesheets = JSON.parse(${JSON.stringify(FARM_NATIVE_STYLESHEETS_PLACEHOLDER)});
+  // A POST is a form a native-tier screen submitted (native-tree.ts).
   if (
-    (request.method === "GET" || request.method === "HEAD") &&
+    (request.method === "GET" || request.method === "HEAD" || request.method === "POST") &&
     request.headers.get("accept")?.includes(${JSON.stringify(FARM_NATIVE_TREE_CONTENT_TYPE)})
   ) {
     const treeResponse = await createFarmNativeTreeResponse({

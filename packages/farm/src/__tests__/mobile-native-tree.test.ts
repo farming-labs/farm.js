@@ -329,6 +329,165 @@ describe("native tier tree", () => {
     expect(JSON.stringify(links.root)).not.toContain("TextInput");
   });
 
+  it("draws a form with its fields and submit buttons, as a browser would send it", () => {
+    const tree = createFarmNativeTree(
+      page(
+        `<form method="post" action="/api/notes#top" class="flex flex-col gap-2">` +
+          `<input type="hidden" name="list" value="inbox">` +
+          `<input type="hidden" value="no name, not sent">` +
+          `<label>Title<input name="title" required maxlength="120" placeholder="Title"></label>` +
+          `<label>Body <textarea name="body">Hello</textarea></label>` +
+          `<input type="email" name="email" value="a@b.c" disabled>` +
+          `<button name="intent" value="save">Save</button>` +
+          `<button formaction="/api/drafts" formmethod="get" formenctype="multipart/form-data">Draft</button>` +
+          `<button disabled>Archive</button>` +
+          `<input type="submit" value="Send">` +
+          `</form>`,
+      ),
+      url,
+    );
+    expect(tree.unsupported).toEqual([]);
+    const form = tree.root.children![0]!;
+    expect(form).toMatchObject({
+      type: "View",
+      tag: "form",
+      form: {
+        action: "https://notes.example.com/api/notes",
+        method: "post",
+        fields: [{ name: "list", value: "inbox" }],
+      },
+    });
+    const [title, body, email, save, draft, archive, send] = form.children!;
+    // A label wrapping a field is a box: its text, then the field.
+    expect(title).toMatchObject({
+      type: "View",
+      tag: "label",
+      children: [
+        { type: "Text", children: ["Title"] },
+        { type: "TextInput", name: "title", required: true, maxLength: 120, placeholder: "Title" },
+      ],
+    });
+    expect(body!.children![1]).toMatchObject({
+      type: "TextInput",
+      name: "body",
+      multiline: true,
+      value: "Hello",
+    });
+    expect(email).toMatchObject({ inputType: "email", disabled: true, value: "a@b.c" });
+    expect(save).toMatchObject({ type: "Pressable", submit: { name: "intent", value: "save" } });
+    expect(draft).toMatchObject({
+      submit: {
+        action: "https://notes.example.com/api/drafts",
+        method: "get",
+        enctype: "multipart/form-data",
+      },
+    });
+    expect(archive).toMatchObject({ type: "Pressable", disabled: true });
+    expect(archive!.submit).toBeUndefined();
+    expect(send).toMatchObject({
+      type: "Pressable",
+      submit: {},
+      children: [{ type: "Text", children: ["Send"] }],
+    });
+
+    // No action or method: a GET to this page, as in a browser.
+    const search = createFarmNativeTree(page(`<form><input type="search" name="q"></form>`), url);
+    expect(search.root.children![0]!.form).toEqual({ action: url.href, method: "get" });
+    expect(
+      createFarmNativeTree(page(`<form enctype="multipart/form-data" method="POST"></form>`), url)
+        .root.children![0]!.form,
+    ).toEqual({ action: url.href, method: "post", enctype: "multipart/form-data" });
+  });
+
+  it("keeps the web screen for a form only JavaScript or another control can submit", () => {
+    const tree = createFarmNativeTree(
+      page(
+        // React renders a client function action as a javascript: URL.
+        `<form action="javascript:throw new Error('React form unexpectedly submitted.')"></form>` +
+          `<form method="dialog"><button type="button">Close</button><button type="reset">Reset</button></form>` +
+          `<form target="_blank"><input type="checkbox" name="done"><form></form></form>` +
+          `<input name="q" form="search">`,
+      ),
+      url,
+    );
+    expect(tree.unsupported).toEqual([
+      `<form> action "javascript:throw new Error('React form unexpectedly submitted.')"`,
+      '<form> method "dialog"',
+      '<button type="button">',
+      '<button type="reset">',
+      '<form> target="_blank"',
+      '<input type="checkbox">',
+      "<form> inside a form",
+      '<input> form="search"',
+      "<input> has no form to submit it",
+    ]);
+  });
+
+  it("sends a submitted form to the page or route, and answers with what it rendered", async () => {
+    const seen: Array<{ method: string; body: string; type: string | null }> = [];
+    const submit = (renderPage: (request: Request) => Response | Promise<Response>) =>
+      createFarmNativeTreeResponse({
+        request: new Request(url, {
+          method: "POST",
+          headers: {
+            accept: "application/vnd.farm.native+json",
+            "content-type": "application/x-www-form-urlencoded",
+            origin: url.origin,
+          },
+          body: "title=Hi&intent=save",
+        }),
+        renderPage: async (request) => {
+          seen.push({
+            method: request.method,
+            body: await request.text(),
+            type: request.headers.get("content-type"),
+          });
+          return renderPage(request);
+        },
+        loadStylesheet: () => "",
+      });
+    const rendered = await submit(
+      () =>
+        new Response(page("<p>Saved</p>"), {
+          headers: {
+            "content-type": "text/html",
+            "cache-control": "public, max-age=60",
+            "set-cookie": "flash=saved",
+          },
+        }),
+    );
+    expect(seen).toEqual([
+      { method: "POST", body: "title=Hi&intent=save", type: "application/x-www-form-urlencoded" },
+    ]);
+    // The answer is this submission's result: never cached, and it keeps what the route set.
+    expect(rendered.headers.get("cache-control")).toBe("no-store");
+    expect(rendered.headers.get("set-cookie")).toBe("flash=saved");
+    expect((await rendered.json()).root.children[0]).toMatchObject({ children: ["Saved"] });
+    // A form re-rendered with its errors is drawn too, with its status.
+    const invalid = await submit(
+      () =>
+        new Response(page("<p>Title is required</p>"), {
+          status: 422,
+          headers: { "content-type": "text/html" },
+        }),
+    );
+    expect(invalid.status).toBe(422);
+    expect((await invalid.json()).root.children[0]).toMatchObject({
+      children: ["Title is required"],
+    });
+    // A GET's error page is still the web screen's to show.
+    const missing = new Response(page("<p>Not found</p>"), {
+      status: 404,
+      headers: { "content-type": "text/html" },
+    });
+    expect(
+      await createFarmNativeTreeResponse({ request: new Request(url), renderPage: () => missing }),
+    ).toBe(missing);
+    // Post/redirect/get: the shell follows the redirect itself.
+    const redirect = new Response(null, { status: 303, headers: { location: "/notes/1" } });
+    expect(await submit(() => redirect)).toBe(redirect);
+  });
+
   it("answers with the tree, and passes redirects and errors through", async () => {
     const response = await createFarmNativeTreeResponse({
       request: new Request(url, { headers: { accept: "application/vnd.farm.native+json" } }),

@@ -525,6 +525,49 @@ export default function Home() {
     expect(routeOf(result, "/link").analysis!.tier).toBe("native");
   });
 
+  it("keeps a form a browser can submit on the native tier", async () => {
+    const root = await createApp({
+      "src/app/page.tsx": `export default function Guestbook() {
+  return (
+    <form method="post" action="/api/guestbook">
+      <input type="hidden" name="list" value="main" />
+      <label>Name <input name="name" required /></label>
+      <textarea name="message" />
+      <button>Sign</button>
+      <input type="submit" value="Send" />
+    </form>
+  );
+}
+`,
+      "src/app/search/page.tsx": `export default function Search() {
+  return <form><input type="search" name="q" /><button type="button">Clear</button></form>;
+}
+`,
+      "src/app/client/page.tsx": `async function save(data: FormData) {}
+export default function Client() {
+  return <form action={save}><button>Save</button></form>;
+}
+`,
+      "src/app/dialog/page.tsx": `export default function Dialog() {
+  return <form method="dialog"><button>Close</button></form>;
+}
+`,
+    });
+    const result = await report(root);
+    const native = (route: string) =>
+      routeOf(result, route).analysis!.nativeBlockers.map(
+        (blocker) => `${blocker.rule} ${blocker.message}`,
+      );
+    expect(routeOf(result, "/").analysis!.tier).toBe("native");
+    expect(native("/")).toEqual([]);
+    expect(native("/search")).toEqual([
+      'inert-control <button type="button"> does nothing on a native-tier screen',
+    ]);
+    // A function action needs React on the page to call it.
+    expect(native("/client")).toEqual(["form-action action on <form>"]);
+    expect(native("/dialog")).toEqual(['form-action <form method="dialog">']);
+  });
+
   it("parses each module once per run and reuses facts by content hash", async () => {
     const files: Record<string, string> = {
       "src/components/shared.tsx": `export function Shared() { return <p>shared</p>; }\n`,

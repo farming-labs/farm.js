@@ -14,7 +14,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.text.Editable
+import android.text.InputFilter
+import android.text.InputType
 import android.text.SpannableStringBuilder
+import android.text.TextWatcher
 import android.text.Spanned
 import android.text.TextPaint
 import android.text.method.LinkMovementMethod
@@ -30,7 +34,9 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.inputmethod.EditorInfo
 import android.webkit.CookieManager
+import androidx.appcompat.app.AlertDialog
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -43,6 +49,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
+import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
@@ -58,42 +66,17 @@ object FarmServerScreens {
     private val main = Handler(Looper.getMainLooper())
 
     fun open(context: Context, host: FarmNativeHost, url: Uri): FarmNativeContent {
-        val frame = TreeFrame(context)
-        val spinner = ProgressBar(context)
-        frame.addView(spinner, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-        var closed = false
-        network.execute {
-            val result = runCatching { fetch(url) }
-            main.post {
-                if (closed) return@post
-                result.fold(
-                    onSuccess = { tree ->
-                        val unsupported = tree.optJSONArray("unsupported")
-                        if (unsupported != null && unsupported.length() > 0) {
-                            host.fallback("the tree cannot express ${unsupported.join(", ")}")
-                            return@fold
-                        }
-                        val root = tree.getJSONObject("root")
-                        runCatching { Renderer(context, host, url).screen(root) }
-                            .onSuccess { view ->
-                                frame.removeView(spinner)
-                                frame.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-                                // The shell handles a theme change itself: draw the tree again in the new theme.
-                                frame.render = { Renderer(context, host, url).screen(root) }
-                                tree.optString("title").takeIf { it.isNotEmpty() }?.let(host::setTitle)
-                                host.rendered()
-                            }
-                            .onFailure { host.fallback(it.message ?: it.toString()) }
-                    },
-                    onFailure = { host.fallback(it.message ?: it.toString()) },
-                )
-            }
-        }
-        return FarmNativeContent(frame, title = "", close = { closed = true })
+        val screen = TreeScreen(context, host, url)
+        screen.load(url)
+        return FarmNativeContent(screen.frame, title = "", close = { screen.closed = true })
     }
 
+    internal fun background(work: () -> Unit) = network.execute(work)
+
+    internal fun onMain(work: () -> Unit) = main.post(work)
+
     /** The page's tree, with the WebViews' cookies, so a signed-in page renders signed in. */
-    private fun fetch(url: Uri): JSONObject {
+    internal fun fetch(url: Uri): JSONObject {
         val connection = URL(url.toString()).openConnection() as HttpURLConnection
         try {
             connection.instanceFollowRedirects = false
@@ -108,6 +91,55 @@ object FarmServerScreens {
             return JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
         } finally {
             connection.disconnect()
+        }
+    }
+
+    /**
+     * Send a form a server screen submitted, as a browser would: its entries, the page's origin,
+     * and the WebViews' cookies. Redirects are not followed here: a 307 or 308 sends the body
+     * again, and any other redirect is a GET the screen visits.
+     */
+    internal fun send(submission: FormSubmission): FormAnswer {
+        var target = submission.action
+        var redirects = 0
+        while (true) {
+            val connection = URL(target.toString()).openConnection() as HttpURLConnection
+            try {
+                connection.instanceFollowRedirects = false
+                connection.connectTimeout = 15_000
+                connection.readTimeout = 30_000
+                connection.requestMethod = "POST"
+                connection.doOutput = true
+                connection.setRequestProperty("Accept", CONTENT_TYPE)
+                connection.setRequestProperty("Content-Type", submission.contentType)
+                connection.setRequestProperty("Origin", submission.origin)
+                CookieManager.getInstance().getCookie(target.toString())?.let { connection.setRequestProperty("Cookie", it) }
+                connection.outputStream.use { it.write(submission.body) }
+                val status = connection.responseCode
+                connection.headerFields["Set-Cookie"]?.forEach { CookieManager.getInstance().setCookie(target.toString(), it) }
+                if (status in 300..399) {
+                    val location = connection.getHeaderField("Location")
+                        ?: return FormAnswer.Failed("The server answered $status without a location.")
+                    val next = Uri.parse(URL(URL(target.toString()), location).toString())
+                    if ((status == 307 || status == 308) && redirects++ < 5) {
+                        target = next
+                        continue
+                    }
+                    return FormAnswer.Redirect(next)
+                }
+                val type = connection.contentType.orEmpty()
+                // A page the server rendered for the submission, a validation error (4xx) included.
+                if (status < 500 && type.startsWith(CONTENT_TYPE)) {
+                    val stream = if (status >= 400) connection.errorStream else connection.inputStream
+                    return FormAnswer.Tree(target, JSONObject(stream.bufferedReader().use { it.readText() }))
+                }
+                return FormAnswer.Failed(
+                    if (status >= 500) "Something went wrong on the server ($status). Try again."
+                    else "The server answered $status.",
+                )
+            } finally {
+                connection.disconnect()
+            }
         }
     }
 
@@ -128,10 +160,159 @@ object FarmServerScreens {
     }
 }
 
+/** One server screen: its tree, drawn again for a theme change or a form's answer. */
+private class TreeScreen(private val context: Context, private val host: FarmNativeHost, private var page: Uri) {
+    val frame = TreeFrame(context)
+    var closed = false
+    private var shown = false
+    private var submitting = false
+
+    /** What was typed, by form and field, so drawing the tree again keeps it. */
+    private val typed = mutableMapOf<String, String>()
+
+    fun load(url: Uri) {
+        val spinner = ProgressBar(context)
+        frame.removeAllViews()
+        frame.addView(spinner, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        FarmServerScreens.background {
+            val result = runCatching { FarmServerScreens.fetch(url) }
+            FarmServerScreens.onMain {
+                if (closed) return@onMain
+                result.fold(
+                    onSuccess = { show(url, it) },
+                    onFailure = { host.fallback(it.message ?: it.toString()) },
+                )
+            }
+        }
+    }
+
+    private fun show(url: Uri, tree: JSONObject) {
+        val unsupported = tree.optJSONArray("unsupported")
+        if (unsupported != null && unsupported.length() > 0) {
+            host.fallback("the tree cannot express ${unsupported.join(", ")}")
+            return
+        }
+        val root = tree.getJSONObject("root")
+        page = url
+        typed.clear()
+        val draw = { Renderer(context, host, url, typed, ::submit).screen(root) }
+        runCatching(draw)
+            .onSuccess { view ->
+                frame.removeAllViews()
+                frame.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                // The shell handles a theme change itself: draw the tree again in the new theme.
+                frame.render = draw
+                tree.optString("title").takeIf { it.isNotEmpty() }?.let(host::setTitle)
+                if (!shown) host.rendered()
+                shown = true
+            }
+            .onFailure { host.fallback(it.message ?: it.toString()) }
+    }
+
+    private fun submit(submission: FormSubmission) {
+        if (submitting) return
+        if (submission.method == "get") {
+            go(submission.queryUrl())
+            return
+        }
+        submitting = true
+        submission.setPending(true)
+        FarmServerScreens.background {
+            val result = runCatching { FarmServerScreens.send(submission) }
+            FarmServerScreens.onMain {
+                if (closed) return@onMain
+                submitting = false
+                submission.setPending(false)
+                result.fold(
+                    onSuccess = { answer ->
+                        when (answer) {
+                            is FormAnswer.Redirect -> go(answer.location)
+                            is FormAnswer.Tree -> show(answer.url, answer.tree)
+                            is FormAnswer.Failed -> alert(answer.message)
+                        }
+                    },
+                    onFailure = { alert("Could not reach the server. Check your connection and try again.") },
+                )
+            }
+        }
+    }
+
+    /** This page again (a search, or a post/redirect/get) loads in place; another page is a visit. */
+    private fun go(target: Uri) {
+        val samePage = target.scheme == page.scheme && target.encodedAuthority == page.encodedAuthority &&
+            (target.path ?: "/").ifEmpty { "/" } == (page.path ?: "/").ifEmpty { "/" }
+        if (samePage) load(target) else host.visit(target, replace = false)
+    }
+
+    private fun alert(message: String) {
+        AlertDialog.Builder(context).setMessage(message).setPositiveButton(android.R.string.ok, null).show()
+    }
+}
+
+/** A form's entries, ready to send as HTML's form submission algorithm would. */
+internal class FormSubmission(
+    val action: Uri,
+    val method: String,
+    private val enctype: String,
+    entries: List<Pair<String, String>>,
+    val origin: String,
+    val setPending: (Boolean) -> Unit,
+) {
+    // Newlines in names and values are sent as CRLF.
+    private val entries = entries.map { (name, value) -> crlf(name) to crlf(value) }
+    private val boundary = "----FarmFormBoundary" + UUID.randomUUID().toString().replace("-", "")
+
+    val contentType: String
+        get() = if (enctype == MULTIPART) "$MULTIPART; boundary=$boundary" else "$URLENCODED;charset=UTF-8"
+
+    val body: ByteArray
+        get() = if (enctype == MULTIPART) multipart() else urlencoded().toByteArray()
+
+    /** A GET form replaces the action's query with its entries. */
+    fun queryUrl(): Uri {
+        val query = urlencoded()
+        return action.buildUpon().encodedQuery(query.ifEmpty { null }).build()
+    }
+
+    private fun urlencoded(): String = entries.joinToString("&") { (name, value) ->
+        URLEncoder.encode(name, "UTF-8") + "=" + URLEncoder.encode(value, "UTF-8")
+    }
+
+    private fun multipart(): ByteArray {
+        val out = StringBuilder()
+        for ((name, value) in entries) {
+            val escaped = name.replace("\"", "%22").replace("\r", "%0D").replace("\n", "%0A")
+            out.append("--").append(boundary).append("\r\n")
+            out.append("Content-Disposition: form-data; name=\"").append(escaped).append("\"\r\n\r\n")
+            out.append(value).append("\r\n")
+        }
+        out.append("--").append(boundary).append("--\r\n")
+        return out.toString().toByteArray()
+    }
+
+    private companion object {
+        const val URLENCODED = "application/x-www-form-urlencoded"
+        const val MULTIPART = "multipart/form-data"
+        fun crlf(text: String) = text.replace(Regex("\r\n|\r|\n"), "\r\n")
+    }
+}
+
+internal sealed class FormAnswer {
+    class Redirect(val location: Uri) : FormAnswer()
+    class Tree(val url: Uri, val tree: JSONObject) : FormAnswer()
+    class Failed(val message: String) : FormAnswer()
+}
+
 private fun JSONArray.join(separator: String): String = (0 until length()).joinToString(separator) { optString(it) }
 
 /** One tree into views. Lengths in the tree are CSS px, drawn as dp. */
-private class Renderer(private val context: Context, private val host: FarmNativeHost, private val page: Uri) {
+private class Renderer(
+    private val context: Context,
+    private val host: FarmNativeHost,
+    private val page: Uri,
+    private val typed: MutableMap<String, String> = mutableMapOf(),
+    private val onSubmit: (FormSubmission) -> Unit = {},
+) {
     private val density = context.resources.displayMetrics.density
     private val dark = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     private val defaultText = ContextCompat.getColor(context, R.color.farm_text)
@@ -178,11 +359,48 @@ private class Renderer(private val context: Context, private val host: FarmNativ
         }
     }
 
+    /** The form whose content is being drawn, and how many forms came before it. */
+    private var form: FormScope? = null
+    private var forms = 0
+
     private fun node(node: JSONObject, parentRow: Boolean): View? {
         val style = style(node)
         if (style.optString("display") == "none") return null
         val type = node.getString("type")
-        val view = when (type) {
+        val formNode = node.optJSONObject("form")
+        val outer = form
+        if (formNode != null) form = FormScope(formNode, forms++)
+        val scope = form
+        val view = try {
+            draw(node, type, style)
+        } finally {
+            form = outer
+        }
+        decorate(view, style)
+        if (type == "Pressable") {
+            val href = node.optString("href")
+            val submit = node.optJSONObject("submit")
+            if (href.isNotEmpty()) {
+                view.isClickable = true
+                view.setOnClickListener { host.visit(Uri.parse(href), replace = false) }
+            } else if (submit != null && scope != null) {
+                view.isClickable = true
+                scope.buttons += view to submit
+                view.setOnClickListener { scope.submit(submit) }
+            } else if (node.optBoolean("disabled")) {
+                view.isEnabled = false
+                if (!style.has("opacity")) view.alpha = 0.5f
+            }
+            val ripple = TypedValue()
+            context.theme.resolveAttribute(android.R.attr.selectableItemBackground, ripple, true)
+            view.foreground = ContextCompat.getDrawable(context, ripple.resourceId)
+        }
+        view.layoutParams = layout(style, parentRow)
+        return view
+    }
+
+    private fun draw(node: JSONObject, type: String, style: JSONObject): View {
+        return when (type) {
             "Text" -> text(node, style)
             "Image" -> ImageView(context).apply {
                 val sized = style.has("width") && style.has("height")
@@ -191,26 +409,105 @@ private class Renderer(private val context: Context, private val host: FarmNativ
                 contentDescription = node.optString("alt").ifEmpty { null }
                 node.optString("src").takeIf { it.isNotEmpty() }?.let { FarmServerScreens.loadImage(this, it) }
             }
-            "TextInput" -> EditText(context).apply {
-                hint = node.optString("placeholder").ifEmpty { null }
-                setText(node.optString("value"))
-                textStyle(this, style)
-            }
+            "TextInput" -> field(node, style)
             "View", "Pressable" -> box(node, style)
             else -> error("node $type")
         }
-        decorate(view, style)
-        if (type == "Pressable") {
-            node.optString("href").takeIf { it.isNotEmpty() }?.let { href ->
-                view.isClickable = true
-                view.setOnClickListener { host.visit(Uri.parse(href), replace = false) }
-            }
-            val ripple = TypedValue()
-            context.theme.resolveAttribute(android.R.attr.selectableItemBackground, ripple, true)
-            view.foreground = ContextCompat.getDrawable(context, ripple.resourceId)
+    }
+
+    /** A text field of the form being drawn; it keeps what was typed when the tree is drawn again. */
+    private fun field(node: JSONObject, style: JSONObject): EditText {
+        val scope = form ?: error("a field outside a form")
+        val view = EditText(context)
+        view.hint = node.optString("placeholder").ifEmpty { null }
+        textStyle(view, style)
+        val multiline = node.optBoolean("multiline")
+        view.inputType = when (node.optString("inputType")) {
+            "email" -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            "password" -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            "number" -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
+            "tel" -> InputType.TYPE_CLASS_PHONE
+            "url" -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            else -> InputType.TYPE_CLASS_TEXT or if (multiline) InputType.TYPE_TEXT_FLAG_MULTI_LINE else 0
         }
-        view.layoutParams = layout(style, parentRow)
+        if (!multiline) {
+            // Return in a one-line field submits the form, as Enter does in a browser.
+            view.imeOptions = EditorInfo.IME_ACTION_GO
+            view.setOnEditorActionListener { _, action, _ ->
+                if (action == EditorInfo.IME_ACTION_GO) scope.submitImplicitly()
+                action == EditorInfo.IME_ACTION_GO
+            }
+        }
+        if (node.has("maxLength")) view.filters = arrayOf(InputFilter.LengthFilter(node.getInt("maxLength")))
+        val disabled = node.optBoolean("disabled")
+        if (disabled) view.isEnabled = false
+        if (node.optBoolean("readOnly")) {
+            view.isFocusable = false
+            view.isCursorVisible = false
+        }
+        val key = "${scope.index}:${scope.fields.size}"
+        view.setText(typed[key] ?: node.optString("value"))
+        view.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(text: Editable?) {
+                typed[key] = text?.toString().orEmpty()
+            }
+        })
+        scope.fields += FormField(node.optString("name"), view, node.optBoolean("required"), disabled)
         return view
+    }
+
+    private class FormField(val name: String, val view: EditText, val required: Boolean, val disabled: Boolean)
+
+    /** One `<form>`: its fields and submit buttons, and how a tap on one sends them. */
+    private inner class FormScope(private val form: JSONObject, val index: Int) {
+        val fields = mutableListOf<FormField>()
+        val buttons = mutableListOf<Pair<View, JSONObject>>()
+
+        fun submit(submitter: JSONObject?) {
+            // A required field left empty stops the submission, as a browser's validation does.
+            fields.firstOrNull { it.required && !it.disabled && it.view.text.isEmpty() }?.let {
+                it.view.error = "Fill in this field."
+                it.view.requestFocus()
+                return
+            }
+            val entries = mutableListOf<Pair<String, String>>()
+            form.optJSONArray("fields")?.let { hidden ->
+                for (position in 0 until hidden.length()) {
+                    val entry = hidden.getJSONObject(position)
+                    entries += entry.getString("name") to entry.optString("value")
+                }
+            }
+            for (field in fields) {
+                if (field.name.isNotEmpty() && !field.disabled) entries += field.name to field.view.text.toString()
+            }
+            if (submitter != null && submitter.has("name")) {
+                entries += submitter.getString("name") to submitter.optString("value")
+            }
+            fun option(key: String) = submitter?.optString(key)?.ifEmpty { null } ?: form.optString(key).ifEmpty { null }
+            onSubmit(
+                FormSubmission(
+                    action = Uri.parse(option("action") ?: page.toString()),
+                    method = option("method") ?: "get",
+                    enctype = option("enctype") ?: "application/x-www-form-urlencoded",
+                    entries = entries,
+                    origin = "${page.scheme}://${page.encodedAuthority}",
+                    setPending = { pending ->
+                        for ((button, _) in buttons) {
+                            button.isEnabled = !pending
+                            button.alpha = if (pending) 0.5f else 1f
+                        }
+                    },
+                ),
+            )
+        }
+
+        /** Return in a field: the form's first submit button, or the form itself when it has one field. */
+        fun submitImplicitly() {
+            val default = buttons.firstOrNull()
+            if (default != null) submit(default.second) else if (fields.size == 1) submit(null)
+        }
     }
 
     private fun box(node: JSONObject, style: JSONObject): View {
