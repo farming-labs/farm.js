@@ -45,12 +45,17 @@ export default async function Notes() {
 
 **What draws natively:** boxes (`div`, `section`, `main`, lists, …) as flex rows and columns with
 gap, padding, margins, sizes, borders, radii, backgrounds and opacity; text with links, `<strong>`,
-`<em>` and `<code>` inside it; images; links; and [forms](#forms). Styles come from Tailwind classes
+`<em>` and `<code>` inside it; images; links; tables; and [forms](#forms). Styles come from Tailwind classes
 (the default theme, with `dark:`) and from your own CSS: the stylesheets the page links are
 cascaded on the server, with variables and `prefers-color-scheme: dark`.
 
+A table draws as rows whose cells split the row's width evenly, as `table-layout: fixed` lays them
+out, so columns line up from row to row. A `colspan` cell takes a wider share, a cell with its own
+`width` keeps it, and `<th>` is bold and centered. A `rowspan`, or a width set on a `<col>`, keeps
+the page on the web.
+
 **What keeps a page on the web:** anything that needs JavaScript on the device (hooks, event
-handlers, `"use client"` components), and anything with no native equivalent yet: `table`,
+handlers, `"use client"` components), and anything with no native equivalent yet:
 `canvas`, `iframe`, `video`, `svg`, `select`, `dangerouslySetInnerHTML`, CSS grid, `fixed` and
 `sticky` positioning, and `hover:` or responsive variants. Async pages and server components are
 fine, since they run on the server.

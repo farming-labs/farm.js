@@ -108,13 +108,18 @@ const VOID_TAGS = new Set(
   "area base br col embed hr img input link meta source track wbr".split(" "),
 );
 const SKIPPED_TAGS = new Set("link meta template title".split(" "));
-// Browser defaults a Tailwind preflight keeps, applied to inline runs.
+// A table draws as a column of rows, each row's cells sharing its width.
+const TABLE_GROUP_TAGS = new Set("table thead tbody tfoot".split(" "));
+const TABLE_CELL_TAGS = new Set("th td".split(" "));
+// Browser defaults a Tailwind preflight keeps: inline runs, header cells, and captions.
 const INLINE_DEFAULTS: Record<string, FarmNativeStyle> = {
   strong: { fontWeight: 700 },
   b: { fontWeight: 700 },
   em: { fontStyle: "italic" },
   i: { fontStyle: "italic" },
   code: { fontFamily: "mono" },
+  th: { fontWeight: 700, textAlign: "center" },
+  caption: { textAlign: "center" },
 };
 
 interface HtmlElement extends FarmNativeCssElement {
@@ -562,6 +567,69 @@ class Converter {
     return node;
   }
 
+  /**
+   * A table as native views: the table and its row groups are columns, a row is a row, and its
+   * cells share the row's width, `colspan` cells a wider share, so columns line up from row to row
+   * (as `table-layout: fixed` lays them out). A cell's content draws as any block content does.
+   */
+  private tablePart(
+    element: HtmlElement,
+    passed: Inherited,
+    box: FarmNativeStyle | undefined,
+    boxDark: FarmNativeStyle | undefined,
+    flex: boolean,
+  ): FarmNativeNode | undefined {
+    const { tag } = element;
+    if (TABLE_CELL_TAGS.has(tag)) {
+      if (element.parent?.tag !== "tr") this.problem(`<${tag}> outside a row`);
+      const rowspan = Number(element.attributes.rowspan ?? 1);
+      // A native row holds its own cells only: a cell cannot reach into the rows below.
+      if (rowspan !== 1) this.problem(`<${tag}> rowspan="${element.attributes.rowspan}"`);
+      const colspan = Number(element.attributes.colspan ?? 1);
+      const share = Number.isInteger(colspan) && colspan >= 1 ? colspan : 1;
+      // A cell with its own width keeps it; the others split what is left.
+      const cell =
+        box?.width !== undefined
+          ? { flexGrow: 0, flexShrink: 0, ...box }
+          : { flexGrow: share, flexShrink: 1, flexBasis: 0, ...box };
+      const node = this.node("View", element, cell, boxDark);
+      const children = this.blocks(element.children, passed, flex);
+      if (children.length > 0) node.children = children;
+      return node;
+    }
+    const row = tag === "tr";
+    const node = this.node("View", element, row ? { ...box, flexDirection: "row" } : box, boxDark);
+    const children: FarmNativeNode[] = [];
+    for (const child of element.children) {
+      if (typeof child === "string") {
+        // Only whitespace sits between rows and cells; text there is not part of any cell.
+        if (child.trim()) this.problem(`text directly inside <${tag}>`);
+        continue;
+      }
+      if (child.tag === "colgroup" || child.tag === "col") {
+        // Column widths come from the cells; a column's own width or style is not read.
+        for (const column of [child, ...child.children]) {
+          if (typeof column === "string") continue;
+          const { width, style, class: className } = column.attributes;
+          if (width || style || className) this.problem(`<${column.tag}> sets column styles`);
+        }
+        continue;
+      }
+      const allowed = row
+        ? TABLE_CELL_TAGS.has(child.tag)
+        : child.tag === "tr" ||
+          (tag === "table" && (TABLE_GROUP_TAGS.has(child.tag) || child.tag === "caption"));
+      if (!allowed && !SKIPPED_TAGS.has(child.tag)) {
+        this.problem(`<${child.tag}> inside <${tag}>`);
+        continue;
+      }
+      const part = this.element(child, passed);
+      if (part) children.push(part);
+    }
+    if (children.length > 0) node.children = children;
+    return node;
+  }
+
   element(
     element: HtmlElement,
     inherited: Inherited,
@@ -616,7 +684,7 @@ class Converter {
     // A flex item that is inline on the web is a text box of its own.
     const textBox =
       flexItem && INLINE_TAGS.has(element.tag) && element.tag !== "a" && element.tag !== "br";
-    if (BLOCK_TEXT_TAGS.has(element.tag) || textBox) {
+    if (BLOCK_TEXT_TAGS.has(element.tag) || element.tag === "caption" || textBox) {
       if (
         element.children.some((child) => typeof child !== "string" && !INLINE_TAGS.has(child.tag))
       ) {
@@ -719,6 +787,13 @@ class Converter {
         },
         boxDark,
       );
+    }
+    if (
+      TABLE_GROUP_TAGS.has(element.tag) ||
+      element.tag === "tr" ||
+      TABLE_CELL_TAGS.has(element.tag)
+    ) {
+      return this.tablePart(element, passed, box, boxDark, flex);
     }
     if (VIEW_TAGS.has(element.tag)) {
       const node = this.node("View", element, box, boxDark);

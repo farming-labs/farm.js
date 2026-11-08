@@ -29,9 +29,23 @@ export default function TrailPage({ params, searchParams }: PageProps) {
       <Text as="h1" size="2xl" weight="bold">
         {trail.name}
       </Text>
-      <Text color="muted">
-        {trail.region} · {trail.km} km · {trail.climb}
-      </Text>
+      {/* A plain table: the shell draws it as native rows whose cells share the width. */}
+      <table style={{ width: "100%", tableLayout: "fixed", fontSize: 14 }}>
+        <thead>
+          <tr style={{ color: "#6b7280" }}>
+            <th>Region</th>
+            <th>Distance</th>
+            <th>Climb</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style={{ textAlign: "center" }}>
+            <td>{trail.region}</td>
+            <td>{trail.km} km</td>
+            <td>{trail.climb}</td>
+          </tr>
+        </tbody>
+      </table>
       <View padding="md" background="surface" radius="card" gap="xs">
         <Text>{trail.notes}</Text>
       </View>

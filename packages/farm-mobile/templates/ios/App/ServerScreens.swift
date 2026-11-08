@@ -426,6 +426,7 @@ final class FarmTreeRenderer {
         let justify = style["justifyContent"] as? String ?? "flex-start"
         let align = style["alignItems"] as? String ?? "stretch"
         var spacers: [UIView] = []
+        var shares: [(UIView, CGFloat)] = []
         func spacer() -> UIView {
             let view = UIView()
             view.setContentHuggingPriority(.init(1), for: row ? .horizontal : .vertical)
@@ -437,12 +438,22 @@ final class FarmTreeRenderer {
             if index > 0 && (justify == "space-between" || justify == "space-around" || justify == "space-evenly") {
                 stack.addArrangedSubview(spacer())
             }
-            stack.addArrangedSubview(try item(child, style: childStyle, align: align, row: row))
+            let slot = try item(child, style: childStyle, align: align, row: row)
+            stack.addArrangedSubview(slot)
+            if row, let grow = number(childStyle["flexGrow"]), grow > 0, number(childStyle["flexBasis"]) == 0 {
+                shares.append((slot, grow))
+            }
         }
         if justify == "center" { stack.addArrangedSubview(spacer()) }
         if let first = spacers.first {
             for other in spacers.dropFirst() {
                 (row ? other.widthAnchor.constraint(equalTo: first.widthAnchor) : other.heightAnchor.constraint(equalTo: first.heightAnchor)).isActive = true
+            }
+        }
+        // Children with `flex: <n> 1 0` (table cells) split the row's free width by their grow.
+        if case let (first, firstGrow)? = shares.first {
+            for (other, grow) in shares.dropFirst() {
+                other.widthAnchor.constraint(equalTo: first.widthAnchor, multiplier: grow / firstGrow).isActive = true
             }
         }
         box.embed(stack, padding: try padding(style))

@@ -161,6 +161,9 @@ function utility(token: string): FarmNativeStyle | undefined {
     case "shrink-0":
       return { flexShrink: 0 };
     case "flex-nowrap":
+    case "table-auto":
+    case "table-fixed":
+    case "border-collapse":
       return {};
     case "flex-wrap":
       return { flexWrap: "wrap" };
@@ -511,6 +514,9 @@ function cssColor(value: string): string | undefined {
 }
 
 const IGNORED_PROPERTIES = new Set([
+  // A native table always lays out like `table-layout: fixed`, its cells' borders side by side.
+  "border-collapse",
+  "table-layout",
   // No effect on a static, touch-only screen, or the shell owns it.
   "cursor",
   "outline",

@@ -64,7 +64,7 @@ A native screen is only worth having if it never shows something broken. So Farm
 
 ### Layer 1: at build time, the analyzer
 
-`farm build --mobile` parses every page with [Oxc](https://oxc.rs) and walks its syntax tree: each JSX element, class name, inline style, import and browser API is classified as something a native screen can express or something that rules a tier out. Hooks, event handlers and `"use client"` rule out the server tier, since they need JavaScript on the device. `canvas`, `iframe`, `table`, `dangerouslySetInnerHTML`, CSS grid and `window` rule out native altogether.
+`farm build --mobile` parses every page with [Oxc](https://oxc.rs) and walks its syntax tree: each JSX element, class name, inline style, import and browser API is classified as something a native screen can express or something that rules a tier out. Hooks, event handlers and `"use client"` rule out the server tier, since they need JavaScript on the device. `canvas`, `iframe`, `dangerouslySetInnerHTML`, CSS grid and `window` rule out native altogether.
 
 The result is a tier per route, and every blocker comes with a file, line and column:
 
@@ -83,7 +83,7 @@ The rule is conservative on purpose: a route reaches a tier only when nothing ru
 A build sees source, not data. A page that passed the analyzer can still render something on a given request that the tree cannot express: a class that only appears for some users, a CSS rule with no native equivalent, a form field type the shell does not draw. So the reader checks the actual output. Anything it cannot express goes into `unsupported`:
 
 ```json
-{ "version": 1, "root": { "type": "View", "children": [] }, "unsupported": ["<table>"] }
+{ "version": 1, "root": { "type": "View", "children": [] }, "unsupported": ["<canvas>"] }
 ```
 
 A non-empty `unsupported` means the shell shows the web screen for that visit, and so does any answer that is not a tree: a failed request, or a redirect to a sign-in page. This is what makes the server tier safe for dynamic content. The bailout happens per request, so one odd record shows that record on the web without demoting the route for everyone.

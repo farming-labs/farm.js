@@ -35,7 +35,7 @@ import {
  * Cached facts are reused only by the same analyzer: bump when facts change shape or rules
  * change between releases; a new Farm version always starts fresh.
  */
-const ANALYZER_VERSION = `6:${FARM_VERSION}`;
+const ANALYZER_VERSION = `7:${FARM_VERSION}`;
 
 export type FarmUiNodeKind = "View" | "Text" | "Image" | "Pressable" | "TextInput" | "List";
 
@@ -237,6 +237,10 @@ Object.assign(INTRINSIC_KINDS, {
   ol: "List",
 });
 
+/** Table elements: native-tier screens draw them (native-tree.ts); React Native ports do not. */
+const TABLE_TAGS = new Set("table caption thead tbody tfoot tr th td colgroup col".split(" "));
+const TABLE_STYLE_PROPERTIES = new Set(["tableLayout", "borderCollapse"]);
+
 const INPUT_TYPES = new Set(["text", "email", "password", "number", "search", "tel", "url"]);
 
 /** Events with a native counterpart, per element kind. */
@@ -432,7 +436,7 @@ const COLOR =
 const SPACE = "(?:\\d+(?:\\.5)?|px|auto)";
 const SIZE = "(?:\\d+(?:\\.5)?|px|auto|full|\\d+/\\d+|min|max|fit)";
 const PORTABLE_CLASSES = [
-  /^(?:flex|flex-row|flex-col|flex-row-reverse|flex-col-reverse|flex-wrap|flex-nowrap|flex-wrap-reverse|flex-1|flex-auto|flex-initial|flex-none|grow|grow-0|shrink|shrink-0|hidden|relative|absolute|overflow-hidden|overflow-visible|italic|not-italic|underline|line-through|no-underline|uppercase|lowercase|capitalize|normal-case|text-left|text-center|text-right|text-justify)$/,
+  /^(?:flex|flex-row|flex-col|flex-row-reverse|flex-col-reverse|flex-wrap|flex-nowrap|flex-wrap-reverse|flex-1|flex-auto|flex-initial|flex-none|grow|grow-0|shrink|shrink-0|hidden|relative|absolute|overflow-hidden|overflow-visible|italic|not-italic|underline|line-through|no-underline|uppercase|lowercase|capitalize|normal-case|text-left|text-center|text-right|text-justify|table-auto|table-fixed|border-collapse)$/,
   /^(?:items|justify|self|content)-(?:start|end|center|between|around|evenly|stretch|baseline|auto)$/,
   new RegExp(
     `^-?(?:gap|gap-x|gap-y|p|px|py|pt|pr|pb|pl|ps|pe|m|mx|my|mt|mr|mb|ml|ms|me)-${SPACE}$`,
@@ -463,7 +467,7 @@ const BLOCKING_CLASSES: Array<[RegExp, string]> = [
   ],
   [/^(?:space-[xy]-.+|divide-.+)$/, "needs child selectors"],
   [
-    /^(?:block|inline|inline-block|inline-flex|table.*|contents|flow-root|list-item)$/,
+    /^(?:block|inline|inline-block|inline-flex|table(?!-(?:auto|fixed)$).*|contents|flow-root|list-item)$/,
     "sets a display mode other than flex",
   ],
   [
@@ -832,7 +836,9 @@ function analyzeSource(
     if (isIntrinsic) {
       kind = INTRINSIC_KINDS[tag];
       if (!facts.tags.includes(tag)) facts.tags.push(tag);
-      if (!kind) block(opening, "unmapped-element", `<${tag}> has no native mapping`);
+      if (!kind && TABLE_TAGS.has(tag)) {
+        block(opening, "unmapped-element", `<${tag}> has no React Native port`, "react-native");
+      } else if (!kind) block(opening, "unmapped-element", `<${tag}> has no native mapping`);
     } else if (opening.name.type === "JSXNamespacedName") {
       block(opening, "unmapped-element", `<${tag}> has no native mapping`);
     } else {
@@ -967,6 +973,11 @@ function analyzeSource(
             continue;
           }
           const key = property.key.name ?? property.key.value;
+          if (TABLE_STYLE_PROPERTIES.has(key)) {
+            // The native tier always lays a table out this way; React Native has no tables.
+            block(property, "style", `style.${key} has no React Native port`, "react-native");
+            continue;
+          }
           if (!STYLE_PROPERTIES.has(key)) {
             block(property, "style", `style.${key} has no native mapping`);
             continue;
@@ -1507,12 +1518,16 @@ function analyzeComponentSource(file: string, source: string, parseSync: ParseSy
       const kind = INTRINSIC_KINDS[tag];
       if (!facts.tags.includes(tag)) facts.tags.push(tag);
       facts.elements.total += 1;
-      if (!kind) {
+      if (kind) {
+        facts.elements.mapped += 1;
+        facts.elements.byKind[kind] = (facts.elements.byKind[kind] ?? 0) + 1;
+      } else if (TABLE_TAGS.has(tag)) {
+        // Drawn by the native tier, so its attributes still count; not portable to React Native.
+        block(at, "unmapped-element", `<${tag}> has no React Native port`, "react-native");
+      } else {
         block(at, "unmapped-element", `<${tag}> has no native mapping`);
         continue;
       }
-      facts.elements.mapped += 1;
-      facts.elements.byKind[kind] = (facts.elements.byKind[kind] ?? 0) + 1;
 
       const value = (attr: string) =>
         attributes.find((attribute) => attribute.name.toLowerCase() === attr);

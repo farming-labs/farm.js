@@ -303,15 +303,69 @@ describe("native tier tree", () => {
 
   it("lists what it cannot express, so the shell shows the web screen", () => {
     const tree = createFarmNativeTree(
-      page(`<div class="grid"><table><tr><td>x</td></tr></table><p>a <div>b</div></p></div>`),
+      page(`<div class="grid"><canvas></canvas><p>a <div>b</div></p></div>`),
       url,
     );
     expect(tree.unsupported).toEqual([
       '<div> class "grid"',
-      "<table>",
+      "<canvas>",
       "<p> holds block elements",
       "<div> inside text",
     ]);
+  });
+
+  it("draws a table as rows whose cells share the width, colspan a wider share", () => {
+    const tree = createFarmNativeTree(
+      page(
+        `<table class="w-full table-fixed border-collapse"><caption>Plans</caption>` +
+          `<colgroup><col><col></colgroup>` +
+          `<thead><tr><th>Plan</th><th colspan="2">Price</th></tr></thead>\n` +
+          `<tbody><tr><td>Free</td><td style="width: 40px">$0</td><td><a href="/x">Pick</a></td></tr></tbody></table>`,
+      ),
+      url,
+    );
+    expect(tree.unsupported).toEqual([]);
+    const table = tree.root.children?.[0] as FarmNativeNode;
+    expect(table).toMatchObject({ type: "View", tag: "table", style: { width: "100%" } });
+    const [caption, thead, tbody] = table.children as FarmNativeNode[];
+    expect(caption).toMatchObject({
+      type: "Text",
+      style: { textAlign: "center" },
+      children: ["Plans"],
+    });
+    const header = (thead.children as FarmNativeNode[])[0];
+    expect(header).toMatchObject({ tag: "tr", style: { flexDirection: "row" } });
+    expect(header.children).toMatchObject([
+      {
+        tag: "th",
+        style: { flexGrow: 1, flexShrink: 1, flexBasis: 0 },
+        children: [{ type: "Text", style: { fontWeight: 700, textAlign: "center" } }],
+      },
+      { tag: "th", style: { flexGrow: 2, flexShrink: 1, flexBasis: 0 } },
+    ]);
+    const cells = ((tbody.children as FarmNativeNode[])[0].children ?? []) as FarmNativeNode[];
+    // A cell with its own width keeps it.
+    expect(cells.map((cell) => cell.style)).toEqual([
+      { flexGrow: 1, flexShrink: 1, flexBasis: 0 },
+      { flexGrow: 0, flexShrink: 0, width: 40 },
+      { flexGrow: 1, flexShrink: 1, flexBasis: 0 },
+    ]);
+    expect(JSON.stringify(cells[2])).toContain('"href":"https://notes.example.com/x"');
+  });
+
+  it("keeps the web screen for a table a native row cannot hold", () => {
+    const unsupported = (body: string) => createFarmNativeTree(page(body), url).unsupported;
+    expect(
+      unsupported(`<table><tr><td rowspan="2">a</td><td>b</td></tr><tr><td>c</td></tr></table>`),
+    ).toEqual(['<td> rowspan="2"']);
+    expect(unsupported(`<table><tr><td>a</td></tr>stray</table>`)).toEqual([
+      "text directly inside <table>",
+    ]);
+    expect(unsupported(`<table><div>a</div></table>`)).toEqual(["<div> inside <table>"]);
+    expect(unsupported(`<table><colgroup><col style="width: 30%"></colgroup></table>`)).toEqual([
+      "<col> sets column styles",
+    ]);
+    expect(unsupported(`<div><td>a</td></div>`)).toEqual(["<td> outside a row"]);
   });
 
   it("keeps the web screen for a button or field nothing submits", () => {
