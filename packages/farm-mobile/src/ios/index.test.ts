@@ -621,6 +621,11 @@ describe("@farm.js/mobile/ios", () => {
       server.indexOf("scroll.addSubview(content)"),
     );
     expect(server.indexOf(completion)).toBeGreaterThan(server.indexOf("loaded = true"));
+    // A redraw replaces only the previous tree: the scroll view also holds the refresh control,
+    // and pull to refresh stops working once that leaves the view.
+    expect(server).toContain("scroll.refreshControl = refresher");
+    expect(server).not.toContain("scroll.subviews");
+    expect(server).toContain("drawn?.removeFromSuperview()");
     expect(files["App/Navigator.swift"]).toContain('screen.navigationItem.title = ""');
     expect(routes).toContain(
       'let screen = (json["screen"] as? String).flatMap { screens.contains($0) ? $0 : nil } ?? web',
