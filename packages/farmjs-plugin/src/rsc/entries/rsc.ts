@@ -116,7 +116,7 @@ import {
   createProductionMiddlewareRunner,
 } from '@farm.js/core/middleware';
 import { _withFarmGuardedResponseCache } from '@farm.js/core/internal/production-runtime';
-${ctx.mobileClient === "entry" ? "import { _applyFarmMobileShellClient, createFarmNativeTreeResponse } from '@farm.js/core/internal/production-runtime';\n" : ctx.mobileClient === "inline" ? "import { createFarmNativeTreeResponse } from '@farm.js/core/internal/production-runtime';\n" : ""}import {
+${ctx.mobileClient === "entry" ? "import { _applyFarmMobileShellClient, createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';\n" : ctx.mobileClient === "inline" ? "import { createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';\n" : ""}import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   isFarmAPIPathname,
@@ -1570,6 +1570,11 @@ ${
         farmNativeTreeRenders.add(target);
         return handler(target, context);
       },
+      // Behind a proxy that terminates TLS, links and server-action forms use the forwarded
+      // origin (under server.trustProxy), so the shell posts to https:// as the browser does.
+      origin: resolveFarmWebRequestOrigin(request, {
+        trustProxy: ${JSON.stringify(ctx.server?.trustProxy === true)},
+      }),
       loadStylesheet: ${
         ctx.mobileClient === "entry"
           ? "(href) => farmNativeStylesheets[href]"
