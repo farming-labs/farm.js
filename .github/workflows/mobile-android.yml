@@ -4,8 +4,9 @@ name: Mobile Android
 # examples/mobile (Field Notes, the complete example) and examples/mobile-minimal (Trail Guide, the
 # zero-native-code path). It keeps the same evidence the Mobile iOS workflow keeps for the iOS
 # shell: the APK builds, the app launches, the home route draws native content, and the log holds
-# no fatal error. Ubuntu runners have the Android SDK preinstalled and KVM available, so this needs
-# no third-party action.
+# no fatal error. It also builds examples/server-components' APK and taps the server actions on
+# its native-tier screen /native (RFC 0004). Ubuntu runners have the Android SDK preinstalled and
+# KVM available, so this needs no third-party action.
 on:
   workflow_dispatch:
   pull_request:
@@ -15,6 +16,8 @@ on:
       - "packages/farm-cli/src/mobile*.ts"
       - "examples/mobile/**"
       - "examples/mobile-minimal/**"
+      - "examples/server-components/**"
+      - "packages/farmjs-plugin/src/rsc/**"
       - ".github/workflows/mobile-android.yml"
 
 permissions:
@@ -40,6 +43,11 @@ jobs:
           - example: mobile-minimal
             app-id: dev.farmjs.examples.trailguide
             server-routes: "/ /trails/[id]"
+          # Only its native-tier screen /native, whose forms post server actions, tapped in the
+          # production APK, where it is the first tab: "/" is a web screen, so the shell checks skip it.
+          - example: server-components
+            app-id: dev.farmjs.examples.servercomponents
+            native-actions: true
     env:
       AVD_IMAGE: system-images;android-35;google_apis;x86_64
     steps:
@@ -57,6 +65,9 @@ jobs:
           pnpm --filter @farm.js/mobile build
           pnpm --filter @farm.js/native build
           pnpm --filter @farm.js/ui build
+          if [ "${{ matrix.example }}" = "server-components" ]; then
+            pnpm --filter @farm.js/plugin build
+          fi
         env:
           NODE_OPTIONS: --max-old-space-size=12288
 
@@ -99,11 +110,15 @@ jobs:
         env:
           FIELD_NOTES_SERVER: https://10.0.2.2:3443
           TRAIL_GUIDE_SERVER: https://10.0.2.2:3443
+          FARM_SERVER_COMPONENTS_MOBILE_SERVER: https://10.0.2.2:3443
+          FARM_SERVER_COMPONENTS_MODE: rsc
+          FARM_SKIP_RSC_INSTALL: "1"
         run: |
           export JAVA_HOME="$JAVA_HOME_21_X64"
           pnpm exec farm build --mobile --apk 2>&1 | tee "$EVIDENCE/farm-build-android.txt"
 
       - name: Serve the production build over HTTPS
+        if: ${{ !matrix.native-actions }}
         working-directory: examples/${{ matrix.example }}
         run: |
           PORT=3100 HOST=127.0.0.1 node .farm/output/mobile/www/server/index.mjs \
@@ -116,6 +131,22 @@ jobs:
           node "$GITHUB_WORKSPACE/examples/mobile/scripts/https-ready.mjs" "$RUNNER_TEMP/tls/ca.pem" \
             https://localhost:3443/ 60 || { cat "$EVIDENCE/production-server.txt" "$EVIDENCE/https-proxy.txt"; exit 1; }
           cat "$EVIDENCE/production-server.txt" "$EVIDENCE/https-proxy.txt"
+
+      # The native tree resolves each form's action against the URL the server was asked for, so a
+      # server behind the plain HTTP proxy above would send the screen http:// actions it cannot
+      # post to. This production server terminates TLS itself (Nitro's NITRO_SSL_CERT/KEY), as a
+      # deployment answers https:// requests, and sees the URL the app opened.
+      - name: Serve the production build over HTTPS from the server itself
+        if: matrix.native-actions
+        working-directory: examples/${{ matrix.example }}
+        run: |
+          NITRO_SSL_CERT="$RUNNER_TEMP/tls/server.pem" NITRO_SSL_KEY="$RUNNER_TEMP/tls/server-key.pem" \
+            PORT=3443 HOST=127.0.0.1 node .farm/output/mobile/www/server/index.mjs \
+            > "$EVIDENCE/production-server.txt" 2>&1 &
+          echo "PRODUCTION_SERVER_PID=$!" >> "$GITHUB_ENV"
+          node "$GITHUB_WORKSPACE/examples/mobile/scripts/https-ready.mjs" "$RUNNER_TEMP/tls/ca.pem" \
+            https://localhost:3443/native 60 || { cat "$EVIDENCE/production-server.txt"; exit 1; }
+          cat "$EVIDENCE/production-server.txt"
 
       - name: Boot the emulator
         run: |
@@ -166,6 +197,7 @@ jobs:
       # The production APK's home tab is a server screen: it must draw native content from the
       # local production server, over HTTPS with the run's CA.
       - name: Open the production APK against the local server
+        if: ${{ !matrix.native-actions }}
         working-directory: examples/${{ matrix.example }}
         env:
           APP_ID: ${{ matrix.app-id }}
@@ -229,6 +261,7 @@ jobs:
           "$ADB" logcat -c || true
 
       - name: Run the shell with farm dev --mobile
+        if: ${{ !matrix.native-actions }}
         working-directory: examples/${{ matrix.example }}
         run: |
           export JAVA_HOME="$JAVA_HOME_21_X64"
@@ -244,6 +277,7 @@ jobs:
           grep -q "Opened .* on " "$EVIDENCE/farm-dev-android.txt"
 
       - name: Capture the running app
+        if: ${{ !matrix.native-actions }}
         env:
           APP_ID: ${{ matrix.app-id }}
         run: |
@@ -261,6 +295,7 @@ jobs:
           grep -iE "FATAL|crash" "$EVIDENCE/app-log.txt" | head -20 || true
 
       - name: Check the home route drew native content
+        if: ${{ !matrix.native-actions }}
         working-directory: examples/${{ matrix.example }}
         env:
           SERVER_ROUTES: ${{ matrix.server-routes }}
@@ -276,6 +311,17 @@ jobs:
         env:
           APP_ID: ${{ matrix.app-id }}
         run: node scripts/check-android-form.mjs "$EVIDENCE" "$APP_ID"
+
+      # The server action forms on /native, drawn natively from the production server's tree:
+      # typed into and tapped on the emulator, with each note required on the redrawn screen.
+      - name: Tap the server actions on the native /native screen
+        if: matrix.native-actions
+        working-directory: examples/${{ matrix.example }}
+        env:
+          APP_ID: ${{ matrix.app-id }}
+        run: |
+          "$ANDROID_HOME/platform-tools/adb" install -r ".farm/output/mobile/dist/$APP_ID-debug.apk"
+          node scripts/check-android-native-actions.mjs "$EVIDENCE" "$APP_ID"
 
       - name: Stop the dev server and the production server
         if: always()
