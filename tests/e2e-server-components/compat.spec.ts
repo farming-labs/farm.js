@@ -195,3 +195,52 @@ test("react-hook-form's hooks work in a client component", async ({ page }) => {
   await expect(page.getByTestId("hook-form")).toHaveText("sent: Ada");
   expect(errors).toEqual([]);
 });
+
+test("lucide-react icons render from a server component and swap in a client component", async ({
+  page,
+  request,
+}) => {
+  expect(await (await request.get("/compat/icons")).text()).toContain("lucide-camera");
+  const errors = await open(page, "/compat/icons");
+  await expect(page.getByTestId("icon-server")).toBeVisible();
+  await expect(page.getByLabel("sun")).toBeVisible();
+  await page.getByTestId("icon-toggle").click();
+  await expect(page.getByLabel("moon")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("react-markdown renders markdown in a server component", async ({ page, request }) => {
+  const html = await (await request.get("/compat/markdown")).text();
+  expect(html).toContain("<h1>Rendered on the server</h1>");
+  expect(html).toContain("<strong>bold</strong>");
+  const errors = await open(page, "/compat/markdown");
+  await expect(page.getByTestId("markdown").getByRole("link")).toHaveAttribute(
+    "href",
+    "/compat/icons",
+  );
+  expect(errors).toEqual([]);
+});
+
+test("a recharts chart draws server data in a client component", async ({ page }) => {
+  const errors = await open(page, "/compat/chart");
+  await expect(page.locator("[data-testid=chart] .recharts-bar-rectangle")).toHaveCount(3);
+  await expect(page.getByTestId("chart").getByText("Feb")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("React Aria Components open and close a dialog from a client component", async ({ page }) => {
+  const errors = await open(page, "/compat/aria");
+  await page.getByTestId("aria-open").click();
+  await expect(page.getByRole("dialog", { name: "Aria dialog" })).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("a cmdk command menu filters its items", async ({ page }) => {
+  const errors = await open(page, "/compat/command");
+  await page.getByPlaceholder("Search").fill("ban");
+  await expect(page.getByRole("option", { name: "Banana" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Apple" })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
