@@ -22,13 +22,20 @@ import {
   FARM_NATIVE_TEXT_KEYS,
   farmNativeClassProblem,
   resolveFarmNativeClasses,
+  resolveFarmNativeInlineStyle,
 } from "./native-style";
+import {
+  farmComponentKind,
+  farmComponentModuleScripts,
+  keepFarmComponentRanges,
+  readFarmComponentBlocks,
+} from "./component-blocks";
 
 /**
  * Cached facts are reused only by the same analyzer: bump when facts change shape or rules
  * change between releases; a new Farm version always starts fresh.
  */
-const ANALYZER_VERSION = `5:${FARM_VERSION}`;
+const ANALYZER_VERSION = `6:${FARM_VERSION}`;
 
 export type FarmUiNodeKind = "View" | "Text" | "Image" | "Pressable" | "TextInput" | "List";
 
@@ -95,7 +102,8 @@ export type FarmMobileBlockerRule =
   | "dynamic-import"
   | "node-builtin"
   | "client-logic"
-  | "inert-control";
+  | "inert-control"
+  | "renderer-component";
 
 export type FarmMobileWin = "list" | "input" | "timer";
 
@@ -386,6 +394,10 @@ const MAPPED_COMPONENTS: Record<string, Record<string, FarmUiNodeKind>> = {
 const SERVER_FN_FACTORIES = new Set(["createServerFn", "createServerQuery"]);
 
 const SCRIPT_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js", ".mjs"];
+/** Renderer component files the analyzer reads without the renderer's compiler. */
+const COMPONENT_EXTENSIONS = [".vue", ".svelte"];
+const isModuleFile = (file: string) =>
+  [...SCRIPT_EXTENSIONS, ...COMPONENT_EXTENSIONS].some((extension) => file.endsWith(extension));
 const STYLE_FILE = /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:\?.*)?$/i;
 const ASSET_FILE =
   /\.(?:png|jpe?g|gif|webp|avif|svg|ico|bmp|json|woff2?|ttf|otf|mp3|wav|txt)(?:\?.*)?$/i;
@@ -516,6 +528,8 @@ interface ModuleFacts {
   appClasses: Array<{ name: string; line: number; column: number }>;
   /** Intrinsic elements rendered, for element rules in the app's CSS. */
   tags: string[];
+  /** A `.vue` or `.svelte` component's own `<style>` blocks: CSS that styles its classes. */
+  styles?: string[];
 }
 
 type Node = { type: string; start: number; end: number; [key: string]: any };
@@ -606,7 +620,12 @@ const SKIP_KEYS = new Set([
 ]);
 
 /** Facts for one module's source. Pure: the same source always gives the same facts. */
-function analyzeSource(file: string, source: string, parseSync: ParseSync): ModuleFacts {
+function analyzeSource(
+  file: string,
+  source: string,
+  parseSync: ParseSync,
+  lang: "ts" | "tsx" | "jsx" = scriptLang(file),
+): ModuleFacts {
   const facts: ModuleFacts = {
     imports: [],
     blockers: [],
@@ -639,7 +658,7 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
     block(node, "client-logic", message, "native");
   // Inside a `<form>` of this module's JSX: its controls submit it.
   let formDepth = 0;
-  const result = parseSync(file, source, { lang: scriptLang(file) });
+  const result = parseSync(file, source, { lang });
   if (result.errors.length > 0) {
     const error = result.errors[0]!;
     const offset = error.labels?.[0]?.start ?? 0;
@@ -1201,6 +1220,333 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
   return facts;
 }
 
+// Vue and Svelte tags that render their children, or nothing, rather than an element.
+const COMPONENT_STRUCTURE = new Set([
+  "template",
+  "slot",
+  "Transition",
+  "TransitionGroup",
+  "KeepAlive",
+  "Suspense",
+  "svelte:head",
+  "svelte:fragment",
+  "svelte:options",
+  "svelte:window",
+  "svelte:body",
+  "svelte:document",
+  "svelte:boundary",
+]);
+// Tags whose element or content is chosen at runtime, or rendered outside the page.
+const COMPONENT_DYNAMIC = new Set(["component", "svelte:element", "svelte:component", "Teleport"]);
+const VOID_ELEMENTS = new Set(
+  "area base br col embed hr img input link meta source track wbr".split(" "),
+);
+
+/**
+ * Facts for a `.vue` or `.svelte` component, read without the renderer's compiler. Its scripts go
+ * through the script analyzer (imports, browser globals, async), and its markup through a scanner
+ * that applies the element, class, style, and form rules JSX gets. Vue and Svelte run a page's
+ * scripts on the server unless the page exports `hydrate = true`, so that export, not a hook
+ * call, is what needs JavaScript on the device. React Native ports are React only.
+ */
+function analyzeComponentSource(file: string, source: string, parseSync: ParseSync): ModuleFacts {
+  const blocks = readFarmComponentBlocks(file, source);
+  const name = blocks.kind === "vue" ? "Vue" : "Svelte";
+  const scripts = keepFarmComponentRanges(source, blocks.scripts);
+  const typed = blocks.scripts.some((script) => script.attributes.lang === "tsx") ? "tsx" : "ts";
+  const facts = analyzeSource(file, scripts, parseSync, typed);
+  // A hook-shaped call is React's signal for the device; Vue and Svelte use `hydrate` instead.
+  facts.blockers = facts.blockers.filter((blocker) => blocker.rule !== "client-logic");
+  const starts = lineStarts(source);
+  const block = (
+    offset: number,
+    rule: FarmMobileBlockerRule,
+    message: string,
+    only?: FarmMobileBlocker["only"],
+  ) => facts.blockers.push({ ...locate(starts, offset), rule, message, ...(only ? { only } : {}) });
+  facts.blockers.push({
+    line: 1,
+    column: 1,
+    rule: "renderer-component",
+    message: `a ${name} component has no React Native port`,
+    only: "react-native",
+  });
+  for (const script of farmComponentModuleScripts(blocks)) {
+    const hydrate = /\bexport\s+const\s+hydrate\s*=\s*true\b/.exec(
+      source.slice(script.start, script.end),
+    );
+    if (hydrate) {
+      block(
+        script.start + hydrate.index,
+        "client-logic",
+        "it exports hydrate = true, which hydrates the page in the browser",
+        "native",
+      );
+    }
+  }
+  const styles = blocks.styles
+    .filter((style) => !style.attributes.lang || style.attributes.lang === "css")
+    .map((style) => source.slice(style.start, style.end));
+  if (styles.length > 0) facts.styles = styles;
+  for (const style of blocks.styles) {
+    if (style.attributes.lang && style.attributes.lang !== "css") {
+      block(
+        style.start,
+        "css-import",
+        `<style lang="${String(style.attributes.lang)}"> is not CSS`,
+      );
+    }
+  }
+
+  // The names this component's scripts import: tags that name one are components it renders.
+  const imported = new Set<string>();
+  for (const script of blocks.scripts) {
+    const text = source.slice(script.start, script.end);
+    for (const match of text.matchAll(/\bimport\s+(?:type\s+)?([\w$]+)\s*(?:,|from\b)/g)) {
+      imported.add(match[1]!);
+    }
+    for (const match of text.matchAll(/\bimport\s+(?:[\w$]+\s*,\s*)?\{([^}]*)\}/g)) {
+      for (const part of match[1]!.split(",")) {
+        const local = part
+          .trim()
+          .split(/\s+as\s+/)
+          .pop()
+          ?.trim();
+        if (local) imported.add(local);
+      }
+    }
+  }
+  const pascal = (tag: string) =>
+    tag.replace(/(^|-)([a-z])/g, (_, __, letter: string) => letter.toUpperCase());
+
+  let formDepth = 0;
+  const open: string[] = [];
+  for (const range of blocks.markup) {
+    const markup = source.slice(range.start, range.end);
+    let index = 0;
+    while (index < markup.length) {
+      const at = range.start + index;
+      if (markup.startsWith("<!--", index)) {
+        const end = markup.indexOf("-->", index + 4);
+        index = end === -1 ? markup.length : end + 3;
+        continue;
+      }
+      // Text expressions: Vue's {{ }}, Svelte's { } and its {@html}, {#if}, {:else} blocks.
+      if (markup[index] === "{") {
+        const end = closeBrace(markup, index);
+        if (blocks.kind === "svelte" && /^\{@html\b/.test(markup.slice(index))) {
+          block(at, "dangerously-set-inner-html", "{@html} renders raw HTML");
+        }
+        index = end;
+        continue;
+      }
+      if (markup[index] !== "<") {
+        index += 1;
+        continue;
+      }
+      const closing = markup[index + 1] === "/";
+      const nameMatch = /^[A-Za-z][\w:.-]*/.exec(markup.slice(index + (closing ? 2 : 1)));
+      if (!nameMatch) {
+        index += 1;
+        continue;
+      }
+      const tag = nameMatch[0];
+      let cursor = index + (closing ? 2 : 1) + tag.length;
+      const attributes: Array<{ name: string; value?: string; dynamic: boolean; offset: number }> =
+        [];
+      let selfClosing = false;
+      while (cursor < markup.length && markup[cursor] !== ">") {
+        const char = markup[cursor]!;
+        if (/\s/.test(char)) {
+          cursor += 1;
+          continue;
+        }
+        if (char === "/" && markup[cursor + 1] === ">") {
+          selfClosing = true;
+          cursor += 1;
+          continue;
+        }
+        if (char === "{") {
+          // A Svelte spread or shorthand attribute, {...props} or {value}.
+          attributes.push({ name: "{", dynamic: true, offset: range.start + cursor });
+          cursor = closeBrace(markup, cursor);
+          continue;
+        }
+        const attrName = /^[^\s=/>]+/.exec(markup.slice(cursor))?.[0] ?? char;
+        const attrOffset = range.start + cursor;
+        cursor += attrName.length;
+        while (/\s/.test(markup[cursor] ?? "")) cursor += 1;
+        let value: string | undefined;
+        let braced = false;
+        if (markup[cursor] === "=") {
+          cursor += 1;
+          while (/\s/.test(markup[cursor] ?? "")) cursor += 1;
+          const quote = markup[cursor];
+          if (quote === '"' || quote === "'") {
+            const end = markup.indexOf(quote, cursor + 1);
+            value = markup.slice(cursor + 1, end === -1 ? markup.length : end);
+            cursor = end === -1 ? markup.length : end + 1;
+          } else if (quote === "{") {
+            const end = closeBrace(markup, cursor);
+            value = markup.slice(cursor, end);
+            braced = true;
+            cursor = end;
+          } else {
+            value = /^[^\s>]+/.exec(markup.slice(cursor))?.[0] ?? "";
+            cursor += value.length;
+          }
+        }
+        const dynamic =
+          braced ||
+          attrName.startsWith(":") ||
+          attrName.startsWith("v-bind:") ||
+          attrName.startsWith("@") ||
+          attrName.startsWith("v-on:") ||
+          (blocks.kind === "svelte" && value !== undefined && /\{/.test(value));
+        attributes.push({ name: attrName, value, dynamic, offset: attrOffset });
+      }
+      index = cursor + 1;
+      if (closing) {
+        const position = open.lastIndexOf(tag);
+        if (position !== -1) {
+          for (const closed of open.splice(position)) if (closed === "form") formDepth -= 1;
+        }
+        continue;
+      }
+      const element = !selfClosing && !VOID_ELEMENTS.has(tag.toLowerCase());
+      if (element) open.push(tag);
+      if (tag === "form" && element) formDepth += 1;
+
+      for (const attribute of attributes) {
+        if (attribute.name === "v-html") {
+          block(attribute.offset, "dangerously-set-inner-html", "v-html renders raw HTML");
+        }
+        if (attribute.name.toLowerCase() === "contenteditable") {
+          block(attribute.offset, "content-editable", "contentEditable");
+        }
+      }
+      if (COMPONENT_STRUCTURE.has(tag)) continue;
+      if (COMPONENT_DYNAMIC.has(tag) || attributes.some((attribute) => attribute.name === "is")) {
+        block(at, "dynamic-component", `<${tag}> picks what it renders at runtime`);
+        continue;
+      }
+      const intrinsic = /^[a-z][a-z0-9]*$/.test(tag);
+      if (!intrinsic) {
+        if (!imported.has(tag) && !imported.has(pascal(tag))) {
+          block(at, "dynamic-component", `<${tag}> is not a component this file imports`);
+        }
+        continue;
+      }
+      const kind = INTRINSIC_KINDS[tag];
+      if (!facts.tags.includes(tag)) facts.tags.push(tag);
+      facts.elements.total += 1;
+      if (!kind) {
+        block(at, "unmapped-element", `<${tag}> has no native mapping`);
+        continue;
+      }
+      facts.elements.mapped += 1;
+      facts.elements.byKind[kind] = (facts.elements.byKind[kind] ?? 0) + 1;
+
+      const value = (attr: string) =>
+        attributes.find((attribute) => attribute.name.toLowerCase() === attr);
+      const boundAttribute = (attr: string) =>
+        attributes.find(
+          (attribute) =>
+            (attribute.dynamic &&
+              (attribute.name === `:${attr}` ||
+                attribute.name === `v-bind:${attr}` ||
+                attribute.name === attr)) ||
+            (attr === "class" && attribute.name.startsWith("class:")),
+        );
+      const classes = value("class");
+      if (boundAttribute("class")) {
+        block(at, "runtime-class-name", `<${tag}> builds its class names at runtime`);
+      } else if (classes?.value) {
+        for (const token of classes.value.split(/\s+/).filter(Boolean)) {
+          const problem = classifyClass(token);
+          if (problem && /^class ".*" is not in the native Tailwind subset$/.test(problem)) {
+            facts.appClasses.push({ name: token, ...locate(starts, classes.offset) });
+          } else if (problem) block(classes.offset, "class-name", problem);
+          else {
+            const native = farmNativeClassProblem(token);
+            if (native) block(classes.offset, "class-name", native, "native");
+          }
+        }
+      }
+      const style = value("style");
+      if (boundAttribute("style")) {
+        block(at, "runtime-style", `<${tag}> style is computed at runtime`);
+      } else if (style?.value) {
+        for (const declaration of resolveFarmNativeInlineStyle(style.value).unsupported) {
+          block(
+            style.offset,
+            "style",
+            `<${tag}> style "${declaration}" has no native-tier style`,
+            "native",
+          );
+        }
+      }
+      const type = value("type");
+      if (tag === "input") {
+        const inputType = type?.dynamic ? undefined : (type?.value ?? "text").toLowerCase();
+        const formType = formDepth > 0 && (inputType === "hidden" || inputType === "submit");
+        if (!formType && (inputType === undefined || !INPUT_TYPES.has(inputType))) {
+          block(
+            at,
+            "unmapped-element",
+            `<input type="${inputType ?? "{expr}"}"> has no native mapping`,
+          );
+          continue;
+        }
+        if (inputType === "hidden") continue;
+      }
+      // A server-drawn screen opens links and submits forms (see analyzeSource).
+      const buttonType = tag === "button" ? (type?.value ?? "submit").toLowerCase() : undefined;
+      if (
+        (tag === "button" || kind === "TextInput") &&
+        !value("action") &&
+        !value("formaction") &&
+        (formDepth === 0 || (buttonType !== undefined && buttonType !== "submit"))
+      ) {
+        block(
+          at,
+          "inert-control",
+          formDepth > 0
+            ? `<button type="${buttonType}"> does nothing on a native-tier screen`
+            : `<${tag}> has no link or form to submit on a native-tier screen`,
+          "native",
+        );
+      }
+      if (tag === "form") {
+        const method = value("method");
+        const methodValue = (method?.value ?? "get").toLowerCase();
+        if (method?.dynamic || (methodValue !== "get" && methodValue !== "post")) {
+          block(at, "form-action", `<form method="${method?.value ?? "{expr}"}">`, "native");
+        }
+      }
+    }
+  }
+  return facts;
+}
+
+/** The index after the brace that closes the one at `start`, past strings and nested braces. */
+function closeBrace(text: string, start: number): number {
+  let depth = 0;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"' || char === "'" || char === "`") {
+      const end = text.indexOf(char, index + 1);
+      if (end === -1) return text.length;
+      index = end;
+    } else if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+  return text.length;
+}
+
 type ParseSync = (
   file: string,
   source: string,
@@ -1423,14 +1769,25 @@ export async function analyzeFarmMobileRoutes(
     let pending = facts.get(file);
     if (!pending) {
       pending = readFile(file, "utf8").then((source) => {
+        const component = farmComponentKind(file);
         const hash = createHash("sha1")
-          .update(file.endsWith(".tsx") ? "tsx\0" : file.endsWith(".ts") ? "ts\0" : "jsx\0")
+          .update(
+            component
+              ? `${component}\0`
+              : file.endsWith(".tsx")
+                ? "tsx\0"
+                : file.endsWith(".ts")
+                  ? "ts\0"
+                  : "jsx\0",
+          )
           .update(source)
           .digest("hex");
         let result = cache.modules[hash];
         if (result) cached += 1;
         else {
-          result = analyzeSource(file, source, parseSync);
+          result = component
+            ? analyzeComponentSource(file, source, parseSync)
+            : analyzeSource(file, source, parseSync);
           parsed += 1;
         }
         used[hash] = result;
@@ -1503,7 +1860,7 @@ export async function analyzeFarmMobileRoutes(
             },
           };
         }
-        if (!SCRIPT_EXTENSIONS.some((extension) => file.endsWith(extension))) {
+        if (!isModuleFile(file)) {
           return {
             fact,
             blocker: {
@@ -1544,8 +1901,7 @@ export async function analyzeFarmMobileRoutes(
   const scripts = new Set<string>();
   for (const { page, layouts } of entries.values()) {
     for (const file of [page, ...layouts]) {
-      if (file && SCRIPT_EXTENSIONS.some((extension) => file.endsWith(extension)))
-        scripts.add(file);
+      if (file && isModuleFile(file)) scripts.add(file);
     }
   }
   await Promise.all([...scripts].map(visitModule));
@@ -1583,6 +1939,8 @@ export async function analyzeFarmMobileRoutes(
     const tags = new Set<string>();
     const graph: FarmMobilePortGraph["modules"] = [];
     const layoutClasses = new Set<string>();
+    // `.vue` and `.svelte` components' own `<style>` blocks, which style their classes.
+    const componentSheets: FarmNativeStylesheet[] = [];
 
     // `layout`: a layout's graph, which only a React Native port includes.
     const walk = (file: string, entry: boolean, layout: boolean) => {
@@ -1640,6 +1998,9 @@ export async function analyzeFarmMobileRoutes(
         for (const appClass of moduleFacts.appClasses)
           appClasses.push({ file: label, ...appClass });
         for (const tag of moduleFacts.tags) tags.add(tag);
+        for (const css of moduleFacts.styles ?? []) {
+          componentSheets.push(parseFarmNativeStylesheet(css));
+        }
       }
       for (const win of moduleFacts.wins) wins.add(win);
       elements.total += moduleFacts.elements.total;
@@ -1685,7 +2046,7 @@ export async function analyzeFarmMobileRoutes(
     }
     for (const layout of layouts) walk(layout, true, true);
 
-    const sheets = [...stylesheets].map(readStylesheet);
+    const sheets = [...[...stylesheets].map(readStylesheet), ...componentSheets];
     for (const appClass of appClasses) {
       const { styled, problems } = inspectFarmNativeStylesheets(sheets, { class: appClass.name });
       const at = { file: appClass.file, line: appClass.line, column: appClass.column };

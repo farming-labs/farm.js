@@ -411,6 +411,15 @@ Each analyzed route gets a **tier**, the first one nothing rules out:
 | `react-native` | A React Native screen ported from the page can run its logic on the device                                                                                         | the blockers below, async pages, server components, Node.js APIs, and packages not on the list |
 | `web`          | A WebView of the page                                                                                                                                              | —                                                                                              |
 
+Vue and Svelte pages are read too, `.vue` and `.svelte` components included, without the renderer's
+compiler. Their scripts run on the server unless the page exports `hydrate = true`, so that export,
+not a hook-shaped call, is what keeps a Vue or Svelte page off the native tier. Their markup gets
+the element, class, inline-style, and form rules JSX does; a component's own `<style>` blocks count
+as the app's CSS for its classes, and `v-html`, `{@html}`, bound classes and styles, `<component
+:is>`, `<svelte:element>`, and tags that name no imported component keep the route web. `export
+const mobile` goes in the module script (Vue's plain `<script>`, Svelte's `<script module>`).
+React Native ports are React only, so a Vue or Svelte route is `native` or `web`.
+
 The native tier looks only at the page and its app modules: the native shell draws the chrome, so
 layouts are not part of a native screen. The report keeps the two lists apart, `nativeBlockers` for
 the native tier and `blockers` for a React Native port, and the table shows the first blocker of the

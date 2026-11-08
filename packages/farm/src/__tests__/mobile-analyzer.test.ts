@@ -568,6 +568,156 @@ export default function Client() {
     expect(native("/dialog")).toEqual(['form-action <form method="dialog">']);
   });
 
+  it("reads Vue and Svelte pages, whose scripts run on the server unless they hydrate", async () => {
+    const renderer = (name: "vue" | "svelte") => ({
+      name,
+      vite: `@farm.js/${name}/vite`,
+      server: `@farm.js/${name}/server`,
+      client: `@farm.js/${name}/client`,
+      componentExtensions: [`.${name}`],
+    });
+    const vue = await createApp({
+      "src/app/layout.vue": `<template><slot /></template>`,
+      "src/app/page.vue": `<script lang="ts">
+export const mobile = { native: true };
+</script>
+
+<script setup lang="ts">
+import TrailCard from "../components/trail-card.vue";
+import { useRoute } from "vue-router";
+const route = useRoute();
+</script>
+
+<template>
+  <main class="flex flex-col gap-2">
+    <h1 class="text-2xl">Trails</h1>
+    <template v-if="route">
+      <TrailCard name="Creek" />
+    </template>
+    <form method="post" action="/api/reports">
+      <input type="hidden" name="trail" value="creek" />
+      <textarea name="text" required></textarea>
+      <button>Post</button>
+    </form>
+  </main>
+</template>
+`,
+      "src/components/trail-card.vue": `<script setup lang="ts">
+defineProps<{ name: string }>();
+</script>
+
+<template>
+  <a href="/trails/creek" class="card">{{ name }}</a>
+</template>
+
+<style scoped>
+.card { padding: 8px; border-radius: 8px; }
+</style>
+`,
+      "src/app/counter/page.vue": `<script lang="ts">
+export const hydrate = true;
+</script>
+
+<template><button type="button" @click="count++">{{ count }}</button></template>
+`,
+      "src/app/raw/page.vue": `<template>
+  <div :class="tone"><div v-html="html" /><GlobalWidget /><component :is="tag" /></div>
+</template>
+`,
+    });
+    const vueResult = await report(vue, {
+      ...userConfig({ auto: "on" }),
+      renderer: renderer("vue"),
+    } as never);
+    const vueBlockers = (route: string) =>
+      routeOf(vueResult, route).analysis!.nativeBlockers.map(
+        (blocker) => `${blocker.file}:${blocker.line} ${blocker.rule} ${blocker.message}`,
+      );
+    // A page whose scripts run on the server only, in a component's own CSS: the native tier.
+    expect(vueBlockers("/")).toEqual([]);
+    expect(routeOf(vueResult, "/").analysis!.tier).toBe("native");
+    expect(vueResult.screens["/"]).toMatchObject({ screen: "server", source: "page" });
+    // React Native ports are React only: a Vue page is native or web.
+    expect(routeOf(vueResult, "/").analysis!.blockers.map((blocker) => blocker.rule)).toContain(
+      "renderer-component",
+    );
+    expect(vueBlockers("/counter")).toEqual([
+      "src/app/counter/page.vue:2 client-logic it exports hydrate = true, which hydrates the page in the browser",
+      "src/app/counter/page.vue:5 inert-control <button> has no link or form to submit on a native-tier screen",
+    ]);
+    expect(routeOf(vueResult, "/counter").analysis!.tier).toBe("web");
+    expect(vueBlockers("/raw")).toEqual([
+      "src/app/raw/page.vue:2 runtime-class-name <div> builds its class names at runtime",
+      "src/app/raw/page.vue:2 dangerously-set-inner-html v-html renders raw HTML",
+      "src/app/raw/page.vue:2 dynamic-component <GlobalWidget> is not a component this file imports",
+      "src/app/raw/page.vue:2 dynamic-component <component> picks what it renders at runtime",
+    ]);
+
+    const svelte = await createApp({
+      "src/app/layout.svelte": `<slot />`,
+      "src/app/page.svelte": `<script module lang="ts">
+  export const mobile = { native: true };
+</script>
+
+<script lang="ts">
+  import Card from "../components/card.svelte";
+  const trails = ["creek", "ridge"];
+</script>
+
+<main class="flex flex-col gap-2">
+  {#each trails as trail}
+    <Card {trail} />
+  {/each}
+  {#if trails.length > 1 && trails.length < 3}<p>Two trails</p>{/if}
+</main>
+`,
+      "src/components/card.svelte": `<script lang="ts">
+  let { trail }: { trail: string } = $props();
+</script>
+
+<a href={"/trails/" + trail} class="p-2">{trail}</a>
+`,
+      "src/app/counter/page.svelte": `<script module>
+  export const hydrate = true;
+</script>
+
+<button onclick={() => count++}>{count}</button>
+`,
+      "src/app/raw/page.svelte": `<div class:active={on}>{@html html}<svelte:element this={tag} /></div>
+`,
+    });
+    const svelteResult = await report(svelte, {
+      ...userConfig({ auto: "on" }),
+      renderer: renderer("svelte"),
+    } as never);
+    const svelteBlockers = (route: string) =>
+      routeOf(svelteResult, route).analysis!.nativeBlockers.map(
+        (blocker) => `${blocker.rule} ${blocker.message}`,
+      );
+    expect(svelteBlockers("/")).toEqual([]);
+    expect(svelteResult.screens["/"]).toMatchObject({ screen: "server", source: "page" });
+    expect(svelteBlockers("/counter")).toEqual([
+      "client-logic it exports hydrate = true, which hydrates the page in the browser",
+      "inert-control <button> has no link or form to submit on a native-tier screen",
+    ]);
+    expect(svelteBlockers("/raw")).toEqual([
+      "runtime-class-name <div> builds its class names at runtime",
+      "dangerously-set-inner-html {@html} renders raw HTML",
+      "dynamic-component <svelte:element> picks what it renders at runtime",
+    ]);
+  });
+
+  it("never reads as a page that opts into hydration when core's bundle includes it", async () => {
+    // Core's main entry loads the analyzer's chunk, and the hydration planner reads the modules a
+    // page imports for an `export const hydrate` opt-in as text: a message spelling it would make
+    // every page that imports @farm.js/core hydrate.
+    const { hasHydrateExport } = await import("../utils/client-component");
+    for (const file of ["analyzer.ts", "component-blocks.ts", "runtime.ts", "screens.ts"]) {
+      const source = await fs.readFile(new URL(`../mobile/${file}`, import.meta.url), "utf8");
+      expect(hasHydrateExport(source), file).toBe(false);
+    }
+  });
+
   it("parses each module once per run and reuses facts by content hash", async () => {
     const files: Record<string, string> = {
       "src/components/shared.tsx": `export function Shared() { return <p>shared</p>; }\n`,
