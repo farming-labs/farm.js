@@ -23,7 +23,7 @@ Every route gets a **tier** — the first one nothing rules out:
 - **react-native** — a React Native screen ported from the page runs its logic on the device. This is the tier for pages that need interactivity — state, handlers — but still map to native. (The emitter that generates these screens runs on an Android emulator today, not yet on a device.)
 - **web** — a WebView of the page. The fallback, and the floor: every route works here.
 
-A screen is one tier. Every route keeps its `page.tsx`, which stays the web version and the fallback, so adopting native is reversible and never leaves a screen with nothing to show. A page built from the portable [`@farm.js/ui`](/docs/mobile#portable-components-farmjsui) components ports as it is: on a React Native screen the same `View`, `Text`, and `List` render as native views, with their tokens resolved to the web defaults.
+A screen is one tier. Every route keeps its `page.tsx`, which stays the web version and the fallback, so adopting native is reversible and never leaves a screen with nothing to show. A page built from the portable [`@farm.js/ui`](/docs/mobile/native-screens#portable-components) components ports as it is: on a React Native screen the same `View`, `Text`, and `List` render as native views, with their tokens resolved to the web defaults.
 
 <span id="how-the-analyzer-decides" className="blog-heading-anchor" />
 

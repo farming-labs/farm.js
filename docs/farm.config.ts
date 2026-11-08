@@ -8,6 +8,10 @@ const siteDescription =
 
 export default defineConfig({
   plugins: [devtools()],
+  // Moved pages keep their shared links working.
+  redirects: () => [
+    { source: "/docs/mobile/auth", destination: "/docs/auth#mobile-apps", permanent: true },
+  ],
   mdx: {
     components: "./src/markdown-components.tsx",
   },

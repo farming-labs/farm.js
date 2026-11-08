@@ -7,6 +7,10 @@ description: "Releases, engineering notes, and ideas from the people building Fa
 
 Releases, engineering notes, and ideas.
 
+## [How Farm draws a page natively, and when it bails out](/blog/native-internals)
+
+How a `page.tsx` becomes Android views and UIKit with no JavaScript on the phone, the three layers of bailout that fall back to the web page, and why a JSON tree from the server is not the bridge React Native removed.
+
 ## [Making your site agent-native](/blog/agent-native)
 
 Agents meet your site in four layers: content they can read, an index that points at it, rules about who may use it, and tools they can call. Most "AI-ready" work stops at the first. What the other three take, with the requests and responses to prove each one.
