@@ -156,6 +156,44 @@ for (const [name, status, body] of [
   });
 }
 
+test("shows Infra's own fix for a refusal, and the general checks only when it gives none", async (t) => {
+  const mismatch = {
+    error: "endpoint_mismatch",
+    message:
+      "This API key is bound to https://farmjs.dev, so it can only register cron jobs and agent wakes there.",
+  };
+  for (const [status, contentType, body, expected, unexpected] of [
+    [
+      409,
+      "application/json",
+      JSON.stringify(mismatch),
+      /HTTP 409\. Infra said \(endpoint_mismatch\): This API key is bound to https:\/\/farmjs\.dev, so it can only register cron jobs and agent wakes there\.$/,
+      /cron:jobs` permission/,
+    ],
+    [
+      502,
+      "text/html",
+      "<h1>Bad gateway</h1>",
+      /HTTP 502\. Check the key's `cron:jobs` permission, `FARMJS_ENVIRONMENT`, and `FARMJS_PROJECT_ID`\.$/,
+      /Infra said/,
+    ],
+  ]) {
+    const { options } = await fixture(t, {
+      handler(_request, response) {
+        response.writeHead(status, { "content-type": contentType });
+        response.end(body);
+      },
+    });
+    const error = await syncFarmCronJobs({ ...options, apply: true }).then(
+      () => assert.fail("the sync should be refused"),
+      (error) => error,
+    );
+    assert.equal(error.code, "SYNC_FAILED");
+    assert.match(error.message, expected);
+    assert.doesNotMatch(error.message, unexpected);
+  }
+});
+
 test("refuses redirects without following them with credentials", async (t) => {
   const { options, requests } = await fixture(t, {
     handler(_request, response) {
