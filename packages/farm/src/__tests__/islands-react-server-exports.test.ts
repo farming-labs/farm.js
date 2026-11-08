@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  findFarmClientOnlyImport,
   findFarmPackageManifest,
   isFarmClientExport,
   resolveFarmReactServerExport,
@@ -151,5 +152,70 @@ describe("react-server builds in islands mode", () => {
         reference: () => "",
       }),
     ).toBeNull();
+  });
+
+  describe("a package that reaches client-only", () => {
+    const packages = {
+      // Shaped like React Aria Components: the entry imports client-only without "use client".
+      "node_modules/entry-kit/package.json": '{"name":"entry-kit","exports":"./index.js"}',
+      "node_modules/entry-kit/index.js": 'import "client-only";\nexport const Button = 1;\n',
+      "node_modules/deep-kit/package.json": '{"name":"deep-kit","exports":"./index.js"}',
+      "node_modules/deep-kit/index.js": 'export { a } from "./a.js";\n',
+      "node_modules/deep-kit/a.js": 'import "entry-kit";\nexport const a = 1;\n',
+      "node_modules/boundary-kit/package.json": '{"name":"boundary-kit","exports":"./index.js"}',
+      "node_modules/boundary-kit/index.js": 'export { b } from "./b.js";\n',
+      "node_modules/boundary-kit/b.js":
+        '"use client";\nimport "client-only";\nexport const b = 1;\n',
+      // The build server components get has no client-only; only the browser's does.
+      "node_modules/split-kit/package.json": JSON.stringify({
+        name: "split-kit",
+        exports: { ".": { "react-server": "./server.js", default: "./client.js" } },
+      }),
+      "node_modules/split-kit/server.js": "export const s = 1;\n",
+      "node_modules/split-kit/client.js": 'import "client-only";\nexport const s = 1;\n',
+      "node_modules/browser-kit/package.json": JSON.stringify({
+        name: "browser-kit",
+        exports: { ".": { browser: "./browser.js", default: "./node.js" } },
+      }),
+      "node_modules/browser-kit/browser.js": 'import "client-only";\nexport const n = 1;\n',
+      "node_modules/browser-kit/node.js": "export const n = 1;\n",
+    };
+
+    it("names the import and the files between it and client-only", () => {
+      const root = project(packages);
+      const page = path.join(root, "src/page.tsx");
+      expect(findFarmClientOnlyImport('import { Button } from "entry-kit";\n', page)).toEqual({
+        specifier: "entry-kit",
+        chain: [path.join(root, "node_modules/entry-kit/index.js")],
+      });
+      expect(findFarmClientOnlyImport('import { a } from "deep-kit";\n', page)).toEqual({
+        specifier: "deep-kit",
+        chain: [
+          path.join(root, "node_modules/deep-kit/index.js"),
+          path.join(root, "node_modules/deep-kit/a.js"),
+          path.join(root, "node_modules/entry-kit/index.js"),
+        ],
+      });
+    });
+
+    it("ignores use client boundaries, the builds server code skips and type imports", () => {
+      const root = project(packages);
+      const page = path.join(root, "src/page.tsx");
+      for (const code of [
+        'import { b } from "boundary-kit";\n',
+        'import { s } from "split-kit";\n',
+        'import { n } from "browser-kit";\n',
+        'import type { Button } from "entry-kit";\n',
+      ]) {
+        expect(findFarmClientOnlyImport(code, page)).toBeNull();
+      }
+    });
+
+    it("finds a package again after an earlier import walked part of it clean", () => {
+      const root = project(packages);
+      const page = path.join(root, "src/page.tsx");
+      expect(findFarmClientOnlyImport('import { b } from "boundary-kit";\n', page)).toBeNull();
+      expect(findFarmClientOnlyImport('import { a } from "deep-kit";\n', page)).not.toBeNull();
+    });
   });
 });

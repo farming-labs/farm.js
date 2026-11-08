@@ -88,6 +88,10 @@ parts:
 | A package that mixes client components and server code in one entry (TanStack Query's `HydrationBoundary` beside `QueryClient` and `dehydrate`) | yes   | Only exports that come from a `"use client"` module become client references; the rest stay ordinary server imports, as in RSC.                                                                                        |
 | Lowercase client components (`motion.div` from `motion/react-client`)                                                                           | yes   | They render as islands like any other client reference.                                                                                                                                                                |
 
+A server module that imports a package reaching `client-only` without `"use client"` (React Aria
+Components) fails with the import chain, in development and in the build, as RSC does. Import such
+packages from a `"use client"` module.
+
 Packages that Node cannot load as a bundler does, because their files import stylesheets
 (react-tweet's CSS modules) or their ES module build is only a `module` field beside a CommonJS
 `main` (react-wrap-balancer), are bundled into the server graph (`ssr.noExternal`) in every mode,
@@ -111,7 +115,3 @@ recharts, React Aria Components and cmdk.
   (`createDialogScope`) as the real functions. RSC gives client references that throw when called.
 - **Package client components always hydrate,** including ones that only render markup (icons),
   as RSC sends them as client components too. Each one is an island.
-- **`client-only` reached from a server component** fails an RSC build. Islands mode doesn't check
-  it: a package whose entry imports `client-only` without `"use client"` (React Aria Components)
-  renders its markup from a server component but never hydrates. Import such packages from a
-  `"use client"` module.

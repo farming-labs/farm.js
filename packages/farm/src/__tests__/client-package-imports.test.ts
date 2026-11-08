@@ -85,6 +85,28 @@ describe("modules client code reaches", () => {
   });
 });
 
+describe("modules client code reaches lazily or through hydrate", () => {
+  it("includes a use client module's lazy import and a hydrate module's imports", async () => {
+    const { getFarmClientReachableModules } = await import("../utils/client-component");
+    const root = project({
+      "src/components/shell.tsx":
+        '"use client";\nimport { lazy } from "react";\nexport const Widget = lazy(() => import("./widget"));\n',
+      "src/components/widget.tsx": "export default function Widget() { return null; }\n",
+      "src/app/form/page.tsx":
+        'import { Field } from "../../lib/field";\nexport const hydrate = true;\nexport default () => <Field />;\n',
+      "src/lib/field.tsx": "export function Field() { return null; }\n",
+      "src/lib/server-data.ts": "export const read = () => 2;\n",
+    });
+    const reachable = getFarmClientReachableModules(path.join(root, "src"), root);
+    expect([...reachable].map((file) => path.relative(root, file)).sort()).toEqual([
+      path.join("src", "app", "form", "page.tsx"),
+      path.join("src", "components", "shell.tsx"),
+      path.join("src", "components", "widget.tsx"),
+      path.join("src", "lib", "field.tsx"),
+    ]);
+  });
+});
+
 describe("packages the server graph bundles", () => {
   it("are the packages the app imports that import stylesheets or ship ESM only through module", () => {
     const root = project({

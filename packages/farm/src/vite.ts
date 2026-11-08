@@ -205,6 +205,7 @@ import {
   rewriteFarmPackageClientImports,
 } from "./islands-package-references";
 import {
+  invalidateFarmClientOnlyScan,
   farmRelativeImportFiles,
   rewriteFarmReactServerImports,
 } from "./islands-react-server-exports";
@@ -4632,6 +4633,7 @@ if (import.meta.hot) {
     watchChange() {
       // A module that gains or loses "use client", or an import, changes what client code reaches.
       invalidateFarmClientReachableModules();
+      invalidateFarmClientOnlyScan();
     },
     async handleHotUpdate(ctx: HmrContext) {
       const { file, server, modules } = ctx;

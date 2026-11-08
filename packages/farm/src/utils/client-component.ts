@@ -1899,7 +1899,7 @@ function traversePackageClientBoundary(
 
 function getImportSpecifiers(
   content: string | null,
-  { reexportsOnly = false }: { reexportsOnly?: boolean } = {},
+  { reexportsOnly = false, dynamic = false }: { reexportsOnly?: boolean; dynamic?: boolean } = {},
 ): string[] {
   if (!content) return [];
 
@@ -1915,6 +1915,17 @@ function getImportSpecifiers(
     }
     if (keyword.value === "}") {
       braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+    if (
+      dynamic &&
+      keyword.kind === "identifier" &&
+      keyword.value === "import" &&
+      tokens[index - 1]?.value !== "." &&
+      tokens[index + 1]?.value === "(" &&
+      tokens[index + 2]?.kind === "string"
+    ) {
+      matches.add(tokens[index + 2].value);
       continue;
     }
     if (braceDepth !== 0) continue;
@@ -2529,9 +2540,10 @@ export function invalidateFarmClientReachableModules(): void {
 }
 
 /**
- * The application modules client code reaches: every `"use client"` module under `directory` and
- * the local modules it imports, transitively. React Server Components keep those modules in the
- * client graph, so their package imports resolve as client code there.
+ * The application modules client code reaches: every `"use client"` or `hydrate` module under
+ * `directory` and the local modules it imports, statically or lazily, transitively. React Server
+ * Components keep those modules in the client graph, so their package imports resolve as client
+ * code there.
  */
 export function getFarmClientReachableModules(directory: string, root: string): Set<string> {
   const key = `${path.resolve(root)}\0${path.resolve(directory)}`;
@@ -2550,12 +2562,9 @@ export function getFarmClientReachableModules(directory: string, root: string): 
       const file = path.join(current, entry.name);
       if (entry.isDirectory()) {
         if (!entry.name.startsWith(".") && !CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
-      } else if (
-        CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) &&
-        !entry.name.endsWith(".d.ts") &&
-        hasUseClientDirective(readIfExists(file))
-      ) {
-        queue.push(file);
+      } else if (CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) && !entry.name.endsWith(".d.ts")) {
+        const content = readIfExists(file);
+        if (hasUseClientDirective(content) || hasHydrateExport(content)) queue.push(file);
       }
     }
   };
@@ -2564,7 +2573,7 @@ export function getFarmClientReachableModules(directory: string, root: string): 
     const file = path.resolve(queue.pop()!);
     if (reachable.has(file)) continue;
     reachable.add(file);
-    for (const specifier of getImportSpecifiers(readIfExists(file))) {
+    for (const specifier of getImportSpecifiers(readIfExists(file), { dynamic: true })) {
       const imported = resolveImportedModule(file, specifier, root);
       if (imported.local && imported.path && !reachable.has(path.resolve(imported.path))) {
         queue.push(imported.path);
