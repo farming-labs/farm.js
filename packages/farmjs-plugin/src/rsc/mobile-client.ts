@@ -24,6 +24,8 @@ export const FARM_RSC_MOBILE_CLIENT_ENTRY_NAME = "farm-mobile-client";
 
 /** The server entry's stand-in for the shell client, replaced once the client is built. */
 export const FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER = "__farm_mobile_shell_client__";
+/** The client CSS by href, embedded so the RSC server can draw native-tier screens (RFC 0004). */
+export const FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER = "__farm_native_stylesheets__";
 
 /** Next to the RSC entries, as core writes it to its build directory (`.farm/`); never served. */
 const MANIFEST_FILE = "mobile-client.json";
@@ -176,6 +178,53 @@ export function encodeFarmRscMobileShellClient(client: FarmRscMobileShellClient 
     .replace(/\$/g, "\\u0024")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
+}
+
+function serverBundleFiles(rscDir: string, placeholder: string): string[] {
+  const files: string[] = [];
+  const visit = (dir: string) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const file = path.join(dir, name);
+      if (statSync(file).isDirectory()) visit(file);
+      else if (/\.(?:m|c)?js$/.test(name) && readFileSync(file, "utf8").includes(placeholder)) {
+        files.push(file);
+      }
+    }
+  };
+  visit(rscDir);
+  return files;
+}
+
+/**
+ * Embed the client CSS, by href, wherever the RSC server bundle has the native-stylesheets
+ * placeholder (only a build with the mobile entry): a native-tier screen is drawn with the page's
+ * own stylesheets, and the server cannot fetch the static files Nitro serves around it.
+ */
+export function patchFarmRscNativeStylesheets(rscDir: string, publicDir: string): void {
+  const files = serverBundleFiles(rscDir, FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER);
+  if (files.length === 0) return;
+  const stylesheets: Record<string, string> = {};
+  const visit = (dir: string, prefix: string) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const file = path.join(dir, name);
+      if (statSync(file).isDirectory()) visit(file, `${prefix}${name}/`);
+      else if (name.endsWith(".css")) stylesheets[`/${prefix}${name}`] = readFileSync(file, "utf8");
+    }
+  };
+  visit(publicDir, "");
+  const encoded = JSON.stringify(JSON.stringify(stylesheets))
+    .slice(1, -1)
+    .replace(/'/g, "\\u0027")
+    .replace(/`/g, "\\u0060")
+    .replace(/\$/g, "\\u0024")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+  for (const file of files) {
+    const code = readFileSync(file, "utf8");
+    writeFileSync(file, code.split(FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER).join(encoded));
+  }
 }
 
 /**

@@ -1614,6 +1614,9 @@ importers:
       '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
+      '@farm.js/mobile':
+        specifier: workspace:*
+        version: link:../../packages/farm-mobile
       '@farm.js/plugin':
         specifier: workspace:*
         version: link:../../packages/farmjs-plugin

@@ -5,12 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { generateRscEntry } from "./entries/rsc.js";
 import {
   FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER,
+  FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER,
   createFarmRscMobileClientManifestPlugin,
   farmRscMobileClientManifestPath,
   finalizeFarmRscMobileClient,
   generateMobileClientEntry,
   generateMobileShellNavigation,
   patchFarmRscMobileShellClient,
+  patchFarmRscNativeStylesheets,
 } from "./mobile-client.js";
 
 const roots: string[] = [];
@@ -82,15 +84,57 @@ describe("the RSC mobile client", () => {
       const entry = generateRscEntry({ ...entryContext, mobileClient });
       expect(entry).not.toContain("_applyFarmMobileShellClient");
       expect(entry).not.toContain(FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER);
+      expect(entry).not.toContain(FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER);
     }
+    // A web-only app has no native-tier screens; `farm dev --mobile` reads CSS from Vite.
+    expect(generateRscEntry({ ...entryContext })).not.toContain("createFarmNativeTreeResponse");
+    const dev = generateRscEntry({ ...entryContext, mobileClient: "inline" });
+    expect(dev).toContain("createFarmNativeTreeResponse");
+    expect(dev).toContain("url.hostname = '127.0.0.1'");
     const entry = generateRscEntry({ ...entryContext, mobileClient: "entry" });
     expect(entry).toContain(
-      "import { _applyFarmMobileShellClient } from '@farm.js/core/internal/production-runtime';",
+      "import { _applyFarmMobileShellClient, createFarmNativeTreeResponse } from '@farm.js/core/internal/production-runtime';",
     );
+    // Native-tier screens: the tree, with the embedded CSS and the page marked for its render only.
+    expect(entry).toContain("application/vnd.farm.native+json");
+    expect(entry).toContain("farmNativeTreeRenders.add(target)");
+    expect(entry).toContain(`JSON.parse("${FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER}")`);
+    expect(entry).toContain("headers.delete('x-farm-native-tree')");
     expect(entry).toContain(
       "return _applyFarmMobileShellClient(request, response, farmMobileShellClient);",
     );
     expect(entry).toContain(`JSON.parse("${FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER}")`);
+  });
+
+  it("embeds the client CSS for native-tier screens only where the server bundle asks", () => {
+    const root = tempRoot();
+    const rscDir = path.join(root, "rsc");
+    const publicDir = path.join(root, "public");
+    mkdirSync(path.join(rscDir, "chunks"), { recursive: true });
+    mkdirSync(path.join(publicDir, "assets", "nested"), { recursive: true });
+    writeFileSync(path.join(publicDir, "assets", "index-A1.css"), ".card{padding:8px}\n");
+    writeFileSync(
+      path.join(publicDir, "assets", "nested", "route-B2.css"),
+      'a::after{content:"$`\'"}',
+    );
+    writeFileSync(path.join(publicDir, "assets", "index-A1.js"), "console.log(1)");
+    const entry = path.join(rscDir, "index.mjs");
+    writeFileSync(
+      entry,
+      `const sheets = JSON.parse("${FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER}"); export { sheets };`,
+    );
+    const other = path.join(rscDir, "chunks", "other.mjs");
+    writeFileSync(other, "export const unrelated = 1;");
+    patchFarmRscNativeStylesheets(rscDir, publicDir);
+    const code = readFileSync(entry, "utf8");
+    expect(code).not.toContain(FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER);
+    // The patched literal parses back to every stylesheet by href, quotes and $ included.
+    const literal = /JSON\.parse\("(.*)"\)/.exec(code)![1]!;
+    expect(JSON.parse(JSON.parse(`"${literal}"`))).toEqual({
+      "/assets/index-A1.css": ".card{padding:8px}\n",
+      "/assets/nested/route-B2.css": 'a::after{content:"$`\'"}',
+    });
+    expect(readFileSync(other, "utf8")).toBe("export const unrelated = 1;");
   });
 
   it("records the entry, finishes core's manifest, and fills in the server bundle once", () => {

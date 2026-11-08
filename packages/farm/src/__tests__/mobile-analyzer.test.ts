@@ -718,6 +718,62 @@ export const hydrate = true;
     }
   });
 
+  it("keeps a server action's form on the native tier in a server components app", async () => {
+    const root = await createApp({
+      "src/app/actions.ts": `"use server";
+export async function addNote(formData: FormData) {}
+`,
+      "src/app/fns.ts": `import { createServerFn } from "@farm.js/core/server-fn";
+export const renameNote = createServerFn(async (input: FormData) => input);
+`,
+      "src/app/page.tsx": `import { addNote } from "./actions";
+import * as actions from "./actions";
+import { renameNote } from "./fns";
+export default function Notes() {
+  async function archive(formData: FormData) {
+    "use server";
+  }
+  return (
+    <div>
+      <form action={addNote}><input name="title" /><button>Add</button></form>
+      <form action={actions.addNote}><button>Again</button></form>
+      <form action={archive}><button>Archive</button></form>
+      <form action={renameNote}><button>Rename</button></form>
+      <form><button formAction={addNote}>Save</button></form>
+    </div>
+  );
+}
+`,
+      "src/app/local/page.tsx": `import { track } from "./track";
+export default function Local() {
+  async function save(formData: FormData) {}
+  return <div><form action={save}><button>Save</button></form><form action={track}><button>Go</button></form></div>;
+}
+`,
+      "src/app/local/track.ts": `export async function track(formData: FormData) {}
+`,
+    });
+    const native = (result: Awaited<ReturnType<typeof report>>, route: string) =>
+      routeOf(result, route).analysis!.nativeBlockers.map(
+        (blocker) => `${blocker.rule} ${blocker.message}`,
+      );
+    const rsc = await report(root, userConfig({}, { experimental: { serverComponents: true } }));
+    expect(native(rsc, "/")).toEqual([]);
+    expect(routeOf(rsc, "/").analysis!.tier).toBe("native");
+    // A plain function, local or imported from a module that is not "use server", needs React.
+    expect(native(rsc, "/local")).toEqual([
+      "form-action action on <form>",
+      "form-action action on <form>",
+    ]);
+    // Without server components there are no server actions to render.
+    const ssr = await report(root);
+    expect(native(ssr, "/")).toEqual(
+      Array(5)
+        .fill("form-action action on <form>")
+        .map((message, index) => (index === 4 ? "form-action formAction on <button>" : message)),
+    );
+  });
+
   it("parses each module once per run and reuses facts by content hash", async () => {
     const files: Record<string, string> = {
       "src/components/shared.tsx": `export function Shared() { return <p>shared</p>; }\n`,

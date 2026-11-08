@@ -90,8 +90,9 @@ A plain HTML form works on a server-rendered screen with no JavaScript on the de
 - **What keeps the web screen.** Fields other than text (`text`, `email`, `password`, `number`,
   `search`, `tel`, `url`) and `<textarea>`, such as checkboxes, selects, and files; a
   `<button type="button">` or `"reset"`; a field or button outside a form, or tied to one with
-  `form="id"`; a form inside a form, `method="dialog"`, or `target="_blank"`; and a function
-  `action`, which React renders as a `javascript:` URL. The tree lists these in `unsupported`, and
+  `form="id"`; a form inside a form, `method="dialog"`, or `target="_blank"`; and an `action`
+  that is a plain function rather than a [server action](#server-actions-on-native-screens), which
+  React renders as a `javascript:` URL. The tree lists these in `unsupported`, and
   the analyzer reports them (`inert-control`, `form-action`, `unmapped-element`). The analyzer
   checks a form's controls within one component: a submit button in a separate component keeps
   the route web, so keep the form's controls with the `<form>`.
@@ -99,6 +100,45 @@ A plain HTML form works on a server-rendered screen with no JavaScript on the de
 `examples/mobile-minimal`'s trail page posts trail reports to `src/app/api/reports/route.ts` this
 way, and the Mobile Android workflow types a report on the emulator, taps Post report, and requires
 it on the redrawn native screen.
+
+### Server actions on native screens
+
+In a server components app (RSC or islx), a server action or server function passed to a form
+works on a server-rendered screen as it is, with no wrapper:
+
+```tsx
+// src/app/notes/actions.ts
+"use server";
+export async function addNote(formData: FormData) {
+  await db.notes.insert({ title: String(formData.get("title")) });
+  redirect("/notes");
+}
+
+// src/app/notes/page.tsx, a server component
+import { addNote } from "./actions";
+
+export default function Notes() {
+  return (
+    <form action={addNote}>
+      <input name="title" />
+      <button>Add</button>
+    </form>
+  );
+}
+```
+
+The action never runs on the device. React renders the form as one a browser submits without
+JavaScript: a POST to the page with hidden fields naming the action (`$ACTION_ID_…` in RSC,
+`$F_REF_…` in islx). The shell draws it and posts it like any form; the server looks the action
+up, runs it with its usual origin check, and answers as it would the browser: a `redirect()` is
+followed, and otherwise the page renders again with the result (islx redirects back to it). The
+analyzer accepts `action` and `formAction` values imported from a `"use server"` or server
+function module, or declared with their own `"use server"`; a plain function keeps the route web.
+
+Hook wrappers such as `useServerFn` and `useFetcher` run in the browser, so a page that uses them
+stays a web screen; a `page.native.tsx` calls the same server functions by import instead.
+`examples/server-components`' `/native` posts a redirecting and an inline server action from a
+native screen, checked against its production server in both modes.
 
 ### Refresh and accessibility
 

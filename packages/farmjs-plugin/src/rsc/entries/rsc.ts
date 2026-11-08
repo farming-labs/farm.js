@@ -1,6 +1,9 @@
 import { createRequire } from "node:module";
 import type { EntryContext } from "../types.js";
-import { FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER } from "../mobile-client.js";
+import {
+  FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER,
+  FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER,
+} from "../mobile-client.js";
 
 const require_ = createRequire(import.meta.url);
 
@@ -113,7 +116,7 @@ import {
   createProductionMiddlewareRunner,
 } from '@farm.js/core/middleware';
 import { _withFarmGuardedResponseCache } from '@farm.js/core/internal/production-runtime';
-${ctx.mobileClient === "entry" ? "import { _applyFarmMobileShellClient } from '@farm.js/core/internal/production-runtime';\n" : ""}import {
+${ctx.mobileClient === "entry" ? "import { _applyFarmMobileShellClient, createFarmNativeTreeResponse } from '@farm.js/core/internal/production-runtime';\n" : ctx.mobileClient === "inline" ? "import { createFarmNativeTreeResponse } from '@farm.js/core/internal/production-runtime';\n" : ""}import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   isFarmAPIPathname,
@@ -1158,6 +1161,12 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
     });
   }
   
+  // A native-tier screen reads only the page (RFC 0004): mark it, for the server's own render of
+  // the tree only (the handler strips this header from every other request).
+  if (request.headers.get('x-farm-native-tree') === '1') {
+    pageContent = h('div', { id: '__farm_page__', 'data-farm-segment': 'page' }, pageContent);
+  }
+
   // Render layouts inside out so every ancestor wraps its descendants.
   let layoutContent = pageContent;
   for (let index = LayoutModules.length - 1; index >= 0; index--) {
@@ -1520,7 +1529,22 @@ function isFarmPrerenderRequest(request) {
   return globalThis.process?.env?.FARM_RSC_PRERENDER === '1' && request.headers.has('x-nitro-prerender');
 }
 
-async function handler(request, context) {
+${
+  ctx.mobileClient
+    ? `// The server's own renders of a page for a native-tree answer: only these mark the page.
+const farmNativeTreeRenders = new WeakSet();
+`
+    : ""
+}async function handler(request, context) {${
+    ctx.mobileClient
+      ? `
+  if (request.headers.has('x-farm-native-tree') && !farmNativeTreeRenders.has(request)) {
+    const headers = new Headers(request.headers);
+    headers.delete('x-farm-native-tree');
+    request = new Request(request, { headers });
+  }`
+      : ""
+  }
   const prerendering = isFarmPrerenderRequest(request);
   if (prerendering && new URL(request.url).pathname === FARM_PRERENDER_ROUTES_PATH) {
     const pages = await collectFarmStaticPages();
@@ -1531,7 +1555,39 @@ async function handler(request, context) {
       },
     });
   }
-  const pageRequest = toFarmPayloadRequest(request);
+${
+  ctx.mobileClient
+    ? `  // A native-tier screen of the mobile app (RFC 0004): the page, rendered as for a browser,
+  // read into a tree of native views. A POST is a form the screen submitted, such as a server
+  // action's: it runs as the browser's no-JavaScript submission would.
+  if (
+    (request.method === 'GET' || request.method === 'HEAD' || request.method === 'POST') &&
+    (request.headers.get('accept') || '').includes('application/vnd.farm.native+json')
+  ) {
+    return createFarmNativeTreeResponse({
+      request,
+      renderPage: (target) => {
+        farmNativeTreeRenders.add(target);
+        return handler(target, context);
+      },
+      loadStylesheet: ${
+        ctx.mobileClient === "entry"
+          ? "(href) => farmNativeStylesheets[href]"
+          : `async (href) => {
+        // farm dev: Vite serves the CSS, so ask this dev server for it over loopback.
+        const url = new URL(href, request.url);
+        url.hostname = '127.0.0.1';
+        const response = await fetch(url, { headers: { accept: 'text/css,*/*;q=0.1' } }).catch(() => null);
+        return response?.ok && (response.headers.get('content-type') || '').includes('text/css')
+          ? response.text()
+          : undefined;
+      }`
+      },
+    });
+  }
+`
+    : ""
+}  const pageRequest = toFarmPayloadRequest(request);
   const response = await handleFarmRequestWithRuntime(pageRequest, context);
   if (
     prerendering &&
@@ -1559,6 +1615,14 @@ function readFarmMobileShellClient() {
   }
 }
 const farmMobileShellClient = readFarmMobileShellClient();
+// The client CSS by href, embedded by the build for native-tier screens.
+const farmNativeStylesheets = (() => {
+  try {
+    return JSON.parse("${FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER}");
+  } catch {
+    return {};
+  }
+})();
 `
     : ""
 }

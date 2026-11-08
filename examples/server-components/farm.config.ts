@@ -7,6 +7,12 @@ const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" :
 const target = process.env.FARM_SERVER_COMPONENTS_TARGET;
 
 export default defineConfig({
+  // The mobile contract (RFC 0004): `farm build --mobile` adds native-tier screens, such as
+  // /native, which posts its server actions from native views. A web build strips this block.
+  mobile: {
+    id: "dev.farmjs.examples.servercomponents",
+    server: "https://server-components.farmjs.dev",
+  },
   experimental: {
     serverComponents: { mode },
     serverActions: true,

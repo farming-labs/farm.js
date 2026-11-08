@@ -924,6 +924,9 @@ export async function createFarmNativeTreeResponse(options: {
   const headers = new Headers(options.request.headers);
   headers.set("accept", "text/html");
   headers.delete("accept-encoding");
+  // A renderer that cannot always mark the page (the RSC entry) marks it for this render; the
+  // server must accept the header only on the request it hands `renderPage` itself.
+  headers.set("x-farm-native-tree", "1");
   // A form a native screen submits: the page or route gets the POST a browser would send, and
   // answers it as it would for the browser (a page, or a redirect the shell follows).
   const submitted = options.request.method === "POST";
