@@ -15,6 +15,7 @@ import {
 } from "./icons";
 import type { LucideIcon } from "lucide-react";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
+import xIconUrl from "simple-icons/icons/x.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import { launchPost } from "../lib/blog";
 import { formatCount, NO_READING, useScrambledText, useSiteStats } from "./site-stats";
@@ -22,6 +23,14 @@ import { formatCount, NO_READING, useScrambledText, useSiteStats } from "./site-
 // Matches .farm-nav-link, so the stars read as one more nav cell.
 const statLinkClass =
   "group flex h-11 shrink-0 items-center gap-1.5 border-l border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white";
+
+const githubUrl = "https://github.com/farming-labs/farm.js";
+// The Farming Labs X account, as listed in the site's Organization `sameAs` (farm.config.ts).
+const xUrl = "https://x.com/KinfishT";
+
+// A square, icon-only cell with the same border and hover as the other header cells.
+const iconLinkClass =
+  "group grid size-11 shrink-0 place-items-center border-l border-white/12 transition-colors duration-150 hover:bg-white/[0.035] focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white";
 
 const navItems = [
   {
@@ -107,6 +116,17 @@ function GithubIcon({ className }: { className?: string }) {
   return <BrandIcon className={className} src={githubIconUrl} />;
 }
 
+function HeaderIconLink({ href, label, src }: { href: string; label: string; src: string }) {
+  return (
+    <a aria-label={label} className={iconLinkClass} href={href} title={label}>
+      <BrandIcon
+        className="size-3.5 opacity-48 transition-opacity duration-150 group-hover:opacity-100"
+        src={src}
+      />
+    </a>
+  );
+}
+
 // GitHub stars as a nav cell, in the nav's "01 / Guide" grammar: icon / 684 stars. The count
 // reads NO_READING until it arrives, then scrambles into it, and again on hover or focus. The
 // count and label keep room for a four-character count, so the header never shifts.
@@ -117,7 +137,7 @@ function GithubStars({ stars }: { stars: number | null | undefined }) {
     <a
       aria-label={count ? `Farm.js on GitHub, ${count} stars` : "Open Farm.js on GitHub"}
       className={statLinkClass}
-      href="https://github.com/farming-labs/farm.js"
+      href={githubUrl}
       onFocus={replay}
       onPointerEnter={replay}
       title="GitHub stars"
@@ -240,6 +260,7 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
         </nav>
 
         <div className="ml-auto hidden shrink-0 items-stretch xl:flex">
+          <HeaderIconLink href={xUrl} label="Farming Labs on X" src={xIconUrl} />
           <GithubStars stars={stats?.stars} />
           <a
             className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white bg-clip-padding px-5 font-mono text-[10px] font-normal uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
@@ -250,30 +271,34 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
           </a>
         </div>
 
-        <details className="group relative ml-auto border-l border-white/12 xl:hidden">
-          <summary className="grid size-11 cursor-pointer list-none place-items-center text-white transition-colors hover:bg-white/[0.04] [&::-webkit-details-marker]:hidden">
-            <span className="sr-only">Open navigation</span>
-            <Menu aria-hidden className="size-4 group-open:hidden" strokeWidth={1.5} />
-            <X aria-hidden className="hidden size-4 group-open:block" strokeWidth={1.5} />
-          </summary>
-          <nav
-            aria-label="Mobile navigation"
-            className="absolute -right-px top-11 w-screen overflow-hidden border border-white/14 bg-black shadow-2xl shadow-black/60"
-          >
-            {[...navItems, { index: "07", label: "Docs", href: "/docs", icon: BookOpenText }].map(
-              (item) => (
-                <a
-                  key={item.label}
-                  aria-current={activePage && item.href === `/${activePage}` ? "page" : undefined}
-                  className="farm-menu-link font-mono"
-                  href={item.href}
-                >
-                  <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
-                </a>
-              ),
-            )}
-          </nav>
-        </details>
+        <div className="ml-auto flex shrink-0 items-stretch xl:hidden">
+          <HeaderIconLink href={xUrl} label="Farming Labs on X" src={xIconUrl} />
+          <HeaderIconLink href={githubUrl} label="Farm.js on GitHub" src={githubIconUrl} />
+          <details className="group relative border-l border-white/12">
+            <summary className="grid size-11 cursor-pointer list-none place-items-center text-white transition-colors hover:bg-white/[0.04] [&::-webkit-details-marker]:hidden">
+              <span className="sr-only">Open navigation</span>
+              <Menu aria-hidden className="size-4 group-open:hidden" strokeWidth={1.5} />
+              <X aria-hidden className="hidden size-4 group-open:block" strokeWidth={1.5} />
+            </summary>
+            <nav
+              aria-label="Mobile navigation"
+              className="absolute -right-px top-11 w-screen overflow-hidden border-x border-b border-white/14 bg-black shadow-2xl shadow-black/60"
+            >
+              {[...navItems, { index: "07", label: "Docs", href: "/docs", icon: BookOpenText }].map(
+                (item) => (
+                  <a
+                    key={item.label}
+                    aria-current={activePage && item.href === `/${activePage}` ? "page" : undefined}
+                    className="farm-menu-link font-mono"
+                    href={item.href}
+                  >
+                    <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
+                  </a>
+                ),
+              )}
+            </nav>
+          </details>
+        </div>
       </div>
     </header>
   );
