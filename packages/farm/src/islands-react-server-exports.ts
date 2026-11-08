@@ -27,6 +27,7 @@ const REACT_PACKAGES = new Set([
   "react-server-dom-turbopack",
 ]);
 
+const CLIENT_ONLY_PACKAGE = "client-only";
 const SERVER_CONDITIONS = ["react-server", "node", "import", "module", "default"];
 const DEFAULT_CONDITIONS = ["node", "import", "module", "default"];
 const SCRIPT_EXTENSIONS = ["", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts"];
@@ -191,7 +192,11 @@ function exportedName(node: AstNode | undefined): string | undefined {
 }
 
 /** The file a bare `specifier` resolves to from `importer` with the default (browser) build. */
-export function resolveFarmPackageDefaultEntry(importer: string, specifier: string): string | null {
+export function resolveFarmPackageDefaultEntry(
+  importer: string,
+  specifier: string,
+  conditions: readonly string[] = ["browser", ...DEFAULT_CONDITIONS],
+): string | null {
   const parsed = packageNameOf(specifier);
   if (!parsed) return null;
   const directory = findPackageDirectory(importer, parsed.name);
@@ -199,10 +204,8 @@ export function resolveFarmPackageDefaultEntry(importer: string, specifier: stri
   try {
     const manifest = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8"));
     const target =
-      pickTarget(exportEntry(manifest.exports, parsed.subpath), [
-        "browser",
-        ...DEFAULT_CONDITIONS,
-      ]) ?? (!parsed.subpath ? (manifest.module ?? manifest.main ?? "index.js") : parsed.subpath);
+      pickTarget(exportEntry(manifest.exports, parsed.subpath), conditions) ??
+      (!parsed.subpath ? (manifest.module ?? manifest.main ?? "index.js") : parsed.subpath);
     return resolveRelative(
       path.join(directory, "package.json"),
       `./${String(target).replace(/^\.\//, "")}`,
@@ -473,6 +476,83 @@ export function rewriteFarmReactServerImports(options: {
     output = output.slice(0, entry.start) + lines.join("\n") + output.slice(entry.end);
   }
   return output;
+}
+
+/** The modules `program` loads statically; type-only imports are not loaded. */
+function staticImportSources(program: AstNode): string[] {
+  const sources: string[] = [];
+  for (const node of program.body ?? []) {
+    if (
+      node.type !== "ImportDeclaration" &&
+      node.type !== "ExportAllDeclaration" &&
+      !(node.type === "ExportNamedDeclaration" && node.source)
+    ) {
+      continue;
+    }
+    if (node.importKind === "type" || node.exportKind === "type") continue;
+    if (typeof node.source?.value === "string") sources.push(node.source.value);
+  }
+  return sources;
+}
+
+/** Files already walked without reaching `client-only`. */
+const clientOnlyFreeFiles = new Set<string>();
+
+/** Forgets the walked files (a file changed in development). */
+export function invalidateFarmClientOnlyScan(): void {
+  clientOnlyFreeFiles.clear();
+}
+
+/** The build of `specifier` a server module loads. */
+function resolveServerEntry(importer: string, specifier: string): string | null {
+  const parsed = packageNameOf(specifier);
+  if (!parsed || REACT_PACKAGES.has(parsed.name) || parsed.name.startsWith("@farm.js/")) {
+    return null;
+  }
+  return (
+    resolveFarmReactServerExport(importer, specifier) ??
+    resolveFarmPackageDefaultEntry(importer, specifier, DEFAULT_CONDITIONS)
+  );
+}
+
+function walkToClientOnly(file: string, seen: Set<string>): string[] | null {
+  if (seen.has(file) || clientOnlyFreeFiles.has(file)) return null;
+  seen.add(file);
+  const program = readModule(file);
+  // `"use client"` is the boundary: what it imports is client code.
+  if (!program || isClientModule(program)) return null;
+  for (const source of staticImportSources(program)) {
+    if (source === CLIENT_ONLY_PACKAGE) return [file];
+    const child = source.startsWith(".")
+      ? resolveRelative(file, source)
+      : resolveServerEntry(file, source);
+    const chain = child && walkToClientOnly(child, seen);
+    if (chain) return [file, ...chain];
+  }
+  return null;
+}
+
+/**
+ * The first package import in a server module whose server build reaches `client-only` without
+ * crossing `"use client"`, with the files between them. React Server Components fail that build.
+ * In islands mode the module would render its markup and never hydrate.
+ */
+export function findFarmClientOnlyImport(
+  code: string,
+  file: string,
+): { specifier: string; chain: string[] } | null {
+  if (!code.includes("import") && !code.includes("export")) return null;
+  const program = parseCode(code, file);
+  if (!program) return null;
+  for (const specifier of staticImportSources(program)) {
+    const entry = resolveServerEntry(file, specifier);
+    if (!entry) continue;
+    const seen = new Set<string>();
+    const chain = walkToClientOnly(entry, seen);
+    if (chain) return { specifier, chain };
+    for (const walked of seen) clientOnlyFreeFiles.add(walked);
+  }
+  return null;
 }
 
 /** The files a module imports by relative path, resolved. */

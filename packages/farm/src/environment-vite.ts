@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
 import type { FarmEnvironment } from "./environment";
+import { findFarmClientOnlyImport } from "./islands-react-server-exports";
 import { getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
 import {
   findClientNodeBuiltinChain,
@@ -9,6 +10,8 @@ import {
   type FarmProgrammaticRoutesPluginApi,
 } from "./programmatic-routes-client";
 import { PROGRAMMATIC_ROUTE_FILE_NAMES, parseProgrammaticRouteModuleId } from "./routes-shared";
+import { resolveFarmServerComponentsMode } from "./server-components-mode";
+import { getFarmClientReachableModules } from "./utils/client-component";
 
 type EnvironmentFunctionKind = "createServerOnlyFn" | "createClientOnlyFn" | "createIsomorphicFn";
 
@@ -104,6 +107,7 @@ export interface FarmEnvironmentFunctionsPluginOptions {
   root?: string;
   srcDir?: string;
   layers?: readonly ResolvedFarmLayer[];
+  experimental?: { serverComponents?: unknown };
 }
 
 export function farmEnvironmentFunctionsPlugin(
@@ -115,6 +119,7 @@ export function farmEnvironmentFunctionsPlugin(
   let routesFiles = new Set<string>();
   let farmApi: FarmProgrammaticRoutesPluginApi | undefined;
   let isBuild = false;
+  let projectRoot = process.cwd();
   let sources: { for: unknown; files: ReadonlySet<string> } | undefined;
   const routeSourceFiles = (): ReadonlySet<string> => {
     const clientRoutes = farmApi?.getProgrammaticClientRoutes();
@@ -142,6 +147,7 @@ export function farmEnvironmentFunctionsPlugin(
 
     configResolved(config) {
       isBuild = config.command === "build";
+      projectRoot = config.root;
       farmApi = config.plugins.find((plugin) => plugin.name === "farm")?.api as
         | FarmProgrammaticRoutesPluginApi
         | undefined;
@@ -172,6 +178,26 @@ export function farmEnvironmentFunctionsPlugin(
         !isProgrammaticRouteActionProxy(code)
       ) {
         this.error(routeSourceError(moduleFile(id)));
+      }
+      if (
+        environment === "server" &&
+        resolveFarmServerComponentsMode(options.experimental?.serverComponents) === "islands" &&
+        isApplicationScript(id)
+      ) {
+        const file = id.split("?", 1)[0]!;
+        // Vite ids are real paths; a symlinked root must compare as one.
+        const root = realpathSync(options.root ?? projectRoot);
+        const clientCode = getFarmClientReachableModules(
+          path.resolve(root, options.srcDir || "src"),
+          root,
+        ).has(path.resolve(file));
+        const reached = clientCode ? null : findFarmClientOnlyImport(code, file);
+        if (reached) {
+          const chain = reached.chain.map((step) => path.relative(root, step)).join(" -> ");
+          this.error(
+            `[Farm.js] ${path.relative(root, file)} is server code, but its import of "${reached.specifier}" reaches "client-only" (${chain}), so that package can only run in the browser. Add "use client" to this module, or import the package from a "use client" module.`,
+          );
+        }
       }
       return result ? { code: result.code, map: null } : null;
     },
@@ -206,6 +232,16 @@ export function farmEnvironmentFunctionsPlugin(
       }
     },
   };
+}
+
+/** An application's own script: not a package, a virtual module or Farm's generated code. */
+function isApplicationScript(id: string): boolean {
+  return (
+    !id.startsWith("\0") &&
+    !id.includes("/node_modules/") &&
+    !id.includes("/.farm/") &&
+    /\.[cm]?[jt]sx?(?:$|\?)/.test(id)
+  );
 }
 
 function moduleFile(id: string): string {

@@ -15,6 +15,62 @@ afterEach(() => {
   }
 });
 
+describe("client-only reached from islands server code", () => {
+  const files: Record<string, string> = {
+    "node_modules/aria-kit/package.json": '{"name":"aria-kit","exports":"./index.js"}',
+    "node_modules/aria-kit/index.js": 'import "client-only";\nexport const Button = "b";\n',
+    "src/lib/styles.ts": "export const label = 1;\n",
+  };
+
+  async function buildIslands(page: string, extra: Record<string, string> = {}) {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-client-only-"));
+    temporaryRoots.push(root);
+    for (const [file, contents] of Object.entries({ ...files, ...extra, "src/page.ts": page })) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), contents);
+    }
+    await build({
+      root,
+      logLevel: "silent",
+      plugins: [
+        farmEnvironmentFunctionsPlugin({
+          root,
+          srcDir: "src",
+          experimental: { serverComponents: { mode: "islands" } },
+        }),
+      ],
+      build: {
+        ssr: path.join(root, "src/page.ts"),
+        write: false,
+        rolldownOptions: { external: ["client-only"] },
+      },
+      ssr: { noExternal: true },
+    });
+  }
+
+  it("fails the build and names the chain", async () => {
+    await expect(
+      buildIslands('import { Button } from "aria-kit";\nexport default Button;\n'),
+    ).rejects.toThrow(/import of "aria-kit" reaches "client-only".*"use client"/s);
+  });
+
+  it("ignores an import TypeScript erases", async () => {
+    await expect(
+      buildIslands('import { Button } from "aria-kit";\nexport const size: Button = 1 as never;\n'),
+    ).resolves.toBeUndefined();
+  });
+
+  it("allows a module client code reaches", async () => {
+    await expect(
+      buildIslands('import { label } from "./lib/shared";\nexport default label;\n', {
+        "src/client.tsx":
+          '"use client";\nimport { label } from "./lib/shared";\nexport { label };\n',
+        "src/lib/shared.ts": 'import { Button } from "aria-kit";\nexport const label = Button;\n',
+      }),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("environment function Vite transform", () => {
   it("removes server implementations from client chunks", async () => {
     const output = await buildFixture(false);
