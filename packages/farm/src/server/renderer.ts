@@ -173,6 +173,7 @@ import { installFarmIslandValues, uninstallFarmIslandValues } from "../client/is
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmRouteRootStrategy } from "../island-inference";
 import { canBootFarmIslandsClient } from "../islands-client-boot";
+import { resolveFarmPlatform } from "../desktop/config";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
   createFarmCspNonceRewriter,
@@ -3622,9 +3623,12 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
             ? "root"
             : "__farm_page__"
           : null;
+      // Under `farm dev --mobile` every page is a shell's screen, which needs the client at once
+      // (for navigation and the shell's ready signal), not when the page first needs it.
       const bootClient =
         (islandsOnlyPage || waitingRoot !== null) &&
         !staticShellParts &&
+        resolveFarmPlatform() !== "mobile" &&
         canBootFarmIslandsClient(this.config);
       const hydrationClickQueueScript =
         !islandsOnlyPage &&
