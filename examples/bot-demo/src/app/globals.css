@@ -1,0 +1,50 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, sans-serif;
+  background: #fff;
+  color: #111;
+}
+
+.shell {
+  max-width: 340px;
+  margin: 48px auto;
+  padding: 0 16px;
+}
+
+label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: #444;
+}
+
+input[type="email"] {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font: inherit;
+}
+
+button {
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px;
+  border: 0;
+  border-radius: 4px;
+  background: #111;
+  color: #fff;
+  font: inherit;
+}
+
+button:disabled {
+  background: #999;
+}
+
+[role="status"] {
+  min-height: 20px;
+  margin-top: 12px;
+  font-size: 14px;
+}

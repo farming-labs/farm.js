@@ -16,6 +16,7 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 | -------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | [API MCP](/docs/plugins/mcp)           | Expose opted-in typed API routes as authenticated Streamable HTTP tools.                          |
 | [Analyzer](/docs/plugins/analyzer)     | Explain page, client, and server build size and enforce readable CI limits.                       |
+| [Bot Protection](/docs/plugins/bot)    | Stop bots at your forms with a captcha or your own checker, verified on the server.               |
 | [Content](/docs/plugins/content)       | Validate local Markdown, MDX, JSON, and YAML as typed server collections.                         |
 | [DevTools](/docs/plugins/devtools)     | Inspect routes, runtime configuration, diagnostics, and browser module output during development. |
 | [Federation](/docs/plugins/federation) | Publish and load independently deployed browser modules while server capabilities stay local.     |

@@ -404,6 +404,37 @@ importers:
         specifier: 8.3.4
         version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
 
+  examples/bot-demo:
+    dependencies:
+      '@farm.js/bot':
+        specifier: workspace:*
+        version: link:../../packages/farm-bot
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../../packages/farm
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+    devDependencies:
+      '@farm.js/cli':
+        specifier: workspace:*
+        version: link:../../packages/farm-cli
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.13
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.13)
+      typescript:
+        specifier: ^5.5.3
+        version: 5.9.3
+      vite:
+        specifier: 8.3.4
+        version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
+
   examples/cf-agent:
     dependencies:
       '@farm.js/cf-agent':
@@ -2572,6 +2603,46 @@ importers:
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
+
+  packages/farm-bot:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.13
+      jsdom:
+        specifier: ^25.0.0
+        version: 25.0.1(supports-color@10.2.2)
+      preact:
+        specifier: 10.29.8
+        version: 10.29.8(preact-render-to-string@6.7.0)
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+      solid-js:
+        specifier: 1.9.18
+        version: 1.9.18
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vite:
+        specifier: 8.3.4
+        version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
+      vue:
+        specifier: 3.5.44
+        version: 3.5.44(typescript@5.9.3)
 
   packages/farm-cache-redis:
     dependencies:
