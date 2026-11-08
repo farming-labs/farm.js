@@ -31,9 +31,11 @@ let the analyzer decide (`native.auto: "on"` in `farm.config.ts`).
 
 The Mobile Android and Mobile iOS workflows build this example and launch it on an emulator and a
 simulator, next to [`examples/mobile`](../mobile). Each run checks that `/` and `/trails/[id]` are
-`server` screens and that the home screen drew native views without a web fallback, and keeps
-`farm-routes.json`, the shell log, and home-screen screenshots as the `mobile-*-mobile-minimal-*`
-artifact.
+`server` screens and that the home screen drew native views without a web fallback. Each then
+opens `/trails/creek`, types a trail report, taps Post report, and requires the report on the
+redrawn native screen and after a pull to refresh (`scripts/check-android-form.mjs`, and
+`scripts/check-ios-form.mjs` with [idb](https://fbidb.io) on the simulator). The run keeps
+`farm-routes.json`, the shell log, and the screenshots as the `mobile-*-mobile-minimal-*` artifact.
 
 ## What this example is for
 

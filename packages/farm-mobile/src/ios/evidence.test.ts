@@ -111,5 +111,9 @@ describe("iOS native simulator evidence", () => {
     expect(workflow).toContain('server-routes: "/ /trails/[id]"');
     expect(workflow).toContain("name: mobile-ios-${{ matrix.example }}-${{ github.sha }}");
     expect(workflow).toContain('- "examples/mobile-minimal/**"');
+    // Trail Guide's trail page is also driven: its native form posts, and it pulls to refresh.
+    expect(workflow).toContain(
+      'run: node scripts/check-ios-form.mjs "$EVIDENCE" "$APP_ID" "$SIMULATOR_UDID"',
+    );
   });
 });
