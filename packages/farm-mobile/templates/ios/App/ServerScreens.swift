@@ -16,6 +16,8 @@ final class FarmServerScreen: UIViewController {
     private let scroll = UIScrollView()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let refresher = UIRefreshControl()
+    /// The tree's views in the scroll view, replaced on each draw.
+    private var drawn: UIView?
     private var loaded = false
     private var submitting = false
     /// The drawn tree's forms; their fields are delegates the views do not retain.
@@ -78,7 +80,10 @@ final class FarmServerScreen: UIViewController {
             let renderer = FarmTreeRenderer(page: target, visit: visit, submit: { [weak self] in self?.submit($0) })
             let content = try renderer.node(root, parentRow: false) ?? UIView()
             forms = renderer.forms
-            for subview in scroll.subviews { subview.removeFromSuperview() }
+            // Only the previous tree: the scroll view also holds the refresh control, which stops
+            // pulling to refresh once it leaves the view.
+            drawn?.removeFromSuperview()
+            drawn = content
             if let background = renderer.style(root)["backgroundColor"] {
                 view.backgroundColor = renderer.color(background) ?? Theme.background
             }
