@@ -125,6 +125,8 @@ export async function finalizeFarmMobileClient(options: {
   clientOutputDir: string;
   /** `/farm-client-h<hash>.js`, as documents reference it. */
   webEntry: string;
+  /** Islands mode's `/farm-client-boot-h<hash>.js`, when the build emitted one. */
+  webBoot?: string | null;
   /** The hashed stylesheet href, such as `/assets/farm-client-h<hash>.css`. */
   stylesheet: string;
   /** The web client's chunk files (from its preload manifest), without leading slashes. */
@@ -166,6 +168,7 @@ export async function finalizeFarmMobileClient(options: {
   return {
     webEntry: options.webEntry,
     entry: manifest.entry,
+    ...(options.webBoot ? { webBoot: options.webBoot } : {}),
     webOnly: options.webFiles.filter((file) => !mobileFiles.has(file)).sort(),
   };
 }

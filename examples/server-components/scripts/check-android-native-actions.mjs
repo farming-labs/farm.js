@@ -1,7 +1,7 @@
 // CI check for the Mobile Android workflow: server actions run from /native, a native-tier screen
 // (RFC 0004), when tapped on a device. `node scripts/check-android-native-actions.mjs <evidence-dir>
 // <app-id>`, from this example, after `farm build --mobile --apk` with its production server
-// reachable from the emulator and the APK installed. It opens the app on /native, requires a server screen
+// reachable from the emulator and the APK installed. It opens /native from the app's web home page, requires a server screen
 // drawn with native views, types a note into each form, taps its button, and requires the note on
 // the redrawn native screen: once through the action that redirects (post/redirect/get) and once
 // through the inline action whose answer is the page again, with no fallback to the web screen.
@@ -37,13 +37,19 @@ const readLog = async () => {
 };
 
 adb("logcat", "-c");
-// /native is the app's first tab.
-adb("shell", "am", "start", "-S", "-W", "-n", `${appId}/dev.farmjs.mobile.shell.MainActivity`);
+// The app opens on its web home page; the debug build's farmOpen extra then visits /native, as a
+// tapped link would, once that first screen reports itself ready.
+adb(
+  "shell", "am", "start", "-S", "-W", "-n", `${appId}/dev.farmjs.mobile.shell.MainActivity`,
+  "--es", "farmOpen", "/native",
+);
 try {
   await waitFor(native("Native notes"), "the native /native screen");
   await screenshot("native-before.png");
   // Drawn by the shell from the server's tree, not a WebView: only a native screen reports this.
-  assert.match(await readLog(), /native app\/native open->content=\d+ms/, "/native never drew native content.");
+  const opened = await readLog();
+  assert.match(opened, /visit \/native -> server/, "The shell did not open /native as a server screen.");
+  assert.match(opened, /native app\/native open->content=\d+ms/, "/native never drew native content.");
 
   // The first field belongs to the redirecting action's form, the second to the inline action's.
   const fields = nativeFields();
@@ -55,7 +61,8 @@ try {
   await waitFor(native(NOTE), "the note the redirecting server action added");
   await screenshot("native-after-redirect.png");
 
-  // The inline action: RSC answers the post with the page again, which the screen draws in place.
+  // The inline action: the server answers with the page again (RSC) or redirects back (islx), and
+  // the screen draws the result in place.
   const urgentField = nativeFields()[1];
   assert(urgentField, "The urgent note field is gone after the first action.");
   await type(urgentField, URGENT);

@@ -77,6 +77,32 @@ describe("the mobile shell response", () => {
     expect(html).toContain("<main>hello</main>");
   });
 
+  it("loads the mobile client at once in place of the islands boot entry", async () => {
+    const islands = { ...CLIENT, webBoot: "/farm-client-boot-h66666666.js" };
+    const document =
+      "<!DOCTYPE html><html><body><main>hello</main>" +
+      '<script type="module" async src="/farm-client-boot-h66666666.js" data-farm-runtime="/farm-client-h11111111.js"></script>' +
+      "</body></html>";
+    const html = await _applyFarmMobileShellClient(
+      shellRequest(),
+      htmlResponse(document),
+      islands,
+    ).text();
+    // The boot would load the client only once the page needs it; the shell needs it to report
+    // the screen ready and to hand links to the navigator.
+    expect(html).toContain(
+      '<script type="module" async src="/farm-mobile-client-h22222222.js" data-farm-runtime="/farm-mobile-client-h22222222.js">',
+    );
+    expect(html).not.toContain("farm-client-boot");
+    // A browser's document keeps the boot entry.
+    const web = await _applyFarmMobileShellClient(
+      new Request("https://notes.example.com/notes"),
+      htmlResponse(document),
+      islands,
+    ).text();
+    expect(web).toBe(document);
+  });
+
   it("keeps a shell's document out of shared caches and varies every document on the header", async () => {
     const shell = _applyFarmMobileShellClient(shellRequest(), htmlResponse(DOCUMENT), CLIENT);
     expect(shell.headers.get("cache-control")).toBe("private, no-store");

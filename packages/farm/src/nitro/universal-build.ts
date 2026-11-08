@@ -12093,6 +12093,7 @@ async function buildNitroUniversal(
           buildDir: path.join(root, distDir),
           clientOutputDir,
           webEntry: clientJsSrc,
+          webBoot: clientBootSrc,
           stylesheet: clientCssHref,
           webFiles: clientModulePreloads?.files ?? [],
         }),

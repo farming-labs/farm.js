@@ -20,6 +20,13 @@ export interface FarmMobileShellClient {
   /** The mobile client entry that replaces it, such as `/farm-mobile-client-h5e6f7a8b.js`. */
   entry: string;
   /**
+   * Islands mode's boot entry, such as `/farm-client-boot-h1a2b3c4d.js`, which a shell's document
+   * also replaces with the mobile entry. The boot loads the client only when the page first needs
+   * it, but the shell needs it at once: it hands links to the navigator, tells the shell the screen
+   * is ready, and lets a warm WebView render the next screen in place.
+   */
+  webBoot?: string;
+  /**
    * Web client files, without the leading slash, that the mobile client does not load. Their
    * modulepreload links are dropped from a shell's document; shared chunks keep theirs.
    */
@@ -55,14 +62,15 @@ function escapeRegExp(value: string): string {
 const MAX_HELD_TAG = 4096;
 
 /**
- * Rewrites a streamed HTML document for the mobile client: the web entry's URL becomes the mobile
- * entry's, and modulepreload links of web-only chunks are removed. Both live inside tags, so an
+ * Rewrites a streamed HTML document for the mobile client: the web entry's URL (and the islands
+ * boot entry's) becomes the mobile entry's, and modulepreload links of web-only chunks are removed. Both live inside tags, so an
  * unfinished tag at the end of a chunk waits for the next one.
  */
 export function createFarmMobileShellRewriter(
   client: FarmMobileShellClient,
 ): (text: string, final?: boolean) => string {
-  const entry = new RegExp(`(["'])${escapeRegExp(client.webEntry)}\\1`, "g");
+  const entries = [client.webEntry, ...(client.webBoot ? [client.webBoot] : [])];
+  const entry = new RegExp(`(["'])(?:${entries.map(escapeRegExp).join("|")})\\1`, "g");
   const webOnly = new Set(client.webOnly);
   const preload = /<link rel="modulepreload" href="\/([^"]+)"[^>]*>/g;
   let held = "";
