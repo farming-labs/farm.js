@@ -68,7 +68,7 @@ export default defineConfig({
           sameAs: [
             "https://github.com/farming-labs",
             "https://www.npmjs.com/org/farm.js",
-            "https://x.com/KinfishT",
+            "https://x.com/farming_labs",
           ],
         },
       },
