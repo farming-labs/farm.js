@@ -94,7 +94,8 @@ Packages that Node cannot load as a bundler does, because their files import sty
 so development renders them as the production build does.
 
 `tests/e2e-server-components/compat.spec.ts` runs these against both engines, including TanStack
-Query, Motion, react-tweet, react-hook-form and react-wrap-balancer.
+Query, Motion, react-tweet, react-hook-form, react-wrap-balancer, lucide-react, react-markdown,
+recharts, React Aria Components and cmdk.
 
 ### Known differences
 
@@ -110,3 +111,7 @@ Query, Motion, react-tweet, react-hook-form and react-wrap-balancer.
   (`createDialogScope`) as the real functions. RSC gives client references that throw when called.
 - **Package client components always hydrate,** including ones that only render markup (icons),
   as RSC sends them as client components too. Each one is an island.
+- **`client-only` reached from a server component** fails an RSC build. Islands mode doesn't check
+  it: a package whose entry imports `client-only` without `"use client"` (React Aria Components)
+  renders its markup from a server component but never hydrates. Import such packages from a
+  `"use client"` module.
