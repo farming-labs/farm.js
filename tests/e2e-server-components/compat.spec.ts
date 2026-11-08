@@ -146,3 +146,52 @@ test("a package's react-server build renders server code, and its use client exp
   await expect(label).toHaveText("kit hook clicks: 1");
   expect(errors).toEqual([]);
 });
+
+test("TanStack Query: a server prefetch reaches useQuery through HydrationBoundary", async ({
+  page,
+  request,
+}) => {
+  // QueryClient and dehydrate are server code; only HydrationBoundary is a client component.
+  expect(await (await request.get("/compat/query-hydration")).text()).toContain(
+    "prefetched on the server",
+  );
+  const errors = await open(page, "/compat/query-hydration");
+  await expect(page.getByTestId("hydrated-todo")).toHaveText("prefetched on the server");
+  expect(errors).toEqual([]);
+});
+
+test("motion/react-client animates a motion.div rendered by a server component", async ({
+  page,
+}) => {
+  const errors = await open(page, "/compat/motion");
+  await expect(page.getByTestId("motion-box")).toHaveCSS("opacity", "1");
+  expect(errors).toEqual([]);
+});
+
+test("a package with a CommonJS main and an ES module build renders its default export", async ({
+  page,
+}) => {
+  const errors = await open(page, "/compat/balancer");
+  await expect(page.getByTestId("balancer-server")).toContainText("A balanced headline");
+  await expect(page.getByTestId("balancer-client")).toContainText("balanced from a client");
+  expect(errors).toEqual([]);
+});
+
+test("react-tweet's server Tweet renders, with client parts that import CSS modules", async ({
+  page,
+  request,
+}) => {
+  expect((await request.get("/compat/tweet")).status()).toBe(200);
+  const errors = await open(page, "/compat/tweet");
+  await expect(page.getByTestId("tweet")).toBeVisible();
+  // The tweet's images and data come from Twitter's CDN, which a sandbox may not reach.
+  expect(errors.filter((error) => !/Failed to load resource/.test(error))).toEqual([]);
+});
+
+test("react-hook-form's hooks work in a client component", async ({ page }) => {
+  const errors = await open(page, "/compat/hook-form");
+  await page.getByLabel("hook name").fill("Ada");
+  await page.getByRole("button", { name: "Send hook form" }).click();
+  await expect(page.getByTestId("hook-form")).toHaveText("sent: Ada");
+  expect(errors).toEqual([]);
+});

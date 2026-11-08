@@ -4,12 +4,14 @@ import { fileURLToPath } from "url";
 import {
   ensureFarmPackageClientReference,
   farmPackageClientImportExports,
+  FARM_CLIENT_REFERENCE_PRAGMA,
   findFarmPackageClientImports,
 } from "../islands-package-references";
 import {
   farmReactServerBuildReachesClientModules,
   findFarmPackageManifest,
   findFarmReactServerClientNames,
+  findFarmServerBundledPackage,
 } from "../islands-react-server-exports";
 import { isFarmIslandStrategy, type FarmIslandStrategy } from "../island";
 import { isReactRenderer, type FarmRenderer } from "../renderer";
@@ -1083,6 +1085,8 @@ export function enforceFarmIsolatedHydrationRouteBudget(
  */
 export function isIsolatableClientBoundarySource(content: string | null): boolean {
   if (!content || !hasUseClientDirective(content)) return false;
+  // A generated client reference names exactly one client export.
+  if (content.includes(FARM_CLIENT_REFERENCE_PRAGMA)) return true;
   // `export *` names its exports only in another module.
   if (/\bexport\s*\*/.test(content)) return false;
   return (
@@ -1793,6 +1797,21 @@ function inspectClientModuleMetadata(
  * would read exactly what it read before: none of its files are visited yet, and every file where
  * it stopped because an earlier inspection had visited it is visited again.
  */
+function realpathOrSelf(file: string): string {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return file;
+  }
+}
+
+/** The packages `content` re-exports from: `export * from "pkg"`, `export { a } from "pkg"`. */
+function getBarePackageReexports(content: string | null): string[] {
+  return getImportSpecifiers(content, { reexportsOnly: true }).filter((specifier) =>
+    bareSpecifierPackage(specifier),
+  );
+}
+
 function inspectPackageClientBoundary(
   resolvedPath: string | null,
   root: string | undefined,
@@ -1840,9 +1859,23 @@ function traversePackageClientBoundary(
   // relative file. Follow only files inside that package entry graph: scanning
   // bare dependencies here would incorrectly turn server package APIs into
   // client boundaries because of unrelated transitive imports.
-  for (const specifier of getImportSpecifiers(content)) {
-    if (!specifier.startsWith(".") && !specifier.startsWith("/")) continue;
-    const importedPath = resolveImportedModuleSourcePath(resolvedPath, specifier, root);
+  // Re-exports of another package (`export * from "framer-motion/client"`) are part of this
+  // entry's API, so they are followed too.
+  const reexports = getBarePackageReexports(content);
+  // A package's own dependencies resolve from its real directory (pnpm links them beside it).
+  const realPath = reexports.length > 0 ? realpathOrSelf(resolvedPath) : resolvedPath;
+  const followed = [
+    ...getImportSpecifiers(content).filter(
+      (specifier) => specifier.startsWith(".") || specifier.startsWith("/"),
+    ),
+    ...reexports,
+  ];
+  for (const specifier of followed) {
+    const importedPath = resolveImportedModuleSourcePath(
+      reexports.includes(specifier) ? realPath : resolvedPath,
+      specifier,
+      root,
+    );
     const importedMetadata = traversePackageClientBoundary(importedPath, root, visited, trace);
     if (!importedMetadata.shouldHydrate) continue;
     importsClientBoundary = true;
@@ -1864,7 +1897,10 @@ function traversePackageClientBoundary(
   };
 }
 
-function getImportSpecifiers(content: string | null): string[] {
+function getImportSpecifiers(
+  content: string | null,
+  { reexportsOnly = false }: { reexportsOnly?: boolean } = {},
+): string[] {
   if (!content) return [];
 
   const tokens = tokenizeModuleSource(content);
@@ -1885,6 +1921,7 @@ function getImportSpecifiers(content: string | null): string[] {
     if (keyword.kind !== "identifier" || !["import", "export"].includes(keyword.value)) {
       continue;
     }
+    if (reexportsOnly && keyword.value !== "export") continue;
 
     const previous = tokens[index - 1];
     if (previous?.value === ".") continue;
@@ -2399,7 +2436,19 @@ function bareSpecifierPackage(specifier: string): string | null {
  * not run in a browser.
  */
 export function collectFarmClientPackageImports(directory: string, root: string): string[] {
+  return scanFarmPackageImports(directory, root).client;
+}
+
+/**
+ * The bare imports under `directory`: `client`, as `collectFarmClientPackageImports` describes,
+ * and `server`, every package a module without `"use client"` imports.
+ */
+function scanFarmPackageImports(
+  directory: string,
+  root: string,
+): { client: string[]; server: Set<string> } {
   const found = new Set<string>();
+  const server = new Set<string>();
   const walk = (current: string) => {
     let entries: fs.Dirent[];
     try {
@@ -2421,8 +2470,50 @@ export function collectFarmClientPackageImports(directory: string, root: string)
       const client = hasUseClientDirective(content);
       for (const specifier of new Set(getImportSpecifiers(content))) {
         const name = bareSpecifierPackage(specifier);
-        if (!name || found.has(name)) continue;
+        if (!name) continue;
+        if (!client) server.add(name);
+        if (found.has(name)) continue;
         if (client || isFarmPackageClientBoundary(file, name, root)) found.add(name);
+      }
+    }
+  };
+  walk(directory);
+  return { client: [...found].sort(), server };
+}
+
+/**
+ * Packages the app under `directory` imports that Node cannot load the way a bundler does: their
+ * files import stylesheets, or their ES module build is only a `module` field beside a CommonJS
+ * `main`. The server graph bundles these (`ssr.noExternal`) instead of importing them natively, so
+ * development renders them as the production bundle does.
+ */
+export function collectFarmServerBundledPackages(directory: string): string[] {
+  const found = new Set<string>();
+  const checked = new Set<string>();
+  const walk = (current: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") && entry.isDirectory()) continue;
+      const file = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
+        continue;
+      }
+      if (!CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) || entry.name.endsWith(".d.ts"))
+        continue;
+      const content = readIfExists(file);
+      if (!content) continue;
+      for (const specifier of new Set(getImportSpecifiers(content))) {
+        const name = bareSpecifierPackage(specifier);
+        if (!name || checked.has(name)) continue;
+        checked.add(name);
+        const bundled = findFarmServerBundledPackage(file, name);
+        if (bundled) found.add(bundled);
       }
     }
   };
@@ -2498,9 +2589,13 @@ export function resolveFarmClientOptimizeDeps(
   const importer = path.join(path.resolve(root), "package.json");
   const include = new Set<string>();
   const exclude = new Set<string>();
-  for (const specifier of collectFarmClientPackageImports(directory, root)) {
+  const imports = scanFarmPackageImports(directory, root);
+  for (const specifier of imports.client) {
     const manifest = findFarmPackageManifest(importer, specifier);
-    if (manifest && farmReactServerBuildReachesClientModules(importer, manifest.name)) {
+    if (
+      manifest &&
+      farmReactServerBuildReachesClientModules(importer, specifier, imports.server.has(specifier))
+    ) {
       exclude.add(manifest.name);
       for (const dependency of manifest.dependencies) {
         include.add(`${manifest.name} > ${dependency}`);
@@ -2511,7 +2606,9 @@ export function resolveFarmClientOptimizeDeps(
   }
   for (const name of exclude) {
     for (const entry of include) {
-      if (entry === name || entry.startsWith(`${name}/`)) include.delete(entry);
+      // `react-tweet > swr` would pre-bundle swr, which the browser has to load unbundled.
+      const target = entry.includes(" > ") ? entry.slice(entry.lastIndexOf(" > ") + 3) : entry;
+      if (target === name || target.startsWith(`${name}/`)) include.delete(entry);
     }
   }
   return { include: [...include].sort(), exclude: [...exclude].sort() };

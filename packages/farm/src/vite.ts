@@ -132,6 +132,7 @@ import {
   getClientModuleMetadata,
   resolveModuleSourcePath,
   getIslandStrategyExport,
+  collectFarmServerBundledPackages,
   getFarmClientReachableModules,
   hasUseClientDirective,
   invalidateFarmClientReachableModules,
@@ -199,6 +200,8 @@ import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config
 import { rewriteFormStatusImports, type AstNode } from "@farm.js/islx/compiler";
 import {
   ensureFarmPackageClientReference,
+  FARM_CLIENT_REFERENCE_DIRECTORY,
+  FARM_CLIENT_REFERENCE_PRAGMA,
   rewriteFarmPackageClientImports,
 } from "./islands-package-references";
 import {
@@ -425,11 +428,17 @@ export function farmServerOnlyEntriesPlugin(
   return {
     name: "farm:server-only-entries",
     enforce: "pre",
-    config() {
+    config(config) {
       return {
         optimizeDeps: { rolldownOptions: { plugins: [farmBrowserBuiltinsOptimizerPlugin()] } },
-        // Resolve `server-only` here rather than in Node, which would load its throwing build.
-        ssr: { noExternal: [SERVER_ONLY_PACKAGE] },
+        ssr: {
+          noExternal: [
+            // Resolve `server-only` here rather than in Node, which would load its throwing build.
+            SERVER_ONLY_PACKAGE,
+            // Packages Node cannot load as a bundler does (stylesheet imports, `module`-only ESM).
+            ...collectFarmServerBundledPackages(path.resolve(config.root ?? process.cwd())),
+          ],
+        },
       };
     },
     configResolved(config) {
@@ -1109,6 +1118,11 @@ export function transformIsolatedClientBoundaryModule(options: {
   }
 
   const body = Array.isArray((ast as any).body) ? ((ast as any).body as any[]) : [];
+  // A generated client reference re-exports one client export, whatever its name. Its marker
+  // comment is gone once TSX is compiled, so its location under `.farm/client-references/` names it.
+  const everyExportIsComponent =
+    options.code.includes(FARM_CLIENT_REFERENCE_PRAGMA) ||
+    options.moduleReference.includes(FARM_CLIENT_REFERENCE_DIRECTORY);
   const replacements: Array<{ start: number; end: number; code: string }> = [];
   const wrapperStatements: string[] = [];
   const originalEntries: string[] = [];
@@ -1169,7 +1183,7 @@ export function transformIsolatedClientBoundaryModule(options: {
       const specifierName = (name: any): string => name?.name ?? String(name?.value ?? "");
       const isComponentExport = (specifier: any) => {
         const exported = specifierName(specifier.exported);
-        return exported === "default" || /^[A-Z]/.test(exported);
+        return everyExportIsComponent || exported === "default" || /^[A-Z]/.test(exported);
       };
       if (!specifiers.some(isComponentExport)) continue;
       const imports: string[] = [];
@@ -4236,7 +4250,9 @@ export const manifest = getManifest();
         if (
           isReactRenderer(resolveFarmRenderer(currentConfig.renderer)) &&
           selectedForIsolatedHydration &&
-          isIsolatableClientBoundarySource(clientBoundarySource)
+          (isIsolatableClientBoundarySource(clientBoundarySource) ||
+            // A generated client reference, whose marker comment compiled TSX no longer has.
+            cleanId.replace(/\\/g, "/").includes(FARM_CLIENT_REFERENCE_DIRECTORY))
         ) {
           isolatedModuleReference = toViteModuleId(cleanId, root);
           const islandsMode =

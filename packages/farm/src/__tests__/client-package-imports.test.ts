@@ -2,7 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { collectFarmClientPackageImports } from "../utils/client-component";
+import {
+  collectFarmClientPackageImports,
+  collectFarmServerBundledPackages,
+  resolveFarmClientOptimizeDeps,
+} from "../utils/client-component";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -40,6 +44,25 @@ describe("packages the browser loads once a page renders", () => {
   });
 });
 
+describe("packages that re-export another package", () => {
+  it("reach that package's client modules, but not through re-export text in a string", () => {
+    // Shaped like motion: `motion/react-client` is `export * from "framer-motion/client"`. Farm's
+    // core keeps a virtual module's source as a string, which is not a re-export.
+    const root = project({
+      "node_modules/client-kit/package.json": '{"name":"client-kit","main":"index.js"}',
+      "node_modules/client-kit/index.js": '"use client";\nexport function Box() {}\n',
+      "node_modules/reexport-kit/package.json": '{"name":"reexport-kit","main":"index.js"}',
+      "node_modules/reexport-kit/index.js": 'export * from "client-kit";\n',
+      "node_modules/string-kit/package.json": '{"name":"string-kit","main":"index.js"}',
+      "node_modules/string-kit/index.js":
+        "export const source = 'export { Box } from \"client-kit\";';\n",
+      "src/app/page.tsx":
+        'import { Box } from "reexport-kit";\nimport { source } from "string-kit";\nexport default () => null;\n',
+    });
+    expect(collectFarmClientPackageImports(path.join(root, "src"), root)).toEqual(["reexport-kit"]);
+  });
+});
+
 describe("modules client code reaches", () => {
   it("are the use client modules and what they import, not modules only server code imports", async () => {
     const { getFarmClientReachableModules } = await import("../utils/client-component");
@@ -59,5 +82,58 @@ describe("modules client code reaches", () => {
       path.join("src", "lib", "deep.ts"),
       path.join("src", "lib", "shared.ts"),
     ]);
+  });
+});
+
+describe("packages the server graph bundles", () => {
+  it("are the packages the app imports that import stylesheets or ship ESM only through module", () => {
+    const root = project({
+      "node_modules/tweet-kit/package.json": '{"name":"tweet-kit","main":"dist/index.js"}',
+      "node_modules/tweet-kit/dist/index.js": 'export * from "./icons.js";\n',
+      "node_modules/tweet-kit/dist/icons.js":
+        'import s from "./icons.module.css";\nexport const icon = s;\n',
+      "node_modules/plain-kit/package.json": '{"name":"plain-kit","main":"index.js"}',
+      "node_modules/plain-kit/index.js": "export const plain = 1;\n",
+      "node_modules/unused-styles/package.json": '{"name":"unused-styles","main":"index.js"}',
+      "node_modules/unused-styles/index.js": 'import "./a.css";\n',
+      "node_modules/legacy-dual/package.json":
+        '{"name":"legacy-dual","main":"dist/index.js","module":"dist/index.mjs"}',
+      "node_modules/legacy-dual/dist/index.js": "module.exports = { default: 1 };\n",
+      "node_modules/modern-dual/package.json":
+        '{"name":"modern-dual","main":"dist/index.js","module":"dist/index.mjs","exports":{".":{"import":"./dist/index.mjs","require":"./dist/index.js"}}}',
+      // Farm's own packages import stylesheets too, and must stay one external copy.
+      "node_modules/@farm.js/core/package.json": '{"name":"@farm.js/core","main":"index.js"}',
+      "node_modules/@farm.js/core/index.js": 'import "./docs.css";\nexport const page = 1;\n',
+      "src/page.tsx":
+        'import { icon } from "tweet-kit";\nimport { plain } from "plain-kit";\nimport legacy from "legacy-dual";\nimport modern from "modern-dual";\nimport { page } from "@farm.js/core";\n',
+    });
+    expect(collectFarmServerBundledPackages(root)).toEqual(["legacy-dual", "tweet-kit"]);
+  });
+});
+
+describe("client pre-bundling under React Server Components", () => {
+  it("leaves out a package whose server-imported build reaches an internal use client module", () => {
+    // Shaped like @tanstack/react-query: a server component renders HydrationBoundary, which the
+    // RSC dev server loads from the package itself, while a client component uses the hooks.
+    const root = project({
+      "node_modules/rq/package.json":
+        '{"name":"rq","type":"module","exports":{".":"./index.js"},"dependencies":{"rq-core":"1","ui":"1"}}',
+      "node_modules/rq/index.js":
+        'import { HydrationBoundary } from "./boundary.js";\nimport "ui";\nexport * from "rq-core";\nexport { HydrationBoundary };\n',
+      "node_modules/rq/boundary.js": '"use client";\nexport function HydrationBoundary() {}\n',
+      "node_modules/rq-core/package.json": '{"name":"rq-core","main":"index.js"}',
+      "node_modules/rq-core/index.js": "export class QueryClient {}\n",
+      "node_modules/ui/package.json": '{"name":"ui","type":"module","main":"index.js"}',
+      "node_modules/ui/index.js": 'import { Button } from "./button.js";\nexport { Button };\n',
+      "node_modules/ui/button.js": '"use client";\nexport function Button() {}\n',
+      "src/app/page.tsx":
+        'import { HydrationBoundary } from "rq";\nimport { Button } from "ui";\nexport default () => null;\n',
+      "src/todo.tsx": '"use client";\nimport { useQuery } from "rq";\n',
+    });
+    // `ui` is left out too, so `rq > ui` must not pre-bundle it either.
+    expect(resolveFarmClientOptimizeDeps(path.join(root, "src"), root)).toEqual({
+      include: ["rq > rq-core"],
+      exclude: ["rq", "ui"],
+    });
   });
 });
