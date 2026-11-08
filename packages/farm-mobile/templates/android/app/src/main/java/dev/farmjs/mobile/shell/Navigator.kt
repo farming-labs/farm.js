@@ -274,7 +274,7 @@ class Navigator(
                 screen.destroy()
             }.start()
         // The screen under the modal may show data the modal changed.
-        if (refresh) stacks[current].lastOrNull()?.page?.bridge?.refresh()
+        if (refresh) stacks[current].lastOrNull()?.refresh()
         updateBack()
     }
 

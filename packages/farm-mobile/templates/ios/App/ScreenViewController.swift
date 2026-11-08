@@ -23,6 +23,15 @@ final class ScreenViewController: UIViewController, PageHost {
     var onPainted: (() -> Void)?
     /// Releases a native screen's content (such as its React Native surface), once.
     var onClose: (() -> Void)?
+    /// Load the content again: the WebView page, or a server screen's tree.
+    func refresh() {
+        if let page {
+            page.bridge.refresh()
+        } else {
+            (nativeContent as? FarmServerScreen)?.refresh()
+        }
+    }
+
     /// A native screen's link to the navigator, which its engine holds only weakly.
     var nativeHost: AnyObject?
     private var awaitedToken = 0

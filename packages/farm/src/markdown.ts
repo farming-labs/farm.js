@@ -871,7 +871,15 @@ function readHtmlContentRegion(html: string): string {
  * @internal A rendered page as a reader sees it, whole: streamed Suspense content in place, and
  * scripts, styles, comments, and hidden elements removed. The native tier reads pages this way too.
  */
-export function _readFarmRenderedHtml(html: string): string {
+/**
+ * The rendered page's markup: streamed boundaries in place, without scripts, styles, comments, or
+ * hidden elements. `aria-hidden` content goes too unless `keepAriaHidden`: the Markdown mirror
+ * reads what a screen reader gets, while the native tree draws what a browser shows.
+ */
+export function _readFarmRenderedHtml(
+  html: string,
+  options: { keepAriaHidden?: boolean } = {},
+): string {
   const streamed = readStreamedBoundaryInstructions(html);
   return removeHiddenElements(
     resolveStreamedBoundaries(
@@ -881,6 +889,7 @@ export function _readFarmRenderedHtml(html: string): string {
         .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ""),
       streamed,
     ).replace(/<!--[\s\S]*?-->/g, ""),
+    options.keepAriaHidden,
   );
 }
 
@@ -1343,7 +1352,7 @@ const VOID_TAGS = new Set([
  * Markdown mirror should get what a screen reader gets. `hidden="until-found"`
  * stays, since that content can still be found and revealed.
  */
-function removeHiddenElements(html: string): string {
+function removeHiddenElements(html: string, keepAriaHidden = false): string {
   // Both supported attribute names contain "hidden". Only prove absence here;
   // any occurrence (including text or quoted values) uses the complete parser.
   if (!/hidden/i.test(html)) return html;
@@ -1354,7 +1363,7 @@ function removeHiddenElements(html: string): string {
   let match: RegExpExecArray | null;
   while ((match = openingTag.exec(html))) {
     const [tag, name, attributes] = match;
-    if (!isHiddenElement(attributes)) continue;
+    if (!isHiddenElement(attributes, keepAriaHidden)) continue;
     const start = match.index;
     let end = start + tag.length;
     if (!VOID_TAGS.has(name.toLowerCase()) && !isSelfClosingTag(tag)) {
@@ -1372,13 +1381,13 @@ function removeHiddenElements(html: string): string {
   return result + html.slice(cursor);
 }
 
-function isHiddenElement(attributes: string): boolean {
+function isHiddenElement(attributes: string, keepAriaHidden = false): boolean {
   const attribute = /([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
   let match: RegExpExecArray | null;
   while ((match = attribute.exec(attributes))) {
     const name = match[1]!.toLowerCase();
     const value = (match[2] ?? match[3] ?? match[4] ?? "").trim().toLowerCase();
-    if (name === "aria-hidden" && value === "true") return true;
+    if (name === "aria-hidden" && value === "true" && !keepAriaHidden) return true;
     if (name === "hidden" && value !== "until-found") return true;
   }
   return false;

@@ -21,6 +21,11 @@ class Screen(
     val modal: Boolean,
     private val navigator: Navigator,
 ) : PageHost {
+    /** Load the content again: the WebView page, or a native screen that can reload. */
+    fun refresh() {
+        page?.bridge?.refresh() ?: native?.refresh?.invoke()
+    }
+
     /** The screen's WebView page; set later when a native screen falls back to its web twin. */
     var page: Page? = page
         private set

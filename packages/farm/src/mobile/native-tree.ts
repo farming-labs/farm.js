@@ -57,6 +57,12 @@ export interface FarmNativeNode {
   /** A disabled field is not sent and cannot be edited; a disabled button does not submit. */
   disabled?: true;
   readOnly?: true;
+  /** A heading's level, 1 to 6, from `<h1>`–`<h6>` or `role="heading"`. */
+  heading?: number;
+  /** What a screen reader says for it: `aria-label`, or a field's `<label>`. */
+  label?: string;
+  /** Hidden from screen readers: `aria-hidden="true"`, `role="presentation"`, or `alt=""`. */
+  hidden?: true;
 }
 
 /** How a form submits, as a browser would send it (HTML's form submission algorithm). */
@@ -223,6 +229,30 @@ function settleLineHeight(style: FarmNativeStyle): FarmNativeStyle {
   return rest;
 }
 
+/** A label's text without its fields' text, whitespace collapsed. */
+function labelText(element: HtmlElement): string {
+  const text = (node: HtmlElement | string): string =>
+    typeof node === "string"
+      ? node
+      : CONTROL_TAGS.has(node.tag) || node.tag === "option"
+        ? " "
+        : node.children.map(text).join("");
+  return text(element).replace(/\s+/g, " ").trim();
+}
+
+function findNode(
+  node: FarmNativeNode,
+  test: (node: FarmNativeNode) => boolean,
+): FarmNativeNode | undefined {
+  for (const child of node.children ?? []) {
+    if (typeof child === "string") continue;
+    if (test(child)) return child;
+    const found = findNode(child, test);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 class Converter {
   readonly unsupported: string[] = [];
 
@@ -243,6 +273,8 @@ class Converter {
   constructor(
     private readonly pageUrl: URL,
     private readonly sheets?: readonly FarmNativeStylesheet[],
+    /** `<label for="id">` text by the id it names. */
+    private readonly labels: ReadonlyMap<string, string> = new Map(),
   ) {
     this.vars = {
       light: Object.assign({}, ...(sheets ?? []).map((sheet) => sheet.vars.light)),
@@ -366,12 +398,31 @@ class Converter {
     const changed =
       dark &&
       Object.fromEntries(Object.entries(dark).filter(([key, value]) => style?.[key] !== value));
-    return {
+    const node: FarmNativeNode = {
       type,
       tag: element.tag,
       ...(style && Object.keys(style).length > 0 ? { style } : {}),
       ...(changed && Object.keys(changed).length > 0 ? { dark: changed } : {}),
     };
+    // What a screen reader needs from the markup, as a browser exposes it.
+    const { role } = element.attributes;
+    const level =
+      /^h([1-6])$/.exec(element.tag)?.[1] ??
+      (role === "heading" ? (element.attributes["aria-level"] ?? "2") : undefined);
+    if (type === "Text" && level && Number(level) >= 1 && Number(level) <= 6) {
+      node.heading = Number(level);
+    }
+    const label = element.attributes["aria-label"]?.trim();
+    if (label) node.label = label;
+    if (
+      element.attributes["aria-hidden"] === "true" ||
+      role === "presentation" ||
+      role === "none" ||
+      (element.tag === "img" && element.attributes.alt === "")
+    ) {
+      node.hidden = true;
+    }
+    return node;
   }
 
   /** Inline content: runs of text, nested inline elements, and line breaks. */
@@ -555,6 +606,10 @@ class Converter {
       const node = this.node("View", element, box, boxDark);
       const children = this.blocks(element.children, passed, flex);
       if (children.length > 0) node.children = children;
+      // The label's own text names its field for a screen reader.
+      const text = labelText(element);
+      const field = findNode(node, (child) => child.type === "TextInput");
+      if (text && field && !field.label) field.label = text;
       return node;
     }
 
@@ -615,6 +670,9 @@ class Converter {
         boxDark,
       );
       if (attributes.name) node.name = attributes.name;
+      if (!node.label && attributes.id && this.labels.has(attributes.id)) {
+        node.label = this.labels.get(attributes.id);
+      }
       if (type !== "text") node.inputType = type;
       if (element.tag === "textarea") node.multiline = true;
       if (attributes.placeholder) node.placeholder = attributes.placeholder;
@@ -766,13 +824,23 @@ export function createFarmNativeTree(
   stylesheets?: readonly string[],
 ): FarmNativeTree {
   const title = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
-  const document = parseHtml(_readFarmRenderedHtml(html));
+  // `aria-hidden` content is drawn, as a browser shows it, and hidden from screen readers.
+  const document = parseHtml(_readFarmRenderedHtml(html, { keepAriaHidden: true }));
   const page =
     find(document, (element) => element.attributes.id === "__farm_page__") ??
     find(document, (element) => element.attributes.id === "root") ??
     find(document, (element) => element.tag === "body") ??
     document;
-  const converter = new Converter(pageUrl, stylesheets?.map(parsedStylesheet));
+  const labels = new Map<string, string>();
+  const collectLabels = (element: HtmlElement) => {
+    if (element.tag === "label" && element.attributes.for) {
+      const text = labelText(element);
+      if (text) labels.set(element.attributes.for, text);
+    }
+    for (const child of element.children) if (typeof child !== "string") collectLabels(child);
+  };
+  collectLabels(page);
+  const converter = new Converter(pageUrl, stylesheets?.map(parsedStylesheet), labels);
   // What the elements above the page pass down: text styles, and the background the screen shows.
   const ancestors: HtmlElement[] = [];
   for (let element = page.parent; element; element = element.parent) ancestors.unshift(element);

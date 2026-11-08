@@ -1,7 +1,8 @@
 // CI check for the Mobile Android workflow: the trail page's report form, drawn natively, posts
 // from the app. `node check-android-form.mjs <evidence-dir> <app-id>`, with `farm dev --mobile`
 // running and the app installed. It opens /trails/creek, types a report, taps Post report, and
-// requires the report on the redrawn native screen with no fallback to the web screen.
+// requires the report on the redrawn native screen, and after a pull to refresh, with no fallback
+// to the web screen.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
@@ -86,6 +87,11 @@ adb("shell", "input", "tap", String(button.x), String(button.y));
 // Post/redirect/get back to /trails/creek: the screen loads the tree again in place.
 await waitFor((node) => node.text === REPORT && node.className === "android.widget.TextView", "the posted report");
 await screenshot("form-after.png");
+
+// Pull to refresh: the screen loads its tree again in place and keeps the report.
+for (let pull = 0; pull < 3; pull += 1) adb("shell", "input", "swipe", "540", "500", "540", "1700", "250");
+await sleep(2000);
+await waitFor((node) => node.text === REPORT, "the report after a pull to refresh");
 
 const log = adb("logcat", "-d", "-s", "FarmShell:V", "AndroidRuntime:E");
 await writeFile(path.join(evidenceDir, "form-log.txt"), log);

@@ -7,7 +7,11 @@ import {
   resolveFarmNativeClasses,
   resolveFarmNativeInlineStyle,
 } from "../mobile/native-style";
-import { createFarmNativeTree, createFarmNativeTreeResponse } from "../mobile/native-tree";
+import {
+  createFarmNativeTree,
+  createFarmNativeTreeResponse,
+  type FarmNativeNode,
+} from "../mobile/native-tree";
 
 const page = (body: string, head = "<title>Notes</title>") =>
   `<!DOCTYPE html><html><head>${head}</head><body><div id="root"><nav>site chrome</nav>` +
@@ -220,6 +224,7 @@ describe("native tier tree", () => {
       style: { color: "#101828", fontSize: 24, lineHeight: 32, fontWeight: 700 },
       dark: { color: "#ffffff" },
       children: ["Notes & ideas"],
+      heading: 1,
     });
     const link = list.children[0].children[0];
     expect(link).toMatchObject({ type: "Text", tag: "#text" });
@@ -486,6 +491,36 @@ describe("native tier tree", () => {
     // Post/redirect/get: the shell follows the redirect itself.
     const redirect = new Response(null, { status: 303, headers: { location: "/notes/1" } });
     expect(await submit(() => redirect)).toBe(redirect);
+  });
+
+  it("carries headings, labels, and hidden content for screen readers", () => {
+    const tree = createFarmNativeTree(
+      page(
+        `<h2>Reports</h2><p role="heading" aria-level="3">Latest</p>` +
+          `<a href="/x" aria-label="Open the Creek Loop trail"><img src="/a.png" alt=""></a>` +
+          `<img src="/b.png" alt="Map of the loop"><p aria-hidden="true">decoration</p>` +
+          `<p hidden>not shown</p>` +
+          `<form method="post"><label>Your name <input name="name"></label>` +
+          `<label for="report">Report &amp; notes</label><textarea id="report" name="text"></textarea>` +
+          `<input name="tag" aria-label="Tag"><button>Post</button></form>`,
+      ),
+      url,
+    );
+    expect(tree.unsupported).toEqual([]);
+    const [h2, latest, link, map, decoration, form] = tree.root.children as FarmNativeNode[];
+    expect(h2).toMatchObject({ type: "Text", heading: 2 });
+    expect(latest).toMatchObject({ type: "Text", heading: 3 });
+    expect(link).toMatchObject({ label: "Open the Creek Loop trail" });
+    expect(link!.children![0]).toMatchObject({ type: "Image", hidden: true });
+    expect(map).toMatchObject({ type: "Image", alt: "Map of the loop" });
+    expect(map!.hidden).toBeUndefined();
+    // Drawn, as a browser shows it, and hidden from screen readers; `hidden` is not drawn at all.
+    expect(decoration).toMatchObject({ type: "Text", hidden: true, children: ["decoration"] });
+    expect(JSON.stringify(tree)).not.toContain("not shown");
+    const fields = JSON.stringify(form);
+    expect(fields).toContain('"name":"name","label":"Your name"');
+    expect(fields).toContain('"name":"text","label":"Report & notes"');
+    expect(fields).toContain('"label":"Tag"');
   });
 
   it("answers with the tree, and passes redirects and errors through", async () => {
