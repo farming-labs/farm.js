@@ -140,15 +140,29 @@ export function resolveFarmReactServerExport(importer: string, specifier: string
   return resolved;
 }
 
+const parsedModules = new Map<string, { size: number; mtimeMs: number; program: AstNode | null }>();
+
+/** `file` parsed, once per version of it: tracing reads the same package files for every import. */
 function readModule(file: string): AstNode | null {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    return null;
+  }
+  const cached = parsedModules.get(file);
+  if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached.program;
+  let program: AstNode | null = null;
   try {
     const code = fs.readFileSync(file, "utf8");
     const extension = path.extname(file).slice(1);
     const lang = extension === "ts" || extension === "mts" || extension === "cts" ? "ts" : "tsx";
-    return parseAst(code, { lang: lang as "tsx" }) as unknown as AstNode;
+    program = parseAst(code, { lang: lang as "tsx" }) as unknown as AstNode;
   } catch {
-    return null;
+    program = null;
   }
+  parsedModules.set(file, { size: stat.size, mtimeMs: stat.mtimeMs, program });
+  return program;
 }
 
 function isClientModule(program: AstNode): boolean {
@@ -176,43 +190,121 @@ function exportedName(node: AstNode | undefined): string | undefined {
   return node?.type === "Identifier" ? node.name : node?.value;
 }
 
+/** The file a bare `specifier` resolves to from `importer` with the default (browser) build. */
+export function resolveFarmPackageDefaultEntry(importer: string, specifier: string): string | null {
+  const parsed = packageNameOf(specifier);
+  if (!parsed) return null;
+  const directory = findPackageDirectory(importer, parsed.name);
+  if (!directory) return null;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8"));
+    const target =
+      pickTarget(exportEntry(manifest.exports, parsed.subpath), [
+        "browser",
+        ...DEFAULT_CONDITIONS,
+      ]) ?? (!parsed.subpath ? (manifest.module ?? manifest.main ?? "index.js") : parsed.subpath);
+    return resolveRelative(
+      path.join(directory, "package.json"),
+      `./${String(target).replace(/^\.\//, "")}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Where `source`, imported or re-exported by `file`, resolves: relative files and packages. */
+function resolveSource(file: string, source: string): string | null {
+  if (source.startsWith(".")) return resolveRelative(file, source);
+  return resolveFarmPackageDefaultEntry(file, source);
+}
+
 /**
- * Whether `name`, as `file` exports it, comes from a `"use client"` module: the export follows
- * re-exports (`export { x } from`, `export * from`) through relative files.
+ * Where `name`, as `file` exports it, comes from: `"client"` for a `"use client"` module,
+ * `"server"` for any other module that defines it, undefined when that cannot be told (not found,
+ * CommonJS, too deep). Follows re-exports (`export { x } from`, `export * from`) and local names
+ * bound by imports (`import { x } from "./x.js"; export { x }`), through relative files and
+ * packages.
  */
-export function isFarmClientExport(file: string, name: string, depth = 0): boolean {
-  if (depth > 6) return false;
+export function traceFarmExport(
+  file: string,
+  name: string,
+  depth = 0,
+): "client" | "server" | undefined {
+  if (depth > 8) return undefined;
   const program = readModule(file);
-  if (!program) return false;
-  if (isClientModule(program)) return true;
+  if (!program) return undefined;
+  if (isClientModule(program)) return "client";
+  const follow = (source: string, imported: string) => {
+    const target = resolveSource(file, source);
+    return target ? traceFarmExport(target, imported, depth + 1) : undefined;
+  };
+  const imports = new Map<string, { source: string; imported: string }>();
+  for (const node of program.body ?? []) {
+    if (node.type !== "ImportDeclaration" || typeof node.source?.value !== "string") continue;
+    for (const specifier of node.specifiers ?? []) {
+      if (specifier.type === "ImportNamespaceSpecifier") continue;
+      const imported =
+        specifier.type === "ImportDefaultSpecifier"
+          ? "default"
+          : (exportedName(specifier.imported) ?? specifier.local.name);
+      imports.set(specifier.local.name, { source: node.source.value, imported });
+    }
+  }
+  const local = (localName: string) => {
+    const binding = imports.get(localName);
+    return binding ? follow(binding.source, binding.imported) : "server";
+  };
   const stars: string[] = [];
   for (const node of program.body ?? []) {
     if (node.type === "ExportNamedDeclaration" && node.source) {
       for (const specifier of node.specifiers ?? []) {
         if (exportedName(specifier.exported) !== name) continue;
-        const target = resolveRelative(file, node.source.value);
-        return target
-          ? isFarmClientExport(target, exportedName(specifier.local) ?? name, depth + 1)
-          : false;
+        return follow(node.source.value, exportedName(specifier.local) ?? name);
       }
     } else if (node.type === "ExportAllDeclaration" && node.source && !node.exported) {
       stars.push(node.source.value);
     } else if (node.type === "ExportNamedDeclaration" && !node.source) {
-      const names = [
-        ...(node.specifiers ?? []).map((specifier: AstNode) => exportedName(specifier.exported)),
+      for (const specifier of node.specifiers ?? []) {
+        if (exportedName(specifier.exported) === name) {
+          return local(exportedName(specifier.local) ?? name);
+        }
+      }
+      const declared = [
         ...(node.declaration?.id ? [node.declaration.id.name] : []),
         ...(node.declaration?.declarations ?? []).map((declarator: AstNode) => declarator.id?.name),
       ];
-      if (names.includes(name)) return false;
+      if (declared.includes(name)) return "server";
     } else if (node.type === "ExportDefaultDeclaration" && name === "default") {
-      return false;
+      return node.declaration?.type === "Identifier" ? local(node.declaration.name) : "server";
     }
   }
   for (const source of stars) {
-    const target = resolveRelative(file, source);
-    if (target && isFarmClientExport(target, name, depth + 1)) return true;
+    const traced = follow(source, name);
+    if (traced) return traced;
   }
-  return false;
+  return undefined;
+}
+
+/**
+ * Whether `name`, as `file` exports it, comes from a `"use client"` module, following re-exports
+ * and imported local names through relative files and packages.
+ */
+export function isFarmClientExport(file: string, name: string): boolean {
+  return traceFarmExport(file, name) === "client";
+}
+
+/**
+ * Whether `specifier`'s `name` export, imported from `importer`, is not known to be server code,
+ * so a server component gets it as a client reference, as RSC would. A name the package defines
+ * outside any `"use client"` module (`dehydrate`, `QueryClient`) stays a plain import.
+ */
+export function isFarmPackageClientExport(
+  importer: string,
+  specifier: string,
+  name: string,
+): boolean {
+  const entry = resolveFarmPackageDefaultEntry(importer, specifier);
+  return !entry || traceFarmExport(entry, name) !== "server";
 }
 
 /** A module's imports of packages, with the names each reads. */
@@ -402,15 +494,24 @@ export function farmRelativeImportFiles(code: string, file: string): string[] {
 }
 
 /**
- * Whether `specifier`'s `react-server` build, from `importer`, re-exports a `"use client"` module.
- * React Server Components' dev server loads that module straight from the package for the browser,
- * so the same package pre-bundled by Vite would be a second copy (two React contexts).
+ * Whether the build of `specifier` that server components get, from `importer`, reaches an internal
+ * `"use client"` module. React Server Components' dev server loads that module straight from the
+ * package for the browser, so the same package pre-bundled by Vite would be a second copy (two
+ * React contexts).
  */
 export function farmReactServerBuildReachesClientModules(
   importer: string,
   specifier: string,
+  /**
+   * A server module imports the package: its default build then serves server components too,
+   * and its internal `"use client"` modules are client references (React Query's
+   * `HydrationBoundary`).
+   */
+  serverImported = false,
 ): boolean {
-  const target = resolveFarmReactServerExport(importer, specifier);
+  const target =
+    resolveFarmReactServerExport(importer, specifier) ??
+    (serverImported ? resolveFarmPackageDefaultEntry(importer, specifier) : null);
   if (!target) return false;
   const seen = new Set<string>();
   const reaches = (file: string, depth: number): boolean => {
@@ -436,11 +537,24 @@ export function farmReactServerBuildReachesClientModules(
 
 /** The package directory `specifier` resolves to from `importer`, for its manifest. */
 const IMPORT_SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"'./][^"']*)["']/g;
+const STYLESHEET_IMPORT =
+  /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'][^"']+\.(?:css|scss|sass|less|styl)["']/;
 const MAX_SCANNED_FILES = 2000;
 
-/** The bare specifiers the script files under `directory` import, skipping nested packages. */
-function packageImportSpecifiers(directory: string): Set<string> {
-  const found = new Set<string>();
+interface PackageScan {
+  /** The bare specifiers its script files import. */
+  imports: Set<string>;
+  /** Whether a script file imports a stylesheet, which Node cannot load. */
+  stylesheets: boolean;
+}
+
+const packageScans = new Map<string, PackageScan>();
+
+/** The script files under `directory`, read once, skipping nested packages. */
+function scanPackage(directory: string): PackageScan {
+  const cached = packageScans.get(directory);
+  if (cached) return cached;
+  const scan: PackageScan = { imports: new Set(), stylesheets: false };
   const pending = [directory];
   let scanned = 0;
   while (pending.length > 0 && scanned < MAX_SCANNED_FILES) {
@@ -455,18 +569,53 @@ function packageImportSpecifiers(directory: string): Set<string> {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
       const file = path.join(current, entry.name);
       if (entry.isDirectory()) pending.push(file);
-      else if (/\.(?:m?js|jsx)$/.test(entry.name) && scanned++ < MAX_SCANNED_FILES) {
+      else if (/\.(?:[cm]?js|jsx)$/.test(entry.name) && scanned++ < MAX_SCANNED_FILES) {
         let code: string;
         try {
           code = fs.readFileSync(file, "utf8");
         } catch {
           continue;
         }
-        for (const match of code.matchAll(IMPORT_SPECIFIER)) found.add(match[1]!);
+        for (const match of code.matchAll(IMPORT_SPECIFIER)) scan.imports.add(match[1]!);
+        if (!scan.stylesheets && STYLESHEET_IMPORT.test(code)) scan.stylesheets = true;
       }
     }
   }
-  return found;
+  packageScans.set(directory, scan);
+  return scan;
+}
+
+/**
+ * The name of the package `specifier` names, from `importer`, when Node cannot load it the way a
+ * bundler does, so a server graph has to bundle it instead of importing it natively; otherwise
+ * null. That is a package whose own script files import stylesheets (react-tweet's CSS modules),
+ * or one that ships an ES module build only through `module` beside a CommonJS `main`
+ * (react-wrap-balancer), whose default export Node would read as the whole CommonJS exports object.
+ */
+export function findFarmServerBundledPackage(importer: string, specifier: string): string | null {
+  const parsed = packageNameOf(specifier);
+  // Farm's own packages stay external: bundling a second copy of the core would split its
+  // module state (route definitions, request context) from the copy the server runtime loads.
+  if (!parsed || REACT_PACKAGES.has(parsed.name) || parsed.name.startsWith("@farm.js/")) {
+    return null;
+  }
+  const directory = findPackageDirectory(importer, parsed.name);
+  if (!directory) return null;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8"));
+    if (
+      manifest.exports === undefined &&
+      manifest.type !== "module" &&
+      typeof manifest.module === "string" &&
+      typeof manifest.main === "string" &&
+      path.resolve(directory, manifest.main) !== path.resolve(directory, manifest.module)
+    ) {
+      return parsed.name;
+    }
+  } catch {
+    return null;
+  }
+  return scanPackage(directory).stylesheets ? parsed.name : null;
 }
 
 /**
@@ -489,7 +638,7 @@ export function findFarmPackageManifest(
   } catch {
     return null;
   }
-  const dependencies = [...packageImportSpecifiers(directory)].filter((imported) => {
+  const dependencies = [...scanPackage(directory).imports].filter((imported) => {
     const name = packageNameOf(imported)?.name;
     return name !== undefined && names.has(name);
   });
@@ -502,25 +651,7 @@ export function findFarmPackageManifest(
  * package).
  */
 export function listFarmPackageExports(importer: string, specifier: string): string[] | null {
-  const parsed = packageNameOf(specifier);
-  if (!parsed) return null;
-  const directory = findPackageDirectory(importer, parsed.name);
-  if (!directory) return null;
-  let entry: string | null = null;
-  try {
-    const manifest = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8"));
-    const target =
-      pickTarget(exportEntry(manifest.exports, parsed.subpath), [
-        "browser",
-        ...DEFAULT_CONDITIONS,
-      ]) ?? (!parsed.subpath ? (manifest.module ?? manifest.main ?? "index.js") : parsed.subpath);
-    entry = resolveRelative(
-      path.join(directory, "package.json"),
-      `./${String(target).replace(/^\.\//, "")}`,
-    );
-  } catch {
-    return null;
-  }
+  const entry = resolveFarmPackageDefaultEntry(importer, specifier);
   if (!entry) return null;
   const names = new Set<string>();
   const seen = new Set<string>();

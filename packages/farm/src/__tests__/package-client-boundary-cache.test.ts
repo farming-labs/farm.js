@@ -185,8 +185,10 @@ describe("package client-boundary cache", () => {
     const uncached = countPackageReads();
     planProject(root, modules);
     // Islands-mode plans reach package components through their client references, which
-    // inspect each package entry once rather than again for a static-leaf check.
-    expect(uncached.reads.filter((file) => file === icon)).toHaveLength(20);
+    // inspect each package entry once rather than again for a static-leaf check. One more read is
+    // the export trace that decides which imported names are client components; it parses each
+    // file once per process.
+    expect(uncached.reads.filter((file) => file === icon)).toHaveLength(21);
     vi.restoreAllMocks();
 
     const build = countPackageReads();

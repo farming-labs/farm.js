@@ -240,6 +240,21 @@ describe("islands mode", () => {
     expect(output).not.toMatch(/export \{ Counter, helper/);
   });
 
+  it("wraps a generated client reference's export as an island whatever its name", async () => {
+    // `import * as motion from "motion/react-client"` renders `motion.div`: a lowercase export.
+    const { parseSync } = await import("vite");
+    const output = transformIsolatedClientBoundaryModule({
+      code: '"use client";\nexport { div } from "motion/react-client";\n',
+      moduleReference: "/.farm/client-references/motion+react-client/div.tsx",
+      islandStrategy: "load",
+      parse: (code) => (parseSync("div.tsx", code) as { program: unknown }).program as never,
+      slots: true,
+    })!;
+    expect(output).toContain(
+      'const __farm_isolated_boundary_div__ = __farm_islx_island__(__farm_isolated_reexport_0__, "/.farm/client-references/motion+react-client/div.tsx", "div", "load");',
+    );
+  });
+
   it("keeps every island of a page above the root budget, so the page never ships", () => {
     const root = mkdtempSync(path.join(tmpdir(), "farm-islands-budget-"));
     roots.push(root);
@@ -384,7 +399,7 @@ describe("islands mode", () => {
       const file = reference(root, "acme-theme", "ThemeProvider");
       expect(plan.isolatedBoundaries).toEqual([{ modulePath: file, islandStrategy: "load" }]);
       expect(readFileSync(file, "utf8")).toContain(
-        '"use client";\nexport { ThemeProvider } from "acme-theme";',
+        '"use client";\nimport { ThemeProvider as __farm_reference__ } from "acme-theme";\nexport { __farm_reference__ as ThemeProvider };',
       );
     });
 

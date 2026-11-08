@@ -86,6 +86,57 @@ describe("package client references", () => {
     expect(output).toContain("Root: __farm_package_reference_0__");
   });
 
+  it("keeps exports the package defines outside use client modules as plain imports", () => {
+    // Shaped like @tanstack/react-query: client components imported then re-exported by name, and
+    // server-safe functions from another package through `export *`.
+    const root = tempRoot();
+    const files: Record<string, string> = {
+      "node_modules/rq/package.json": JSON.stringify({
+        name: "rq",
+        exports: { ".": { import: "./index.js" } },
+      }),
+      "node_modules/rq/index.js":
+        'import { HydrationBoundary } from "./boundary.js";\nexport * from "rq-core";\nexport { HydrationBoundary };\n',
+      "node_modules/rq/boundary.js": '"use client";\nexport function HydrationBoundary() {}\n',
+      "node_modules/rq-core/package.json": JSON.stringify({
+        name: "rq-core",
+        exports: { ".": { import: "./index.js" } },
+      }),
+      "node_modules/rq-core/index.js":
+        'import { dehydrate } from "./hydration.js";\nexport class QueryClient {}\nexport { dehydrate };\n',
+      "node_modules/rq-core/hydration.js": "export function dehydrate() {}\n",
+    };
+    for (const [file, contents] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), contents);
+    }
+    const page = path.join(root, "src/page.tsx");
+    const code = 'import { dehydrate, HydrationBoundary, QueryClient } from "rq";\n';
+    const [entry] = findFarmPackageClientImports(code, page, (specifier) => specifier === "rq");
+    expect(farmPackageClientImportExports(entry!)).toEqual(["HydrationBoundary"]);
+    const output = rewriteFarmPackageClientImports({
+      code,
+      file: page,
+      root,
+      isClientPackage: (specifier) => specifier === "rq",
+    })!;
+    expect(output).toContain(
+      'import { dehydrate as dehydrate, QueryClient as QueryClient } from "rq";',
+    );
+    expect(output).toContain(
+      `import { HydrationBoundary as HydrationBoundary } from ${JSON.stringify(farmPackageClientReferencePath(root, "rq", "HydrationBoundary"))};`,
+    );
+    // Server exports only: the import stays as it is.
+    expect(
+      rewriteFarmPackageClientImports({
+        code: 'import { QueryClient } from "rq";\n',
+        file: page,
+        root,
+        isClientPackage: (specifier) => specifier === "rq",
+      }),
+    ).toBeNull();
+  });
+
   it("points the imports at client references that re-export each one with use client", () => {
     const root = tempRoot();
     const code = [
@@ -114,7 +165,7 @@ describe("package client references", () => {
     );
     expect(output).not.toContain('from "next-themes"');
     expect(readFileSync(theme, "utf8")).toContain(
-      '"use client";\nexport { ThemeProvider } from "next-themes";',
+      '"use client";\nimport { ThemeProvider as __farm_reference__ } from "next-themes";\nexport { __farm_reference__ as ThemeProvider };',
     );
 
     // Writing again leaves an unchanged reference alone, so a watcher sees no change.

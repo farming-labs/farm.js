@@ -45,7 +45,7 @@ interface StoredCache {
 }
 
 /** Bump when inspection semantics or this file's shape change. */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const NODE_MODULES_SEGMENT = `${path.sep}node_modules${path.sep}`;
 
 /**
