@@ -253,6 +253,38 @@ jobs:
           set -f
           node "$GITHUB_WORKSPACE/examples/mobile/scripts/check-ios-native.mjs" "$EVIDENCE" $SERVER_ROUTES
 
+      # Taps on a native-tier screen, as Mobile Android's form check: idb reads the simulator's
+      # accessibility tree for frames and sends touches and keys to them.
+      - name: Install idb
+        if: matrix.example == 'mobile-minimal'
+        env:
+          IDB_VERSION: 1.7.8
+          IDB_COMPANION_SHA256: 44369a2df0b62e3a1764de61bd09280999c7e9b27ea8f20bff1ea3a9db0302a2
+        run: |
+          # The companion's prebuilt release, which Homebrew's facebook/fb formula installs. It loads
+          # the simulator frameworks of Xcode 26, which the formula requires; the shell still builds
+          # with the runner's default Xcode.
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          test -d "$xcode"
+          echo "IDB_DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          archive="$RUNNER_TEMP/idb-companion.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/facebook/idb/releases/download/v$IDB_VERSION/idb-companion.macos-arm64.tar.gz"
+          echo "$IDB_COMPANION_SHA256  $archive" | shasum -a 256 -c
+          mkdir -p "$RUNNER_TEMP/idb-companion"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/idb-companion"
+          echo "$RUNNER_TEMP/idb-companion" >> "$GITHUB_PATH"
+          pipx install "fb-idb==1.7.7"
+          DEVELOPER_DIR="$xcode/Contents/Developer" "$RUNNER_TEMP/idb-companion/idb_companion" --version
+          idb --help > /dev/null
+
+      - name: Submit a native form from the app
+        if: matrix.example == 'mobile-minimal'
+        working-directory: examples/${{ matrix.example }}
+        env:
+          APP_ID: ${{ matrix.app-id }}
+        run: node scripts/check-ios-form.mjs "$EVIDENCE" "$APP_ID" "$SIMULATOR_UDID"
+
       # A web screen calling the app's own Device module (mobile.modules.Device.web) through the
       # bridge. Under farm dev: the production app's server has no deployment in CI.
       - name: Call the Device module from the /settings web screen
