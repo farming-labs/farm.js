@@ -920,6 +920,13 @@ export async function createFarmNativeTreeResponse(options: {
    * a production server passes the client CSS its build embedded.
    */
   loadStylesheet?: (href: string) => string | undefined | Promise<string | undefined>;
+  /**
+   * The public origin the tree's links and form actions resolve against. Behind a proxy that
+   * terminates TLS the request arrives as `http://`, and a shell cannot post to that, so a
+   * production server passes the forwarded origin under `server.trustProxy`. Defaults to the
+   * request's own origin.
+   */
+  origin?: string;
 }): Promise<Response> {
   const headers = new Headers(options.request.headers);
   headers.set("accept", "text/html");
@@ -939,12 +946,15 @@ export async function createFarmNativeTreeResponse(options: {
   const drawn = page.status === 200 || (submitted && page.status >= 400 && page.status < 500);
   if (!drawn || !type.includes("text/html")) return page;
   const html = await page.text();
-  const pageUrl = new URL(options.request.url);
+  const requestUrl = new URL(options.request.url);
+  const pageUrl = options.origin
+    ? new URL(requestUrl.pathname + requestUrl.search, options.origin)
+    : requestUrl;
   const load =
     options.loadStylesheet ??
     (async (href: string) => {
       const response = await options.renderPage(
-        new Request(new URL(href, pageUrl), {
+        new Request(new URL(href, requestUrl), {
           headers: { accept: "text/css,*/*;q=0.1", cookie: headers.get("cookie") ?? "" },
           signal: options.request.signal,
         }),
