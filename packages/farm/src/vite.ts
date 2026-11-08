@@ -778,6 +778,68 @@ function interceptFarmDevPageResponse(options: {
       : Boolean(runtimeSession && hasRuntimeAfterHook);
   };
 
+  // A response only runtime.after needs streams through it, as in production: the hook gets a
+  // Response whose body is the page as it renders, and what it returns is written as it arrives.
+  // Buffering would hold every Suspense boundary until the last resolved, whenever any plugin
+  // (the mobile session plugin of every app with a `mobile` block, say) has an `after` hook.
+  // HTML transform hooks still need the whole document, so those responses stay buffered.
+  let runtimeStream:
+    | { controller: ReadableStreamDefaultController<Uint8Array>; done: Promise<void> }
+    | undefined;
+  const streamsThroughRuntime = () => {
+    if (runtimeStream) return true;
+    if (!runtimeSession || !hasRuntimeAfterHook) return false;
+    if (!hasHTMLTransformHook) return true;
+    const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
+    return !(typeof contentTypeHeader === "string" && contentTypeHeader.includes("text/html"));
+  };
+  const startRuntimeStream = () => {
+    if (runtimeStream) return runtimeStream;
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(streamController) {
+        controller = streamController;
+      },
+    });
+    const status = res.statusCode || 200;
+    const canHaveBody = method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
+    pm.copyRequestContext(req, runtimeSession!.request);
+    const done = pm
+      .endRuntimeRequest(
+        runtimeSession!,
+        new Response(canHaveBody ? body : null, {
+          status,
+          headers: createHeadersFromNodeResponse(res),
+        }),
+      )
+      .then(async (runtimeResponse) => {
+        applyWebResponseToNodeResponse(runtimeResponse, res);
+        if (!res.headersSent) originalWriteHead(res.statusCode);
+        originalFlushHeaders?.();
+        if (!runtimeResponse.body) return;
+        const reader = runtimeResponse.body.getReader();
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          originalWrite(chunk.value);
+          if (typeof res.flush === "function") res.flush();
+        }
+      });
+    // Settled by `end`, which reports a failure; until then a rejection is not unhandled.
+    done.catch(() => {});
+    runtimeStream = { controller, done };
+    return runtimeStream;
+  };
+  const streamRuntimeChunk = (chunk: Buffer | undefined) => {
+    const stream = startRuntimeStream();
+    if (!chunk || chunk.byteLength === 0) return;
+    try {
+      stream.controller.enqueue(new Uint8Array(chunk));
+    } catch {
+      // The hook cancelled the body or replaced it; the rest of the page has nowhere to go.
+    }
+  };
+
   res.writeHead = ((statusCode: number, ...args: unknown[]) => {
     const statusMessage = typeof args[0] === "string" ? args[0] : undefined;
     const headers = statusMessage === undefined ? args[0] : args[1];
@@ -785,15 +847,21 @@ function interceptFarmDevPageResponse(options: {
     if (statusMessage !== undefined) res.statusMessage = statusMessage;
     applyNodeWriteHeadHeaders(res, headers);
 
-    if (shouldBufferCurrentResponse()) return res;
+    // Streamed responses send their head once runtime.after has answered.
+    if (streamsThroughRuntime() || shouldBufferCurrentResponse()) return res;
     return statusMessage === undefined
       ? originalWriteHead(statusCode)
       : originalWriteHead(statusCode, statusMessage);
   }) as any;
 
   if (originalFlushHeaders) {
-    res.flushHeaders = (() =>
-      shouldBufferCurrentResponse() ? undefined : originalFlushHeaders()) as any;
+    res.flushHeaders = (() => {
+      if (streamsThroughRuntime()) {
+        startRuntimeStream();
+        return undefined;
+      }
+      return shouldBufferCurrentResponse() ? undefined : originalFlushHeaders();
+    }) as any;
   }
 
   res.write = ((chunk: unknown, ...args: unknown[]) => {
@@ -801,6 +869,13 @@ function interceptFarmDevPageResponse(options: {
     const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
     const isHtmlResponse = contentType.includes("text/html");
     const bufferChunk = toNodeResponseBuffer(chunk, args[0]);
+
+    if (streamsThroughRuntime()) {
+      streamRuntimeChunk(bufferChunk);
+      const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
+      callback?.();
+      return true;
+    }
 
     if (isHtmlResponse && bufferChunk) {
       htmlChunks.push(bufferChunk);
@@ -835,6 +910,43 @@ function interceptFarmDevPageResponse(options: {
       typeof originalEndArgs[originalEndArgs.length - 1] === "function"
         ? (originalEndArgs[originalEndArgs.length - 1] as () => void)
         : undefined;
+    const restore = () => {
+      res.write = originalWrite;
+      res.end = originalEnd;
+      res.writeHead = originalWriteHead;
+      if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
+      delete res[FARM_NODE_RESPONSE_END_PENDING];
+    };
+    if (streamsThroughRuntime()) {
+      const stream = startRuntimeStream();
+      streamRuntimeChunk(toNodeResponseBuffer(args[0], args[1]));
+      try {
+        stream.controller.close();
+      } catch {
+        // Already cancelled by the hook.
+      }
+      stream.done
+        .then(() =>
+          hasAfterResponseHook ? pm.runHookParallel("afterResponse", req, res) : undefined,
+        )
+        .catch((error) => {
+          void options.emitError(error);
+          console.error("Error in afterResponse hook:", error);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.removeHeader("Content-Length");
+            res.setHeader("Content-Type", "text/plain; charset=utf-8");
+            originalWriteHead(500);
+            originalWrite("Internal Server Error");
+          }
+        })
+        .finally(() => {
+          restore();
+          if (callback) originalEnd(callback);
+          else originalEnd();
+        });
+      return res;
+    }
     const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
     const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
     const isHtmlResponse = contentType.includes("text/html");
