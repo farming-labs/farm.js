@@ -24,6 +24,11 @@ import {
 import type { FarmMobileAnalyzerStats, FarmMobileBlocker } from "./analyzer";
 import type { FarmMobilePort } from "./port";
 import {
+  farmComponentModuleScripts,
+  keepFarmComponentRanges,
+  readFarmComponentBlocks,
+} from "./component-blocks";
+import {
   readFarmMobileWebModules,
   scanFarmMobileAppModules,
   type FarmMobileAppModules,
@@ -173,6 +178,7 @@ export interface FarmMobileApp {
 }
 
 const SCRIPT_PAGE = /\.(?:tsx|ts|jsx|js)$/;
+const COMPONENT_PAGE = /\.(?:vue|svelte)$/;
 
 /** `.js` pages may contain JSX, as in the client build. */
 function describe(blocker: FarmMobileBlocker): string {
@@ -183,7 +189,10 @@ function scriptLang(file: string): "ts" | "tsx" | "jsx" {
   return file.endsWith(".tsx") ? "tsx" : file.endsWith(".ts") ? "ts" : "jsx";
 }
 
-/** Static `export const mobile` of every script page; pages without one are not parsed. */
+/**
+ * Static `export const mobile` of every script page, and of every `.vue` or `.svelte` page's
+ * module script; pages without one are not parsed.
+ */
 async function readPageExports(
   root: string,
   pageFiles: ReadonlyMap<string, string>,
@@ -193,16 +202,23 @@ async function readPageExports(
   let parseSync: (typeof import("rolldown/utils"))["parseSync"] | undefined;
   await Promise.all(
     [...pageFiles].map(async ([route, file]) => {
-      if (!SCRIPT_PAGE.test(file)) return;
-      const source = await readFile(file, "utf8");
+      const component = COMPONENT_PAGE.test(file);
+      if (!SCRIPT_PAGE.test(file) && !component) return;
+      let source = await readFile(file, "utf8");
       if (!/\bmobile\b/.test(source)) return;
+      if (component) {
+        // Only the script that holds module exports; positions stay those of the file.
+        const blocks = readFarmComponentBlocks(file, source);
+        source = keepFarmComponentRanges(source, farmComponentModuleScripts(blocks));
+      }
       parseSync ??= (await import("rolldown/utils")).parseSync;
       const parse = parseSync;
       const relative = path.relative(root, file).split(path.sep).join("/");
       const config = readFarmMobilePageExport(
         source,
         relative,
-        (name, code) => parse(name, code, { lang: scriptLang(name) }).program as never,
+        (name, code) =>
+          parse(name, code, { lang: component ? "ts" : scriptLang(name) }).program as never,
         { os },
       );
       if (config) exports.set(route, { file: relative, config });

@@ -3,8 +3,10 @@
 import { Writable } from "node:stream";
 import {
   defineRendererDescriptorConformance,
+  defineRendererNativeTreeConformance,
   defineRendererServerConformance,
 } from "@farm.js/renderer-tests";
+import { createFarmNativeTreeResponse } from "@farm.js/core/internal/production-runtime";
 import { lazy } from "preact/compat";
 import { describe, expect, it } from "vitest";
 import { preact } from "../index";
@@ -34,6 +36,21 @@ defineRendererDescriptorConformance({
 });
 
 defineRendererServerConformance(serverRuntime);
+defineRendererNativeTreeConformance(serverRuntime, async (html) => {
+  // As a mobile app's server answers a native-tier screen: the page's HTML read into a tree.
+  const response = await createFarmNativeTreeResponse({
+    request: new Request("https://app.example/trails", {
+      headers: { accept: "application/vnd.farm.native+json" },
+    }),
+    renderPage: () =>
+      new Response(
+        `<!DOCTYPE html><html><head><title>Trails</title></head><body><div id="__farm_page__">${html}</div></body></html>`,
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      ),
+    loadStylesheet: () => "",
+  });
+  return response.json();
+});
 
 describe("Preact renderer", () => {
   it("streams FARMJS elements through Preact's Node renderer", async () => {

@@ -3,9 +3,11 @@
 import { Writable } from "node:stream";
 import {
   defineRendererDescriptorConformance,
+  defineRendererNativeTreeConformance,
   defineRendererServerConformance,
   defineRendererServerQueryConformance,
 } from "@farm.js/renderer-tests";
+import { createFarmNativeTreeResponse } from "@farm.js/core/internal/production-runtime";
 import { Suspense, createResource, createSignal, createUniqueId } from "solid-js";
 import { createComponent, escape, ssr, ssrAttribute, ssrHydrationKey } from "solid-js/web";
 import { describe, expect, it } from "vitest";
@@ -38,6 +40,21 @@ defineRendererDescriptorConformance({
 });
 
 defineRendererServerConformance(serverRuntime);
+defineRendererNativeTreeConformance(serverRuntime, async (html) => {
+  // As a mobile app's server answers a native-tier screen: the page's HTML read into a tree.
+  const response = await createFarmNativeTreeResponse({
+    request: new Request("https://app.example/trails", {
+      headers: { accept: "application/vnd.farm.native+json" },
+    }),
+    renderPage: () =>
+      new Response(
+        `<!DOCTYPE html><html><head><title>Trails</title></head><body><div id="__farm_page__">${html}</div></body></html>`,
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      ),
+    loadStylesheet: () => "",
+  });
+  return response.json();
+});
 
 defineRendererServerQueryConformance({
   name: "solid",
