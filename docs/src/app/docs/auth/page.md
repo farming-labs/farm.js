@@ -105,18 +105,6 @@ await signIn({
 });
 ```
 
-### On native screens
-
-React Native screens (`page.native.tsx`) in a [mobile app](/docs/mobile/auth#auth-on-mobile) use the
-same import, `@farm.js/auth/client`. Metro resolves its `react-native` build, which calls the same
-auth routes through `serverFetch` from `@farm.js/native` with the device token, so `signIn`,
-`signUp`, `getSession`, `useAuth` and `signOut` behave as on the web. Sign-in and sign-up go through
-the shell's native code, which keeps the session cookie in the WebView and issues the device token,
-so a native sign-in signs web screens in too. Web bundles are unaffected: Vite and other web
-bundlers never resolve that condition, and `@farm.js/native` is an optional peer only mobile apps
-install. Social and OAuth sign-in reject on native screens for now. `basePath` applies on native
-too; `baseURL` does not, since native screens always call `mobile.server`.
-
 ## Configuration
 
 The default is intentionally useful. Add options only when application policy differs:
@@ -215,6 +203,62 @@ farm auth migrate --write auth-schema.sql
 ```
 
 Both print or save exactly what `farm auth migrate` would run and change nothing. Better Auth owns this schema, so the statements come from its migrator rather than from the table declarations a plugin makes to `farm <plugin> migrate`.
+
+## Mobile apps
+
+In a [mobile app](/docs/mobile), users sign in once and stay signed in on every screen. Web screens
+sign in exactly as in a browser, with the session cookie in the WebView. Native screens send no
+cookies, so after a sign-in the app trades that session for a **device token**, kept in the
+Keychain on iOS and encrypted with an Android Keystore key on Android. Requests from native screens
+carry it as `Authorization: Bearer`, and on the server they run as the same session:
+`auth.user()`, protected routes, API routes, and server functions all see the signed-in user.
+There is nothing to configure.
+
+React Native screens (`page.native.tsx`) use the same import as the web:
+
+```tsx
+// src/app/account/page.native.tsx
+import { Button, Text } from "react-native";
+import { useAuth } from "@farm.js/auth/client";
+
+export default function Account() {
+  const { user, isPending, signIn, signOut } = useAuth();
+  if (isPending) return <Text>Loading</Text>;
+  if (user) return <Button title={`Sign out ${user.email}`} onPress={() => void signOut()} />;
+  return (
+    <Button
+      title="Sign in"
+      onPress={() => void signIn({ email: "ada@example.com", password: "correct-horse" })}
+    />
+  );
+}
+```
+
+`signIn`, `signUp`, `getSession`, `useAuth` and `signOut` return what they return on the web. A
+sign-in on either kind of screen signs both in, and `signOut()` ends the session and forgets the
+device. Metro resolves the package's React Native build; web bundles do not change.
+
+- **Production storage.** Device tokens are stored with Farm storage under `farm-mobile`. Mount
+  persistent storage there (`storage.mounts`); the in-memory default forgets every device when the
+  server restarts.
+- **Browsers cannot use tokens.** The token endpoints and bearer requests refuse anything a browser
+  sends (`Origin` or `Sec-Fetch-*` headers), so no web page can mint, refresh, or use a token, and
+  browser CSRF protection is unchanged.
+- **Tokens follow the session.** Access tokens last 15 minutes and refresh for up to 30 days, and
+  each refresh checks that the session behind the device still exists. A web sign-out, an expired
+  session, or a reused refresh token ends the device.
+
+| Auth                             | Signed-in native screens                                          |
+| -------------------------------- | ----------------------------------------------------------------- |
+| `auth: true` (this page)         | Supported                                                         |
+| `@farm.js/better-auth`           | Supported                                                         |
+| Auth0, Auth.js, WorkOS, Supabase | Not yet                                                           |
+| Clerk                            | Not yet: Clerk refreshes its session cookie from a browser script |
+| A custom integration             | Add a `session(request)` reader to it                             |
+
+Not yet: social and OAuth sign-in from native screens (they need a browser session; sign in on a
+web screen instead), apps on the RSC pipeline (they cannot use `auth` yet), and proof that a
+request comes from your own app binary (App Attest and Play Integrity are planned).
 
 ## Extend with Better Auth
 

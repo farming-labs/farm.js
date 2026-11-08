@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { BlogFigure } from "./figures";
 import { ReleaseArtwork } from "./release-artwork";
-import { agentNativePost, launchPost, nativePost } from "../../lib/blog";
+import { agentNativePost, launchPost, nativeInternalsPost, nativePost } from "../../lib/blog";
 
 /**
  * A post's presentation: the heading markup, which breaks where its author wants it to, and the
@@ -57,6 +57,23 @@ export const POST_ART: Record<string, PostArt> = {
     card: (
       <div className="blog-post-artwork">
         <BlogFigure fit kind="ast-native" />
+      </div>
+    ),
+  },
+  [nativeInternalsPost.href]: {
+    heading: (
+      <>
+        How Farm draws a page natively, <span>and when it bails out.</span>
+      </>
+    ),
+    header: (
+      <div className="blog-post-artwork">
+        <BlogFigure fit kind="mobile-arch" />
+      </div>
+    ),
+    card: (
+      <div className="blog-post-artwork">
+        <BlogFigure fit kind="mobile-arch" />
       </div>
     ),
   },

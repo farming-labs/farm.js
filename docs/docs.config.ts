@@ -352,7 +352,6 @@ const sidebar = [
           { label: "The Web Shell", slug: "mobile/shell", icon: "layout" },
           { label: "Native Screens", slug: "mobile/native-screens", icon: "layers" },
           { label: "Device Features", slug: "mobile/modules", icon: "plug" },
-          { label: "Auth on Mobile", slug: "mobile/auth", icon: "lock" },
         ],
       },
     ],
