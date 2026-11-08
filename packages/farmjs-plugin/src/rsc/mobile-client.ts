@@ -77,6 +77,14 @@ const farmOfferNavigation = farmMobileShellBridge?.offerNavigation;
 if (typeof farmOfferNavigation === 'function') {
   farmDelegateNavigation((context) => farmOfferNavigation.call(farmMobileShellBridge, context) === true);
 }
+// RSC pages install no SPA router, which is what tells the shell a web screen is ready (its
+// first screen, a warm pool WebView), so say so once the document has loaded.
+const farmMobileShellReady = farmMobileShellBridge?.ready;
+if (typeof farmMobileShellReady === 'function') {
+  const farmSignalReady = () => farmMobileShellReady.call(farmMobileShellBridge);
+  if (document.readyState === 'complete') queueMicrotask(farmSignalReady);
+  else addEventListener('load', farmSignalReady, { once: true });
+}
 `;
 }
 

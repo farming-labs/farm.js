@@ -103,11 +103,34 @@
         });
     },
 
+    // A document without Farm's SPA router, such as an RSC page, calls this once it has loaded:
+    // it shows its content and takes navigations, though not in-place renders (render() then
+    // reports an error and native loads the document instead).
+    ready() {
+      if (!router) postReady();
+    },
+
     // Re-render the current route from the server (used when a modal closes).
     refresh() {
       if (router && typeof router.refresh === "function") return router.refresh();
       location.reload();
     },
+  };
+
+  // Tells native the page is ready, once per document.
+  let readyPosted = false;
+  const postReady = () => {
+    if (readyPosted) return;
+    readyPosted = true;
+    // The mobile client entry this document loaded: a shell bundling page shells stops showing
+    // them when a document runs another client build.
+    const entry = document.querySelector('script[type="module"][src*="farm-mobile-client-"]');
+    post({
+      type: "router-ready",
+      url: location.href,
+      title: document.title,
+      client: entry ? entry.getAttribute("src") : null,
+    });
   };
 
   // Farm installs its client router on window.__FARM_SPA_ROUTER__; the page is ready for
@@ -118,15 +141,7 @@
     // Every screen has its own WebView, so data prefetched for a link here never reaches the
     // screen that opens it.
     if (typeof instance.prefetch === "function") instance.prefetch = () => Promise.resolve();
-    // The mobile client entry this document loaded: a shell bundling page shells stops showing
-    // them when a document runs another client build.
-    const entry = document.querySelector('script[type="module"][src*="farm-mobile-client-"]');
-    post({
-      type: "router-ready",
-      url: location.href,
-      title: document.title,
-      client: entry ? entry.getAttribute("src") : null,
-    });
+    postReady();
   };
 
   Object.defineProperty(window, "__FARM_SPA_ROUTER__", {

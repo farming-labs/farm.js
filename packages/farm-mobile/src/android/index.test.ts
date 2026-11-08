@@ -1018,6 +1018,35 @@ describe("the bridge script", () => {
     );
   });
 
+  it("reports a document without the SPA router ready once, when it says so", async () => {
+    const { bridge, window, posted } = await loadBridge("/farm-mobile-client-h1a2b3c4d.js");
+    // An RSC page installs no router; its mobile client calls ready() after load.
+    bridge.ready();
+    bridge.ready();
+    window.__FARM_SPA_ROUTER__ = { navigate: async () => {} };
+    expect(posted.filter((message) => message.type === "router-ready")).toEqual([
+      {
+        type: "router-ready",
+        url: "http://10.0.2.2:3000/notes",
+        title: "Notes",
+        client: "/farm-mobile-client-h1a2b3c4d.js",
+      },
+    ]);
+  });
+
+  it("answers an in-place render with an error when the page has no router", async () => {
+    const { bridge, posted } = await loadBridge();
+    bridge.ready();
+    bridge.render("/notes/2", 7);
+    // Native loads the document instead.
+    expect(posted.at(-1)).toEqual({
+      type: "error",
+      token: 7,
+      url: "/notes/2",
+      message: "Farm router is not ready",
+    });
+  });
+
   it("settles a call when native answers later, only in the document that asked", async () => {
     const { bridge, posted } = await loadBridge();
     const vibrate = bridge.call("Device", "vibrate", [200]);
