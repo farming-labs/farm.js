@@ -453,6 +453,8 @@ test("a server action reads what route middleware put in its context", async ({ 
   await hydrated(page);
   await page.getByRole("button", { name: "Record user" }).click();
   await expect(page.getByTestId("action-user")).toHaveText("Ada");
+});
+
 test("a server action updates the server layout around its page and keeps the layout's client state", async ({
   page,
 }) => {
