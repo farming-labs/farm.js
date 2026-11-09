@@ -15,8 +15,8 @@ drawn with real native views instead, from the same `page.tsx`. For the few scre
 you can add a React Native screen next to the page, one route at a time.
 
 > **Preview.** The Android shell shipped in Farm 0.1.50 with `@farm.js/mobile`. The iOS shell,
-> native screens, and React Native screens are on `main` and run on emulators and simulators in CI,
-> not yet on physical devices. The design is [RFC 0004](https://github.com/farming-labs/farm.js/pull/2352),
+> native screens, and React Native screens shipped in Farm 0.1.65 (`@farm.js/mobile`
+> 0.1.0-beta.10). All of it runs on emulators and simulators in CI, not yet on physical devices. The design is [RFC 0004](https://github.com/farming-labs/farm.js/pull/2352),
 > and how it works inside is in [How Farm draws a page natively](/blog/native-internals).
 
 ## Quick start
@@ -90,14 +90,14 @@ placeholder for now.
 | ------------------------------------------ | --------------- | ------------------------------------------ |
 | Android shell with web screens             | Shipped, 0.1.50 | Android emulator, in CI                    |
 | `mobile` config and route manifest         | Shipped, 0.1.50 |                                            |
-| iOS shell                                  | Unreleased      | simulator, in CI                           |
-| Native screens drawn from `page.tsx`       | Unreleased      | Android emulator and iOS simulator, in CI  |
-| Forms and server actions on native screens | Unreleased      | Android emulator; production server, in CI |
-| React Native screens (`page.native.tsx`)   | Unreleased      | Android emulator and iOS simulator, in CI  |
-| Device modules on React Native screens     | Unreleased      | Android emulator and iOS simulator, in CI  |
-| `@farm.js/ui` on React Native screens      | Unreleased      | unit tests only                            |
-| Signed-in native screens                   | Unreleased      | Android emulator under `farm dev --mobile` |
-| Page shells (`mobile.shells`)              | Unreleased      | unit and generator tests only              |
+| iOS shell                                  | Shipped, 0.1.65 | simulator, in CI                           |
+| Native screens drawn from `page.tsx`       | Shipped, 0.1.65 | Android emulator and iOS simulator, in CI  |
+| Forms and server actions on native screens | Shipped, 0.1.65 | Android emulator; production server, in CI |
+| React Native screens (`page.native.tsx`)   | Shipped, 0.1.65 | Android emulator and iOS simulator, in CI  |
+| Device modules on React Native screens     | Shipped, 0.1.65 | Android emulator and iOS simulator, in CI  |
+| `@farm.js/ui` on React Native screens      | Shipped, 0.1.65 | unit tests only                            |
+| Signed-in native screens                   | Shipped, 0.1.65 | Android emulator under `farm dev --mobile` |
+| Page shells (`mobile.shells`)              | Shipped, 0.1.65 | unit and generator tests only              |
 | Platform screens (`page.kt`, `page.swift`) | Planned         |                                            |
 
 Sign-in from the app is covered in [Authentication](/docs/auth#mobile-apps), and calling server
