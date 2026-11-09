@@ -1589,9 +1589,19 @@ export class ServerRenderer {
         actionRequest = createWebRequestFromFarmRequest(req, {
           trustProxy: this.config.server?.trustProxy,
         });
-        const actionResponse = await handleFarmFormActionRequest(
-          actionRequest,
-          resolveServerActionsConfig(this.config.serverActions),
+        const formActionRequest = actionRequest;
+        // Route middleware has run by now: an action reads its context as the page does.
+        const actionResponse = await _runWithMiddlewareData(
+          toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__),
+          () =>
+            _runWithMiddlewareContext(
+              toMiddlewareMap((req as any).__FARM_MIDDLEWARE_CONTEXT__),
+              () =>
+                handleFarmFormActionRequest(
+                  formActionRequest,
+                  resolveServerActionsConfig(this.config.serverActions),
+                ),
+            ),
         );
         if (actionResponse) {
           await sendWebResponse(res, actionResponse);

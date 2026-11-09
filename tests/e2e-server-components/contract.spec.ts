@@ -448,6 +448,13 @@ test("a client component calls a server action it received as a prop, and the pa
   expect(errors).toEqual([]);
 });
 
+test("a server action reads what route middleware put in its context", async ({ page }) => {
+  await page.goto("/action-middleware");
+  await hydrated(page);
+  await page.getByRole("button", { name: "Record user" }).click();
+  await expect(page.getByTestId("action-user")).toHaveText("Ada");
+});
+
 test("a server action passed as a prop works before JavaScript loads", async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();

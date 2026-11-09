@@ -10269,7 +10269,11 @@ ${
     farmIslandsMode
       ? `// Islands mode: a form or client component posting a server action to this page.
   if (matchedRoute && request.method === "POST") {
-    const actionResponse = await handleFarmFormActionRequest(request, farmFormActionsConfig);
+    const actionResponse = await _runWithMiddlewareData(middlewareData || {}, () =>
+      _runWithMiddlewareContext(middlewareContext || {}, () =>
+        handleFarmFormActionRequest(request, farmFormActionsConfig)
+      )
+    );
     if (actionResponse) return applyProductionMiddlewareHeaders(actionResponse, middlewareHeaders);
   }`
       : ""
