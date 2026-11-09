@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { after } from "@farm.js/core/after";
 import {
   FARM_PRODUCTION_SITE_TELEMETRY_EVENT_TYPE,
   FARM_PRODUCTION_SITE_TELEMETRY_PACKAGE_NAME,
@@ -12,6 +13,7 @@ import {
   isFarmLegacyVercelPreviewSite,
 } from "../../../../../lib/telemetry-sites";
 import { verifyFarmProductionSiteAttestation } from "../../../../../lib/telemetry-site-attestation";
+import { notifyNewFarmSite } from "../../../../../lib/new-site-webhook";
 import { z } from "zod";
 
 const MAX_BODY_BYTES = 8 * 1024;
@@ -131,7 +133,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!attestation) {
       return json({ ok: true, stored: false, warning: "site_unverified" }, 202);
     }
-    await prisma.farmProductionSite.upsert({
+    const site = await prisma.farmProductionSite.upsert({
       where: { url: parsed.data.siteUrl },
       update: {
         packageName: attestation.packageName,
@@ -150,6 +152,10 @@ export async function POST(request: Request): Promise<Response> {
         lastSeenAt: now,
       },
     });
+    // Only the create branch writes `firstSeenAt: now`; an update keeps the first sighting.
+    if (site.firstSeenAt.getTime() === now.getTime()) {
+      after(() => notifyNewFarmSite(site).then(() => undefined));
+    }
     await pruneProductionSites(prisma, now.getTime());
     return json({ ok: true, stored: true }, 202);
   } catch (error) {

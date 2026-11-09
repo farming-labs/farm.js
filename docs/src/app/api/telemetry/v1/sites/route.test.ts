@@ -4,12 +4,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { farmLegacyVercelPreviewSiteWhere } from "../../../../../lib/telemetry-sites";
 import { POST } from "./route";
 
+// Like Prisma, the upsert returns the stored row: here, always the one `create` would write.
 const prismaMocks = vi.hoisted(() => ({
   deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-  upsert: vi.fn().mockResolvedValue({}),
+  upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({ ...create })),
 }));
 const attestationMocks = vi.hoisted(() => ({
   verify: vi.fn(),
+}));
+const afterMocks = vi.hoisted(() => ({ callbacks: [] as Array<() => unknown> }));
+const webhookMocks = vi.hoisted(() => ({ notify: vi.fn(async () => true) }));
+
+vi.mock("@farm.js/core/after", () => ({
+  after: (callback: () => unknown) => {
+    afterMocks.callbacks.push(callback);
+  },
+}));
+vi.mock("../../../../../lib/new-site-webhook", () => ({
+  notifyNewFarmSite: webhookMocks.notify,
 }));
 
 vi.mock("../../../../../lib/prisma", () => ({
@@ -26,6 +38,8 @@ const originalDatabaseUrl = process.env.DATABASE_URL;
 beforeEach(() => {
   prismaMocks.deleteMany.mockClear();
   prismaMocks.upsert.mockClear();
+  afterMocks.callbacks.length = 0;
+  webhookMocks.notify.mockClear();
   attestationMocks.verify.mockReset().mockResolvedValue({
     schemaVersion: 1,
     eventType: "production_site_attestation",
@@ -231,5 +245,38 @@ describe("production-site telemetry ingestion", () => {
         }),
       }),
     );
+  });
+  it("announces a site to the webhook after the response the first time it is stored", async () => {
+    process.env.DATABASE_URL = "postgresql://telemetry.invalid/farmjs";
+
+    const response = await POST(request(sitePayload()));
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ ok: true, stored: true });
+    // Scheduled with after(), not awaited by the request.
+    expect(webhookMocks.notify).not.toHaveBeenCalled();
+    expect(afterMocks.callbacks).toHaveLength(1);
+    await afterMocks.callbacks[0]!();
+    expect(webhookMocks.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://example.com",
+        packageVersion: "1.0.0",
+        renderer: "react",
+        deployTarget: "vercel",
+      }),
+    );
+  });
+
+  it("does not announce a site it has already stored", async () => {
+    process.env.DATABASE_URL = "postgresql://telemetry.invalid/farmjs";
+    prismaMocks.upsert.mockImplementationOnce(async ({ create }) => ({
+      ...create,
+      firstSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+    }));
+
+    const response = await POST(request(sitePayload()));
+
+    await expect(response.json()).resolves.toEqual({ ok: true, stored: true });
+    expect(afterMocks.callbacks).toHaveLength(0);
   });
 });

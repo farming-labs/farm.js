@@ -157,14 +157,22 @@ instead of being redirected to a Farm-owned endpoint.
 
 ## Maintainer deployment setup
 
-The Farm-owned docs deployment uses four server-only environment variables:
+The Farm-owned docs deployment uses these server-only environment variables:
 
-| Variable                         | Purpose                                                              |
-| -------------------------------- | -------------------------------------------------------------------- |
-| `DATABASE_URL`                   | Pooled Postgres connection used by Prisma.                           |
-| `FARM_TELEMETRY_IDENTITY_SALT`   | Long random secret used to HMAC-hash local anonymous IDs.            |
-| `FARM_TELEMETRY_DASHBOARD_TOKEN` | Long random secret used to open the internal `/telemetry` dashboard. |
-| `FARM_TELEMETRY_RETENTION_DAYS`  | Optional event and inactive-site retention window; defaults to `90`. |
+| Variable                         | Purpose                                                                      |
+| -------------------------------- | ---------------------------------------------------------------------------- |
+| `DATABASE_URL`                   | Pooled Postgres connection used by Prisma.                                   |
+| `FARM_TELEMETRY_IDENTITY_SALT`   | Long random secret used to HMAC-hash local anonymous IDs.                    |
+| `FARM_TELEMETRY_DASHBOARD_TOKEN` | Long random secret used to open the internal `/telemetry` dashboard.         |
+| `FARM_TELEMETRY_RETENTION_DAYS`  | Optional event and inactive-site retention window; defaults to `90`.         |
+| `FARM_NEW_SITE_WEBHOOK_URL`      | Optional HTTPS webhook told about each newly verified production site.       |
+| `FARM_NEW_SITE_WEBHOOK_SECRET`   | Optional secret that signs those webhook requests (`x-farm-signature` HMAC). |
+
+When `FARM_NEW_SITE_WEBHOOK_URL` is set, the first time the ingestion service stores a verified
+production site it sends the maintainers' webhook a `farm.site.created` event after responding.
+The event carries only what the site record already holds: its public origin, Farm version,
+renderer, deploy target, and first-seen time. Nothing is sent for a site that is already known, a
+site that fails attestation, or an app with telemetry turned off.
 
 These values must be encrypted deployment variables and must never use a `PUBLIC_` prefix or be
 committed to the repository. Public telemetry clients do not contain an ingestion secret; the
