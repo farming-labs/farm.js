@@ -5,7 +5,6 @@ import { isIP } from "net";
 import * as path from "path";
 import * as tls from "tls";
 import type {
-  FarmConfig,
   FarmRequest,
   FarmResponse,
   LoadingProps,
@@ -13,7 +12,11 @@ import type {
   RouteModule,
   SSGPage,
 } from "../types";
-import type { MatchedRouteSlot, RouteManager } from "../routing/route-manager";
+import type {
+  FarmRendererResolvedConfig,
+  MatchedRouteSlot,
+  RouteManager,
+} from "../routing/route-manager";
 import { logger, toViteModuleId } from "../utils";
 import { collectDevStylesheetUrls, resolveDevGlobalStylesheetHref } from "./dev-styles";
 import {
@@ -155,6 +158,7 @@ import {
   getFarmRendererCapabilities,
   getFarmRendererComponentExtensions,
   getFarmRendererStreamingCapabilitiesForRuntime,
+  isFarmRendererDisabled,
   isReactRenderer,
   readFarmRendererWebStream,
   resolveFarmRendererAppSetup,
@@ -675,7 +679,7 @@ function readAppPackageIdentity(root: string | undefined): { name?: unknown; ver
 }
 
 export class ServerRenderer {
-  private config: Required<FarmConfig>;
+  private config: FarmRendererResolvedConfig;
   private routeManager: RouteManager;
   private ssgManifest: SSGPage[] = [];
   private dataCache = getFarmDataCache();
@@ -689,7 +693,7 @@ export class ServerRenderer {
   private defaultMCPServer?: ReturnType<typeof createFarmDefaultMCPServer>;
 
   constructor(
-    config: Required<FarmConfig>,
+    config: FarmRendererResolvedConfig,
     routeManager: RouteManager,
     i18nRuntime?: FarmI18nRuntime,
     viteServer?: ViteDevServer,
@@ -721,16 +725,18 @@ export class ServerRenderer {
 
     const loaded = isReactRenderer(this.config.renderer)
       ? await import("../renderer/react/server")
-      : this.viteServer
-        ? await loadFarmDevModule(this.viteServer, this.config.renderer.server)
-        : await import(
-            pathToFileURL(
-              resolveFarmRendererModule(
-                this.config.root || process.cwd(),
-                this.config.renderer.server,
-              ),
-            ).href
-          );
+      : isFarmRendererDisabled(this.config.renderer)
+        ? await import("../renderer/none/server")
+        : this.viteServer
+          ? await loadFarmDevModule(this.viteServer, this.config.renderer.server)
+          : await import(
+              pathToFileURL(
+                resolveFarmRendererModule(
+                  this.config.root || process.cwd(),
+                  this.config.renderer.server,
+                ),
+              ).href
+            );
     const runtime = loaded as Partial<FarmServerRendererRuntime>;
     const required = ["createElement", "isValidElement", "renderToString"] as const;
     for (const key of required) {
@@ -4114,6 +4120,13 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     const pathname = resolveFarmRequestURL(req, {
       trustProxy: this.config.server?.trustProxy,
     }).pathname;
+
+    // `renderer: false` has no pages to render; a miss answers like an API miss, as in production.
+    if (isFarmRendererDisabled(this.config.renderer)) {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Not found", pathname }));
+      return;
+    }
 
     // Agents that navigate in Markdown (a `.md` URL or `Accept: text/markdown`)
     // get a Markdown error body instead of the HTML not-found shell.

@@ -241,6 +241,7 @@ import {
 import { emitFarmEvent, runWithFarmRequestSpan } from "./observability";
 import {
   getFarmRendererCapabilities,
+  isFarmRendererDisabled,
   isReactRenderer,
   loadFarmRendererVitePlugins,
   REACT_RENDERER,
@@ -1076,7 +1077,12 @@ function getEnvDefines(
     __FARM_API_BASE_URL__: JSON.stringify(getFarmAPIBaseURLDefine(config)),
     __FARM_PUBLIC_ENV__: JSON.stringify(getPublicEnvDefine(config)),
     __FARM_IMAGE_CONFIG__: JSON.stringify(
-      getPublicFarmImageConfig(resolveFarmImageConfig(config.images)),
+      getPublicFarmImageConfig(
+        resolveFarmImageConfig(
+          config.images,
+          isFarmRendererDisabled(config.renderer) ? "none" : undefined,
+        ),
+      ),
     ),
   };
 
@@ -1451,7 +1457,7 @@ function warnClientBoundaryOnce(
  * ship their own HMR integration, which can only preserve component state if
  * Farm leaves the module unaccepted.
  */
-export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer): boolean {
+export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer | false): boolean {
   return getFarmRendererCapabilities(resolveFarmRenderer(renderer)).reconcilesRerenders;
 }
 
@@ -1467,6 +1473,7 @@ export function farmPlugin(
   options: FarmVitePluginOptions = {},
   initialPluginManager?: PluginManager,
 ): Plugin {
+  const rendererDisabled = isFarmRendererDisabled(options.renderer);
   const imageImports = farmImageImportsPlugin();
   const fontImports = farmFontImportsPlugin({
     root: options.root,
@@ -4494,6 +4501,8 @@ if (import.meta.hot) {
       if (typeof fontImports.generateBundle === "function") {
         await fontImports.generateBundle.call(this, options, bundle, false);
       }
+      // `renderer: false` has no browser client; the server bundle's chunks are not public.
+      if (rendererDisabled) return;
       const clientManifest = generateClientManifest(bundle);
       this.emitFile({
         type: "asset",

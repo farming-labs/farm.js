@@ -837,6 +837,38 @@ test("recognizes routes using the configured renderer extension", async () => {
   }
 });
 
+test("treats a renderer: false app as API-only", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-backend-"));
+
+  try {
+    await mkdir(path.join(root, "src/app/api/users"), { recursive: true });
+    await writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ name: "backend-doctor", dependencies: { "@farm.js/core": "workspace:*" } }),
+    );
+    await writeFile(path.join(root, "farm.config.mjs"), "export default { renderer: false };\n");
+    await writeFile(
+      path.join(root, "src/app/api/users/route.ts"),
+      "export function GET() { return Response.json([]); }\n",
+    );
+
+    const report = await runFarmDoctor({ root, offline: true, fix: true });
+
+    assert.ok(report.checks.some((check) => check.code === "API_ROUTES_READY"));
+    for (const code of ["NO_PAGE_ROUTES", "ROOT_LAYOUT_MISSING", "ROOT_LAYOUT_READY"]) {
+      assert.ok(!report.checks.some((check) => check.code === code), code);
+    }
+    // The safe fixes must not add a React layout to an app without pages.
+    await assert.rejects(stat(path.join(root, "src/app/layout.tsx")));
+
+    await rm(path.join(root, "src/app/api"), { recursive: true });
+    const empty = await runFarmDoctor({ root, offline: true });
+    assert.equal(empty.checks.find((check) => check.code === "NO_API_ROUTES")?.status, "fail");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 for (const fixture of [
   {
     renderer: "preact",

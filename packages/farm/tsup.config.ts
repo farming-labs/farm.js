@@ -106,6 +106,7 @@ const entry = {
   "renderer/react/server": "src/renderer/react/server.ts",
   "renderer/react/client": "src/renderer/react/client.ts",
   "renderer/react/vite": "src/renderer/react/vite.ts",
+  "renderer/none/server": "src/renderer/none/server.ts",
 };
 
 export const farmPackageBuildOptions = {

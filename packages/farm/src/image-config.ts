@@ -76,6 +76,8 @@ const SIZE_UNITS: Record<string, number> = {
 
 export function resolveFarmImageConfig(
   config: FarmImageConfig | undefined,
+  /** Provider used when `config.provider` is unset; a backend-only app has no images to serve. */
+  defaultProvider: FarmImageProvider = "auto",
 ): ResolvedFarmImageConfig {
   const path = normalizeImagePath(config?.path ?? DEFAULT_FARM_IMAGE_PATH);
   const deviceSizes = normalizeIntegerList(
@@ -107,7 +109,7 @@ export function resolveFarmImageConfig(
   );
 
   return Object.freeze({
-    provider: config?.provider ?? "auto",
+    provider: config?.provider ?? defaultProvider,
     path,
     domains: Object.freeze([
       ...new Set(

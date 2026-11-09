@@ -113,7 +113,7 @@ import type {
 import type { FarmMobileConfigInput } from "./mobile/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import type { OpenAPISecurityMode } from "./openapi/types";
-import { isReactRenderer, resolveFarmRenderer } from "./renderer";
+import { isFarmRendererDisabled, isReactRenderer, resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
 import { applyFarmDocsFrameworkAutoDetection } from "./docs/framework-detect";
 import { resolveFarmAPIConfig, type ResolvedFarmAPIConfig } from "./api/config";
@@ -1395,7 +1395,10 @@ export async function resolveConfig(
       ppr: false,
       ...userConfig.experimental,
     },
-    agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled }),
+    agent: resolveFarmAgentConfig(userConfig.agent, {
+      docs: docs.enabled,
+      pages: !isFarmRendererDisabled(userConfig.renderer),
+    }),
     desktop: desktopSetup?.desktop ?? null,
     ...(userConfig.mobile !== undefined ? { mobileClient: true } : {}),
     plugins: [
@@ -1415,7 +1418,10 @@ export async function resolveConfig(
       ...(securityHeader ? [{ source: "/*", headers: [securityHeader] }] : []),
     ],
     routeRules,
-    images: resolveFarmImageConfig(userConfig.images),
+    images: resolveFarmImageConfig(
+      userConfig.images,
+      isFarmRendererDisabled(userConfig.renderer) ? "none" : undefined,
+    ),
     performance: resolveFarmPerformanceConfig(userConfig.performance),
     theme: resolveFarmThemeConfig(userConfig.theme, basePath),
     publicDir: userConfig.publicDir || "public",

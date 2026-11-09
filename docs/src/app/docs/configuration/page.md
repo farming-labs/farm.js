@@ -98,6 +98,9 @@ dedicated [React](/docs/renderers/react), [Preact](/docs/renderers/preact),
 [Solid](/docs/renderers/solid), [Vue](/docs/renderers/vue), and
 [Svelte](/docs/renderers/svelte) guides.
 
+Set `renderer: false` for an API server with no pages: Farm then builds no browser client and
+needs no React. See [Backend-Only Apps](/docs/backend).
+
 ### Preact
 
 Install Preact and its FARMJS renderer adapter:

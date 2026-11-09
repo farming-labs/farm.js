@@ -1364,6 +1364,41 @@ function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck
       existsSync(path.join(source.root, source.srcDir, `farm.routes.${extension}`)),
     ),
   );
+
+  // `renderer: false` resolves to the "none" renderer and serves API routes only: pages and a
+  // root layout are not expected.
+  if (config.renderer.name === "none") {
+    const routeFilePattern = new RegExp(
+      `^route\\.(?:${routeExtensions.map(escapeRegExp).join("|")})$`,
+    );
+    const hasAPIRoutes = appDirectories.some((directory) =>
+      containsFile(path.join(directory, "api"), routeFilePattern),
+    );
+    const hasRoutesFile = sources.some((source) =>
+      routeExtensions.some((extension) =>
+        ["routes", "farm.routes"].some((name) =>
+          existsSync(path.join(source.root, source.srcDir, `${name}.${extension}`)),
+        ),
+      ),
+    );
+    checks.push(
+      hasAPIRoutes || hasRoutesFile
+        ? {
+            status: "pass",
+            code: "API_ROUTES_READY",
+            title: "API routes are present",
+            message: "This app sets `renderer: false` and serves API routes only.",
+          }
+        : {
+            status: "fail",
+            code: "NO_API_ROUTES",
+            title: "No API routes were found",
+            message: `This app sets \`renderer: false\` but has no ${config.srcDir}/app/api/**/route.ts files or ${config.srcDir}/routes.ts.`,
+            action: `Add ${config.srcDir}/app/api/route.ts, or remove \`renderer: false\` to render pages.`,
+          },
+    );
+    return;
+  }
   checks.push(
     hasPages || hasProgrammaticRoutes
       ? {

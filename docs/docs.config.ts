@@ -220,6 +220,7 @@ const sidebar = [
       { label: "Query and Params", slug: "query", icon: "search" },
       { label: "API Routes", slug: "api-routes", icon: "server" },
       { label: "API Client", slug: "api-client", icon: "terminal" },
+      { label: "Backend-Only Apps", slug: "backend", icon: "server" },
       { label: "Server Queries", slug: "server-queries", icon: "database" },
       { label: "Local-First Patterns", slug: "local-first", icon: "zap" },
       { label: "KV Storage", slug: "storage", icon: "database" },

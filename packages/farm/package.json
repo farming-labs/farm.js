@@ -320,6 +320,11 @@
       "import": "./dist/renderer/react/vite.mjs",
       "require": "./dist/renderer/react/vite.cjs"
     },
+    "./renderer/none/server": {
+      "types": "./dist/renderer/none/server.d.ts",
+      "import": "./dist/renderer/none/server.mjs",
+      "require": "./dist/renderer/none/server.cjs"
+    },
     "./server": {
       "types": "./dist/server.d.ts",
       "import": "./dist/server.mjs",

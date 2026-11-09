@@ -100,7 +100,11 @@ import {
   isInRouteGroupScope,
   routeBoundaryCoversDirectory,
 } from "./route-groups";
-import { getFarmRendererComponentExtensions, isReactRenderer } from "../renderer";
+import {
+  getFarmRendererComponentExtensions,
+  isReactRenderer,
+  type FarmRenderer,
+} from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
 import {
   AmbiguousRouteError,
@@ -109,6 +113,12 @@ import {
   getRoutePatternShape,
   type RouteSegmentSpecificity,
 } from "./specificity";
+
+/**
+ * A config whose renderer is resolved: `renderer: false` has become the internal no-renderer
+ * descriptor, so runtime code always reads a `FarmRenderer`.
+ */
+export type FarmRendererResolvedConfig = Required<FarmConfig> & { renderer: FarmRenderer };
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -259,7 +269,7 @@ function compareRouteEntries(left: RouteEntry, right: RouteEntry): number {
  * Manages route discovery and matching for the Farm.js application
  */
 export class RouteManager {
-  private config: Required<FarmConfig>;
+  private config: FarmRendererResolvedConfig;
   private routes: Map<string, RouteEntry> = new Map();
   private pageRouteShapes: Map<string, RouteEntry> = new Map();
   private layouts: Map<string, RouteEntry> = new Map();
@@ -284,7 +294,7 @@ export class RouteManager {
   };
   private reportedIslandsErrors = new Set<string>();
 
-  constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
+  constructor(config: FarmRendererResolvedConfig, viteServer?: ViteDevServer) {
     this.config = config;
     this.viteServer = viteServer;
     // Record where route definitions are made from the first module the server evaluates, so
