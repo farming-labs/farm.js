@@ -193,7 +193,11 @@ function decodeConfigRouteSegment(segment: string): string {
   }
 }
 
-function encodeConfigRouteSegment(segment: string): string {
+/**
+ * Encode one decoded path segment for a redirect or rewrite destination, as
+ * `encodeRuntimePathSegment` does in the generated production server.
+ */
+export function encodeConfigRouteSegment(segment: string): string {
   return encodeURIComponent(segment).replace(
     /[!'()*]/g,
     (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,

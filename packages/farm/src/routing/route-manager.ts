@@ -5,6 +5,7 @@ import type {
   FarmConfig,
   ParsedRoute,
   RouteModule,
+  RouteSegment,
   LayoutModule,
   SSGCollectionResult,
 } from "../types";
@@ -91,6 +92,7 @@ import {
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { stripFarmBasePath } from "../base-path";
 import { appendFarmRedirectQuery } from "../redirect-query";
+import { encodeConfigRouteSegment } from "../plugins/route-pattern";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
 import {
   createRouteDirectoryPattern,
@@ -512,9 +514,10 @@ export class RouteManager {
     const localeMatch = i18n ? resolveFarmLocalePath(pathname, i18n) : undefined;
     const routePathname = localeMatch?.pathname || pathname;
     const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
+    const urlParts = splitRoutePath(normalizedPath);
 
     for (const redirectEntry of this.redirects.values()) {
-      const match = matchRoute(normalizedPath, redirectEntry.route.segments);
+      const match = matchRouteParts(urlParts, redirectEntry.route.segments);
       if (!match.matches) continue;
 
       const statusCode =
@@ -524,7 +527,11 @@ export class RouteManager {
         redirect: redirectEntry.definition,
         destination: appendFarmRedirectQuery(
           this.localizeRedirectDestination(
-            interpolateRedirectDestination(redirectEntry.definition.destination, match.params),
+            interpolateRedirectDestination(
+              redirectEntry.definition.destination,
+              match.params,
+              getCatchAllParamSegments(redirectEntry.route.segments, urlParts),
+            ),
             localeMatch?.locale,
           ),
           search,
@@ -1690,13 +1697,23 @@ function getPageDirectoryField(route: ParsedRoute, pattern: string): { directory
   return directory === pattern ? {} : { directory };
 }
 
+/**
+ * Substitute decoded route params into a redirect destination, encoding each path segment as the
+ * production server does. `catchAllSegments` holds the decoded segments a catch-all consumed, so
+ * a slash decoded from `%2F` stays inside its segment instead of becoming a separator.
+ */
 export function interpolateRedirectDestination(
   destination: string,
   params: Record<string, string>,
+  catchAllSegments: Readonly<Record<string, readonly string[]>> = {},
 ): string {
   let result = destination;
 
-  for (const [key, value] of Object.entries(params)) {
+  for (const [key, rawValue] of Object.entries(params)) {
+    const segments = catchAllSegments[key];
+    const value = segments
+      ? segments.map(encodeConfigRouteSegment).join("/")
+      : encodeConfigRouteSegment(rawValue);
     // Longest token first: [[...key]] contains [...key], which contains [key].
     result = replaceAll(result, `[[...${key}]]`, value);
     result = replaceAll(result, `[...${key}]`, value);
@@ -1706,6 +1723,15 @@ export function interpolateRedirectDestination(
   }
 
   return result;
+}
+
+/** The decoded segments a matched route's catch-all consumed; each earlier segment takes one. */
+function getCatchAllParamSegments(
+  segments: readonly RouteSegment[],
+  urlParts: readonly string[],
+): Record<string, readonly string[]> {
+  const index = segments.findIndex((segment) => segment.isCatchAll);
+  return index === -1 ? {} : { [segments[index].segment]: urlParts.slice(index) };
 }
 
 function getMetadataImageSuffix(pathname: string): {
