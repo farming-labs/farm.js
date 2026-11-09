@@ -4663,6 +4663,25 @@ async function streamFarmNavigation(stream, root, isCurrent) {
     : ""
 }
 
+// A layout's own server output, without what it wraps and without its islands, whose live DOM
+// always differs from fresh HTML.
+function getLayoutShell(root, patterns, index) {
+  const shell = findLayoutBoundary(root, patterns[index])?.cloneNode(true);
+  if (!shell) return null;
+  const inner = index + 1 < patterns.length
+    ? findLayoutBoundary(shell, patterns[index + 1])
+    : shell.querySelector("#__farm_page__");
+  inner?.replaceChildren();
+  shell.querySelectorAll("script").forEach(function(script) { script.remove(); });
+  shell.querySelectorAll("f-island").forEach(function(island) {
+    island.replaceChildren();
+    Array.from(island.attributes).forEach(function(attribute) {
+      island.removeAttribute(attribute.name);
+    });
+  });
+  return shell.innerHTML;
+}
+
 function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
   const currentPatterns = getLayoutPatterns(currentRoot);
   const nextPatterns = getLayoutPatterns(nextRoot);
@@ -4670,7 +4689,11 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
   while (
     sharedCount < currentPatterns.length &&
     sharedCount < nextPatterns.length &&
-    currentPatterns[sharedCount] === nextPatterns[sharedCount]
+    currentPatterns[sharedCount] === nextPatterns[sharedCount] &&
+    // A refresh renders every layout again: start at the first one whose output changed.
+    (!refresh ||
+      getLayoutShell(currentRoot, currentPatterns, sharedCount) ===
+        getLayoutShell(nextRoot, nextPatterns, sharedCount))
   ) sharedCount++;
 
   const nextTreeRoot = nextPatterns.length

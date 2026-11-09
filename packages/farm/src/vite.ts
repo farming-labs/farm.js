@@ -6817,6 +6817,23 @@ function parseNavigationFragment(html) {
   return template.content;
 }
 
+// A layout's own server output, without what it wraps and without its islands, whose live DOM
+// always differs from fresh HTML.
+function getLayoutShell(root, patterns, index, find) {
+  const shell = find(root, patterns[index])?.cloneNode(true);
+  if (!shell) return null;
+  const inner = index + 1 < patterns.length
+    ? find(shell, patterns[index + 1])
+    : shell.querySelector('#__farm_page__');
+  inner?.replaceChildren();
+  shell.querySelectorAll('script').forEach((script) => script.remove());
+  shell.querySelectorAll('f-island').forEach((island) => {
+    island.replaceChildren();
+    Array.from(island.attributes).forEach((attribute) => island.removeAttribute(attribute.name));
+  });
+  return shell.innerHTML;
+}
+
 function replaceNavigationBoundary(
   container,
   fragment,
@@ -6829,7 +6846,11 @@ function replaceNavigationBoundary(
   while (
     sharedCount < currentPatterns.length &&
     sharedCount < nextPatterns.length &&
-    currentPatterns[sharedCount] === nextPatterns[sharedCount]
+    currentPatterns[sharedCount] === nextPatterns[sharedCount] &&
+    // A refresh renders every layout again: start at the first one whose output changed.
+    (!refresh ||
+      getLayoutShell(container, currentPatterns, sharedCount, find) ===
+        getLayoutShell(fragment, nextPatterns, sharedCount, find))
   ) {
     sharedCount++;
   }

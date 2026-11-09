@@ -448,6 +448,42 @@ test("a client component calls a server action it received as a prop, and the pa
   expect(errors).toEqual([]);
 });
 
+test("a server action updates the server layout around its page and keeps the layout's client state", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-layout");
+  await hydrated(page);
+  const count = async (id: string) =>
+    Number((await page.getByTestId(id).textContent())?.replace(/\D/g, ""));
+  const layout = await count("layout-count");
+  const button = page.getByRole("button", { name: /^Layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Layout clicks: 1");
+  await page.getByRole("button", { name: "Bump layout" }).click();
+  await expect(page.getByTestId("layout-count")).toHaveText(`Layout count: ${layout + 1}`);
+  await expect(button).toHaveText("Layout clicks: 1");
+  expect(errors).toEqual([]);
+});
+
+test("a server action that leaves its layout unchanged keeps what was typed there", async ({
+  page,
+}) => {
+  await page.goto("/action-layout");
+  await hydrated(page);
+  const pageCount = Number(
+    (await page.getByTestId("page-count").textContent())?.replace(/\D/g, ""),
+  );
+  // A form posts natively until the client runtime runs, and this click loads it.
+  const button = page.getByRole("button", { name: /^Layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Layout clicks: 1");
+  await page.getByLabel("Layout note").fill("still here");
+  await page.getByRole("button", { name: "Bump page" }).click();
+  await expect(page.getByTestId("page-count")).toHaveText(`Page count: ${pageCount + 1}`);
+  await expect(page.getByLabel("Layout note")).toHaveValue("still here");
+});
+
 test("a server action passed as a prop works before JavaScript loads", async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
