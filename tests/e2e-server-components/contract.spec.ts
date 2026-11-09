@@ -448,6 +448,13 @@ test("a client component calls a server action it received as a prop, and the pa
   expect(errors).toEqual([]);
 });
 
+test("a server action reads what route middleware put in its context", async ({ page }) => {
+  await page.goto("/action-middleware");
+  await hydrated(page);
+  await page.getByRole("button", { name: "Record user" }).click();
+  await expect(page.getByTestId("action-user")).toHaveText("Ada");
+});
+
 test("a server action updates the server layout around its page and keeps the layout's client state", async ({
   page,
 }) => {
