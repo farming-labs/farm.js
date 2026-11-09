@@ -145,7 +145,13 @@ export function farmFontImportsPlugin(
       );
       registry.production = false;
       server.middlewares.use(async (req, res, next) => {
-        const pathname = new URL(req.url || "/", "http://farm.local").pathname;
+        // A path is joined, not resolved: `//` would parse as a URL with an empty host and throw.
+        const target = req.url || "/";
+        const pathname = (
+          target.startsWith("/")
+            ? new URL(`http://farm.local${target}`)
+            : new URL(target, "http://farm.local")
+        ).pathname;
 
         if (pathname === "/@farm/fonts.css") {
           res.statusCode = 200;

@@ -118,6 +118,17 @@ describe("RouteManager", () => {
       expect(result.route).toBeNull();
     });
 
+    it("matches an empty segment like production: dynamic routes only", () => {
+      // Production looks static routes up by their exact path.
+      for (const pathname of ["//about", "//about/", "//", "///"]) {
+        expect(routeManager.matchRoute(pathname).route, pathname).toBeNull();
+      }
+      // Trailing slashes are trimmed first, there as here.
+      expect(routeManager.matchRoute("/about//").route?.pattern).toBe("/about");
+      expect(routeManager.matchRoute("//users/123").params).toEqual({ id: "123" });
+      expect(routeManager.matchRoute("/users//123").params).toEqual({ id: "123" });
+    });
+
     it("matches requests under the configured basePath like production routing", async () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {

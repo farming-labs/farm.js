@@ -12,7 +12,7 @@ Run request behavior before routes, pass request-scoped data to pages, and short
 
 Farm runs middleware in development and production builds. For every request, Farm finds matching `farm.config.ts` middleware entries first, then matching `src/app/**/middleware.ts` files from the root segment down to the route segment.
 
-Files in `public/` are served as static assets before any middleware or plugin runtime hook runs, so a guard never sees them. Serve a file that needs protection from an API route or page instead.
+Files in `public/` are served as static assets before any middleware or plugin runtime hook runs, so a guard never sees them. Serve a file that needs protection from an API route or page instead. A `GET` or `HEAD` for a public directory gets its `index.html` (`public/guide/index.html` answers `/guide` and `/guide/`); other methods reach middleware and routing like any path.
 
 Apps with `experimental.serverComponents` run both middleware forms through the same request
 pipeline. Farm extracts an explicit `middleware` property, from `farm.config.ts` or from
