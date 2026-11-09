@@ -737,8 +737,9 @@ describe("streamed navigation flush markers", () => {
     // The browser accepts exactly this shape (readFarmNavigationStream).
     expect(first).toMatch(/^[0-9a-f]{32}$/);
     expect(createFarmFlushToken()).not.toBe(first);
+    // A page with defer() data arrives whole, with the snapshot its props are revived from.
     expect(source).toContain(
-      'request.headers.get("f-stream") === "flush"\n          ? createFarmFlushToken()',
+      'request.headers.get("f-stream") === "flush" && farmDeferredData.records.length === 0\n            ? createFarmFlushToken()',
     );
     expect(source).toContain('...(farmFlushToken ? { "F-Flush": farmFlushToken } : {})');
     expect(source).not.toContain('"<!--farm-flush-->"');

@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { loadConfig, resolveConfig } from "../config";
+import { reviveDeferredData, type DeferredSettlements } from "../deferred";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
 import { logger } from "../utils";
@@ -7026,6 +7027,184 @@ export function GET() {
             expect(html).toContain('<meta name="description" content="Acme app"');
           },
           "/missing",
+        );
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    }
+  }, 240_000);
+
+  it("hydrates defer() route data from the first document's settled snapshot", async () => {
+    // Both document shapes stream through different tails: a root layout that
+    // renders <html> itself, and one that leaves the document to Farm.
+    for (const layout of [
+      "export default function Layout({ children }) { return <html><body>{children}</body></html>; }",
+      'export default function Layout({ children }) { return <div id="app">{children}</div>; }',
+    ]) {
+      const root = await createProductionFixture();
+      try {
+        await fs.writeFile(path.join(root, "src", "app", "layout.tsx"), layout);
+        await fs.mkdir(path.join(root, "src", "components"), { recursive: true });
+        await fs.writeFile(
+          path.join(root, "src", "components", "deferred-page.tsx"),
+          `
+"use client";
+import { Component, Suspense, use, useEffect, useState } from "react";
+
+function Value({ label, value }) {
+  return <li data-deferred={label}>{label}:{String(use(value))}</li>;
+}
+
+class Failure extends Component {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? <li data-deferred-failed={this.props.label}>{this.props.label}:failed</li> : this.props.children;
+  }
+}
+
+export function DeferredPage({ data }) {
+  const [hydrated, setHydrated] = useState(false);
+  const [count, setCount] = useState(0);
+  useEffect(() => setHydrated(true), []);
+  return (
+    <main data-hydrated={String(hydrated)}>
+      <h1>{data.title}</h1>
+      <button data-count onClick={() => setCount((value) => value + 1)}>count:{count}</button>
+      <ul>
+        <Suspense fallback={<li>ready-loading</li>}><Value label="ready" value={data.ready} /></Suspense>
+        <Suspense fallback={<li>late-loading</li>}><Value label="late" value={data.nested.late} /></Suspense>
+        <Failure label="failed">
+          <Suspense fallback={<li>failed-loading</li>}><Value label="failed" value={data.failed} /></Suspense>
+        </Failure>
+      </ul>
+    </main>
+  );
+}
+`.trim(),
+        );
+        await fs.writeFile(
+          path.join(root, "src", "farm.routes.tsx"),
+          `
+import { createRoute, defer, defineRoutes } from "@farm.js/core";
+import { DeferredPage } from "./components/deferred-page";
+
+export const DeferredRoute = createRoute("/deferred", {
+  data: {
+    async main() {
+      return {
+        title: "deferred-title",
+        ready: defer(Promise.resolve("ready-value")),
+        nested: {
+          late: defer(new Promise((resolve) => setTimeout(() => resolve("late-value"), 150))),
+        },
+        failed: defer(Promise.reject(new Error("deferred-private-failure"))),
+      };
+    },
+  },
+  component: DeferredPage,
+});
+
+export default defineRoutes(() => [DeferredRoute]);
+`.trim(),
+        );
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            telemetry: false,
+            generateBuildId: () => "production-deferred-hydration-test",
+          },
+          "production",
+        );
+        await build(config, { root, preset: "node-server" });
+
+        await runProductionRequest(
+          path.join(root, ".farm", ".output", "server"),
+          async (response) => {
+            expect(response.status).toBe(200);
+            const html = await response.text();
+            expect(html).toContain("deferred-title");
+
+            // The props carry references, not the promise's JSON shape ({} or
+            // React's {status,value}), and the snapshot settles each of them.
+            const props = JSON.parse(
+              html.match(
+                /window\.__FARM_PROPS__=(.*?);window\.__FARM_INTEGRATION_API_MANIFEST__=/,
+              )?.[1] ?? "null",
+            );
+            expect(props?.data).toEqual({
+              title: "deferred-title",
+              ready: { $farmDeferred: "d0" },
+              nested: { late: { $farmDeferred: "d1" } },
+              failed: { $farmDeferred: "d2" },
+            });
+            const snapshotScript = html.match(
+              /<script[^>]*>window\.__FARM_DEFERRED_DATA__=(.*?);<\/script>/,
+            );
+            expect(snapshotScript).not.toBeNull();
+            const settlements = JSON.parse(snapshotScript![1]!) as DeferredSettlements;
+            expect(settlements).toEqual({
+              d0: { status: "fulfilled", value: "ready-value" },
+              d1: { status: "fulfilled", value: "late-value" },
+              d2: {
+                status: "rejected",
+                error: {
+                  code: "FARM_DEFERRED_DATA_ERROR",
+                  message: "Deferred route data failed to load",
+                },
+              },
+            });
+            expect(html).not.toContain("deferred-private-failure");
+            // Emitted once the stream has settled, ahead of the client entry.
+            expect(html.indexOf("late:")).toBeLessThan(html.indexOf("__FARM_DEFERRED_DATA__"));
+            expect(html.indexOf("__FARM_DEFERRED_DATA__")).toBeLessThan(
+              html.lastIndexOf('<script type="module"'),
+            );
+
+            // What the browser does with them: use() receives settled promises.
+            const revived = reviveDeferredData(props, settlements) as any;
+            expect(revived.data.ready).toBeInstanceOf(Promise);
+            await expect(revived.data.ready).resolves.toBe("ready-value");
+            await expect(revived.data.nested.late).resolves.toBe("late-value");
+            await expect(revived.data.failed).rejects.toThrow("Deferred route data failed to load");
+
+            const executablePath = await resolveInstalledChromiumExecutable();
+            if (!executablePath) return;
+            const browser = await chromium.launch({ headless: true, executablePath });
+            try {
+              const page = await browser.newPage();
+              const errors: string[] = [];
+              page.on("pageerror", (error) => errors.push(error.message));
+              page.on("console", (message) => {
+                if (message.type() === "error") errors.push(message.text());
+              });
+              await page.goto(response.url);
+              // Scoped to the page: React's hidden streamed segments hold copies until revealed.
+              const main = page.locator('main[data-hydrated="true"]');
+              await main.waitFor();
+              await main.locator('[data-deferred="late"]').waitFor();
+              expect(await main.locator('[data-deferred="ready"]').textContent()).toBe(
+                "ready:ready-value",
+              );
+              expect(await main.locator('[data-deferred="late"]').textContent()).toBe(
+                "late:late-value",
+              );
+              await main.locator('[data-deferred-failed="failed"]').waitFor();
+              await main.locator("[data-count]").click();
+              expect(await main.locator("[data-count]").textContent()).toBe("count:1");
+              // React reports the rejected value it rethrows to the error boundary.
+              expect(
+                errors.filter((message) => !message.includes("Deferred route data failed to load")),
+              ).toEqual([]);
+            } finally {
+              await browser.close();
+            }
+          },
+          "/deferred",
         );
       } finally {
         await fs.rm(root, { recursive: true, force: true });

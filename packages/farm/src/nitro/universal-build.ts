@@ -4248,6 +4248,42 @@ function readRouteSlotPayload(doc) {
   }
 }
 
+/**
+ * The settled defer() values a fetched document writes after its body, which a client
+ * navigation does not execute either. Undefined when the document has none.
+ */
+function readDeferredDataPayload(doc) {
+  const prefix = "window.__FARM_DEFERRED_DATA__=";
+  for (const script of doc.querySelectorAll("script:not([src])")) {
+    const source = (script.textContent || "").trim();
+    if (!source.startsWith(prefix)) continue;
+    try {
+      return JSON.parse(source.slice(prefix.length).replace(/;$/, ""));
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+// defer() values arrive as references, settled by the snapshot the server writes once the
+// document has rendered, and revived as promises the way development revives them. The page
+// and its slots share one id space. The server writes references only with a snapshot, so a
+// document without one has nothing to revive and never loads the reviver.
+async function reviveFarmDeferredPayload(page, slots, settlements) {
+  if (!settlements) return { page: page, slots: slots };
+  const { reviveDeferredData } = await import("@farm.js/core/deferred");
+  return reviveDeferredData({ page: page, slots: slots }, settlements);
+}
+
+function readFarmDocumentPayload(doc) {
+  return reviveFarmDeferredPayload(
+    readPagePropsPayload(doc),
+    readRouteSlotPayload(doc),
+    readDeferredDataPayload(doc),
+  );
+}
+
 const routeSlotRoots = new Map();
 let activeRouteInterception = null;
 
@@ -4371,7 +4407,18 @@ function resetReactRoot() {
   isHydrated = false;
 }
 
-${islandValues ? FARM_DOCUMENT_PARSED_RUNTIME : ""}// Hydrate client components
+${
+  islandValues
+    ? `${FARM_DOCUMENT_PARSED_RUNTIME}// A deferred reference in the payload, settled by the snapshot that follows the body.
+function hasFarmDeferredReference(value) {
+  if (!value || typeof value !== "object") return false;
+  if (typeof value.$farmDeferred === "string") return true;
+  return Object.values(value).some(hasFarmDeferredReference);
+}
+
+`
+    : ""
+}// Hydrate client components
 async function hydrate() {
   await window.__FARM_PPR_REFRESH_PROMISE__;
   // A PPR refresh that is still retrying must not replace DOM once hydration starts.
@@ -4386,12 +4433,21 @@ async function hydrate() {
     !matched ||
     !matched.route.hasIsolatedClientBoundaries ||
     matched.route.pageShouldHydrate ||
-    hasHydratableLayout(pathname)
+    hasHydratableLayout(pathname) ||
+    hasFarmDeferredReference(window.__FARM_ROUTE_SLOTS__)
   ) {
     await farmDocumentParsed();
   }`
       : ""
   }
+  // The snapshot follows the body: this entry runs after it, or waited for it above.
+  const initialPayload = await reviveFarmDeferredPayload(
+    window.__FARM_PROPS__,
+    window.__FARM_ROUTE_SLOTS__,
+    window.__FARM_DEFERRED_DATA__,
+  );
+  window.__FARM_PROPS__ = initialPayload.page;
+  window.__FARM_ROUTE_SLOTS__ = initialPayload.slots;
 
   if (await hydrateFarmDocsAdapterRuntime()) {
     return;
@@ -4775,7 +4831,8 @@ ${
         const html = await this.fetchPage(to, from, false, true, navigation.controller.signal);
         if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         const doc = new DOMParser().parseFromString(html, "text/html");
-        const slotPayload = readRouteSlotPayload(doc);
+        const slotPayload = (await readFarmDocumentPayload(doc)).slots;
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         const selectedSlot = slotPayload.find(function(slot) {
           return slot.interception &&
             slot.name === intercepted.slot.name &&
@@ -4949,10 +5006,12 @@ ${
     const doc = parser.parseFromString(html, "text/html");
     if (isFarmLocaleDocumentChange(doc)) return false;
     if (doc.getElementById("nd-docs-layout")) return false;
-    const nextRouteSlots = readRouteSlotPayload(doc);
-    const nextPageProps = readPagePropsPayload(doc);
     const isNavigationCurrent = () =>
       this.isCurrentNavigation(navigation, clientNavigation);
+    const nextPayload = await readFarmDocumentPayload(doc);
+    if (!isNavigationCurrent()) return false;
+    const nextRouteSlots = nextPayload.slots;
+    const nextPageProps = nextPayload.page;
     
     reconcileFarmDocumentHead(doc);
     
@@ -6796,6 +6855,9 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   applyFarmCspNonceToResponse,
   createFarmCspNonce,
   stampFarmCspNonce,
+  isDeferred,
+  prepareDeferredData,
+  snapshotDeferredData,
   applyFarmPreviewRobotsTag,
   applyFarmThemeDocument,
   appendFarmLinkHeader,
@@ -7799,6 +7861,17 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
   return '<script id="__farm_route_slots_data__" type="application/json">' +
     serializedRouteSlots +
     '</script>' + stampFarmCspNonce('<script>' + source + '</script>');
+}
+
+// The settled defer() values the bootstrap script's props refer to, as development writes them.
+// It runs once the document has rendered: React has awaited every value a component read.
+function renderFarmDeferredDataScript(records) {
+  if (!records || records.length === 0) return "";
+  return stampFarmCspNonce(
+    '<script>window.__FARM_DEFERRED_DATA__=' +
+      serializeFarmInlineValue(snapshotDeferredData(records)) +
+      ';</script>'
+  );
 }
 
 function renderFarmRendererHydrationScript() {
@@ -9612,8 +9685,10 @@ function getPPRHeaders(status, config) {
   return headers;
 }
 
+// defer() values reach the browser as references its snapshot settles; other promises do not.
 function hasFarmUnserializableRouteData(data) {
-  const isPromise = (value) => Boolean(value) && typeof value.then === "function";
+  const isPromise = (value) =>
+    Boolean(value) && typeof value.then === "function" && !isDeferred(value);
   if (isPromise(data)) return true;
   return Boolean(data) && typeof data === "object" && Object.values(data).some(isPromise);
 }
@@ -10599,8 +10674,8 @@ ${
           ...(pageProps.__farmCanonicalPath
             ? { __farmCanonicalPath: pageProps.__farmCanonicalPath }
             : {}),
-          // Deferred values do not survive JSON, so the browser cannot render
-          // a page from these props while one is still in flight.
+          // A promise that is not a defer() value does not survive JSON, so
+          // the browser cannot render a page from these props.
           ...(pageProps.__farmRoutePropsResolved && !hasFarmUnserializableRouteData(pageProps.data)
             ? { __farmRoutePropsResolved: true }
             : {}),
@@ -10625,6 +10700,17 @@ ${
             },
           };
         });
+        // defer() values go to the browser as references (one id space for the page and its
+        // slots), settled by renderFarmDeferredDataScript once the document has rendered.
+        const farmDeferredData = prepareDeferredData({
+          page: clientPageProps,
+          slots: routeSlotPayload,
+        });
+        // A page without defer() values sends its props as they are: references, and escaped
+        // look-alikes, only ever come with a snapshot, so the browser has nothing to revive.
+        if (farmDeferredData.records.length === 0) {
+          farmDeferredData.data = { page: clientPageProps, slots: routeSlotPayload };
+        }
         
         ${
           farmIslandsMode
@@ -10645,9 +10731,12 @@ ${
         // A navigation the browser streams marks where each React flush ends, so the browser
         // shows the page before its Suspense content arrives (FARM_FLUSH_MARKER). The marker
         // carries a random token sent in the F-Flush header: page content cannot forge one.
-        const farmFlushToken = request.headers.get("f-stream") === "flush"
-          ? createFarmFlushToken()
-          : "";`
+        // A page with defer() data arrives whole: the browser revives its props from the
+        // snapshot after the body, which a shell swapped in first would not have yet.
+        const farmFlushToken =
+          request.headers.get("f-stream") === "flush" && farmDeferredData.records.length === 0
+            ? createFarmFlushToken()
+            : "";`
             : `const farmLayoutKeyOf = null;
         const farmPayloadOnlyNavigation = false;
         const farmFlushToken = "";`
@@ -10990,10 +11079,15 @@ ${
           const farmClientScripts = function(early) {
             return '  ' + renderFarmClientBootstrapScript(
               pageProps.__farmCanonicalPath,
-              routeSlotPayload,
-              clientPageProps
+              farmDeferredData.data.slots,
+              farmDeferredData.data.page
             ) + '\\n' +
               '  ' + renderFarmClientEntryScript(early) + '\\n';
+          };
+          // Written as the stream ends, when the values the page read have settled.
+          const farmDeferredDataScript = function() {
+            const script = renderFarmDeferredDataScript(farmDeferredData.records);
+            return script ? '  ' + script + '\\n' : '';
           };
           const farmEarlyClientScripts = ${farmIslandsMode ? "farmClientScripts(true)" : '""'};
           const streamPrefix = '<!DOCTYPE html>\\n<html lang="en">\\n<head>\\n' +
@@ -11006,9 +11100,10 @@ ${
             '  <link rel="modulepreload" href="/__farm_client_js_src__">' + renderFarmClientModulePreloads(null, route.clientModule) + '\\n' +
             renderFarmRendererHydrationScript() + '\\n' +
             '</head>\\n<body>\\n' + farmEarlyClientScripts + '  <div id="root">';
-          const streamSuffix = '</div>\\n' +
-            (farmEarlyClientScripts ? '' : farmClientScripts()) +
-            '</body>\\n</html>';
+          const streamClientScripts = farmEarlyClientScripts ? '' : farmClientScripts();
+          const streamSuffix = function() {
+            return '</div>\\n' + farmDeferredDataScript() + streamClientScripts + '</body>\\n</html>';
+          };
           const themedStreamPrefix = streamPrefix.replace(
             '<html lang="en">',
             () => '<html lang="en"' + farmThemeDocument.attributes + '>'
@@ -11084,6 +11179,7 @@ ${
                 async function(rootOpened) {
                   return (await lateNavigationRecovery()) +
                     (rootOpened ? '</div>\\n' : '') +
+                    farmDeferredDataScript() +
                     (farmEarlyClientScripts ? '' : farmClientScripts());
                 },
                 onStreamComplete
@@ -11092,7 +11188,7 @@ ${
                 renderedPage.stream,
                 themedStreamPrefix,
                 async function() {
-                  return (await lateNavigationRecovery()) + streamSuffix;
+                  return (await lateNavigationRecovery()) + streamSuffix();
                 },
                 onStreamComplete
               );
@@ -11138,9 +11234,9 @@ ${
               /<\\/body>/i,
               () => '  ' + renderFarmClientBootstrapScript(
                 pageProps.__farmCanonicalPath,
-                routeSlotPayload,
-                clientPageProps
-              ) + '\\n' +
+                farmDeferredData.data.slots,
+                farmDeferredData.data.page
+              ) + renderFarmDeferredDataScript(farmDeferredData.records) + '\\n' +
                 '  ' + farmEntryScript + '\\n</body>',
             );
         } else {
@@ -11157,7 +11253,7 @@ ${
 </head>
 <body>
   <div id="root">\${html}</div>
-  \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, routeSlotPayload, clientPageProps)}
+  \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, farmDeferredData.data.slots, farmDeferredData.data.page)}\${renderFarmDeferredDataScript(farmDeferredData.records)}
   \${farmEntryScript}
 </body>
 </html>\`;
