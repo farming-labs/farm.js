@@ -13,7 +13,7 @@ import { generateFarmI18nTypes, renderFarmI18nTypes } from "./i18n/type-generato
 import { readFarmI18nCatalogs } from "./i18n/catalog";
 import type { ResolvedFarmI18nConfig } from "./i18n/types";
 import { getFarmAppDirectories, getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
-import { writeFileIfChanged } from "./write-file-if-changed";
+import { isGeneratedFileCurrent, writeFileIfChanged } from "./write-file-if-changed";
 import type { FarmPlugin } from "./plugin";
 import { resolvePluginRoutes } from "./api/route";
 import { createSyncModelTypeDeclarations } from "./schema-model-types";
@@ -332,7 +332,7 @@ function writeOrCheckGeneratedFile(
 }
 
 function checkGeneratedFile(filePath: string, content: string, stalePaths: string[]): void {
-  if (!existsSync(filePath) || readFileSync(filePath, "utf8") !== content) {
+  if (!existsSync(filePath) || !isGeneratedFileCurrent(readFileSync(filePath, "utf8"), content)) {
     stalePaths.push(filePath);
   }
 }

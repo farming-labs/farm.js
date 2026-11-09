@@ -133,3 +133,7 @@ export interface FarmSchemaConfig {
 export function defineSchema<TSchema extends FarmSchema>(schema: TSchema): TSchema {
   return schema;
 }
+
+// Also exported from the package root. This entry loads no React, so server-only
+// packages that own tables (such as `@farm.js/stripe`) declare them from here.
+export { declareSchemaTables, type FarmSchemaTablesDeclaration } from "./schema-owner";

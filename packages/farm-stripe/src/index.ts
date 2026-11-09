@@ -1,18 +1,20 @@
 import Stripe from "stripe";
+import type {
+  FarmIntegration,
+  FarmIntegrationAPI,
+  FarmIntegrationHandlerContext,
+  FarmIntegrationLogger,
+  FarmIntegrationSchema,
+} from "@farm.js/core";
 import {
   describeIntegrationOriginRejection,
   resolveIntegrationAllowedOrigins,
   validateIntegrationRequestOrigin,
-  createIntegrationOrm,
-  declareSchemaTables,
   defineIntegration,
   integrationRoute,
-  type FarmIntegration,
-  type FarmIntegrationAPI,
-  type FarmIntegrationHandlerContext,
-  type FarmIntegrationLogger,
-  type FarmIntegrationSchema,
-} from "@farm.js/core";
+} from "@farm.js/core/integrations";
+import { createIntegrationOrm } from "@farm.js/core/integrations/orm";
+import { declareSchemaTables } from "@farm.js/core/schema";
 import {
   integrationConfig,
   normalizeWebhookConfig,

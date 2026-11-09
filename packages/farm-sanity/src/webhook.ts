@@ -1,10 +1,6 @@
-import {
-  integrationRoute,
-  invalidate,
-  revalidatePath,
-  type FarmIntegrationRoute,
-  type RouteDataCacheKey,
-} from "@farm.js/core";
+import type { FarmIntegrationRoute, RouteDataCacheKey } from "@farm.js/core";
+import { invalidate, revalidatePath } from "@farm.js/core/cache";
+import { integrationRoute } from "@farm.js/core/integrations";
 import { isValidSignature, SIGNATURE_HEADER_NAME } from "@sanity/webhook";
 import type { SanityWebhookChange, SanityWebhookOptions } from "./config.js";
 

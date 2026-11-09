@@ -1,4 +1,4 @@
-import { defineIntegration } from "@farm.js/core";
+import { defineIntegration } from "@farm.js/core/integrations";
 import type { AgentFramework, AgentUnitConfig } from "agent-unit";
 
 import { registerAgentUnitConfig } from "./config.js";

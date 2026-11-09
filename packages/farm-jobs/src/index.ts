@@ -1,12 +1,11 @@
+import type { FarmIntegrationHandlerContext, FarmIntegrationLogger } from "@farm.js/core";
 import {
+  api,
   defineIntegration,
   defineIntegrationAPI,
   FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY,
   integrationRoute,
-  type FarmIntegrationHandlerContext,
-  type FarmIntegrationLogger,
-} from "@farm.js/core";
-import { api } from "@farm.js/core/client";
+} from "@farm.js/core/integrations";
 import type { FarmIntegrationAPIOperation } from "@farm.js/core/client";
 import { integrationConfig } from "@farm.js/integration-utils";
 

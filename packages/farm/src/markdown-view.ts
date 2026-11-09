@@ -25,7 +25,16 @@ const ATX_HEADING = /^\s{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
 
 /** Parse ATX headings, skipping front matter and fenced code blocks. */
 export function parseFarmMarkdownHeadings(markdown: string): FarmMarkdownHeading[] {
-  return parseMarkdownHeadingsFromLines(markdown.split("\n"));
+  return parseMarkdownHeadingsFromLines(normalizeMarkdownLineEndings(markdown).split("\n"));
+}
+
+/**
+ * CommonMark line endings (`\r\n`, `\r`) as `\n`. A Windows checkout with
+ * `core.autocrlf=true` gives `page.md` CRLF endings, and a `\r` left on each line
+ * would keep every heading from matching.
+ */
+function normalizeMarkdownLineEndings(markdown: string): string {
+  return markdown.includes("\r") ? markdown.replace(/\r\n?/g, "\n") : markdown;
 }
 
 function parseMarkdownHeadingsFromLines(lines: string[]): FarmMarkdownHeading[] {
@@ -126,6 +135,9 @@ export function selectFarmMarkdownView(
   const budget = searchParams.get("max_tokens");
   if (!wantsOutline && sectionId === null && budget === null)
     return { status: 200, body: markdown };
+  // Views are derived documents, so they use one line ending; the whole
+  // document above is served with its original bytes.
+  markdown = normalizeMarkdownLineEndings(markdown);
 
   // Links to other views keep the page's own query (`?category=shoes`), so they
   // read the same page this request rendered.
