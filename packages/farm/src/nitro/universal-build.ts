@@ -3750,9 +3750,9 @@ ${generateUniversalRouterStateProperties()}
 };
 
 const farmClientRuntime = ${
-  clientPluginEntry.empty
-    ? "createPluginlessClientRuntime()"
-    : `createClientPluginManager(
+      clientPluginEntry.empty
+        ? "createPluginlessClientRuntime()"
+        : `createClientPluginManager(
   ${clientPluginEntry.registrations},
   {
     router: spaRouter,
@@ -3761,7 +3761,7 @@ const farmClientRuntime = ${
     deploymentId: window.__FARM_DEPLOYMENT_ID__,
   },
 )`
-};
+    };
 window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
@@ -5139,9 +5139,9 @@ ${
 };
 
 const farmClientRuntime = ${
-  clientPluginEntry.empty
-    ? "createPluginlessClientRuntime()"
-    : `createClientPluginManager(
+    clientPluginEntry.empty
+      ? "createPluginlessClientRuntime()"
+      : `createClientPluginManager(
   ${clientPluginEntry.registrations},
   {
     router: spaRouter,
@@ -5150,7 +5150,7 @@ const farmClientRuntime = ${
     deploymentId: window.__FARM_DEPLOYMENT_ID__,
   },
 )`
-};
+  };
 window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
