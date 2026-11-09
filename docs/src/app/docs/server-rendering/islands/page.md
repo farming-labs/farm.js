@@ -67,6 +67,45 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
 - **Navigation.** A navigation fetches the page's HTML, streamed, with only the layouts the
   browser does not keep, and hydrates the islands it brings.
 
+## How it compares with React Server Components
+
+**Islands mode sends far less JavaScript on pages that do not hydrate at load, and costs about the
+same or less everywhere else, except for a few milliseconds on some navigations.** These are the
+numbers for one app built in both modes (`benchmarks/server-components-payload`), each cell `"rsc"`
+then `"islands"`.
+
+| Measure                    | Docs page       | Shop page      | Blog post      |
+| -------------------------- | --------------- | -------------- | -------------- |
+| First-load JavaScript      | 69.9 to 1.7 KB  | 69.9 to 1.7 KB | 69.9 to 1.7 KB |
+| HTML document              | 16.3 to 15.9 KB | 5.5 to 5.7 KB  | 17.9 to 8.9 KB |
+| Data per navigation        | 12.0 to 2.5 KB  | 3.8 to 2.0 KB  | 10.8 to 8.9 KB |
+| First-load main thread     | 163 to 86 ms    | 143 to 74 ms   | 216 to 99 ms   |
+| Navigation until painted   | 44 to 46 ms     | 46 to 50 ms    | 71 to 69 ms    |
+| Server requests per second | 434 to 458      | 682 to 769     | 48 to 349      |
+
+Sizes are brotli at quality 5. Times are medians with Chrome at 4x CPU throttling. Requests per
+second are the median of 8 rounds alternating between the modes, on one Node process. Measured
+2026-11-08 on an Apple M1 with other work running, at commit `55fb3580c`.
+
+- **First load.** 41 times less JavaScript and about half the main-thread work, because these pages'
+  client components wait for a click.
+- **Server.** 6% and 13% more requests per second on docs and shop pages, within the spread of a
+  busy machine, and 7.3 times more on a long blog post, where Flight serializes every token.
+- **Navigation data.** A fifth of the data on docs pages, half on shop pages, and slightly less on
+  blog posts.
+
+Where islands mode does not win:
+
+- **The runtime still has to arrive.** It is about 87 KB, and it loads on the first navigation or
+  interaction, so a visitor who navigates has downloaded more JavaScript in total than with
+  `"rsc"`. The savings are in what a visit pays before the page can be used.
+- **A client component that hydrates at load** starts the runtime at once, so that page sends more
+  JavaScript than `"rsc"`, not less.
+- **Navigations paint 2 to 4 ms later** on docs and shop pages. Blog posts are 2 ms faster.
+
+To measure it yourself, see the benchmark's
+[README](https://github.com/farming-labs/farm.js/tree/main/benchmarks/server-components-payload).
+
 ## Libraries written for React Server Components
 
 Islands mode runs libraries written for RSC the way their docs show it. Farm shims the RSC-only
