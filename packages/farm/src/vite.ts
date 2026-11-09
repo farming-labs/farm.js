@@ -157,6 +157,8 @@ import {
 } from "./devtools-config";
 import { generateFarmDevIndicatorsClientRuntime } from "./dev-indicators";
 import { createFarmDevPreviewGuard, getFarmDevFsDeny } from "./dev-preview-guard";
+import { createFarmDevViteCorsMiddleware } from "./server/dev-cors";
+import { resolveRouteRuleCorsPreflightHeaders } from "./route-rules";
 import { resolveFarmPlatform } from "./desktop/config";
 import type { FarmPlatform } from "./platform";
 import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
@@ -1498,6 +1500,8 @@ export function farmPlugin(
   let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
   let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
   let isBuild = false;
+  // Whether this dev server turned Vite's `server.cors` off (see the `config` hook).
+  let farmOwnsDevCors = false;
   // MCP servers the docs runtime lists in the AI catalog, removed when the dev server closes.
   const docsMCPServerDisposers = new Set<() => void>();
   const releaseDocsMCPServers = () => {
@@ -1531,6 +1535,11 @@ export function farmPlugin(
         ? {}
         : createFarmSourceAlias(options.root || process.cwd(), options.srcDir);
       const layerRoots = (options.layers ?? []).map((layer) => layer.root);
+      // Vite's CORS middleware runs ahead of every plugin's and ends each OPTIONS request with a
+      // 204, so route OPTIONS exports, app middleware, and routeRules CORS never saw one, and app
+      // responses carried CORS headers production does not send. Farm turns it off and applies
+      // Vite's default policy only to the requests it hands to Vite. An app's server.cors wins.
+      farmOwnsDevCors = !isBuild && userConfig.server?.cors === undefined;
       return {
         // Honor Farm's publicDir so the dev server serves the same static
         // directory the production client build emits.
@@ -1543,6 +1552,7 @@ export function farmPlugin(
           alias: { ...layerAliases, ...sourceAlias },
         },
         server: {
+          ...(farmOwnsDevCors ? { cors: false } : {}),
           fs: {
             ...(layerRoots.length
               ? { allow: [path.resolve(options.root || process.cwd()), ...layerRoots] }
@@ -2302,6 +2312,24 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           });
           const fullUrl = parsedRequestUrl.toString();
           const requestPathname = parsedRequestUrl.pathname;
+
+          // A routeRules `cors` preflight is answered ahead of middleware and routes, as
+          // production's route rule does.
+          if (
+            requestMethod === "OPTIONS" &&
+            req.headers.origin &&
+            req.headers["access-control-request-method"]
+          ) {
+            const preflightHeaders = resolveRouteRuleCorsPreflightHeaders(
+              currentConfig.routeRules,
+              requestPathname,
+            );
+            if (preflightHeaders) {
+              res.writeHead(204, preflightHeaders);
+              res.end();
+              return;
+            }
+          }
 
           if (imageHandler && requestPathname === farmConfig.images.path) {
             const imageResponse = await imageHandler(
@@ -3955,6 +3983,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
         }),
       );
+
+      // What Farm passed on is Vite's (modules, /@vite/*, /@fs/*, public files): give it the CORS
+      // policy Vite would have, unless a later plugin turned Vite's own back on.
+      if (farmOwnsDevCors && viteServer.config.server.cors === false) {
+        viteServer.middlewares.use(createFarmDevViteCorsMiddleware());
+      }
 
       // `renderer: false`: a dotted path that no route or file answered falls through to Vite,
       // whose 404 has an empty body. Answer it with the same JSON miss as production. The post hook

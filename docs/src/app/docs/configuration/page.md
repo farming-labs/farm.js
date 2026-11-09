@@ -1289,6 +1289,8 @@ set their own.
 
 API routes remain same-origin by default in development and production. Add `cors` only to route patterns that intentionally form a cross-origin browser API.
 
+A `cors` rule answers a browser preflight (`OPTIONS` with `Origin` and `Access-Control-Request-Method`) with `204` before middleware and routes run. Every other `OPTIONS` request reaches app middleware and the route: an API route's `OPTIONS` export, or `405` with an `Allow` header when it has none. `farm dev` behaves the same way. Vite's own development requests (modules, `/@vite/client`, `/@fs/`) keep Vite's default CORS for `localhost` origins. An app that sets `vite.server.cors` hands CORS for every development request back to Vite.
+
 Rules can also provide `runtime`, `regions`, and `maxDuration` defaults. File pages, API routes, and layouts can override them with named exports. See [Route Runtime](/docs/route-runtime) for inheritance and deployment behavior.
 
 Prefer route-level exports when one page owns the behavior. Prefer `routeRules` for broad groups, deployment-facing cache policy, API CORS, static asset headers, and legacy redirects.

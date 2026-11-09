@@ -1,8 +1,8 @@
 import type { HeaderConfig, RedirectConfig } from "./config";
 import { isFarmRedirectStatus, type FarmRedirectStatus } from "./navigation-errors";
 import type { FarmRouteRuntimeConfig } from "./route-runtime";
-import { normalizeFarmRouteRuntimeConfig } from "./route-runtime";
-import { validateConfigRouteSource } from "./plugins/route-pattern";
+import { compareFarmRouteRuleSpecificity, normalizeFarmRouteRuntimeConfig } from "./route-runtime";
+import { compileConfigRoutePattern, validateConfigRouteSource } from "./plugins/route-pattern";
 
 export type FarmRouteRuleRenderMode = "static" | "dynamic";
 
@@ -149,6 +149,30 @@ export function routeRulesToNitroRouteRules(routeRules: FarmRouteRules): Record<
   }
 
   return nitroRules;
+}
+
+/**
+ * The headers a production server answers a CORS preflight (`OPTIONS` with `Origin` and
+ * `Access-Control-Request-Method`) for `pathname` with, before app middleware or routes run, or
+ * `undefined` when no `cors` rule covers the path. Matching rules merge from broadest to most
+ * specific, as Nitro merges them, so a more specific `cors: false` turns a broader rule off.
+ */
+export function resolveRouteRuleCorsPreflightHeaders(
+  routeRules: FarmRouteRules | undefined,
+  pathname: string,
+): Record<string, string> | undefined {
+  if (!routeRules) return undefined;
+  let cors: FarmRouteRuleCors | undefined;
+  let headers: Record<string, string> = {};
+  const matches = Object.entries(routeRules)
+    // The matcher the development `routeRules` headers use (routeRulesToHeaders).
+    .filter(([source]) => compileConfigRoutePattern(source).regex.test(pathname))
+    .sort(([left], [right]) => compareFarmRouteRuleSpecificity(left, right));
+  for (const [, rule] of matches) {
+    if (rule.cors !== undefined) cors = rule.cors;
+    headers = { ...headers, ...normalizeCorsHeaders(rule.cors), ...rule.headers };
+  }
+  return cors ? headers : undefined;
 }
 
 function normalizeCorsHeaders(cors: FarmRouteRuleCors | undefined): Record<string, string> {
