@@ -351,7 +351,6 @@ export async function resolveFarmMobileApp(
     };
     // React Native ports of portable pages: the routes `auto: "on"` picks and config routes that
     // ask for a native screen, unless the page renders on the native tier without JavaScript.
-    // Only Android hosts React Native.
     if (portable) {
       const { emitFarmMobilePort } = await import("./port");
       const portsDir = path.resolve(root, getFarmMobileOutputDirs(config.distDir).ports);
@@ -406,6 +405,33 @@ export async function resolveFarmMobileApp(
       analysis: result.routes,
     });
   }
+  // Options the config and file conventions accept but nothing acts on yet: say so, so an app
+  // does not rely on them.
+  const reserved: string[] = [];
+  if (mobile.native.islands.length > 0) {
+    reserved.push(
+      `mobile.native.islands is reserved: no native islands render yet, so these stay web components: ${mobile.native.islands.join(", ")}.`,
+    );
+  }
+  if (Object.keys(mobile.native.budgets).length > 0) {
+    reserved.push(
+      "mobile.native.budgets is reserved: nothing measures app size, screen open time, or dropped frames yet.",
+    );
+  }
+  for (const page of pageExports.values()) {
+    if (page.config.prefetch === "intent") {
+      reserved.push(
+        `${page.file}: mobile.prefetch "intent" has no effect yet: the shell does not prefetch a route's data.`,
+      );
+    }
+  }
+  for (const files of scan.nativeLayouts.values()) {
+    for (const file of Object.values(files)) {
+      reserved.push(
+        `${path.relative(root, file).split(path.sep).join("/")}: layout.native files are reserved: nothing renders them yet, though the analyzer reads one in place of that folder's layout.`,
+      );
+    }
+  }
   const nativeLayouts = Object.fromEntries(
     [...scan.nativeLayouts]
       .sort()
@@ -447,7 +473,7 @@ export async function resolveFarmMobileApp(
     manifest,
     config,
     screens,
-    warnings,
+    warnings: [...reserved, ...warnings],
     nativeLayouts,
     pageFiles: scan.pageFiles,
     ports: Object.fromEntries(ports),

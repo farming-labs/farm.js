@@ -10,6 +10,16 @@
 
 ## Status
 
+Update 2026-11-09, after 0.1.67. The list below is from 0.1.61. Since then:
+
+- **Shipped in 0.1.65** (`@farm.js/mobile` 0.1.0-beta.10): the iOS shell, iOS React Native screens
+  and modules, native-tier pages on iOS, and the rest of the docs status table.
+- **0.1.66:** native HTML tables, and islands-mode shell screens.
+- **0.1.67:** iOS web screens receive module files as `blob:` URLs, which closes "file references".
+- **Platform screens** moved to [RFC 0006](./0006-platform-screens.md).
+- **Reserved options** (`native.islands`, `native.budgets`, a page's `prefetch`, `layout.native.tsx`)
+  now warn at build time, since nothing acts on them yet.
+
 Updated 2026-11-07, after 0.1.61.
 
 - Desktop: merged and released. #2353 (core runtime primitives), #2354
