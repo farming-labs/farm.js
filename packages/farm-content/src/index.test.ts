@@ -88,8 +88,12 @@ describe("content plugin", () => {
           listener = callback;
         },
       },
+      // Like Vite's module graph, keyed by forward-slash paths (Windows paths are not).
       moduleGraph: {
-        getModulesByFile: () => new Set([{}]),
+        getModulesByFile: (file: string) =>
+          file === path.join(root, ".farm", "content", "server.mjs").replace(/\\/g, "/")
+            ? new Set([{}])
+            : undefined,
         invalidateModule,
       },
       ws: { send },

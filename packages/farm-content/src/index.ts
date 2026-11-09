@@ -5,6 +5,7 @@ import fg from "fast-glob";
 import { asset } from "./assets.js";
 import { collection, files, isSupportedContentFile } from "./config.js";
 import { loadContentCollections, writeContentServerModule } from "./loader.js";
+import { invalidateFileModules, type ContentModuleGraph } from "./module-graph.js";
 import { registerContentWriteRuntime, setContentAfterWrite } from "./runtime.js";
 import type { ContentCollections, ContentOptions, ContentPlugin } from "./types.js";
 
@@ -156,8 +157,7 @@ export function content<const TCollections extends ContentCollections>(
                 return;
               }
               await rebuild();
-              const modules = server.moduleGraph.getModulesByFile?.(generatedFile);
-              for (const module of modules ?? []) server.moduleGraph.invalidateModule(module);
+              invalidateFileModules(server.moduleGraph, generatedFile);
               server.ws.send({ type: "full-reload" });
             })
             .catch((error) => {
@@ -175,8 +175,7 @@ export function content<const TCollections extends ContentCollections>(
           const settled = (rebuildQueue = rebuildQueue
             .then(async () => {
               if (!(await rebuild())) return;
-              const modules = server.moduleGraph.getModulesByFile?.(generatedFile);
-              for (const module of modules ?? []) server.moduleGraph.invalidateModule(module);
+              invalidateFileModules(server.moduleGraph, generatedFile);
               server.ws.send({ type: "full-reload" });
             })
             .catch((error) => {
@@ -209,8 +208,7 @@ export function content<const TCollections extends ContentCollections>(
                 .then(async () => {
                   if (!(await rebuild())) return;
                   lastPollError = undefined;
-                  const modules = server.moduleGraph.getModulesByFile?.(generatedFile);
-                  for (const module of modules ?? []) server.moduleGraph.invalidateModule(module);
+                  invalidateFileModules(server.moduleGraph, generatedFile);
                   server.ws.send({ type: "full-reload" });
                 })
                 .catch((error) => {
@@ -295,10 +293,7 @@ interface ContentViteDevServer {
     on(event: "all", listener: (event: string, filePath: string) => void): void;
     off?(event: "all", listener: (event: string, filePath: string) => void): void;
   };
-  moduleGraph: {
-    getModulesByFile?(file: string): Set<unknown> | undefined;
-    invalidateModule(module: unknown): void;
-  };
+  moduleGraph: ContentModuleGraph;
   ws: {
     send(payload: Record<string, unknown>): void;
   };
