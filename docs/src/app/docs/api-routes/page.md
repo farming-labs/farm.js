@@ -468,14 +468,22 @@ every affected query. Existing client-side `invalidate` options remain supported
 caller-specific cache relationships, and handlers can continue calling `invalidate(...)` or
 `revalidatePath(...)` directly.
 
-## Mount a Hono or Elysia app
+## Mount another backend framework
 
-A plain route export receives the Web `Request` and can return a `Response`. That is the same
-contract as the `fetch` handler of a Hono or Elysia app, so you can mount an existing app on a
-catch-all route and keep its routes, middleware, and validators.
+You can mount an existing backend app on a catch-all route and keep its routes, middleware, and
+validators. Farm has two optional helpers. Each returns a handler for every HTTP method, and you
+export the ones the app handles:
 
-`mountFetchHandler` from `@farm.js/core/api` is optional. It returns a handler for every HTTP
-method, and you export the ones the app handles:
+- `mountFetchHandler` from `@farm.js/core/api` for apps built on the Web `fetch` API, such as Hono
+  and Elysia.
+- `mountNodeHandler` from `@farm.js/core/api/node` for Node.js frameworks, such as Express, Koa,
+  Fastify, and Nest.
+
+### Hono and Elysia
+
+A plain route export receives the Web `Request` and can return a `Response`, the same contract as
+a Hono or Elysia app's `fetch` handler. `mountFetchHandler` accepts an app with a `fetch` method or
+a plain `(request: Request) => Response | Promise<Response>` function.
 
 **src/app/api/hono/[...path]/route.ts**
 
@@ -507,24 +515,94 @@ const app = new Elysia()
 export const { GET, POST } = mountFetchHandler(app, { stripMountPath: true });
 ```
 
-`mountFetchHandler` accepts an app with a `fetch` method or a plain
-`(request: Request) => Response | Promise<Response>` function.
+### Express, Koa, Fastify, and Nest
+
+`mountNodeHandler` accepts a Node.js `(req, res)` listener, or a promise of one for a framework
+that starts asynchronously. It runs the listener against an in-memory `req` and `res` built from
+the request.
+
+**src/app/api/express/[...path]/route.ts**
+
+```ts
+import { mountNodeHandler } from "@farm.js/core/api/node";
+import express from "express";
+
+const app = express();
+app.use(express.json());
+app.get("/users/:id", (req, res) => res.json({ id: req.params.id }));
+app.post("/users", (req, res) => res.status(201).json(req.body));
+
+export const { GET, POST } = mountNodeHandler(app, { stripMountPath: true });
+```
+
+For Koa, pass the app's listener:
+
+```ts
+export const { GET, POST } = mountNodeHandler(koa.callback(), { stripMountPath: true });
+```
+
+For Fastify, wait until the app is ready, then hand each request to its server:
+
+```ts
+const ready = fastify.ready();
+
+export const { GET, POST } = mountNodeHandler(
+  async (req, res) => {
+    await ready;
+    fastify.server.emit("request", req, res);
+  },
+  { stripMountPath: true },
+);
+```
+
+For Nest, initialize the app and pass its HTTP adapter's instance. Nest's decorators need
+`"experimentalDecorators": true` in your `tsconfig.json`.
+
+**src/app/api/nest/[...path]/route.ts**
+
+```ts
+import "reflect-metadata";
+import { mountNodeHandler } from "@farm.js/core/api/node";
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "../../../../nest/app.module";
+
+const app = NestFactory.create(AppModule).then(async (nest) => {
+  await nest.init();
+  return nest.getHttpAdapter().getInstance();
+});
+
+export const { GET, POST } = mountNodeHandler(app, { stripMountPath: true });
+```
+
+The app reads the request body as a stream, and its response streams back as soon as it sends
+headers, so server-sent events work. Some things a Node.js server provides are not available:
+
+- **Node.js runtimes only.** `mountNodeHandler` imports `node:http`. Use `mountFetchHandler` for
+  edge and worker targets.
+- **No socket.** `req.socket.remoteAddress` is not set, so `req.ip` in Express is `undefined`. WebSocket
+  upgrades and the framework's own `listen()`, timeouts, and keep-alive settings do not apply;
+  Farm's server handles the connection.
+- **Errors go to Farm.** If the listener throws, rejects, or calls `next(error)` before it responds,
+  Farm answers as it does for any failed route. A Connect-style `next()` with no response answers
+  `404`.
+
+### Base path
 
 - **`stripMountPath: true`** hands the app only the part of the path below the catch-all, so its
   routes don't repeat where Farm serves them. `/api/hono/hello/farm` reaches the app as
   `/hello/farm`, and the app keeps working if the route moves or
-  [`api.basePath`](/docs/configuration#api-client-base-url) changes. Segments stay encoded as the client sent them.
-  Paths the app builds itself, such as redirect locations, are then relative to the mount rather
-  than to the site.
+  [`api.basePath`](/docs/configuration#api-client-base-url) changes. Segments stay encoded as the
+  client sent them. Paths the app builds itself, such as redirect locations, are then relative to
+  the mount rather than to the site.
 - **Without `stripMountPath`** (the default), the app receives the request unchanged, with the full
-  URL. Give it the route's public path as its base path, such as `basePath("/api/hono")` in Hono or
-  `prefix: "/api/elysia"` in Elysia. With any other base path, every request misses its routes and
-  gets the app's own 404.
+  URL. Give it the route's public path as its base path, such as `basePath("/api/hono")` in Hono,
+  `prefix: "/api/elysia"` in Elysia, or `app.use("/api/express", router)` in Express. With any other
+  base path, every request misses its routes and gets the app's own 404.
 
 ### Without the helper
 
-The helper only saves boilerplate. Exporting the app's `fetch` yourself behaves the same as
-`mountFetchHandler(app)` without `stripMountPath`:
+The helpers only save boilerplate. Exporting a `fetch`-based app's handler yourself behaves the
+same as `mountFetchHandler(app)` without `stripMountPath`:
 
 ```ts
 import { Hono } from "hono";
@@ -547,8 +625,8 @@ export { handle as GET, handle as POST };
   opt-in, declared invalidation, and endpoint middleware. Use `createEndpoint` routes for those,
   alongside the mounted app.
 
-These recipes are covered by Farm's tests with Hono 4 and Elysia 1.4 on Node, in development and in
-a `node-server` production build.
+These recipes are covered by Farm's tests with Hono 4, Elysia 1.4, Express 5, Koa 3, Fastify 5,
+and Nest 11 on Node, in development and in a `node-server` production build.
 
 ## When to use integrations instead
 
