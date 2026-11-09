@@ -194,6 +194,10 @@ path has run, the config and file middleware matching the rewritten path runs to
 direct request. Integration guards, such as an auth integration's `protectedRoutes`, run for the
 rewritten path too. Each middleware runs at most once per request, so repeated rewrites cannot loop.
 
+A configured [`rewrites()`](/docs/configuration#route-rules) entry is applied before middleware, so
+only the middleware matching its destination runs, in development and production. Configured
+`redirects()` answer before middleware runs.
+
 ```ts
 import { defineConfig } from "@farm.js/core";
 

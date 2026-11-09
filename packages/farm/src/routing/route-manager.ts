@@ -90,7 +90,7 @@ import {
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
-import { stripFarmBasePath } from "../base-path";
+import { applyFarmBasePath, stripFarmBasePath } from "../base-path";
 import { appendFarmRedirectQuery } from "../redirect-query";
 import { encodeConfigRouteSegment } from "../plugins/route-pattern";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
@@ -512,7 +512,7 @@ export class RouteManager {
   } | null {
     const i18n = this.getI18nConfig();
     const localeMatch = i18n ? resolveFarmLocalePath(pathname, i18n) : undefined;
-    const routePathname = localeMatch?.pathname || pathname;
+    const routePathname = localeMatch?.pathname || this.toRoutePathname(pathname);
     const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
     const urlParts = splitRoutePath(normalizedPath);
 
@@ -1639,11 +1639,16 @@ export class RouteManager {
   }
 
   private localizeRedirectDestination(destination: string, locale?: string): string {
-    if (!locale || !destination.startsWith("/") || destination.startsWith("//")) {
+    if (!destination.startsWith("/") || destination.startsWith("//")) {
       return destination;
     }
     const i18n = this.getI18nConfig();
-    return i18n ? localizeFarmHref(destination, locale, i18n) : destination;
+    // Like the production entry: an app-relative destination stays inside the basePath.
+    return locale && i18n
+      ? localizeFarmHref(destination, locale, i18n)
+      : this.config.basePath
+        ? applyFarmBasePath(destination, this.config.basePath)
+        : destination;
   }
 
   private getI18nConfig(): ResolvedFarmI18nConfig | undefined {

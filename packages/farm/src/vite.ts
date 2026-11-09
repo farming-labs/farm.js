@@ -176,6 +176,7 @@ import { _withAfterNodeMiddleware } from "./after";
 import { _runWithAPIRequestRuntime } from "./api/server-context";
 import type { APIRequestRuntime } from "./api/server-client-bridge";
 import {
+  devServableFileExists,
   farmAppOwnsDocsEnginePath,
   isViteModuleRequest,
   shouldBypassFarmRouterForDottedPath,
@@ -266,6 +267,8 @@ import {
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
 import { addMetadataMarkdownAlternate, mergeMetadata, mergeModuleViewport } from "./metadata";
+import { FARM_CONFIG_HEADERS_PLUGIN_NAME } from "./plugins/headers";
+import { FARM_CONFIG_REDIRECTS_PLUGIN_NAME, getConfigRedirectMatcher } from "./plugins/redirects";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
 import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
@@ -619,6 +622,24 @@ export function withFarmRequestTracing(
     });
   };
 }
+
+const FARM_CONFIG_ROUTE_PLUGIN_NAMES = new Set([
+  FARM_CONFIG_HEADERS_PLUGIN_NAME,
+  FARM_CONFIG_REDIRECTS_PLUGIN_NAME,
+  FARM_CONFIG_REWRITES_PLUGIN_NAME,
+]);
+
+/** The config redirects(), rewrites(), and headers() plugins, which run once, before routing. */
+function isFarmConfigRoutePlugin(plugin: FarmPlugin): boolean {
+  return FARM_CONFIG_ROUTE_PLUGIN_NAMES.has(plugin.name);
+}
+
+/** The requested URL of a dev request a config rewrite re-entered the handler with. */
+const FARM_DEV_CONFIG_REWRITE_SOURCE = Symbol.for("farm.devConfigRewriteSource");
+
+type FarmDevConfigRewriteRequest = Connect.IncomingMessage & {
+  [FARM_DEV_CONFIG_REWRITE_SOURCE]?: string;
+};
 
 /**
  * A config rewrite to another origin leaves `req.url` absolute. Forward the request there, as the
@@ -1600,6 +1621,16 @@ export function farmPlugin(
 
       // Store the plugin manager passed during creation
       const pm = initialPluginManager;
+      const configRoutePlugins = new Set(
+        pm
+          ?.getPlugins()
+          .filter(isFarmConfigRoutePlugin)
+          .map((plugin) => plugin.name),
+      );
+      const configRedirectMatchers = (pm?.getPlugins() ?? []).flatMap((plugin) => {
+        const matcher = getConfigRedirectMatcher(plugin);
+        return matcher ? [matcher] : [];
+      });
       const emitPluginError = async (
         phase: string,
         error: unknown,
@@ -2303,8 +2334,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             });
           },
         );
+      // A configured rewrite re-enters this handler with the destination URL, as the production
+      // entry re-enters its request handler, so every route and guard sees the destination.
       server.middlewares.use(
-        withAPIRequestTracing(async (req, res, next) => {
+        withAPIRequestTracing(async function handleFarmDevRequest(req, res, next) {
           const requestUrl = req.url || "/";
           const requestMethod = req.method || "GET";
           const currentConfig = farmApp?.getConfig() ?? options;
@@ -2440,6 +2473,74 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               res.end(renderFarmDevtoolsHtml(snapshot));
             }
             return;
+          }
+
+          // Vite answers its own endpoints, modules, and files; config routes leave them alone, as
+          // production serves files before its request handler.
+          const isViteOwnedRequest = () =>
+            requestUrl.startsWith("/@") ||
+            requestUrl.startsWith("/node_modules/") ||
+            requestUrl.startsWith("/__farm/") ||
+            isViteModuleRequest(parsedRequestUrl, req.headers) ||
+            (requestPathname.includes(".") &&
+              devServableFileExists(requestPathname, [
+                server.config.publicDir,
+                server.config.root,
+              ]));
+
+          // Config headers() and redirects() see the requested URL before any route or app
+          // middleware does, as in the production entry: headers() then apply to whatever
+          // answers, a redirect or a middleware response included, and a redirect passes through
+          // the plugin runtime like any response. A request a config rewrite re-entered this
+          // handler with has passed them already.
+          const configRewriteSource = (req as FarmDevConfigRewriteRequest)[
+            FARM_DEV_CONFIG_REWRITE_SOURCE
+          ];
+          if (
+            pm &&
+            configRewriteSource === undefined &&
+            (configRoutePlugins.has(FARM_CONFIG_HEADERS_PLUGIN_NAME) ||
+              configRedirectMatchers.length > 0) &&
+            !isViteOwnedRequest()
+          ) {
+            try {
+              await pm.runHookParallelFiltered(
+                "beforeRequest",
+                (plugin) => plugin.name === FARM_CONFIG_HEADERS_PLUGIN_NAME,
+                req,
+                res,
+              );
+              let redirect: ReturnType<(typeof configRedirectMatchers)[number]> = null;
+              for (const matchRedirect of configRedirectMatchers) {
+                redirect ??= matchRedirect(parsedRequestUrl);
+              }
+              if (redirect) {
+                const redirectResponse = new Response(`Redirecting to ${redirect.destination}`, {
+                  status: redirect.statusCode,
+                  headers: { Location: redirect.destination },
+                });
+                await sendWebResponse(
+                  res,
+                  pm.hasRuntimeRequestHooks()
+                    ? await pm.runRuntimeRequest(
+                        createRequestFromNodeRequest(req, parsedRequestUrl),
+                        () => redirectResponse,
+                        { kind: "page", route: { pathname: requestPathname } },
+                      )
+                    : redirectResponse,
+                );
+                logResponse(requestMethod, requestUrl, res.statusCode, 0, "PAGE");
+                return;
+              }
+            } catch (error) {
+              await emitPluginError("before-request", error, { urlPath: requestUrl });
+              if (!res.headersSent) {
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "text/plain; charset=utf-8");
+              }
+              res.end("Internal Server Error");
+              return;
+            }
           }
 
           // The OpenAPI spec and reference, docs, raw markdown-source, the
@@ -2945,7 +3046,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   (plugin) => {
                     const owner = getFarmIntegrationPluginOwner(plugin);
                     return (
-                      plugin.name !== FARM_CONFIG_REWRITES_PLUGIN_NAME &&
+                      !isFarmConfigRoutePlugin(plugin) &&
                       (owner?.source !== "lifecycle" || owner.key !== matchedRoute.key)
                     );
                   },
@@ -3038,6 +3139,57 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             }
           };
 
+          // Config rewrites are a fallback: a request no local route serves is rewritten, and the
+          // destination re-enters this handler as the production entry re-enters its own, so
+          // app middleware, API routes, and pages all see the destination, and only it.
+          if (
+            pm &&
+            configRewriteSource === undefined &&
+            configRoutePlugins.has(FARM_CONFIG_REWRITES_PLUGIN_NAME)
+          ) {
+            // Local routes win, as in the production entry. Checked only once a rewrite matched.
+            const hasLocalDevRoute = () => {
+              const routeManager = farmApp.getRouteManager();
+              return Boolean(
+                matchIntegrationRoute(configuredIntegrations, {
+                  pathname: requestPathname,
+                  method: requestMethod,
+                }) ||
+                routeManager.matchRedirect(requestPathname) ||
+                apiRouteManager.matchRoute(requestPathname) ||
+                (farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(requestPathname)) ||
+                routeManager.matchRoute(requestPathname).route ||
+                routeManager.matchMetadataRoute(requestPathname) ||
+                routeManager.matchMetadataImage(requestPathname),
+              );
+            };
+            try {
+              await pm.runHookParallelFiltered(
+                "beforeRequest",
+                (plugin) => plugin.name === FARM_CONFIG_REWRITES_PLUGIN_NAME,
+                req,
+                res,
+              );
+            } catch (error) {
+              await emitPluginError("before-request", error, { urlPath: requestUrl });
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "text/plain; charset=utf-8");
+              res.end("Internal Server Error");
+              return;
+            }
+            if (req.url !== requestUrl) {
+              if (isViteOwnedRequest() || hasLocalDevRoute()) {
+                req.url = requestUrl;
+              } else {
+                if (await proxyFarmExternalRewrite(req, res, currentServerConfig.bodySizeLimit)) {
+                  return;
+                }
+                (req as FarmDevConfigRewriteRequest)[FARM_DEV_CONFIG_REWRITE_SOURCE] = fullUrl;
+                return handleFarmDevRequest(req, res, next);
+              }
+            }
+          }
+
           if (await tryConfiguredIntegrationRoute()) {
             return;
           }
@@ -3063,32 +3215,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               trustProxy: currentServerConfig.trustProxy,
             }).pathname;
 
-            // Config rewrites never replace a route the app serves, the docs API included (as in
-            // production).
-            const servesLocalApiRoute =
-              hasMatchedApiRoute ||
-              Boolean(
-                farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(requestPathname),
-              );
-
             try {
               if (pm) {
-                if (servesLocalApiRoute) {
-                  await pm.runHookParallelFiltered(
-                    "beforeRequest",
-                    (plugin) => plugin.name !== FARM_CONFIG_REWRITES_PLUGIN_NAME,
-                    req,
-                    res,
-                  );
-                } else {
-                  await pm.runHookParallel("beforeRequest", req, res);
-                }
+                await pm.runHookParallelFiltered(
+                  "beforeRequest",
+                  (plugin) => !isFarmConfigRoutePlugin(plugin),
+                  req,
+                  res,
+                );
               }
 
-              if (
-                res.writableEnded ||
-                (await proxyFarmExternalRewrite(req, res, currentServerConfig.bodySizeLimit))
-              ) {
+              if (res.writableEnded) {
                 const duration = Date.now() - startTime;
                 logResponse(method, urlPath, res.statusCode || 200, duration, "API");
                 return;
@@ -3866,33 +4003,44 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               : null;
           };
           let runtimeSession: FarmPluginRuntimeSession | undefined;
+          let pathname = requestedPathname;
           if (pm && hasRuntimeRequestHooks) {
             try {
+              const sessionOptions = {
+                kind: "page" as const,
+                route: setFarmRouteLabel(
+                  {
+                    pathname: requestedPathname,
+                    pattern: requestedMatch?.route?.pattern || null,
+                    params: requestedMatch?.params || {},
+                  },
+                  requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
+                ),
+              };
+              // A config rewrite's session opens on the requested URL, and runtime.before runs
+              // again on the destination with the same ctx, as on production's re-entry.
               runtimeSession = await pm.beginRuntimeRequest(
-                createRequestFromNodeRequest(req, new URL(fullUrl)),
-                {
-                  kind: "page",
-                  route: setFarmRouteLabel(
-                    {
-                      pathname: requestedPathname,
-                      pattern: requestedMatch?.route?.pattern || null,
-                      params: requestedMatch?.params || {},
-                    },
-                    requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
-                  ),
-                },
+                createRequestFromNodeRequest(req, new URL(configRewriteSource ?? fullUrl)),
+                sessionOptions,
               );
-              pm.copyRequestContext(runtimeSession.request, req);
-              applyWebRequestToNodeRequest(runtimeSession.request, req);
+              const routedRequest =
+                runtimeSession.response ??
+                (configRewriteSource === undefined
+                  ? runtimeSession.request
+                  : await pm.runRuntimeBeforeForRewrite(
+                      runtimeSession.request,
+                      createRequestFromNodeRequest(req, new URL(fullUrl)),
+                      sessionOptions,
+                    ));
 
-              if (runtimeSession.response) {
-                const response = await pm.endRuntimeRequest(
-                  runtimeSession,
-                  runtimeSession.response,
-                );
+              if (routedRequest instanceof Response) {
+                const response = await pm.endRuntimeRequest(runtimeSession, routedRequest);
                 await sendWebResponse(res, response);
                 return;
               }
+              pm.copyRequestContext(routedRequest, req);
+              applyWebRequestToNodeRequest(routedRequest, req);
+              pathname = new URL(routedRequest.url).pathname;
             } catch (error) {
               await emitPluginError("runtime-before", error, { pathname: requestedPathname });
               res.statusCode = 500;
@@ -3905,9 +4053,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // A replacement request is matched on its own pathname, including when
           // it matches nothing and has to 404 on the rewritten path. An ordinary
           // request is not re-matched, so the common path still matches once.
-          const pathname = runtimeSession
-            ? new URL(runtimeSession.request.url).pathname
-            : requestedPathname;
           const routeMatch =
             pathname === requestedPathname ? requestedMatch : routeManager.matchRoute(pathname);
 
@@ -3982,56 +4127,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
             // Run beforeRequest hooks
             if (pm && hasBeforeRequestHook) {
-              const urlBeforeRequestHooks = req.url;
-              const currentPathname = new URL(
-                req.url || "/",
-                `http://${req.headers.host || "localhost:3000"}`,
-              ).pathname;
-              const hasLocalPageRoute = Boolean(routeManager.matchRoute(currentPathname)?.route);
               await pm.runHookParallelFiltered(
                 "beforeRequest",
-                (plugin) => !hasLocalPageRoute || plugin.name !== FARM_CONFIG_REWRITES_PLUGIN_NAME,
+                (plugin) => !isFarmConfigRoutePlugin(plugin),
                 req,
                 res,
               );
-
-              // A config rewrite changed req.url after plugin guards ran on the
-              // requested URL. Re-run runtime.before on the destination, like
-              // the production entry does when a rewrite re-enters it.
-              if (
-                runtimeSession &&
-                req.url !== urlBeforeRequestHooks &&
-                req.url?.startsWith("/") &&
-                !res.writableEnded
-              ) {
-                const destinationUrl = new URL(req.url, fullUrl);
-                const destinationMatch = routeManager.matchRoute(destinationUrl.pathname);
-                const guarded = await pm.runRuntimeBeforeForRewrite(
-                  runtimeSession.request,
-                  createRequestFromNodeRequest(req, destinationUrl),
-                  {
-                    kind: "page",
-                    route: {
-                      pathname: destinationUrl.pathname,
-                      pattern: destinationMatch?.route?.pattern || null,
-                      params: destinationMatch?.params || {},
-                    },
-                  },
-                );
-                if (guarded instanceof Response) {
-                  await sendWebResponse(res, guarded);
-                } else {
-                  pm.copyRequestContext(guarded, req);
-                  applyWebRequestToNodeRequest(guarded, req);
-                }
-              }
             }
 
-            if (
-              res.writableEnded ||
-              responseInterceptor?.isEnded() ||
-              (await proxyFarmExternalRewrite(req, res, currentServerConfig.bodySizeLimit))
-            ) {
+            if (res.writableEnded || responseInterceptor?.isEnded()) {
               if (!responseInterceptor?.isEnded()) {
                 const duration = Date.now() - startTime;
                 logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
