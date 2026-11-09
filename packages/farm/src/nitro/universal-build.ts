@@ -241,6 +241,7 @@ import { listFarmBuiltInRoutePaths } from "../route-label";
 import {
   getFarmRendererCapabilities,
   getFarmRendererStreamingCapabilitiesForRuntime,
+  isFarmRendererDisabled,
   isReactRenderer,
   loadFarmRendererVitePlugins,
   REACT_RENDERER,
@@ -1455,8 +1456,15 @@ export async function buildUniversal(
     logger.info("⚡ Building application bundles with Vite Rolldown");
     const mobileClient = shouldBuildFarmMobileClient(config);
 
-    const buildClientBundle = () =>
-      buildClient(
+    // `renderer: false`: the app has no pages, so there is no browser client to build. Nitro
+    // still serves the (empty) client output directory as public assets.
+    const rendererDisabled = isFarmRendererDisabled(config.renderer);
+    const buildClientBundle = async () => {
+      if (rendererDisabled) {
+        await fs.mkdir(clientOutputDir, { recursive: true });
+        return;
+      }
+      return buildClient(
         productionVite,
         config,
         root,
@@ -1471,6 +1479,7 @@ export async function buildUniversal(
         routeManager.getProgrammaticClientRoutes(),
         mobileClient,
       );
+    };
     const buildSSRBundle = () =>
       buildSSRInMemory(
         productionVite,
@@ -1494,12 +1503,16 @@ export async function buildUniversal(
     // compiler plugins with process-global caches can request serial graphs.
     let clientBuildResult: PromiseSettledResult<Awaited<ReturnType<typeof buildClientBundle>>>;
     let ssrBuildResult: PromiseSettledResult<Awaited<ReturnType<typeof buildSSRBundle>>>;
-    if (config.renderer.buildConcurrency === "serial") {
+    if (!rendererDisabled && config.renderer.buildConcurrency === "serial") {
       logger.info(`📦 Building client and SSR bundles serially for ${config.renderer.name}...`);
       [clientBuildResult] = await Promise.allSettled([buildClientBundle()]);
       [ssrBuildResult] = await Promise.allSettled([buildSSRBundle()]);
     } else {
-      logger.info("📦 Building client and SSR bundles in parallel...");
+      logger.info(
+        rendererDisabled
+          ? "📦 Building the server bundle (renderer: false, no client bundle)..."
+          : "📦 Building client and SSR bundles in parallel...",
+      );
       [clientBuildResult, ssrBuildResult] = await Promise.allSettled([
         buildClientBundle(),
         buildSSRBundle(),
@@ -6254,6 +6267,8 @@ function generateVirtualEntryCode(
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
   mobileShellLoadingRoutes: UniversalBoundaryRoute[] = [],
 ): string {
+  // `renderer: false`: no pages, so every miss answers JSON rather than a rendered page.
+  const farmRendererDisabled = isFarmRendererDisabled(config.renderer);
   // Islands mode runs `"use server"` actions posted to a page (RFC 0003).
   const farmIslandsMode =
     resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
@@ -11360,7 +11375,24 @@ ${
   // Hoisted: page and middleware notFound() answer with the same page.
   async function renderFarmNotFoundResponse() {
   emitFarmEvent({ type: "route.notFound", pathname });
-
+${
+  farmRendererDisabled
+    ? `
+  // renderer: false has no pages to render, so a miss answers like an API miss.
+  emitFarmEvent({
+    type: "render.complete",
+    route: pathname,
+    pathname,
+    status: 404,
+    durationMs: Date.now() - requestStartTime,
+  });
+  return applyProductionMiddlewareHeaders(farmOwnedResponse(
+    JSON.stringify({ error: "Not found", pathname }),
+    { status: 404, headers: { "Content-Type": "application/json" } }
+  ), middlewareHeaders);
+`
+    : ""
+}
   // Agents that navigate in Markdown (a \`.md\` URL or \`Accept: text/markdown\`)
   // get a Markdown error body instead of the HTML not-found shell.
   if (farmRequestWantsMarkdown(pathname, request.headers.get("accept"))) {

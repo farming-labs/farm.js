@@ -167,13 +167,22 @@ const DEFAULT_JSON_LD: FarmAgentJsonLd = { type: "WebSite" };
 
 export function resolveFarmAgentConfig(
   input: FarmAgentUserConfig | undefined,
-  context: { docs?: boolean } = {},
+  /**
+   * `docs`: the docs engine serves its own llms.txt, sitemap, and MCP server.
+   * `pages: false`: the app has no pages (`renderer: false`), so the page-derived defaults
+   * (JSON-LD, llms.txt, sitemap, and the page-reading MCP server) would describe nothing.
+   */
+  context: { docs?: boolean; pages?: boolean } = {},
 ): ResolvedFarmAgentConfig {
+  const servesPages = context.pages !== false;
+  const pageDefaults = servesPages && !context.docs;
   const jsonLd = input?.jsonLd;
   return {
     jsonLd:
       jsonLd === undefined
-        ? { ...DEFAULT_JSON_LD }
+        ? servesPages
+          ? { ...DEFAULT_JSON_LD }
+          : false
         : !jsonLd
           ? false
           : jsonLd === true
@@ -182,15 +191,15 @@ export function resolveFarmAgentConfig(
     noindexPreviews: resolveFarmNoindexPreviews(input?.noindexPreviews),
     // The docs engine answers /llms.txt with its own pages; a default here would replace it.
     // llms-full.txt renders every listed page, so it stays opt-in.
-    llmsTxt: resolveFarmLlmsTxtConfig(input?.llmsTxt ?? (context.docs ? false : { full: false })),
+    llmsTxt: resolveFarmLlmsTxtConfig(input?.llmsTxt ?? (pageDefaults ? { full: false } : false)),
     // Same rule as llms.txt: the docs engine answers /sitemap.xml with its own pages.
-    sitemap: resolveFarmAgentSitemap(input?.sitemap ?? !context.docs),
+    sitemap: resolveFarmAgentSitemap(input?.sitemap ?? pageDefaults),
     crawlers: resolveFarmAgentCrawlers(input?.crawlers),
     apiCatalog: resolveFarmAgentBoolean(input?.apiCatalog, "apiCatalog", false),
     aiCatalog: resolveFarmAgentBoolean(input?.aiCatalog, "aiCatalog", true),
     manifest: resolveFarmAppManifestConfig(input?.manifest),
     // Same rule as llms.txt: the docs engine serves its own MCP server at /mcp.
-    mcp: resolveFarmAgentBoolean(input?.mcp, "mcp", !context.docs),
+    mcp: resolveFarmAgentBoolean(input?.mcp, "mcp", pageDefaults),
   };
 }
 

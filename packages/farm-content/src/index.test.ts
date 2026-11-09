@@ -175,7 +175,9 @@ describe("content plugin", () => {
     const vitePlugin = (configured as any).vite.plugins[0];
     let listener: ((event: string, file: string) => void) | undefined;
     const send = vi.fn();
+    const logError = vi.fn();
     vitePlugin.configureServer({
+      config: { logger: { error: logError } },
       watcher: {
         on: (_event: string, callback: typeof listener) => {
           listener = callback;
@@ -194,6 +196,11 @@ describe("content plugin", () => {
     listener?.("add", addedFile);
     await vi.waitFor(() =>
       expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "error" })),
+    );
+    // Also in the terminal: a backend-only app (renderer: false) has no browser overlay.
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[farm:content\] /),
+      expect.anything(),
     );
 
     send.mockClear();

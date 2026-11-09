@@ -28,6 +28,7 @@ const entry = {
   request: "src/request.ts",
   plugin: "src/plugin-entry.ts",
   integrations: "src/integrations.ts",
+  "integrations/orm": "src/integration-orm.ts",
   schema: "src/schema.ts",
   storage: "src/storage/index.ts",
   cache: "src/cache.ts",
@@ -106,6 +107,7 @@ const entry = {
   "renderer/react/server": "src/renderer/react/server.ts",
   "renderer/react/client": "src/renderer/react/client.ts",
   "renderer/react/vite": "src/renderer/react/vite.ts",
+  "renderer/none/server": "src/renderer/none/server.ts",
 };
 
 export const farmPackageBuildOptions = {

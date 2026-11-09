@@ -241,6 +241,7 @@ import {
 import { emitFarmEvent, runWithFarmRequestSpan } from "./observability";
 import {
   getFarmRendererCapabilities,
+  isFarmRendererDisabled,
   isReactRenderer,
   loadFarmRendererVitePlugins,
   REACT_RENDERER,
@@ -1076,7 +1077,12 @@ function getEnvDefines(
     __FARM_API_BASE_URL__: JSON.stringify(getFarmAPIBaseURLDefine(config)),
     __FARM_PUBLIC_ENV__: JSON.stringify(getPublicEnvDefine(config)),
     __FARM_IMAGE_CONFIG__: JSON.stringify(
-      getPublicFarmImageConfig(resolveFarmImageConfig(config.images)),
+      getPublicFarmImageConfig(
+        resolveFarmImageConfig(
+          config.images,
+          isFarmRendererDisabled(config.renderer) ? "none" : undefined,
+        ),
+      ),
     ),
   };
 
@@ -1451,7 +1457,7 @@ function warnClientBoundaryOnce(
  * ship their own HMR integration, which can only preserve component state if
  * Farm leaves the module unaccepted.
  */
-export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer): boolean {
+export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer | false): boolean {
   return getFarmRendererCapabilities(resolveFarmRenderer(renderer)).reconcilesRerenders;
 }
 
@@ -1467,6 +1473,7 @@ export function farmPlugin(
   options: FarmVitePluginOptions = {},
   initialPluginManager?: PluginManager,
 ): Plugin {
+  const rendererDisabled = isFarmRendererDisabled(options.renderer);
   const imageImports = farmImageImportsPlugin();
   const fontImports = farmFontImportsPlugin({
     root: options.root,
@@ -2333,9 +2340,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               return;
             }
 
+            // The launcher opens the overlay on an app page. A backend-only app has no pages, so it
+            // gets the standalone panel instead.
             if (
               requestPathname === FARM_DEVTOOLS_PATH &&
-              parsedRequestUrl.searchParams.get("embedded") !== "1"
+              parsedRequestUrl.searchParams.get("embedded") !== "1" &&
+              !rendererDisabled
             ) {
               let launchUrl = new URL(farmConfig.basePath || "/", parsedRequestUrl.origin);
               const referrer = req.headers.referer;
@@ -3945,6 +3955,23 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
         }),
       );
+
+      // `renderer: false`: a dotted path that no route or file answered falls through to Vite,
+      // whose 404 has an empty body. Answer it with the same JSON miss as production. The post hook
+      // runs after Vite's module and static-file middleware, so only true misses reach it.
+      if (rendererDisabled) {
+        return () => {
+          viteServer.middlewares.use((req, res, next) => {
+            if (res.headersSent || res.writableEnded) return next();
+            // Vite's SPA fallback may have rewritten req.url to /index.html by now.
+            const requested = (req as { originalUrl?: string }).originalUrl ?? req.url ?? "/";
+            const pathname = new URL(requested, "http://localhost").pathname;
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "Not found", pathname }));
+          });
+        };
+      }
     },
 
     async resolveId(id, importer, resolveOptions) {
@@ -4494,6 +4521,8 @@ if (import.meta.hot) {
       if (typeof fontImports.generateBundle === "function") {
         await fontImports.generateBundle.call(this, options, bundle, false);
       }
+      // `renderer: false` has no browser client; the server bundle's chunks are not public.
+      if (rendererDisabled) return;
       const clientManifest = generateClientManifest(bundle);
       this.emitFile({
         type: "asset",

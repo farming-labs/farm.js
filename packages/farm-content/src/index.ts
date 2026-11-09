@@ -161,11 +161,7 @@ export function content<const TCollections extends ContentCollections>(
               server.ws.send({ type: "full-reload" });
             })
             .catch((error) => {
-              const message = error instanceof Error ? error.message : String(error);
-              server.ws.send({
-                type: "error",
-                err: { message, stack: error instanceof Error ? error.stack : undefined },
-              });
+              reportContentRebuildError(server, error);
             });
         };
         server.watcher.on("all", onFile);
@@ -184,11 +180,7 @@ export function content<const TCollections extends ContentCollections>(
               server.ws.send({ type: "full-reload" });
             })
             .catch((error) => {
-              const message = error instanceof Error ? error.message : String(error);
-              server.ws.send({
-                type: "error",
-                err: { message, stack: error instanceof Error ? error.stack : undefined },
-              });
+              reportContentRebuildError(server, error);
             }));
           await settled;
         });
@@ -225,10 +217,7 @@ export function content<const TCollections extends ContentCollections>(
                   const message = error instanceof Error ? error.message : String(error);
                   if (message === lastPollError) return;
                   lastPollError = message;
-                  server.ws.send({
-                    type: "error",
-                    err: { message, stack: error instanceof Error ? error.stack : undefined },
-                  });
+                  reportContentRebuildError(server, error);
                 });
             },
             Math.min(...intervals),
@@ -284,7 +273,24 @@ async function assertGeneratedOutputInsideRoot(root: string, outputFile: string)
   }
 }
 
+/**
+ * Show a failed content rebuild in the browser overlay and in the dev terminal. A backend-only
+ * app (`renderer: false`) has no browser to show the overlay, and the API keeps serving the last
+ * good content, so the terminal is the only place the error would surface.
+ */
+function reportContentRebuildError(server: ContentViteDevServer, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  server.config?.logger.error(`[farm:content] ${message}`, {
+    error: error instanceof Error ? error : undefined,
+  });
+  server.ws.send({
+    type: "error",
+    err: { message, stack: error instanceof Error ? error.stack : undefined },
+  });
+}
+
 interface ContentViteDevServer {
+  config?: { logger: { error(message: string, options?: { error?: Error }): void } };
   watcher: {
     on(event: "all", listener: (event: string, filePath: string) => void): void;
     off?(event: "all", listener: (event: string, filePath: string) => void): void;
