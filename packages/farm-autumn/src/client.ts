@@ -4,7 +4,7 @@ import {
   createPathInferredClientApi,
   type InferPathInferredClientAPI,
   type PathInferredClientOperation,
-} from "@farm.js/integration-utils/integration";
+} from "@farm.js/integration-utils/client";
 import type { FarmWebhookAckResult } from "@farm.js/integration-utils/webhooks";
 
 export type AutumnBillingStatus =
