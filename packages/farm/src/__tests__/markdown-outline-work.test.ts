@@ -56,7 +56,9 @@ describe("Markdown outline work", () => {
     "# Repeat\r\n\r\n## Repeat\r\n\r\nText\r\n\r\n## Repeat\r\n\t\r\n",
     "\ufeff # Unicode prefix\n\nLine\u2028\u2029\u2000\u3000\n\n## Last\n\u00a0",
   ])("keeps exact slice/join/trim token estimates for %j", (markdown) => {
-    const lines = markdown.split("\n");
+    // Views read CRLF documents with LF line endings.
+    const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+    if (markdown.includes("\r")) expect(parseFarmMarkdownHeadings(markdown)).not.toEqual([]);
     const headings = parseFarmMarkdownHeadings(markdown);
     const expected = headings.map((heading) =>
       Math.ceil(lines.slice(heading.start, heading.end).join("\n").trim().length / 4),

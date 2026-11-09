@@ -47,6 +47,16 @@ Cookies set by multiple matching middleware handlers are accumulated into separa
 headers. They are also preserved when the short-circuiting `Response` supplies its own cookies, so
 a returned response does not replace cookies already written through `ctx.cookies`.
 
+A middleware handler that throws (other than `redirect()` or `notFound()`) fails the request. In a
+production build without `experimental.serverComponents`, a request under the API base path, or
+any request in a `renderer: false` app, gets the JSON `500` a throwing API route gets. A page request gets the root `error.*` boundary
+inside the root layouts, or Farm's default error page, as a page that throws does, and a request
+for Markdown gets that document as Markdown. These responses are `private, no-store`, carry your
+`headers()` config but not headers the failed middleware run set, and Farm adds no error message
+or stack to them. As for a throwing API route, the error reaches the `middleware.error` event,
+plugin `runtime.error` hooks, and `onError` hooks with `phase: "runtime"`, and every
+`runtime.after` hook then sees the `500`. Development shows the error overlay for a page instead.
+
 ## Route middleware
 
 Middleware can live near the routes it protects. Use it for auth, request metadata, A/B flags, rate limit checks, or headers that belong to an area of the app.
@@ -193,6 +203,10 @@ Multiple config middleware entries can match the same request. They run in array
 path has run, the config and file middleware matching the rewritten path runs too, as it would for a
 direct request. Integration guards, such as an auth integration's `protectedRoutes`, run for the
 rewritten path too. Each middleware runs at most once per request, so repeated rewrites cannot loop.
+
+A configured [`rewrites()`](/docs/configuration#route-rules) entry is applied before middleware, so
+only the middleware matching its destination runs, in development and production. Configured
+`redirects()` answer before middleware runs.
 
 ```ts
 import { defineConfig } from "@farm.js/core";

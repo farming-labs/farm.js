@@ -58,6 +58,27 @@ test("spaces the CLI banner and matches the website hero copy", async () => {
   assert.doesNotMatch(lines.join("\n"), /React (?:meta-)?framework/i);
 });
 
+test("prints the GitHub star link only to an interactive terminal", async () => {
+  const { showStarInvitation } = await import("../dist/utils.mjs");
+  const lines = [];
+  const originalLog = console.log;
+  console.log = (...values) => lines.push(values.join(" "));
+
+  try {
+    showStarInvitation(false);
+    assert.deepEqual(lines, []);
+
+    showStarInvitation(true);
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.match(
+    lines.at(-1),
+    /Enjoying Farm\? Star it: https:\/\/github\.com\/farming-labs\/farm\.js$/,
+  );
+});
+
 test("writes a valid package name when the target is a nested path", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-nested-"));
 
@@ -379,6 +400,8 @@ test("generates the experimental React Compiler starter with the shared dark sta
         },
       },
     );
+
+    assert.doesNotMatch(output, /Star it:/);
 
     const templateDir = path.join(packageDir, "templates/react-compiler");
     const basicTemplateDir = path.join(packageDir, "templates/basic");

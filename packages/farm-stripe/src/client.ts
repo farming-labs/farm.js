@@ -1,5 +1,5 @@
 import type { FarmIntegrationAPIOperation } from "@farm.js/core/client";
-import { api } from "@farm.js/core/client";
+import { api } from "@farm.js/core/api/client";
 import {
   createPathInferredClientApi,
   type InferPathInferredClientAPI,

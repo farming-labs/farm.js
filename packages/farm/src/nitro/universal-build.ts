@@ -192,6 +192,7 @@ import {
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes } from "./vercel-assets";
+import { collectServerOnlySSRAssets } from "./ssr-public-assets";
 import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
 import { farmStripPlatformConfigPlugin } from "../build/strip-platform-config";
 import type { FarmPlatform } from "../platform";
@@ -1461,6 +1462,9 @@ export async function buildUniversal(
     const rendererDisabled = isFarmRendererDisabled(config.renderer);
     const buildClientBundle = async () => {
       if (rendererDisabled) {
+        // Start empty, as the client build's emptyOutDir does, so files an earlier build
+        // published are not served again.
+        await fs.rm(clientOutputDir, { recursive: true, force: true });
         await fs.mkdir(clientOutputDir, { recursive: true });
         return;
       }
@@ -1648,10 +1652,15 @@ function varyFarmNitroCacheRulesByShell(rules: Record<string, any>): Record<stri
   );
 }
 
+/**
+ * Publish the SSR assets a rendered page can point the browser at. Assets that only server code
+ * reads from its own output directory stay with the server bundle and out of the public output.
+ */
 async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): Promise<void> {
   const fs = await import("fs/promises");
+  const serverOnlyAssets = collectServerOnlySSRAssets(bundle);
   for (const [fileName, output] of Object.entries(bundle)) {
-    if (output.type !== "asset") continue;
+    if (output.type !== "asset" || serverOnlyAssets.has(fileName)) continue;
     if (fileName === "farm-fonts.css") {
       await mergeBuiltFontCss(outputDir, output.source);
       continue;
@@ -7078,7 +7087,7 @@ function matchLocalAPIRequest(request) {
   return matchBuiltAPIRoute(new URL(request.url).pathname);
 }
 
-async function handleAPIRequest(request) {
+async function handleAPIRequest(request, reportRuntimeError) {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
   const match = matchLocalAPIRequest(request);
@@ -7145,6 +7154,8 @@ async function handleAPIRequest(request) {
       error,
     });
     console.error(\`[API Error] \${url.pathname}:\`, error);
+    // A plugin's runtime.error observes the throw; runtime.after still sees this 500.
+    await reportRuntimeError?.(error);
     return new Response(
       JSON.stringify({ error: "Internal Server Error" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
@@ -7657,6 +7668,8 @@ function fetchFarmInnerRequest(request, context) {
   return fetch(new Request(request, { headers }), context);
 }
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
+// Reports a failure Farm answers itself (an API route's 500) to the plugin runtime request.
+const farmRuntimeErrorSlot = Symbol("farm.runtime.error.slot");
 const farmOpenAPIReference = ${JSON.stringify(openAPIReference)};
 ${
   config.agent?.apiCatalog
@@ -9029,10 +9042,12 @@ function matchRedirectRoute(pathname, locale, search) {
     const params = matchRuntimePathPattern(redirect.source, pathname);
     if (!params) continue;
     const destination = interpolateRedirectDestination(redirect.destination, params);
+    // Sources match the app-relative path, so an internal destination is app-relative
+    // too: send the browser to it inside the basePath, as a localized one already is.
     const localizedDestination =
       locale && destination.startsWith("/") && !destination.startsWith("//")
         ? localizeFarmHref(destination, locale, farmI18nConfig)
-        : destination;
+        : applyFarmBasePath(destination);
     return {
       destination: appendFarmRedirectQuery(localizedDestination, search),
       statusCode: redirect.statusCode ?? (redirect.permanent ? 308 : 307),
@@ -9821,9 +9836,27 @@ async function resolveFarmRequestInContext(
     hasMiddlewareRuntime
       ? `
   const requestBeforeMiddleware = request;
-  const middlewareResult = await farmMiddlewareRunner(request, {
-    clientAddress: adapterContext?.clientAddress,
-  });
+  let middlewareResult;
+  try {
+    middlewareResult = await farmMiddlewareRunner(request, {
+      clientAddress: adapterContext?.clientAddress,
+    });
+  } catch (error) {
+    // The runner emitted middleware.error. The request is answered below like any
+    // failed request; a plugin's runtime.error observes the throw, as for an API route.
+    console.error("Middleware error:", error);
+    await adapterContext?.[farmRuntimeErrorSlot]?.(error);
+    middlewareResult = {
+      request,
+      response: null,
+      data: new Map(),
+      context: new Map(),
+      headers: new Headers(),
+      guarded: true,
+      failed: true,
+      error,
+    };
+  }
   if (middlewareResult.response) {
     return middlewareResult.response;
   }
@@ -9877,6 +9910,33 @@ ${
   // request instead of the original outer-handler value.
   const runResolvedRequest = async () => {
     if (middlewareResult.notFound) return renderFarmNotFoundResponse();
+    if (middlewareResult.failed) {${
+      farmRendererDisabled
+        ? `
+      return renderFarmErrorJSONResponse();`
+        : `
+      if (isFarmLocalAPIPathname(pathname)) return renderFarmErrorJSONResponse();
+      // No page was selected, so only the root error boundary and layouts apply.
+      const errorResponse = await renderFarmErrorResponse(middlewareResult.error, "/", {}, null);${
+        config.md?.enabled
+          ? `
+      // An agent asking for Markdown reads the error document as Markdown, as it
+      // does when a page throws. The helper answers null when Markdown is off.
+      const markdownErrorResponse = await createMarkdownMirrorResponse({
+        request,
+        requestUrl: url,
+        config: farmMarkdownConfig,
+        routeExists: (targetPathname) =>
+          Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
+        renderPage: async () => errorResponse,
+        apiServerBasePath: farmLocalAPIBasePath,
+      });
+      if (markdownErrorResponse) return markdownErrorResponse;`
+          : ""
+      }
+      return errorResponse;`
+    }
+    }
   `
       : `
 ${
@@ -10056,7 +10116,10 @@ ${
   // Clone only for an API request: cloning a Request costs more than the match,
   // and handleAPIRequest returns null without one.
   if (matchLocalAPIRequest(request)) {
-    const apiResponse = await handleAPIRequest(cloneFarmRequestWithContext(request));
+    const apiResponse = await handleAPIRequest(
+      cloneFarmRequestWithContext(request),
+      adapterContext?.[farmRuntimeErrorSlot],
+    );
     if (apiResponse) {
       return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
     }
@@ -11247,110 +11310,7 @@ ${
 
       emitFarmEvent({ type: "render.error", route: pathname, error });
       console.error("SSR Error:", error);
-      const errorStatus = resolveDefaultErrorStatus(error);
-      const errorStatusText = getDefaultErrorStatusText(errorStatus);
-
-      const errorBoundaryMatch = getMatchingErrorBoundary(routePathname);
-      if (errorBoundaryMatch?.route.module?.default) {
-        try {
-          const searchParamsObj = searchParamsToObject(url.searchParams);
-          const ErrorComponent = errorBoundaryMatch.route.module.default;
-          let errorElement = React.createElement(ErrorComponent, {
-            error,
-            reset: function() {},
-            params,
-            search: searchParamsObj,
-            searchParams: createFarmSearchParams(searchParamsObj),
-            path: pathname,
-            ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
-          });
-
-          const applicableLayouts = getApplicableLayouts(routePathname);
-          for (let i = applicableLayouts.length - 1; i >= 0; i--) {
-            const LayoutComponent = applicableLayouts[i].module.default;
-            if (LayoutComponent) {
-              errorElement = React.createElement(LayoutComponent, {
-                children: errorElement,
-                params,
-              });
-            }
-          }
-
-          errorElement = wrapWithFarmIntegrationProviders(errorElement);
-
-          const renderErrorElement = () =>
-            renderFarmElementToString(ReactDOMServer, errorElement);
-          const errorHtml = ${
-            hasMiddlewareRuntime
-              ? `await _runWithMiddlewareData(middlewareData, () =>
-            _runWithMiddlewareContext(middlewareContext, renderErrorElement)
-          )`
-              : "await renderErrorElement()"
-          };
-          const errorDocument = applyFarmThemeDocument(
-            applyFarmI18nDocument(
-              createFarmErrorDocument(errorHtml, "Application Error"),
-              pathname,
-              getFarmI18nSnapshot(),
-              request
-            ),
-            farmThemeConfig,
-            farmResolvedRuntimeConfig.basePath,
-            getFarmTheme(request)
-          );
-          emitFarmEvent({
-            type: "render.complete",
-            route: pathname,
-            pathname,
-            status: errorStatus,
-            durationMs: Date.now() - requestStartTime,
-          });
-          return rememberFarmBufferedHtml(applyProductionMiddlewareHeaders(farmOwnedHtmlResponse(errorDocument, {
-            status: errorStatus,
-            headers: {
-              "Content-Type": "text/html; charset=utf-8",
-              "Cache-Control": "private, no-store",
-              "x-farm-preload-buffered": getFarmBufferedPreloadMarker(errorDocument),
-            },
-          }), middlewareHeaders), errorDocument);
-        } catch (boundaryError) {
-          console.error("Route error boundary failed:", boundaryError);
-        }
-      }
-
-      const fallbackHtml = stampFarmCspNonce(createDefaultErrorMarkup({
-        statusCode: errorStatus,
-        statusText: errorStatusText,
-        requestPath: pathname,
-        method: request.method,
-        development: false,
-        mode: "production",
-      }));
-      const fallbackDocument = applyFarmThemeDocument(
-        applyFarmI18nDocument(
-          createFarmErrorDocument(
-            fallbackHtml,
-            errorStatus + " - " + errorStatusText
-          ),
-          pathname,
-          getFarmI18nSnapshot(),
-          request
-        ),
-        farmThemeConfig,
-        farmResolvedRuntimeConfig.basePath,
-        getFarmTheme(request)
-      );
-      return rememberFarmBufferedHtml(applyProductionMiddlewareHeaders(farmOwnedHtmlResponse(
-        fallbackDocument,
-        {
-          status: errorStatus,
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "private, no-store",
-            "x-farm-preload-buffered": getFarmBufferedPreloadMarker(fallbackDocument),
-          },
-        }
-      ), middlewareHeaders), fallbackDocument);
+      return renderFarmErrorResponse(error, routePathname, params);
     }
   }
 
@@ -11373,6 +11333,127 @@ ${
   // 404 fallback - render proper HTML page
   return renderFarmNotFoundResponse();
 
+  // Hoisted: a page that throws and a middleware failure answer with the same error
+  // document. The error boundary and layouts are those of errorRoutePathname.
+  async function renderFarmErrorResponse(error, errorRoutePathname, params, errorDirectory) {
+    const errorStatus = resolveDefaultErrorStatus(error);
+    const errorStatusText = getDefaultErrorStatusText(errorStatus);
+
+    const errorBoundaryMatch = getMatchingErrorBoundary(errorRoutePathname);
+    if (errorBoundaryMatch?.route.module?.default) {
+      try {
+        const searchParamsObj = searchParamsToObject(url.searchParams);
+        const ErrorComponent = errorBoundaryMatch.route.module.default;
+        let errorElement = React.createElement(ErrorComponent, {
+          error,
+          reset: function() {},
+          params,
+          search: searchParamsObj,
+          searchParams: createFarmSearchParams(searchParamsObj),
+          path: pathname,
+          ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
+        });
+
+        const applicableLayouts = getApplicableLayouts(errorRoutePathname, errorDirectory);
+        for (let i = applicableLayouts.length - 1; i >= 0; i--) {
+          const LayoutComponent = applicableLayouts[i].module.default;
+          if (LayoutComponent) {
+            errorElement = React.createElement(LayoutComponent, {
+              children: errorElement,
+              params,
+            });
+          }
+        }
+
+        errorElement = wrapWithFarmIntegrationProviders(errorElement);
+
+        const renderErrorElement = () =>
+          renderFarmElementToString(ReactDOMServer, errorElement);
+        const errorHtml = ${
+          hasMiddlewareRuntime
+            ? `await _runWithMiddlewareData(middlewareData, () =>
+          _runWithMiddlewareContext(middlewareContext, renderErrorElement)
+        )`
+            : "await renderErrorElement()"
+        };
+        const errorDocument = applyFarmThemeDocument(
+          applyFarmI18nDocument(
+            createFarmErrorDocument(errorHtml, "Application Error"),
+            pathname,
+            getFarmI18nSnapshot(),
+            request
+          ),
+          farmThemeConfig,
+          farmResolvedRuntimeConfig.basePath,
+          getFarmTheme(request)
+        );
+        emitFarmEvent({
+          type: "render.complete",
+          route: pathname,
+          pathname,
+          status: errorStatus,
+          durationMs: Date.now() - requestStartTime,
+        });
+        return rememberFarmBufferedHtml(applyProductionMiddlewareHeaders(farmOwnedHtmlResponse(errorDocument, {
+          status: errorStatus,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "private, no-store",
+            "x-farm-preload-buffered": getFarmBufferedPreloadMarker(errorDocument),
+          },
+        }), middlewareHeaders), errorDocument);
+      } catch (boundaryError) {
+        console.error("Route error boundary failed:", boundaryError);
+      }
+    }
+
+    const fallbackHtml = stampFarmCspNonce(createDefaultErrorMarkup({
+      statusCode: errorStatus,
+      statusText: errorStatusText,
+      requestPath: pathname,
+      method: request.method,
+      development: false,
+      mode: "production",
+    }));
+    const fallbackDocument = applyFarmThemeDocument(
+      applyFarmI18nDocument(
+        createFarmErrorDocument(
+          fallbackHtml,
+          errorStatus + " - " + errorStatusText
+        ),
+        pathname,
+        getFarmI18nSnapshot(),
+        request
+      ),
+      farmThemeConfig,
+      farmResolvedRuntimeConfig.basePath,
+      getFarmTheme(request)
+    );
+    return rememberFarmBufferedHtml(applyProductionMiddlewareHeaders(farmOwnedHtmlResponse(
+      fallbackDocument,
+      {
+        status: errorStatus,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "private, no-store",
+          "x-farm-preload-buffered": getFarmBufferedPreloadMarker(fallbackDocument),
+        },
+      }
+    ), middlewareHeaders), fallbackDocument);
+  }
+${
+  hasMiddlewareRuntime
+    ? `
+  // A request no page answers fails with the JSON a throwing API route answers.
+  function renderFarmErrorJSONResponse() {
+    return applyProductionMiddlewareHeaders(farmOwnedResponse(
+      JSON.stringify({ error: "Internal Server Error" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    ), middlewareHeaders);
+  }
+`
+    : ""
+}
   // Hoisted: page and middleware notFound() answer with the same page.
   async function renderFarmNotFoundResponse() {
   emitFarmEvent({ type: "route.notFound", pathname });
@@ -11680,11 +11761,14 @@ async function handleFarmFetch(request, context) {
         const runRequest = () => farmPluginRuntime
           ? farmPluginRuntime.runRuntimeRequest(
               request,
-              (runtimeRequest) =>
+              (runtimeRequest, runtimeScope) =>
                 _runWithCurrentRequest(runtimeRequest, () =>
                   prepareResponse(
                     runtimeRequest,
-                    handleFarmPluginRequest(runtimeRequest, runtimeOptions, context),
+                    handleFarmPluginRequest(runtimeRequest, runtimeOptions, {
+                      ...context,
+                      [farmRuntimeErrorSlot]: runtimeScope.reportError,
+                    }),
                   )
                 ),
               {

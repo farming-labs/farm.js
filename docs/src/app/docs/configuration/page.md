@@ -1237,8 +1237,16 @@ Rewrites use after-files semantics in development and production: an existing Fa
 integration, docs, image, or metadata route wins, and the rewrite is considered only as a fallback.
 A rewrite destination on another origin is proxied: Farm forwards the request there and returns the
 upstream response, in development and production.
+Both modes handle a request in the same order: redirects first, before any route or middleware;
+then rewrites; then app middleware; then the route. An internal rewrite is routed as a direct
+request for its destination would be, so the destination's middleware and its page or API route
+answer it, and middleware for the requested path does not run.
+With a `basePath`, sources match the path below it, as routes do: `/old` matches a request for
+`/console/old`. An internal redirect destination is sent with the `basePath`, so `/new` redirects to
+`/console/new`; a destination that already starts with it is kept.
 Configured response headers are applied after route handlers in both modes, so they win when the
-same header is returned by a handler. `Link` is additive: handler and configured link values are
+same header is returned by a handler. They match the requested path and also apply to redirects
+and middleware responses. `Link` is additive: handler and configured link values are
 merged instead of replacing one another. `Set-Cookie` is also additive, and each handler or
 configured cookie remains a separate response header.
 
@@ -1288,6 +1296,8 @@ on either, is cached on the CDN. The rest are sent `Cache-Control: private, no-s
 set their own.
 
 API routes remain same-origin by default in development and production. Add `cors` only to route patterns that intentionally form a cross-origin browser API.
+
+A `cors` rule answers a browser preflight (`OPTIONS` with `Origin` and `Access-Control-Request-Method`) with `204` before middleware and routes run. Every other `OPTIONS` request reaches app middleware and the route: an API route's `OPTIONS` export, or `405` with an `Allow` header when it has none. `farm dev` behaves the same way. Vite's own development requests (modules, `/@vite/client`, `/@fs/`) keep Vite's default CORS for `localhost` origins. An app that sets `vite.server.cors` hands CORS for every development request back to Vite.
 
 Rules can also provide `runtime`, `regions`, and `maxDuration` defaults. File pages, API routes, and layouts can override them with named exports. See [Route Runtime](/docs/route-runtime) for inheritance and deployment behavior.
 

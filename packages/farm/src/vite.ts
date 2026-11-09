@@ -38,6 +38,7 @@ import {
   FARM_NODE_RESPONSE_END_PENDING,
   type FarmPlugin,
   type FarmPluginRuntimeKind,
+  type FarmPluginRuntimeRequestScope,
   type FarmPluginRuntimeSession,
   type PluginManager,
 } from "./plugin";
@@ -157,6 +158,8 @@ import {
 } from "./devtools-config";
 import { generateFarmDevIndicatorsClientRuntime } from "./dev-indicators";
 import { createFarmDevPreviewGuard, getFarmDevFsDeny } from "./dev-preview-guard";
+import { createFarmDevViteCorsMiddleware } from "./server/dev-cors";
+import { resolveRouteRuleCorsPreflightHeaders } from "./route-rules";
 import { resolveFarmPlatform } from "./desktop/config";
 import type { FarmPlatform } from "./platform";
 import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
@@ -175,6 +178,7 @@ import type { APIRequestRuntime } from "./api/server-client-bridge";
 import {
   createFarmPublicFileIndex,
   FARM_MALFORMED_REQUEST_BODY,
+  devServableFileExists,
   farmAppOwnsDocsEnginePath,
   isMalformedFarmRequestPathname,
   isViteModuleRequest,
@@ -267,6 +271,8 @@ import {
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
 import { addMetadataMarkdownAlternate, mergeMetadata, mergeModuleViewport } from "./metadata";
+import { FARM_CONFIG_HEADERS_PLUGIN_NAME } from "./plugins/headers";
+import { FARM_CONFIG_REDIRECTS_PLUGIN_NAME, getConfigRedirectMatcher } from "./plugins/redirects";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
 import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
@@ -620,6 +626,24 @@ export function withFarmRequestTracing(
     });
   };
 }
+
+const FARM_CONFIG_ROUTE_PLUGIN_NAMES = new Set([
+  FARM_CONFIG_HEADERS_PLUGIN_NAME,
+  FARM_CONFIG_REDIRECTS_PLUGIN_NAME,
+  FARM_CONFIG_REWRITES_PLUGIN_NAME,
+]);
+
+/** The config redirects(), rewrites(), and headers() plugins, which run once, before routing. */
+function isFarmConfigRoutePlugin(plugin: FarmPlugin): boolean {
+  return FARM_CONFIG_ROUTE_PLUGIN_NAMES.has(plugin.name);
+}
+
+/** The requested URL of a dev request a config rewrite re-entered the handler with. */
+const FARM_DEV_CONFIG_REWRITE_SOURCE = Symbol.for("farm.devConfigRewriteSource");
+
+type FarmDevConfigRewriteRequest = Connect.IncomingMessage & {
+  [FARM_DEV_CONFIG_REWRITE_SOURCE]?: string;
+};
 
 /**
  * A config rewrite to another origin leaves `req.url` absolute. Forward the request there, as the
@@ -1502,6 +1526,8 @@ export function farmPlugin(
   let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
   let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
   let isBuild = false;
+  // Whether this dev server turned Vite's `server.cors` off (see the `config` hook).
+  let farmOwnsDevCors = false;
   // MCP servers the docs runtime lists in the AI catalog, removed when the dev server closes.
   const docsMCPServerDisposers = new Set<() => void>();
   const releaseDocsMCPServers = () => {
@@ -1535,6 +1561,11 @@ export function farmPlugin(
         ? {}
         : createFarmSourceAlias(options.root || process.cwd(), options.srcDir);
       const layerRoots = (options.layers ?? []).map((layer) => layer.root);
+      // Vite's CORS middleware runs ahead of every plugin's and ends each OPTIONS request with a
+      // 204, so route OPTIONS exports, app middleware, and routeRules CORS never saw one, and app
+      // responses carried CORS headers production does not send. Farm turns it off and applies
+      // Vite's default policy only to the requests it hands to Vite. An app's server.cors wins.
+      farmOwnsDevCors = !isBuild && userConfig.server?.cors === undefined;
       return {
         // Honor Farm's publicDir so the dev server serves the same static
         // directory the production client build emits.
@@ -1547,6 +1578,7 @@ export function farmPlugin(
           alias: { ...layerAliases, ...sourceAlias },
         },
         server: {
+          ...(farmOwnsDevCors ? { cors: false } : {}),
           fs: {
             ...(layerRoots.length
               ? { allow: [path.resolve(options.root || process.cwd()), ...layerRoots] }
@@ -1593,6 +1625,16 @@ export function farmPlugin(
 
       // Store the plugin manager passed during creation
       const pm = initialPluginManager;
+      const configRoutePlugins = new Set(
+        pm
+          ?.getPlugins()
+          .filter(isFarmConfigRoutePlugin)
+          .map((plugin) => plugin.name),
+      );
+      const configRedirectMatchers = (pm?.getPlugins() ?? []).flatMap((plugin) => {
+        const matcher = getConfigRedirectMatcher(plugin);
+        return matcher ? [matcher] : [];
+      });
       const emitPluginError = async (
         phase: string,
         error: unknown,
@@ -2304,9 +2346,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       // Dotted paths handed to Vite's file serving, by the URL they had then. One that nothing in
       // Vite answered comes back through the post hook below and is routed like any other path.
       const deferredDottedRequests = new WeakMap<Connect.IncomingMessage, string>();
-      let farmRequestMiddleware: Connect.NextHandleFunction | undefined;
+      // A configured rewrite re-enters this handler with the destination URL, as the production
+      // entry re-enters its request handler, so every route and guard sees the destination.
       server.middlewares.use(
-        (farmRequestMiddleware = withAPIRequestTracing(async (req, res, next) => {
+        withAPIRequestTracing(async function handleFarmDevRequest(req, res, next) {
           const requestUrl = req.url || "/";
           const requestMethod = req.method || "GET";
           const currentConfig = farmApp?.getConfig() ?? options;
@@ -2331,6 +2374,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // middleware sends it; it only knows exact file paths, so the URL names the file.
           if (
             (requestMethod === "GET" || requestMethod === "HEAD") &&
+            (req as FarmDevConfigRewriteRequest)[FARM_DEV_CONFIG_REWRITE_SOURCE] === undefined &&
             !isViteModuleRequest(parsedRequestUrl, req.headers)
           ) {
             const publicFile = resolveFarmPublicFilePath(requestPathname, publicFileIndex.get());
@@ -2339,6 +2383,24 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 req.url = `${encodeURI(publicFile)}${parsedRequestUrl.search}`;
               }
               return next();
+            }
+          }
+
+          // A routeRules `cors` preflight is answered ahead of middleware and routes, as
+          // production's route rule does.
+          if (
+            requestMethod === "OPTIONS" &&
+            req.headers.origin &&
+            req.headers["access-control-request-method"]
+          ) {
+            const preflightHeaders = resolveRouteRuleCorsPreflightHeaders(
+              currentConfig.routeRules,
+              requestPathname,
+            );
+            if (preflightHeaders) {
+              res.writeHead(204, preflightHeaders);
+              res.end();
+              return;
             }
           }
 
@@ -2449,6 +2511,75 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               res.end(renderFarmDevtoolsHtml(snapshot));
             }
             return;
+          }
+
+          // Vite answers its own endpoints, modules, and files; config routes leave them alone, as
+          // production serves files before its request handler.
+          const isViteOwnedRequest = () =>
+            requestUrl.startsWith("/@") ||
+            requestUrl.startsWith("/node_modules/") ||
+            requestUrl.startsWith("/__farm/") ||
+            isViteModuleRequest(parsedRequestUrl, req.headers) ||
+            (requestPathname.includes(".") &&
+              devServableFileExists(requestPathname, [
+                server.config.publicDir,
+                server.config.root,
+              ]));
+
+          // Config headers() and redirects() see the requested URL before any route or app
+          // middleware does, as in the production entry: headers() then apply to whatever
+          // answers, a redirect or a middleware response included, and a redirect passes through
+          // the plugin runtime like any response. A request a config rewrite re-entered this
+          // handler with, or a dotted path back from Vite's file serving, has passed them already.
+          const configRewriteSource = (req as FarmDevConfigRewriteRequest)[
+            FARM_DEV_CONFIG_REWRITE_SOURCE
+          ];
+          if (
+            pm &&
+            configRewriteSource === undefined &&
+            !deferredDottedRequests.has(req) &&
+            (configRoutePlugins.has(FARM_CONFIG_HEADERS_PLUGIN_NAME) ||
+              configRedirectMatchers.length > 0) &&
+            !isViteOwnedRequest()
+          ) {
+            try {
+              await pm.runHookParallelFiltered(
+                "beforeRequest",
+                (plugin) => plugin.name === FARM_CONFIG_HEADERS_PLUGIN_NAME,
+                req,
+                res,
+              );
+              let redirect: ReturnType<(typeof configRedirectMatchers)[number]> = null;
+              for (const matchRedirect of configRedirectMatchers) {
+                redirect ??= matchRedirect(parsedRequestUrl);
+              }
+              if (redirect) {
+                const redirectResponse = new Response(`Redirecting to ${redirect.destination}`, {
+                  status: redirect.statusCode,
+                  headers: { Location: redirect.destination },
+                });
+                await sendWebResponse(
+                  res,
+                  pm.hasRuntimeRequestHooks()
+                    ? await pm.runRuntimeRequest(
+                        createRequestFromNodeRequest(req, parsedRequestUrl),
+                        () => redirectResponse,
+                        { kind: "page", route: { pathname: requestPathname } },
+                      )
+                    : redirectResponse,
+                );
+                logResponse(requestMethod, requestUrl, res.statusCode, 0, "PAGE");
+                return;
+              }
+            } catch (error) {
+              await emitPluginError("before-request", error, { urlPath: requestUrl });
+              if (!res.headersSent) {
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "text/plain; charset=utf-8");
+              }
+              res.end("Internal Server Error");
+              return;
+            }
           }
 
           // The OpenAPI spec and reference, docs, raw markdown-source, the
@@ -2954,7 +3085,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   (plugin) => {
                     const owner = getFarmIntegrationPluginOwner(plugin);
                     return (
-                      plugin.name !== FARM_CONFIG_REWRITES_PLUGIN_NAME &&
+                      !isFarmConfigRoutePlugin(plugin) &&
                       (owner?.source !== "lifecycle" || owner.key !== matchedRoute.key)
                     );
                   },
@@ -3047,6 +3178,57 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             }
           };
 
+          // Config rewrites are a fallback: a request no local route serves is rewritten, and the
+          // destination re-enters this handler as the production entry re-enters its own, so
+          // app middleware, API routes, and pages all see the destination, and only it.
+          if (
+            pm &&
+            configRewriteSource === undefined &&
+            configRoutePlugins.has(FARM_CONFIG_REWRITES_PLUGIN_NAME)
+          ) {
+            // Local routes win, as in the production entry. Checked only once a rewrite matched.
+            const hasLocalDevRoute = () => {
+              const routeManager = farmApp.getRouteManager();
+              return Boolean(
+                matchIntegrationRoute(configuredIntegrations, {
+                  pathname: requestPathname,
+                  method: requestMethod,
+                }) ||
+                routeManager.matchRedirect(requestPathname) ||
+                apiRouteManager.matchRoute(requestPathname) ||
+                (farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(requestPathname)) ||
+                routeManager.matchRoute(requestPathname).route ||
+                routeManager.matchMetadataRoute(requestPathname) ||
+                routeManager.matchMetadataImage(requestPathname),
+              );
+            };
+            try {
+              await pm.runHookParallelFiltered(
+                "beforeRequest",
+                (plugin) => plugin.name === FARM_CONFIG_REWRITES_PLUGIN_NAME,
+                req,
+                res,
+              );
+            } catch (error) {
+              await emitPluginError("before-request", error, { urlPath: requestUrl });
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "text/plain; charset=utf-8");
+              res.end("Internal Server Error");
+              return;
+            }
+            if (req.url !== requestUrl) {
+              if (isViteOwnedRequest() || hasLocalDevRoute()) {
+                req.url = requestUrl;
+              } else {
+                if (await proxyFarmExternalRewrite(req, res, currentServerConfig.bodySizeLimit)) {
+                  return;
+                }
+                (req as FarmDevConfigRewriteRequest)[FARM_DEV_CONFIG_REWRITE_SOURCE] = fullUrl;
+                return handleFarmDevRequest(req, res, next);
+              }
+            }
+          }
+
           if (await tryConfiguredIntegrationRoute()) {
             return;
           }
@@ -3072,32 +3254,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               trustProxy: currentServerConfig.trustProxy,
             }).pathname;
 
-            // Config rewrites never replace a route the app serves, the docs API included (as in
-            // production).
-            const servesLocalApiRoute =
-              hasMatchedApiRoute ||
-              Boolean(
-                farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(requestPathname),
-              );
-
             try {
               if (pm) {
-                if (servesLocalApiRoute) {
-                  await pm.runHookParallelFiltered(
-                    "beforeRequest",
-                    (plugin) => plugin.name !== FARM_CONFIG_REWRITES_PLUGIN_NAME,
-                    req,
-                    res,
-                  );
-                } else {
-                  await pm.runHookParallel("beforeRequest", req, res);
-                }
+                await pm.runHookParallelFiltered(
+                  "beforeRequest",
+                  (plugin) => !isFarmConfigRoutePlugin(plugin),
+                  req,
+                  res,
+                );
               }
 
-              if (
-                res.writableEnded ||
-                (await proxyFarmExternalRewrite(req, res, currentServerConfig.bodySizeLimit))
-              ) {
+              if (res.writableEnded) {
                 const duration = Date.now() - startTime;
                 logResponse(method, urlPath, res.statusCode || 200, duration, "API");
                 return;
@@ -3124,7 +3291,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             }
 
             // Let this request boundary observe endpoint failures before it
-            // converts them into the development 500 response below.
+            // converts them into the development 500 response.
             const apiHandler = apiRouteManager.getHandler({ throwOnError: true });
             // A middleware ctx.rewrite() changed req.url: route the rewritten request, as the
             // production entry does.
@@ -3178,7 +3345,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   method,
                   routePath: apiRoutePattern,
                 };
-                const invokeAPIHandler = async (runtimeRequest: Request) => {
+                let apiHandlerFailed = false;
+                const invokeAPIHandler = async (
+                  runtimeRequest: Request,
+                  runtime?: FarmPluginRuntimeRequestScope,
+                ) => {
                   const handledRequest: Request = pm
                     ? await pm.runHookSerial(
                         "beforeApiHandler",
@@ -3187,7 +3358,29 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                       )
                     : runtimeRequest;
 
-                  const response = await apiHandler(handledRequest);
+                  let response: Response;
+                  try {
+                    response = await apiHandler(handledRequest);
+                  } catch (error) {
+                    // As in production, a throwing route answers 500: runtime.error observes
+                    // the throw, and runtime.after still sees that response.
+                    apiHandlerFailed = true;
+                    emitFarmEvent({
+                      type: "api.error",
+                      pathname,
+                      route: apiRoutePattern,
+                      method,
+                      durationMs: Date.now() - startTime,
+                      error,
+                    });
+                    await emitPluginError("api-handler", error, { urlPath, method });
+                    logger.error(`API route error: ${error}`);
+                    await runtime?.reportError(error);
+                    response = new Response(JSON.stringify({ error: "Internal server error" }), {
+                      status: 500,
+                      headers: { "Content-Type": "application/json" },
+                    });
+                  }
                   return pm
                     ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
                     : response;
@@ -3203,14 +3396,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   : await invokeAPIHandler(request);
 
                 const duration = Date.now() - startTime;
-                emitFarmEvent({
-                  type: "api.request.complete",
-                  pathname,
-                  route: apiRoutePattern,
-                  method,
-                  status: handledResponse.status,
-                  durationMs: duration,
-                });
+                if (!apiHandlerFailed) {
+                  emitFarmEvent({
+                    type: "api.request.complete",
+                    pathname,
+                    route: apiRoutePattern,
+                    method,
+                    status: handledResponse.status,
+                    durationMs: duration,
+                  });
+                }
                 logResponse(method, urlPath, handledResponse.status, duration, "API");
 
                 // Send response
@@ -3323,11 +3518,59 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               }
             }
 
-            const duration = Date.now() - startTime;
-            logResponse(method, urlPath, 404, duration, "API");
-            res.statusCode = 404;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "API route not found", pathname }));
+            const notFoundBody = JSON.stringify({ error: "API route not found", pathname });
+            if (!pm?.hasRuntimeRequestHooks()) {
+              logResponse(method, urlPath, 404, Date.now() - startTime, "API");
+              res.statusCode = 404;
+              res.setHeader("Content-Type", "application/json");
+              res.end(notFoundBody);
+              return;
+            }
+            // As in production, an unmatched API path still passes through the plugin
+            // runtime: a runtime.before guard can answer it, and runtime.after sees the 404.
+            try {
+              let body: Buffer | undefined;
+              if (req.method !== "GET" && req.method !== "HEAD") {
+                body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
+              }
+              const headers = new Headers();
+              for (const [key, value] of Object.entries(req.headers)) {
+                if (value) {
+                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+                }
+              }
+              const request = new Request(
+                `http://${req.headers.host || "localhost:3000"}${req.url}`,
+                {
+                  method: req.method,
+                  headers,
+                  body: toRequestBody(body),
+                  signal: createFarmNodeRequestAbortSignal(req, res),
+                },
+              );
+              const notFound = () =>
+                new Response(notFoundBody, {
+                  status: 404,
+                  headers: { "Content-Type": "application/json" },
+                });
+              const response = await pm.runRuntimeRequest(request, notFound, {
+                kind: "api",
+                route: { pathname },
+              });
+              logResponse(method, urlPath, response.status, Date.now() - startTime, "API");
+              await sendWebResponse(res, response);
+            } catch (error) {
+              const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
+              if (bodyErrorResponse) {
+                await sendWebResponse(res, bodyErrorResponse);
+                return;
+              }
+              await emitPluginError("api-handler", error, { urlPath, method });
+              logger.error(`API route error: ${error}`);
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Internal server error" }));
+            }
             return;
           }
 
@@ -3804,33 +4047,44 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               : null;
           };
           let runtimeSession: FarmPluginRuntimeSession | undefined;
+          let pathname = requestedPathname;
           if (pm && hasRuntimeRequestHooks) {
             try {
+              const sessionOptions = {
+                kind: "page" as const,
+                route: setFarmRouteLabel(
+                  {
+                    pathname: requestedPathname,
+                    pattern: requestedMatch?.route?.pattern || null,
+                    params: requestedMatch?.params || {},
+                  },
+                  requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
+                ),
+              };
+              // A config rewrite's session opens on the requested URL, and runtime.before runs
+              // again on the destination with the same ctx, as on production's re-entry.
               runtimeSession = await pm.beginRuntimeRequest(
-                createRequestFromNodeRequest(req, new URL(fullUrl)),
-                {
-                  kind: "page",
-                  route: setFarmRouteLabel(
-                    {
-                      pathname: requestedPathname,
-                      pattern: requestedMatch?.route?.pattern || null,
-                      params: requestedMatch?.params || {},
-                    },
-                    requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
-                  ),
-                },
+                createRequestFromNodeRequest(req, new URL(configRewriteSource ?? fullUrl)),
+                sessionOptions,
               );
-              pm.copyRequestContext(runtimeSession.request, req);
-              applyWebRequestToNodeRequest(runtimeSession.request, req);
+              const routedRequest =
+                runtimeSession.response ??
+                (configRewriteSource === undefined
+                  ? runtimeSession.request
+                  : await pm.runRuntimeBeforeForRewrite(
+                      runtimeSession.request,
+                      createRequestFromNodeRequest(req, new URL(fullUrl)),
+                      sessionOptions,
+                    ));
 
-              if (runtimeSession.response) {
-                const response = await pm.endRuntimeRequest(
-                  runtimeSession,
-                  runtimeSession.response,
-                );
+              if (routedRequest instanceof Response) {
+                const response = await pm.endRuntimeRequest(runtimeSession, routedRequest);
                 await sendWebResponse(res, response);
                 return;
               }
+              pm.copyRequestContext(routedRequest, req);
+              applyWebRequestToNodeRequest(routedRequest, req);
+              pathname = new URL(routedRequest.url).pathname;
             } catch (error) {
               await emitPluginError("runtime-before", error, { pathname: requestedPathname });
               res.statusCode = 500;
@@ -3843,9 +4097,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // A replacement request is matched on its own pathname, including when
           // it matches nothing and has to 404 on the rewritten path. An ordinary
           // request is not re-matched, so the common path still matches once.
-          const pathname = runtimeSession
-            ? new URL(runtimeSession.request.url).pathname
-            : requestedPathname;
           const routeMatch =
             pathname === requestedPathname ? requestedMatch : routeManager.matchRoute(pathname);
 
@@ -3920,56 +4171,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
             // Run beforeRequest hooks
             if (pm && hasBeforeRequestHook) {
-              const urlBeforeRequestHooks = req.url;
-              const currentPathname = parseFarmRequestTarget(
-                req.url || "/",
-                "http://localhost",
-              ).pathname;
-              const hasLocalPageRoute = Boolean(routeManager.matchRoute(currentPathname)?.route);
               await pm.runHookParallelFiltered(
                 "beforeRequest",
-                (plugin) => !hasLocalPageRoute || plugin.name !== FARM_CONFIG_REWRITES_PLUGIN_NAME,
+                (plugin) => !isFarmConfigRoutePlugin(plugin),
                 req,
                 res,
               );
-
-              // A config rewrite changed req.url after plugin guards ran on the
-              // requested URL. Re-run runtime.before on the destination, like
-              // the production entry does when a rewrite re-enters it.
-              if (
-                runtimeSession &&
-                req.url !== urlBeforeRequestHooks &&
-                req.url?.startsWith("/") &&
-                !res.writableEnded
-              ) {
-                const destinationUrl = new URL(req.url, fullUrl);
-                const destinationMatch = routeManager.matchRoute(destinationUrl.pathname);
-                const guarded = await pm.runRuntimeBeforeForRewrite(
-                  runtimeSession.request,
-                  createRequestFromNodeRequest(req, destinationUrl),
-                  {
-                    kind: "page",
-                    route: {
-                      pathname: destinationUrl.pathname,
-                      pattern: destinationMatch?.route?.pattern || null,
-                      params: destinationMatch?.params || {},
-                    },
-                  },
-                );
-                if (guarded instanceof Response) {
-                  await sendWebResponse(res, guarded);
-                } else {
-                  pm.copyRequestContext(guarded, req);
-                  applyWebRequestToNodeRequest(guarded, req);
-                }
-              }
             }
 
-            if (
-              res.writableEnded ||
-              responseInterceptor?.isEnded() ||
-              (await proxyFarmExternalRewrite(req, res, currentServerConfig.bodySizeLimit))
-            ) {
+            if (res.writableEnded || responseInterceptor?.isEnded()) {
               if (!responseInterceptor?.isEnded()) {
                 const duration = Date.now() - startTime;
                 logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
@@ -3997,8 +4207,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             await emitPluginError("render-page", error, { pathname });
             next(error);
           }
-        })),
+        }),
       );
+      // The handler just registered, so the post hook below can route a deferred dotted path.
+      const farmRequestMiddleware = server.middlewares.stack.at(-1)
+        ?.handle as Connect.NextHandleFunction;
+
+      // What Farm passed on is Vite's (modules, /@vite/*, /@fs/*, public files): give it the CORS
+      // policy Vite would have, unless a later plugin turned Vite's own back on.
+      if (farmOwnsDevCors && viteServer.config.server.cors === false) {
+        viteServer.middlewares.use(createFarmDevViteCorsMiddleware());
+      }
 
       // A dotted path that no route or file answered falls through to Vite, whose 404 has an
       // empty body. The post hook runs after Vite's module and static-file middleware, so only
@@ -4009,7 +4228,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           if (res.headersSent || res.writableEnded) return next();
           // Vite's SPA fallback may have rewritten req.url to /index.html by now.
           const deferredUrl = deferredDottedRequests.get(req);
-          if (deferredUrl !== undefined && farmRequestMiddleware) {
+          if (deferredUrl !== undefined) {
             req.url = deferredUrl;
             return farmRequestMiddleware(req, res, next);
           }

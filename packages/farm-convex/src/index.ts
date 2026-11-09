@@ -1,4 +1,4 @@
-import { defineIntegration } from "@farm.js/core";
+import { defineIntegration } from "@farm.js/core/integrations";
 
 import { createConvexPlugin, resolveDevOptions } from "./dev.js";
 import { detectExtensions, mergeExtensions } from "./detect.js";

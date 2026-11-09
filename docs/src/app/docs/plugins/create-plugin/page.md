@@ -56,6 +56,15 @@ Each runtime hook receives one event with `request`, `req` (the shared request s
 | `error`     | When the request throws (also gets `error`, `durationMs`) | Nothing                                                                 |
 | `close`     | Once, when the runtime shuts down (gets `reason`)         | Nothing                                                                 |
 
+API requests follow the same contract in `farm dev` and in a production build:
+
+- A path under the API base path that no route matches still runs `context` and `before`, so a
+  guard can answer it, and `after` sees Farm's JSON 404 or the guard's early answer.
+- When an API route throws, Farm answers `500`. `error` runs first with the thrown value, then
+  `after` runs with that `500` response.
+- A throw from a `context`, `before`, or `after` hook runs `error` and skips the remaining `after`
+  hooks.
+
 ### Router, render, build, and dev hooks
 
 These hooks receive their payload, then a context with `state`, `config`, `isDev`, and `isProd`.

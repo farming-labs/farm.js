@@ -1,4 +1,4 @@
-import { api } from "@farm.js/core/client";
+import { api } from "@farm.js/core/api/client";
 
 export interface Auth0RedirectQuery {
   returnTo?: string;
