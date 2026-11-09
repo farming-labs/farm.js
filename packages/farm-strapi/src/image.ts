@@ -4,10 +4,17 @@ export interface StrapiMediaFormat {
   height: number;
 }
 
-export interface StrapiMediaAsset extends StrapiMediaFormat {
+/** A populated Strapi upload, including non-image files without dimensions. */
+export interface StrapiMediaFile {
+  url: string;
+  width?: number | null;
+  height?: number | null;
   alternativeText?: string | null;
   formats?: Record<string, StrapiMediaFormat | null | undefined> | null;
 }
+
+/** A Strapi image upload with dimensions suitable for `getStrapiImageProps`. */
+export type StrapiMediaAsset = StrapiMediaFile & StrapiMediaFormat;
 
 export interface StrapiImageOptions {
   /** Public media origin used to resolve relative upload URLs. */

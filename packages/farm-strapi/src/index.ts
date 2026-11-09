@@ -49,9 +49,24 @@ export type {
   StrapiImageOptions,
   StrapiImageProps,
   StrapiMediaAsset,
+  StrapiMediaFile,
   StrapiMediaFormat,
 } from "./image.js";
 export { createStrapiCollection } from "./query.js";
 export type { StrapiDocument, StrapiQueryParams, TypedStrapiCollection } from "./query.js";
+export type {
+  GeneratedStrapiCollection,
+  StrapiComponent,
+  StrapiContentTypeDefinition,
+  StrapiDynamicZone,
+  StrapiGeneratedDocument,
+  StrapiGeneratedDocumentMetadata,
+  StrapiGeneratedQuery,
+  StrapiGeneratedResource,
+  StrapiMedia,
+  StrapiPopulateField,
+  StrapiRelation,
+  StrapiUnknownPopulate,
+} from "./schema-types.js";
 export { applyStrapiWebhookChange, createStrapiWebhookRoute } from "./webhook.js";
 export type { StrapiWebhookInvalidation, StrapiWebhookRouteOptions } from "./webhook.js";
