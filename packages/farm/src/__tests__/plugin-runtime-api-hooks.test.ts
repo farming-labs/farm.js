@@ -27,22 +27,42 @@ afterEach(async () => {
   temporaryRoots.clear();
 });
 
-// The plugin records every runtime hook it sees and serves the record from its own endpoint,
-// which runs outside the request hooks, so a dev server and a production server can be
-// asked the same questions.
-const FILES: Record<string, string> = {
-  "farm.config.ts": `import { definePlugin } from "@farm.js/core";
-const trace: string[] = [];
-const traced = (request: Request) => {
+// The plugin records every runtime hook (and onError report) it sees, app middleware records
+// that it ran, and the plugin serves the record from its own endpoint, which runs outside the
+// request hooks, so a dev server and a production server can be asked the same questions.
+const TRACED = `const traced = (request: Request) => {
   const { pathname } = new URL(request.url);
-  return pathname.startsWith("/api/") || pathname === "/hello" ? pathname : null;
+  return /^\\/(api|integration)\\//.test(pathname) || pathname === "/hello" ? pathname : null;
 };
+const trace: string[] = ((globalThis as any).__farmTestTrace ??= []);`;
+
+const FILES: Record<string, string> = {
+  "farm.config.ts": `import { defineIntegration, definePlugin } from "@farm.js/core";
+${TRACED}
 export default {
   images: { provider: "none" },
   telemetry: false,
+  integrations: {
+    acme: defineIntegration({
+      category: "custom",
+      type: "acme",
+      routes: [
+        {
+          path: "/integration/boom",
+          methods: ["GET"],
+          handler(): Response {
+            throw new Error("integration failed");
+          },
+        },
+      ],
+    }),
+  },
   plugins: [
     definePlugin({
       name: "acme:trace",
+      onError({ phase, error }) {
+        trace.push("onError " + phase + " " + (error as Error).message);
+      },
       runtime: {
         endpoints: [{ path: "/__trace", handler: () => Response.json(trace.splice(0)) }],
         before({ request, kind }) {
@@ -53,7 +73,9 @@ export default {
         },
         after({ request, response }) {
           const pathname = traced(request);
-          if (pathname) trace.push("after " + pathname + " " + response.status);
+          if (!pathname) return;
+          trace.push("after " + pathname + " " + response.status);
+          if (pathname === "/api/after-fails") throw new Error("after failed");
         },
         error({ request, error }) {
           const pathname = traced(request);
@@ -65,7 +87,15 @@ export default {
 };`,
   "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
   "src/app/hello/page.tsx": `export default function Page() { return <h1>hello</h1>; }`,
+  "src/app/middleware.ts": `${TRACED}
+export function middleware(request: Request) {
+  const pathname = traced(request);
+  if (!pathname) return;
+  trace.push("middleware " + pathname);
+  if (pathname === "/api/guarded") return new Response("guarded", { status: 401 });
+}`,
   "src/app/api/ok/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
+  "src/app/api/after-fails/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
   "src/app/api/boom/route.ts": `export function GET(): Response { throw new Error("route failed"); }`,
 };
 
@@ -91,7 +121,16 @@ async function createApp(prefix: string): Promise<string> {
 
 async function expectRuntimeHookContract(origin: string): Promise<void> {
   const results: Record<string, { status: number; trace: string[] }> = {};
-  for (const pathname of ["/api/ok", "/api/blocked", "/api/missing", "/api/boom", "/hello"]) {
+  for (const pathname of [
+    "/api/ok",
+    "/api/blocked",
+    "/api/guarded",
+    "/api/missing",
+    "/api/boom",
+    "/api/after-fails",
+    "/integration/boom",
+    "/hello",
+  ]) {
     const response = await fetch(`${origin}${pathname}`);
     await response.arrayBuffer();
     const trace = await (await fetch(`${origin}/__trace`)).json();
@@ -99,31 +138,70 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
   }
 
   expect(results).toEqual({
-    // A matched API route: before, then after on its response.
-    "/api/ok": { status: 200, trace: ["before api /api/ok", "after /api/ok 200"] },
-    // An unmatched API path still passes through runtime.before, so a guard answers it, and
-    // runtime.after sees that early answer.
+    // A matched API route: before, then app middleware, then after on its response.
+    "/api/ok": {
+      status: 200,
+      trace: ["before api /api/ok", "middleware /api/ok", "after /api/ok 200"],
+    },
+    // An unmatched API path still passes through runtime.before, so a guard answers it before
+    // app middleware runs, and runtime.after sees that early answer.
     "/api/blocked": {
       status: 403,
       trace: ["before api /api/blocked", "after /api/blocked 403"],
     },
+    // runtime.after sees a response app middleware answers with.
+    "/api/guarded": {
+      status: 401,
+      trace: ["before api /api/guarded", "middleware /api/guarded", "after /api/guarded 401"],
+    },
     // Farm's JSON 404 for an unmatched API path is a response like any other.
     "/api/missing": {
       status: 404,
-      trace: ["before api /api/missing", "after /api/missing 404"],
+      trace: ["before api /api/missing", "middleware /api/missing", "after /api/missing 404"],
     },
-    // A throwing API route: runtime.error observes the throw, then runtime.after sees the 500
-    // Farm answers with.
+    // A throwing API route: runtime.error observes the throw, onError gets it once as the
+    // "runtime" phase, then runtime.after sees the 500 Farm answers with.
     "/api/boom": {
       status: 500,
-      trace: ["before api /api/boom", "error /api/boom route failed", "after /api/boom 500"],
+      trace: [
+        "before api /api/boom",
+        "middleware /api/boom",
+        "error /api/boom route failed",
+        "onError runtime route failed",
+        "after /api/boom 500",
+      ],
+    },
+    // A runtime.after hook that throws: runtime.error observes it, and onError gets it once.
+    "/api/after-fails": {
+      status: 500,
+      trace: [
+        "before api /api/after-fails",
+        "middleware /api/after-fails",
+        "after /api/after-fails 200",
+        "error /api/after-fails after failed",
+        "onError runtime after failed",
+      ],
+    },
+    // A throwing integration route follows the same contract (integration routes answer
+    // before app middleware).
+    "/integration/boom": {
+      status: 500,
+      trace: [
+        "before integration /integration/boom",
+        "error /integration/boom integration failed",
+        "onError runtime integration failed",
+        "after /integration/boom 500",
+      ],
     },
     // Page requests are unchanged.
-    "/hello": { status: 200, trace: ["before page /hello", "after /hello 200"] },
+    "/hello": {
+      status: 200,
+      trace: ["before page /hello", "middleware /hello", "after /hello 200"],
+    },
   });
 }
 
-describe("plugin runtime hooks for API requests", () => {
+describe("plugin runtime hooks for API and integration requests", () => {
   it("in development", async () => {
     const root = await createApp("farm-dev-plugin-runtime-api-");
     const server = await createServer({ root });

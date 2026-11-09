@@ -38,6 +38,7 @@ import {
   FARM_NODE_RESPONSE_END_PENDING,
   type FarmPlugin,
   type FarmPluginRuntimeKind,
+  type FarmPluginRuntimeRequestOptions,
   type FarmPluginRuntimeRequestScope,
   type FarmPluginRuntimeSession,
   type PluginManager,
@@ -749,7 +750,11 @@ function interceptFarmDevPageResponse(options: {
   startTime: number;
   logResponse(method: string, path: string, status: number, durationMs: number, type: "PAGE"): void;
   emitError(error: unknown): Promise<void>;
-}): { isEnded(): boolean } {
+}): {
+  isEnded(): boolean;
+  /** Stops intercepting a response nothing has ended yet, so the caller can send its own. */
+  release(): void;
+} {
   const {
     req,
     res,
@@ -769,6 +774,13 @@ function interceptFarmDevPageResponse(options: {
   const originalFlushHeaders = res.flushHeaders?.bind(res);
   let afterResponseCalled = false;
   let interceptedEnd = false;
+  const restore = () => {
+    res.write = originalWrite;
+    res.end = originalEnd;
+    res.writeHead = originalWriteHead;
+    if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
+    delete res[FARM_NODE_RESPONSE_END_PENDING];
+  };
   const htmlChunks: Buffer[] = [];
   const responseChunks: Buffer[] = [];
   let didStreamHtml = false;
@@ -915,13 +927,6 @@ function interceptFarmDevPageResponse(options: {
       typeof originalEndArgs[originalEndArgs.length - 1] === "function"
         ? (originalEndArgs[originalEndArgs.length - 1] as () => void)
         : undefined;
-    const restore = () => {
-      res.write = originalWrite;
-      res.end = originalEnd;
-      res.writeHead = originalWriteHead;
-      if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
-      delete res[FARM_NODE_RESPONSE_END_PENDING];
-    };
     if (streamsThroughRuntime()) {
       const stream = startRuntimeStream();
       streamRuntimeChunk(toNodeResponseBuffer(args[0], args[1]));
@@ -1054,6 +1059,9 @@ function interceptFarmDevPageResponse(options: {
 
   return {
     isEnded: () => interceptedEnd || res.writableEnded,
+    release() {
+      if (!interceptedEnd) restore();
+    },
   };
 }
 
@@ -2937,6 +2945,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             }
 
             const startTime = Date.now();
+            // Once the plugin runtime runs the request, it reports a failure itself.
+            let runtimeReportsErrors = false;
 
             try {
               if (pm) {
@@ -2979,22 +2989,38 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 signal: createFarmNodeRequestAbortSignal(req, res),
               });
 
-              const dispatchIntegration = async (request: Request) => {
-                const result = await dispatchIntegrationRequest(
-                  {
-                    integration: matchedRoute.integration,
-                    config: currentConfig,
-                    isDev: true,
-                    isProd: false,
-                  },
-                  request,
-                  { clientAddress: req.socket?.remoteAddress },
-                );
-                if (!result) {
-                  throw new Error(`Matched integration route did not return a response`);
+              const dispatchIntegration = async (
+                request: Request,
+                runtime?: FarmPluginRuntimeRequestScope,
+              ) => {
+                try {
+                  const result = await dispatchIntegrationRequest(
+                    {
+                      integration: matchedRoute.integration,
+                      config: currentConfig,
+                      isDev: true,
+                      isProd: false,
+                    },
+                    request,
+                    { clientAddress: req.socket?.remoteAddress },
+                  );
+                  if (!result) {
+                    throw new Error(`Matched integration route did not return a response`);
+                  }
+                  return result;
+                } catch (error) {
+                  // As for an API route, and as in production: runtime.error observes the
+                  // throw (and reports it to onError as the "runtime" phase), and
+                  // runtime.after still sees the 500.
+                  logger.error(`Integration route error: ${error}`);
+                  await runtime?.reportError(error);
+                  return new Response(JSON.stringify({ error: "Internal server error" }), {
+                    status: 500,
+                    headers: { "Content-Type": "application/json" },
+                  });
                 }
-                return result;
               };
+              runtimeReportsErrors = Boolean(pm);
               const response = pm
                 ? await pm.runRuntimeRequest(integrationRequest, dispatchIntegration, {
                     kind: "integration",
@@ -3022,12 +3048,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               }
               const duration = Date.now() - startTime;
               logResponse(requestMethod, requestUrl, 500, duration, "API");
-              await emitPluginError("integration-handler", error, {
-                pathname: requestPathname,
-                routePath: requestUrl,
-                method: requestMethod,
-                integration: matchedRoute.key,
-              });
+              // A runtime hook failure was already reported to runtime.error and onError.
+              if (!runtimeReportsErrors) {
+                await emitPluginError("integration-handler", error, {
+                  pathname: requestPathname,
+                  routePath: requestUrl,
+                  method: requestMethod,
+                  integration: matchedRoute.key,
+                });
+              }
               logger.error(`Integration route error: ${error}`);
               if (!res.writableEnded) {
                 res.statusCode = 500;
@@ -3105,14 +3134,164 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               return;
             }
 
+            // The route handler's Request, read from the (possibly rewritten) Node request. The
+            // body is kept per request, so middleware that reads it still can.
+            const createAPIRequest = async () => {
+              const headers = new Headers();
+              for (const [key, value] of Object.entries(req.headers)) {
+                if (value) {
+                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+                }
+              }
+              let body: Buffer | undefined;
+              if (req.method !== "GET" && req.method !== "HEAD") {
+                body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
+              }
+              // Like production, the handler can see the client go away.
+              return new Request(`http://${req.headers.host || "localhost:3000"}${req.url}`, {
+                method: req.method,
+                headers,
+                body: toRequestBody(body),
+                signal: createFarmNodeRequestAbortSignal(req, res),
+              });
+            };
+            const isDocsAPIRequest = Boolean(
+              farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(pathname),
+            );
+            const docsRuntimeOptions = (): FarmPluginRuntimeRequestOptions => ({
+              kind: "docs",
+              route: setFarmRouteLabel(
+                { pathname, pattern: urlPath },
+                resolveFarmDocsRouteLabel(pathname, {
+                  path: farmConfig.docs?.entry || "/docs",
+                  roots: farmConfig.docs?.roots?.map((root) => root.entry),
+                }),
+              ),
+            });
+
+            // runtime.before runs before app middleware, as it does for pages and in
+            // production, where middleware runs inside the runtime request. The session
+            // describes the requested route, as production computes it from the incoming
+            // request; middleware and the route handler then run inside it.
+            let runtimeSession: FarmPluginRuntimeSession | undefined;
+            let sessionRequestUrl: string | undefined;
+            if (pm?.hasRuntimeRequestHooks()) {
+              try {
+                runtimeSession = await pm.beginRuntimeRequest(
+                  await createAPIRequest(),
+                  !hasMatchedApiRoute && isDocsAPIRequest
+                    ? docsRuntimeOptions()
+                    : {
+                        kind: "api",
+                        route: matchedApiRoute
+                          ? { pathname, pattern: matchedApiRoute.route.path }
+                          : { pathname },
+                      },
+                );
+                if (runtimeSession.response) {
+                  const response = await pm.endRuntimeRequest(
+                    runtimeSession,
+                    runtimeSession.response,
+                  );
+                  logResponse(method, urlPath, response.status, Date.now() - startTime, "API");
+                  await sendWebResponse(res, response);
+                  return;
+                }
+              } catch (error) {
+                const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
+                if (bodyErrorResponse) {
+                  logResponse(
+                    method,
+                    urlPath,
+                    bodyErrorResponse.status,
+                    Date.now() - startTime,
+                    "API",
+                  );
+                  await sendWebResponse(res, bodyErrorResponse);
+                  return;
+                }
+                // The runtime already reported a hook failure to runtime.error and onError.
+                logger.error(`API route error: ${error}`);
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: "Internal server error" }));
+                return;
+              }
+              pm.copyRequestContext(runtimeSession.request, req);
+              applyWebRequestToNodeRequest(runtimeSession.request, req);
+              sessionRequestUrl = req.url;
+            }
+
             // App middleware guards API routes, including plugin routes, as the
-            // production entry does before it dispatches them. It runs before the
-            // body is read, so a middleware that reads the request still can.
-            if (await runAppMiddlewareForContentRoute()) {
-              const duration = Date.now() - startTime;
-              logResponse(method, urlPath, res.statusCode || 200, duration, "API");
+            // production entry does before it dispatches them. runtime.after sees a response
+            // middleware answers with, as in production.
+            const middlewareInterceptor =
+              runtimeSession && pm?.hasRuntimeHook("after") && middlewareManager?.hasMiddleware()
+                ? interceptFarmDevPageResponse({
+                    req,
+                    res,
+                    pm,
+                    runtimeSession,
+                    hasRuntimeAfterHook: true,
+                    hasAfterResponseHook: false,
+                    hasHTMLTransformHook: false,
+                    renderPayload: {},
+                    method,
+                    urlPath,
+                    pathname,
+                    startTime,
+                    logResponse: (logMethod, logPath, status, durationMs) =>
+                      logResponse(logMethod, logPath, status, durationMs, "API"),
+                    // The runtime reports a runtime.after failure itself.
+                    emitError: async () => {},
+                  })
+                : undefined;
+            let middlewareHandled: boolean;
+            try {
+              middlewareHandled = await runAppMiddlewareForContentRoute();
+            } catch (error) {
+              middlewareInterceptor?.release();
+              if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
+              throw error;
+            }
+            if (middlewareHandled) {
+              if (!middlewareInterceptor?.isEnded()) {
+                const duration = Date.now() - startTime;
+                logResponse(method, urlPath, res.statusCode || 200, duration, "API");
+              }
               return;
             }
+            middlewareInterceptor?.release();
+
+            // The handler gets the session's Request, as in production, unless middleware
+            // rewrote the URL or a runtime.before hook read the body.
+            const createHandlerRequest = async () => {
+              if (
+                runtimeSession &&
+                req.url === sessionRequestUrl &&
+                !runtimeSession.request.bodyUsed
+              ) {
+                return runtimeSession.request;
+              }
+              const request = await createAPIRequest();
+              if (runtimeSession) pm!.copyRequestContext(runtimeSession.request, request);
+              return request;
+            };
+            const runInRuntime = (
+              request: Request,
+              handler: (
+                request: Request,
+                runtime?: FarmPluginRuntimeRequestScope,
+              ) => Promise<Response>,
+              options: FarmPluginRuntimeRequestOptions,
+            ): Promise<Response> =>
+              runtimeSession
+                ? pm!.completeRuntimeRequest(runtimeSession, (_request, runtime) =>
+                    handler(request, runtime),
+                  )
+                : pm
+                  ? pm.runRuntimeRequest(request, handler, options)
+                  : handler(request);
 
             // Let this request boundary observe endpoint failures before it
             // converts them into the development 500 response.
@@ -3141,28 +3320,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 method,
               });
               try {
-                // Convert Node.js request to Web Request
                 const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
-                const headers = new Headers();
-                for (const [key, value] of Object.entries(req.headers)) {
-                  if (value) {
-                    headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-                  }
-                }
-
-                // Get body for POST/PUT/PATCH
-                let body: Buffer | undefined;
-                if (req.method !== "GET" && req.method !== "HEAD") {
-                  body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
-                }
-
-                // Like production, the handler can see the client go away.
-                const request = new Request(url, {
-                  method: req.method,
-                  headers,
-                  body: toRequestBody(body),
-                  signal: createFarmNodeRequestAbortSignal(req, res),
-                });
+                const request = await createHandlerRequest();
 
                 const apiLifecyclePayload = {
                   pathname: new URL(url).pathname,
@@ -3197,8 +3356,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                       durationMs: Date.now() - startTime,
                       error,
                     });
-                    await emitPluginError("api-handler", error, { urlPath, method });
                     logger.error(`API route error: ${error}`);
+                    // Reports the throw to onError as the "runtime" phase, as production does.
                     await runtime?.reportError(error);
                     response = new Response(JSON.stringify({ error: "Internal server error" }), {
                       status: 500,
@@ -3209,15 +3368,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
                     : response;
                 };
-                const handledResponse: Response = pm
-                  ? await pm.runRuntimeRequest(request, invokeAPIHandler, {
-                      kind: "api",
-                      route: {
-                        pathname: apiLifecyclePayload.pathname,
-                        pattern: apiLifecyclePayload.routePath,
-                      },
-                    })
-                  : await invokeAPIHandler(request);
+                const handledResponse = await runInRuntime(request, invokeAPIHandler, {
+                  kind: "api",
+                  route: {
+                    pathname: apiLifecyclePayload.pathname,
+                    pattern: apiLifecyclePayload.routePath,
+                  },
+                });
 
                 const duration = Date.now() - startTime;
                 if (!apiHandlerFailed) {
@@ -3251,10 +3408,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   await sendWebResponse(res, bodyErrorResponse);
                   return;
                 }
-                await emitPluginError("api-handler", error, {
-                  urlPath,
-                  method,
-                });
+                // The plugin runtime already reported the failure to runtime.error and onError.
                 logger.error(`API route error: ${error}`);
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
@@ -3263,27 +3417,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               }
             }
 
-            if (farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(pathname)) {
+            if (farmDocsAPIHandler && isDocsAPIRequest) {
               try {
-                const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
-                const headers = new Headers();
-                for (const [key, value] of Object.entries(req.headers)) {
-                  if (value) {
-                    headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-                  }
-                }
-
-                let body: Buffer | undefined;
-                if (req.method !== "GET" && req.method !== "HEAD") {
-                  body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
-                }
-
-                const request = new Request(url, {
-                  method: req.method,
-                  headers,
-                  body: toRequestBody(body),
-                  signal: createFarmNodeRequestAbortSignal(req, res),
-                });
+                const request = await createHandlerRequest();
 
                 const apiLifecyclePayload = {
                   pathname,
@@ -3306,18 +3442,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
                     : response;
                 };
-                const docsResponse = pm
-                  ? await pm.runRuntimeRequest(request, invokeDocsAPIHandler, {
-                      kind: "docs",
-                      route: setFarmRouteLabel(
-                        { pathname, pattern: apiLifecyclePayload.routePath },
-                        resolveFarmDocsRouteLabel(pathname, {
-                          path: farmConfig.docs?.entry || "/docs",
-                          roots: farmConfig.docs?.roots?.map((root) => root.entry),
-                        }),
-                      ),
-                    })
-                  : await invokeDocsAPIHandler(request);
+                const docsResponse = await runInRuntime(
+                  request,
+                  invokeDocsAPIHandler,
+                  docsRuntimeOptions(),
+                );
                 if (docsResponse) {
                   const duration = Date.now() - startTime;
                   logResponse(method, urlPath, docsResponse.status, duration, "API");
@@ -3330,10 +3459,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   await sendWebResponse(res, bodyErrorResponse);
                   return;
                 }
-                await emitPluginError("docs-api-handler", error, {
-                  urlPath,
-                  method,
-                });
+                // The plugin runtime already reported the failure to runtime.error and onError.
                 logger.error(`Docs API route error: ${error}`);
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
@@ -3343,7 +3469,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             }
 
             const notFoundBody = JSON.stringify({ error: "API route not found", pathname });
-            if (!pm?.hasRuntimeRequestHooks()) {
+            if (!runtimeSession) {
               logResponse(method, urlPath, 404, Date.now() - startTime, "API");
               res.statusCode = 404;
               res.setHeader("Content-Type", "application/json");
@@ -3351,45 +3477,20 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               return;
             }
             // As in production, an unmatched API path still passes through the plugin
-            // runtime: a runtime.before guard can answer it, and runtime.after sees the 404.
+            // runtime: runtime.after sees the 404.
             try {
-              let body: Buffer | undefined;
-              if (req.method !== "GET" && req.method !== "HEAD") {
-                body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
-              }
-              const headers = new Headers();
-              for (const [key, value] of Object.entries(req.headers)) {
-                if (value) {
-                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-                }
-              }
-              const request = new Request(
-                `http://${req.headers.host || "localhost:3000"}${req.url}`,
-                {
-                  method: req.method,
-                  headers,
-                  body: toRequestBody(body),
-                  signal: createFarmNodeRequestAbortSignal(req, res),
-                },
+              const response = await pm!.completeRuntimeRequest(
+                runtimeSession,
+                () =>
+                  new Response(notFoundBody, {
+                    status: 404,
+                    headers: { "Content-Type": "application/json" },
+                  }),
               );
-              const notFound = () =>
-                new Response(notFoundBody, {
-                  status: 404,
-                  headers: { "Content-Type": "application/json" },
-                });
-              const response = await pm.runRuntimeRequest(request, notFound, {
-                kind: "api",
-                route: { pathname },
-              });
               logResponse(method, urlPath, response.status, Date.now() - startTime, "API");
               await sendWebResponse(res, response);
             } catch (error) {
-              const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
-              if (bodyErrorResponse) {
-                await sendWebResponse(res, bodyErrorResponse);
-                return;
-              }
-              await emitPluginError("api-handler", error, { urlPath, method });
+              // The runtime already reported a hook failure to runtime.error and onError.
               logger.error(`API route error: ${error}`);
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");

@@ -1565,7 +1565,18 @@ export class PluginManager {
     handler: FarmPluginRuntimeRequestHandler,
     options: FarmPluginRuntimeRequestOptions = {},
   ): Promise<Response> {
-    const session = await this.beginRuntimeRequest(request, options);
+    return this.completeRuntimeRequest(await this.beginRuntimeRequest(request, options), handler);
+  }
+
+  /**
+   * Finishes a session `beginRuntimeRequest` opened, as `runRuntimeRequest` does: the handler
+   * answers unless `before` already did, then `after` runs. A server that has work between
+   * `before` and the handler (the dev server runs app middleware there) splits the two.
+   */
+  async completeRuntimeRequest(
+    session: FarmPluginRuntimeSession,
+    handler: FarmPluginRuntimeRequestHandler,
+  ): Promise<Response> {
     try {
       const response =
         session.response ??
