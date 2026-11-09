@@ -238,6 +238,7 @@ describe("@farm.js/mobile/ios", () => {
       "App/Assets.xcassets/LaunchBackground.colorset/Contents.json",
       "App/FarmBridge.swift",
       "App/FarmBuild.swift",
+      "App/FarmFiles.swift",
       "App/Info.plist",
       "App/MobileSession.swift",
       "App/NativeEngine.swift",
@@ -1037,6 +1038,10 @@ describe("the bridge script on iOS", () => {
       performance: { now: () => 0 },
       requestAnimationFrame: (callback: () => void) => callback(),
       URL,
+      Blob,
+      Uint8Array,
+      atob,
+      Array,
       Promise,
       Map,
       JSON,
@@ -1076,6 +1081,61 @@ describe("the bridge script on iOS", () => {
         )
         .replace("window.FarmNative", "<port>");
     expect(normalize(script)).toBe(normalize(androidScript));
+  });
+
+  it("shares farm-files with web screens by reference, scoped to the page", async () => {
+    const files = await generated(context());
+    const bridge = files["App/FarmBridge.swift"];
+    // Arguments go to the module with references resolved; answers come back with them shared.
+    expect(bridge).toContain('let args = try files.resolve(message["args"])');
+    expect(bridge).toContain("let shared = try files.share(value)");
+    expect(bridge).toContain("_resolve(\\(id), \\(ok), \\(payload), \\(document), \\(bytes))");
+    // A closed page's files are deleted, and an earlier run's at launch.
+    expect(bridge.slice(bridge.indexOf("func detach()"))).toMatch(
+      /^func detach\(\) \{\n\s+files\.close\(\)/,
+    );
+    expect(files["App/SceneDelegate.swift"]).toContain("FarmFiles.clearStale()");
+    const store = files["App/FarmFiles.swift"];
+    expect(store).toContain('.appendingPathComponent("farm-files", isDirectory: true)');
+    expect(store).toContain("guard file.path.hasPrefix(root)");
+    expect(store).toContain('code: "invalid_args"');
+  });
+
+  it("turns files an answer carries into blob: URLs, and sends them back as references", async () => {
+    const { bridge, posted } = await loadBridge();
+    const created: Blob[] = [];
+    const createObjectURL = URL.createObjectURL;
+    URL.createObjectURL = (blob: Blob) => {
+      created.push(blob);
+      return `blob:http://localhost:3000/${created.length}`;
+    };
+    try {
+      const reference = "/__farm/files/AAAAAAAAAAAAAAAAAAAAAA";
+      const picked = bridge.call("Device", "pickPhoto", []);
+      const call = posted.at(-1)!;
+      // What FarmBridge.swift evaluates: the value with references, the document, then the bytes.
+      bridge._resolve(call.id, true, { uri: reference, size: 3 }, call.doc, {
+        [reference]: { type: "image/png", data: Buffer.from([1, 2, 3]).toString("base64") },
+      });
+      const value = await picked;
+      expect(value).toEqual({ uri: "blob:http://localhost:3000/1", size: 3 });
+      expect(created[0]!.type).toBe("image/png");
+      expect([...new Uint8Array(await created[0]!.arrayBuffer())]).toEqual([1, 2, 3]);
+
+      // The page passes the blob: URL back; the module gets the reference, which native resolves.
+      void bridge.call("Device", "upload", [value.uri, { nested: [value.uri] }, "other"]);
+      expect(posted.at(-1)!.args).toEqual([reference, { nested: [reference] }, "other"]);
+
+      // An answer meant for another document settles nothing here.
+      const other = bridge.call("Device", "model", []);
+      let settled = false;
+      void other.then(() => (settled = true));
+      bridge._resolve(posted.at(-1)!.id, true, "Pixel", "another-document");
+      await Promise.resolve();
+      expect(settled).toBe(false);
+    } finally {
+      URL.createObjectURL = createObjectURL;
+    }
   });
 
   it("marks the page as running in the iOS shell", async () => {
