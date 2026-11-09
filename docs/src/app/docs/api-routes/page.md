@@ -468,6 +468,54 @@ every affected query. Existing client-side `invalidate` options remain supported
 caller-specific cache relationships, and handlers can continue calling `invalidate(...)` or
 `revalidatePath(...)` directly.
 
+## Mount a Hono or Elysia app
+
+A plain route export receives the Web `Request` and can return a `Response`. That is the same
+contract as a Hono app's `fetch` or an Elysia app's `handle`, so you can mount an existing app on a
+catch-all route and keep its routes, middleware, and validators.
+
+**src/app/api/hono/[...path]/route.ts**
+
+```ts
+import { Hono } from "hono";
+
+const app = new Hono().basePath("/api/hono");
+
+app.get("/hello/:name", (c) => c.json({ hello: c.req.param("name") }));
+app.post("/echo", async (c) => c.json({ got: await c.req.json() }, 201));
+
+const handle = (request: Request) => app.fetch(request);
+export { handle as GET, handle as POST };
+```
+
+**src/app/api/elysia/[...path]/route.ts**
+
+```ts
+import { Elysia } from "elysia";
+
+const app = new Elysia({ prefix: "/api/elysia" })
+  .get("/hello/:name", ({ params }) => ({ hello: params.name }))
+  .post("/echo", ({ body, set }) => {
+    set.status = 201;
+    return { got: body };
+  });
+
+const handle = (request: Request) => app.handle(request);
+export { handle as GET, handle as POST };
+```
+
+- **Give the app the route's URL as its base path.** The mounted app receives the full request
+  URL. With a different base path, every request misses its routes and gets the app's own 404.
+- **Export every method the app handles.** Farm answers a method the route file does not export
+  with `405` before the app sees it. `HEAD` uses the `GET` export, as for any route.
+- **Farm treats the mounted app as one plain route.** `createEndpoint` features that come from
+  each endpoint's declared shape do not apply to the app's routes: typed client inference, OpenAPI
+  generation, typed errors, MCP tool opt-in, declared invalidation, and endpoint middleware. Use
+  `createEndpoint` routes for those, alongside the mounted app.
+
+Both recipes are covered by Farm's tests on Node, in development and in a `node-server`
+production build.
+
 ## When to use integrations instead
 
 Use API routes for app-owned endpoints. Use integrations when a provider or feature needs a package-like surface: config validation, lifecycle hooks, database schemas, middleware, providers, and typed callers bundled together.
