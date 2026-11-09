@@ -1292,11 +1292,24 @@ describe("static rendering suggestions with i18n", () => {
 describe("interpolateRedirectDestination", () => {
   it("interpolates every bracket and colon parameter form", () => {
     const params = { slug: "a/b", id: "42" };
+    const catchAll = { slug: ["a", "b"] };
 
-    expect(interpolateRedirectDestination("/new/[[...slug]]", params)).toBe("/new/a/b");
-    expect(interpolateRedirectDestination("/new/[...slug]", params)).toBe("/new/a/b");
-    expect(interpolateRedirectDestination("/new/[id]", params)).toBe("/new/42");
-    expect(interpolateRedirectDestination("/new/:slug*", params)).toBe("/new/a/b");
-    expect(interpolateRedirectDestination("/new/:id", params)).toBe("/new/42");
+    expect(interpolateRedirectDestination("/new/[[...slug]]", params, catchAll)).toBe("/new/a/b");
+    expect(interpolateRedirectDestination("/new/[...slug]", params, catchAll)).toBe("/new/a/b");
+    expect(interpolateRedirectDestination("/new/[id]", params, catchAll)).toBe("/new/42");
+    expect(interpolateRedirectDestination("/new/:slug*", params, catchAll)).toBe("/new/a/b");
+    expect(interpolateRedirectDestination("/new/:id", params, catchAll)).toBe("/new/42");
+  });
+
+  it("encodes each value as one path segment unless catch-all segments are given", () => {
+    expect(interpolateRedirectDestination("/[slug]", { slug: "//example.com" })).toBe(
+      "/%2F%2Fexample.com",
+    );
+    expect(interpolateRedirectDestination("/:slug", { slug: "\\example.com" })).toBe(
+      "/%5Cexample.com",
+    );
+    expect(
+      interpolateRedirectDestination("/[...path]", { path: "a b//x/y" }, { path: ["a b//x", "y"] }),
+    ).toBe("/a%20b%2F%2Fx/y");
   });
 });
