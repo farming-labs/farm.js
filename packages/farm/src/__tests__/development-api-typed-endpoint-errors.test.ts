@@ -40,14 +40,39 @@ async function linkPackage(root: string, name: string, target: string): Promise<
 }
 
 /**
- * An app with `@farm.js/core` linked from the workspace, as every app in `examples/` is. In
- * development the route imports its own copy of `@farm.js/core/api` through Vite's SSR runner,
- * while the API runtime that catches the failure is core's Node copy.
+ * Install `@farm.js/core` as a package manager would: a real directory under `node_modules`
+ * holding the published files, not a symlink into the workspace. Its own dependencies resolve
+ * from the workspace's install.
  */
-async function createTypedErrorFixture(renderer: "react" | false): Promise<string> {
+async function installPackageCopy(root: string): Promise<void> {
+  const installed = path.join(root, "node_modules", "@farm.js", "core");
+  await fs.mkdir(installed, { recursive: true });
+  const manifest = JSON.parse(await fs.readFile(path.join(packageRoot, "package.json"), "utf8"));
+  await fs.copyFile(path.join(packageRoot, "package.json"), path.join(installed, "package.json"));
+  for (const entry of manifest.files as string[]) {
+    await fs.cp(path.join(packageRoot, entry), path.join(installed, entry), { recursive: true });
+  }
+  await fs.symlink(
+    await fs.realpath(path.join(packageRoot, "node_modules")),
+    path.join(installed, "node_modules"),
+    "junction",
+  );
+}
+
+/**
+ * An app with `@farm.js/core` either linked from the workspace, as every app in `examples/` is,
+ * or installed as a real copy, as an app installed from npm has it. When linked, the route
+ * imports its own copy of `@farm.js/core/api` through Vite's SSR runner in development, while the
+ * API runtime that catches the failure is core's Node copy.
+ */
+async function createTypedErrorFixture(
+  renderer: "react" | false,
+  core: "linked" | "installed" = "linked",
+): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-typed-endpoint-errors-"));
   temporaryRoots.add(root);
-  await linkPackage(root, "@farm.js/core", packageRoot);
+  if (core === "installed") await installPackageCopy(root);
+  else await linkPackage(root, "@farm.js/core", packageRoot);
   await linkPackage(root, "zod", path.join(packageRoot, "node_modules", "zod"));
   if (renderer === "react") {
     for (const name of ["react", "react-dom"]) {
@@ -145,6 +170,46 @@ describe("typed endpoint errors through the app runtime", () => {
     },
     60_000,
   );
+
+  it("answer the declared status in development with @farm.js/core installed from npm", async () => {
+    const root = await createTypedErrorFixture(false, "installed");
+    // Start the dev server from the installed copy, as `farm dev` in that app does, so the
+    // runtime catching the failure and the route's `@farm.js/core/api` come from the same package.
+    await fs.writeFile(
+      path.join(root, "dev.mjs"),
+      `import { createServer } from "@farm.js/core/server";
+
+const server = await createServer({ root: process.cwd(), renderer: false, images: { provider: "none" } });
+await server.listen(Number(process.env.PORT));
+console.log("FARM_DEV_READY");
+`,
+    );
+    const port = await getAvailablePort();
+    const processOutput: string[] = [];
+    const devServer = spawn(process.execPath, ["dev.mjs"], {
+      cwd: root,
+      env: { ...process.env, NODE_PATH: "", PORT: String(port) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const exited = new Promise<void>((resolve) => devServer.once("exit", () => resolve()));
+    const ready = new Promise<boolean>((resolve) => {
+      devServer.stdout.on("data", (chunk) => {
+        processOutput.push(String(chunk));
+        if (processOutput.join("").includes("FARM_DEV_READY")) resolve(true);
+      });
+      devServer.once("exit", () => resolve(false));
+    });
+    devServer.stderr.on("data", (chunk) => processOutput.push(String(chunk)));
+
+    try {
+      expect(await ready, processOutput.join("")).toBe(true);
+
+      await expectTypedEndpointResponses(`http://localhost:${port}`);
+    } finally {
+      if (devServer.exitCode === null) devServer.kill();
+      await exited;
+    }
+  }, 60_000);
 
   it("answer the same declared status from a production server", async () => {
     const root = await createTypedErrorFixture(false);
