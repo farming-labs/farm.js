@@ -192,6 +192,7 @@ import {
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes } from "./vercel-assets";
+import { collectServerOnlySSRAssets } from "./ssr-public-assets";
 import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
 import { farmStripPlatformConfigPlugin } from "../build/strip-platform-config";
 import type { FarmPlatform } from "../platform";
@@ -1461,6 +1462,9 @@ export async function buildUniversal(
     const rendererDisabled = isFarmRendererDisabled(config.renderer);
     const buildClientBundle = async () => {
       if (rendererDisabled) {
+        // Start empty, as the client build's emptyOutDir does, so files an earlier build
+        // published are not served again.
+        await fs.rm(clientOutputDir, { recursive: true, force: true });
         await fs.mkdir(clientOutputDir, { recursive: true });
         return;
       }
@@ -1648,10 +1652,15 @@ function varyFarmNitroCacheRulesByShell(rules: Record<string, any>): Record<stri
   );
 }
 
+/**
+ * Publish the SSR assets a rendered page can point the browser at. Assets that only server code
+ * reads from its own output directory stay with the server bundle and out of the public output.
+ */
 async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): Promise<void> {
   const fs = await import("fs/promises");
+  const serverOnlyAssets = collectServerOnlySSRAssets(bundle);
   for (const [fileName, output] of Object.entries(bundle)) {
-    if (output.type !== "asset") continue;
+    if (output.type !== "asset" || serverOnlyAssets.has(fileName)) continue;
     if (fileName === "farm-fonts.css") {
       await mergeBuiltFontCss(outputDir, output.source);
       continue;
