@@ -31,6 +31,12 @@ export function federation(options: FederationOptions) {
         throw new Error("[farm:federation] Configure federation in one federation() instance");
       }
 
+      if (config.renderer === false) {
+        throw new Error(
+          "[farm:federation] Federation shares browser components, so it needs a renderer. " +
+            "Remove `renderer: false` to use it.",
+        );
+      }
       const renderer = config.renderer ?? { name: "react", dedupe: ["react", "react-dom"] };
       const resolved = resolveFederationOptions(options, renderer);
       const vite = config.vite ?? {};
