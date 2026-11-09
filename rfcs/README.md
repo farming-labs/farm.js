@@ -10,3 +10,4 @@ implementation changes default behavior.
 | [0003: Server components in islands mode](./0003-islands-server-components.md)                        | Implemented in part (experimental)         |                                                            |
 | [0004: Platforms: one Farm source for web, desktop and mobile](./0004-platforms.md)                   | Draft (target 0.2)                         |                                                            |
 | [0005: Explicit cron infrastructure and deployment synchronization](./0005-cron-infrastructure.md)    | Implementation in progress                 |                                                            |
+| [0006: Platform screens (`page.kt`, `page.swift`)](./0006-platform-screens.md)                        | Draft, open for discussion                 |                                                            |

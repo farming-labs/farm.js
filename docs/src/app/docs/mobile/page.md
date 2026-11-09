@@ -81,8 +81,8 @@ cannot show: a native screen that cannot draw some content, or a React Native sc
 shows the web page instead. Native screens are covered in [Native Screens](/docs/mobile/native-screens),
 and the WebView side in [The Web Shell](/docs/mobile/shell).
 
-`page.kt` and `page.swift` (fully platform screens, no JavaScript) are planned and show a
-placeholder for now.
+`page.kt` and `page.swift` (fully platform screens, no JavaScript) are not being built. Their
+design is under discussion in [RFC 0006](https://github.com/farming-labs/farm.js/blob/main/rfcs/0006-platform-screens.md); a route set to them shows a placeholder.
 
 ## Status
 
@@ -98,7 +98,7 @@ placeholder for now.
 | `@farm.js/ui` on React Native screens      | Shipped, 0.1.65 | unit tests only                            |
 | Signed-in native screens                   | Shipped, 0.1.65 | Android emulator under `farm dev --mobile` |
 | Page shells (`mobile.shells`)              | Shipped, 0.1.65 | unit and generator tests only              |
-| Platform screens (`page.kt`, `page.swift`) | Planned         |                                            |
+| Platform screens (`page.kt`, `page.swift`) | RFC 0006, draft |                                            |
 
 Sign-in from the app is covered in [Authentication](/docs/auth#mobile-apps), and calling server
 functions and API routes from React Native screens in
