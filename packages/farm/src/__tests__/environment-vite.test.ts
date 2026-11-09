@@ -69,6 +69,31 @@ describe("client-only reached from islands server code", () => {
       }),
     ).resolves.toBeUndefined();
   });
+  it("allows client modules outside srcDir and what they import", async () => {
+    await expect(
+      buildIslands('import { label } from "../lib/client";\nexport default label;\n', {
+        "lib/client.ts": '"use client";\nexport { label } from "./helper";\n',
+        "lib/helper.ts": 'import { Button } from "aria-kit";\nexport const label = Button;\n',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("allows a client module outside the scanned directories", async () => {
+    await expect(
+      buildIslands('import { label } from "../.shared/client";\nexport default label;\n', {
+        ".shared/client.ts":
+          '"use client";\nimport { Button } from "aria-kit";\nexport const label = Button;\n',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still fails for server code outside srcDir", async () => {
+    await expect(
+      buildIslands('import { label } from "../lib/server";\nexport default label;\n', {
+        "lib/server.ts": 'import { Button } from "aria-kit";\nexport const label = Button;\n',
+      }),
+    ).rejects.toThrow(/reaches "client-only"/);
+  });
 });
 
 describe("environment function Vite transform", () => {
