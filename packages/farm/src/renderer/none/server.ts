@@ -26,4 +26,12 @@ export function renderToString(): never {
   return throwNoRenderer();
 }
 
+// Optional renderer exports the server entry checks for by name. This renderer has none of
+// them; declaring them keeps the bundler from warning that each import is missing.
+export const capabilities = undefined;
+export const generateHydrationScript = undefined;
+export const renderToPipeableStream = undefined;
+export const renderToReadableStream = undefined;
+export const renderToStringWithHead = undefined;
+
 export default { Fragment, createElement, isValidElement };

@@ -2340,9 +2340,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               return;
             }
 
+            // The launcher opens the overlay on an app page. A backend-only app has no pages, so it
+            // gets the standalone panel instead.
             if (
               requestPathname === FARM_DEVTOOLS_PATH &&
-              parsedRequestUrl.searchParams.get("embedded") !== "1"
+              parsedRequestUrl.searchParams.get("embedded") !== "1" &&
+              !rendererDisabled
             ) {
               let launchUrl = new URL(farmConfig.basePath || "/", parsedRequestUrl.origin);
               const referrer = req.headers.referer;

@@ -188,7 +188,15 @@ describe("renderer: false", () => {
     const address = server.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("Missing dev server address");
 
-    await expectBackendResponses(`http://localhost:${address.port}`);
+    const origin = `http://localhost:${address.port}`;
+    await expectBackendResponses(origin);
+
+    // There is no page to open the DevTools overlay on, so the launcher serves the panel itself.
+    const devtools = await fetch(`${origin}/__farm/devtools`, { redirect: "manual" });
+    expect(devtools.status).toBe(200);
+    expect(devtools.headers.get("content-type")).toMatch(/^text\/html/);
+    await devtools.body?.cancel();
+
     const loaded = [...server.moduleGraph.idToModuleMap.keys()];
     expect(loaded.filter((id) => /[\\/]react(?:-dom)?[\\/]/.test(id))).toEqual([]);
   }, 60_000);
