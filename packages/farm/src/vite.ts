@@ -3955,6 +3955,23 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
         }),
       );
+
+      // `renderer: false`: a dotted path that no route or file answered falls through to Vite,
+      // whose 404 has an empty body. Answer it with the same JSON miss as production. The post hook
+      // runs after Vite's module and static-file middleware, so only true misses reach it.
+      if (rendererDisabled) {
+        return () => {
+          viteServer.middlewares.use((req, res, next) => {
+            if (res.headersSent || res.writableEnded) return next();
+            // Vite's SPA fallback may have rewritten req.url to /index.html by now.
+            const requested = (req as { originalUrl?: string }).originalUrl ?? req.url ?? "/";
+            const pathname = new URL(requested, "http://localhost").pathname;
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "Not found", pathname }));
+          });
+        };
+      }
     },
 
     async resolveId(id, importer, resolveOptions) {

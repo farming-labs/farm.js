@@ -351,6 +351,11 @@
       "import": "./dist/integrations.mjs",
       "require": "./dist/integrations.cjs"
     },
+    "./integrations/orm": {
+      "types": "./dist/integrations/orm.d.ts",
+      "import": "./dist/integrations/orm.mjs",
+      "require": "./dist/integrations/orm.cjs"
+    },
     "./schema": {
       "types": "./dist/schema.d.ts",
       "import": "./dist/schema.mjs",

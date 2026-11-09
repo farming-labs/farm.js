@@ -28,6 +28,7 @@ const entry = {
   request: "src/request.ts",
   plugin: "src/plugin-entry.ts",
   integrations: "src/integrations.ts",
+  "integrations/orm": "src/integration-orm.ts",
   schema: "src/schema.ts",
   storage: "src/storage/index.ts",
   cache: "src/cache.ts",

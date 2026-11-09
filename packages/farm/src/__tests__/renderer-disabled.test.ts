@@ -55,6 +55,7 @@ async function createBackendFixture(): Promise<string> {
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
   await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+  await writeModule(root, "public/robots-notes.txt", "served from public");
   await writeModule(
     root,
     "src/app/api/route.ts",
@@ -106,7 +107,12 @@ async function expectBackendResponses(origin: string): Promise<void> {
   // The API prefix keeps answering alongside api.basePath "/".
   expect((await fetch(`${origin}/api`)).status).toBe(200);
 
-  for (const pathname of ["/missing", "/missing/deeper"]) {
+  // Public files still serve; a dotted miss answers JSON like any other miss.
+  const asset = await fetch(`${origin}/robots-notes.txt`);
+  expect(asset.status).toBe(200);
+  await expect(asset.text()).resolves.toBe("served from public");
+
+  for (const pathname of ["/missing", "/missing/deeper", "/missing.json"]) {
     const miss = await fetch(`${origin}${pathname}`);
     expect(miss.status).toBe(404);
     expect(miss.headers.get("content-type")).toMatch(/^application\/json/);
@@ -212,7 +218,10 @@ describe("renderer: false", () => {
 
     const output = path.join(root, ".farm", ".output");
     const publicFiles = await listFiles(path.join(output, "public"));
-    expect(publicFiles.map((file) => path.relative(output, file))).toEqual([]);
+    // Only the app's own public file: no browser client, manifest, or SSR assets.
+    expect(
+      publicFiles.map((file) => path.relative(output, file).split(path.sep).join("/")),
+    ).toEqual(["public/robots-notes.txt"]);
     const serverFiles = await listFiles(path.join(output, "server"));
     expect(serverFiles.some((file) => file.split(path.sep).includes("react"))).toBe(false);
     for (const file of serverFiles.filter((name) => /\.m?js$/.test(name))) {

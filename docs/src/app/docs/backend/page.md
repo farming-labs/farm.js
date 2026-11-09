@@ -142,6 +142,30 @@ With `renderer: false`, Farm:
 Built-in health probes (`/_farm/health/live`, `/_farm/health/ready`), graceful shutdown, and every
 [deployment target](/docs/deployment) work as in any other app.
 
+## Plugins
+
+Server plugins work as in any app: [Health](/docs/plugins/health), [API MCP](/docs/plugins/mcp),
+[Sentry](/docs/plugins/sentry), [Content](/docs/plugins/content), [Sync](/docs/plugins/sync),
+[Plugin Tables](/docs/plugins/schema-tables), [Analyzer](/docs/plugins/analyzer) (it reports the
+server bundle), [WebAssembly](/docs/plugins/wasm) for `.wasm` imports in API routes,
+[MSW](/docs/plugins/msw) for server-side mocking, and plugins you write with
+[`definePlugin`](/docs/plugins/create-plugin): `setup`, runtime hooks, `routes`, and lifecycle
+hooks all run.
+
+Plugins that only serve pages stop `farm dev` and `farm build` with a message naming
+`renderer: false`: [Partytown](/docs/plugins/partytown), [PWA](/docs/plugins/pwa),
+[Search](/docs/plugins/search), [StyleX](/docs/plugins/stylex), [WebMCP](/docs/plugins/webmcp),
+[Federation](/docs/plugins/federation), and MSW with `browser: true`.
+
+Development plugins that act on pages have no effect: [Hints](/docs/plugins/hints),
+[Progress](/docs/plugins/progress), and [Scripts](/docs/plugins/scripts).
+[DevTools](/docs/plugins/devtools) opens its standalone panel at `/__farm/devtools`, which lists the
+app's API routes, middleware, and plugins.
+
+A plugin must import from Farm's subpath entries, such as `@farm.js/core/plugin`; the package root
+loads React. The [Blyp](/docs/plugins/blyp) integration imports the root today, so it needs React
+installed.
+
 ## Testing
 
 `createFarmTestHarness` from `@farm.js/core/testing` calls API routes without React. Only its
