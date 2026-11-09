@@ -512,7 +512,8 @@ with each page's metadata title and description, linking to its [Markdown mirror
 when one is exposed. An options object sets the `title` and `summary` (the root layout's metadata by
 default), adds `details` Markdown, and narrows the list with `include` and `exclude` route patterns,
 which use the same syntax as `md.expose`. Dynamic routes are left out because they have no single
-URL, and so are pages a path-specific guard covers, as for the [sitemap](#sitemap).
+URL, and so are pages a path-specific guard covers, as for the [sitemap](#sitemap). Links use the
+root layout's `metadataBase`, or the request's origin when it has none, as for the sitemap.
 
 It also serves `/llms-full.txt`: the same header, then a block per listed page with its title, URL,
 and description, separated by `---`. Pages with an exposed Markdown mirror get it inlined; a page

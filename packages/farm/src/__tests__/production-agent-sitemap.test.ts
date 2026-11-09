@@ -71,7 +71,7 @@ describe("production default sitemap", () => {
           images: { provider: "none" },
           telemetry: false,
           deploy: { target: "vercel" },
-          agent: { crawlers: true },
+          agent: { crawlers: true, llmsTxt: true },
         },
         "production",
       );
@@ -103,7 +103,18 @@ describe("production default sitemap", () => {
 
       const roster = await handler.fetch(new Request("https://acme.test/staff/roster"));
       expect(await roster.text()).toContain('name="robots" content="noindex"');
-      const llms = await (await handler.fetch(new Request("https://acme.test/llms.txt"))).text();
+      // llms.txt links to metadataBase too, whatever host the request named.
+      const llms = await (await handler.fetch(new Request("https://other.test/llms.txt"))).text();
+      expect(llms).toContain("(https://acme.test/about.md)");
+      expect(llms).not.toContain("other.test");
+      // llms-full.txt still reads each page from this server.
+      const full = await (
+        await handler.fetch(new Request("https://other.test/llms-full.txt"))
+      ).text();
+      expect(full).toContain(
+        "URL: https://acme.test/about.md\n\n# Acme\n\nSource: /about\n\nabout",
+      );
+      expect(full).not.toContain("other.test");
       expect(llms).toContain("[Careers]");
       expect(llms).not.toContain("/staff/roster");
       expect(llms).not.toMatch(/\/staff\)/);

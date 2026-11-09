@@ -6823,8 +6823,10 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   createFarmLlmsMarkdownReader,
   isFarmPageNoIndex,
   listFarmMCPLlmsTxtLinks,
+  readFarmLlmsMarkdownFrom,
   registerFarmMCPServer,
   renderFarmLlmsFullTxt,
+  resolveFarmAgentOrigin,
   createFarmLlmsFullRenderer,
   createFarmThemeDocumentParts,
   createFarmLocaleCookie,
@@ -8961,9 +8963,21 @@ const farmDefaultMCPReadMarkdown = createFarmLlmsMarkdownReader((page) => fetch(
 `
     : ""
 }
+// The origin llms.txt and llms-full.txt link to: the root layout's metadataBase, else the
+// request's origin, as for the sitemap and in development.
+function getFarmAgentOrigin(request) {
+  const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
+  return resolveFarmAgentOrigin(
+    rootLayout && rootLayout.module && rootLayout.module.metadata
+      ? rootLayout.module.metadata.metadataBase
+      : undefined,
+    new URL(request.url).origin,
+  );
+}
+
 // Static pages and root metadata for llms.txt, built the same way as in development.
 function createFarmLlmsTxtContext(request, full) {
-  const origin = new URL(request.url).origin;
+  const origin = getFarmAgentOrigin(request);
   const pages = collectFarmLlmsTxtPages(
     getFarmAgentListedPageRoutes().map((route) => ({ pattern: route.pattern, metadata: route.module && route.module.metadata })),
     {
@@ -8998,7 +9012,11 @@ function createFarmLlmsTxtContext(request, full) {
       ? {
           markdown: request.method.toUpperCase() === "HEAD"
             ? async () => null
-            : createFarmLlmsMarkdownReader((page) => fetch(page)),
+            : readFarmLlmsMarkdownFrom(
+                new URL(request.url).origin,
+                origin,
+                createFarmLlmsMarkdownReader((page) => fetch(page)),
+              ),
         }
       : {}),
   };
@@ -9033,7 +9051,7 @@ async function handleApplicationMetadataRouteRequest(request, routePathname) {
         })
       : routeModule.default;
     const body = isLlmsFull && !(value instanceof Response)
-      ? await renderFarmLlmsFullTxt(value, { origin: url.origin, readMarkdown: llmsContext.markdown })
+      ? await renderFarmLlmsFullTxt(value, { origin: getFarmAgentOrigin(request), readMarkdown: llmsContext.markdown })
       : value;
     return createFarmMetadataRouteResponse(match.metadata.kind, body, routeModule, { method, request });
   } catch (error) {
@@ -10233,13 +10251,14 @@ ${
     : ${config.agent?.llmsTxt?.full ? `normalizeRuntimePath(routePathname) === "/llms-full.txt" ? "llms-full" : ` : ""}null;
   if (farmGeneratedLlmsKind) {
     const llmsContext = createFarmLlmsTxtContext(request, farmGeneratedLlmsKind === "llms-full");
+    // Renders are shared per origin the request reached, which is where pages are read.
     const llmsOrigin = new URL(request.url).origin;
     // A page that times out is left out, the shared render is not reused, and
     // the partial response is not cacheable.
     let llmsComplete = true;
     const renderLlmsFull = (shared) =>
       renderFarmLlmsFullTxt(llmsContext.defaults, {
-        origin: llmsOrigin,
+        origin: getFarmAgentOrigin(request),
         readMarkdown: llmsContext.markdown,
         onIncomplete: () => {
           llmsComplete = false;

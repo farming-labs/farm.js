@@ -136,6 +136,13 @@ export default function Page() { return <main>careers</main>; }`,
     expect(llms).not.toMatch(/\/staff\)/);
   }, 120_000);
 
+  it("links llms.txt to metadataBase, as the sitemap does, not the request's host", async () => {
+    const origin = await startApp("");
+    const llms = await (await fetch(`${origin}/llms.txt`)).text();
+    expect(llms).toContain("(https://acme.test/about.md)");
+    expect(llms).not.toContain(origin);
+  }, 120_000);
+
   it("turns off with agent.sitemap: false", async () => {
     const origin = await startApp("agent: { sitemap: false }");
     expect((await fetch(`${origin}/sitemap.xml`)).status).toBe(404);

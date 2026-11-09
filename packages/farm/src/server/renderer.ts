@@ -117,7 +117,9 @@ import {
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
   isFarmPageNoIndex,
+  readFarmLlmsMarkdownFrom,
   renderFarmLlmsFullTxt,
+  resolveFarmAgentOrigin,
   resolveFarmLlmsTxtConfig,
 } from "../llms-txt";
 import {
@@ -2593,7 +2595,7 @@ export class ServerRenderer {
       const body =
         match.metadata.kind === "llms-full" && !(value instanceof Response)
           ? await renderFarmLlmsFullTxt(value, {
-              origin: url.origin,
+              origin: await this.getAgentOrigin(request),
               readMarkdown: llmsContext.markdown!,
             })
           : value;
@@ -2636,7 +2638,7 @@ export class ServerRenderer {
       const body =
         kind === "llms-full"
           ? await renderFarmLlmsFullTxt(context.defaults, {
-              origin: new URL(request.url).origin,
+              origin: await this.getAgentOrigin(request),
               readMarkdown: context.markdown!,
             })
           : context.defaults;
@@ -2872,7 +2874,7 @@ export class ServerRenderer {
     markdown?: (url: string) => Promise<string | null>;
   }> {
     const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
-    const origin = new URL(request.url).origin;
+    const origin = await this.getAgentOrigin(request);
     const sources = await Promise.all(
       this.getAgentListedRoutes().map(async ([pattern, route]) => {
         try {
@@ -2923,8 +2925,31 @@ export class ServerRenderer {
                 defaultMCP: () => this.getDefaultMCPServer(),
               }),
       }),
-      ...(options.full ? { markdown: this.createDevMarkdownReader(options.req) } : {}),
+      ...(options.full
+        ? {
+            markdown: readFarmLlmsMarkdownFrom(
+              new URL(request.url).origin,
+              origin,
+              this.createDevMarkdownReader(options.req),
+            ),
+          }
+        : {}),
     };
+  }
+
+  /**
+   * The origin llms.txt and llms-full.txt link to: the root layout's `metadataBase`, else the
+   * request's origin, as for the sitemap and the production server.
+   */
+  private async getAgentOrigin(request: Request): Promise<string> {
+    const rootLayout = this.routeManager.getLayouts().get("/");
+    const rootMetadata = rootLayout
+      ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
+      : undefined;
+    return resolveFarmAgentOrigin(
+      (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
+      new URL(request.url).origin,
+    );
   }
 
   /**

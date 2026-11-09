@@ -191,6 +191,42 @@ export function collectFarmLlmsTxtPages(
   return [...pages.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
+/**
+ * The origin generated agent files (llms.txt, llms-full.txt, sitemap.xml) link to: the root
+ * layout's `metadataBase` when it is an absolute http(s) URL, else the request's origin. The
+ * request's host is client input, so a configured base keeps it out of files CDNs may cache.
+ */
+export function resolveFarmAgentOrigin(metadataBase: unknown, requestOrigin: string): string {
+  if (typeof metadataBase !== "string" && !(metadataBase instanceof URL)) return requestOrigin;
+  try {
+    const url = new URL(String(metadataBase));
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : requestOrigin;
+  } catch {
+    return requestOrigin;
+  }
+}
+
+/**
+ * Reads pages linked on `origin` (a configured `metadataBase`) from `readOrigin`, the origin
+ * this server was reached at, so llms-full.txt reads stay on this server whatever the links name.
+ */
+export function readFarmLlmsMarkdownFrom(
+  readOrigin: string,
+  origin: string,
+  read: (url: string) => Promise<string | null>,
+): (url: string) => Promise<string | null> {
+  if (readOrigin === origin) return read;
+  return (url) => {
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      return read(url);
+    }
+    return read(target.origin === origin ? `${readOrigin}${target.pathname}${target.search}` : url);
+  };
+}
+
 /** True when page metadata asks search engines not to index the page. */
 export function isFarmMetadataNoIndex(metadata: unknown): boolean {
   if (!metadata || typeof metadata !== "object") return false;
