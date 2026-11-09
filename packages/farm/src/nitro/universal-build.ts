@@ -9029,10 +9029,12 @@ function matchRedirectRoute(pathname, locale, search) {
     const params = matchRuntimePathPattern(redirect.source, pathname);
     if (!params) continue;
     const destination = interpolateRedirectDestination(redirect.destination, params);
+    // Sources match the app-relative path, so an internal destination is app-relative
+    // too: send the browser to it inside the basePath, as a localized one already is.
     const localizedDestination =
       locale && destination.startsWith("/") && !destination.startsWith("//")
         ? localizeFarmHref(destination, locale, farmI18nConfig)
-        : destination;
+        : applyFarmBasePath(destination);
     return {
       destination: appendFarmRedirectQuery(localizedDestination, search),
       statusCode: redirect.statusCode ?? (redirect.permanent ? 308 : 307),

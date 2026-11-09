@@ -319,16 +319,18 @@ export async function createServer(
     const headers = await resolvedConfig.headers();
     const rewrites = await resolvedConfig.rewrites();
 
+    const configRouteOptions = { i18n: resolvedConfig.i18n, basePath: resolvedConfig.basePath };
+
     if (redirects.length > 0) {
-      pluginManager.addPlugin(createRedirectsPlugin(redirects, { i18n: resolvedConfig.i18n }));
+      pluginManager.addPlugin(createRedirectsPlugin(redirects, configRouteOptions));
     }
 
     if (headers.length > 0) {
-      pluginManager.addPlugin(createHeadersPlugin(headers, { i18n: resolvedConfig.i18n }));
+      pluginManager.addPlugin(createHeadersPlugin(headers, configRouteOptions));
     }
 
     if (rewrites.length > 0) {
-      pluginManager.addPlugin(createRewritesPlugin(rewrites, { i18n: resolvedConfig.i18n }));
+      pluginManager.addPlugin(createRewritesPlugin(rewrites, configRouteOptions));
     }
 
     // Compression is applied by production adapters. Its hook is a no-op in
