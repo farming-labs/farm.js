@@ -29,6 +29,38 @@ describe("trailing slash routing", () => {
     expect(resolveFarmTrailingSlashRedirect(new URL("https://farm.test/about/"), true)).toBeNull();
   });
 
+  it("keeps canonical redirects on the request origin when the path repeats leading slashes", () => {
+    // A root-level dynamic route matches "//evil.com/" because empty segments are skipped, so
+    // the canonical Location must not become the protocol-relative URL "//evil.com".
+    const cases: Array<[string, boolean, string]> = [
+      ["https://farm.test//evil.com/", false, "/evil.com"],
+      ["https://farm.test/\\evil.com/", false, "/evil.com"],
+      ["https://farm.test///evil.com/", false, "/evil.com"],
+      ["https://farm.test//evil.com/?x=1", false, "/evil.com?x=1"],
+      ["https://farm.test//evil.com", false, "/evil.com"],
+      ["https://farm.test//evil.com", true, "/evil.com/"],
+      ["https://farm.test/\\evil.com", true, "/evil.com/"],
+      ["https://farm.test//evil.com/about", true, "/evil.com/about/"],
+      ["https://farm.test//evil.com/", true, "/evil.com/"],
+      ["https://farm.test//", false, "/"],
+      ["https://farm.test//", true, "/"],
+    ];
+    for (const [href, enabled, location] of cases) {
+      expect(resolveFarmTrailingSlashRedirect(new URL(href), enabled), href).toBe(location);
+    }
+    expect(normalizeFarmTrailingSlashPathname("//evil.com/", false)).toBe("/evil.com");
+    expect(normalizeFarmTrailingSlashPathname("/\\evil.com", true)).toBe("/evil.com/");
+  });
+
+  it("leaves interior repeated slashes and already-canonical paths alone", () => {
+    expect(resolveFarmTrailingSlashRedirect(new URL("https://farm.test/a//b/"), false)).toBe(
+      "/a//b",
+    );
+    expect(resolveFarmTrailingSlashRedirect(new URL("https://farm.test/a//b/"), true)).toBeNull();
+    expect(resolveFarmTrailingSlashRedirect(new URL("https://farm.test/about"), false)).toBeNull();
+    expect(resolveFarmTrailingSlashRedirect(new URL("https://farm.test/"), true)).toBeNull();
+  });
+
   it("shares the configured preference across framework entry points", () => {
     setFarmTrailingSlashPreference(true);
     expect(getFarmTrailingSlashPreference()).toBe(true);

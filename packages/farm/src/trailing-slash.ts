@@ -15,12 +15,18 @@ export function getFarmTrailingSlashPreference(): boolean {
 }
 
 export function normalizeFarmTrailingSlashPathname(pathname: string, enabled: boolean): string {
-  if (pathname === "/") return pathname;
-  if (enabled) return pathname.endsWith("/") ? pathname : `${pathname}/`;
-  return pathname.replace(/\/+$/, "") || "/";
+  // Route matching skips empty segments, so "//host/" matches a root dynamic route. Collapse the
+  // leading slashes (browsers read a backslash as "/") so the canonical path never reads "//host".
+  const canonical = pathname.replace(/^[/\\]+/, "/");
+  if (canonical === "/") return canonical;
+  if (enabled) return canonical.endsWith("/") ? canonical : `${canonical}/`;
+  return canonical.replace(/\/+$/, "") || "/";
 }
 
 export function resolveFarmTrailingSlashRedirect(url: URL, enabled: boolean): string | null {
   const pathname = normalizeFarmTrailingSlashPathname(url.pathname, enabled);
-  return pathname === url.pathname ? null : `${pathname}${url.search}`;
+  if (pathname === url.pathname) return null;
+  // A relative Location starting with two slashes (or a slash and a backslash) leaves the origin.
+  if (/^\/[/\\]/.test(pathname)) return null;
+  return `${pathname}${url.search}`;
 }
