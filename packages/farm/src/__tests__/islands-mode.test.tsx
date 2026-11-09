@@ -206,6 +206,21 @@ describe("islands mode", () => {
     expect(transform(false)).toContain('import { createPortal, useFormStatus } from "react-dom";');
   });
 
+  it("keeps islx's server wrapper out of the browser build", async () => {
+    const { parseSync } = await import("vite");
+    const transform = (browser: boolean) =>
+      transformIsolatedClientBoundaryModule({
+        code: '"use client";\nexport function Counter() { return null; }\n',
+        moduleReference: "/src/counter.tsx",
+        islandStrategy: "load",
+        parse: (code) => (parseSync("counter.tsx", code) as { program: unknown }).program as never,
+        slots: true,
+        browser,
+      })!;
+    expect(transform(true)).not.toContain("createIsland");
+    expect(transform(false)).toContain("createIsland");
+  });
+
   it("wraps export-list and re-exported components as islands", async () => {
     const { parseSync } = await import("vite");
     const output = transformIsolatedClientBoundaryModule({
