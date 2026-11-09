@@ -58,7 +58,11 @@ import { resolveMarkdownConfig, type FarmMarkdownUserConfig } from "@farm.js/cor
 import type { FarmLlmsTxtUserConfig } from "@farm.js/core/internal/production-runtime";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateErrorFallbackEntry } from "./entries/error-fallback.js";
-import { generateClientEntry, serverFnTransportErrorClientRuntime } from "./entries/client.js";
+import {
+  CLIENT_ENTRY_CORE_IMPORTS,
+  generateClientEntry,
+  serverFnTransportErrorClientRuntime,
+} from "./entries/client.js";
 import { transformFarmRouteActionClients } from "./route-action-transform.js";
 import {
   createFarmServerFnBoundaryModule,
@@ -1400,6 +1404,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                   "react-dom",
                   "react-dom/client",
                   "rsc-html-stream/client",
+                  ...CLIENT_ENTRY_CORE_IMPORTS,
                   // Client components and the packages they use load only once a page renders
                   // (client references), so they would be found late too.
                   ...clientOptimizeDeps.include,

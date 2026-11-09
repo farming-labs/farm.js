@@ -1,6 +1,14 @@
 import type { EntryContext } from "../types.js";
 import { generateMobileShellNavigation } from "../mobile-client.js";
 
+// The browser entry always loads, so what it imports must be optimized before the first page.
+export const CLIENT_ENTRY_CORE_IMPORTS = [
+  "@farm.js/core/client",
+  "@farm.js/core/deployment",
+  "@farm.js/core/internal/client-runtime",
+  "@farm.js/core/server-query/client",
+] as const;
+
 export const serverFnTransportErrorClientRuntime = `function createFarmServerFnTransportError(value) {
   const message = value && typeof value === 'object' && typeof value.message === 'string'
     ? value.message
