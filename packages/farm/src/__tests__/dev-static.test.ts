@@ -3,8 +3,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  createFarmPublicFileIndex,
   devServableFileExists,
   farmAppOwnsDocsEnginePath,
+  isMalformedFarmRequestPathname,
+  resolveFarmPublicFilePath,
   shouldBypassFarmRouterForDottedPath,
 } from "../dev-static";
 
@@ -219,5 +222,92 @@ describe("shouldBypassFarmRouterForDottedPath", () => {
     expect(shouldBypassFarmRouterForDottedPath("/page.html", routeManager, [publicDir, root])).toBe(
       false,
     );
+  });
+
+  it("routes a file's path for POST, as production only serves files to GET and HEAD", () => {
+    fs.writeFileSync(path.join(publicDir, "hello.txt"), "hi");
+    try {
+      const bypass = (pathname: string, method: string) =>
+        shouldBypassFarmRouterForDottedPath(
+          pathname,
+          createRouteManager({}),
+          [publicDir, root],
+          [],
+          method,
+        );
+      expect(bypass("/hello.txt", "GET")).toBe(true);
+      expect(bypass("/hello.txt", "HEAD")).toBe(true);
+      expect(bypass("/hello.txt", "POST")).toBe(false);
+      // A dotted path with no file still goes to Vite first (its proxy, for one).
+      expect(bypass("/legacy/submit.php", "POST")).toBe(true);
+    } finally {
+      fs.rmSync(path.join(publicDir, "hello.txt"));
+    }
+  });
+});
+
+describe("isMalformedFarmRequestPathname", () => {
+  it("matches the paths h3 rejects", () => {
+    for (const pathname of ["/%ZZ", "/api/items/%E0%A4", "/a%", "/a%2"]) {
+      expect(isMalformedFarmRequestPathname(pathname), pathname).toBe(true);
+    }
+    for (const pathname of ["/", "/about", "/caf%C3%A9", "/a%2Fb", "/%25ZZ"]) {
+      expect(isMalformedFarmRequestPathname(pathname), pathname).toBe(false);
+    }
+  });
+});
+
+describe("resolveFarmPublicFilePath", () => {
+  const files = new Set(["/hello.txt", "/landing.html", "/sub/index.html", "/my file.txt"]);
+
+  it("resolves files and directory indexes as Nitro's static handler does", () => {
+    expect(resolveFarmPublicFilePath("/hello.txt", files)).toBe("/hello.txt");
+    expect(resolveFarmPublicFilePath("/hello.txt/", files)).toBe("/hello.txt");
+    expect(resolveFarmPublicFilePath("/landing.html", files)).toBe("/landing.html");
+    expect(resolveFarmPublicFilePath("/sub", files)).toBe("/sub/index.html");
+    expect(resolveFarmPublicFilePath("/sub/", files)).toBe("/sub/index.html");
+    expect(resolveFarmPublicFilePath("/sub/index.html", files)).toBe("/sub/index.html");
+    expect(resolveFarmPublicFilePath("/my%20file.txt", files)).toBe("/my file.txt");
+  });
+
+  it("serves nothing else", () => {
+    for (const pathname of ["/", "/nope.txt", "/hello.txt//", "//sub/", "/sub%2Findex.html"]) {
+      expect(resolveFarmPublicFilePath(pathname, files), pathname).toBeNull();
+    }
+    expect(resolveFarmPublicFilePath("/", new Set(["/index.html"]))).toBe("/index.html");
+  });
+});
+
+describe("createFarmPublicFileIndex", () => {
+  let root: string;
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-dev-public-index-"));
+    fs.mkdirSync(path.join(root, "public", "sub"), { recursive: true });
+    fs.writeFileSync(path.join(root, "public", "hello.txt"), "hi");
+    fs.writeFileSync(path.join(root, "public", "sub", "index.html"), "<p>sub</p>");
+  });
+
+  afterAll(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("lists the public dir once and again after a change inside it", () => {
+    const publicDir = path.join(root, "public");
+    const index = createFarmPublicFileIndex(() => publicDir);
+    const first = index.get();
+    expect([...first].sort()).toEqual(["/hello.txt", "/sub/index.html"]);
+    expect(index.get()).toBe(first);
+
+    const added = path.join(publicDir, "added.txt");
+    fs.writeFileSync(added, "new");
+    // A change elsewhere keeps the listing.
+    index.invalidate(path.join(root, "src", "page.tsx"));
+    expect(index.get()).toBe(first);
+    index.invalidate(added);
+    expect([...index.get()].sort()).toEqual(["/added.txt", "/hello.txt", "/sub/index.html"]);
+
+    expect(createFarmPublicFileIndex(() => false).get().size).toBe(0);
+    expect(createFarmPublicFileIndex(() => path.join(root, "missing")).get().size).toBe(0);
   });
 });

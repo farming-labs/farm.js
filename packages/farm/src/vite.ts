@@ -176,9 +176,13 @@ import { _withAfterNodeMiddleware } from "./after";
 import { _runWithAPIRequestRuntime } from "./api/server-context";
 import type { APIRequestRuntime } from "./api/server-client-bridge";
 import {
+  createFarmPublicFileIndex,
+  FARM_MALFORMED_REQUEST_BODY,
   devServableFileExists,
   farmAppOwnsDocsEnginePath,
+  isMalformedFarmRequestPathname,
   isViteModuleRequest,
+  resolveFarmPublicFilePath,
   shouldBypassFarmRouterForDottedPath,
 } from "./dev-static";
 import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
@@ -272,7 +276,7 @@ import { FARM_CONFIG_REDIRECTS_PLUGIN_NAME, getConfigRedirectMatcher } from "./p
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
 import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
-import { resolveFarmRequestURL } from "./server/request";
+import { parseFarmRequestTarget, resolveFarmRequestURL } from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
 
 /** Paths `agent.llmsTxt` serves without a route file. */
@@ -2338,6 +2342,14 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             });
           },
         );
+      // Production serves public files before middleware and routes; see resolveFarmPublicFilePath.
+      const publicFileIndex = createFarmPublicFileIndex(() => server.config.publicDir);
+      for (const event of ["add", "unlink", "addDir", "unlinkDir"] as const) {
+        server.watcher.on(event, (file: string) => publicFileIndex.invalidate(file));
+      }
+      // Dotted paths handed to Vite's file serving, by the URL they had then. One that nothing in
+      // Vite answered comes back through the post hook below and is routed like any other path.
+      const deferredDottedRequests = new WeakMap<Connect.IncomingMessage, string>();
       // A configured rewrite re-enters this handler with the destination URL, as the production
       // entry re-enters its request handler, so every route and guard sees the destination.
       server.middlewares.use(
@@ -2351,6 +2363,32 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           });
           const fullUrl = parsedRequestUrl.toString();
           const requestPathname = parsedRequestUrl.pathname;
+
+          // Production's HTTP layer (h3) rejects a path that does not percent-decode before any
+          // middleware, file, or route sees it.
+          if (isMalformedFarmRequestPathname(requestPathname)) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.end(requestMethod === "HEAD" ? undefined : FARM_MALFORMED_REQUEST_BODY);
+            return;
+          }
+
+          // A GET or HEAD for a public file, or a public directory's index.html, is served before
+          // anything else, as Nitro's static handler does in production. Vite's public-file
+          // middleware sends it; it only knows exact file paths, so the URL names the file.
+          if (
+            (requestMethod === "GET" || requestMethod === "HEAD") &&
+            (req as FarmDevConfigRewriteRequest)[FARM_DEV_CONFIG_REWRITE_SOURCE] === undefined &&
+            !isViteModuleRequest(parsedRequestUrl, req.headers)
+          ) {
+            const publicFile = resolveFarmPublicFilePath(requestPathname, publicFileIndex.get());
+            if (publicFile) {
+              if (publicFile !== requestPathname) {
+                req.url = `${encodeURI(publicFile)}${parsedRequestUrl.search}`;
+              }
+              return next();
+            }
+          }
 
           // A routeRules `cors` preflight is answered ahead of middleware and routes, as
           // production's route rule does.
@@ -2496,13 +2534,14 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // middleware does, as in the production entry: headers() then apply to whatever
           // answers, a redirect or a middleware response included, and a redirect passes through
           // the plugin runtime like any response. A request a config rewrite re-entered this
-          // handler with has passed them already.
+          // handler with, or a dotted path back from Vite's file serving, has passed them already.
           const configRewriteSource = (req as FarmDevConfigRewriteRequest)[
             FARM_DEV_CONFIG_REWRITE_SOURCE
           ];
           if (
             pm &&
             configRewriteSource === undefined &&
+            !deferredDottedRequests.has(req) &&
             (configRoutePlugins.has(FARM_CONFIG_HEADERS_PLUGIN_NAME) ||
               configRedirectMatchers.length > 0) &&
             !isViteOwnedRequest()
@@ -3549,15 +3588,20 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // application metadata routes (/manifest.webmanifest, /sitemap.xml,
           // /robots.txt, metadata images). Only skip the router when the
           // request maps to a real file on disk or nothing in the app matches
-          // the pathname.
+          // the pathname. A path no Vite middleware answers comes back here
+          // (see the post hook), and is then routed: middleware runs and the
+          // not-found page renders, as in production.
           if (
+            !deferredDottedRequests.has(req) &&
             shouldBypassFarmRouterForDottedPath(
               requestPathname,
               farmApp?.getRouteManager(),
               [server.config.publicDir, server.config.root],
               farmAgentGeneratedPaths(farmConfig),
+              requestMethod,
             )
           ) {
+            if (!viteModuleRequest) deferredDottedRequests.set(req, requestUrl);
             return next();
           }
 
@@ -4169,6 +4213,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
         }),
       );
+      // The handler just registered, so the post hook below can route a deferred dotted path.
+      const farmRequestMiddleware = server.middlewares.stack.at(-1)
+        ?.handle as Connect.NextHandleFunction;
 
       // What Farm passed on is Vite's (modules, /@vite/*, /@fs/*, public files): give it the CORS
       // policy Vite would have, unless a later plugin turned Vite's own back on.
@@ -4176,22 +4223,27 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         viteServer.middlewares.use(createFarmDevViteCorsMiddleware());
       }
 
-      // `renderer: false`: a dotted path that no route or file answered falls through to Vite,
-      // whose 404 has an empty body. Answer it with the same JSON miss as production. The post hook
-      // runs after Vite's module and static-file middleware, so only true misses reach it.
-      if (rendererDisabled) {
-        return () => {
-          viteServer.middlewares.use((req, res, next) => {
-            if (res.headersSent || res.writableEnded) return next();
-            // Vite's SPA fallback may have rewritten req.url to /index.html by now.
-            const requested = (req as { originalUrl?: string }).originalUrl ?? req.url ?? "/";
-            const pathname = new URL(requested, "http://localhost").pathname;
-            res.statusCode = 404;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "Not found", pathname }));
-          });
-        };
-      }
+      // A dotted path that no route or file answered falls through to Vite, whose 404 has an
+      // empty body. The post hook runs after Vite's module and static-file middleware, so only
+      // true misses reach it: route them as production does, where middleware runs and the
+      // not-found page (or, with `renderer: false`, the JSON miss) answers.
+      return () => {
+        viteServer.middlewares.use((req, res, next) => {
+          if (res.headersSent || res.writableEnded) return next();
+          // Vite's SPA fallback may have rewritten req.url to /index.html by now.
+          const deferredUrl = deferredDottedRequests.get(req);
+          if (deferredUrl !== undefined) {
+            req.url = deferredUrl;
+            return farmRequestMiddleware(req, res, next);
+          }
+          if (!rendererDisabled) return next();
+          const requested = (req as { originalUrl?: string }).originalUrl ?? req.url ?? "/";
+          const pathname = parseFarmRequestTarget(requested, "http://localhost").pathname;
+          res.statusCode = 404;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: "Not found", pathname }));
+        });
+      };
     },
 
     async resolveId(id, importer, resolveOptions) {

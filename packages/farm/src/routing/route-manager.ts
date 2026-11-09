@@ -399,11 +399,20 @@ export class RouteManager {
     const routePathname = this.toRoutePathname(pathname);
     const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
     const pathParts = splitRoutePath(normalizedPath);
+    // Production looks a static route up by its exact path, so a path with an empty segment
+    // (`//about`, `/console//about`, `//`) reaches no static route; only dynamic routes,
+    // matched segment by segment, skip the empty segment.
+    const trimmedPathname = routePathname.replace(/\/+$/, "");
+    const hasEmptySegment =
+      trimmedPathname.includes("//") || (trimmedPathname === "" && routePathname.length > 1);
     // Find matching page route
     let matchedRoute: RouteEntry | null = null;
     let params: Record<string, string> = {};
 
     for (const routeEntry of this.routes.values()) {
+      if (hasEmptySegment && !routeEntry.route.segments.some((segment) => segment.isDynamic)) {
+        continue;
+      }
       const match = matchRouteParts(pathParts, routeEntry.route.segments);
       if (match.matches) {
         matchedRoute = routeEntry;

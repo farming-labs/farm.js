@@ -172,9 +172,20 @@ export interface FarmRequestURLOptions {
   trustProxy?: boolean;
 }
 
+/**
+ * The URL a request target names on `origin`. An origin-form target (`/path?query`) is always
+ * a path: `new URL("//about/", origin)` would read it as a scheme-relative reference whose host
+ * is `about`, where production's HTTP layer keeps `//about/` as the pathname.
+ */
+export function parseFarmRequestTarget(target: string, origin: string | URL): URL {
+  return target.startsWith("/")
+    ? new URL(`${new URL(origin).origin}${target}`)
+    : new URL(target, origin);
+}
+
 export function resolveFarmRequestURL(req: FarmRequest, options: FarmRequestURLOptions = {}): URL {
   if (options.origin) {
-    return new URL(req.url || "/", options.origin);
+    return parseFarmRequestTarget(req.url || "/", options.origin);
   }
 
   const forwardedHost = options.trustProxy
@@ -191,7 +202,10 @@ export function resolveFarmRequestURL(req: FarmRequest, options: FarmRequestURLO
       : isEncryptedFarmRequest(req)
         ? "https"
         : "http";
-  return new URL(req.url || "/", resolveRequestOrigin(proto, forwardedHost, fallbackHost));
+  const origin = resolveRequestOrigin(proto, forwardedHost, fallbackHost);
+  const target = req.url || "/";
+  // `origin` is already an origin, so an origin-form target joins it without another parse.
+  return target.startsWith("/") ? new URL(`${origin}${target}`) : new URL(target, origin);
 }
 
 /**
