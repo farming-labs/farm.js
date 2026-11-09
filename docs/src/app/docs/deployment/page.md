@@ -52,6 +52,20 @@ The rule intentionally excludes HTML, unhashed public files, and stable entry UR
 revalidatable. The immutable header route runs before Vercel's filesystem handler, so matching files
 are still served directly from the CDN and never enter the Farm server function.
 
+### Files server code reads
+
+Server code can read a file it imports from beside its own chunk. Vite emits this for a server
+import of a `.wasm` module without `@farm.js/wasm`: the server loads the binary with
+`readFile(new URL("assets/<name>", import.meta.url))`. Farm copies each such file next to the
+server chunk that reads it on presets with a filesystem (`node-server`, `bun`, `vercel`,
+`netlify`, and other Node presets), and keeps it out of the public output.
+
+Workers and edge functions (`cloudflare`, `cloudflare-pages`, `cloudflare-module`, `vercel-edge`,
+`netlify-edge`) have no filesystem, so the build fails and names the file instead of deploying a
+server that crashes when it loads. Cloudflare Workers also refuse to compile WebAssembly from bytes,
+so inlining the module does not work there either. Import other files with `?inline` to ship their
+contents inside the server bundle, or build that server code for a preset with a filesystem.
+
 ## Preset showcase
 
 Use `deploy.target` when you want one config file to control the platform output. Farm maps that target to the Nitro preset, default output directory, and deploy command shape.

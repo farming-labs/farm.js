@@ -1,18 +1,20 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Rollup } from "vite";
 import { afterEach, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
-import { collectServerOnlySSRAssets } from "../nitro/ssr-public-assets";
+import { collectServerFileSSRAssets, collectServerOnlySSRAssets } from "../nitro/ssr-public-assets";
+import { definePlugin } from "../plugin";
 import { getAvailablePort } from "./dev-server-port";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots = new Set<string>();
+const hasBun = spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0;
 
 afterEach(async () => {
   await Promise.all(
@@ -87,10 +89,11 @@ async function listRelativeFiles(directory: string): Promise<string[]> {
 async function withProductionServer(
   serverDir: string,
   run: (origin: string) => Promise<void>,
+  command = process.execPath,
 ): Promise<void> {
   const port = await getAvailablePort();
   const processOutput: string[] = [];
-  const productionServer = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
+  const productionServer = spawn(command, [path.join(serverDir, "index.mjs")], {
     cwd: serverDir,
     env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
@@ -242,6 +245,139 @@ export default function Page() {
   }, 240_000);
 });
 
+/** The server-read binary's path relative to the server directory, from the SSR bundle. */
+async function findSSRWasmAsset(root: string): Promise<string> {
+  const ssrFiles = await listRelativeFiles(path.join(root, ".farm", "ssr"));
+  const wasmFile = ssrFiles.find((file) => /^assets\/math-[\w-]+\.wasm$/.test(file));
+  expect(wasmFile, ssrFiles.join("\n")).toBeDefined();
+  return wasmFile!;
+}
+
+/** Forces node-server onto Nitro's rebundle of `.farm/ssr`, as any late Nitro hook does. */
+const nitroRebundlePlugin = definePlugin({
+  name: "test:nitro-rebundle",
+  build: {
+    configure(nitroConfig) {
+      return { ...nitroConfig, hooks: { ...nitroConfig.hooks, "rollup:before"() {} } };
+    },
+  },
+});
+
+describe("SSR assets server code reads in rebundled server output", () => {
+  it("copies the asset beside the node-server fallback's rebundled server", async () => {
+    const root = await createServerWasmFixture();
+    const config = await resolveConfig(
+      { root, renderer: false, plugins: [nitroRebundlePlugin] },
+      "production",
+    );
+    await build(config, { root, preset: "node-server" });
+
+    const serverDir = path.join(root, ".farm", ".output", "server");
+    const serverFiles = await listRelativeFiles(serverDir);
+    // Nitro rebundled the SSR graph rather than reusing Farm's prebuilt copy.
+    expect(serverFiles.some((file) => file.startsWith("farm-ssr/"))).toBe(false);
+    const wasmFile = await findSSRWasmAsset(root);
+    expect(serverFiles).toContain(wasmFile);
+
+    await withProductionServer(serverDir, async (origin) => {
+      const sum = await fetch(`${origin}/api/add?a=20&b=22`);
+      expect(sum.status).toBe(200);
+      await expect(sum.json()).resolves.toEqual({ sum: 42 });
+      // Still server-private: the copy is not a public asset.
+      const asset = await fetch(`${origin}/${wasmFile}`);
+      expect(asset.status).toBe(404);
+      await asset.body?.cancel();
+    });
+  }, 180_000);
+
+  it("copies the asset beside the bun server", async ({ skip }) => {
+    const root = await createServerWasmFixture();
+    const config = await resolveConfig({ root, renderer: false }, "production");
+    await build(config, { root, preset: "bun" });
+
+    const serverDir = path.join(root, ".farm", ".output", "server");
+    const wasmFile = await findSSRWasmAsset(root);
+    expect(await listRelativeFiles(serverDir)).toContain(wasmFile);
+    expect(
+      (await listRelativeFiles(path.join(root, ".farm", ".output", "public"))).filter((file) =>
+        file.endsWith(".wasm"),
+      ),
+    ).toEqual([]);
+
+    if (!hasBun) skip();
+    // Before the copy, the server crashed at startup with ENOENT for server/assets/math-*.wasm.
+    await withProductionServer(
+      serverDir,
+      async (origin) => {
+        const sum = await fetch(`${origin}/api/add?a=40&b=2`);
+        expect(sum.status).toBe(200);
+        await expect(sum.json()).resolves.toEqual({ sum: 42 });
+      },
+      "bun",
+    );
+  }, 180_000);
+
+  it("copies the asset into the Vercel function", async () => {
+    const root = await createServerWasmFixture();
+    const config = await resolveConfig({ root, renderer: false }, "production");
+    await build(config, { root, preset: "vercel" });
+
+    const output = path.join(root, ".vercel", "output");
+    const functionDir = path.join(output, "functions", "__nitro.func");
+    expect(await listRelativeFiles(functionDir)).toContain(await findSSRWasmAsset(root));
+    expect(
+      (await listRelativeFiles(path.join(output, "static"))).filter((file) =>
+        file.endsWith(".wasm"),
+      ),
+    ).toEqual([]);
+
+    const entry = pathToFileURL(path.join(functionDir, "index.mjs")).href;
+    const server = (await import(/* @vite-ignore */ entry)).default;
+    const response: Response = await server.fetch(
+      new Request("https://farm.test/api/add?a=19&b=23"),
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ sum: 42 });
+  }, 180_000);
+
+  it("copies the asset into the Netlify function", async () => {
+    const root = await createServerWasmFixture();
+    const config = await resolveConfig({ root, renderer: false }, "production");
+    await build(config, { root, preset: "netlify" });
+
+    const functionDir = path.join(root, ".netlify", "functions-internal", "server");
+    expect(await listRelativeFiles(functionDir)).toContain(await findSSRWasmAsset(root));
+
+    const entry = pathToFileURL(path.join(functionDir, "main.mjs")).href;
+    const { default: handler } = await import(/* @vite-ignore */ entry);
+    const response: Response = await handler(
+      new Request("https://site.netlify.app/api/add?a=21&b=21"),
+      {},
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ sum: 42 });
+  }, 180_000);
+
+  it("fails a Cloudflare Worker build that would read the asset from disk", async () => {
+    const root = await createServerWasmFixture();
+    const config = await resolveConfig({ root, renderer: false }, "production");
+    const failure = await build(config, { root, preset: "cloudflare-module" }).then(
+      () => null,
+      (error: Error) => error,
+    );
+
+    expect(failure?.message).toMatch(
+      /The cloudflare-module preset cannot deploy files that server code reads from disk: assets\/math-[\w-]+\.wasm\./,
+    );
+    expect(failure?.message).toContain("refuse to compile WebAssembly from bytes");
+    expect(failure?.message).toContain("node-server, bun, vercel, or netlify");
+    // No Worker that would crash at startup is left to deploy.
+    await expect(
+      fs.access(path.join(root, ".farm", ".output", "server", "index.mjs")),
+    ).rejects.toThrow();
+  }, 180_000);
+});
+
 function chunk(fileName: string, code: string): Rollup.OutputChunk {
   return { type: "chunk", fileName, code } as Rollup.OutputChunk;
 }
@@ -253,6 +389,28 @@ function asset(fileName: string, source: string | Uint8Array = ""): Rollup.Outpu
 function bundleOf(...outputs: Array<Rollup.OutputChunk | Rollup.OutputAsset>): Rollup.OutputBundle {
   return Object.fromEntries(outputs.map((output) => [output.fileName, output]));
 }
+
+describe("collectServerFileSSRAssets", () => {
+  it("includes an asset server code reads even when a page also links it", () => {
+    const bundle = bundleOf(
+      chunk(
+        "entry.js",
+        `const a = new URL("assets/linked-abc.wasm", import.meta.url);
+const b = new URL("assets/private-def.wasm", import.meta.url);
+const href = "/assets/linked-abc.wasm";
+const page = "/assets/page-ghi.png";`,
+      ),
+      asset("assets/linked-abc.wasm"),
+      asset("assets/private-def.wasm"),
+      asset("assets/page-ghi.png"),
+    );
+    expect([...collectServerFileSSRAssets(bundle)].sort()).toEqual([
+      "assets/linked-abc.wasm",
+      "assets/private-def.wasm",
+    ]);
+    expect([...collectServerOnlySSRAssets(bundle)]).toEqual(["assets/private-def.wasm"]);
+  });
+});
 
 describe("collectServerOnlySSRAssets", () => {
   it("treats an asset reached only through server file URLs as server-only", () => {

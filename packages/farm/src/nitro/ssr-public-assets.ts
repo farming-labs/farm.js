@@ -7,9 +7,14 @@ import type { Rollup } from "vite";
  * directory instead of linking to it (its SSR WebAssembly helper reads the bytes with `readFile`).
  * Quotes vary once a later pass reprints the code.
  */
-const SERVER_FILE_URL_RE = /new\s+URL\(\s*(["'`])([^"'`\\]+)\1\s*,\s*import\.meta\.url\s*\)/g;
+export const SERVER_FILE_URL_RE =
+  /new\s+URL\(\s*(["'`])([^"'`\\]+)\1\s*,\s*import\.meta\.url\s*\)/g;
 
-function resolveBundleFileName(chunkFileName: string, relativeUrl: string): string | null {
+/**
+ * The output file a relative server file URL names, resolved from the file that contains it, or
+ * `null` when it is root-relative, uses another scheme, or leaves the output directory.
+ */
+export function resolveBundleFileName(chunkFileName: string, relativeUrl: string): string | null {
   // A root-relative path or another scheme resolves away from the chunk's own directory.
   if (relativeUrl.startsWith("/") || /^[a-z][a-z\d+.-]*:/i.test(relativeUrl)) return null;
   let relativePath = relativeUrl.replace(/[?#].*$/, "");
@@ -24,6 +29,45 @@ function resolveBundleFileName(chunkFileName: string, relativeUrl: string): stri
   return fileName.startsWith("../") ? null : fileName;
 }
 
+interface ServerFileReferenceScan {
+  /** Assets the server bundle reaches through a server file reference. */
+  serverFileAssets: Set<string>;
+  /** Bundle sources with those references removed, to look for any other reference. */
+  otherReferenceSources: string[];
+}
+
+function scanServerFileReferences(bundle: Rollup.OutputBundle): ServerFileReferenceScan {
+  const serverFileAssets = new Set<string>();
+  const otherReferenceSources: string[] = [];
+
+  for (const [fileName, output] of Object.entries(bundle)) {
+    if (output.type !== "chunk") continue;
+    if (!output.code.includes("import.meta.url")) {
+      otherReferenceSources.push(output.code);
+      continue;
+    }
+    // Drop the server file references themselves so only other references remain to be checked.
+    otherReferenceSources.push(
+      output.code.replace(SERVER_FILE_URL_RE, (reference, _quote: string, relativeUrl: string) => {
+        const target = resolveBundleFileName(fileName, relativeUrl);
+        if (!target || bundle[target]?.type !== "asset") return reference;
+        serverFileAssets.add(target);
+        return "";
+      }),
+    );
+  }
+  return { serverFileAssets, otherReferenceSources };
+}
+
+/**
+ * Every SSR asset server code reads from beside its own chunk through a server file reference,
+ * whether or not a page also links to it. The deployed server needs each one next to the code
+ * that reads it.
+ */
+export function collectServerFileSSRAssets(bundle: Rollup.OutputBundle): Set<string> {
+  return scanServerFileReferences(bundle).serverFileAssets;
+}
+
 /**
  * The SSR assets only server code can reach: every reference to them in the server bundle is a
  * server file reference. Server code reads these files beside its own chunks, so they must not be
@@ -34,25 +78,8 @@ function resolveBundleFileName(chunkFileName: string, relativeUrl: string): stri
  * asset that is also referenced that way is browser-reachable by design.
  */
 export function collectServerOnlySSRAssets(bundle: Rollup.OutputBundle): Set<string> {
-  const serverOnly = new Set<string>();
-  const publicReferenceSources: string[] = [];
-
-  for (const [fileName, output] of Object.entries(bundle)) {
-    if (output.type !== "chunk") continue;
-    if (!output.code.includes("import.meta.url")) {
-      publicReferenceSources.push(output.code);
-      continue;
-    }
-    // Drop the server file references themselves so only other references remain to be checked.
-    publicReferenceSources.push(
-      output.code.replace(SERVER_FILE_URL_RE, (reference, _quote: string, relativeUrl: string) => {
-        const target = resolveBundleFileName(fileName, relativeUrl);
-        if (!target || bundle[target]?.type !== "asset") return reference;
-        serverOnly.add(target);
-        return "";
-      }),
-    );
-  }
+  const { serverFileAssets: serverOnly, otherReferenceSources: publicReferenceSources } =
+    scanServerFileReferences(bundle);
   if (serverOnly.size === 0) return serverOnly;
 
   for (const output of Object.values(bundle)) {

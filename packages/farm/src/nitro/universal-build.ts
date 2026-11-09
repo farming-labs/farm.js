@@ -192,7 +192,11 @@ import {
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes } from "./vercel-assets";
-import { collectServerOnlySSRAssets } from "./ssr-public-assets";
+import { collectServerFileSSRAssets, collectServerOnlySSRAssets } from "./ssr-public-assets";
+import {
+  assertServerFileAssetsDeployable,
+  copyServerFileAssetsBesideChunks,
+} from "./ssr-server-assets";
 import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
 import { farmStripPlatformConfigPlugin } from "../build/strip-platform-config";
 import type { FarmPlatform } from "../platform";
@@ -11982,6 +11986,9 @@ async function buildNitroUniversal(
     ? path.join(outputDir, "functions", "__nitro.func")
     : path.join(outputDir, "server");
   const ssrOutputDir = path.join(root, distDir, "ssr");
+  // Assets server code reads from beside its own chunk, such as a .wasm an API route imports.
+  const serverFileAssets = collectServerFileSSRAssets(ssrBundle);
+  assertServerFileAssetsDeployable(preset, serverFileAssets);
   const imageRuntime = resolveFarmImageServerRuntime(config.images, preset);
   const hasGeneratedMetadataImages = Array.from(routeManager.getMetadataImages().values()).some(
     (image) => image.sourceType === "module",
@@ -12878,6 +12885,7 @@ function toFarmNodeResponse(request, response) {
       sharpRuntimeStagePromise,
       prebuiltSSRFilesPromise,
     ]);
+  const nitroServerDir = nitroInstance.options.output.serverDir;
   await nitroInstance.close();
   if (nitroBuildResult.status === "rejected") {
     if (sharpRuntimeStageResult.status === "fulfilled" && sharpRuntimeStageResult.value) {
@@ -12915,6 +12923,17 @@ function toFarmNodeResponse(request, response) {
         )
       : Promise.resolve(),
     runtimeCopyPromise,
+    // The prebuilt SSR bundle keeps its assets beside its chunks. Nitro's rebundle keeps the
+    // reading code's relative URLs but not the files they name.
+    canReusePrebuiltSSR
+      ? Promise.resolve()
+      : copyServerFileAssetsBesideChunks(ssrBundle, serverFileAssets, nitroServerDir, fs).then(
+          (copied) => {
+            if (copied.length > 0) {
+              logger.info(`📦 Copied ${copied.length} server-read asset(s) into the server output`);
+            }
+          },
+        ),
   ]);
   const failedCopy = copyResults.find(
     (result): result is PromiseRejectedResult => result.status === "rejected",

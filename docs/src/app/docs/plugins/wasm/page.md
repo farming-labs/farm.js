@@ -132,7 +132,7 @@ Also terminate the worker when its owner unmounts or cancels. The [runnable exam
 ## Deployment and limits
 
 - Production emits Wasm and worker assets through Vite. Farm serves hashed assets at the origin root even when page routes use `basePath`; the example tests a page at `/lab/` loading those assets. Deploy the complete client output, not just JavaScript files.
-- A binary that only server code imports, such as one an API route loads, stays with the server output: Farm does not publish it with the client assets, so it is never served publicly.
+- A binary that only server code imports, such as one an API route loads, stays with the server output: Farm does not publish it with the client assets, so it is never served publicly. Farm copies it next to the server code that reads it on presets with a filesystem; Worker and edge presets fail the build instead. See [files server code reads](/docs/deployment#files-server-code-reads).
 - This plugin's supported scope is browser code and browser workers. It is renderer-neutral; the maintained example uses React. Server, edge, WASI, and Node-native package compatibility require separate testing and are not promised by this plugin.
 - Loading, compilation, linking, and runtime errors still need application error handling. A missing binary, unsupported Wasm feature, or library-specific requirement is not silently ignored.
 - A strict Content Security Policy may need `wasm-unsafe-eval` in `script-src` and an appropriate `worker-src`. The plugin never relaxes your security headers automatically.
