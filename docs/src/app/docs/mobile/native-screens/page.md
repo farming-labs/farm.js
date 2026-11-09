@@ -162,8 +162,11 @@ route        screen  tier     reason
 | --------------- | ------------------------------------------------------------------------------------- |
 | `auto`          | `"report"` (default) prints the report in builds; `"on"` applies it; `"off"` skips it |
 | `routes`        | Per route: `screen` (`web`, `native`), `android`, `ios`, `presentation`               |
-| `engine`        | `"react-native"` (default) or `"platform"` for `page.kt` / `page.swift` (planned)     |
-| `prefetch`      | `"intent"` (default) or `"off"`                                                       |
+| `engine`        | `"react-native"` (default) or `"platform"` for `page.kt` / `page.swift` (RFC 0006)    |
+| `prefetch`      | Reserved: recorded in the route manifest, but nothing prefetches yet                  |
+
+`islands`, `budgets`, and `layout.native.tsx` files are reserved too: the build accepts them and
+warns, since nothing acts on them yet.
 
 ## React Native screens
 
@@ -258,6 +261,6 @@ web type-check and check them with their own config:
 }
 ```
 
-With `native.auto: "on"`, Android builds can also turn a page with state into a React Native screen
+With `native.auto: "on"`, builds can also turn a page with state into a React Native screen
 automatically, when everything it uses has a native equivalent (generated ports, experimental). The
 report shows which routes qualify.
