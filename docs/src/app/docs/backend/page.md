@@ -150,5 +150,5 @@ Built-in health probes (`/_farm/health/live`, `/_farm/health/ready`), graceful s
 ## Example
 
 [`examples/api-server`](https://github.com/farming-labs/farm.js/tree/main/examples/api-server) is a
-todo API with validated endpoints, typed `notFound` errors, a middleware that requires a token for
-writes, and an OpenAPI document at `/openapi.json`.
+todo API with validated endpoints, a middleware that requires a token for writes, JSON 404s, and an
+OpenAPI document at `/openapi.json`.

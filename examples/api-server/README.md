@@ -19,8 +19,8 @@ pnpm dev
 
 - **Validated endpoints** with `createEndpoint` and Zod: invalid bodies and queries get a `400`
   with the failing fields before the handler runs.
-- **Typed errors**: `GET /todos/99` answers `404 {"code":"notFound",...}` through the declared
-  `notFound` error, which the generated client and the OpenAPI document both know about.
+- **Typed responses**: the generated client in `src/lib/api.generated.ts` knows each route's
+  input and output types; `GET /todos/99` answers `404 {"error":"Todo not found","id":"99"}`.
 - **Middleware** in `src/app/middleware.ts`: every response gets an `x-request-id`, and writes
   need `Authorization: Bearer demo-token`. The token is intentionally visible and local-only; use
   a real authentication integration in production.
