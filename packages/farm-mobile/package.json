@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/mobile",
-  "version": "0.1.0-beta.11",
+  "version": "0.1.0-beta.12",
   "description": "Mobile shells for Farm.js apps (farm dev --mobile, farm build --mobile). Ships the Android and iOS shells.",
   "keywords": [
     "android",
