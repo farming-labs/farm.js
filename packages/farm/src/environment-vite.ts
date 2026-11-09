@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
 import type { FarmEnvironment } from "./environment";
@@ -11,7 +11,7 @@ import {
 } from "./programmatic-routes-client";
 import { PROGRAMMATIC_ROUTE_FILE_NAMES, parseProgrammaticRouteModuleId } from "./routes-shared";
 import { resolveFarmServerComponentsMode } from "./server-components-mode";
-import { getFarmClientReachableModules } from "./utils/client-component";
+import { getFarmClientReachableModules, hasUseClientDirective } from "./utils/client-component";
 
 type EnvironmentFunctionKind = "createServerOnlyFn" | "createClientOnlyFn" | "createIsomorphicFn";
 
@@ -187,10 +187,11 @@ export function farmEnvironmentFunctionsPlugin(
         const file = id.split("?", 1)[0]!;
         // Vite ids are real paths; a symlinked root must compare as one.
         const root = realpathSync(options.root ?? projectRoot);
-        const clientCode = getFarmClientReachableModules(
-          path.resolve(root, options.srcDir || "src"),
-          root,
-        ).has(path.resolve(file));
+        // The whole app counts: a client module can live outside `srcDir`, and one a shared
+        // workspace package holds is outside the root, so its own directive has to count too.
+        const clientCode =
+          getFarmClientReachableModules(root, root).has(path.resolve(file)) ||
+          hasUseClientDirective(readFileSync(file, "utf8"));
         const reached = clientCode ? null : findFarmClientOnlyImport(code, file);
         if (reached) {
           const chain = reached.chain.map((step) => path.relative(root, step)).join(" -> ");

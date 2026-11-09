@@ -15,6 +15,7 @@ import "@farm.js/core/css";
 export type RoutePath =
   | "/"
   | "/action"
+  | "/action-layout"
   | "/action-middleware"
   | "/action-props"
   | "/after"
@@ -91,6 +92,7 @@ export type RoutePath =
 export type RoutePattern =
   | "/"
   | "/action"
+  | "/action-layout"
   | "/action-middleware"
   | "/action-props"
   | "/after"
@@ -167,6 +169,7 @@ export type RoutePattern =
 export type RouteModulePattern =
   | "/"
   | "/action"
+  | "/action-layout"
   | "/action-middleware"
   | "/action-props"
   | "/after"

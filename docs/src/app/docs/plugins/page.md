@@ -325,8 +325,12 @@ For each application request, Farm runs the runtime hooks in this order:
 2. Otherwise, every `runtime.context` creates request-local values.
 3. Every `runtime.before` runs in plugin order.
 4. Farm calls the page, API route, or integration handler unless a plugin returned a `Response`.
+   A path under the API base path that no route matches gets Farm's JSON 404 here.
 5. Every `runtime.after` can transform the response, including an endpoint response.
-6. `runtime.error` observes an error if any preceding phase throws.
+6. `runtime.error` observes an error if any preceding phase throws. When an API route throws,
+   `runtime.error` observes the throw, Farm answers `500`, and every `runtime.after` still sees
+   that response. A throw from `runtime.context`, `runtime.before`, or `runtime.after` skips the
+   remaining `runtime.after` hooks.
 
 `runtime.before` may return a new `Request`, return a `Response` to short-circuit, or return nothing. A short-circuit response still passes through `runtime.after`. `runtime.after` may return a new `Response` or return nothing.
 

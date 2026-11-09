@@ -683,6 +683,37 @@ describe("file route loading.tsx and error.tsx", () => {
       }
     });
 
+    it("links to the root layout's metadataBase and still reads pages from this server", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(
+        {
+          ...pages,
+          [layoutModulePath]: {
+            ...pages[layoutModulePath],
+            metadata: {
+              ...pages[layoutModulePath].metadata,
+              metadataBase: "https://acme.test/app",
+            },
+          },
+        },
+        { routes, layouts: { "/": layoutModulePath }, agent: { llmsTxt: true } },
+      );
+      const request = createDevRequest("/llms-full.txt");
+      request.headers = { host: "evil.test" };
+
+      await renderer.renderPage(request, response);
+
+      expect(response.body).toContain("URL: https://acme.test/dashboard.md");
+      expect(response.body).toContain("dashboard-markdown-body");
+      expect(response.body).not.toContain("evil.test");
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      const index = createMockResponse();
+      await renderer.renderPage(createDevRequest("/llms.txt"), index);
+      expect(index.body).toContain("- [Dashboard](https://acme.test/dashboard.md)");
+    });
+
     it("reads pages from an HTTPS dev server, verifying the requested hostname", async () => {
       // The certificate names farm.test and no IP address.
       const { cert, key } = createSelfSignedCertificate("farm.test");
@@ -1528,6 +1559,13 @@ function createRenderer(
   const routeManager = {
     getRoutes: () => toRouteEntries(options.routes),
     getLayouts: () => toRouteEntries(options.layouts),
+    getRouteLayouts: (pattern: string) =>
+      [...toRouteEntries(options.layouts).values()].filter(
+        (layout) =>
+          layout.pattern === "/" ||
+          pattern === layout.pattern ||
+          pattern.startsWith(`${layout.pattern}/`),
+      ),
     getIsolatedClientBoundaryModules: () => new Set(options.isolatedClientBoundaryModules ?? []),
     matchMetadataRoute(pathname: string) {
       const segmentPath = applicationMetadataPattern === "/" ? "" : applicationMetadataPattern;

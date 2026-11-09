@@ -29,6 +29,45 @@ describe("trailing slash routing", () => {
     expect(resolveFarmTrailingSlashRedirect(new URL("https://farm.test/about/"), true)).toBeNull();
   });
 
+  it("keeps canonical redirects on the request origin when the path repeats leading slashes", () => {
+    // A root-level dynamic route matches "//evil.com/" because empty segments are skipped, so
+    // the canonical Location must not become the protocol-relative URL "//evil.com".
+    const cases: Array<[string, boolean, string]> = [
+      ["https://farm.test//evil.com/", false, "/evil.com"],
+      ["https://farm.test/\\evil.com/", false, "/evil.com"],
+      ["https://farm.test///evil.com/", false, "/evil.com"],
+      ["https://farm.test//evil.com/?x=1", false, "/evil.com?x=1"],
+      ["https://farm.test//evil.com", true, "/evil.com/"],
+      ["https://farm.test/\\evil.com", true, "/evil.com/"],
+      ["https://farm.test//evil.com/about", true, "/evil.com/about/"],
+      ["https://farm.test//", false, "/"],
+    ];
+    for (const [href, enabled, location] of cases) {
+      expect(resolveFarmTrailingSlashRedirect(new URL(href), enabled), href).toBe(location);
+    }
+  });
+
+  it("does not redirect a repeated leading slash whose trailing slash is already canonical", () => {
+    // These were served as they are before, and still are: there is no Location to protect.
+    for (const [href, enabled] of [
+      ["https://farm.test//dashboard/projects/7", false],
+      ["https://farm.test//evil.com", false],
+      ["https://farm.test//evil.com/", true],
+      ["https://farm.test//", true],
+    ] as const) {
+      expect(resolveFarmTrailingSlashRedirect(new URL(href), enabled), href).toBeNull();
+    }
+  });
+
+  it("leaves interior repeated slashes and already-canonical paths alone", () => {
+    expect(resolveFarmTrailingSlashRedirect(new URL("https://farm.test/a//b/"), false)).toBe(
+      "/a//b",
+    );
+    expect(resolveFarmTrailingSlashRedirect(new URL("https://farm.test/a//b/"), true)).toBeNull();
+    expect(resolveFarmTrailingSlashRedirect(new URL("https://farm.test/about"), false)).toBeNull();
+    expect(resolveFarmTrailingSlashRedirect(new URL("https://farm.test/"), true)).toBeNull();
+  });
+
   it("shares the configured preference across framework entry points", () => {
     setFarmTrailingSlashPreference(true);
     expect(getFarmTrailingSlashPreference()).toBe(true);

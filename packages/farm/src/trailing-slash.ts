@@ -22,5 +22,10 @@ export function normalizeFarmTrailingSlashPathname(pathname: string, enabled: bo
 
 export function resolveFarmTrailingSlashRedirect(url: URL, enabled: boolean): string | null {
   const pathname = normalizeFarmTrailingSlashPathname(url.pathname, enabled);
-  return pathname === url.pathname ? null : `${pathname}${url.search}`;
+  if (pathname === url.pathname) return null;
+  // Route matching skips empty segments, so "//host/" can match a root dynamic route. Collapse
+  // leading separators (browsers read a backslash as "/") so the relative Location never reads as
+  // the protocol-relative URL "//host". A path whose trailing slash is already canonical is served
+  // as it is, as before.
+  return `${pathname.replace(/^[/\\]+/, "/")}${url.search}`;
 }

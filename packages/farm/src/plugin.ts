@@ -445,7 +445,18 @@ export interface FarmPluginRuntimeRequestOptions {
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
-export type FarmPluginRuntimeRequestHandler = (request: Request) => MaybePromise<Response>;
+export interface FarmPluginRuntimeRequestScope {
+  /**
+   * Runs `runtime.error` for a failure the handler answers itself, such as an API route that
+   * threw and became a 500. `runtime.after` still runs on the response the handler returns.
+   */
+  reportError(error: unknown): Promise<void>;
+}
+
+export type FarmPluginRuntimeRequestHandler = (
+  request: Request,
+  scope: FarmPluginRuntimeRequestScope,
+) => MaybePromise<Response>;
 
 export interface FarmPluginRuntimeSession {
   request: Request;
@@ -1556,7 +1567,21 @@ export class PluginManager {
   ): Promise<Response> {
     const session = await this.beginRuntimeRequest(request, options);
     try {
-      const response = session.response ?? (await handler(session.request));
+      const response =
+        session.response ??
+        (await handler(session.request, {
+          // Not a failed session: the handler answers, so `after` runs and a later throw in it
+          // is still reported.
+          reportError: (error) =>
+            this.runRuntimeErrorHooks(
+              session.request,
+              error,
+              session.ctx,
+              Date.now() - session.startedAt,
+              session.options,
+              session.waitUntil,
+            ),
+        }));
       if (!(response instanceof Response)) {
         throw new TypeError("Farm plugin runtime handlers must return a Response");
       }

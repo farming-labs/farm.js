@@ -19,6 +19,10 @@ import {
   type InferProgrammaticRouteData,
   type ProgrammaticPageRoute,
 } from "../routes";
+import {
+  generateRedirectInterpolationSource,
+  generateRuntimePathMatcherSource,
+} from "../nitro/universal-build";
 import { RouteManager } from "../routing/route-manager";
 import { createServerFn } from "../server-fn";
 import type { FarmConfig } from "../types";
@@ -303,6 +307,85 @@ describe("programmatic routes", () => {
       "/blog/farm-router",
       "/blog/hello-world",
     ]);
+  });
+
+  it("encodes redirect params into the destination as the production server does", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-programmatic-routes-"));
+    tempDirs.push(root);
+    const routesFile = path.join(root, "src", "farm.routes.js");
+    fs.mkdirSync(path.dirname(routesFile), { recursive: true });
+    fs.writeFileSync(routesFile, "export {};\n");
+
+    const redirects = [
+      { source: "/old/[slug]", destination: "/[slug]" },
+      { source: "/colon/[slug]", destination: "/:slug" },
+      { source: "/docs-old/[...path]", destination: "/[...path]" },
+      { source: "/guides-old/[[...path]]", destination: "/guides/[[...path]]" },
+      { source: "/blog-old/[slug]", destination: "/blog/[slug]" },
+    ];
+    const manifest = defineRoutes(({ redirect }) =>
+      redirects.map(({ source, destination }) => redirect(source, destination)),
+    );
+    const manager = new RouteManager(createConfig(root), {
+      config: { root },
+      environments: { ssr: { runner: { import: async () => ({ default: manifest }) } } },
+    } as any);
+    manager.setRendererRuntime(createTestRendererRuntime() as any);
+    await manager.discoverRoutes();
+
+    const production = new Function(
+      `${generateRuntimePathMatcherSource()}\n${generateRedirectInterpolationSource()}` +
+        "; return { matchRuntimePathPattern, interpolateRedirectDestination };",
+    )() as {
+      matchRuntimePathPattern: (pattern: string, pathname: string) => Record<string, string> | null;
+      interpolateRedirectDestination: (
+        destination: string,
+        params: Record<string, string>,
+      ) => string;
+    };
+    function productionDestination(pathname: string): string | undefined {
+      for (const { source, destination } of redirects) {
+        const params = production.matchRuntimePathPattern(source, pathname);
+        if (params) return production.interpolateRedirectDestination(destination, params);
+      }
+      return undefined;
+    }
+
+    const cases: Array<[pathname: string, expected: string]> = [
+      // Ordinary params are unchanged.
+      ["/old/hello", "/hello"],
+      ["/colon/hello", "/hello"],
+      ["/docs-old/a/b/c", "/a/b/c"],
+      ["/guides-old", "/guides/"],
+      // A decoded slash or backslash stays inside its own path segment.
+      ["/old/%2F%2Fexample.com", "/%2F%2Fexample.com"],
+      ["/old/%5Cexample.com", "/%5Cexample.com"],
+      ["/colon/%2F%2Fexample.com", "/%2F%2Fexample.com"],
+      ["/colon/%5C%5Cexample.com", "/%5C%5Cexample.com"],
+      ["/docs-old/%2F%2Fexample.com/x", "/%2F%2Fexample.com/x"],
+      ["/guides-old/%5Cexample.com/x", "/guides/%5Cexample.com/x"],
+      ["/blog-old/%2F..%2Fadmin", "/blog/%2F..%2Fadmin"],
+      // Other reserved characters are encoded per segment.
+      ["/docs-old/a%20b/c%3Fd", "/a%20b/c%3Fd"],
+    ];
+
+    for (const [pathname, expected] of cases) {
+      const match = manager.matchRedirect(pathname);
+      expect(match?.destination, pathname).toBe(expected);
+      expect(match?.destination, pathname).toBe(productionDestination(pathname));
+      expect(new URL(match!.destination, "https://app.test/").origin, pathname).toBe(
+        "https://app.test",
+      );
+    }
+
+    // Route params keep their decoded values; only the destination is encoded.
+    expect(manager.matchRedirect("/old/%2F%2Fexample.com")?.params).toEqual({
+      slug: "//example.com",
+    });
+    expect(manager.matchRedirect("/docs-old/a%20b/c", "?from=archive")).toMatchObject({
+      destination: "/a%20b/c?from=archive",
+      statusCode: 307,
+    });
   });
 
   it("rejects duplicate params in programmatic page routes", async () => {

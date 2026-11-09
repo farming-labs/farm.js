@@ -326,7 +326,8 @@ export class APIRouteManager {
     return null;
   }
 
-  private async loadModule(filePath: string): Promise<Record<string, unknown>> {
+  /** Load an app module through the server that loads the routes, as their handlers were. */
+  async loadModule(filePath: string): Promise<Record<string, unknown>> {
     if (this.viteServer) {
       return await loadFarmDevModule(this.viteServer, filePath);
     }
