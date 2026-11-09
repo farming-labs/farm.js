@@ -38,6 +38,7 @@ import {
   FARM_NODE_RESPONSE_END_PENDING,
   type FarmPlugin,
   type FarmPluginRuntimeKind,
+  type FarmPluginRuntimeRequestScope,
   type FarmPluginRuntimeSession,
   type PluginManager,
 } from "./plugin";
@@ -3085,7 +3086,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             }
 
             // Let this request boundary observe endpoint failures before it
-            // converts them into the development 500 response below.
+            // converts them into the development 500 response.
             const apiHandler = apiRouteManager.getHandler({ throwOnError: true });
             // A middleware ctx.rewrite() changed req.url: route the rewritten request, as the
             // production entry does.
@@ -3139,7 +3140,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   method,
                   routePath: apiRoutePattern,
                 };
-                const invokeAPIHandler = async (runtimeRequest: Request) => {
+                let apiHandlerFailed = false;
+                const invokeAPIHandler = async (
+                  runtimeRequest: Request,
+                  runtime?: FarmPluginRuntimeRequestScope,
+                ) => {
                   const handledRequest: Request = pm
                     ? await pm.runHookSerial(
                         "beforeApiHandler",
@@ -3148,7 +3153,29 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                       )
                     : runtimeRequest;
 
-                  const response = await apiHandler(handledRequest);
+                  let response: Response;
+                  try {
+                    response = await apiHandler(handledRequest);
+                  } catch (error) {
+                    // As in production, a throwing route answers 500: runtime.error observes
+                    // the throw, and runtime.after still sees that response.
+                    apiHandlerFailed = true;
+                    emitFarmEvent({
+                      type: "api.error",
+                      pathname,
+                      route: apiRoutePattern,
+                      method,
+                      durationMs: Date.now() - startTime,
+                      error,
+                    });
+                    await emitPluginError("api-handler", error, { urlPath, method });
+                    logger.error(`API route error: ${error}`);
+                    await runtime?.reportError(error);
+                    response = new Response(JSON.stringify({ error: "Internal server error" }), {
+                      status: 500,
+                      headers: { "Content-Type": "application/json" },
+                    });
+                  }
                   return pm
                     ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
                     : response;
@@ -3164,14 +3191,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   : await invokeAPIHandler(request);
 
                 const duration = Date.now() - startTime;
-                emitFarmEvent({
-                  type: "api.request.complete",
-                  pathname,
-                  route: apiRoutePattern,
-                  method,
-                  status: handledResponse.status,
-                  durationMs: duration,
-                });
+                if (!apiHandlerFailed) {
+                  emitFarmEvent({
+                    type: "api.request.complete",
+                    pathname,
+                    route: apiRoutePattern,
+                    method,
+                    status: handledResponse.status,
+                    durationMs: duration,
+                  });
+                }
                 logResponse(method, urlPath, handledResponse.status, duration, "API");
 
                 // Send response
@@ -3284,11 +3313,59 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               }
             }
 
-            const duration = Date.now() - startTime;
-            logResponse(method, urlPath, 404, duration, "API");
-            res.statusCode = 404;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "API route not found", pathname }));
+            const notFoundBody = JSON.stringify({ error: "API route not found", pathname });
+            if (!pm?.hasRuntimeRequestHooks()) {
+              logResponse(method, urlPath, 404, Date.now() - startTime, "API");
+              res.statusCode = 404;
+              res.setHeader("Content-Type", "application/json");
+              res.end(notFoundBody);
+              return;
+            }
+            // As in production, an unmatched API path still passes through the plugin
+            // runtime: a runtime.before guard can answer it, and runtime.after sees the 404.
+            try {
+              let body: Buffer | undefined;
+              if (req.method !== "GET" && req.method !== "HEAD") {
+                body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
+              }
+              const headers = new Headers();
+              for (const [key, value] of Object.entries(req.headers)) {
+                if (value) {
+                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+                }
+              }
+              const request = new Request(
+                `http://${req.headers.host || "localhost:3000"}${req.url}`,
+                {
+                  method: req.method,
+                  headers,
+                  body: toRequestBody(body),
+                  signal: createFarmNodeRequestAbortSignal(req, res),
+                },
+              );
+              const notFound = () =>
+                new Response(notFoundBody, {
+                  status: 404,
+                  headers: { "Content-Type": "application/json" },
+                });
+              const response = await pm.runRuntimeRequest(request, notFound, {
+                kind: "api",
+                route: { pathname },
+              });
+              logResponse(method, urlPath, response.status, Date.now() - startTime, "API");
+              await sendWebResponse(res, response);
+            } catch (error) {
+              const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
+              if (bodyErrorResponse) {
+                await sendWebResponse(res, bodyErrorResponse);
+                return;
+              }
+              await emitPluginError("api-handler", error, { urlPath, method });
+              logger.error(`API route error: ${error}`);
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Internal server error" }));
+            }
             return;
           }
 

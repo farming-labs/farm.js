@@ -7077,7 +7077,7 @@ function matchLocalAPIRequest(request) {
   return matchBuiltAPIRoute(new URL(request.url).pathname);
 }
 
-async function handleAPIRequest(request) {
+async function handleAPIRequest(request, reportRuntimeError) {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
   const match = matchLocalAPIRequest(request);
@@ -7144,6 +7144,8 @@ async function handleAPIRequest(request) {
       error,
     });
     console.error(\`[API Error] \${url.pathname}:\`, error);
+    // A plugin's runtime.error observes the throw; runtime.after still sees this 500.
+    await reportRuntimeError?.(error);
     return new Response(
       JSON.stringify({ error: "Internal Server Error" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
@@ -7656,6 +7658,8 @@ function fetchFarmInnerRequest(request, context) {
   return fetch(new Request(request, { headers }), context);
 }
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
+// Reports a failure Farm answers itself (an API route's 500) to the plugin runtime request.
+const farmRuntimeErrorSlot = Symbol("farm.runtime.error.slot");
 const farmOpenAPIReference = ${JSON.stringify(openAPIReference)};
 ${
   config.agent?.apiCatalog
@@ -10055,7 +10059,10 @@ ${
   // Clone only for an API request: cloning a Request costs more than the match,
   // and handleAPIRequest returns null without one.
   if (matchLocalAPIRequest(request)) {
-    const apiResponse = await handleAPIRequest(cloneFarmRequestWithContext(request));
+    const apiResponse = await handleAPIRequest(
+      cloneFarmRequestWithContext(request),
+      adapterContext?.[farmRuntimeErrorSlot],
+    );
     if (apiResponse) {
       return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
     }
@@ -11679,11 +11686,14 @@ async function handleFarmFetch(request, context) {
         const runRequest = () => farmPluginRuntime
           ? farmPluginRuntime.runRuntimeRequest(
               request,
-              (runtimeRequest) =>
+              (runtimeRequest, runtimeScope) =>
                 _runWithCurrentRequest(runtimeRequest, () =>
                   prepareResponse(
                     runtimeRequest,
-                    handleFarmPluginRequest(runtimeRequest, runtimeOptions, context),
+                    handleFarmPluginRequest(runtimeRequest, runtimeOptions, {
+                      ...context,
+                      [farmRuntimeErrorSlot]: runtimeScope.reportError,
+                    }),
                   )
                 ),
               {
