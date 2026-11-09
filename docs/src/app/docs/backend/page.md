@@ -166,6 +166,14 @@ A plugin must import from Farm's subpath entries, such as `@farm.js/core/plugin`
 loads React. The [Blyp](/docs/plugins/blyp) integration imports the root today, so it needs React
 installed.
 
+## Integrations
+
+Server integrations load without React: AI, Agent, Auth0, Auth.js, Autumn, Better Auth, Clerk,
+Convex, Jobs, Polar, Sanity, Strapi, Stripe, Supabase, Unkey, and WorkOS.
+[Email](/docs/integrations/email) renders React Email templates, so it needs React installed. An
+integration you write imports `defineIntegration` and `integrationRoute` from
+`@farm.js/core/integrations`, and its client bindings import `api` from `@farm.js/core/api/client`.
+
 ## Testing
 
 `createFarmTestHarness` from `@farm.js/core/testing` calls API routes without React. Only its

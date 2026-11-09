@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { WorkOS } from "@workos-inc/node";
-import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
+import type { FarmIntegrationLogger } from "@farm.js/core";
+import { defineIntegration, integrationRoute } from "@farm.js/core/integrations";
 import {
   describeIntegrationOriginRejection,
   resolveIntegrationAllowedOrigins,
