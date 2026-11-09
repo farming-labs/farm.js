@@ -1,0 +1,177 @@
+// @vitest-environment node
+
+import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { ViteDevServer } from "vite";
+import { afterEach, describe, expect, it } from "vitest";
+import { build } from "../build";
+import { loadConfig, resolveConfig } from "../config";
+import { createServer } from "../server/create-server";
+import { getAvailablePort } from "./dev-server-port";
+
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const temporaryRoots = new Set<string>();
+const devServers = new Set<ViteDevServer>();
+
+afterEach(async () => {
+  await Promise.all([...devServers].map((server) => server.close()));
+  devServers.clear();
+  await Promise.all(
+    [...temporaryRoots].map((root) =>
+      fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    ),
+  );
+  temporaryRoots.clear();
+});
+
+// The plugin records every runtime hook it sees and serves the record from its own endpoint,
+// which runs outside the request hooks, so a dev server and a production server can be
+// asked the same questions.
+const FILES: Record<string, string> = {
+  "farm.config.ts": `import { definePlugin } from "@farm.js/core";
+const trace: string[] = [];
+const traced = (request: Request) => {
+  const { pathname } = new URL(request.url);
+  return pathname.startsWith("/api/") || pathname === "/hello" ? pathname : null;
+};
+export default {
+  images: { provider: "none" },
+  telemetry: false,
+  plugins: [
+    definePlugin({
+      name: "acme:trace",
+      runtime: {
+        endpoints: [{ path: "/__trace", handler: () => Response.json(trace.splice(0)) }],
+        before({ request, kind }) {
+          const pathname = traced(request);
+          if (!pathname) return;
+          trace.push("before " + kind + " " + pathname);
+          if (pathname === "/api/blocked") return new Response("blocked", { status: 403 });
+        },
+        after({ request, response }) {
+          const pathname = traced(request);
+          if (pathname) trace.push("after " + pathname + " " + response.status);
+        },
+        error({ request, error }) {
+          const pathname = traced(request);
+          if (pathname) trace.push("error " + pathname + " " + (error as Error).message);
+        },
+      },
+    }),
+  ],
+};`,
+  "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
+  "src/app/hello/page.tsx": `export default function Page() { return <h1>hello</h1>; }`,
+  "src/app/api/ok/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
+  "src/app/api/boom/route.ts": `export function GET(): Response { throw new Error("route failed"); }`,
+};
+
+async function createApp(prefix: string): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  temporaryRoots.add(root);
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
+  for (const name of ["react", "react-dom"]) {
+    await fs.symlink(
+      await fs.realpath(path.join(packageRoot, "node_modules", name)),
+      path.join(root, "node_modules", name),
+      "junction",
+    );
+  }
+  await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
+  for (const [relativePath, source] of Object.entries(FILES)) {
+    await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
+    await fs.writeFile(path.join(root, relativePath), source);
+  }
+  return root;
+}
+
+async function expectRuntimeHookContract(origin: string): Promise<void> {
+  const results: Record<string, { status: number; trace: string[] }> = {};
+  for (const pathname of ["/api/ok", "/api/blocked", "/api/missing", "/api/boom", "/hello"]) {
+    const response = await fetch(`${origin}${pathname}`);
+    await response.arrayBuffer();
+    const trace = await (await fetch(`${origin}/__trace`)).json();
+    results[pathname] = { status: response.status, trace };
+  }
+
+  expect(results).toEqual({
+    // A matched API route: before, then after on its response.
+    "/api/ok": { status: 200, trace: ["before api /api/ok", "after /api/ok 200"] },
+    // An unmatched API path still passes through runtime.before, so a guard answers it, and
+    // runtime.after sees that early answer.
+    "/api/blocked": {
+      status: 403,
+      trace: ["before api /api/blocked", "after /api/blocked 403"],
+    },
+    // Farm's JSON 404 for an unmatched API path is a response like any other.
+    "/api/missing": {
+      status: 404,
+      trace: ["before api /api/missing", "after /api/missing 404"],
+    },
+    // A throwing API route: runtime.error observes the throw, then runtime.after sees the 500
+    // Farm answers with.
+    "/api/boom": {
+      status: 500,
+      trace: ["before api /api/boom", "error /api/boom route failed", "after /api/boom 500"],
+    },
+    // Page requests are unchanged.
+    "/hello": { status: 200, trace: ["before page /hello", "after /hello 200"] },
+  });
+}
+
+describe("plugin runtime hooks for API requests", () => {
+  it("in development", async () => {
+    const root = await createApp("farm-dev-plugin-runtime-api-");
+    const server = await createServer({ root });
+    devServers.add(server);
+    await server.listen(await getAvailablePort());
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+
+    await expectRuntimeHookContract(`http://localhost:${address.port}`);
+  }, 120_000);
+
+  it("in a node-server production build", async () => {
+    const root = await createApp("farm-prod-plugin-runtime-api-");
+    const config = await resolveConfig(
+      { ...(await loadConfig(root, undefined, "production")), root, srcDir: "src" },
+      "production",
+    );
+    await build(config, { root, preset: "node-server" });
+
+    const output = path.join(root, ".farm", ".output");
+    const port = await getAvailablePort();
+    const processOutput: string[] = [];
+    const productionServer = spawn(process.execPath, [path.join(output, "server", "index.mjs")], {
+      cwd: path.join(output, "server"),
+      env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    productionServer.stdout.on("data", (chunk) => processOutput.push(String(chunk)));
+    productionServer.stderr.on("data", (chunk) => processOutput.push(String(chunk)));
+    const exited = new Promise<void>((resolve) => productionServer.once("exit", () => resolve()));
+
+    try {
+      const origin = `http://127.0.0.1:${port}`;
+      let ready = false;
+      for (let attempt = 0; attempt < 200 && !ready; attempt++) {
+        if (productionServer.exitCode !== null) break;
+        ready = await fetch(`${origin}/_farm/health/ready`).then(
+          (response) => response.ok,
+          () => false,
+        );
+        if (!ready) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(ready, processOutput.join("")).toBe(true);
+
+      await expectRuntimeHookContract(origin);
+    } finally {
+      if (productionServer.exitCode === null) productionServer.kill();
+      await exited;
+    }
+  }, 240_000);
+});

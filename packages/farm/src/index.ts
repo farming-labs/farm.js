@@ -298,6 +298,7 @@ export type {
   FarmPluginRuntimeHooks,
   FarmPluginRuntimeRequestOptions,
   FarmPluginRuntimeRequestHandler,
+  FarmPluginRuntimeRequestScope,
   FarmPluginRuntimeSession,
   FarmPluginDiscoveredRoute,
   FarmPluginRouterHooks,
