@@ -468,6 +468,88 @@ every affected query. Existing client-side `invalidate` options remain supported
 caller-specific cache relationships, and handlers can continue calling `invalidate(...)` or
 `revalidatePath(...)` directly.
 
+## Mount a Hono or Elysia app
+
+A plain route export receives the Web `Request` and can return a `Response`. That is the same
+contract as the `fetch` handler of a Hono or Elysia app, so you can mount an existing app on a
+catch-all route and keep its routes, middleware, and validators.
+
+`mountFetchHandler` from `@farm.js/core/api` is optional. It returns a handler for every HTTP
+method, and you export the ones the app handles:
+
+**src/app/api/hono/[...path]/route.ts**
+
+```ts
+import { mountFetchHandler } from "@farm.js/core/api";
+import { Hono } from "hono";
+
+const app = new Hono();
+
+app.get("/hello/:name", (c) => c.json({ hello: c.req.param("name") }));
+app.post("/echo", async (c) => c.json({ got: await c.req.json() }, 201));
+
+export const { GET, POST } = mountFetchHandler(app, { stripMountPath: true });
+```
+
+**src/app/api/elysia/[...path]/route.ts**
+
+```ts
+import { mountFetchHandler } from "@farm.js/core/api";
+import { Elysia } from "elysia";
+
+const app = new Elysia()
+  .get("/hello/:name", ({ params }) => ({ hello: params.name }))
+  .post("/echo", ({ body, set }) => {
+    set.status = 201;
+    return { got: body };
+  });
+
+export const { GET, POST } = mountFetchHandler(app, { stripMountPath: true });
+```
+
+`mountFetchHandler` accepts an app with a `fetch` method or a plain
+`(request: Request) => Response | Promise<Response>` function.
+
+- **`stripMountPath: true`** hands the app only the part of the path below the catch-all, so its
+  routes don't repeat where Farm serves them. `/api/hono/hello/farm` reaches the app as
+  `/hello/farm`, and the app keeps working if the route moves or
+  [`api.basePath`](/docs/configuration#api-client-base-url) changes. Segments stay encoded as the client sent them.
+  Paths the app builds itself, such as redirect locations, are then relative to the mount rather
+  than to the site.
+- **Without `stripMountPath`** (the default), the app receives the request unchanged, with the full
+  URL. Give it the route's public path as its base path, such as `basePath("/api/hono")` in Hono or
+  `prefix: "/api/elysia"` in Elysia. With any other base path, every request misses its routes and
+  gets the app's own 404.
+
+### Without the helper
+
+The helper only saves boilerplate. Exporting the app's `fetch` yourself behaves the same as
+`mountFetchHandler(app)` without `stripMountPath`:
+
+```ts
+import { Hono } from "hono";
+
+const app = new Hono().basePath("/api/hono");
+app.get("/hello/:name", (c) => c.json({ hello: c.req.param("name") }));
+
+const handle = (request: Request) => app.fetch(request);
+export { handle as GET, handle as POST };
+```
+
+### What a mounted app gets from Farm
+
+- **Only the methods you export.** Farm answers a method the route file does not export with
+  `405` before the app sees it. Leave out `HEAD` to keep Farm answering it from your `GET` export,
+  as for any route. Export plain names (`export const { GET, POST } = ...`): Farm reads the route's
+  methods from its export names.
+- **One plain route.** `createEndpoint` features that come from each endpoint's declared shape do
+  not apply to the app's routes: typed client inference, OpenAPI generation, typed errors, MCP tool
+  opt-in, declared invalidation, and endpoint middleware. Use `createEndpoint` routes for those,
+  alongside the mounted app.
+
+These recipes are covered by Farm's tests with Hono 4 and Elysia 1.4 on Node, in development and in
+a `node-server` production build.
+
 ## When to use integrations instead
 
 Use API routes for app-owned endpoints. Use integrations when a provider or feature needs a package-like surface: config validation, lifecycle hooks, database schemas, middleware, providers, and typed callers bundled together.
