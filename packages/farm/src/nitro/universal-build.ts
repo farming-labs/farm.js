@@ -3518,7 +3518,7 @@ function isFarmDocsPath() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientCancellation, ${clientPluginEntry.empty ? "createPluginlessClientRuntime" : "createClientPluginManager"}, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
@@ -3919,7 +3919,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, ${clientPluginEntry.empty ? "createPluginlessClientRuntime" : "createClientPluginManager"}, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
