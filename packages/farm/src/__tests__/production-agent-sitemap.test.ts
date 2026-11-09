@@ -42,6 +42,20 @@ describe("production default sitemap", () => {
           "export const metadata = { robots: { index: false } };",
           "export default function Page() { return <p>drafts</p>; }",
         ].join("\n"),
+        // Pages render with the layout's noindex unless they set their own robots.
+        "src/app/staff/layout.tsx": [
+          "export const metadata = { robots: { index: false } };",
+          "export default function Layout({ children }) { return <section>{children}</section>; }",
+        ].join("\n"),
+        "src/app/staff/page.tsx": "export default function Page() { return <p>staff</p>; }",
+        "src/app/staff/roster/page.tsx": [
+          'export const metadata = { title: "Roster" };',
+          "export default function Page() { return <p>roster</p>; }",
+        ].join("\n"),
+        "src/app/staff/careers/page.tsx": [
+          'export const metadata = { title: "Careers", robots: { index: true } };',
+          "export default function Page() { return <p>careers</p>; }",
+        ].join("\n"),
       };
       for (const [relativePath, source] of Object.entries(files)) {
         await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
@@ -78,10 +92,21 @@ describe("production default sitemap", () => {
       expect(sitemap.status).toBe(200);
       expect(sitemap.headers.get("content-type")).toBe("application/xml; charset=utf-8");
       const xml = await sitemap.text();
-      expect(locs(xml)).toEqual(["https://acme.test/", "https://acme.test/about"]);
+      expect(locs(xml)).toEqual([
+        "https://acme.test/",
+        "https://acme.test/about",
+        "https://acme.test/staff/careers",
+      ]);
       expect(xml).toContain(
         "<loc>https://acme.test/about</loc>\n    <lastmod>2026-10-01T12:00:00.000Z</lastmod>",
       );
+
+      const roster = await handler.fetch(new Request("https://acme.test/staff/roster"));
+      expect(await roster.text()).toContain('name="robots" content="noindex"');
+      const llms = await (await handler.fetch(new Request("https://acme.test/llms.txt"))).text();
+      expect(llms).toContain("[Careers]");
+      expect(llms).not.toContain("/staff/roster");
+      expect(llms).not.toMatch(/\/staff\)/);
 
       const robots = await handler.fetch(new Request("https://acme.test/robots.txt"));
       expect(await robots.text()).toContain("Sitemap: https://acme.test/sitemap.xml");

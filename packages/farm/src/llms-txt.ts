@@ -206,6 +206,21 @@ export function isFarmMetadataNoIndex(metadata: unknown): boolean {
   );
 }
 
+/**
+ * True when a page renders with noindex. Page metadata merges over its layouts' (root first)
+ * and `robots` is replaced whole, so the page's own `robots` decides, else the nearest
+ * layout's. `layoutMetadata` is the wrapping layouts' metadata, root first.
+ */
+export function isFarmPageNoIndex(
+  pageMetadata: unknown,
+  layoutMetadata: readonly unknown[] = [],
+): boolean {
+  for (const metadata of [pageMetadata, ...[...layoutMetadata].reverse()]) {
+    if (isRecord(metadata) && "robots" in metadata) return isFarmMetadataNoIndex(metadata);
+  }
+  return false;
+}
+
 export function createFarmDefaultLlmsTxt(options: {
   origin: string;
   pages: FarmLlmsTxtPage[];

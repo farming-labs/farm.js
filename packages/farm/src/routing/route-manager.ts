@@ -440,6 +440,12 @@ export class RouteManager {
     return new Map(this.routeSlots);
   }
 
+  /** The layouts that wrap a registered page, root first. */
+  getRouteLayouts(pattern: string): RouteEntry[] {
+    const routeEntry = this.routes.get(pattern);
+    return routeEntry ? this.findMatchingLayouts(splitRoutePath(pattern), routeEntry) : [];
+  }
+
   /** Resolve route rules, inherited layouts, and the page export in precedence order. */
   async resolveRouteRuntimeConfig(pattern: string): Promise<ResolvedFarmRouteRuntimeConfig> {
     const routeEntry = this.routes.get(pattern);

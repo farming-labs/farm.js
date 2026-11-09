@@ -6821,6 +6821,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
+  isFarmPageNoIndex,
   listFarmMCPLlmsTxtLinks,
   registerFarmMCPServer,
   renderFarmLlmsFullTxt,
@@ -8857,7 +8858,8 @@ function createFarmAgentRobotsResponse(request) {
 // Static pages a path-specific guard covers (non-root middleware.ts, a config or
 // integration middleware matcher naming the path), decided at build time.
 // sitemap.xml, llms.txt and the default MCP server never list them, nor a page behind
-// a route guard.
+// a route guard, nor one that renders noindex through its own robots or, without one,
+// its nearest layout's.
 const farmAgentGuardedPages = new Set(${JSON.stringify(
     pageRoutes
       .map((route) => route.pattern)
@@ -8876,7 +8878,15 @@ const farmAgentGuardedPages = new Set(${JSON.stringify(
 function getFarmAgentListedPageRoutes() {
   return pageRoutes.filter(
     (route) =>
-      !farmAgentGuardedPages.has(route.pattern) && !(route.module && route.module.__farmRouteGuard),
+      !route.pattern.includes("[") &&
+      !farmAgentGuardedPages.has(route.pattern) &&
+      !(route.module && route.module.__farmRouteGuard) &&
+      !isFarmPageNoIndex(
+        route.module && route.module.metadata,
+        getApplicableLayouts(route.pattern, route.directory || route.pattern).map(
+          (layout) => layout.module && layout.module.metadata,
+        ),
+      ),
   );
 }
 ${

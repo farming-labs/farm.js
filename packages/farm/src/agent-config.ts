@@ -83,7 +83,8 @@ export interface FarmAgentUserConfig {
   /**
    * Serve `/sitemap.xml` listing the app's static pages, the same pages the generated
    * llms.txt lists, each with the time its page file last changed. Dynamic routes,
-   * pages whose metadata says noindex, pages behind a route `guard`, and pages a
+   * pages whose metadata says noindex (their own, or a layout's when the page sets no
+   * `robots`), pages behind a route `guard`, and pages a
    * path-specific guard covers (non-root middleware.ts, a config or integration
    * middleware matcher naming the path) are left out.
    * URLs use the root layout's `metadataBase`, or the request's origin without one. An

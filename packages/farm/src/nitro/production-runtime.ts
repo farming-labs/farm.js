@@ -97,6 +97,7 @@ export {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
+  isFarmPageNoIndex,
   renderFarmLlmsFullTxt,
   createFarmLlmsFullRenderer,
   resolveFarmLlmsTxtConfig,

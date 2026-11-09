@@ -6,6 +6,7 @@ import {
   createFarmDefaultLlmsTxt,
   createFarmLlmsFullRenderer,
   createFarmLlmsMarkdownReader,
+  isFarmPageNoIndex,
   renderFarmLlmsFullTxt,
   resolveFarmLlmsTxtConfig,
   serializeFarmLlmsTxt,
@@ -253,6 +254,28 @@ describe("collectFarmLlmsTxtPages", () => {
       "/docs/getting-started",
       "/pricing",
     ]);
+  });
+});
+
+describe("isFarmPageNoIndex", () => {
+  const noindex = { robots: { index: false } };
+
+  it("follows the nearest layout's robots when the page sets none", () => {
+    expect(isFarmPageNoIndex({ title: "Roster" }, [{}, noindex])).toBe(true);
+    expect(isFarmPageNoIndex(undefined, [noindex, { title: "Staff" }])).toBe(true);
+    expect(isFarmPageNoIndex({}, [noindex, { robots: "index, follow" }])).toBe(false);
+  });
+
+  it("lets the page's own robots replace its layouts'", () => {
+    expect(isFarmPageNoIndex({ robots: { index: true } }, [noindex])).toBe(false);
+    expect(isFarmPageNoIndex({ robots: "noindex" }, [{ robots: { index: true } }])).toBe(true);
+    // A page that sets robots to nothing renders none, as mergeMetadata spreads it over.
+    expect(isFarmPageNoIndex({ robots: undefined }, [noindex])).toBe(false);
+  });
+
+  it("is false without robots anywhere", () => {
+    expect(isFarmPageNoIndex(undefined)).toBe(false);
+    expect(isFarmPageNoIndex({ title: "About" }, [{ title: "Acme" }])).toBe(false);
   });
 });
 

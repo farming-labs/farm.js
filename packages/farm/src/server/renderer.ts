@@ -116,6 +116,7 @@ import {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
+  isFarmPageNoIndex,
   renderFarmLlmsFullTxt,
   resolveFarmLlmsTxtConfig,
 } from "../llms-txt";
@@ -2719,6 +2720,7 @@ export class ServerRenderer {
             }),
             fs.promises.stat(route.modulePath).catch(() => undefined),
           ]);
+          if (await this.isAgentPageNoIndex(pattern, module?.metadata)) return null;
           return { pattern, module, lastModified: stat?.mtime.toISOString() };
         }),
       );
@@ -2726,12 +2728,15 @@ export class ServerRenderer {
       const rootMetadata = rootLayout
         ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
         : undefined;
-      const sitemap = createFarmDefaultSitemap(sources, {
-        origin: new URL(request.url).origin,
-        config: this.getAgentSitemap(),
-        metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
-        basePath: this.config.basePath,
-      });
+      const sitemap = createFarmDefaultSitemap(
+        sources.filter((source) => source !== null),
+        {
+          origin: new URL(request.url).origin,
+          config: this.getAgentSitemap(),
+          metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
+          basePath: this.config.basePath,
+        },
+      );
       await sendWebResponse(
         res as any,
         createFarmMetadataRouteResponse("sitemap", sitemap, {}, { method: req.method }),
@@ -2771,6 +2776,22 @@ export class ServerRenderer {
   }
 
   /**
+   * Whether a listed page renders noindex: its own `robots`, else its nearest layout's, as
+   * the production server decides. A layout that fails to load is surfaced by the page.
+   */
+  private async isAgentPageNoIndex(pattern: string, metadata: unknown): Promise<boolean> {
+    const layoutMetadata = await Promise.all(
+      this.routeManager.getRouteLayouts(pattern).map((layout) =>
+        this.routeManager.loadLayoutModule(layout.modulePath).then(
+          (module) => module.metadata as unknown,
+          () => undefined,
+        ),
+      ),
+    );
+    return isFarmPageNoIndex(metadata, layoutMetadata);
+  }
+
+  /**
    * The default read-only MCP server (`agent.mcp`), or undefined when the app has an MCP
    * server of its own: a route that answers /mcp, an API route at /api/mcp, `@farm.js/mcp`,
    * or a registered server such as the docs engine's. Production applies the same rules.
@@ -2800,20 +2821,26 @@ export class ServerRenderer {
         basePath: this.config.basePath,
         listPages: async () => {
           const sources = await Promise.all(
-            this.getAgentListedRoutes().map(async ([pattern, route]) => ({
-              pattern,
+            this.getAgentListedRoutes().map(async ([pattern, route]) => {
               // The page itself surfaces a load error. Without its module a guard cannot
               // be ruled out, so the page is left out.
-              module: await this.routeManager
+              const module = await this.routeManager
                 .loadRouteModule(route.modulePath)
-                .catch(() => ({ __farmRouteGuard: true })),
-            })),
+                .catch(() => ({ __farmRouteGuard: true }) as const);
+              const metadata = (module as { metadata?: unknown }).metadata;
+              return (await this.isAgentPageNoIndex(pattern, metadata))
+                ? null
+                : { pattern, module };
+            }),
           );
-          return collectFarmDefaultMCPPages(sources, {
-            origin,
-            basePath: this.config.basePath,
-            markdown: resolveMarkdownConfig(this.config.md as any),
-          });
+          return collectFarmDefaultMCPPages(
+            sources.filter((source) => source !== null),
+            {
+              origin,
+              basePath: this.config.basePath,
+              markdown: resolveMarkdownConfig(this.config.md as any),
+            },
+          );
         },
         // Pages are read through this server's own socket, with no cookies, as llms-full.txt does.
         readMarkdown: this.createDevMarkdownReader(req),
@@ -2852,6 +2879,7 @@ export class ServerRenderer {
           const module = await this.routeManager.loadRouteModule(route.modulePath);
           // A route guard decides per request who may see the page, as for the sitemap.
           if ((module as { __farmRouteGuard?: unknown }).__farmRouteGuard) return null;
+          if (await this.isAgentPageNoIndex(pattern, module.metadata)) return null;
           return { pattern, metadata: module.metadata as unknown };
         } catch (error) {
           // The page itself will surface this error; list it with its fallback title.

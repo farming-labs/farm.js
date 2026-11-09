@@ -1528,6 +1528,13 @@ function createRenderer(
   const routeManager = {
     getRoutes: () => toRouteEntries(options.routes),
     getLayouts: () => toRouteEntries(options.layouts),
+    getRouteLayouts: (pattern: string) =>
+      [...toRouteEntries(options.layouts).values()].filter(
+        (layout) =>
+          layout.pattern === "/" ||
+          pattern === layout.pattern ||
+          pattern.startsWith(`${layout.pattern}/`),
+      ),
     getIsolatedClientBoundaryModules: () => new Set(options.isolatedClientBoundaryModules ?? []),
     matchMetadataRoute(pathname: string) {
       const segmentPath = applicationMetadataPattern === "/" ? "" : applicationMetadataPattern;
