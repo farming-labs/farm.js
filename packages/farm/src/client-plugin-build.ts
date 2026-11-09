@@ -14,6 +14,8 @@ export interface ResolvedFarmClientPlugin {
 }
 
 export interface FarmClientPluginEntryCode {
+  /** No plugin and no app client entry: the entry can skip the plugin manager. */
+  empty: boolean;
   imports: string;
   registrations: string;
   plugins: ResolvedFarmClientPlugin[];
@@ -118,7 +120,7 @@ export function generateFarmClientPluginEntryCode(
 ${serializedPlugins.join(",\n")}
 ]`;
 
-  return { imports, registrations, plugins: resolved };
+  return { imports, registrations, plugins: resolved, empty: serializedPlugins.length === 0 };
 }
 
 function assertClientLifecycle(client: FarmPluginClientConfig, pluginName: string): void {

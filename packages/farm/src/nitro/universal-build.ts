@@ -3518,7 +3518,7 @@ function isFarmDocsPath() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientCancellation, createClientPluginManager, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
@@ -3749,7 +3749,10 @@ ${generateUniversalRouterStateProperties()}
   }
 };
 
-const farmClientRuntime = createClientPluginManager(
+const farmClientRuntime = ${
+      clientPluginEntry.empty
+        ? "createPluginlessClientRuntime()"
+        : `createClientPluginManager(
   ${clientPluginEntry.registrations},
   {
     router: spaRouter,
@@ -3757,7 +3760,8 @@ const farmClientRuntime = createClientPluginManager(
     isProd: true,
     deploymentId: window.__FARM_DEPLOYMENT_ID__,
   },
-);
+)`
+    };
 window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
@@ -3915,7 +3919,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -5216,7 +5220,10 @@ ${
   }
 };
 
-const farmClientRuntime = createClientPluginManager(
+const farmClientRuntime = ${
+    clientPluginEntry.empty
+      ? "createPluginlessClientRuntime()"
+      : `createClientPluginManager(
   ${clientPluginEntry.registrations},
   {
     router: spaRouter,
@@ -5224,7 +5231,8 @@ const farmClientRuntime = createClientPluginManager(
     isProd: true,
     deploymentId: window.__FARM_DEPLOYMENT_ID__,
   },
-);
+)`
+  };
 window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
