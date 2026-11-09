@@ -105,6 +105,44 @@ describe("development default sitemap", () => {
     expect(xml.match(/<lastmod>/g)?.length).toBeGreaterThanOrEqual(2);
   }, 120_000);
 
+  it("leaves out pages a layout marks noindex unless the page sets its own robots", async () => {
+    const origin = await startApp("", {
+      "src/app/staff/layout.tsx": `import React from "react";
+export const metadata = { robots: { index: false } };
+export default function Layout({ children }) { return <>{children}</>; }`,
+      "src/app/staff/page.tsx": `import React from "react";
+export default function Page() { return <main>staff</main>; }`,
+      "src/app/staff/roster/page.tsx": `import React from "react";
+export const metadata = { title: "Roster" };
+export default function Page() { return <main>roster</main>; }`,
+      "src/app/staff/careers/page.tsx": `import React from "react";
+export const metadata = { title: "Careers", robots: { index: true } };
+export default function Page() { return <main>careers</main>; }`,
+    });
+
+    // Each page renders with the merged robots, so only the page that overrides it is indexable.
+    const page = await (await fetch(`${origin}/staff/roster`)).text();
+    expect(page).toContain('name="robots" content="noindex"');
+
+    expect(locs(await (await fetch(`${origin}/sitemap.xml`)).text())).toEqual([
+      "https://acme.test/",
+      "https://acme.test/about",
+      "https://acme.test/staff/careers",
+      "https://acme.test/team",
+    ]);
+    const llms = await (await fetch(`${origin}/llms.txt`)).text();
+    expect(llms).toContain("[Careers]");
+    expect(llms).not.toContain("/staff/roster");
+    expect(llms).not.toMatch(/\/staff\)/);
+  }, 120_000);
+
+  it("links llms.txt to metadataBase, as the sitemap does, not the request's host", async () => {
+    const origin = await startApp("");
+    const llms = await (await fetch(`${origin}/llms.txt`)).text();
+    expect(llms).toContain("(https://acme.test/about.md)");
+    expect(llms).not.toContain(origin);
+  }, 120_000);
+
   it("turns off with agent.sitemap: false", async () => {
     const origin = await startApp("agent: { sitemap: false }");
     expect((await fetch(`${origin}/sitemap.xml`)).status).toBe(404);
