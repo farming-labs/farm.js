@@ -132,22 +132,20 @@ async function serve(mode, port) {
 /** Records decoded response bodies by resource type while `action` runs. */
 async function record(page, action) {
   const bodies = [];
-  const pending = [];
-  const onResponse = (response) => {
-    const type = response.request().resourceType();
-    if (!["document", "script", "fetch", "xhr"].includes(type)) return;
-    pending.push(
-      response
-        .body()
-        .then((body) => bodies.push({ type, url: response.url(), body }))
-        .catch(() => {}),
-    );
+  // Fetched here rather than read back with `response.body()`: Chrome can discard a large body
+  // before the protocol asks for it, which lost one navigation in most runs.
+  const handler = async (route) => {
+    const request = route.request();
+    const type = request.resourceType();
+    if (!["document", "script", "fetch", "xhr"].includes(type)) return route.continue();
+    const response = await route.fetch();
+    bodies.push({ type, url: request.url(), body: await response.body() });
+    await route.fulfill({ response });
   };
-  page.on("response", onResponse);
+  await page.route("**/*", handler);
   await action();
   await page.waitForLoadState("networkidle");
-  await Promise.all(pending);
-  page.off("response", onResponse);
+  await page.unroute("**/*", handler);
   return bodies;
 }
 
@@ -198,8 +196,7 @@ async function measure(mode, url, browser, scenario) {
     if (bodies.some((entry) => entry.type === "document")) {
       throw new Error(`${mode}: navigation to ${expected} reloaded the document`);
     }
-    // A body the browser could not hand over, or data fetched outside the click, would count as
-    // a free navigation and lower the average.
+    // Data fetched outside the click would count as a free navigation and lower the average.
     if (!bodies.some((entry) => entry.type === "fetch" || entry.type === "xhr")) {
       throw new Error(`${mode}: navigation to ${expected} recorded no data`);
     }
