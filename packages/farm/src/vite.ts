@@ -1209,6 +1209,8 @@ export function transformIsolatedClientBoundaryModule(options: {
   parse: (code: string) => FarmModuleAstNode;
   /** Islands mode: server output in props travels as DOM slots (RFC 0003). */
   slots?: boolean;
+  /** Islands mode, browser build: islx's wrapper only renders on the server. */
+  browser?: boolean;
   /**
    * Islands mode: the module sets no `island` export and its islands can wait for an interaction
    * (RFC 0003, section 11); `islandStrategy` is ignored.
@@ -1364,7 +1366,9 @@ export function transformIsolatedClientBoundaryModule(options: {
   }
 
   const runtimeImport = options.slots
-    ? `import { createIsland as __farm_islx_island__ } from "@farm.js/core/internal/islx-react";`
+    ? options.browser
+      ? "const __farm_islx_island__ = (component) => component;"
+      : `import { createIsland as __farm_islx_island__ } from "@farm.js/core/internal/islx-react";`
     : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";`;
   return `${runtimeImport}\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
 }
@@ -4504,6 +4508,7 @@ export const manifest = getManifest();
             islandStrategy: explicitStrategy ?? "load",
             parse: (source) => this.parse(source) as unknown as FarmModuleAstNode,
             slots: islandsMode,
+            browser: transformOptions?.ssr !== true,
             inferredInteraction: inference?.strategy === "interaction",
           });
           if (!transformedBoundary) {
