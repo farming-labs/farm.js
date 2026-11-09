@@ -1,5 +1,6 @@
 import type { OpenAPIConfig } from "../config";
 import type { APIRouteInfo } from "../type-generator";
+import { toFileModuleUrl } from "../utils/file-module";
 import type {
   EndpointOpenAPIMetadata,
   EndpointOpenAPIResponseMetadata,
@@ -37,6 +38,11 @@ export interface OpenAPIGeneratorContext {
   mode?: "development" | "production";
   /** Resolved Farm `api.baseURL`, including its API path. */
   apiBaseURL?: string;
+  /**
+   * Loads a route module the way the app's server does (Vite's module runner), so extensionless
+   * and aliased imports resolve and the spec reads the instance that serves requests.
+   */
+  loadModule?: (filePath: string) => Promise<Record<string, any>>;
 }
 
 type AllowedType = "string" | "number" | "boolean" | "array" | "object";
@@ -515,6 +521,12 @@ export class OpenAPIGenerator {
     }));
   }
 
+  private loadRouteModule(filePath: string): Promise<Record<string, any>> {
+    return this.context.loadModule
+      ? this.context.loadModule(filePath)
+      : import(/* @vite-ignore */ toFileModuleUrl(filePath));
+  }
+
   /**
    * Extract request body schema from endpoint
    */
@@ -524,9 +536,7 @@ export class OpenAPIGenerator {
     }
 
     try {
-      // Try to dynamically load the route module
-      const modulePath = route.filePath;
-      const routeModule = await import(/* @vite-ignore */ modulePath);
+      const routeModule = await this.loadRouteModule(route.filePath);
 
       // Get the method handler (GET, POST, etc.)
       const handler = routeModule[method];
@@ -568,9 +578,7 @@ export class OpenAPIGenerator {
     const parameters: any[] = [];
 
     try {
-      // Try to dynamically load the route module
-      const modulePath = route.filePath;
-      const routeModule = await import(/* @vite-ignore */ modulePath);
+      const routeModule = await this.loadRouteModule(route.filePath);
 
       // Get the method handler
       const handler = routeModule[method];
@@ -643,7 +651,7 @@ export class OpenAPIGenerator {
     method: string,
   ): Promise<EndpointOpenAPIMetadata> {
     try {
-      const routeModule = await import(/* @vite-ignore */ route.filePath);
+      const routeModule = await this.loadRouteModule(route.filePath);
       return routeModule[method]?.__openapi ?? {};
     } catch {
       return {};
