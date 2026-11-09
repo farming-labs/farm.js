@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -10,7 +10,6 @@ import { checkServiceHomes } from "./homes.js";
 import type { ConvexDevOptions, ConvexDevState, ConvexFarmConfigView } from "./types.js";
 import type { ConvexPluginInput } from "./types.js";
 
-const CONVEX_BINARY = process.platform === "win32" ? "convex.cmd" : "convex";
 const OUTPUT_LABEL = "convex │ ";
 
 export function resolveDevOptions(
@@ -20,9 +19,23 @@ export function resolveDevOptions(
   return dev === true || dev === undefined ? {} : dev;
 }
 
-function findConvexBinary(root: string): string | undefined {
-  const binaryPath = path.join(root, "node_modules", ".bin", CONVEX_BINARY);
-  return existsSync(binaryPath) ? binaryPath : undefined;
+/**
+ * The convex CLI script installed in the app. Farm runs it with its own Node rather than through
+ * the node_modules/.bin shim, which on Windows is a .cmd file that only cmd.exe can run, and
+ * cmd.exe splits a project path that contains a space.
+ */
+function findConvexCli(root: string): string | undefined {
+  const packageDirectory = path.join(root, "node_modules", "convex");
+  let bin: unknown;
+  try {
+    bin = JSON.parse(readFileSync(path.join(packageDirectory, "package.json"), "utf8")).bin;
+  } catch {
+    return undefined;
+  }
+  const script = typeof bin === "string" ? bin : (bin as Record<string, unknown> | null)?.convex;
+  if (typeof script !== "string") return undefined;
+  const cliPath = path.join(packageDirectory, script);
+  return existsSync(cliPath) ? cliPath : undefined;
 }
 
 function readEnvironmentFile(root: string): string {
@@ -52,18 +65,17 @@ export function startConvexDev(
   options: ConvexDevOptions,
   state: ConvexDevState,
 ): void {
-  const binaryPath = findConvexBinary(root);
-  if (!binaryPath) {
+  const cliPath = findConvexCli(root);
+  if (!cliPath) {
     console.warn(
       "[farm:convex] convex is not installed in this app, so `convex dev` was not started.",
     );
     return;
   }
   const labelOutput = isDeploymentChosen(root);
-  const child = spawn(binaryPath, ["dev", ...(options.args ?? [])], {
+  const child = spawn(process.execPath, [cliPath, "dev", ...(options.args ?? [])], {
     cwd: root,
     stdio: labelOutput ? ["inherit", "pipe", "pipe"] : "inherit",
-    shell: process.platform === "win32",
     env: labelOutput && process.stdout.isTTY ? { ...process.env, FORCE_COLOR: "1" } : process.env,
   });
   state.child = child;
@@ -82,8 +94,26 @@ export function startConvexDev(
 
 export function stopConvexDev(state: ConvexDevState | undefined): void {
   if (!state?.child || state.child.exitCode !== null) return;
-  state.child.kill("SIGINT");
+  stopConvexProcess(state.child);
   state.child = undefined;
+}
+
+/**
+ * Stop convex dev and what it started. Windows has no SIGINT for another process, and kill() ends
+ * only that one process, so taskkill ends the whole tree there.
+ */
+export function stopConvexProcess(
+  child: ChildProcess,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform === "win32" && child.pid !== undefined) {
+    const result = spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    if (!result.error && result.status === 0) return;
+  }
+  child.kill("SIGINT");
 }
 
 const DEPLOYMENT_URL_PATTERN = /^(?:VITE_)?CONVEX_URL=\S/m;

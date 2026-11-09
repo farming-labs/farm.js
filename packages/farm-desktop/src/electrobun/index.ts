@@ -8,6 +8,7 @@ import {
   type DesktopDevSession,
   type DesktopShellContext,
 } from "@farm.js/core/desktop";
+import { stopProcessTree } from "./process-tree.js";
 import { createElectrobunConfig, createElectrobunMain, ICONSET_IMAGE } from "./templates.js";
 
 export { createElectrobunConfig, createElectrobunMain } from "./templates.js";
@@ -37,7 +38,8 @@ export function resolveElectrobunCli(root: string): string {
 
 function runElectrobun(context: DesktopShellContext, args: string[], env?: NodeJS.ProcessEnv) {
   // Its own process group on macOS and Linux, so stopping also reaches the app that
-  // `electrobun dev` launches, which outlives the CLI wrapper otherwise.
+  // `electrobun dev` launches, which outlives the CLI wrapper otherwise. Windows stops the
+  // process tree instead.
   return spawn(process.execPath, [resolveElectrobunCli(context.root), ...args], {
     cwd: context.shellDir,
     env: env ?? process.env,
@@ -51,16 +53,6 @@ function waitForExit(child: ChildProcess): Promise<number> {
     child.once("error", reject);
     child.once("exit", (code, signal) => resolve(code ?? (signal ? 1 : 0)));
   });
-}
-
-function stopProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
-  try {
-    if (isWindows) child.kill(signal);
-    else process.kill(-child.pid, signal);
-  } catch {
-    // Already gone.
-  }
 }
 
 /** Move Electrobun's build and artifact folders into Farm's dist directory. */
