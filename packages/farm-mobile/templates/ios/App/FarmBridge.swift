@@ -78,6 +78,8 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
     private weak var webView: WKWebView?
     private let config: RouteConfig
     private let plugins: [String: FarmPlugin]
+    /// Files this page received by reference (FarmFiles.swift).
+    private let files = FarmFiles()
 
     init(webView: WKWebView, config: RouteConfig, plugins: [String: FarmPlugin], script: String) {
         self.webView = webView
@@ -100,6 +102,7 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
 
     /// Removes the message handler; the WebView is going away.
     func detach() {
+        files.close()
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: FarmBridge.handlerName,
             contentWorld: .page
@@ -176,29 +179,34 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
         guard let id = FarmBridge.integer(message["id"]) else { return }
         let pluginName = message["plugin"] as? String ?? ""
         let method = message["method"] as? String ?? ""
+        // The document that called: an answer that arrives after the WebView loaded another one
+        // settles nothing there.
+        let doc = message["doc"] as? String
         let started = CACurrentMediaTime()
+        let answer = { [weak self] (reply: FarmCallReply) in
+            self?.answer(id, doc, pluginName, method, started, reply)
+        }
         guard let plugin = plugins[pluginName], let webView else {
-            answer(id, pluginName, method, started, .failure(FarmCallError(
+            answer(.failure(FarmCallError(
                 code: "native_unavailable", message: "No native plugin \"\(pluginName)\"."
             )))
             return
         }
-        if let async = plugin as? FarmAsyncPlugin {
-            do {
-                try async.callAsync(method: method, args: message["args"], webView: webView) { reply in
-                    Task { @MainActor [weak self] in self?.answer(id, pluginName, method, started, reply) }
-                }
-            } catch {
-                answer(id, pluginName, method, started, .failure(FarmBridge.callError(error)))
-            }
-            return
-        }
         do {
-            let args = message["args"] as? [String: Any] ?? [:]
-            let value = try plugin.call(method: method, args: args, webView: webView)
-            answer(id, pluginName, method, started, .value(value))
+            // File references this page received go back to the module as its own file:// URLs.
+            let args = try files.resolve(message["args"])
+            if let async = plugin as? FarmAsyncPlugin {
+                try async.callAsync(method: method, args: args, webView: webView) { reply in
+                    Task { @MainActor [weak self] in
+                        self?.answer(id, doc, pluginName, method, started, reply)
+                    }
+                }
+                return
+            }
+            let value = try plugin.call(method: method, args: args as? [String: Any] ?? [:], webView: webView)
+            answer(.value(value))
         } catch {
-            answer(id, pluginName, method, started, .failure(FarmBridge.callError(error)))
+            answer(.failure(FarmBridge.callError(error)))
         }
     }
 
@@ -209,13 +217,15 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
     /// Settles call `id` in the page.
     private func answer(
         _ id: Int,
+        _ doc: String?,
         _ pluginName: String,
         _ method: String,
         _ started: CFTimeInterval,
         _ reply: FarmCallReply
     ) {
-        let ok: Bool
-        let payload: String
+        var ok: Bool
+        var payload: String
+        var bytes = "undefined"
         switch reply {
         case .json(let json):
             ok = true
@@ -224,13 +234,30 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
             ok = false
             payload = FarmBridge.json(["code": error.code, "message": error.message]) ?? "null"
         }
+        // A file:// URL in farm-files reaches the page as a reference, its bytes alongside.
+        if ok, payload.contains("file:"), let data = payload.data(using: .utf8),
+           let value = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+            do {
+                let shared = try files.share(value)
+                if !shared.bytes.isEmpty, let json = FarmBridge.json(shared.value),
+                   let encoded = FarmBridge.json(shared.bytes) {
+                    payload = json
+                    bytes = encoded
+                }
+            } catch {
+                let failure = FarmBridge.callError(error)
+                ok = false
+                payload = FarmBridge.json(["code": failure.code, "message": failure.message]) ?? "null"
+            }
+        }
         if FarmBuild.dev {
             let ms = (CACurrentMediaTime() - started) * 1000
             FarmBridge.log.info(
                 "call #\(id) \(pluginName, privacy: .public).\(method, privacy: .public) ok=\(ok) -> \(payload, privacy: .public) (\(ms) ms native)"
             )
         }
-        evaluate("window.__farmBridge._resolve(\(id), \(ok), \(payload))")
+        let document = doc.map(FarmBridge.jsString) ?? "undefined"
+        evaluate("window.__farmBridge._resolve(\(id), \(ok), \(payload), \(document), \(bytes))")
     }
 
     /// An integral JSON number; booleans and fractions are not ids or tokens.

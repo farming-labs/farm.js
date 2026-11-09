@@ -124,12 +124,17 @@ export function DeviceCard() {
 | `native_error`       | The module threw                                                        |
 | The module's own     | The module called `promise.reject(code, message)`                       |
 
-**Large results, such as photos, come back as URLs** on Android. A module writes the file into
-`cacheDir/farm-files` and resolves with its `file://` URI; the page receives a
-`/__farm/files/<id>` path it can show in an `<img>` or upload with `fetch`. Only the page that got
-the reference can load it, and the file is deleted when the screen closes.
+**Large results, such as photos, come back as URLs.** A module writes the file into
+`farm-files` (`cacheDir/farm-files` on Android, `NSTemporaryDirectory()/farm-files` on iOS) and
+resolves with its `file://` URL. The page receives a URL it can show in an `<img>`, upload with
+`fetch`, or pass back to the module, which gets the `file://` URL again:
+
+- **Android:** a `/__farm/files/<id>` path the WebView serves from the file.
+- **iOS:** a `blob:` URL. WKWebView cannot serve the app's own origin, so the shell copies the
+  file into the page; files over 64 MB are rejected with `native_error`.
+
+Only the page that got the URL can use it, and the file is deleted when the screen closes.
 [`PhotoPicker`](/docs/mobile/native-screens#portable-components) from `@farm.js/ui` wraps this.
-iOS web screens receive the plain string for now, so pick photos there with a file input.
 
 ## `mobile.modules`
 

@@ -107,6 +107,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         Navigator.log.info("server=\(config.server.absoluteString, privacy: .public) pool=\(launch.pool) rules=\(config.rules.count)")
         // The device token native screens call the server with; issued after a web sign-in.
         _ = MobileSession.start(config: config)
+        // Files web screens received by reference in an earlier run of the app.
+        FarmFiles.clearStale()
 
         // Device plugins reachable as native.<name>; none ship yet, so calls reject as unavailable.
         let plugins: [String: FarmPlugin] = [:]

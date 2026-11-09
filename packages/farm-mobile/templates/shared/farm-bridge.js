@@ -27,6 +27,35 @@
 
   const post = (message) => port.postMessage(JSON.stringify(message));
 
+  // Files a native module answered with, by reference (/__farm/files/<id>). Android's WebView
+  // serves that path itself; WKWebView cannot answer requests to the app's origin, so the iOS shell
+  // sends a file's bytes with the answer, and the page gets a blob: URL instead. This document's
+  // blob: URLs to their references:
+  const fileUrls = new Map();
+  const swap = (value, replace) => {
+    if (typeof value === "string") return replace(value) ?? value;
+    if (Array.isArray(value)) return value.map((item) => swap(item, replace));
+    if (value && typeof value === "object") {
+      const copy = {};
+      for (const key of Object.keys(value)) copy[key] = swap(value[key], replace);
+      return copy;
+    }
+    return value;
+  };
+  const withFiles = (value, files) => {
+    const urls = new Map();
+    for (const reference of Object.keys(files)) {
+      const { type, data } = files[reference];
+      const binary = atob(data);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+      const url = URL.createObjectURL(new Blob([bytes], { type: type || "" }));
+      urls.set(reference, url);
+      fileUrls.set(url, reference);
+    }
+    return swap(value, (text) => urls.get(text));
+  };
+
   const bridge = {
     platform: __FARM_SHELL_OS__,
     plugins,
@@ -36,15 +65,19 @@
       const id = ++seq;
       return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
-        post({ type: "call", id, plugin, method, args: args ?? {}, doc: documentId });
+        // A blob: URL a file arrived as goes back to native as its reference.
+        const sent = fileUrls.size > 0 ? swap(args ?? {}, (text) => fileUrls.get(text)) : args;
+        post({ type: "call", id, plugin, method, args: sent ?? {}, doc: documentId });
       });
     },
 
-    _resolve(id, ok, value, doc) {
-      if (doc !== undefined && doc !== documentId) return;
+    // `files` (iOS): the bytes of each file reference in `value`, which become blob: URLs.
+    _resolve(id, ok, value, doc, files) {
+      if (doc != null && doc !== documentId) return;
       const entry = pending.get(id);
       if (!entry) return;
       pending.delete(id);
+      if (ok && files) value = withFiles(value, files);
       if (ok) entry.resolve(value);
       else {
         const error = new Error((value && value.message) || "Native call failed");
