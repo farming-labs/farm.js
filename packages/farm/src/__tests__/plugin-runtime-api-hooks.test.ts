@@ -28,11 +28,16 @@ afterEach(async () => {
 });
 
 // The plugin records every runtime hook (and onError report) it sees, app middleware records
-// that it ran, and the plugin serves the record from its own endpoint, which runs outside the
-// request hooks, so a dev server and a production server can be asked the same questions.
+// that it ran (and guards a built-in route, the app manifest), and the plugin serves the record
+// from its own endpoint, which runs outside the request hooks, so a dev server and a production
+// server can be asked the same questions.
 const TRACED = `const traced = (request: Request) => {
   const { pathname } = new URL(request.url);
-  return /^\\/(api|integration)\\//.test(pathname) || pathname === "/hello" ? pathname : null;
+  return /^\\/(api|integration)\\//.test(pathname) ||
+    pathname === "/hello" ||
+    pathname === "/.well-known/farmjs.json"
+    ? pathname
+    : null;
 };
 const trace: string[] = ((globalThis as any).__farmTestTrace ??= []);`;
 
@@ -92,7 +97,9 @@ export function middleware(request: Request) {
   const pathname = traced(request);
   if (!pathname) return;
   trace.push("middleware " + pathname);
-  if (pathname === "/api/guarded") return new Response("guarded", { status: 401 });
+  if (pathname === "/api/guarded" || pathname === "/.well-known/farmjs.json") {
+    return new Response("guarded", { status: 401 });
+  }
 }`,
   "src/app/api/ok/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
   "src/app/api/after-fails/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
@@ -129,6 +136,7 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
     "/api/boom",
     "/api/after-fails",
     "/integration/boom",
+    "/.well-known/farmjs.json",
     "/hello",
   ]) {
     const response = await fetch(`${origin}${pathname}`);
@@ -193,6 +201,16 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
         "after /integration/boom 500",
       ],
     },
+    // A built-in route (here the app manifest) app middleware answers: runtime.after sees
+    // that response, as for an API route.
+    "/.well-known/farmjs.json": {
+      status: 401,
+      trace: [
+        "before page /.well-known/farmjs.json",
+        "middleware /.well-known/farmjs.json",
+        "after /.well-known/farmjs.json 401",
+      ],
+    },
     // Page requests are unchanged.
     "/hello": {
       status: 200,
@@ -201,7 +219,7 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
   });
 }
 
-describe("plugin runtime hooks for API and integration requests", () => {
+describe("plugin runtime hooks for API, integration, and built-in route requests", () => {
   it("in development", async () => {
     const root = await createApp("farm-dev-plugin-runtime-api-");
     const server = await createServer({ root });
