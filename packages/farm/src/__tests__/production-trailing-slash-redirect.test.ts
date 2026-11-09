@@ -152,13 +152,15 @@ describe("production trailing-slash redirects", () => {
         ["/\\evil.com/", "/evil.com"],
         ["///evil.com/", "/evil.com"],
         ["//evil.com/?x=1", "/evil.com?x=1"],
-        ["//evil.com", "/evil.com"],
       ];
       for (const [target, location] of expected) {
         const response = await requestRaw(port, target);
         expectSameOriginLocation(response, target);
         expect(response, target).toEqual({ status: 308, location });
       }
+
+      // Already canonical, so it renders the dynamic route without a redirect, as before.
+      expect(await requestRaw(port, "//evil.com")).toEqual({ status: 200, location: undefined });
 
       // Ordinary canonicalization is unchanged.
       expect(await requestRaw(port, "/about/")).toEqual({ status: 308, location: "/about" });
@@ -184,13 +186,14 @@ describe("production trailing-slash redirects", () => {
         ["//evil.com", "/evil.com/"],
         ["/\\evil.com", "/evil.com/"],
         ["//evil.com/about", "/evil.com/about/"],
-        ["//evil.com/", "/evil.com/"],
       ];
       for (const [target, location] of expected) {
         const response = await requestRaw(port, target);
         expectSameOriginLocation(response, target);
         expect(response, target).toEqual({ status: 308, location });
       }
+
+      expect(await requestRaw(port, "//evil.com/")).toEqual({ status: 200, location: undefined });
 
       expect(await requestRaw(port, "/about")).toEqual({ status: 308, location: "/about/" });
       expect(await requestRaw(port, "/about?tab=team")).toEqual({

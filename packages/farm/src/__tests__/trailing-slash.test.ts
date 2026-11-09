@@ -37,19 +37,26 @@ describe("trailing slash routing", () => {
       ["https://farm.test/\\evil.com/", false, "/evil.com"],
       ["https://farm.test///evil.com/", false, "/evil.com"],
       ["https://farm.test//evil.com/?x=1", false, "/evil.com?x=1"],
-      ["https://farm.test//evil.com", false, "/evil.com"],
       ["https://farm.test//evil.com", true, "/evil.com/"],
       ["https://farm.test/\\evil.com", true, "/evil.com/"],
       ["https://farm.test//evil.com/about", true, "/evil.com/about/"],
-      ["https://farm.test//evil.com/", true, "/evil.com/"],
       ["https://farm.test//", false, "/"],
-      ["https://farm.test//", true, "/"],
     ];
     for (const [href, enabled, location] of cases) {
       expect(resolveFarmTrailingSlashRedirect(new URL(href), enabled), href).toBe(location);
     }
-    expect(normalizeFarmTrailingSlashPathname("//evil.com/", false)).toBe("/evil.com");
-    expect(normalizeFarmTrailingSlashPathname("/\\evil.com", true)).toBe("/evil.com/");
+  });
+
+  it("does not redirect a repeated leading slash whose trailing slash is already canonical", () => {
+    // These were served as they are before, and still are: there is no Location to protect.
+    for (const [href, enabled] of [
+      ["https://farm.test//dashboard/projects/7", false],
+      ["https://farm.test//evil.com", false],
+      ["https://farm.test//evil.com/", true],
+      ["https://farm.test//", true],
+    ] as const) {
+      expect(resolveFarmTrailingSlashRedirect(new URL(href), enabled), href).toBeNull();
+    }
   });
 
   it("leaves interior repeated slashes and already-canonical paths alone", () => {

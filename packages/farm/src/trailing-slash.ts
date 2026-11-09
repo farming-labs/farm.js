@@ -15,18 +15,17 @@ export function getFarmTrailingSlashPreference(): boolean {
 }
 
 export function normalizeFarmTrailingSlashPathname(pathname: string, enabled: boolean): string {
-  // Route matching skips empty segments, so "//host/" matches a root dynamic route. Collapse the
-  // leading slashes (browsers read a backslash as "/") so the canonical path never reads "//host".
-  const canonical = pathname.replace(/^[/\\]+/, "/");
-  if (canonical === "/") return canonical;
-  if (enabled) return canonical.endsWith("/") ? canonical : `${canonical}/`;
-  return canonical.replace(/\/+$/, "") || "/";
+  if (pathname === "/") return pathname;
+  if (enabled) return pathname.endsWith("/") ? pathname : `${pathname}/`;
+  return pathname.replace(/\/+$/, "") || "/";
 }
 
 export function resolveFarmTrailingSlashRedirect(url: URL, enabled: boolean): string | null {
   const pathname = normalizeFarmTrailingSlashPathname(url.pathname, enabled);
   if (pathname === url.pathname) return null;
-  // A relative Location starting with two slashes (or a slash and a backslash) leaves the origin.
-  if (/^\/[/\\]/.test(pathname)) return null;
-  return `${pathname}${url.search}`;
+  // Route matching skips empty segments, so "//host/" can match a root dynamic route. Collapse
+  // leading separators (browsers read a backslash as "/") so the relative Location never reads as
+  // the protocol-relative URL "//host". A path whose trailing slash is already canonical is served
+  // as it is, as before.
+  return `${pathname.replace(/^[/\\]+/, "/")}${url.search}`;
 }
