@@ -72,7 +72,7 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment';
-import { runFarmNavigationDelegates } from '@farm.js/core/internal/client-runtime';
+import { createFarmRouteAnnouncer, runFarmNavigationDelegates } from '@farm.js/core/internal/client-runtime';
 `;
 
   // farm dev --mobile: every page runs in the shell's WebView, so this entry is the mobile client.
@@ -243,6 +243,9 @@ async function main() {
     return;
   }
   
+  // The page the document loaded with is the baseline: it is never announced.
+  const announceRoute = createFarmRouteAnnouncer();
+
   // Root component that manages RSC state
   function BrowserRoot() {
     const [payload, set] = React.useState(initial);
@@ -271,6 +274,11 @@ async function main() {
         description?.remove();
       }
     }, [payload.metadata?.title, payload.metadata?.description]);
+
+    // Announce a client navigation to screen readers once its page and title are in place.
+    React.useEffect(() => {
+      if (payload !== initial) announceRoute();
+    }, [payload]);
     
     // Set up client-side navigation
     React.useEffect(() => {
