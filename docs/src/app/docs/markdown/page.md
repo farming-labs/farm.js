@@ -417,6 +417,8 @@ at its `.md` URL and to `Accept: text/markdown`, with `?outline`, `?section`, `?
 `?actions`. HTML pages send the `Link` header, a missing `.md` page answers a Markdown 404, and reads
 fire `agent.read` events. The mirror renders the page through the normal request path, so middleware
 and sign-in gates apply, and a page that must not be shared keeps its private `Cache-Control`.
+Under a `basePath` or locale prefix, a home page's mirror is `<prefix>/index.md` and `md.expose`
+lists route paths without the prefix, as described above.
 
 The RSC renderer currently sets a deployment cookie on HTML page renders. Its generated mirrors
 therefore use `private, no-store` too; setting `md.cache` does not enable shared caching while that
