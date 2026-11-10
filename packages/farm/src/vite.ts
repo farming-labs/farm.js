@@ -2876,12 +2876,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             farmApp.getRouteManager().toRoutePathname(pathname);
           // An app's own llms.txt, llms-full.txt, sitemap.xml, and robots.txt (agent.llmsTxt,
           // agent.crawlers, a root llms.ts, llms-full.ts, sitemap.ts, or robots.ts, or a public
-          // file) take those paths from the docs engine, as in production.
-          const appOwnsDocsEnginePath = farmAppOwnsDocsEnginePath(requestPathname, {
-            generatedPaths: farmAgentGeneratedPaths(farmConfig),
-            routeManager: farmApp.getRouteManager(),
-            publicDir: server.config.publicDir,
-          });
+          // file) take those paths from the docs engine. Production decides on the route path,
+          // so this does too.
+          const appOwnsDocsEnginePath = farmAppOwnsDocsEnginePath(
+            toRoutePathname(requestPathname),
+            {
+              generatedPaths: farmAgentGeneratedPaths(farmConfig),
+              routeManager: farmApp.getRouteManager(),
+              publicDir: server.config.publicDir,
+            },
+          );
           if (farmDocsHandler && !appOwnsDocsEnginePath && !viteModuleRequest) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,

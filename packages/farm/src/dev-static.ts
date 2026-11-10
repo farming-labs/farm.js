@@ -182,15 +182,19 @@ const DOCS_ENGINE_APP_OWNABLE_PATHS = new Set([
  * keeps the docs engine off that path, as production does, where platforms
  * serve public files before any route. Other files under the project root do
  * not count: production does not emit them.
+ *
+ * `routePathname` is the request's path as routes see it, without the basePath and locale
+ * prefix. As in production, a trailing slash does not change the file it names.
  */
 export function farmAppOwnsDocsEnginePath(
-  pathname: string,
+  routePathname: string,
   options: {
     generatedPaths: readonly string[];
     routeManager?: DottedPathRouteMatcher | null;
     publicDir: string | false | undefined;
   },
 ): boolean {
+  const pathname = routePathname.length > 1 ? routePathname.replace(/\/+$/, "") : routePathname;
   if (!DOCS_ENGINE_APP_OWNABLE_PATHS.has(pathname)) return false;
   return (
     options.generatedPaths.includes(pathname) ||

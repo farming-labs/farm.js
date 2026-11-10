@@ -173,6 +173,8 @@ describe("shouldBypassFarmRouterForDottedPath", () => {
 
     expect(owns("/llms.txt")).toBe(false);
     expect(owns("/llms.txt", ["/llms.txt"])).toBe(true);
+    // As in production, a trailing slash names the same file; the docs engine reads it so.
+    expect(owns("/llms.txt/", ["/llms.txt"])).toBe(true);
     expect(owns("/llms-full.txt", [], ["/llms-full.txt"])).toBe(true);
     fs.writeFileSync(path.join(publicDir, "llms-full.txt"), "# Static");
     try {
