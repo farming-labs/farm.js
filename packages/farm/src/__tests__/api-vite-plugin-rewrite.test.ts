@@ -259,7 +259,7 @@ describe("dev API dispatch after middleware rewrites", () => {
     apiMiddleware!({ url: "/api/health", method: "GET", headers: {} }, conflictRes, vi.fn());
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(conflictRes.statusCode).toBe(500);
-    expect(conflictRes.__body).toContain("Internal server error");
+    expect(JSON.parse(conflictRes.__body)).toEqual({ error: "Internal Server Error" });
 
     rootMethod = "POST";
     await plugin.handleHotUpdate({ file: routesFile, modules: [], server });
@@ -338,5 +338,22 @@ describe("dev API dispatch after middleware rewrites", () => {
     });
     expect(result.passedToNext).toBe(false);
     expect(JSON.parse(result.body ?? "")).toEqual({ route: "public" });
+  });
+});
+
+describe("dev API route errors", () => {
+  it("answers a throwing route with production's 500 body and logs the error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const harness = await createDevHarness({
+      boom: `export const GET = async () => { throw new Error("route-secret-detail"); };\n`,
+    });
+
+    const result = await harness.dispatch("/api/boom");
+    expect(result.status).toBe(500);
+    expect(result.body).toBe('{"error":"Internal Server Error"}');
+    expect(consoleError).toHaveBeenCalledWith(
+      "[API Error] /api/boom:",
+      expect.objectContaining({ message: "route-secret-detail" }),
+    );
   });
 });

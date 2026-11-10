@@ -18,6 +18,7 @@ import {
 import { _runWithFarmI18nRequest, type FarmI18nRuntime } from "../i18n/server";
 import {
   API_ROUTE_METHODS,
+  createFarmInternalServerErrorResponse,
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   registerAPIRouteShape,
@@ -441,10 +442,7 @@ export class APIRouteManager {
         } catch (error: any) {
           if (options.throwOnError) throw error;
           console.error(`[API Error] ${pathname}:`, error);
-          return new Response(JSON.stringify({ error: "Internal Server Error" }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
+          return createFarmInternalServerErrorResponse();
         }
       };
 

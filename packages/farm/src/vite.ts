@@ -59,7 +59,11 @@ import { APIRouteManager } from "./api/route-manager";
 import { createFarmDevServerDispatch } from "./api/dev-dispatch";
 import { DEFAULT_FARM_API_BASE_PATH } from "./api/config";
 import { resolveFarmAPIServerBasePath } from "./api/server-path";
-import { isFarmAPIPathname } from "./api/runtime";
+import {
+  createFarmInternalServerErrorResponse,
+  FARM_INTERNAL_SERVER_ERROR_BODY,
+  isFarmAPIPathname,
+} from "./api/runtime";
 import type { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { _runWithMiddlewareContext, _runWithMiddlewareData } from "./middleware/server";
@@ -623,7 +627,7 @@ export function withFarmRequestTracing(
       }
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: "Internal server error" }));
+      res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
     });
   };
 }
@@ -3202,10 +3206,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   // runtime.after still sees the 500.
                   logger.error(`Integration route error: ${error}`);
                   await runtime?.reportError(error);
-                  return new Response(JSON.stringify({ error: "Internal server error" }), {
-                    status: 500,
-                    headers: { "Content-Type": "application/json" },
-                  });
+                  return createFarmInternalServerErrorResponse();
                 }
               };
               runtimeReportsErrors = Boolean(pm);
@@ -3249,7 +3250,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               if (!res.writableEnded) {
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: "Internal server error" }));
+                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
               }
               return true;
             }
@@ -3354,7 +3355,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               logger.error(`Request hook error: ${error}`);
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Internal server error" }));
+              res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
               return;
             }
 
@@ -3438,7 +3439,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 logger.error(`API route error: ${error}`);
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: "Internal server error" }));
+                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
                 return;
               }
               pm.copyRequestContext(runtimeSession.request, req);
@@ -3553,10 +3554,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     logger.error(`API route error: ${error}`);
                     // Reports the throw to onError as the "runtime" phase, as production does.
                     await runtime?.reportError(error);
-                    response = new Response(JSON.stringify({ error: "Internal server error" }), {
-                      status: 500,
-                      headers: { "Content-Type": "application/json" },
-                    });
+                    response = createFarmInternalServerErrorResponse();
                   }
                   return pm
                     ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
@@ -3606,7 +3604,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 logger.error(`API route error: ${error}`);
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: "Internal server error" }));
+                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
                 return;
               }
             }
@@ -3657,7 +3655,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 logger.error(`Docs API route error: ${error}`);
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: "Internal server error" }));
+                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
                 return;
               }
             }
@@ -3688,7 +3686,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               logger.error(`API route error: ${error}`);
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Internal server error" }));
+              res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
             }
             return;
           }
@@ -4324,6 +4322,14 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               await pm.failRuntimeRequest(runtimeSession, error);
             }
             await emitPluginError("render-page", error, { pathname });
+            // With `renderer: false` no error page renders: answer the JSON 500 production
+            // answers (a throwing middleware, say), not Vite's HTML error page.
+            if (rendererDisabled && !res.headersSent) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+              return;
+            }
             next(error);
           }
         }),
