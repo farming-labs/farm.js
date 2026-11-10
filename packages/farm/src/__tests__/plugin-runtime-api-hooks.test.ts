@@ -97,6 +97,8 @@ export default {
   "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
   "src/app/hello/page.tsx": `export default function Page() { return <h1>hello</h1>; }`,
   "src/app/hello/after-fails/page.tsx": `export default function Page() { return <h1>after</h1>; }`,
+  "src/app/hello/transform-fails/page.tsx": `export default function Page() { return <h1>transform-fails-marker</h1>; }`,
+  "src/app/hello/render-fails/page.tsx": `export default function Page() { return <h1>render</h1>; }`,
   "src/app/middleware.ts": `${TRACED}
 export function middleware(request: Request) {
   const pathname = traced(request);
@@ -116,12 +118,17 @@ export function middleware(request: Request) {
   "src/app/api/boom/route.ts": `export function GET(): Response { throw new Error("route failed"); }`,
 };
 
-// A second plugin with an HTML transform hook, which makes farm dev buffer a page response
-// before runtime.after sees it.
+// A second plugin with HTML transform hooks, which make farm dev buffer a page response before
+// runtime.after sees it. transformHTML fails on one page's markup, afterRender on another path.
 const HTML_TRANSFORM_PLUGIN = `
     definePlugin({
       name: "acme:html",
       transformHTML(html: string) {
+        if (html.includes("transform-fails-marker")) throw new Error("transform failed");
+        return html;
+      },
+      afterRender(html: string, { pathname }: { pathname: string }) {
+        if (pathname.endsWith("/render-fails")) throw new Error("render failed");
         return html;
       },
     }),`;
@@ -360,6 +367,36 @@ async function expectPageHookFailures(origin: string): Promise<void> {
   });
 }
 
+// A throwing HTML transform hook (transformHTML or afterRender) fails the page as a throwing
+// runtime hook does: runtime.error observes it, onError gets it once as the "runtime" phase, no
+// runtime.after runs, and the page answers the plain-text 500.
+async function expectHTMLTransformFailures(origin: string): Promise<void> {
+  const accept = { headers: { accept: "text/html" } };
+  expect({
+    "/hello/transform-fails": await request(origin, "/hello/transform-fails", accept),
+    "/hello/render-fails": await request(origin, "/hello/render-fails", accept),
+  }).toEqual({
+    "/hello/transform-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/transform-fails",
+        "middleware /hello/transform-fails",
+        "error /hello/transform-fails transform failed",
+        "onError runtime transform failed",
+      ],
+    },
+    "/hello/render-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/render-fails",
+        "middleware /hello/render-fails",
+        "error /hello/render-fails render failed",
+        "onError runtime render failed",
+      ],
+    },
+  });
+}
+
 async function startDevelopment(root: string): Promise<string> {
   const server = await createServer({ root });
   devServers.add(server);
@@ -420,14 +457,19 @@ describe("plugin runtime hooks for API, integration, and built-in route requests
   }, 240_000);
 });
 
-describe("plugin runtime hook failures on a page with an HTML transform hook", () => {
+describe("plugin runtime and HTML transform hook failures on a page", () => {
   it("in development", async () => {
     const root = await createApp("farm-dev-plugin-runtime-html-", { htmlTransform: true });
-    await expectPageHookFailures(await startDevelopment(root));
+    const origin = await startDevelopment(root);
+    await expectPageHookFailures(origin);
+    await expectHTMLTransformFailures(origin);
   }, 120_000);
 
   it("in a node-server production build", async () => {
     const root = await createApp("farm-prod-plugin-runtime-html-", { htmlTransform: true });
-    await withProduction(root, expectPageHookFailures);
+    await withProduction(root, async (origin) => {
+      await expectPageHookFailures(origin);
+      await expectHTMLTransformFailures(origin);
+    });
   }, 240_000);
 });

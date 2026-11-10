@@ -841,8 +841,9 @@ function interceptFarmDevPageResponse(options: {
     if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
     delete res[FARM_NODE_RESPONSE_END_PENDING];
   };
-  // A runtime.after failure is the runtime's to report, once, and fails the response with the
-  // runtime hook 500 production answers instead of the response the hook never finished.
+  // A runtime.after failure, or an HTML transform failure inside a runtime session, is the
+  // runtime's to report, once, and fails the response with the runtime hook 500 production
+  // answers instead of the response the hook never finished.
   let runtimeHookFailed = false;
   const endRuntimeRequest = (response: Response) =>
     pm.endRuntimeRequest(runtimeSession!, response).catch((error: unknown) => {
@@ -1042,15 +1043,26 @@ function interceptFarmDevPageResponse(options: {
       .then(async () => {
         if (isHtmlResponse) {
           const fullHtml = Buffer.concat(htmlChunks).toString("utf8");
-          if (!didStreamHtml || bufferPluginResponse) {
-            let html = await pm.runHookSerial("transformHTML", fullHtml);
-            html = await pm.runHookSerial("afterRender", html, renderPayload);
-            originalEndArgs.length = 0;
-            originalEndArgs.push(html);
-            if (callback) originalEndArgs.push(callback);
-          } else {
-            await pm.runHookSerial("transformHTML", fullHtml);
-            await pm.runHookSerial("afterRender", fullHtml, renderPayload);
+          try {
+            if (!didStreamHtml || bufferPluginResponse) {
+              let html = await pm.runHookSerial("transformHTML", fullHtml);
+              html = await pm.runHookSerial("afterRender", html, renderPayload);
+              originalEndArgs.length = 0;
+              originalEndArgs.push(html);
+              if (callback) originalEndArgs.push(callback);
+            } else {
+              await pm.runHookSerial("transformHTML", fullHtml);
+              await pm.runHookSerial("afterRender", fullHtml, renderPayload);
+            }
+          } catch (error) {
+            // Production runs these hooks inside the runtime request, so a throw fails it:
+            // runtime.error and onError ("runtime") observe it, runtime.after does not run, and
+            // the page answers the runtime hook 500.
+            if (runtimeSession) {
+              runtimeHookFailed = true;
+              await pm.failRuntimeRequest(runtimeSession, error);
+            }
+            throw error;
           }
         }
 
