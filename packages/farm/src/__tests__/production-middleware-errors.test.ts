@@ -236,7 +236,7 @@ async function readTrace(origin: string, logPath: string, pathname: string, init
   return { response, trace };
 }
 
-// What both modes answer and report for a throwing API middleware.
+// What both modes answer and report for a throwing API middleware and a throwing page hook.
 async function expectSharedFailureTraces(origin: string, logPath: string): Promise<void> {
   const failure = { message: SECRET };
   // The middleware throw reaches runtime.error and onError once, and runtime.after sees the 500.
@@ -257,6 +257,28 @@ async function expectSharedFailureTraces(origin: string, logPath: string): Promi
         pathname: "/api/mw-throw",
         status: 500,
         contentType: "application/json",
+      },
+    ],
+  });
+  // A plugin hook that throws still fails the request: runtime.error runs, onError gets it once,
+  // and runtime.after does not run. The answer is Farm's, with the headers() config.
+  expect(
+    await readTrace(origin, logPath, "/plugin-throw", { headers: { accept: "text/html" } }),
+  ).toEqual({
+    response: {
+      status: 500,
+      contentType: "text/plain; charset=utf-8",
+      cacheControl: null,
+      configured: "yes",
+      body: "Internal Server Error",
+    },
+    trace: [
+      { source: "runtime.error", pathname: "/plugin-throw", message: "plugin-before-failed" },
+      {
+        source: "onError",
+        phase: "runtime",
+        pathname: "/plugin-throw",
+        message: "plugin-before-failed",
       },
     ],
   });
@@ -366,30 +388,7 @@ describe("production middleware errors", () => {
       },
     ]);
     await expectSharedFailureTraces(app!.origin, logPath);
-    // A plugin hook that throws still fails the request: runtime.error runs, runtime.after does not.
-    expect((await readTrace(app!.origin, logPath, "/plugin-throw")).trace).toEqual([
-      { source: "runtime.error", pathname: "/plugin-throw", message: "plugin-before-failed" },
-      {
-        source: "onError",
-        phase: "runtime",
-        pathname: "/plugin-throw",
-        message: "plugin-before-failed",
-      },
-    ]);
     expect(app!.output.join("")).toContain(SECRET);
-  });
-
-  it("answers a page whose plugin hook throws with farm dev's plain-text 500", async () => {
-    const response = await readResponse(
-      await fetch(`${app!.origin}/plugin-throw`, { headers: { accept: "text/html" } }),
-    );
-    // Farm's response, with the headers() config, not the server's own error response.
-    expect(response).toMatchObject({
-      status: 500,
-      contentType: "text/plain; charset=utf-8",
-      configured: "yes",
-      body: "Internal Server Error",
-    });
   });
 });
 
@@ -471,7 +470,7 @@ describe("development middleware errors", () => {
     }
   }, 120_000);
 
-  it("reports a throwing API middleware as production does", async () => {
+  it("reports a throwing API middleware and a throwing page hook as production does", async () => {
     const logDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "farm-dev-mw-error-log-"));
     const logPath = path.join(logDirectory, "log");
     // The dev server loads the config in this process.

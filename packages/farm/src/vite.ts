@@ -841,6 +841,17 @@ function interceptFarmDevPageResponse(options: {
     if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
     delete res[FARM_NODE_RESPONSE_END_PENDING];
   };
+  // A runtime.after failure is the runtime's to report to runtime.error and onError, once.
+  let runtimeHookFailed = false;
+  const endRuntimeRequest = (response: Response) =>
+    pm.endRuntimeRequest(runtimeSession!, response).catch((error: unknown) => {
+      runtimeHookFailed = true;
+      throw error;
+    });
+  const reportFailure = (error: unknown) => {
+    if (!runtimeHookFailed) void options.emitError(error);
+    console.error("Error in afterResponse hook:", error);
+  };
   const htmlChunks: Buffer[] = [];
   const responseChunks: Buffer[] = [];
   let didStreamHtml = false;
@@ -881,27 +892,24 @@ function interceptFarmDevPageResponse(options: {
     const status = res.statusCode || 200;
     const canHaveBody = method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
     pm.copyRequestContext(req, runtimeSession!.request);
-    const done = pm
-      .endRuntimeRequest(
-        runtimeSession!,
-        new Response(canHaveBody ? body : null, {
-          status,
-          headers: createHeadersFromNodeResponse(res),
-        }),
-      )
-      .then(async (runtimeResponse) => {
-        applyWebResponseToNodeResponse(runtimeResponse, res);
-        if (!res.headersSent) originalWriteHead(res.statusCode);
-        originalFlushHeaders?.();
-        if (!runtimeResponse.body) return;
-        const reader = runtimeResponse.body.getReader();
-        for (;;) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          originalWrite(chunk.value);
-          if (typeof res.flush === "function") res.flush();
-        }
-      });
+    const done = endRuntimeRequest(
+      new Response(canHaveBody ? body : null, {
+        status,
+        headers: createHeadersFromNodeResponse(res),
+      }),
+    ).then(async (runtimeResponse) => {
+      applyWebResponseToNodeResponse(runtimeResponse, res);
+      if (!res.headersSent) originalWriteHead(res.statusCode);
+      originalFlushHeaders?.();
+      if (!runtimeResponse.body) return;
+      const reader = runtimeResponse.body.getReader();
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        originalWrite(chunk.value);
+        if (typeof res.flush === "function") res.flush();
+      }
+    });
     // Settled by `end`, which reports a failure; until then a rejection is not unhandled.
     done.catch(() => {});
     runtimeStream = { controller, done };
@@ -1000,8 +1008,7 @@ function interceptFarmDevPageResponse(options: {
           hasAfterResponseHook ? pm.runHookParallel("afterResponse", req, res) : undefined,
         )
         .catch((error) => {
-          void options.emitError(error);
-          console.error("Error in afterResponse hook:", error);
+          reportFailure(error);
           if (!res.headersSent) {
             res.statusCode = 500;
             res.removeHeader("Content-Length");
@@ -1062,8 +1069,7 @@ function interceptFarmDevPageResponse(options: {
                 ? Buffer.concat(responseChunks)
                 : toNodeResponseBuffer(firstArg, originalEndArgs[1])
             : null;
-          const runtimeResponse = await pm.endRuntimeRequest(
-            runtimeSession,
+          const runtimeResponse = await endRuntimeRequest(
             new Response(responseBody ? toRequestBody(responseBody) : responseBody, {
               status,
               headers: createHeadersFromNodeResponse(res),
@@ -1096,8 +1102,7 @@ function interceptFarmDevPageResponse(options: {
         originalEnd(...originalEndArgs);
       })
       .catch((error) => {
-        void options.emitError(error);
-        console.error("Error in afterResponse hook:", error);
+        reportFailure(error);
         const shouldBufferResponse = isHtmlResponse
           ? bufferPluginResponse
           : Boolean(runtimeSession && hasRuntimeAfterHook);
@@ -2743,9 +2748,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   createRequestFromNodeRequest(req, new URL(fullUrl)),
                   { kind, route },
                 );
-              } catch (error) {
+              } catch {
+                // The runtime reported the failure to runtime.error and onError.
                 await discard();
-                await emitPluginError("runtime-before", error, { pathname: requestPathname });
                 sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
                 return;
               }
@@ -4288,7 +4293,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               applyWebRequestToNodeRequest(routedRequest, req);
               pathname = new URL(routedRequest.url).pathname;
             } catch (error) {
-              await emitPluginError("runtime-before", error, { pathname: requestedPathname });
+              // runtime.error and onError observe a hook failure once: the runtime reported a
+              // throw from opening or ending the session, and a rewrite's runtime.before fails
+              // the session here.
+              if (runtimeSession) await pm.failRuntimeRequest(runtimeSession, error);
               sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
               return;
             }

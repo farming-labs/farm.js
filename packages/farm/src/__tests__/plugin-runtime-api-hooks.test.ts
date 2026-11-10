@@ -296,17 +296,32 @@ const PAGE_HOOK_FAILURE = {
   body: "Internal Server Error",
 };
 
-// On a page, a throwing runtime hook answers a plain-text 500.
+// On a page, a throwing runtime hook answers a plain-text 500: runtime.error observes it, onError
+// gets it once as the "runtime" phase, and no later runtime.after runs.
 async function expectPageHookFailures(origin: string): Promise<void> {
   const accept = { headers: { accept: "text/html" } };
-  const pageFailures: Record<string, Omit<TracedResponse, "trace">> = {};
-  for (const pathname of ["/hello/before-fails", "/hello/after-fails"]) {
-    const { trace: _trace, ...response } = await request(origin, pathname, accept);
-    pageFailures[pathname] = response;
-  }
-  expect(pageFailures).toEqual({
-    "/hello/before-fails": PAGE_HOOK_FAILURE,
-    "/hello/after-fails": PAGE_HOOK_FAILURE,
+  expect({
+    "/hello/before-fails": await request(origin, "/hello/before-fails", accept),
+    "/hello/after-fails": await request(origin, "/hello/after-fails", accept),
+  }).toEqual({
+    "/hello/before-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/before-fails",
+        "error /hello/before-fails before failed",
+        "onError runtime before failed",
+      ],
+    },
+    "/hello/after-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/after-fails",
+        "middleware /hello/after-fails",
+        "after /hello/after-fails 200",
+        "error /hello/after-fails after failed",
+        "onError runtime after failed",
+      ],
+    },
   });
 }
 
