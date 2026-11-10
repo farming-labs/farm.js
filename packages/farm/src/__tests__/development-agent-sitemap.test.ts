@@ -165,6 +165,41 @@ export default function Page() { return <main>careers</main>; }`,
     ]);
   }, 120_000);
 
+  it("serves the home page's Markdown and the agent files under basePath, as production does", async () => {
+    const origin = await startApp(
+      'basePath: "/console", agent: { crawlers: true, llmsTxt: true }',
+      {
+        "src/app/docs/intro/page.tsx": `import React from "react";
+export default function Page() { return <main>intro</main>; }`,
+      },
+    );
+    const get = (pathname: string) => fetch(`${origin}${pathname}`);
+
+    // llms.txt links the home page to <basePath>/index.md, and that URL serves it.
+    expect(await (await get("/console/llms.txt")).text()).toContain(
+      "(https://acme.test/console/index.md)",
+    );
+    const home = await get("/console/index.md");
+    expect(home.status).toBe(200);
+    expect(home.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(await home.text()).toContain("home");
+    expect(await (await get("/console/llms-full.txt")).text()).toContain(
+      "URL: https://acme.test/console/index.md\n\n# Acme\n\nSource: /console\n\nhome",
+    );
+    // The other spellings of the home page's Markdown keep working.
+    expect((await get("/console.md")).status).toBe(200);
+    expect((await get("/index.md")).status).toBe(200);
+
+    // The generated agent files answer inside the basePath and, as before, at the origin root.
+    for (const pathname of ["/llms.txt", "/llms-full.txt", "/sitemap.xml", "/robots.txt"]) {
+      expect((await get(`/console${pathname}`)).status, `/console${pathname}`).toBe(200);
+      expect((await get(pathname)).status, pathname).toBe(200);
+    }
+    expect(locs(await (await get("/console/sitemap.xml")).text())).toContain(
+      "https://acme.test/console/about",
+    );
+  }, 120_000);
+
   it("names the sitemap in the robots.txt agent.crawlers serves", async () => {
     const origin = await startApp("agent: { crawlers: true }");
     expect(await (await fetch(`${origin}/robots.txt`)).text()).toContain(

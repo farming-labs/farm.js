@@ -1,5 +1,5 @@
 import { _withFarmResponseHeaders } from "./owned-response";
-import { stripFarmBasePath } from "./base-path";
+import { normalizeFarmBasePath, stripFarmBasePath } from "./base-path";
 import { _findFarmMCPEndpointTool, type FarmMCPEndpointTool } from "./mcp-catalog";
 import { createFarmMarkdownViewResponse, FARM_MARKDOWN_VIEW_PARAMS } from "./markdown-view";
 
@@ -95,6 +95,8 @@ export interface FarmMarkdownMirrorTarget {
 
 export interface ResolveMarkdownMirrorTargetOptions {
   accept?: string | null;
+  /** The app's `basePath`, so `<basePath>/index.md` names the home page as `/index.md` does. */
+  basePath?: string;
 }
 
 export interface CreateMarkdownMirrorResponseOptions {
@@ -106,6 +108,8 @@ export interface CreateMarkdownMirrorResponseOptions {
   renderPage: (request: Request) => Response | Promise<Response>;
   /** The app's public API path, so a form posting to an API route can be matched to its MCP tool. */
   apiServerBasePath?: string;
+  /** The app's `basePath`, so `<basePath>/index.md` names the home page as `/index.md` does. */
+  basePath?: string;
 }
 
 export interface ApplyMarkdownNegotiationHeadersOptions {
@@ -160,8 +164,11 @@ export function resolveMarkdownMirrorTarget(
     return null;
   }
 
-  const targetPathname = normalizeMarkdownRoute(
-    hasMarkdownExtension ? pathname.slice(0, -".md".length) || "/" : pathname,
+  const targetPathname = _resolveFarmMarkdownIndexAlias(
+    normalizeMarkdownRoute(
+      hasMarkdownExtension ? pathname.slice(0, -".md".length) || "/" : pathname,
+    ),
+    options.basePath,
   );
   const route = findExposedMarkdownRoute(config, targetPathname);
   if (!route && config.expose !== true) {
@@ -188,6 +195,7 @@ export async function createMarkdownMirrorResponse(
   const hasMarkdownExtension = requestUrl.pathname.toLowerCase().endsWith(".md");
   const target = resolveMarkdownMirrorTarget(options.config, requestUrl.pathname, {
     accept: options.request.headers.get("accept"),
+    basePath: options.basePath,
   });
   if (!target) {
     return null;
@@ -669,6 +677,17 @@ function normalizeMarkdownRouteInput(input: FarmMarkdownRouteInput): FarmMarkdow
     ...input,
     route: normalizeMarkdownRoute(input.route),
   };
+}
+
+/**
+ * @internal `/index` names the home page at the app's root. Under a `basePath` the root is the
+ * base path itself, so `/console/index` is `/console`: the URL llms.txt and the default MCP server
+ * link the home page's Markdown to. Request paths still carry the base path at this point.
+ */
+export function _resolveFarmMarkdownIndexAlias(pathname: string, basePath?: string): string {
+  if (pathname === "/index") return "/";
+  const base = normalizeFarmBasePath(basePath);
+  return base && pathname === `${base}/index` ? base : pathname;
 }
 
 function normalizeMarkdownRoute(route: string): string {

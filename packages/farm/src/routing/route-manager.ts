@@ -1645,7 +1645,8 @@ export class RouteManager {
     };
   }
 
-  private toRoutePathname(pathname: string): string {
+  /** A request pathname as routes see it: without the basePath and, with i18n, the locale. */
+  toRoutePathname(pathname: string): string {
     const i18n = this.getI18nConfig();
     // Locale stripping removes the basePath too; production strips it the same way.
     return i18n

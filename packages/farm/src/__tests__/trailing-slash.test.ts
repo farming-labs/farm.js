@@ -75,6 +75,7 @@ describe("trailing slash routing", () => {
 
   it("redirects a matched development page before rendering it", async () => {
     const routeManager = {
+      toRoutePathname: (pathname: string) => pathname,
       matchMetadataRoute: () => null,
       matchMetadataImage: () => null,
       matchRoute: () => ({
