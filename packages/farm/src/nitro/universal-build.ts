@@ -2268,7 +2268,14 @@ async function buildClient(
     const entryName = platform === "mobile" ? FARM_MOBILE_CLIENT_ENTRY_NAME : "farm-client";
 
     // Write the client entry to a temporary file
-    await fs.writeFile(clientEntryPath, clientHydrationCode);
+    const clientEntry =
+      islandsMode && platform === "web" && clientHydrationCode.includes("/*farm-router-stub*/")
+        ? splitFarmClientRouter(clientHydrationCode)
+        : { entry: clientHydrationCode, router: undefined };
+    await fs.writeFile(clientEntryPath, clientEntry.entry);
+    if (clientEntry.router !== undefined) {
+      await fs.writeFile(path.join(clientEntryDir, "farm-client-router.tsx"), clientEntry.router);
+    }
     // Islands mode's boot entry. It shares no module with the client entry and runs it from its
     // URL, so the client entry and its chunks come out as they would without it.
     const clientInput: Record<string, string> = { [entryName]: clientEntryPath };
@@ -2552,6 +2559,7 @@ const IDLE_NAVIGATION_STATE = {
   startedAt: null,
 };
 
+/*farm-router-start*/
 function createNavigationLocation(url) {
   return {
     href: url.href,
@@ -2621,6 +2629,7 @@ function readHistoryIndex(state) {
   return Number.isSafeInteger(value) ? value : null;
 }
 
+/*farm-router-end*/
 function hasAbsoluteNavigationHref(href) {
   return /^[a-zA-Z][a-zA-Z\\d+.-]*:/.test(href) || href.startsWith("//");
 }
@@ -3351,6 +3360,173 @@ ${
  * the layouts the browser shows, by key: the pattern with its params filled in, so a layout whose
  * params change renders again. The response leaves out the leading layouts the browser keeps.
  */
+// Stands in for the router until the first navigation needs it. A page people read and leave
+// never loads it. Hovering or focusing a Link starts the load, so a click rarely waits for it.
+const FARM_LAZY_ROUTER_STUB = `let farmLoadedRouter = null;
+let farmRouterLoading = null;
+const farmRouterReady = [];
+const farmRouterObserved = new Set();
+
+function loadFarmRouter() {
+  return farmRouterLoading || (farmRouterLoading = import("./farm-client-router").then(function(module) {
+    farmLoadedRouter = module.spaRouter;
+    for (const ready of farmRouterReady.splice(0)) ready(farmLoadedRouter);
+    for (const element of farmRouterObserved) farmLoadedRouter.observeForPrefetch(element);
+    farmRouterObserved.clear();
+    return farmLoadedRouter;
+  }, function(error) {
+    farmRouterLoading = null;
+    throw error;
+  }));
+}
+
+function farmRouterCall(name, beforeLoad) {
+  return function() {
+    const args = arguments;
+    if (farmLoadedRouter) return farmLoadedRouter[name].apply(farmLoadedRouter, args);
+    if (beforeLoad) return beforeLoad.apply(null, args);
+    return loadFarmRouter().then(function(router) { return router[name].apply(router, args); });
+  };
+}
+
+function farmRouterSubscribe(name, loadNow) {
+  return function() {
+    const args = arguments;
+    if (farmLoadedRouter) return farmLoadedRouter[name].apply(farmLoadedRouter, args);
+    let active = true;
+    let cleanup;
+    farmRouterReady.push(function(router) {
+      if (active) cleanup = router[name].apply(router, args);
+    });
+    if (loadNow) void loadFarmRouter().catch(function() {});
+    return function() {
+      active = false;
+      if (cleanup) cleanup();
+    };
+  };
+}
+
+const spaRouter = {
+  navigate: function(href, options) {
+    if (farmLoadedRouter) return farmLoadedRouter.navigate(href, options);
+    return loadFarmRouter().then(function(router) {
+      return router.navigate(href, options);
+    }, function() {
+      if (options && (options.replace || options.action === "replace")) window.location.replace(href);
+      else window.location.assign(href);
+    });
+  },
+  refresh: farmRouterCall("refresh"),
+  prefetch: farmRouterCall("prefetch"),
+  // Watching links for viewport prefetch waits for the router: alone it never justifies loading it.
+  observeForPrefetch: farmRouterCall("observeForPrefetch", function(element) {
+    farmRouterObserved.add(element);
+  }),
+  unobserveForPrefetch: farmRouterCall("unobserveForPrefetch", function(element) {
+    farmRouterObserved.delete(element);
+  }),
+  pushState: farmRouterCall("pushState"),
+  replaceState: farmRouterCall("replaceState"),
+  handlePopState: farmRouterCall("handlePopState"),
+  getNavigationState: farmRouterCall("getNavigationState", function() { return IDLE_NAVIGATION_STATE; }),
+  shouldBlockUnload: farmRouterCall("shouldBlockUnload", function() { return false; }),
+  saveScrollPosition: farmRouterCall("saveScrollPosition", function() {}),
+  subscribeNavigation: farmRouterSubscribe("subscribeNavigation", false),
+  addBlocker: farmRouterSubscribe("addBlocker", true),
+  registerScrollElement: farmRouterSubscribe("registerScrollElement", true),
+};
+window.__FARM_SPA_ROUTER__ = spaRouter;
+
+// Links in server components have no handlers of their own, so intent is read from the document.
+const farmRouterIntentEvents = ["mouseover", "pointerdown", "focusin"];
+function farmRouterIntent(event) {
+  const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+  const href = anchor && anchor.getAttribute("href");
+  if (!href || href.startsWith("#") || hasAbsoluteNavigationHref(href)) return;
+  for (const type of farmRouterIntentEvents) document.removeEventListener(type, farmRouterIntent, true);
+  void loadFarmRouter().catch(function() {});
+}
+for (const type of farmRouterIntentEvents) document.addEventListener(type, farmRouterIntent, true);
+`;
+
+function bindingPattern(name: string): RegExp {
+  // A name after a single dot is a property; after a spread's three dots it is the binding.
+  return new RegExp(`(?<![\\w$])(?<![^.]\\.)${name.replace(/\$/g, "\\$")}(?![\\w$])`);
+}
+
+function readFarmEntryDeclarations(source: string): Set<string> {
+  const names = new Set<string>();
+  const pattern = /^(?:async\s+)?function\*?\s+([\w$]+)|^(?:const|let|var|class)\s+([\w$]+)/gm;
+  for (const match of source.matchAll(pattern)) names.add((match[1] ?? match[2])!);
+  return names;
+}
+
+function readFarmEntryImports(
+  source: string,
+): Array<{ local: string; clause: string; from: string }> {
+  const bindings: Array<{ local: string; clause: string; from: string }> = [];
+  for (const match of source.matchAll(/^import\s+([^"';]+?)\s+from\s+(["'][^"']+["'])/gm)) {
+    const from = match[2]!;
+    const named = /\{([^}]*)\}/.exec(match[1]!);
+    for (const specifier of named?.[1]?.split(",") ?? []) {
+      const [imported, local] = specifier.trim().split(/\s+as\s+/);
+      if (imported)
+        bindings.push({ local: local ?? imported, clause: `{ ${specifier.trim()} }`, from });
+    }
+    const outside = match[1]!
+      .replace(/\{[^}]*\}/, "")
+      .replace(/,/g, " ")
+      .trim();
+    const namespace = /\*\s+as\s+([\w$]+)/.exec(outside);
+    if (namespace) bindings.push({ local: namespace[1]!, clause: `* as ${namespace[1]}`, from });
+    else if (outside) bindings.push({ local: outside, clause: outside, from });
+  }
+  return bindings;
+}
+
+/**
+ * Islands mode: moves the navigation code of a generated client entry into its own module, loaded
+ * when something first needs it, and leaves a stand-in router in the entry.
+ * @internal Exported for tests.
+ */
+export function splitFarmClientRouter(code: string): { entry: string; router: string } {
+  const regions: string[] = [];
+  const eager = code.replace(
+    /\/\*farm-router-start\*\/([\s\S]*?)\/\*farm-router-end\*\/\n?/g,
+    (_, body) => {
+      regions.push(body);
+      return "";
+    },
+  );
+  const body = regions.join("\n");
+  const moved = readFarmEntryDeclarations(body);
+  const usedByRouter = (name: string) => !moved.has(name) && bindingPattern(name).test(body);
+  // An import the entry uses too reaches the router through the entry, so its module stays there.
+  const eagerCode = eager.replace(/^import\s[^;]*;/gm, "");
+  const usedByEntry = (name: string) => bindingPattern(name).test(eagerCode);
+  const bindings = readFarmEntryImports(eager).filter((binding) => usedByRouter(binding.local));
+  const imports = bindings.filter((binding) => !usedByEntry(binding.local));
+  const reexported = bindings
+    .filter((binding) => usedByEntry(binding.local))
+    .map((binding) => binding.local);
+  const shared = [
+    ...new Set([
+      ...reexported,
+      ...[...readFarmEntryDeclarations(eager)].filter((name) => usedByRouter(name)),
+    ]),
+  ];
+  return {
+    entry: `${eager.replace("/*farm-router-stub*/", FARM_LAZY_ROUTER_STUB)}\nexport { ${shared.join(", ")} };\n`,
+    router: [
+      ...imports.map((binding) => `import ${binding.clause} from ${binding.from};`),
+      `import { ${shared.join(", ")} } from "./farm-client-entry";`,
+      body,
+      "export { spaRouter };",
+      "",
+    ].join("\n"),
+  };
+}
+
 /** @internal Exported for tests. */
 export const FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME = `
 function getFarmLayoutKey(pattern, params) {
@@ -4278,6 +4454,7 @@ function renderFarmRoute(root, route) {
   else root.render(route.element);
 }
 
+/*farm-router-start*/
 function matchesRoutePrefix(pathname, pattern) {
   return pattern === "/" ||
     isFarmRouteActive(pattern, getFarmRoutePathname(pathname), { exact: false });
@@ -4292,6 +4469,7 @@ function matchInterceptedRouteSlot(pathname, from) {
   return null;
 }
 
+/*farm-router-end*/
 function routeSlotKey(slot) {
   return slot.ownerPattern + ":" + slot.name;
 }
@@ -4311,6 +4489,7 @@ function findClientRouteSlot(slot) {
  * client navigation does not execute. The JSON ends at the first statement
  * boundary where it parses, so the separator inside a string cannot cut it.
  */
+/*farm-router-start*/
 function readPagePropsPayload(doc) {
   const prefix = "window.__FARM_PROPS__=";
   const separator = ";window.__FARM_INTEGRATION_API_MANIFEST__=";
@@ -4361,6 +4540,7 @@ function readDeferredDataPayload(doc) {
   return undefined;
 }
 
+/*farm-router-end*/
 // defer() values arrive as references, settled by the snapshot the server writes once the
 // document has rendered, and revived as promises the way development revives them. The page
 // and its slots share one id space. The server writes references only with a snapshot, so a
@@ -4371,6 +4551,7 @@ async function reviveFarmDeferredPayload(page, slots, settlements) {
   return reviveDeferredData({ page: page, slots: slots }, settlements);
 }
 
+/*farm-router-start*/
 function readFarmDocumentPayload(doc) {
   return reviveFarmDeferredPayload(
     readPagePropsPayload(doc),
@@ -4379,7 +4560,9 @@ function readFarmDocumentPayload(doc) {
   );
 }
 
+/*farm-router-end*/
 const routeSlotRoots = new Map();
+/*farm-router-start*/
 let activeRouteInterception = null;
 
 function resetRouteSlotRoots() {
@@ -4390,6 +4573,7 @@ function resetRouteSlotRoots() {
   activeRouteInterception = null;
 }
 
+/*farm-router-end*/
 function renderClientRouteSlot(slot, registration, mode) {
   const container = document.getElementById(slot.containerId);
   if (!container || !registration?.Component) return false;
@@ -4434,6 +4618,7 @@ function hydrateInitialRouteSlots() {
   }
 }
 
+/*farm-router-start*/
 function renderRouteInterception(slot, registration, from, nextDocument) {
   const container = document.getElementById(slot.containerId);
   if (!container || !registration?.Component) return false;
@@ -4479,12 +4664,21 @@ function clearRouteInterception(destination) {
   return destination === active.from;
 }
 
+/*farm-router-end*/
 // State
 let reactRoot = null;
 let reactRootContainer = null;
-let currentPathname = null;
 let isHydrated = false;
 let pendingPageHydrationController = null;
+
+function setFarmReactRoot(root, container) {
+  reactRoot = root;
+  reactRootContainer = container;
+}
+
+function setFarmHydrated() {
+  isHydrated = true;
+}
 
 ${generateUniversalRouterStateRuntime(islandValues)}
 
@@ -4626,7 +4820,6 @@ async function hydrate() {
             }
             renderFarmRoute(reactRoot, routeState);
           }
-          currentPathname = pathname;
           await farmClientRuntime.completeHydration(hydrationSession);
         } catch (error) {
           await farmClientRuntime.failHydration(hydrationSession, error);
@@ -4651,6 +4844,7 @@ async function hydrate() {
   }
 }
 
+/*farm-router-start*/
 // A layout boundary is the same layout when its key matches: islands mode keys it by pattern and
 // params, so a layout whose params change renders again. Other modes compare patterns.
 function getLayoutIdentity(boundary) {
@@ -5034,11 +5228,9 @@ ${
           if (container) {
             if (reactRoot && reactRootContainer !== container) resetReactRoot();
             if (!reactRoot) {
-              reactRoot = createRoot(container);
-              reactRootContainer = container;
+              setFarmReactRoot(createRoot(container), container);
             }
             renderFarmRoute(reactRoot, routeState);
-            currentPathname = pathname;
           }
           this.currentPath = to;
         });
@@ -5061,7 +5253,6 @@ ${
           // page and its title, then waits for its islands, and a Back pressed meanwhile must
           // leave the page on screen, not the one before it. Its islands also hydrate at their URL.
           this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
-          currentPathname = pathname;
           this.currentPath = to;
           let swappedHtml = html;
           let swapped = await this.swapContent(
@@ -5202,7 +5393,7 @@ ${
       if (routeState) {
         renderFarmRoute(reactRoot, routeState);
         window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
-        isHydrated = true;
+        setFarmHydrated();
         return true;
       }
     }
@@ -5246,9 +5437,8 @@ ${
       );
       if (!isNavigationCurrent()) return false;
       if (routeState) {
-        reactRoot = hydrateFarmRoute(pageContainer, routeState);
-        reactRootContainer = pageContainer;
-        isHydrated = true;
+        setFarmReactRoot(hydrateFarmRoute(pageContainer, routeState), pageContainer);
+        setFarmHydrated();
       }
       ${
         isolatedHydrationEnabled
@@ -5336,6 +5526,8 @@ ${
   }
 };
 
+/*farm-router-end*/
+/*farm-router-stub*/
 const farmClientRuntime = ${
     clientPluginEntry.empty
       ? "createPluginlessClientRuntime()"
@@ -5353,8 +5545,10 @@ window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
 // Expose router globally
+/*farm-router-start*/
 spaRouter.initializeHistory();
 window.__FARM_SPA_ROUTER__ = spaRouter;
+/*farm-router-end*/
 
 window.addEventListener("beforeunload", function(event) {
   if (spaRouter.shouldBlockUnload()) {
