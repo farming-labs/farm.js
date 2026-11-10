@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 // The server components contract. Every test runs against the same app built with
 // { mode: "rsc" } and with { mode: "islands" } (playwright.server-components.config.ts).
@@ -151,19 +151,28 @@ test("a Suspense boundary streams its fallback first, then the content", async (
   await expect(page.getByTestId("slow-content")).toBeVisible();
 });
 
-test("client components before and inside slow Suspense content both hydrate", async ({ page }) => {
-  await page.goto("/stream", { waitUntil: "commit" });
+test("client components before and inside slow Suspense content both hydrate", async ({
+  page,
+  request,
+}) => {
+  // The slow content waits for this release instead of a timer, so the body streams until then.
+  const token = randomUUID();
+  const release = async () =>
+    expect((await request.get(`/stream?release=${token}`)).ok()).toBe(true);
+  await page.goto(`/stream?hold=${token}`, { waitUntil: "commit" });
   const early = page.getByRole("button", { name: /^Early: / });
-  // Click until the Early counter responds, and note whether the slow content had arrived then.
-  let slowArrivedFirst = true;
+  // Islands mode starts the client while the body streams, in development too: the Early counter
+  // works before the slow content is released. The RSC client starts once the stream ends.
+  if (mode !== "islands") await release();
   await expect(async () => {
     await early.click({ timeout: 100 });
     await expect(early).toHaveText(/^Early: [1-9]/, { timeout: 50 });
-    slowArrivedFirst = (await page.getByTestId("slow-content").count()) > 0;
   }).toPass({ intervals: [20], timeout: 10_000 });
-  // Islands mode starts the client while the body streams, in development too. The RSC client
-  // starts once the stream ends.
-  if (mode === "islands") expect(slowArrivedFirst).toBe(false);
+  if (mode === "islands") {
+    expect(await page.evaluate(() => document.readyState)).toBe("loading");
+    expect(await page.getByTestId("slow-content").count()).toBe(0);
+    await release();
+  }
 
   const late = page.getByRole("button", { name: /^Late: / });
   await expect(page.getByTestId("slow-content")).toBeVisible();

@@ -5035,6 +5035,12 @@ ${
         if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         await this.runViewTransition(options.viewTransition, async () => {
           if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+          // The history entry comes first, as on the client-render path: swapContent shows the
+          // page and its title, then waits for its islands, and a Back pressed meanwhile must
+          // leave the page on screen, not the one before it. Its islands also hydrate at their URL.
+          this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
+          currentPathname = pathname;
+          this.currentPath = to;
           let swappedHtml = html;
           let swapped = await this.swapContent(
             html,
@@ -5068,9 +5074,6 @@ ${
             throw new Error("Farm could not swap the target document");
           }
           this.takeNavigationStream(swappedHtml);
-          this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
-          currentPathname = pathname;
-          this.currentPath = to;
         });
       }
 

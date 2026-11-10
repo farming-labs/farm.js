@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 // Cases real apps hit that the contract does not name: ids, failing islands, portals,
 // keyboard input before hydration, element props, nested client trees, long lists,
