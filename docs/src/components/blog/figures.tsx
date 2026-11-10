@@ -3,13 +3,15 @@
 import {
   Bot,
   FileText,
+  Globe,
   MessageSquare,
   Monitor,
+  PanelBottomOpen,
   RadioTower,
   Smartphone,
   Wrench,
 } from "lucide-react";
-import { siCloudflare, siStripe } from "simple-icons";
+import { siCloudflare, siReact, siStripe } from "simple-icons";
 import {
   useEffect,
   useLayoutEffect,
@@ -53,6 +55,9 @@ const ICONS: Record<IconKey, ReactNode> = {
   chat: <MessageSquare aria-hidden strokeWidth={1.5} />,
   tool: <Wrench aria-hidden strokeWidth={1.5} />,
   page: <FileText aria-hidden strokeWidth={1.5} />,
+  globe: <Globe aria-hidden strokeWidth={1.5} />,
+  react: brand(siReact.path),
+  sheet: <PanelBottomOpen aria-hidden strokeWidth={1.5} />,
 };
 
 // Loop: hold on the finished frame for a beat, then play again from the start.
