@@ -55,7 +55,8 @@ for Markdown gets that document as Markdown. These responses are `private, no-st
 `headers()` config but not headers the failed middleware run set, and Farm adds no error message
 or stack to them. As for a throwing API route, the error reaches the `middleware.error` event,
 plugin `runtime.error` hooks, and `onError` hooks with `phase: "runtime"`, and every
-`runtime.after` hook then sees the `500`. Development shows the error overlay for a page instead.
+`runtime.after` hook then sees the `500`. Development answers the same `private, no-store` JSON
+`500`, and shows the error overlay for a page instead, also `private, no-store`.
 
 ## Route middleware
 

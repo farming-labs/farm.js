@@ -632,6 +632,18 @@ export function withFarmRequestTracing(
   };
 }
 
+/**
+ * The JSON 500 the production entry answers when app middleware throws on an API path or with
+ * `renderer: false`: the generic body, kept out of shared caches as production keeps a request
+ * middleware handled.
+ */
+function sendFarmDevErrorJSON(res: ServerResponse): void {
+  res.statusCode = 500;
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Cache-Control", "private, no-store");
+  res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+}
+
 const FARM_CONFIG_ROUTE_PLUGIN_NAMES = new Set([
   FARM_CONFIG_HEADERS_PLUGIN_NAME,
   FARM_CONFIG_REDIRECTS_PLUGIN_NAME,
@@ -3454,11 +3466,20 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // App middleware guards API routes, including plugin routes, as the
             // production entry does before it dispatches them. runtime.after sees a response
             // middleware answers with, as in production.
-            if (
-              await runAppMiddlewareInRuntimeSession(runtimeSession, (status) =>
-                logResponse(method, urlPath, status, Date.now() - startTime, "API"),
-              )
-            ) {
+            try {
+              if (
+                await runAppMiddlewareInRuntimeSession(runtimeSession, (status) =>
+                  logResponse(method, urlPath, status, Date.now() - startTime, "API"),
+                )
+              ) {
+                return;
+              }
+            } catch (error) {
+              if (res.headersSent) throw error;
+              // The runtime already reported the throw to runtime.error and onError.
+              logger.error(`Middleware error: ${error}`);
+              logResponse(method, urlPath, 500, Date.now() - startTime, "API");
+              sendFarmDevErrorJSON(res);
               return;
             }
 
@@ -4329,11 +4350,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // With `renderer: false` no error page renders: answer the JSON 500 production
             // answers (a throwing middleware, say), not Vite's HTML error page.
             if (rendererDisabled && !res.headersSent) {
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+              sendFarmDevErrorJSON(res);
               return;
             }
+            // Vite's error page reports it, kept out of caches like production's error document.
+            if (!res.headersSent) res.setHeader("Cache-Control", "private, no-store");
             next(error);
           }
         }),

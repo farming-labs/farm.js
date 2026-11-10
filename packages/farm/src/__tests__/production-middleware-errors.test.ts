@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig, type FarmUserConfig } from "../config";
+import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -21,6 +22,27 @@ const middlewareSource = `export function middleware(request: Request, context: 
   context.headers.set("x-middleware", "ran");
 }`;
 
+const APP_FILES: Record<string, string> = {
+  "src/app/globals.css": "",
+  "src/app/layout.tsx":
+    "export default function Layout({ children }) { return <html><body>{children}</body></html>; }",
+  "src/app/error.tsx":
+    "export default function RootError() { return <p data-root-error>root-error-boundary</p>; }",
+  "src/app/page.tsx": "export default function Home() { return <main>home</main>; }",
+  "src/app/mw-throw/page.tsx":
+    "export default function Page() { return <main>unreachable</main>; }",
+  "src/app/boom/page.tsx": `export default function Boom() { throw new Error(${JSON.stringify(SECRET)}); }`,
+  "src/app/api/mw-throw/route.ts": "export function GET() { return Response.json({ ok: true }); }",
+  "src/app/api/boom/route.ts": `export function GET(): Response { throw new Error(${JSON.stringify(SECRET)}); }`,
+  "src/app/middleware.ts": middlewareSource,
+};
+
+const BACKEND_FILES: Record<string, string> = {
+  "src/app/api/mw-throw/route.ts": "export function GET() { return Response.json({ ok: true }); }",
+  "src/app/middleware.ts": middlewareSource,
+};
+const BACKEND_CONFIG: FarmUserConfig = { renderer: false, images: { provider: "none" } };
+
 interface ProductionApp {
   origin: string;
   root: string;
@@ -28,15 +50,15 @@ interface ProductionApp {
   stop(): Promise<void>;
 }
 
-async function startProductionApp(
+async function createApp(
   prefix: string,
   files: Record<string, string>,
-  options: { linkReact: boolean; config?: FarmUserConfig; env?: Record<string, string> },
-): Promise<ProductionApp> {
+  linkReact: boolean,
+): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
-  if (options.linkReact) {
+  if (linkReact) {
     for (const pkg of ["react", "react-dom"]) {
       await fs.symlink(
         await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
@@ -52,6 +74,15 @@ async function startProductionApp(
     await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await fs.writeFile(path.join(root, file), source);
   }
+  return root;
+}
+
+async function startProductionApp(
+  prefix: string,
+  files: Record<string, string>,
+  options: { linkReact: boolean; config?: FarmUserConfig; env?: Record<string, string> },
+): Promise<ProductionApp> {
+  const root = await createApp(prefix, files, options.linkReact);
   const userConfig = options.config ?? (await loadConfig(root, undefined, "production"));
   const config = await resolveConfig({ ...userConfig, root }, "production");
   await build(config, { root, preset: "node-server" });
@@ -88,6 +119,28 @@ async function startProductionApp(
     throw new Error(`Production server did not become ready\n${output.join("")}`);
   }
   return { origin, root, output, stop };
+}
+
+async function startDevelopmentApp(
+  prefix: string,
+  files: Record<string, string>,
+  options: { linkReact: boolean; config?: FarmUserConfig },
+): Promise<{ origin: string; stop(): Promise<void> }> {
+  const root = await createApp(prefix, files, options.linkReact);
+  const server = await createServer({ ...options.config, root });
+  const stop = async () => {
+    await server.close();
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  };
+  try {
+    await server.listen(await getAvailablePort());
+  } catch (error) {
+    await stop();
+    throw error;
+  }
+  const address = server.httpServer?.address();
+  if (!address || typeof address === "string") throw new Error("Missing dev server address");
+  return { origin: `http://localhost:${address.port}`, stop };
 }
 
 async function readResponse(response: Response) {
@@ -155,19 +208,7 @@ export default defineConfig({
   ],
 });
 `,
-        "src/app/globals.css": "",
-        "src/app/layout.tsx":
-          "export default function Layout({ children }) { return <html><body>{children}</body></html>; }",
-        "src/app/error.tsx":
-          "export default function RootError() { return <p data-root-error>root-error-boundary</p>; }",
-        "src/app/page.tsx": "export default function Home() { return <main>home</main>; }",
-        "src/app/mw-throw/page.tsx":
-          "export default function Page() { return <main>unreachable</main>; }",
-        "src/app/boom/page.tsx": `export default function Boom() { throw new Error(${JSON.stringify(SECRET)}); }`,
-        "src/app/api/mw-throw/route.ts":
-          "export function GET() { return Response.json({ ok: true }); }",
-        "src/app/api/boom/route.ts": `export function GET(): Response { throw new Error(${JSON.stringify(SECRET)}); }`,
-        "src/app/middleware.ts": middlewareSource,
+        ...APP_FILES,
       },
       { linkReact: true, env: { FARM_MW_ERROR_LOG: logPath } },
     );
@@ -302,15 +343,10 @@ describe("production middleware errors with renderer: false", () => {
   let app: ProductionApp | undefined;
 
   beforeAll(async () => {
-    app = await startProductionApp(
-      "farm-production-mw-errors-backend-",
-      {
-        "src/app/api/mw-throw/route.ts":
-          "export function GET() { return Response.json({ ok: true }); }",
-        "src/app/middleware.ts": middlewareSource,
-      },
-      { linkReact: false, config: { renderer: false, images: { provider: "none" } } },
-    );
+    app = await startProductionApp("farm-production-mw-errors-backend-", BACKEND_FILES, {
+      linkReact: false,
+      config: BACKEND_CONFIG,
+    });
   }, 240_000);
 
   afterAll(async () => {
@@ -318,13 +354,57 @@ describe("production middleware errors with renderer: false", () => {
   });
 
   it("answers JSON whatever the path", async () => {
-    for (const pathname of ["/mw-throw", "/api/mw-throw"]) {
-      const response = await readResponse(
-        await fetch(`${app!.origin}${pathname}`, { headers: { accept: "text/html" } }),
-      );
-      expect(response, pathname).toMatchObject({ status: 500, cacheControl: "private, no-store" });
-      expect(response.contentType, pathname).toMatch(/^application\/json/);
-      expect(JSON.parse(response.body), pathname).toEqual({ error: "Internal Server Error" });
-    }
+    await expectBackendMiddlewareErrors(app!.origin);
   });
+});
+
+async function expectBackendMiddlewareErrors(origin: string): Promise<void> {
+  for (const pathname of ["/mw-throw", "/api/mw-throw"]) {
+    const response = await readResponse(
+      await fetch(`${origin}${pathname}`, { headers: { accept: "text/html" } }),
+    );
+    expect(response, pathname).toMatchObject({ status: 500, cacheControl: "private, no-store" });
+    expect(response.contentType, pathname).toMatch(/^application\/json/);
+    expect(JSON.parse(response.body), pathname).toEqual({ error: "Internal Server Error" });
+  }
+}
+
+// Development renders its own error page for a page, but answers what production answers on
+// the wire otherwise, and keeps every middleware failure out of shared caches.
+describe("development middleware errors", () => {
+  it("answers an API request with production's JSON 500, kept out of shared caches", async () => {
+    const app = await startDevelopmentApp("farm-dev-mw-errors-", APP_FILES, {
+      linkReact: true,
+      config: { images: { provider: "none" }, telemetry: false },
+    });
+    try {
+      const middlewareError = await readResponse(await fetch(`${app.origin}/api/mw-throw`));
+      expect(middlewareError).toMatchObject({
+        status: 500,
+        contentType: "application/json",
+        cacheControl: "private, no-store",
+      });
+      expect(JSON.parse(middlewareError.body)).toEqual({ error: "Internal Server Error" });
+
+      // The page's error response is Vite's development page, but just as uncacheable.
+      const pageError = await readResponse(
+        await fetch(`${app.origin}/mw-throw`, { headers: { accept: "text/html" } }),
+      );
+      expect(pageError).toMatchObject({ status: 500, cacheControl: "private, no-store" });
+    } finally {
+      await app.stop();
+    }
+  }, 120_000);
+
+  it("answers JSON whatever the path with renderer: false", async () => {
+    const app = await startDevelopmentApp("farm-dev-mw-errors-backend-", BACKEND_FILES, {
+      linkReact: false,
+      config: BACKEND_CONFIG,
+    });
+    try {
+      await expectBackendMiddlewareErrors(app.origin);
+    } finally {
+      await app.stop();
+    }
+  }, 120_000);
 });
