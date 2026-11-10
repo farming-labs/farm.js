@@ -758,6 +758,25 @@
   border-radius: 1em;
   background: rgb(255 255 255 / 0.25);
 }
+/* A pushed screen's back chevron, at the header's text size. */
+.bf-vback {
+  position: absolute;
+  top: 2.4%;
+  display: inline-flex;
+  width: 1.15em;
+  height: 1.15em;
+  color: #cfcfcf;
+}
+.bf-vback svg {
+  width: 100%;
+  height: 100%;
+}
+/* Streets on the React Native map: hairlines over the hatching. */
+.bf-vroad {
+  position: absolute;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.16);
+}
 /* A map pin: the one bright mark on the React Native screen. */
 .bf-vpin {
   position: absolute;

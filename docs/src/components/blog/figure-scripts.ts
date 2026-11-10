@@ -39,7 +39,10 @@ export type IconKey =
   | "relay"
   | "chat"
   | "tool"
-  | "page";
+  | "page"
+  | "globe"
+  | "react"
+  | "sheet";
 
 export interface WireFrame {
   /** 0..1 how much of the connector is drawn. */
@@ -1799,7 +1802,7 @@ type MobileScreen = {
   tab: number;
 };
 const MOBILE_SCREENS: MobileScreen[] = [
-  { id: "web", icon: "browser", kicker: "Web screen", route: "/notes", kind: "WebView", tab: 0 },
+  { id: "web", icon: "globe", kicker: "Web screen", route: "/notes", kind: "WebView", tab: 0 },
   {
     id: "native",
     icon: "phone",
@@ -1808,8 +1811,8 @@ const MOBILE_SCREENS: MobileScreen[] = [
     kind: "Native views",
     tab: 0,
   },
-  { id: "rn", icon: "page", kicker: "React Native", route: "/map", kind: "React Native", tab: 1 },
-  { id: "modal", icon: "page", kicker: "Modal sheet", route: "/notes/new", kind: "Sheet", tab: 0 },
+  { id: "rn", icon: "react", kicker: "React Native", route: "/map", kind: "React Native", tab: 1 },
+  { id: "modal", icon: "sheet", kicker: "Modal sheet", route: "/notes/new", kind: "Sheet", tab: 0 },
 ];
 const MOBILE_LANE = (i: number) => i * 84; // top of each route pill
 const MOBILE_HUB = 150; // where the four connectors meet the phone
@@ -1824,7 +1827,7 @@ const SCREEN_BLOCKS: Record<string, [number, number, number, number][]> = {
     [6, 51, 88, 13],
   ],
   native: [
-    [6, 3, 58, 7],
+    [16, 3, 50, 7],
     [6, 14, 88, 3],
     [6, 20, 80, 3],
     [6, 26, 86, 3],
@@ -1839,8 +1842,13 @@ const SCREEN_BLOCKS: Record<string, [number, number, number, number][]> = {
     [6, 51, 88, 13],
   ],
 };
-const block = ([x, y, w, h]: [number, number, number, number], opacity: number, cls = "") =>
-  `<span class="bf-vblock${cls ? ` ${cls}` : ""}" style="left:${x}%;top:${y}%;width:${w}%;height:${h}%;opacity:${opacity.toFixed(3)}"></span>`;
+const block = ([x, y, w, h]: [number, number, number, number], opacity: number, cls = "", dx = 0) =>
+  `<span class="bf-vblock${cls ? ` ${cls}` : ""}" style="left:${(x + dx).toFixed(2)}%;top:${y}%;width:${w}%;height:${h}%;opacity:${opacity.toFixed(3)}"></span>`;
+/** A back chevron in a pushed screen's header. */
+const backChevron = (opacity: number, dx: number) =>
+  `<span class="bf-vback" style="left:${(4 + dx).toFixed(2)}%;opacity:${opacity.toFixed(3)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></span>`;
+const road = ([x, y, w, h]: [number, number, number, number], opacity: number) =>
+  `<span class="bf-vroad" style="left:${x}%;top:${y}%;width:${w}%;height:${h}%;opacity:${opacity.toFixed(3)}"></span>`;
 const landingMobile: FigureSpec = {
   duration: MOBILE_START + (MOBILE_SCREENS.length - 1) * MOBILE_STEP + PULSE + 0.9 + HOLD,
   stage: { w: 440, h: 300 },
@@ -1888,12 +1896,25 @@ const landingMobile: FigureSpec = {
     if (screen) {
       const content = SCREEN_BLOCKS[screen.id];
       const under = screen.id === "modal";
-      blocks += content
-        .map((rect, i) => block(rect, (under ? 0.35 : 1) * ease(prog(since, i * 0.08, 0.3))))
-        .join("");
+      if (screen.id === "native") {
+        // A pushed screen slides in from the right edge, as a native stack does, with a back
+        // chevron in its header.
+        const push = ease(prog(since, 0, 0.45));
+        const dx = 24 * (1 - push);
+        const shown = ease(prog(since, 0, 0.2));
+        blocks += backChevron(shown, dx);
+        blocks += content.map((rect) => block(rect, shown, "", dx)).join("");
+      } else {
+        blocks += content
+          .map((rect, i) => block(rect, (under ? 0.35 : 1) * ease(prog(since, i * 0.08, 0.3))))
+          .join("");
+      }
       if (screen.id === "rn") {
-        // A pin drops onto the map once it has drawn.
-        blocks += `<span class="bf-vpin" style="left:50%;top:34%;opacity:${ease(prog(since, 0.35, 0.3)).toFixed(3)}"></span>`;
+        // Two streets cross the map, then a pin drops onto it.
+        const streets = ease(prog(since, 0.15, 0.3));
+        blocks += road([0, 56, 100, 1.2], streets) + road([30, 0, 1.8, 84], streets);
+        const drop = ease(prog(since, 0.4, 0.35));
+        blocks += `<span class="bf-vpin" style="left:50%;top:${(26 + 8 * drop).toFixed(2)}%;opacity:${drop.toFixed(3)}"></span>`;
       }
       // The native frame: a tab bar with the screen's tab lit. A modal sheet covers it.
       blocks += [0, 1]
