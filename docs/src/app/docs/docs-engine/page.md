@@ -99,6 +99,21 @@ automatically. Route wrappers are only needed when you want to override the defa
 - /api/docs?format=sitemap-xml
 - /api/docs/agent/spec
 
+### Base path
+
+With an [application `basePath`](/docs/configuration#application-base-path) such as `/console`, the
+docs answer below it: `/console/docs`, `/console/docs/getting-started.md`, `/console/llms.txt`,
+`/console/sitemap.xml`, `/console/robots.txt`, and the other docs files. Every link the docs runtime
+generates includes the base path: the navigation, breadcrumbs, canonical and social image URLs, the
+URLs in a page's Markdown, `llms.txt`, `llms-full.txt`, the sitemaps, and search results. As app
+pages do, the docs also keep answering at the origin root.
+
+The `/api/docs` endpoints stay at `/api/docs`, as the app's API routes do. Links you write in a
+docs page are rendered as written. The routes `@farming-labs/docs` lists in `AGENTS.md`, `SKILL.md`,
+the agent manifest, and a page's `LLM index` line are root-relative, and answer at the origin root.
+An external docs adapter such as `@farming-labs/farmjs` routes and links its pages itself, and does
+not apply the base path.
+
 `/api/docs?format=config` is public, so it returns only the documented docs config fields with
 credentials replaced by `"[redacted]"`: values under `apiKey`, `token`, `secret`, `password`,
 `authorization`, or `credential` keys, and every `headers` value. The server keeps the real values

@@ -2180,6 +2180,7 @@ export function farmPlugin(
                 farmConfig.srcDir,
               ),
               isPathGuarded: isFarmDocsPathGuarded,
+              basePath: farmConfig.basePath,
             })
         : null;
       const wrapFarmDocsResponseWithLayouts = async (
@@ -2319,6 +2320,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               docs: farmConfig.docs,
               diagnostics: true,
               isPathGuarded: isFarmDocsPathGuarded,
+              basePath: farmConfig.basePath,
             })
           : null;
       const farmDocsFontAssets = new Map(

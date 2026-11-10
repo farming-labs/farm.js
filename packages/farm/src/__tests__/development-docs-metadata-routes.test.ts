@@ -123,6 +123,54 @@ describe("development docs and app metadata routes", () => {
     expect(await (await fetch(`${origin}/robots.txt`)).text()).toContain("@farming-labs/docs");
   }, 30_000);
 
+  it("serves the docs engine under basePath and links every page below it", async () => {
+    const origin = await startDocsApp(`{}`, {
+      "farm.config.ts": `export default {
+  basePath: "/console",
+  docs: { enabled: true, entry: "/docs", contentDir: "docs", adapter: false },
+  images: { provider: "none" },
+};`,
+      "docs/page.md": "---\ntitle: Docs\n---\n# Docs\n",
+    });
+    const get = (pathname: string) => fetch(`${origin}${pathname}`);
+
+    const page = await get("/console/docs/guide");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('href="/console/docs/guide"');
+    expect(html).toContain('href="/console/llms.txt"');
+    expect(html).toContain('const docsEntry="/console/docs"');
+    expect(html).toContain(`property="og:url" content="${origin}/console/docs/guide"`);
+    expect(html).not.toMatch(/href="\/(docs|llms\.txt)/);
+
+    const markdown = await get("/console/docs/guide.md");
+    expect(markdown.status).toBe(200);
+    expect(markdown.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(await markdown.text()).toContain("URL: /console/docs/guide");
+
+    const llms = await get("/console/llms.txt");
+    expect(llms.status).toBe(200);
+    const llmsText = await llms.text();
+    expect(llmsText).toContain(`(${origin}/console/docs/guide.md)`);
+    expect(llmsText).not.toContain(`${origin}/docs`);
+    expect(await (await get("/console/sitemap.xml")).text()).toContain(
+      `<loc>${origin}/console/docs/guide</loc>`,
+    );
+    expect(await (await get("/console/robots.txt")).text()).toContain(
+      `Sitemap: ${origin}/console/sitemap.xml`,
+    );
+
+    // Search stays at /api/docs, as the app's API routes do, and links results below basePath.
+    const results = (await (await get("/api/docs?query=guide")).json()) as Array<{ url: string }>;
+    expect(results.map((result) => result.url)).toContain("/console/docs/guide");
+    expect((await get("/console/api/docs?format=llms")).status).toBe(404);
+
+    // Pages answer at the origin root too, and so do the docs.
+    for (const pathname of ["/docs/guide", "/docs/guide.md", "/llms.txt"]) {
+      expect((await get(pathname)).status, pathname).toBe(200);
+    }
+  }, 30_000);
+
   it("serves docs config without provider credentials and diagnostics without them", async () => {
     const secrets = ["ALGOLIA_ADMIN_SECRET", "OPENAI_SECRET"];
     const origin = await startDocsApp(`{

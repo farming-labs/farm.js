@@ -148,6 +148,46 @@ describe("precompiled docs runtime", () => {
     }
   });
 
+  it("serves pages under basePath and links every page below it", async () => {
+    const { root, docs } = await createFixture();
+    const manifest = await compileFarmDocsManifest(docs, {
+      root,
+      srcDir: "src",
+      clientEntry: "/farm-client.js",
+      fontAssets: [],
+      basePath: "/console",
+    });
+    const compiled = createFarmDocsPrecompiledRuntime(manifest);
+    const get = (pathname: string) =>
+      compiled.handleDocsRequest(new Request(`https://edge.example${pathname}`));
+
+    const page = await get("/console/docs/guide");
+    expect(page?.status).toBe(200);
+    const html = (await page?.text()) || "";
+    expect(html).toContain('href="/console/docs/guide"');
+    expect(html).toContain('const docsEntry="/console/docs"');
+    expect(html).not.toMatch(/href="\/(docs|llms\.txt)/);
+    // The page's social image answers at the URL the page gives it.
+    const image = html.match(/property="og:image" content="([^"]+)"/)?.[1] || "";
+    expect(new URL(image).pathname).toBe("/console/docs/_social/guide/opengraph-image.svg");
+    expect((await get(new URL(image).pathname))?.status).toBe(200);
+
+    expect(await (await get("/console/docs/guide.md"))?.text()).toContain(
+      "URL: /console/docs/guide",
+    );
+    expect(await (await get("/console/llms.txt"))?.text()).toContain(
+      "(https://edge.example/console/docs/guide.md)",
+    );
+    // Pages answer at the origin root too, and so do the docs.
+    expect((await get("/docs/guide"))?.status).toBe(200);
+
+    const results = await compiled.handleAPIRequest(
+      new Request("https://edge.example/api/docs?query=guide"),
+    );
+    const urls = ((await results!.json()) as Array<{ url: string }>).map((result) => result.url);
+    expect(urls).toContain("/console/docs/guide");
+  });
+
   it("precompiles config without provider credentials and never precompiles diagnostics", async () => {
     const { root, docs } = await createFixture();
     docs.config = {

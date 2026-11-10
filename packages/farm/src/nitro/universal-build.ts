@@ -5892,6 +5892,7 @@ async function buildSSRInMemory(
                   fontStylesheetHref: "/farm-fonts.css",
                   globalStylesheetHref: FARM_CLIENT_CSS_HREF_PLACEHOLDER,
                   isPathGuarded: (pathname) => guardedPaths.has(pathname),
+                  basePath: config.basePath,
                 });
               })(),
         )
@@ -8037,6 +8038,7 @@ globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
   srcDir: ${JSON.stringify(config.srcDir)},
   docs: farmDocsResolvedConfig,
   guardedPaths: farmDocsGuardedPaths,
+  basePath: ${JSON.stringify(config.basePath)},
 };
 const farmDocsPrecompiledRuntime = ${
     hasPrecompiledDocs
@@ -8102,6 +8104,7 @@ const farmDocsHandler = ${
   // The client stylesheet carries globals.css under a content-hashed name.
   globalStylesheetHref: ${JSON.stringify(FARM_CLIENT_CSS_HREF_PLACEHOLDER)},
   isPathGuarded: isFarmDocsPathGuarded,
+  basePath: ${JSON.stringify(config.basePath)},
 })`
       : "null"
   };
@@ -8111,7 +8114,7 @@ const farmDocsAPIHandler = ${
         ? "farmDocsPrecompiledRuntime.handleAPIRequest"
         : adapterOwnsDocsRuntime
           ? "null"
-          : `createFarmDocsAPIHandler({ rootDir: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, docs: farmDocsResolvedConfig, isPathGuarded: isFarmDocsPathGuarded })`
+          : `createFarmDocsAPIHandler({ rootDir: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, docs: farmDocsResolvedConfig, isPathGuarded: isFarmDocsPathGuarded, basePath: ${JSON.stringify(config.basePath)} })`
       : "null"
   };
 
@@ -9767,11 +9770,13 @@ function hasLocalRequestRoute(request, routePathname) {
   ${
     config.docs?.enabled
       ? `const docsPath = normalizeRuntimePath(farmDocsResolvedConfig?.entry || "/docs");
+  // The docs answer below the basePath; their API stays at /api/docs, as API routes do.
+  const docsRoutePathname = stripFarmBasePath(pathname);
   if (
     isFarmDocsAPIRequest(pathname) ||
     docsPath === "/" ||
-    pathname === docsPath ||
-    pathname.startsWith(docsPath + "/")
+    docsRoutePathname === docsPath ||
+    docsRoutePathname.startsWith(docsPath + "/")
   ) {
     return true;
   }`
