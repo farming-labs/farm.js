@@ -71,6 +71,7 @@ import type {
   HighlightedCodeValueVariant,
 } from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
+import { MobilePartsFigure } from "../components/home/mobile-parts-figure";
 import { FileTree } from "../components/ui/file-tree";
 import { RouteExplorer } from "../components/home/route-explorer";
 import type { FileTreeNode } from "../components/ui/file-tree";
@@ -1479,7 +1480,7 @@ function MobileVisual() {
   return (
     <div className="farm-feature-spotlight relative flex min-h-[340px] min-w-0 items-center overflow-hidden px-6 py-8 sm:px-10">
       <div className="relative z-10 w-full">
-        <BlogFigure fit kind="landing-mobile" />
+        <MobilePartsFigure />
       </div>
     </div>
   );

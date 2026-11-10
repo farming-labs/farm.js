@@ -734,7 +734,6 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 1.6em;
 }
 .blog-figure[data-figure="landing-mobile"] [data-panel="phone"] .bf-body {
   flex: 1;
@@ -746,7 +745,7 @@
 /* A modal sheet: the panel's own surface, raised over the dimmed screen it opened from. */
 .bf-vsheet {
   border-color: rgb(255 255 255 / 0.22);
-  border-radius: 0.9em 0.9em 3px 3px;
+  border-radius: 3px;
   background: #0b0b0b;
 }
 .bf-vgrip {
