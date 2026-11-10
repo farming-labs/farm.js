@@ -31,8 +31,12 @@ Install Farm without React:
 
 ```bash
 pnpm add @farm.js/core
-pnpm add -D @farm.js/cli vite typescript
+pnpm add -D @farm.js/cli typescript
 ```
+
+Vite comes with `@farm.js/core`: `farm dev` loads routes through it, and `farm build` bundles the
+server with it. The built server does not load Vite. Add `vite` to your own dependencies only when
+your code or a Vite plugin you install imports it.
 
 **package.json**
 
