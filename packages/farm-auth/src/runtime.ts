@@ -1,11 +1,20 @@
-import { mkdir } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { isIP } from "node:net";
 import path from "node:path";
 import type { ResolvedFarmAuthConfig } from "./types.js";
 
 const FARM_AUTH_STATE_KEY = Symbol.for("@farm.js/auth/runtime");
 const CURRENT_REQUEST_RESOLVER_KEY = Symbol.for("farm.currentRequestResolver");
 const loadNodeModule = createRequire(import.meta.url);
+
+/**
+ * Where Better Auth reads the caller's address from. Farm Auth sets it from the
+ * address Farm resolved for the request (the server's peer address, or the
+ * forwarded one under `server.trustProxy`) and drops any copy the client sent.
+ */
+const CLIENT_ADDRESS_HEADER = "x-farm-auth-client-address";
 
 interface FarmAuthRuntimeOptions {
   root: string;
@@ -87,6 +96,23 @@ export async function getFarmAuthRuntime(): Promise<BetterAuthRuntime> {
     });
   }
   return state.runtime;
+}
+
+/**
+ * The request Better Auth's handler sees, carrying the client address Farm
+ * resolved. Better Auth keys its sign-in rate limit on that address; left to
+ * its default it reads a client-supplied single-value x-forwarded-for, so a
+ * rotating header bypassed the limit and requests without one shared a bucket.
+ */
+export function withFarmAuthClientAddress(request: Request): Request {
+  const address = (request as Request & { socket?: { remoteAddress?: string } }).socket
+    ?.remoteAddress;
+  if (!address && !request.headers.has(CLIENT_ADDRESS_HEADER)) return request;
+
+  const headers = new Headers(request.headers);
+  headers.delete(CLIENT_ADDRESS_HEADER);
+  if (address) headers.set(CLIENT_ADDRESS_HEADER, address);
+  return new Request(request, { headers });
 }
 
 export function getFarmAuthRequest(request?: Request): Request {
@@ -191,9 +217,9 @@ async function createBetterAuthOptions(
   return {
     appName: config.appName || "Farm app",
     baseURL: resolveFarmAuthBaseURL(options.mode),
-    trustedOrigins: resolveFarmAuthTrustedOrigins(),
+    trustedOrigins: resolveFarmAuthTrustedOrigins(options.mode),
     basePath: config.basePath,
-    secret: secret || "farm-auth-development-or-migration-secret",
+    secret: secret || (await resolveFallbackSecret(options)),
     database: await createDatabase(config, options),
     emailAndPassword: {
       enabled: config.emailAndPassword.enabled,
@@ -205,7 +231,65 @@ async function createBetterAuthOptions(
       expiresIn: config.session.expiresIn,
       updateAge: config.session.updateAge,
     },
+    advanced: {
+      ipAddress: { ipAddressHeaders: [CLIENT_ADDRESS_HEADER] },
+    },
   };
+}
+
+/** Random secrets used when a project directory cannot hold one, kept for the process. */
+const ephemeralSecrets = new Map<string, string>();
+
+/**
+ * The secret used when no secret env is set: development or a migration, which never signs.
+ *
+ * A fixed fallback would let anyone who reaches a dev server (a `farm preview` URL, `--host`) forge
+ * Better Auth's signed tokens, such as email verification links. Development instead generates a
+ * random secret once per project in `.farm/auth-secret`, next to the local database, so sessions
+ * survive restarts. A production migration gets a throwaway one and writes nothing.
+ */
+async function resolveFallbackSecret(options: FarmAuthRuntimeOptions): Promise<string> {
+  const file = path.resolve(options.root, ".farm", "auth-secret");
+  if (options.mode !== "development") return getEphemeralSecret(file);
+
+  const existing = await readSecretFile(file);
+  if (existing) return existing;
+
+  const generated = randomBytes(32).toString("hex");
+  try {
+    await mkdir(path.dirname(file), { recursive: true });
+    // `wx` keeps a secret another process wrote first; that one is read back below.
+    await writeFile(file, `${generated}\n`, { flag: "wx", mode: 0o600 });
+    return generated;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") return getEphemeralSecret(file);
+  }
+
+  // Another process won the race, or the file holds no usable secret.
+  const raced = await readSecretFile(file);
+  if (raced) return raced;
+  return writeFile(file, `${generated}\n`, { mode: 0o600 }).then(
+    () => generated,
+    () => getEphemeralSecret(file),
+  );
+}
+
+async function readSecretFile(file: string): Promise<string | undefined> {
+  try {
+    const value = (await readFile(file, "utf8")).trim();
+    return value.length >= 32 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getEphemeralSecret(key: string): string {
+  let secret = ephemeralSecrets.get(key);
+  if (!secret) {
+    secret = randomBytes(32).toString("hex");
+    ephemeralSecrets.set(key, secret);
+  }
+  return secret;
 }
 
 /**
@@ -223,6 +307,12 @@ export function resolveFarmAuthBaseURL(
   mode: "development" | "production",
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
+  const configured = resolveConfiguredBaseURL(env);
+  if (configured) return configured;
+  return mode === "development" ? "http://localhost:3000" : undefined;
+}
+
+function resolveConfiguredBaseURL(env: NodeJS.ProcessEnv): string | undefined {
   const configured = env.FARM_AUTH_URL || env.BETTER_AUTH_URL;
   if (configured) return configured;
 
@@ -230,9 +320,7 @@ export function resolveFarmAuthBaseURL(
     env.VERCEL_ENV === "production"
       ? env.VERCEL_PROJECT_PRODUCTION_URL || env.VERCEL_URL
       : env.VERCEL_URL;
-  if (vercelHost) return toAbsoluteOrigin(vercelHost);
-
-  return mode === "development" ? "http://localhost:3000" : undefined;
+  return vercelHost ? toAbsoluteOrigin(vercelHost) : undefined;
 }
 
 /**
@@ -241,13 +329,55 @@ export function resolveFarmAuthBaseURL(
  * A production deployment is still reachable at its own deployment hostname,
  * and previews get a fresh one per build, so both are trusted explicitly
  * rather than leaving direct deployment-URL access broken.
+ *
+ * `farm dev` without a configured URL also trusts the origin the dev server is
+ * serving the request on, so another port, an emulator's `10.0.2.2`, or a LAN
+ * address under `--host` can sign in. See `resolveDevServerOrigin`.
  */
-export function resolveFarmAuthTrustedOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
+export function resolveFarmAuthTrustedOrigins(
+  mode: "development" | "production",
+  env: NodeJS.ProcessEnv = process.env,
+): string[] | ((request?: Request) => string[]) {
   const origins = new Set<string>();
   for (const host of [env.VERCEL_URL, env.VERCEL_PROJECT_PRODUCTION_URL, env.VERCEL_BRANCH_URL]) {
     if (host) origins.add(toAbsoluteOrigin(host));
   }
-  return [...origins];
+  const trusted = [...origins];
+  // A configured URL stays authoritative, in development too.
+  if (mode !== "development" || resolveConfiguredBaseURL(env)) return trusted;
+
+  return (request) => {
+    const own = request ? resolveDevServerOrigin(request) : undefined;
+    return own ? [...trusted, own] : trusted;
+  };
+}
+
+/**
+ * The dev server's own origin for this request, when it is safe to trust.
+ *
+ * In development the request URL comes from the Host the dev server accepted,
+ * so a page served by the dev server sends that same origin. Only hosts that
+ * cannot be DNS-rebound are trusted: `localhost`, `*.localhost`, and IP
+ * literals, the hosts Vite allows without `server.allowedHosts`. A rebinding
+ * page on `evil.example` that resolves to the dev server sends its own Host and
+ * Origin, which match each other but are not trusted here. A cross-site page
+ * sends an Origin that is not this request's origin, so it stays rejected.
+ */
+function resolveDevServerOrigin(request: Request): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+
+  const hostname = url.hostname.toLowerCase();
+  const trusted =
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    isIP(hostname.replace(/^\[|\]$/g, "")) !== 0;
+  return trusted ? url.origin : undefined;
 }
 
 function toAbsoluteOrigin(host: string): string {

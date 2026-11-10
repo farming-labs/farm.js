@@ -45,6 +45,9 @@ describe("DevTools request boundary", () => {
         server,
       ),
     ).toBe(false);
+    expect(
+      isTrustedRequest(request({ host: "localhost:3000", "x-farm-preview": "1" }), server),
+    ).toBe(false);
     for (const host of [
       "user@localhost",
       "localhost/path",

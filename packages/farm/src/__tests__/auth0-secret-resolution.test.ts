@@ -1,5 +1,8 @@
 // @vitest-environment node
 
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { auth0 } from "../../../farm-auth0/src/index";
 
@@ -60,9 +63,18 @@ describe("auth0 secret resolution", () => {
 
   it("allows the development fallback secret only for explicit dev/test", () => {
     setBaseAuth0Env();
-    for (const mode of ["development", "test"]) {
-      process.env.NODE_ENV = mode;
-      expect(() => auth0()).not.toThrow();
+    // Development persists a generated secret under the app root Farm is loading.
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-auth0-dev-"));
+    const configRoot = Symbol.for("farm.configRoot");
+    (globalThis as Record<symbol, unknown>)[configRoot] = root;
+    try {
+      for (const mode of ["development", "test"]) {
+        process.env.NODE_ENV = mode;
+        expect(() => auth0()).not.toThrow();
+      }
+    } finally {
+      delete (globalThis as Record<symbol, unknown>)[configRoot];
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

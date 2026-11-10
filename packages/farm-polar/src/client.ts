@@ -1,10 +1,10 @@
 import type { FarmIntegrationAPIOperation } from "@farm.js/core/client";
-import { api } from "@farm.js/core/client";
+import { api } from "@farm.js/core/api/client";
 import {
   createPathInferredClientApi,
   type InferPathInferredClientAPI,
   type PathInferredClientOperation,
-} from "@farm.js/integration-utils/integration";
+} from "@farm.js/integration-utils/client";
 
 export type PolarBillingStatus =
   | "free"

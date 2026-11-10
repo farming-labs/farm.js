@@ -1,13 +1,15 @@
 // @vitest-environment node
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  assertFarmDocsAdapterServesNoGuardedPages,
   compileFarmDocsAdapterEdgeManifest,
   createFarmDocsAdapterHandler,
   hasFarmDocsRuntimeAdapter,
+  listFarmDocsAdapterPages,
 } from "../docs/adapter";
 import type { FarmDocsResolvedConfig } from "../docs/types";
 
@@ -32,7 +34,61 @@ function createAdapterDocs(): FarmDocsResolvedConfig {
   };
 }
 
+function createMultiRootDocs(): FarmDocsResolvedConfig {
+  return {
+    ...createAdapterDocs(),
+    configOverrides: { nav: { title: "Farm" } },
+    roots: [
+      {
+        entry: "/statewire/docs",
+        contentDir: "content/statewire",
+        config: { entry: "statewire/docs", nav: { title: "Statewire" } },
+        configOverrides: { nav: { title: "Statewire" } },
+      },
+      {
+        entry: "/pinboard/docs",
+        config: { entry: "pinboard/docs" },
+        configOverrides: { nav: { title: "Farm" } },
+      },
+    ],
+  };
+}
+
 describe("Farm docs runtime adapters", () => {
+  it("lists the pages of every docs root for prerendering", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-docs-adapter-roots-pages-"));
+    tempDirs.push(root);
+    const adapterDir = path.join(root, "node_modules", "fake-docs-adapter");
+    await mkdir(adapterDir, { recursive: true });
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "app" }));
+    await writeFile(
+      path.join(adapterDir, "package.json"),
+      JSON.stringify({
+        name: "fake-docs-adapter",
+        type: "module",
+        exports: { "./server": "./server.js" },
+      }),
+    );
+    await writeFile(
+      path.join(adapterDir, "server.js"),
+      `export function listFarmDocsPages(config) {
+  const base = "/" + String(config.entry).replace(/^\\/+/, "");
+  return [base, base + "/guide"];
+}`,
+    );
+    const docs = createMultiRootDocs();
+    docs.adapter = { ...docs.adapter!, server: "fake-docs-adapter/server" };
+
+    expect(await listFarmDocsAdapterPages(docs, { root })).toEqual([
+      "/docs",
+      "/docs/guide",
+      "/statewire/docs",
+      "/statewire/docs/guide",
+      "/pinboard/docs",
+      "/pinboard/docs/guide",
+    ]);
+  });
+
   it("recognizes only enabled adapters with server and React entrypoints", () => {
     const docs = createAdapterDocs();
 
@@ -82,8 +138,27 @@ describe("Farm docs runtime adapters", () => {
       clientEntry: "/@farm/client.js",
       stylesheets: ["/@farm/fonts.css", "/src/app/globals.css"],
     });
+    // Development content changes while the server runs; the adapter must keep
+    // reading it.
+    expect(hostOptions).not.toHaveProperty("immutableContent");
     await expect(hostOptions.loadReactModule()).resolves.toBe(reactModule);
     await expect(handler(new Request("https://farm.test/docs"))).resolves.toBe(response);
+  });
+
+  it("tells the adapter a production build's content is immutable", async () => {
+    // The production server is generated source; its adapter handler call is
+    // the one place a build's fixed content can be declared.
+    const source = await readFile(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf8",
+    );
+    const call = source.slice(source.indexOf("`${adapterHandler.factory}("));
+    const options = call.slice(call.indexOf("}, {"), call.indexOf("})"));
+    expect(options).toContain("rootDir: farmDocsRuntimeRoot,");
+    expect(options).toContain("immutableContent: true,");
+    expect(options).toContain("modulePreloads: farmDocsModulePreloadPaths,");
+    // The page list is filled in after the client build; an unfilled one parses to nothing.
+    expect(source).toContain('JSON.parse("${FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER}")');
   });
 
   it("loads the docs config module through the app's module loader for the runtime", async () => {
@@ -122,6 +197,136 @@ describe("Farm docs runtime adapters", () => {
         loadModule: async () => ({}),
       }),
     ).rejects.toThrow("Upgrade the adapter to a runtime-enabled release");
+  });
+
+  it("hands every docs root to the adapter's multi-root handler, each from the config module", async () => {
+    const docs = { ...createMultiRootDocs(), configPath: "/workspace/app/docs.config.tsx" };
+    const renderStatewireFooter = () => "Statewire";
+    const response = new Response("adapter");
+    const createRuntimeHandler = vi.fn();
+    const createMultiRuntimeHandler = vi.fn(() => async () => response);
+    const reactModule = { hydrateFarmDocs: vi.fn() };
+    const registerMCPServer = vi.fn(() => () => undefined);
+    const loadModule = vi.fn(async (specifier: string) => {
+      if (specifier === docs.adapter?.server) {
+        return {
+          createFarmDocsRuntimeHandler: createRuntimeHandler,
+          createFarmDocsMultiRuntimeHandler: createMultiRuntimeHandler,
+        };
+      }
+      if (specifier === docs.configPath) {
+        return {
+          default: {
+            search: true,
+            roots: [{ entry: "statewire/docs", search: false, renderStatewireFooter }],
+          },
+        };
+      }
+      if (specifier === docs.adapter?.react) return reactModule;
+      throw new Error(`Unexpected module: ${specifier}`);
+    });
+
+    const handler = await createFarmDocsAdapterHandler(docs, {
+      root: "/workspace/app",
+      srcDir: "src",
+      clientEntry: "/@farm/client.js",
+      fontStylesheetHref: "/@farm/fonts.css",
+      loadModule,
+      registerMCPServer,
+    });
+
+    expect(createRuntimeHandler).not.toHaveBeenCalled();
+    expect(createMultiRuntimeHandler).toHaveBeenCalledOnce();
+    const [configs, hostOptions] = createMultiRuntimeHandler.mock.calls[0]! as unknown as [
+      Record<string, unknown>[],
+      any,
+    ];
+    expect(configs).toEqual([
+      {
+        search: true,
+        nav: { title: "Farm" },
+        entry: "docs",
+        docsPath: "/docs",
+        contentDir: path.resolve("/workspace/app", "content", "docs"),
+      },
+      {
+        // The config module's own root, functions intact, over its shared fields.
+        search: false,
+        renderStatewireFooter,
+        nav: { title: "Statewire" },
+        entry: "statewire/docs",
+        docsPath: "/statewire/docs",
+        contentDir: path.resolve("/workspace/app", "content", "statewire"),
+      },
+      {
+        search: true,
+        nav: { title: "Farm" },
+        entry: "pinboard/docs",
+        docsPath: "/pinboard/docs",
+        // No content directory of its own: the inferred one, never the main root's.
+        contentDir: path.resolve("/workspace/app", "pinboard/docs"),
+      },
+    ]);
+    expect(hostOptions).toMatchObject({
+      rootDir: "/workspace/app",
+      clientEntry: "/@farm/client.js",
+      stylesheets: ["/@farm/fonts.css"],
+      registerMCPServer,
+    });
+    await expect(hostOptions.loadReactModule()).resolves.toBe(reactModule);
+    await expect(handler(new Request("https://farm.test/statewire/docs"))).resolves.toBe(response);
+  });
+
+  it("asks for an adapter upgrade when it cannot serve several docs roots", async () => {
+    await expect(
+      createFarmDocsAdapterHandler(createMultiRootDocs(), {
+        root: "/workspace/app",
+        clientEntry: "/farm-client.js",
+        loadModule: async () => ({ createFarmDocsRuntimeHandler: () => async () => null }),
+      }),
+    ).rejects.toThrow(
+      'Farm docs adapter "@farming-labs/farmjs" does not export createFarmDocsMultiRuntimeHandler ' +
+        'from "@farming-labs/farmjs/server". Upgrade the adapter to a release that serves several ' +
+        "docs roots, or remove the roots.",
+    );
+  });
+
+  it("refuses a guarded page in any docs root", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-docs-adapter-roots-guard-"));
+    tempDirs.push(root);
+    await mkdir(path.join(root, "content", "docs"), { recursive: true });
+    await mkdir(path.join(root, "content", "statewire", "internal"), { recursive: true });
+    await writeFile(path.join(root, "content", "docs", "page.md"), "# Docs\n");
+    await writeFile(path.join(root, "content", "statewire", "page.md"), "# Statewire\n");
+    await writeFile(path.join(root, "content", "statewire", "internal", "page.md"), "# Internal\n");
+    const docs = createMultiRootDocs();
+
+    expect(() =>
+      assertFarmDocsAdapterServesNoGuardedPages(
+        docs,
+        { root },
+        (pathname) => pathname === "/statewire/docs/internal",
+      ),
+    ).toThrow("Docs pages behind a path guard (/statewire/docs/internal) would be public");
+    expect(() =>
+      assertFarmDocsAdapterServesNoGuardedPages(
+        docs,
+        { root },
+        (pathname) => pathname === "/docs/internal",
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects several docs roots on an edge deployment", async () => {
+    const docs = createMultiRootDocs();
+    docs.adapter = { ...docs.adapter!, edgeCompiler: "./edge-compiler.js" };
+
+    await expect(
+      compileFarmDocsAdapterEdgeManifest(docs, {
+        root: "/workspace/app",
+        clientEntry: "/farm-client.js",
+      }),
+    ).rejects.toThrow("Several docs roots are not supported on edge deployments yet");
   });
 
   it("loads an edge compiler capability from the application", async () => {

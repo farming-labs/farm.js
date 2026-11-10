@@ -16,6 +16,11 @@ data, not inherited JavaScript methods. Farm omits `__proto__`, `constructor`, a
 when converting request search parameters to objects. This representation is shared by
 development rendering, production SSR, page-data navigation, and hydration.
 
+`searchParams` is a promise, and its keys also read directly: `(await searchParams).q` and
+`searchParams.q` give the same value, in either server components engine, so a page written for
+the RSC engine's plain object works unchanged. A key named `then`, `catch` or `finally` reads only
+through `await`. The `search` prop is the same values as a plain object.
+
 **src/app/search/page.tsx**
 
 ```tsx

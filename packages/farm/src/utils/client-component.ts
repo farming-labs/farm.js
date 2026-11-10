@@ -1,10 +1,28 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  ensureFarmInternalClientReference,
+  ensureFarmPackageClientReference,
+  farmPackageClientImportExports,
+  FARM_CLIENT_REFERENCE_PRAGMA,
+  findFarmPackageClientImports,
+} from "../islands-package-references";
+import {
+  farmReactServerBuildReachesClientModules,
+  findFarmPackageManifest,
+  findFarmReactServerClientModules,
+  findFarmReactServerClientNames,
+  findFarmServerBundledPackage,
+} from "../islands-react-server-exports";
 import { isFarmIslandStrategy, type FarmIslandStrategy } from "../island";
 import { isReactRenderer, type FarmRenderer } from "../renderer";
 import type { FarmIsolatedClientHydrationMode } from "../types";
 import { logger } from "../utils";
+import {
+  getPackageClientBoundaryCache,
+  PackageInspectionTrace,
+} from "./package-client-boundary-cache";
 import { getFarmProjectSourceDir } from "./source-dir";
 
 function readIfExists(filePath: string): string | null {
@@ -99,6 +117,17 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
   asyncOwnerIslands?: true;
   /** Packages whose client components a Markdown page or async owner renders as static server HTML. */
   staticPackageBoundaries?: string[];
+  /**
+   * Islands mode could not turn a client component into an island. The page does not hydrate
+   * route-wide instead, which would ship its server code to the browser: builds fail with this
+   * message, and development renders the page without client JavaScript.
+   */
+  islandsError?: string;
+  /**
+   * Islands mode: the layout hydrates as one root rebuilt from its server tree. Its module stays
+   * on the server; `isolatedBoundaries` are the client components the tree loads.
+   */
+  serverTreeLayout?: true;
 }
 
 export interface FarmClientHydrationPlanOptions {
@@ -111,6 +140,26 @@ export interface FarmClientHydrationPlanOptions {
    * route.
    */
   asyncOwnerIslands?: boolean;
+  /**
+   * Islands mode (RFC 0003): every page that is not a client component is a server component, so
+   * it is planned like an async owner. Its client components become islands, and under a
+   * hydrating layout they hydrate inside that layout's tree from a server tree, so they read its
+   * context. Requires `asyncOwnerIslands`. Pass it for pages only.
+   */
+  serverOwners?: boolean;
+  /**
+   * Islands mode, for Markdown pages: package client components render as islands through their
+   * client references (`islands-package-references.ts`). Pages and layouts get it from
+   * `serverOwners` and `serverTreeLayouts`.
+   */
+  packageReferences?: boolean;
+  /**
+   * Islands mode, for layouts: a synchronous layout whose client components need one React root
+   * (a provider around the pages) renders as a server tree instead of shipping its module. The
+   * browser rebuilds it from the tree and renders the page at its outlet. Requires
+   * `asyncOwnerIslands`.
+   */
+  serverTreeLayouts?: boolean;
 }
 
 /**
@@ -558,6 +607,92 @@ function parseClientModuleMetadata(
   };
 }
 
+// `export { default } from "./page"`: the module renders another module's default export.
+const DEFAULT_REEXPORT = /export\s*\{\s*default(?:\s+as\s+default)?\s*\}\s*from\s*(["'])([^"']+)\1/;
+
+/**
+ * A page or layout whose default export is re-exported from a local module renders that module's
+ * component, so its hydration is analyzed in that module: its async default and client imports.
+ */
+function resolveDefaultReexport(
+  ownerPath: string,
+  content: string | null,
+  root?: string,
+): string | null {
+  const match = content ? DEFAULT_REEXPORT.exec(content) : null;
+  if (!match) return null;
+  const imported = resolveImportedModule(ownerPath, match[2]!, root);
+  return imported.local ? imported.path : null;
+}
+
+function resolveOwnerSourcePath(resolvedPath: string | null, root?: string): string | null {
+  const seen = new Set<string>();
+  let current = resolvedPath;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const target = resolveDefaultReexport(current, readIfExists(current), root);
+    if (!target) return current;
+    current = target;
+  }
+  return current;
+}
+
+/**
+ * The client modules a route module renders: itself when it is a client module, otherwise the
+ * client components it renders (through server components it imports). Null when the analysis
+ * cannot list them, such as a package's client component.
+ */
+export function collectFarmRenderedClientModules(
+  modulePath: string,
+  root?: string,
+): string[] | null {
+  const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
+  if (!resolvedPath) return null;
+  if (hasUseClientDirective(readIfExists(resolvedPath))) return [resolvedPath];
+  const collected = collectIsolatedClientBoundaries(resolvedPath, root, {
+    allowDynamicCardinality: true,
+    allowElementProps: true,
+  });
+  if (collected.fallbackReason || collected.costGuardExceeded) return null;
+  return collected.boundaries.map((boundary) => boundary.modulePath);
+}
+
+const SERVER_MODULE_SOURCE = /\.[cm]?[jt]sx?$/;
+const STYLESHEET_SOURCE = /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)$/;
+
+/**
+ * The stylesheets these server modules import, directly or through the server modules they
+ * import, in import order. In islands mode the client entry leaves pages and layouts out, and the
+ * client bundle is the app's one stylesheet, so it imports these instead. A `"use client"`
+ * module's stylesheets come with the module.
+ */
+export function collectFarmServerStylesheets(
+  modulePaths: readonly string[],
+  root?: string,
+): string[] {
+  const stylesheets = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (file: string) => {
+    if (visited.has(file) || !SERVER_MODULE_SOURCE.test(file)) return;
+    visited.add(file);
+    const content = readIfExists(file);
+    if (!content || hasUseClientDirective(content)) return;
+    for (const specifier of getImportSpecifiers(content)) {
+      // `?url`, `?inline` and `?raw` imports are values, not styles on the page.
+      if (specifier.includes("?")) continue;
+      const imported = resolveImportedModule(file, specifier, root);
+      if (!imported.path) continue;
+      if (STYLESHEET_SOURCE.test(imported.path)) stylesheets.add(imported.path);
+      else if (imported.local) visit(imported.path);
+    }
+  };
+  for (const modulePath of modulePaths) {
+    const resolved = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
+    if (resolved) visit(resolved);
+  }
+  return [...stylesheets];
+}
+
 export function getClientModuleMetadata(modulePath: string, root?: string): ClientModuleMetadata {
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
   return inspectClientModuleMetadata(resolvedPath, root, new Set(), true);
@@ -573,6 +708,64 @@ export function getClientModuleHydrationPlan(
   root: string | undefined,
   mode: FarmIsolatedClientHydrationMode = "off",
   options: FarmClientHydrationPlanOptions = {},
+): ClientModuleHydrationPlan {
+  const plan = planClientModuleHydration(modulePath, root, mode, options);
+  // Islands mode: a layout that would still hydrate as one root renders as a server tree.
+  if (
+    options.serverTreeLayouts !== true ||
+    options.asyncOwnerIslands !== true ||
+    !plan.shouldHydrate ||
+    plan.isClientComponent ||
+    plan.asyncOwnerIslands
+  ) {
+    return plan;
+  }
+  const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
+  const owner = parseClientModuleMetadata(readIfExists(resolvedPath ?? ""), true);
+  // An owner that is a client component, or opts into hydrating whole, keeps its root.
+  if (!resolvedPath || owner.isClientComponent || owner.hasHydrateExport) return plan;
+  const layout = collectIsolatedClientBoundaries(resolvedPath, root, {
+    allowDynamicCardinality: true,
+    allowElementProps: true,
+    packageReferences: true,
+  });
+  const routeWide = {
+    ...plan,
+    shouldHydrate: plan.legacyShouldHydrate,
+    islandStrategy: plan.legacyIslandStrategy,
+    hasIsolatedClientBoundaries: false,
+    isolatedBoundaries: [],
+  };
+  if (layout.fallbackReason) {
+    return {
+      ...routeWide,
+      shouldHydrate: false,
+      islandStrategy: null,
+      fallbackReason: layout.fallbackReason,
+      islandsError: layout.fallbackHint
+        ? `${layout.fallbackReason}. ${layout.fallbackHint}`
+        : layout.fallbackReason,
+    };
+  }
+  const staticPackages =
+    layout.staticPackages.length > 0 ? { staticPackageBoundaries: layout.staticPackages } : {};
+  // Only package elements rendered as static HTML: nothing in the layout needs the browser.
+  if (layout.boundaries.length === 0) {
+    return { ...routeWide, shouldHydrate: false, islandStrategy: null, ...staticPackages };
+  }
+  return {
+    ...routeWide,
+    serverTreeLayout: true,
+    isolatedBoundaries: layout.boundaries,
+    ...staticPackages,
+  };
+}
+
+function planClientModuleHydration(
+  modulePath: string,
+  root: string | undefined,
+  mode: FarmIsolatedClientHydrationMode,
+  options: FarmClientHydrationPlanOptions,
 ): ClientModuleHydrationPlan {
   const metadata = getClientModuleMetadata(modulePath, root);
   const emptyPlan = (
@@ -596,13 +789,14 @@ export function getClientModuleHydrationPlan(
   // components become islands whatever the mode, and the cost guard (which
   // weighs islands against that route-wide root) does not apply.
   const asyncOwner =
-    metadata.suppressedAsyncHydration === true && options.asyncOwnerIslands === true;
+    (metadata.suppressedAsyncHydration === true || options.serverOwners === true) &&
+    options.asyncOwnerIslands === true;
 
   if (mode === "off" && !asyncOwner) return emptyPlan();
 
   // Legacy metadata already inspected the owner. Only reread it when isolation
   // analysis is needed, including async-owner islands with the experiment off.
-  const resolvedPath = resolveModuleSourcePath(modulePath, root);
+  const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
   const content = readIfExists(resolvedPath ?? "");
   const parsed = parseClientModuleMetadata(content, true);
   if (!resolvedPath) return emptyPlan("the owner source could not be resolved");
@@ -617,8 +811,24 @@ export function getClientModuleHydrationPlan(
   // library, say) stays static HTML instead of keeping every local island static too.
   const inspection = collectIsolatedClientBoundaries(resolvedPath, root, {
     allowDynamicCardinality: asyncOwner,
+    allowElementProps: asyncOwner,
     staticPackageBoundaries: asyncOwner,
+    staticPackageLeaves: options.serverTreeLayouts === true && options.asyncOwnerIslands === true,
+    // Islands mode: pages carry `serverOwners`, layouts `serverTreeLayouts`.
+    packageReferences: options.serverOwners === true || options.serverTreeLayouts === true,
   });
+  if (inspection.fallbackReason && asyncOwner && options.serverOwners === true) {
+    // A server page in islands mode never hydrates as a whole: that bundles the page module and
+    // its server-only imports into public JavaScript.
+    return {
+      ...emptyPlan(inspection.fallbackReason),
+      shouldHydrate: false,
+      islandStrategy: null,
+      islandsError: inspection.fallbackHint
+        ? `${inspection.fallbackReason}. ${inspection.fallbackHint}`
+        : inspection.fallbackReason,
+    };
+  }
   if (inspection.boundaries.length === 0) {
     return emptyPlan(inspection.fallbackReason);
   }
@@ -654,10 +864,25 @@ export function getClientModuleHydrationPlan(
   if (asyncOwner) {
     delete plan.suppressedAsyncHydration;
     plan.asyncOwnerIslands = true;
-    if (inspection.staticPackages.length > 0)
-      plan.staticPackageBoundaries = inspection.staticPackages;
   }
+  if (inspection.staticPackages.length > 0)
+    plan.staticPackageBoundaries = inspection.staticPackages;
   return plan;
+}
+
+/**
+ * An async page's client components hydrate inside its hydrating layout's React tree from a
+ * serialized server tree, so they read the layout's context. Islands that declare a deferred
+ * strategy keep hydrating as roots of their own on that schedule.
+ */
+export function usesFarmServerTree(
+  plan: Pick<ClientModuleHydrationPlan, "asyncOwnerIslands" | "isolatedBoundaries"> | undefined,
+): boolean {
+  return (
+    plan?.asyncOwnerIslands === true &&
+    plan.isolatedBoundaries.length > 0 &&
+    plan.isolatedBoundaries.every((boundary) => boundary.islandStrategy === "load")
+  );
 }
 
 /**
@@ -691,6 +916,7 @@ export function getMarkdownPageHydrationPlan(
   const inspection = collectIsolatedClientBoundaries(resolvedPath, root, {
     allowDynamicCardinality: true,
     staticPackageBoundaries: true,
+    packageReferences: options.packageReferences === true,
   });
   if (inspection.fallbackReason) return { ...plan, fallbackReason: inspection.fallbackReason };
   if (inspection.staticPackages.length > 0)
@@ -771,11 +997,18 @@ export function enforceFarmIsolatedHydrationRouteBudget(
   layouts: FarmIsolatedHydrationRouteOwner[],
   routes: FarmIsolatedHydrationRouteOwner[],
   layoutAppliesToRoute: (layoutPattern: string, routePattern: string) => boolean,
+  options: {
+    /**
+     * Islands mode: pages and layouts are server components with no route-wide root to fall back
+     * to (one would ship their server code), so islands are how they hydrate, however many.
+     */
+    serverOwners?: boolean;
+  } = {},
 ): void {
   const boundaryLimit = isolatedHydrationBoundaryLimit();
   const sortedLayouts = [...layouts].sort((left, right) => left.depth - right.depth);
 
-  for (const route of routes) {
+  for (const route of options.serverOwners ? [] : routes) {
     if (route.metadata.mode !== "enabled") continue;
     const applicableLayouts = sortedLayouts.filter((layout) =>
       layoutAppliesToRoute(layout.pattern, route.pattern),
@@ -854,12 +1087,30 @@ export function enforceFarmIsolatedHydrationRouteBudget(
  */
 export function isIsolatableClientBoundarySource(content: string | null): boolean {
   if (!content || !hasUseClientDirective(content)) return false;
-  if (/\bexport\s*\{/.test(content) || /\bexport\s*\*/.test(content)) return false;
+  // A generated client reference names exactly one client export.
+  if (content.includes(FARM_CLIENT_REFERENCE_PRAGMA)) return true;
+  // `export *` names its exports only in another module.
+  if (/\bexport\s*\*/.test(content)) return false;
   return (
     /\bexport\s+default\s+(?!(?:type|interface)\b)/.test(content) ||
     /\bexport\s+(?:async\s+)?function\s+[A-Z][$\w]*/.test(content) ||
-    /\bexport\s+(?:const|let|var|class)\s+[A-Z][$\w]*/.test(content)
+    /\bexport\s+(?:const|let|var|class)\s+[A-Z][$\w]*/.test(content) ||
+    exportListNames(content).some((name) => name === "default" || /^[A-Z]/.test(name))
   );
+}
+
+/** The exported names of `export { ... }` lists, re-exports included, type-only entries excluded. */
+function exportListNames(content: string): string[] {
+  const names: string[] = [];
+  for (const match of content.matchAll(/\bexport\s*(type\s*)?\{([^}]*)\}/g)) {
+    if (match[1]) continue;
+    for (const entry of match[2].split(",")) {
+      const parts = entry.trim().split(/\s+/);
+      if (parts[0] === "type" || !parts[0]) continue;
+      names.push(parts[parts.length - 1].replace(/^["']|["']$/g, ""));
+    }
+  }
+  return names;
 }
 
 function getStaticImportBindings(content: string | null): Map<string, string[]> {
@@ -942,6 +1193,18 @@ const PARSER_SENSITIVE_JSX_CONTAINERS = new Set([
   "svg",
 ]);
 
+/** Elements inside a parser-sensitive container whose content is ordinary flow content again. */
+const PARSER_FLOW_CONTENT_ELEMENTS = new Set(["td", "th", "caption", "foreignObject"]);
+
+const PARSER_SENSITIVE_FLOW_HINTS: Record<string, string> = {
+  table: ", or render it inside a <td>, <th> or <caption>",
+  thead: ", or render it inside a <td> or <th>",
+  tbody: ", or render it inside a <td> or <th>",
+  tfoot: ", or render it inside a <td> or <th>",
+  tr: ", or render it inside a <td> or <th>",
+  svg: ", or render it inside a <foreignObject>",
+};
+
 /**
  * Names a parser-sensitive element that encloses a use of one of the bindings,
  * or undefined when every use is in ordinary flow content.
@@ -957,7 +1220,8 @@ function findParserSensitiveJsxContainer(
   if (!content || localBindings.length === 0) return undefined;
   const names = new Set(localBindings);
   const tokens = tokenizeModuleSource(content);
-  const openDepth = new Map<string, number>();
+  // Open parser-sensitive containers and the flow-content cells inside them, innermost last.
+  const open: string[] = [];
 
   const isSelfClosing = (openingIndex: number): boolean => {
     for (let index = openingIndex; index < tokens.length; index++) {
@@ -971,21 +1235,28 @@ function findParserSensitiveJsxContainer(
 
     if (tokens[index + 1].value === "/") {
       const closing = tokens[index + 2]?.value;
-      if (closing && openDepth.has(closing)) {
-        openDepth.set(closing, Math.max(0, (openDepth.get(closing) ?? 0) - 1));
-      }
+      const at = closing ? open.lastIndexOf(closing) : -1;
+      if (at !== -1) open.length = at;
       continue;
     }
 
     const tag = tokens[index + 1].value;
     if (names.has(tag)) {
-      for (const [container, depth] of openDepth) {
-        if (depth > 0) return container;
+      // The outermost container since the innermost cell is the one the author restructures.
+      let container: string | undefined;
+      for (let depth = open.length - 1; depth >= 0; depth--) {
+        if (PARSER_FLOW_CONTENT_ELEMENTS.has(open[depth])) break;
+        container = open[depth];
       }
+      if (container) return container;
       continue;
     }
-    if (PARSER_SENSITIVE_JSX_CONTAINERS.has(tag) && !isSelfClosing(index)) {
-      openDepth.set(tag, (openDepth.get(tag) ?? 0) + 1);
+    if (
+      (PARSER_SENSITIVE_JSX_CONTAINERS.has(tag) ||
+        (open.length > 0 && PARSER_FLOW_CONTENT_ELEMENTS.has(tag))) &&
+      !isSelfClosing(index)
+    ) {
+      open.push(tag);
     }
   }
 
@@ -1189,6 +1460,27 @@ function passesElementValuedProps(content: string | null, localBindings: string[
   return false;
 }
 
+/** Whether every element of these bindings closes itself and takes no element-valued prop. */
+function rendersOnlyLeafElements(content: string | null, localBindings: string[]): boolean {
+  if (!content) return false;
+  const names = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+  for (let index = 0; index < tokens.length - 1; index++) {
+    if (tokens[index].value !== "<" || !names.has(tokens[index + 1].value)) continue;
+    let braceDepth = 0;
+    let cursor = index + 2;
+    for (; cursor < tokens.length; cursor++) {
+      const value = tokens[cursor].value;
+      if (value === "{") braceDepth++;
+      else if (value === "}") braceDepth--;
+      else if (value === "<" && braceDepth > 0) return false;
+      else if (value === ">" && braceDepth === 0) break;
+    }
+    if (cursor >= tokens.length || tokens[cursor - 1]?.value !== "/") return false;
+  }
+  return true;
+}
+
 function hasDynamicJsxCardinality(content: string | null, localBindings: string[]): boolean {
   if (!content || localBindings.length === 0) return false;
   const clientBindings = new Set(localBindings);
@@ -1245,10 +1537,27 @@ function collectIsolatedClientBoundaries(
     /** Accept boundaries rendered a data-dependent number of times. */
     allowDynamicCardinality?: boolean;
     /**
+     * Accept boundaries that receive React elements (`children` or element props). Only for async
+     * owners: below a hydrating layout the server tree carries the elements, and elsewhere a
+     * boundary whose props do not serialize keeps its server HTML at runtime.
+     */
+    allowElementProps?: boolean;
+    /**
      * Render package client components as static server HTML instead of rejecting the owner.
      * Only for owners with no route-wide fallback, where rejecting leaves everything static.
      */
     staticPackageBoundaries?: boolean;
+    /**
+     * Render a package client component as static server HTML when every element of it closes
+     * itself and takes no element props, such as an icon. Islands mode's layouts: one that wraps
+     * content (a provider) is still rejected, since its client children would lose its context.
+     */
+    staticPackageLeaves?: boolean;
+    /**
+     * Islands mode: a package client component becomes an island through its client reference
+     * (`islands-package-references.ts`), as in React Server Components. Wins over the static options.
+     */
+    packageReferences?: boolean;
   } = {},
 ): {
   boundaries: IsolatedClientBoundaryReference[];
@@ -1256,12 +1565,15 @@ function collectIsolatedClientBoundaries(
   staticPackages: string[];
   costGuardExceeded?: boolean;
   fallbackReason?: string;
+  /** How to restructure the code so the boundary can be isolated. */
+  fallbackHint?: string;
 } {
   const boundaries = new Map<string, IsolatedClientBoundaryReference>();
   const staticPackages = new Set<string>();
   const estimates = new Map<string, number>();
   const visiting = new Set<string>();
   let fallbackReason: string | undefined;
+  let fallbackHint: string | undefined;
   let costGuardExceeded = false;
   const projectRoot = root ? path.resolve(root) : undefined;
 
@@ -1277,10 +1589,14 @@ function collectIsolatedClientBoundaries(
     if (parsed.isClientComponent) {
       if (projectRoot && !path.resolve(moduleSourcePath).startsWith(`${projectRoot}${path.sep}`)) {
         fallbackReason = `client boundary ${moduleSourcePath} is outside the application root`;
+        fallbackHint =
+          "Move the component into the application, or publish it as a package (package client components render as static HTML)";
         return 0;
       }
       if (!isIsolatableClientBoundarySource(content)) {
         fallbackReason = `client boundary ${moduleSourcePath} uses an unsupported export shape`;
+        fallbackHint =
+          "Export each component by name (`export function Name`, `export { Name }`, or `export default`) instead of `export *`";
         return 0;
       }
       boundaries.set(moduleSourcePath, {
@@ -1294,6 +1610,7 @@ function collectIsolatedClientBoundaries(
 
     if (parsed.hasHydrateExport) {
       fallbackReason = `imported module ${moduleSourcePath} explicitly exports hydrate = true`;
+      fallbackHint = "Islands mode never hydrates a whole page; remove `hydrate = true`";
       return 0;
     }
 
@@ -1303,19 +1620,68 @@ function collectIsolatedClientBoundaries(
       const imported = resolveImportedModule(moduleSourcePath, specifier, root);
       const importedPath = imported.path;
       if (!importedPath) continue;
-      if (!imported.local) {
-        const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
-        if (packageMetadata.shouldHydrate) {
-          if (options.staticPackageBoundaries) {
+      let importedBoundaryCount: number;
+      if (imported.local) {
+        importedBoundaryCount = visit(importedPath);
+      } else {
+        // A package with a `react-server` build: only the names that build takes from a
+        // "use client" module are client components (islands-react-server-exports.ts).
+        const reactServerClientNames =
+          options.packageReferences && projectRoot
+            ? findFarmReactServerClientNames(content ?? "", moduleSourcePath, specifier)
+            : null;
+        if (reactServerClientNames) {
+          importedBoundaryCount = 0;
+          for (const exportName of reactServerClientNames) {
+            importedBoundaryCount += visit(
+              ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
+            );
+          }
+          // The `"use client"` modules that build renders itself (react-tweet's video player).
+          for (const clientFile of findFarmReactServerClientModules(
+            content ?? "",
+            moduleSourcePath,
+            specifier,
+          ) ?? []) {
+            const reference = ensureFarmInternalClientReference(projectRoot!, clientFile);
+            if (reference) importedBoundaryCount += visit(reference);
+          }
+        } else {
+          const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
+          if (!packageMetadata.shouldHydrate) continue;
+          const references =
+            options.packageReferences && projectRoot
+              ? findFarmPackageClientImports(
+                  content ?? "",
+                  moduleSourcePath,
+                  (candidate) => candidate === specifier,
+                )
+              : [];
+          if (references.length > 0) {
+            // Each export renders through its client reference, a local client module, so the
+            // checks below apply as they do to a local import.
+            importedBoundaryCount = 0;
+            for (const reference of references) {
+              for (const exportName of farmPackageClientImportExports(reference)) {
+                importedBoundaryCount += visit(
+                  ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
+                );
+              }
+            }
+          } else if (
+            options.staticPackageBoundaries ||
+            (options.staticPackageLeaves &&
+              rendersOnlyLeafElements(content, importedBindings.get(specifier) ?? []))
+          ) {
             staticPackages.add(specifier);
             continue;
+          } else {
+            fallbackReason = `package client boundary ${specifier} cannot yet be isolated`;
+            fallbackHint = `Render it from a local "use client" module (a providers.tsx that renders the ${specifier} component)`;
+            return 0;
           }
-          fallbackReason = `package client boundary ${specifier} cannot yet be isolated`;
-          return 0;
         }
-        continue;
       }
-      const importedBoundaryCount = visit(importedPath);
       if (fallbackReason || importedBoundaryCount === 0) continue;
       const localBindings = importedBindings.get(specifier) ?? [];
       const staticUses = countStaticJsxUses(content, localBindings);
@@ -1323,9 +1689,10 @@ function collectIsolatedClientBoundaries(
         const container = findParserSensitiveJsxContainer(content, localBindings);
         if (container) {
           fallbackReason = `the client boundary imported from ${specifier} renders inside <${container}>, where the HTML parser relocates its hydration marker`;
+          fallbackHint = `Move "use client" up to a component that renders the whole <${container}>${PARSER_SENSITIVE_FLOW_HINTS[container] ?? ""}`;
           return 0;
         }
-        if (passesElementValuedProps(content, localBindings)) {
+        if (!options.allowElementProps && passesElementValuedProps(content, localBindings)) {
           fallbackReason = `the client boundary imported from ${specifier} receives React elements, which cannot cross the boundary as serialized props`;
           return 0;
         }
@@ -1354,6 +1721,7 @@ function collectIsolatedClientBoundaries(
     staticPackages: Array.from(staticPackages),
     costGuardExceeded,
     fallbackReason,
+    fallbackHint,
   };
 }
 
@@ -1374,6 +1742,11 @@ function inspectClientModuleMetadata(
   visited.add(resolvedPath);
 
   const content = readIfExists(resolvedPath);
+  // An owner (the page or layout itself) that re-exports another module's default is that module.
+  if (inspectIslandExport) {
+    const target = resolveDefaultReexport(resolvedPath, content, root);
+    if (target) return inspectClientModuleMetadata(target, root, visited, true);
+  }
   const parsed = parseClientModuleMetadata(content, inspectIslandExport);
   if (parsed.isClientComponent) {
     return {
@@ -1384,12 +1757,14 @@ function inspectClientModuleMetadata(
   }
 
   let importsClientBoundary = false;
+  let importsAsyncOwner = false;
   let importedIslandStrategy: FarmIslandStrategy | null = null;
   for (const specifier of getImportSpecifiers(content)) {
     const imported = resolveImportedModule(resolvedPath, specifier, root);
     const importedMetadata = imported.local
       ? inspectClientModuleMetadata(imported.path, root, visited, false)
       : inspectPackageClientBoundary(imported.path, root, visited);
+    if (importedMetadata.suppressedAsyncHydration) importsAsyncOwner = true;
     if (importedMetadata.isClientComponent || importedMetadata.shouldHydrate) {
       importsClientBoundary = true;
       if (importedIslandStrategy === null) {
@@ -1408,7 +1783,9 @@ function inspectClientModuleMetadata(
   // module would throw, blank the server-rendered HTML, and re-run the page's
   // data fetching in a loop. Keep async server pages server-only even when
   // they import client components.
-  if (shouldHydrate && hasAsyncDefaultExport(content)) {
+  // An async server component it renders (one that renders client components) cannot run in a
+  // client root either, so the module's client components hydrate as islands, as an async page's do.
+  if ((shouldHydrate && hasAsyncDefaultExport(content)) || importsAsyncOwner) {
     return {
       isClientComponent: false,
       shouldHydrate: false,
@@ -1426,12 +1803,55 @@ function inspectClientModuleMetadata(
   };
 }
 
+/**
+ * Within a production build, reuse an earlier inspection of the same package entry graph when it
+ * would read exactly what it read before: none of its files are visited yet, and every file where
+ * it stopped because an earlier inspection had visited it is visited again.
+ */
+function realpathOrSelf(file: string): string {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return file;
+  }
+}
+
+/** The packages `content` re-exports from: `export * from "pkg"`, `export { a } from "pkg"`. */
+function getBarePackageReexports(content: string | null): string[] {
+  return getImportSpecifiers(content, { reexportsOnly: true }).filter((specifier) =>
+    bareSpecifierPackage(specifier),
+  );
+}
+
 function inspectPackageClientBoundary(
   resolvedPath: string | null,
   root: string | undefined,
   visited: Set<string>,
 ): ClientModuleMetadata {
+  const cache = getPackageClientBoundaryCache();
+  if (!cache || !resolvedPath || visited.has(resolvedPath)) {
+    return traversePackageClientBoundary(resolvedPath, root, visited);
+  }
+  const key = `${root ?? ""}\0${resolvedPath}`;
+  const cached = cache.find(key, visited);
+  if (cached) {
+    for (const file of cached.files) visited.add(file);
+    return { ...cached.result };
+  }
+  const trace = new PackageInspectionTrace();
+  const result = traversePackageClientBoundary(resolvedPath, root, visited, trace);
+  cache.add(key, trace.toEntry(result));
+  return result;
+}
+
+function traversePackageClientBoundary(
+  resolvedPath: string | null,
+  root: string | undefined,
+  visited: Set<string>,
+  trace?: PackageInspectionTrace,
+): ClientModuleMetadata {
   if (!resolvedPath || visited.has(resolvedPath)) {
+    if (resolvedPath) trace?.stop(resolvedPath);
     return {
       isClientComponent: false,
       shouldHydrate: false,
@@ -1440,6 +1860,7 @@ function inspectPackageClientBoundary(
   }
 
   visited.add(resolvedPath);
+  trace?.visit(resolvedPath);
   const content = readIfExists(resolvedPath);
   const parsed = parseClientModuleMetadata(content, false);
   let importsClientBoundary = false;
@@ -1449,10 +1870,24 @@ function inspectPackageClientBoundary(
   // relative file. Follow only files inside that package entry graph: scanning
   // bare dependencies here would incorrectly turn server package APIs into
   // client boundaries because of unrelated transitive imports.
-  for (const specifier of getImportSpecifiers(content)) {
-    if (!specifier.startsWith(".") && !specifier.startsWith("/")) continue;
-    const importedPath = resolveImportedModuleSourcePath(resolvedPath, specifier, root);
-    const importedMetadata = inspectPackageClientBoundary(importedPath, root, visited);
+  // Re-exports of another package (`export * from "framer-motion/client"`) are part of this
+  // entry's API, so they are followed too.
+  const reexports = getBarePackageReexports(content);
+  // A package's own dependencies resolve from its real directory (pnpm links them beside it).
+  const realPath = reexports.length > 0 ? realpathOrSelf(resolvedPath) : resolvedPath;
+  const followed = [
+    ...getImportSpecifiers(content).filter(
+      (specifier) => specifier.startsWith(".") || specifier.startsWith("/"),
+    ),
+    ...reexports,
+  ];
+  for (const specifier of followed) {
+    const importedPath = resolveImportedModuleSourcePath(
+      reexports.includes(specifier) ? realPath : resolvedPath,
+      specifier,
+      root,
+    );
+    const importedMetadata = traversePackageClientBoundary(importedPath, root, visited, trace);
     if (!importedMetadata.shouldHydrate) continue;
     importsClientBoundary = true;
     if (importedIslandStrategy === null) {
@@ -1473,7 +1908,10 @@ function inspectPackageClientBoundary(
   };
 }
 
-function getImportSpecifiers(content: string | null): string[] {
+function getImportSpecifiers(
+  content: string | null,
+  { reexportsOnly = false, dynamic = false }: { reexportsOnly?: boolean; dynamic?: boolean } = {},
+): string[] {
   if (!content) return [];
 
   const tokens = tokenizeModuleSource(content);
@@ -1490,10 +1928,22 @@ function getImportSpecifiers(content: string | null): string[] {
       braceDepth = Math.max(0, braceDepth - 1);
       continue;
     }
+    if (
+      dynamic &&
+      keyword.kind === "identifier" &&
+      keyword.value === "import" &&
+      tokens[index - 1]?.value !== "." &&
+      tokens[index + 1]?.value === "(" &&
+      tokens[index + 2]?.kind === "string"
+    ) {
+      matches.add(tokens[index + 2].value);
+      continue;
+    }
     if (braceDepth !== 0) continue;
     if (keyword.kind !== "identifier" || !["import", "export"].includes(keyword.value)) {
       continue;
     }
+    if (reexportsOnly && keyword.value !== "export") continue;
 
     const previous = tokens[index - 1];
     if (previous?.value === ".") continue;
@@ -1563,7 +2013,8 @@ function isTypeOnlyNamedClause(
  * inspected like any app module; false for an npm package, whose client
  * boundaries are inspected through its own entry graph.
  */
-function resolveImportedModule(
+/** Resolves an import to its source file; `local` when it is the app's own code (or an alias). */
+export function resolveImportedModule(
   importerPath: string,
   specifier: string,
   root?: string,
@@ -1961,4 +2412,224 @@ function resolveSourceCandidate(candidates: Iterable<string>): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Whether `specifier`, imported from `importerPath`, is a package whose module is a client boundary
+ * (`"use client"`), as the islands inspection decides it.
+ */
+export function isFarmPackageClientBoundary(
+  importerPath: string,
+  specifier: string,
+  root: string,
+): boolean {
+  const imported = resolveImportedModule(importerPath, specifier, root);
+  if (imported.local || !imported.path) return false;
+  return inspectPackageClientBoundary(imported.path, root, new Set()).shouldHydrate;
+}
+
+const CLIENT_PACKAGE_SCAN_EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
+const CLIENT_PACKAGE_SCAN_SKIP = new Set(["node_modules", ".farm", ".git", "dist", ".output"]);
+
+/** The package a bare specifier names: `@scope/name` or `name`, without a subpath. */
+function bareSpecifierPackage(specifier: string): string | null {
+  if (
+    specifier.startsWith(".") ||
+    specifier.startsWith("/") ||
+    specifier.startsWith("#") ||
+    specifier.startsWith("node:") ||
+    specifier.startsWith("virtual:") ||
+    specifier.includes("\0") ||
+    // A package's stylesheet or asset is not a module for the optimizer.
+    /\.(?:css|scss|sass|less|styl|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|json|wasm)$/.test(
+      specifier,
+    )
+  ) {
+    return null;
+  }
+  return specifier;
+}
+
+/**
+ * Packages the browser loads only once a page renders, so Vite's optimizer finds them late,
+ * optimizes again and can leave two copies of React on the page. Under `directory`: every bare
+ * import of a `"use client"` module, and every package a server module imports that is a client
+ * boundary (`"use client"`). Imports a server module makes of anything else stay out: they may
+ * not run in a browser.
+ */
+export function collectFarmClientPackageImports(directory: string, root: string): string[] {
+  return scanFarmPackageImports(directory, root).client;
+}
+
+/**
+ * The bare imports under `directory`: `client`, as `collectFarmClientPackageImports` describes,
+ * and `server`, every package a module without `"use client"` imports.
+ */
+function scanFarmPackageImports(
+  directory: string,
+  root: string,
+): { client: string[]; server: Set<string> } {
+  const found = new Set<string>();
+  const server = new Set<string>();
+  const walk = (current: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") && entry.isDirectory()) continue;
+      const file = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
+        continue;
+      }
+      if (!CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) || entry.name.endsWith(".d.ts"))
+        continue;
+      const content = readIfExists(file);
+      if (!content) continue;
+      const client = hasUseClientDirective(content);
+      for (const specifier of new Set(getImportSpecifiers(content))) {
+        const name = bareSpecifierPackage(specifier);
+        if (!name) continue;
+        if (!client) server.add(name);
+        if (found.has(name)) continue;
+        if (client || isFarmPackageClientBoundary(file, name, root)) found.add(name);
+      }
+    }
+  };
+  walk(directory);
+  return { client: [...found].sort(), server };
+}
+
+/**
+ * Packages the app under `directory` imports that Node cannot load the way a bundler does: their
+ * files import stylesheets, or their ES module build is only a `module` field beside a CommonJS
+ * `main`. The server graph bundles these (`ssr.noExternal`) instead of importing them natively, so
+ * development renders them as the production bundle does.
+ */
+export function collectFarmServerBundledPackages(directory: string): string[] {
+  const found = new Set<string>();
+  const checked = new Set<string>();
+  const walk = (current: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") && entry.isDirectory()) continue;
+      const file = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
+        continue;
+      }
+      if (!CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) || entry.name.endsWith(".d.ts"))
+        continue;
+      const content = readIfExists(file);
+      if (!content) continue;
+      for (const specifier of new Set(getImportSpecifiers(content))) {
+        const name = bareSpecifierPackage(specifier);
+        if (!name || checked.has(name)) continue;
+        checked.add(name);
+        const bundled = findFarmServerBundledPackage(file, name);
+        if (bundled) found.add(bundled);
+      }
+    }
+  };
+  walk(directory);
+  return [...found].sort();
+}
+
+const clientReachableModules = new Map<string, Set<string>>();
+
+/** Forgets the modules client code reaches (a file changed in development). */
+export function invalidateFarmClientReachableModules(): void {
+  clientReachableModules.clear();
+}
+
+/**
+ * The application modules client code reaches: every `"use client"` or `hydrate` module under
+ * `directory` and the local modules it imports, statically or lazily, transitively. React Server
+ * Components keep those modules in the client graph, so their package imports resolve as client
+ * code there.
+ */
+export function getFarmClientReachableModules(directory: string, root: string): Set<string> {
+  const key = `${path.resolve(root)}\0${path.resolve(directory)}`;
+  const cached = clientReachableModules.get(key);
+  if (cached) return cached;
+  const reachable = new Set<string>();
+  const queue: string[] = [];
+  const walk = (current: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const file = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!entry.name.startsWith(".") && !CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
+      } else if (CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) && !entry.name.endsWith(".d.ts")) {
+        const content = readIfExists(file);
+        if (hasUseClientDirective(content) || hasHydrateExport(content)) queue.push(file);
+      }
+    }
+  };
+  walk(directory);
+  while (queue.length > 0) {
+    const file = path.resolve(queue.pop()!);
+    if (reachable.has(file)) continue;
+    reachable.add(file);
+    for (const specifier of getImportSpecifiers(readIfExists(file), { dynamic: true })) {
+      const imported = resolveImportedModule(file, specifier, root);
+      if (imported.local && imported.path && !reachable.has(path.resolve(imported.path))) {
+        queue.push(imported.path);
+      }
+    }
+  }
+  clientReachableModules.set(key, reachable);
+  return reachable;
+}
+
+/**
+ * What the React Server Components dev server should pre-bundle for the browser:
+ * `collectFarmClientPackageImports`, except packages whose `react-server` build re-exports a
+ * `"use client"` module. The RSC plugin loads that module straight from the package, so those
+ * packages stay out of the pre-bundle (their own dependencies stay in, through `pkg > dep`) and
+ * the browser gets one copy of each.
+ */
+export function resolveFarmClientOptimizeDeps(
+  directory: string,
+  root: string,
+): { include: string[]; exclude: string[] } {
+  const importer = path.join(path.resolve(root), "package.json");
+  const include = new Set<string>();
+  const exclude = new Set<string>();
+  const imports = scanFarmPackageImports(directory, root);
+  for (const specifier of imports.client) {
+    const manifest = findFarmPackageManifest(importer, specifier);
+    if (
+      manifest &&
+      farmReactServerBuildReachesClientModules(importer, specifier, imports.server.has(specifier))
+    ) {
+      exclude.add(manifest.name);
+      for (const dependency of manifest.dependencies) {
+        include.add(`${manifest.name} > ${dependency}`);
+      }
+    } else {
+      include.add(specifier);
+    }
+  }
+  for (const name of exclude) {
+    for (const entry of include) {
+      // `react-tweet > swr` would pre-bundle swr, which the browser has to load unbundled.
+      const target = entry.includes(" > ") ? entry.slice(entry.lastIndexOf(" > ") + 3) : entry;
+      if (target === name || target.startsWith(`${name}/`)) include.delete(entry);
+    }
+  }
+  return { include: [...include].sort(), exclude: [...exclude].sort() };
 }

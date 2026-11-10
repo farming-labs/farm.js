@@ -27,7 +27,8 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000), create an account, and continue to the
 protected dashboard. Local development needs no database or auth environment variables; FARMJS Auth
-creates and migrates `.farm/auth.sqlite` when auth is first used.
+creates and migrates `.farm/auth.sqlite` and generates a random secret in `.farm/auth-secret` when auth
+is first used.
 
 ## How it is wired
 

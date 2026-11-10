@@ -22,6 +22,15 @@ function jsonResponse(value: unknown, status = 200) {
   });
 }
 
+// The handler context of an HTTP request: not an in-process `api` call.
+const httpContext = { req: { get: () => undefined } };
+
+type JobsTestRoute = {
+  path: string;
+  method: string;
+  handler(request: Request, context: unknown): Promise<Response>;
+};
+
 describe("jobs integration", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -40,11 +49,9 @@ describe("jobs integration", () => {
           },
         }),
       }),
+      authorize: () => true,
     });
-    const routes = integration.routes as Array<{
-      path: string;
-      handler(request: Request): Promise<Response>;
-    }>;
+    const routes = integration.routes as JobsTestRoute[];
     const triggerRoute = routes.find((route) => route.path.endsWith("/trigger"));
 
     // A bare array is a valid payload for array-input tasks; see
@@ -56,10 +63,125 @@ describe("jobs integration", () => {
           headers: { "content-type": "application/json" },
           body,
         }),
+        httpContext,
       );
       expect(response.status).toBe(400);
     }
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("answers HTTP requests only when authorize allows them", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const tasks = defineTasks({
+      sendEmail: task({
+        async run(input: { recipient: string }) {
+          return input;
+        },
+      }),
+    });
+    const requests = [
+      ["GET", "https://farmjs.dev/api/jobs/tasks"],
+      ["POST", "https://farmjs.dev/api/jobs/send-email/trigger", { recipient: "a@b.c" }],
+      ["POST", "https://farmjs.dev/api/jobs/send-email/batch-trigger", { items: [{}] }],
+      ["POST", "https://farmjs.dev/api/jobs/send-email/schedule", { after: "1m" }],
+      ["GET", "https://farmjs.dev/api/jobs/send-email/status?handleId=run_1"],
+      ["POST", "https://farmjs.dev/api/jobs/send-email/cancel", { handleId: "run_1" }],
+    ] as const;
+    const call = (
+      integration: ReturnType<typeof jobs>,
+      [method, url, body]: (typeof requests)[number],
+    ) => {
+      const pathname = new URL(url).pathname;
+      const route = (integration.routes as JobsTestRoute[]).find(
+        (candidate) => candidate.method === method && candidate.path === pathname,
+      )!;
+      return route.handler(
+        new Request(url, {
+          method,
+          headers: body ? { "content-type": "application/json" } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
+        }),
+        httpContext,
+      );
+    };
+
+    // Without authorize, no HTTP caller reaches the provider.
+    const closed = jobs({ runtime: trigger({ apiKey: "tr_dev_test" }), tasks });
+    for (const request of requests) {
+      const response = await call(closed, request);
+      expect(response.status).toBe(403);
+      expect(((await response.json()) as { error: string }).error).toContain("authorize");
+    }
+
+    const denied = jobs({
+      runtime: trigger({ apiKey: "tr_dev_test" }),
+      tasks,
+      authorize: () => false,
+    });
+    for (const request of requests) expect((await call(denied, request)).status).toBe(403);
+
+    const answered = jobs({
+      runtime: trigger({ apiKey: "tr_dev_test" }),
+      tasks,
+      authorize: () => new Response("sign in", { status: 401 }),
+    });
+    for (const request of requests) expect((await call(answered, request)).status).toBe(401);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // An allowed request sees the task and operation, and can read the body
+    // without consuming it for the route.
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ id: "run_1" }));
+    const seen: unknown[] = [];
+    const allowed = jobs({
+      runtime: trigger({ apiKey: "tr_dev_test" }),
+      tasks,
+      async authorize(request, context) {
+        seen.push({ ...context, body: await request.json() });
+        return true;
+      },
+    });
+    const response = await call(allowed, requests[1]);
+    expect(response.status).toBe(200);
+    expect(seen).toEqual([
+      { task: "sendEmail", operation: "trigger", body: { recipient: "a@b.c" } },
+    ]);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("does not read or cancel another task's Trigger.dev run", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        jsonResponse({ id: "run_other", output: { secret: "x" }, taskIdentifier: "charge-card" }),
+      );
+    const integration = jobs({
+      runtime: trigger({ apiKey: "tr_dev_test" }),
+      tasks: defineTasks({
+        sendEmail: task({
+          async run(input: { recipient: string }) {
+            return input;
+          },
+        }),
+      }),
+    });
+    const api = createIntegrationServerClient(
+      { integrations: { jobs: integration } },
+      { request: new Request("https://farmjs.dev/jobs") },
+    );
+
+    const status = await api.jobs.sendEmail.status({ query: { handleId: "run_other" } });
+    expect(status.data).toBeNull();
+    expect(status.error?.status).toBe(404);
+    expect(JSON.stringify(status.error)).not.toContain("secret");
+
+    const cancel = await api.jobs.sendEmail.cancel({ body: { handleId: "run_other" } });
+    expect(cancel.data).toBeNull();
+    expect(cancel.error?.status).toBe(404);
+    // Only the two lookups: the cancel request itself is never sent.
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    for (const [url] of fetchSpy.mock.calls) {
+      expect(url).toBe("https://api.trigger.dev/api/v3/runs/run_other");
+    }
   });
 
   it("infers task input/output types and exposes task metadata", async () => {
@@ -256,7 +378,11 @@ describe("jobs integration", () => {
             messageId: "msg_usr_123",
           },
           tags: ["system", "signup"],
+          taskIdentifier: "send-welcome-email",
         }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ id: "run_123", status: "EXECUTING", taskIdentifier: "send-welcome-email" }),
       )
       .mockResolvedValueOnce(jsonResponse({ ok: true }));
 
@@ -371,6 +497,7 @@ describe("jobs integration", () => {
           messageId: "msg_usr_123",
         },
         tags: ["system", "signup"],
+        taskIdentifier: "send-welcome-email",
       },
     });
 
@@ -395,8 +522,14 @@ describe("jobs integration", () => {
       runtime: "trigger",
       canceled: true,
     });
+    // Cancel looks the run up first, to act only on this task's runs.
     expect(fetchSpy).toHaveBeenNthCalledWith(
       3,
+      "https://api.trigger.dev/api/v3/runs/run_123",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      4,
       "https://api.trigger.dev/api/v2/runs/run_123/cancel",
       expect.objectContaining({
         method: "POST",
@@ -614,6 +747,169 @@ describe("jobs integration", () => {
     });
   });
 
+  it("does not read another task's Inngest run", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
+      String(url).endsWith("/runs")
+        ? jsonResponse({
+            data: [{ run_id: "run_x", status: "Completed", output: { secret: "x" } }],
+          })
+        : jsonResponse({ data: { id: "evt_other", name: "farm/charge-card", data: {} } }),
+    );
+    const integration = jobs({
+      runtime: inngest({ eventKey: "evt_test_key", signingKey: "sign_test_key" }),
+      tasks: defineTasks({
+        importCsv: task({
+          async run(input: { fileId: string }) {
+            return input;
+          },
+        }),
+      }),
+    });
+    const api = createIntegrationServerClient(
+      { integrations: { jobs: integration } },
+      { request: new Request("https://farmjs.dev/jobs") },
+    );
+
+    const status = await api.jobs.importCsv.status({ query: { handleId: "evt_other" } });
+    expect(status.data).toBeNull();
+    expect(status.error?.status).toBe(404);
+    expect(JSON.stringify(status.error)).not.toContain("secret");
+    // The runs, and their output, are never fetched for a foreign event.
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([
+      "https://api.inngest.com/v1/events/evt_other",
+    ]);
+
+    // An event the provider does not know answers 404 with no provider body.
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ error: "event not found" }, 404));
+    const missing = await api.jobs.importCsv.status({ query: { handleId: "evt_gone" } });
+    expect(missing.error?.status).toBe(404);
+  });
+
+  it("keeps an HTTP caller's idempotency key to the task and caller", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body));
+      for (const event of Array.isArray(body) ? body : [body]) sent.push(event);
+      return jsonResponse({ ids: (Array.isArray(body) ? body : [body]).map((_, i) => `evt_${i}`) });
+    });
+    const tasks = defineTasks({
+      importCsv: task({
+        id: "import-csv",
+        async run(input: { fileId: string }) {
+          return input;
+        },
+      }),
+      sendWelcome: task({
+        id: "send-welcome",
+        defaults: {
+          idempotencyKey(input: { userId: string }) {
+            return `welcome:${input.userId}`;
+          },
+        },
+        async run(input: { userId: string }) {
+          return input;
+        },
+      }),
+    });
+    let caller: string | undefined;
+    const integration = jobs({
+      runtime: inngest({ eventKey: "evt_test_key", signingKey: "sign_test_key" }),
+      tasks,
+      authorize: () => (caller ? { caller } : true),
+    });
+    const post = (path: string, body: unknown) => {
+      const route = (integration.routes as JobsTestRoute[]).find(
+        (candidate) => candidate.method === "POST" && candidate.path === path,
+      )!;
+      return route.handler(
+        new Request(`https://farmjs.dev${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        httpContext,
+      );
+    };
+
+    caller = "usr_1";
+    await post("/api/jobs/import-csv/trigger", {
+      fileId: "f1",
+      $options: { idempotencyKey: "import:f1" },
+    });
+    await post("/api/jobs/import-csv/schedule", {
+      fileId: "f1",
+      $schedule: { after: "5m", idempotencyKey: "import:f1" },
+    });
+    await post("/api/jobs/import-csv/batch-trigger", {
+      items: [{ fileId: "f1", $options: { idempotencyKey: "import:f1" } }],
+    });
+    caller = "a:b";
+    await post("/api/jobs/import-csv/trigger", {
+      fileId: "f1",
+      $options: { idempotencyKey: "import:f1" },
+    });
+    caller = undefined;
+    await post("/api/jobs/import-csv/trigger", {
+      fileId: "f1",
+      $options: { idempotencyKey: "import:f1" },
+    });
+    // The task's own key is not the caller's to replace.
+    await post("/api/jobs/send-welcome/trigger", {
+      userId: "usr_2",
+      $options: { idempotencyKey: "welcome:usr_victim" },
+    });
+
+    expect(sent.map((event) => event.id)).toEqual([
+      "farm-http:import-csv:usr_1:import:f1",
+      "farm-http:import-csv:usr_1:import:f1",
+      "farm-http:import-csv:usr_1:import:f1",
+      "farm-http:import-csv:a%3Ab:import:f1",
+      "farm-http:import-csv::import:f1",
+      "welcome:usr_2",
+    ]);
+
+    // Server code is trusted with the key as given.
+    const api = createIntegrationServerClient(
+      { integrations: { jobs: integration } },
+      { request: new Request("https://farmjs.dev/jobs") },
+    );
+    await api.jobs.importCsv.trigger({
+      body: { fileId: "f1", $options: { idempotencyKey: "import:f1" } },
+    });
+    expect(sent.at(-1)?.id).toBe("import:f1");
+  });
+
+  it("namespaces an HTTP caller's Trigger.dev idempotency key", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => jsonResponse({ id: "run_1" }));
+    const integration = jobs({
+      runtime: trigger({ apiKey: "tr_dev_test" }),
+      tasks: defineTasks({
+        sendEmail: task({
+          async run(input: { recipient: string }) {
+            return input;
+          },
+        }),
+      }),
+      authorize: () => ({ caller: "usr_1" }),
+    });
+    const route = (integration.routes as JobsTestRoute[]).find((candidate) =>
+      candidate.path.endsWith("/send-email/trigger"),
+    )!;
+    const response = await route.handler(
+      new Request("https://farmjs.dev/api/jobs/send-email/trigger", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ recipient: "a@b.c", $options: { idempotencyKey: "welcome" } }),
+      }),
+      httpContext,
+    );
+    expect(response.status).toBe(200);
+    const body = JSON.parse(String((fetchSpy.mock.calls[0]![1] as RequestInit).body));
+    expect(body.options.idempotencyKey).toBe("farm-http:send-email:usr_1:welcome");
+  });
+
   it("triggers Inngest events and resolves run status from the event handle", async () => {
     const tasks = defineTasks({
       importCsv: task({
@@ -638,6 +934,9 @@ describe("jobs integration", () => {
           ids: ["evt_123"],
           status: 200,
         }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ data: { id: "import:file_1", name: "farm/import-csv", data: {} } }),
       )
       .mockResolvedValueOnce(
         jsonResponse({
@@ -744,6 +1043,11 @@ describe("jobs integration", () => {
     });
     expect(fetchSpy).toHaveBeenNthCalledWith(
       2,
+      "https://api.inngest.com/v1/events/evt_123",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
       "https://api.inngest.com/v1/events/evt_123/runs",
       expect.objectContaining({
         method: "GET",

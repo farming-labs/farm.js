@@ -24,15 +24,18 @@ function runtime({
   const res = Object.assign(new EventEmitter(), { writableEnded: false, destroyed });
   const createSignal = vi.fn(createFarmNodeRequestAbortSignal);
   let signal: AbortSignal | undefined;
-  const fetchPage = vi.fn(async (request: Request, init: RequestInit) => {
-    signal = init.signal ?? request.signal;
+  const fetchPage = vi.fn(async (request: Request) => {
+    signal = request.signal;
     signal.throwIfAborted();
     return new Response("<h1>Account</h1>", { headers: { "content-type": "text/html" } });
   });
+  const server = {};
+  const createDispatch = vi.fn((_server: unknown) => fetchPage);
   const run = new Function(
     "createMarkdownMirrorResponse",
     "createFarmNodeRequestAbortSignal",
-    "fetch",
+    "createFarmDevServerDispatch",
+    "server",
     "farmApp",
     "req",
     "res",
@@ -40,15 +43,18 @@ function runtime({
     "requestMethod",
     "viteModuleRequest",
     `return async function () {
-      const docsHeaders = new Headers();
+      const docsHeaders = new Headers({ "accept-encoding": "gzip, br" });
       const apiServerBasePath = "/api";
+      // A local of the development caller: the request path as routes see it.
+      const toRoutePathname = (pathname) => pathname;
       ${source.slice(start, end)}
       return markdownResponse;
     };`,
   )(
     createMarkdownMirrorResponse,
     createSignal,
-    fetchPage,
+    createDispatch,
+    server,
     {
       getConfig: () => ({ md: resolveMarkdownConfig(enabled) }),
       getRouteManager: () => ({ matchRoute: (value: string) => ({ route: value === "/account" }) }),
@@ -61,7 +67,17 @@ function runtime({
   ) as () => Promise<Response | null>;
   const listenerCount = () =>
     req.listenerCount("aborted") + res.listenerCount("close") + res.listenerCount("finish");
-  return { run, req, res, createSignal, fetchPage, listenerCount, signal: () => signal };
+  return {
+    run,
+    req,
+    res,
+    server,
+    createSignal,
+    createDispatch,
+    fetchPage,
+    listenerCount,
+    signal: () => signal,
+  };
 }
 
 describe("development Markdown cancellation wiring", () => {
@@ -76,7 +92,11 @@ describe("development Markdown cancellation wiring", () => {
       else r.res.emit(event);
       expect(r.signal()?.aborted).toBe(true);
       expect(r.listenerCount()).toBe(0);
-      expect(r.fetchPage.mock.calls[0][1].redirect).toBe("manual");
+      // The page renders through this dev server's own listener, uncompressed.
+      expect(r.createDispatch).toHaveBeenCalledWith(r.server);
+      const pageRequest = r.fetchPage.mock.calls[0][0];
+      expect(new URL(pageRequest.url).pathname).toBe("/account");
+      expect(pageRequest.headers.has("accept-encoding")).toBe(false);
     },
   );
 
@@ -118,6 +138,7 @@ describe("development Markdown cancellation wiring", () => {
       const r = runtime(options);
       expect(await r.run()).toBeNull();
       expect(r.createSignal).not.toHaveBeenCalled();
+      expect(r.createDispatch).not.toHaveBeenCalled();
       expect(r.fetchPage).not.toHaveBeenCalled();
       expect(r.listenerCount()).toBe(0);
     },

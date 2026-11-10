@@ -7,7 +7,10 @@ import {
   createCompilerKeyedArraySlice,
   createCompilerKeyedArrayStructuralReorder,
   keyedRowsEveryHintedRuntimeFeature,
+  keyedRowsConditionalEveryHintedRuntimeFeature,
+  keyedRowsHostRuntimeFeature,
   type CompilerKeyedRowsBlockProps,
+  type CompilerRuntimeFeature,
 } from "../compiler-runtime";
 
 interface Item {
@@ -18,23 +21,34 @@ interface Item {
 interface Block {
   root: Element;
   mounted: boolean;
-  instances: Map<string, { element: Element; item: Item; index: number }>;
+  instances: Map<
+    string,
+    { element: Element; item: Item; index: number; scope?: { cleanup(): void } }
+  >;
+  currentProps: CompilerKeyedRowsBlockProps;
   eventHandlers: Map<string, Map<number, () => void>>;
-  conditionalListeners: Map<string, Map<number, () => void>>;
+  conditionals: {
+    listeners: Map<string, Map<number, () => void>>;
+    prune(instances: Block["instances"]): void;
+  };
   adopt(): boolean;
   pruneEventHandlers(): void;
-  pruneConditionalListeners(): void;
   refresh(afterCommit?: () => void, dirtyState?: ReadonlySet<number>): void;
 }
 
-function harness(size: number) {
+function harness(
+  size: number,
+  feature: CompilerRuntimeFeature = keyedRowsConditionalEveryHintedRuntimeFeature,
+  hostBlocks = false,
+) {
   let items: Item[] = Array.from({ length: size }, (_, index) => ({ id: `row-${index}` }));
-  const Component = keyedRowsEveryHintedRuntimeFeature.create({
+  const Component = feature.create({
     setRoot() {},
     subscribe: () => () => {},
   }).KeyedRows as React.ComponentClass<CompilerKeyedRowsBlockProps>;
   const block = new Component({
     id: 0,
+    hostBlocks,
     items: () => items,
     collectionDependency: 0,
     dependencies: [0],
@@ -102,13 +116,13 @@ describe.each(Object.entries(updates))("cleanup after %s", (name, update) => {
       const survivor = before.get("row-1")!;
       const callback = new Map([[0, vi.fn()]]);
       if (populated) {
-        for (const registry of [block.eventHandlers, block.conditionalListeners]) {
+        for (const registry of [block.eventHandlers, block.conditionals.listeners]) {
           registry.set("row-0", new Map([[0, vi.fn()]]));
           registry.set("row-1", callback);
         }
       }
       const pruneEvents = vi.spyOn(block, "pruneEventHandlers");
-      const pruneConditionals = vi.spyOn(block, "pruneConditionalListeners");
+      const pruneConditionals = vi.spyOn(block.conditionals, "prune");
       const snapshots: number[] = [];
       const nativeKeys = Map.prototype.keys;
       const keys = vi
@@ -148,7 +162,7 @@ describe.each(Object.entries(updates))("cleanup after %s", (name, update) => {
       expect([...block.instances.values()].map((row) => row.index)).toEqual(
         Array.from({ length: block.instances.size }, (_, index) => index),
       );
-      for (const registry of [block.eventHandlers, block.conditionalListeners]) {
+      for (const registry of [block.eventHandlers, block.conditionals.listeners]) {
         expect([...registry]).toEqual(populated ? [["row-1", callback]] : []);
       }
       expect(callback.get(0)).not.toHaveBeenCalled();
@@ -156,10 +170,87 @@ describe.each(Object.entries(updates))("cleanup after %s", (name, update) => {
   );
 });
 
+describe("full replacement cleanup", () => {
+  it.each([1, 1_000])("does not iterate %i scope-free old rows just to discard them", (size) => {
+    const { block, setItems } = harness(size);
+    const before = block.instances;
+    const oldElements = [...block.root.children];
+    const iterate = vi.spyOn(before, Symbol.iterator);
+    const next = Array.from({ length: size }, (_, index) => ({ id: `next-${index}` }));
+    const committed = vi.fn();
+    block.eventHandlers.set("row-0", new Map([[0, vi.fn()]]));
+    block.conditionals.listeners.set("row-0", new Map([[0, vi.fn()]]));
+
+    setItems(next);
+    block.refresh(committed);
+
+    expect(iterate).not.toHaveBeenCalled();
+    expect(committed).toHaveBeenCalledTimes(1);
+    expect(block.instances).not.toBe(before);
+    expect([...block.instances.keys()]).toEqual(next.map((item) => item.id));
+    expect([...block.root.children].map((row) => row.textContent)).toEqual(
+      next.map((item) => item.id),
+    );
+    expect(oldElements.every((element) => element.parentNode === null)).toBe(true);
+    expect(block.eventHandlers.size).toBe(0);
+    expect(block.conditionals.listeners.size).toBe(0);
+  });
+
+  it.each([false, true])("cleans old host scopes with current hostBlocks=%s", (hostBlocks) => {
+    const { block, setItems } = harness(3, keyedRowsHostRuntimeFeature, true);
+    const cleanups = [...block.instances.values()].map((instance) =>
+      vi.spyOn(instance.scope!, "cleanup"),
+    );
+    // Definitions/props can change before scopes mounted by the previous one are disposed.
+    block.currentProps = { ...block.currentProps, hostBlocks };
+    setItems([{ id: "new-a" }, { id: "new-b" }, { id: "new-c" }]);
+
+    block.refresh();
+
+    for (const cleanup of cleanups) expect(cleanup).toHaveBeenCalledTimes(1);
+    expect([...block.root.children].map((row) => row.textContent)).toEqual([
+      "new-a",
+      "new-b",
+      "new-c",
+    ]);
+  });
+
+  it.each([false, true])(
+    "still removes old rows when some survive (host scopes: %s)",
+    (hostBlocks) => {
+      const { block, items, setItems } = harness(
+        3,
+        hostBlocks ? keyedRowsHostRuntimeFeature : keyedRowsEveryHintedRuntimeFeature,
+        hostBlocks,
+      );
+      const survivor = block.instances.get("row-1")!;
+      const removed = [block.instances.get("row-0")!, block.instances.get("row-2")!];
+      const cleanups = hostBlocks
+        ? removed.map((instance) => vi.spyOn(instance.scope!, "cleanup"))
+        : [];
+      const survivorCleanup = hostBlocks ? vi.spyOn(survivor.scope!, "cleanup") : undefined;
+      setItems([{ id: "new-a" }, items[1], { id: "new-b" }]);
+
+      block.refresh();
+
+      expect(block.instances.get("row-1")).toBe(survivor);
+      expect(block.root.children[1]).toBe(survivor.element);
+      expect(removed.every((instance) => instance.element.parentNode === null)).toBe(true);
+      for (const cleanup of cleanups) expect(cleanup).toHaveBeenCalledTimes(1);
+      if (survivorCleanup) expect(survivorCleanup).not.toHaveBeenCalled();
+      expect([...block.root.children].map((row) => row.textContent)).toEqual([
+        "new-a",
+        "row-1",
+        "new-b",
+      ]);
+    },
+  );
+});
+
 it.each(["adopt", "reconcile"] as const)("prunes against the new Map after %s", (mode) => {
   const { block, setItems } = harness(3);
   const callback = new Map([[0, vi.fn()]]);
-  for (const registry of [block.eventHandlers, block.conditionalListeners]) {
+  for (const registry of [block.eventHandlers, block.conditionals.listeners]) {
     registry.set("row-0", new Map([[0, vi.fn()]]));
     registry.set("row-1", callback);
     registry.set("incoming", callback);
@@ -167,14 +258,14 @@ it.each(["adopt", "reconcile"] as const)("prunes against the new Map after %s", 
   const before = block.instances;
   setItems([{ id: "row-1" }, { id: "incoming" }, { id: "row-2" }]);
   const pruneEvents = vi.spyOn(block, "pruneEventHandlers");
-  const pruneConditionals = vi.spyOn(block, "pruneConditionalListeners");
+  const pruneConditionals = vi.spyOn(block.conditionals, "prune");
   if (mode === "adopt") expect(block.adopt()).toBe(true);
   else block.refresh();
   expect(pruneEvents).toHaveBeenCalledTimes(1);
   expect(pruneConditionals).toHaveBeenCalledTimes(1);
   expect(block.instances).not.toBe(before);
   expect([...block.instances.keys()]).toEqual(["row-1", "incoming", "row-2"]);
-  for (const registry of [block.eventHandlers, block.conditionalListeners]) {
+  for (const registry of [block.eventHandlers, block.conditionals.listeners]) {
     expect([...registry]).toEqual([
       ["row-1", callback],
       ["incoming", callback],
@@ -187,16 +278,16 @@ it("does not prune or replace committed state when adoption fails", () => {
   const before = block.instances;
   const callback = new Map([[0, vi.fn()]]);
   block.eventHandlers.set("row-0", callback);
-  block.conditionalListeners.set("row-0", callback);
+  block.conditionals.listeners.set("row-0", callback);
   setItems([{ id: "duplicate" }, { id: "duplicate" }, { id: "other" }]);
   const pruneEvents = vi.spyOn(block, "pruneEventHandlers");
-  const pruneConditionals = vi.spyOn(block, "pruneConditionalListeners");
+  const pruneConditionals = vi.spyOn(block.conditionals, "prune");
   expect(block.adopt()).toBe(false);
   expect(block.instances).toBe(before);
   expect(pruneEvents).not.toHaveBeenCalled();
   expect(pruneConditionals).not.toHaveBeenCalled();
   expect(block.eventHandlers.get("row-0")).toBe(callback);
-  expect(block.conditionalListeners.get("row-0")).toBe(callback);
+  expect(block.conditionals.listeners.get("row-0")).toBe(callback);
 });
 
 describe("filter validation", () => {

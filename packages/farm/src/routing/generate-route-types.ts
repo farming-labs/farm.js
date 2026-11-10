@@ -97,43 +97,8 @@ export async function createRouteTypeDeclarations(
   options: GenerateRouteTypesOptions,
   outPath: string,
 ): Promise<string> {
-  const { root, srcDir = "src", extraRoutes = [], suppressLintOnLink = false } = options;
-  const sourceRoots = options.sourceRoots ?? [{ name: "project", root, srcDir, layer: false }];
-  const componentExtensions = resolveFarmComponentExtensions(options.componentExtensions).map(
-    (extension) => extension.slice(1),
-  );
-
-  const patterns = new Set<string>();
-  const routeModulePatterns = new Set<string>();
-
-  const glob = await import("fast-glob");
-  for (const source of sourceRoots) {
-    const appDir = path.join(source.root, source.srcDir, "app");
-    if (fs.existsSync(appDir)) {
-      const routeModuleFiles = await glob.default(
-        `**/{page,layout,loading,error}.{${componentExtensions.join(",")},md,mdx}`,
-        {
-          cwd: appDir,
-          absolute: false,
-        },
-      );
-
-      for (const file of routeModuleFiles) {
-        if (parseRouteSlotFile(file)) continue;
-        const route = parseRoutePath(file);
-        const pattern = createRoutePattern(route);
-        routeModulePatterns.add(pattern);
-        if (route.type === "page") {
-          patterns.add(pattern);
-        }
-      }
-    }
-
-    for (const route of await discoverProgrammaticRoutePaths(source.root, source.srcDir)) {
-      patterns.add(route);
-      routeModulePatterns.add(route);
-    }
-  }
+  const { extraRoutes = [], suppressLintOnLink = false } = options;
+  const { pages: patterns, modules: routeModulePatterns } = await scanRoutePatterns(options);
 
   for (const route of extraRoutes) {
     if (route.startsWith("/")) {
@@ -203,4 +168,175 @@ ${renderTypeAlias("RouteModulePattern", routeModulePatternType)}${linkAugmentati
 `;
 
   return content;
+}
+
+/**
+ * Mobile screen files next to a route's `page.tsx`: React Native (`page.native.tsx`,
+ * `page.ios.tsx`, `page.android.tsx`) and platform (`page.kt`, `page.swift`). Layouts use the
+ * first three.
+ */
+export interface PlatformRouteFiles {
+  native?: string;
+  ios?: string;
+  android?: string;
+  kt?: string;
+  swift?: string;
+}
+
+export interface ScannedRoutePatterns {
+  pages: Set<string>;
+  modules: Set<string>;
+}
+
+export interface ScannedPlatformRoutePatterns extends ScannedRoutePatterns {
+  /** Absolute page file per file-based page pattern; a project file wins over a layer's. */
+  pageFiles: Map<string, string>;
+  /** Mobile screen files per page pattern, absolute paths. */
+  nativePages: Map<string, PlatformRouteFiles>;
+  /** Reserved `layout.native.tsx` files per app directory, such as `/(tabs)`, absolute paths. */
+  nativeLayouts: Map<string, PlatformRouteFiles>;
+  /**
+   * Patterns whose only page is a `page.native.tsx` (RFC 0004, 7.3): native-only routes, in
+   * mobile builds only, with no web page and no web fallback. Always a subset of `nativePages`.
+   */
+  nativeOnlyPages: Set<string>;
+}
+
+const PLATFORM_FILE =
+  /^(?:(page|layout)\.(native|ios|android)\.(?:tsx|ts|jsx|js)|page\.(kt|swift))$/;
+
+/**
+ * Page and route module URL patterns from the app directory and programmatic routes files, as
+ * the generated route types list them: `/notes/[id]`, route groups removed, slots skipped.
+ * With `platformFiles` (mobile commands only) it also lists page files and the
+ * `page.{native,ios,android}.tsx` screens next to them; web scans never look for them.
+ */
+export async function scanRoutePatterns(
+  options: Pick<
+    GenerateRouteTypesOptions,
+    "root" | "srcDir" | "sourceRoots" | "componentExtensions"
+  > & { platformFiles: true },
+): Promise<ScannedPlatformRoutePatterns>;
+export async function scanRoutePatterns(
+  options: Pick<
+    GenerateRouteTypesOptions,
+    "root" | "srcDir" | "sourceRoots" | "componentExtensions"
+  > & { platformFiles?: false },
+): Promise<ScannedRoutePatterns>;
+export async function scanRoutePatterns(
+  options: Pick<
+    GenerateRouteTypesOptions,
+    "root" | "srcDir" | "sourceRoots" | "componentExtensions"
+  > & { platformFiles?: boolean },
+): Promise<ScannedRoutePatterns | ScannedPlatformRoutePatterns> {
+  const { root, srcDir = "src" } = options;
+  const sourceRoots = options.sourceRoots ?? [{ name: "project", root, srcDir, layer: false }];
+  const componentExtensions = resolveFarmComponentExtensions(options.componentExtensions).map(
+    (extension) => extension.slice(1),
+  );
+
+  const pages = new Set<string>();
+  const modules = new Set<string>();
+  const pageFiles = new Map<string, string>();
+  const nativePages = new Map<string, PlatformRouteFiles>();
+  const nativeLayouts = new Map<string, PlatformRouteFiles>();
+
+  const { glob } = await import("tinyglobby");
+  for (const source of sourceRoots) {
+    const appDir = path.join(source.root, source.srcDir, "app");
+    if (fs.existsSync(appDir)) {
+      const routeModuleFiles = await glob(
+        `**/{page,layout,loading,error}.{${componentExtensions.join(",")},md,mdx}`,
+        { cwd: appDir, expandDirectories: false },
+      );
+
+      for (const file of routeModuleFiles) {
+        if (parseRouteSlotFile(file)) continue;
+        const route = parseRoutePath(file);
+        const pattern = createRoutePattern(route);
+        modules.add(pattern);
+        if (route.type === "page") {
+          pages.add(pattern);
+          if (options.platformFiles) pageFiles.set(pattern, path.join(appDir, file));
+        }
+      }
+
+      if (options.platformFiles) {
+        scanPlatformRouteFiles(
+          appDir,
+          await glob(
+            ["**/{page,layout}.{native,ios,android}.{tsx,ts,jsx,js}", "**/page.{kt,swift}"],
+            { cwd: appDir, expandDirectories: false },
+          ),
+          nativePages,
+          nativeLayouts,
+        );
+      }
+    }
+
+    for (const route of await discoverProgrammaticRoutePaths(source.root, source.srcDir)) {
+      pages.add(route);
+      modules.add(route);
+    }
+  }
+
+  if (!options.platformFiles) return { pages, modules };
+  const nativeOnlyPages = new Set<string>();
+  for (const [pattern, files] of nativePages) {
+    if (pages.has(pattern)) continue;
+    // A React Native page with no page.tsx is a native-only route (RFC 0004, 7.3): it exists in
+    // mobile builds only, with no web page and no web fallback. `page.native.tsx` covers both
+    // OSes; an OS or platform file alone would leave the route missing on the other OS, which
+    // the shells' route config cannot express yet, so those still need a web page.
+    if (files.native) {
+      nativeOnlyPages.add(pattern);
+      continue;
+    }
+    const file = path.relative(root, Object.values(files)[0]!);
+    const dir = path.dirname(file);
+    throw new Error(
+      `${file.replace(/\\/g, "/")} has no web page next to it. Add ${path
+        .join(dir, "page.tsx")
+        .replace(/\\/g, "/")} (the route's web screen and fallback), or ${path
+        .join(dir, "page.native.tsx")
+        .replace(/\\/g, "/")} to make the route native-only on both OSes.`,
+    );
+  }
+  return { pages, modules, pageFiles, nativePages, nativeLayouts, nativeOnlyPages };
+}
+
+function scanPlatformRouteFiles(
+  appDir: string,
+  files: readonly string[],
+  nativePages: Map<string, PlatformRouteFiles>,
+  nativeLayouts: Map<string, PlatformRouteFiles>,
+): void {
+  // One layer's files replace an earlier layer's per route, like page files.
+  const seen = new Map<string, string>();
+  for (const file of [...files].sort()) {
+    const normalized = file.replace(/\\/g, "/");
+    const match = PLATFORM_FILE.exec(path.posix.basename(normalized));
+    if (!match) continue;
+    const kind = (match[1] ?? "page") as "page" | "layout";
+    const platform = (match[2] ?? match[3]) as keyof PlatformRouteFiles;
+    const twin = path.posix.join(path.posix.dirname(normalized), `${kind}.tsx`);
+    if (kind === "page" && parseRouteSlotFile(twin)) continue;
+    // Layouts key by directory: a group's layout and its parent's share a URL pattern.
+    const dir = path.posix.dirname(normalized);
+    const pattern =
+      kind === "page" ? createRoutePattern(parseRoutePath(twin)) : dir === "." ? "/" : `/${dir}`;
+    const key = `${kind}\0${pattern}\0${platform}`;
+    const previous = seen.get(key);
+    if (previous) {
+      throw new Error(
+        `Duplicate ${platform} ${kind} for "${pattern}": found ${previous} and ${normalized} in ` +
+          `${appDir}. Keep one.`,
+      );
+    }
+    seen.set(key, normalized);
+    const target = kind === "page" ? nativePages : nativeLayouts;
+    const entry = { ...target.get(pattern) };
+    entry[platform] = path.join(appDir, normalized);
+    target.set(pattern, entry);
+  }
 }

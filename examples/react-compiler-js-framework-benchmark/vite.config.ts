@@ -6,6 +6,8 @@ const reactivity = process.env.FARM_REACTIVITY === "static" ? "static" : "hybrid
 
 export default defineConfig({
   base: "./",
+  // Workspace renderer dependencies must use the fixture's pinned React copy too.
+  resolve: { dedupe: ["react", "react-dom"] },
   css: {
     postcss: { plugins: [] },
   },

@@ -1,12 +1,17 @@
 import { defineConfig } from "@farm.js/core";
 import { devtools } from "@farm.js/devtools";
 import { farmDocsRuntimeAdapter } from "@farming-labs/farmjs/runtime";
+import { agentSupportInvitation } from "./src/lib/agent-support";
 
 const siteDescription =
   "Farm.js is the full-stack framework for the web and agents: apps are agent-ready by default and run any agent runtime you bring. Built on Vite and Nitro.";
 
 export default defineConfig({
   plugins: [devtools()],
+  // Moved pages keep their shared links working.
+  redirects: () => [
+    { source: "/docs/mobile/auth", destination: "/docs/auth#mobile-apps", permanent: true },
+  ],
   mdx: {
     components: "./src/markdown-components.tsx",
   },
@@ -24,11 +29,14 @@ export default defineConfig({
       title: "Farm.js",
       summary: siteDescription,
       details: [
+        agentSupportInvitation,
+        "",
         "## Agent Discovery",
         "",
         "- [Agent manifest](/.well-known/agent.json): Farming Labs discovery manifest",
         "- [API catalog](/.well-known/api-catalog): RFC 9727 API catalog",
         "- [Agent Skills index](/.well-known/agent-skills/index.json): Hashed Agent Skills discovery",
+        "- [OpenAPI](/openapi.json): OpenAPI 3.1 description of the site's public APIs (docs search and Markdown, docs MCP, agent-ready check)",
         "- [Full docs text](/llms-full.txt): every docs page in one file",
       ].join("\n"),
       exclude: ["/telemetry"],
@@ -49,10 +57,23 @@ export default defineConfig({
         operatingSystem: "Linux, macOS, Windows",
         license: "https://github.com/farming-labs/farm.js/blob/main/LICENSE",
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+        // Farming Labs publishes no postal address, so the organization carries no `address`.
         author: {
           "@type": "Organization",
           name: "Farming Labs",
-          url: "https://github.com/farming-labs",
+          url: "https://farming-labs.dev",
+          email: "contact@farming-labs.dev",
+          contactPoint: {
+            "@type": "ContactPoint",
+            contactType: "technical support",
+            email: "contact@farming-labs.dev",
+            url: "https://github.com/farming-labs/farm.js/issues",
+          },
+          sameAs: [
+            "https://github.com/farming-labs",
+            "https://www.npmjs.com/org/farm.js",
+            "https://x.com/farming_labs",
+          ],
         },
       },
     },
@@ -71,4 +92,7 @@ export default defineConfig({
   deploy: {
     target: "vercel",
   },
+  // Route-local schedules (`cronRoute(..., { schedule })`) run on Farm.js Infra; after a
+  // production deploy, `farm cron sync --url https://farmjs.dev --apply` registers them.
+  cron: { provider: "farmjs" },
 });

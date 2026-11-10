@@ -17,7 +17,7 @@ function render(kind: "Page" | "Layout", Component: unknown) {
   const isPage = kind === "Page";
   const start = entry.indexOf(isPage ? "// Render page content" : "// Render layout");
   const end = entry.indexOf(
-    isPage ? "// Route-level loading boundary" : "// Single wrapper",
+    isPage ? "// Route-level loading boundary" : "// A root layout that renders <html>",
     start,
   );
   expect(start).toBeGreaterThanOrEqual(0);

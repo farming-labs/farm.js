@@ -10,18 +10,18 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "0.1.28",
-    "@farming-labs/docs": "0.2.121",
-    "@farming-labs/farmjs": "0.2.121",
-    "@farming-labs/theme": "0.2.121",
+    "@farm.js/core": "0.1.67",
+    "@farming-labs/docs": "0.2.143",
+    "@farming-labs/farmjs": "0.2.143",
+    "@farming-labs/theme": "0.2.143",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.28",
-    "@farm.js/devtools": "0.1.28",
+    "@farm.js/cli": "0.1.67",
+    "@farm.js/devtools": "0.1.67",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

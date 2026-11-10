@@ -1,8 +1,11 @@
+import { resolveFarmServerComponentsMode } from "../server-components-mode";
+import { getFarmServerTreeLayoutPatterns } from "./layout-selector";
 import { loadFarmDevModule } from "../dev-module";
 import type {
   FarmConfig,
   ParsedRoute,
   RouteModule,
+  RouteSegment,
   LayoutModule,
   SSGCollectionResult,
 } from "../types";
@@ -29,8 +32,16 @@ import type {
 import {
   createProgrammaticRouteModuleId,
   getProgrammaticRouteSearchClientOptions,
+  normalizeProgrammaticRoutePath,
   parseProgrammaticRoutePath,
+  trackProgrammaticRouteSources,
 } from "../routes-shared";
+import {
+  createEvaluatedRouteGraph,
+  mergeProgrammaticClientRoutes,
+  resolveProgrammaticClientRoutes,
+  type ProgrammaticClientRoutes,
+} from "../programmatic-routes-client";
 import { loadProgrammaticRouteManifests } from "../routes.server";
 import {
   createFarmMarkdownRouteModuleFromFile,
@@ -39,6 +50,7 @@ import {
   resolveFarmMdxComponentsModulePath,
   resolveMdxConfig,
 } from "../app-markdown";
+import { realpathSync } from "fs";
 import path from "path";
 import type { ViteDevServer } from "vite";
 import { toFileModuleUrl } from "../utils/file-module";
@@ -47,6 +59,7 @@ import {
   getClientModuleHydrationPlan,
   createMarkdownPageHydrationPlanner,
   getFarmClientHydrationPlanOptions,
+  usesFarmServerTree,
   getClientModuleMetadata,
   resolveFarmIsolatedClientHydrationMode,
   type IsolatedClientBoundaryReference,
@@ -77,10 +90,23 @@ import {
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
-import { stripFarmBasePath } from "../base-path";
+import { applyFarmBasePath, stripFarmBasePath } from "../base-path";
 import { appendFarmRedirectQuery } from "../redirect-query";
+import { encodeConfigRouteSegment } from "../plugins/route-pattern";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
-import { getFarmRendererComponentExtensions } from "../renderer";
+import {
+  createRouteDirectoryPattern,
+  formatRouteSegment,
+  getRouteDirectoryDepth,
+  getRouteGroupScope,
+  isInRouteGroupScope,
+  routeBoundaryCoversDirectory,
+} from "./route-groups";
+import {
+  getFarmRendererComponentExtensions,
+  isReactRenderer,
+  type FarmRenderer,
+} from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
 import {
   AmbiguousRouteError,
@@ -90,18 +116,46 @@ import {
   type RouteSegmentSpecificity,
 } from "./specificity";
 
+/**
+ * A config whose renderer is resolved: `renderer: false` has become the internal no-renderer
+ * descriptor, so runtime code always reads a `FarmRenderer`.
+ */
+export type FarmRendererResolvedConfig = Required<FarmConfig> & { renderer: FarmRenderer };
+
 interface RouteEntry {
   route: ParsedRoute;
   modulePath: string;
   markdownSourcePath?: string;
+  /**
+   * A page's URL pattern. Layouts, loading and error boundaries use their app
+   * directory instead, route groups included (`/(auth)`), because a group adds
+   * no URL segment and two of them can share one URL.
+   */
   pattern: string;
+  /** A page's directory pattern, set only when it differs from `pattern` (route groups). */
+  directory?: string;
   source?: "file" | "programmatic";
   sourceRoot: string;
+}
+
+/** A layout in nesting order, with the group directory that confines it, if any. */
+interface OrderedLayoutEntry {
+  entry: RouteEntry;
+  groupScope: string | null;
+}
+
+function getRouteEntryDirectory(entry: RouteEntry): string {
+  return entry.directory ?? entry.pattern;
 }
 
 export interface RouteSlotEntry extends RouteEntry {
   name: string;
   ownerPattern: string;
+  /**
+   * The owning layout's pattern when route groups make it differ from
+   * `ownerPattern` (a URL pattern); slots render into the layout with this pattern.
+   */
+  ownerDirectory?: string;
   interception: boolean;
   fallback: boolean;
   containerId: string;
@@ -110,6 +164,8 @@ export interface RouteSlotEntry extends RouteEntry {
 export interface MatchedRouteSlot {
   name: string;
   ownerPattern: string;
+  /** See `RouteSlotEntry.ownerDirectory`. */
+  ownerDirectory?: string;
   containerId: string;
   interception: boolean;
   fallback: boolean;
@@ -120,12 +176,16 @@ export interface MatchedRouteSlot {
 export interface FarmClientRouteManifest {
   routes: Array<{
     pattern: string;
+    /** The page's directory pattern when route groups make it differ from `pattern`. */
+    directory?: string;
     modulePath: string;
     shouldHydrate: boolean;
     isClientComponent: boolean;
     islandStrategy: FarmIslandStrategy | null;
     hasIsolatedClientBoundaries?: true;
     isolatedBoundaries?: IsolatedClientBoundaryReference[];
+    /** The async page renders as a server tree inside its hydrating layout's root. */
+    serverTree?: true;
     renderPlan: FarmRouteRenderPlan;
     suppressedAsyncHydration?: true;
     /** Why an async page's client components could not become islands. */
@@ -149,6 +209,8 @@ export interface FarmClientRouteManifest {
     suppressedAsyncHydration?: true;
     /** Why an async layout's client-side hydration could not become islands. */
     suppressedAsyncHydrationReason?: string;
+    /** Islands mode: the browser rebuilds this layout from its server tree, not its module. */
+    serverTree?: true;
   }>;
   slots: Array<{
     name: string;
@@ -209,11 +271,11 @@ function compareRouteEntries(left: RouteEntry, right: RouteEntry): number {
  * Manages route discovery and matching for the Farm.js application
  */
 export class RouteManager {
-  private config: Required<FarmConfig>;
+  private config: FarmRendererResolvedConfig;
   private routes: Map<string, RouteEntry> = new Map();
   private pageRouteShapes: Map<string, RouteEntry> = new Map();
   private layouts: Map<string, RouteEntry> = new Map();
-  private orderedLayouts: RouteEntry[] = [];
+  private orderedLayouts: OrderedLayoutEntry[] = [];
   private routeSlots: Map<string, RouteSlotEntry> = new Map();
   private routeSlotOwnerSegments: Map<string, ParsedRoute["segments"]> = new Map();
   private loadings: Map<string, RouteEntry> = new Map();
@@ -223,17 +285,23 @@ export class RouteManager {
   private redirects: Map<string, RedirectEntry> = new Map();
   private programmaticPages: Map<string, ProgrammaticPageRoute> = new Map();
   private programmaticLayouts: Map<string, ProgrammaticLayoutRoute> = new Map();
+  private programmaticClientRoutes: ProgrammaticClientRoutes = mergeProgrammaticClientRoutes([]);
   private rendererRuntime?: FarmServerRendererRuntime;
   private viteServer?: ViteDevServer;
   private clientManifestCache?: {
     projectRoot: string;
     manifest: FarmClientRouteManifest;
     isolatedClientBoundaryModules: ReadonlySet<string>;
+    islandsErrors: string[];
   };
+  private reportedIslandsErrors = new Set<string>();
 
-  constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
+  constructor(config: FarmRendererResolvedConfig, viteServer?: ViteDevServer) {
     this.config = config;
     this.viteServer = viteServer;
+    // Record where route definitions are made from the first module the server evaluates, so
+    // the client build can keep every module that defines routes out of the browser.
+    if (viteServer) trackProgrammaticRouteSources();
   }
 
   setRendererRuntime(rendererRuntime: FarmServerRendererRuntime): void {
@@ -259,10 +327,12 @@ export class RouteManager {
     this.programmaticPages.clear();
     this.programmaticLayouts.clear();
 
+    const programmaticClientRoutes: ProgrammaticClientRoutes[] = [];
     for (const source of getFarmSourceRoots(this.config)) {
       await this.discoverFileRoutes(source);
-      await this.discoverProgrammaticRoutes(source);
+      await this.discoverProgrammaticRoutes(source, programmaticClientRoutes);
     }
+    this.programmaticClientRoutes = mergeProgrammaticClientRoutes(programmaticClientRoutes);
 
     for (const slot of this.routeSlots.values()) {
       if (slot.interception && !this.pageRouteShapes.has(getRoutePatternShape(slot.pattern))) {
@@ -282,9 +352,14 @@ export class RouteManager {
         compareRouteEntries(left, right),
       ),
     );
-    this.orderedLayouts = Array.from(this.layouts.values()).sort(
-      (left, right) => left.route.segments.length - right.route.segments.length,
-    );
+    // Directory depth, groups included, so `(auth)/layout` nests inside the root
+    // layout it shares a URL with. Without groups this is the URL depth.
+    this.orderedLayouts = Array.from(this.layouts.values())
+      .sort(
+        (left, right) =>
+          getRouteDirectoryDepth(left.pattern) - getRouteDirectoryDepth(right.pattern),
+      )
+      .map((entry) => ({ entry, groupScope: getRouteGroupScope(entry.pattern) }));
     for (const slot of this.routeSlots.values()) {
       if (!this.routeSlotOwnerSegments.has(slot.ownerPattern)) {
         this.routeSlotOwnerSegments.set(
@@ -324,11 +399,20 @@ export class RouteManager {
     const routePathname = this.toRoutePathname(pathname);
     const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
     const pathParts = splitRoutePath(normalizedPath);
+    // Production looks a static route up by its exact path, so a path with an empty segment
+    // (`//about`, `/console//about`, `//`) reaches no static route; only dynamic routes,
+    // matched segment by segment, skip the empty segment.
+    const trimmedPathname = routePathname.replace(/\/+$/, "");
+    const hasEmptySegment =
+      trimmedPathname.includes("//") || (trimmedPathname === "" && routePathname.length > 1);
     // Find matching page route
     let matchedRoute: RouteEntry | null = null;
     let params: Record<string, string> = {};
 
     for (const routeEntry of this.routes.values()) {
+      if (hasEmptySegment && !routeEntry.route.segments.some((segment) => segment.isDynamic)) {
+        continue;
+      }
       const match = matchRouteParts(pathParts, routeEntry.route.segments);
       if (match.matches) {
         matchedRoute = routeEntry;
@@ -338,7 +422,7 @@ export class RouteManager {
     }
 
     // Find all matching layouts (from root to specific)
-    const layouts = this.findMatchingLayouts(normalizedPath, pathParts);
+    const layouts = this.findMatchingLayouts(pathParts, matchedRoute);
     const slots = this.findMatchingRouteSlots(normalizedPath, pathParts, options.interceptFrom);
 
     return {
@@ -367,6 +451,12 @@ export class RouteManager {
     return new Map(this.routeSlots);
   }
 
+  /** The layouts that wrap a registered page, root first. */
+  getRouteLayouts(pattern: string): RouteEntry[] {
+    const routeEntry = this.routes.get(pattern);
+    return routeEntry ? this.findMatchingLayouts(splitRoutePath(pattern), routeEntry) : [];
+  }
+
   /** Resolve route rules, inherited layouts, and the page export in precedence order. */
   async resolveRouteRuntimeConfig(pattern: string): Promise<ResolvedFarmRouteRuntimeConfig> {
     const routeEntry = this.routes.get(pattern);
@@ -375,7 +465,7 @@ export class RouteManager {
     }
 
     const inherited = resolveFarmRouteRuleRuntimeConfig(pattern, this.config.routeRules);
-    const layouts = this.findMatchingLayouts(pattern);
+    const layouts = this.findMatchingLayouts(splitRoutePath(pattern), routeEntry);
     const layoutConfigs = [];
 
     for (const layout of layouts) {
@@ -437,11 +527,12 @@ export class RouteManager {
   } | null {
     const i18n = this.getI18nConfig();
     const localeMatch = i18n ? resolveFarmLocalePath(pathname, i18n) : undefined;
-    const routePathname = localeMatch?.pathname || pathname;
+    const routePathname = localeMatch?.pathname || this.toRoutePathname(pathname);
     const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
+    const urlParts = splitRoutePath(normalizedPath);
 
     for (const redirectEntry of this.redirects.values()) {
-      const match = matchRoute(normalizedPath, redirectEntry.route.segments);
+      const match = matchRouteParts(urlParts, redirectEntry.route.segments);
       if (!match.matches) continue;
 
       const statusCode =
@@ -451,7 +542,11 @@ export class RouteManager {
         redirect: redirectEntry.definition,
         destination: appendFarmRedirectQuery(
           this.localizeRedirectDestination(
-            interpolateRedirectDestination(redirectEntry.definition.destination, match.params),
+            interpolateRedirectDestination(
+              redirectEntry.definition.destination,
+              match.params,
+              getCatchAllParamSegments(redirectEntry.route.segments, urlParts),
+            ),
             localeMatch?.locale,
           ),
           search,
@@ -465,17 +560,20 @@ export class RouteManager {
   }
 
   /**
-   * Return the nearest matching loading boundary for a pathname.
+   * Return the nearest matching loading boundary for a pathname. Pass the page
+   * `matchRoute` selected when it is known (`null` for none); otherwise the page is
+   * matched only if a boundary inside a route group needs it.
    */
-  getMatchingLoading(pathname: string): RouteEntry | null {
-    return this.findNearestBoundary(this.toRoutePathname(pathname), this.loadings);
+  getMatchingLoading(pathname: string, route?: RouteEntry | null): RouteEntry | null {
+    return this.findNearestBoundary(this.toRoutePathname(pathname), this.loadings, route);
   }
 
   /**
-   * Return the nearest matching error boundary for a pathname.
+   * Return the nearest matching error boundary for a pathname. `route` works as it
+   * does for `getMatchingLoading`.
    */
-  getMatchingError(pathname: string): RouteEntry | null {
-    return this.findNearestBoundary(this.toRoutePathname(pathname), this.errors);
+  getMatchingError(pathname: string, route?: RouteEntry | null): RouteEntry | null {
+    return this.findNearestBoundary(this.toRoutePathname(pathname), this.errors, route);
   }
 
   matchMetadataImage(pathname: string): {
@@ -639,7 +737,7 @@ export class RouteManager {
     );
     if (
       this.config.experimental?.isolatedClientHydration === "enabled" &&
-      this.config.experimental?.serverComponents !== true &&
+      resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) !== "rsc" &&
       unsupportedIntegrationProvider
     ) {
       logger.warn(
@@ -649,7 +747,8 @@ export class RouteManager {
     const isolatedMode = resolveFarmIsolatedClientHydrationMode(
       this.config.experimental?.isolatedClientHydration,
       {
-        serverComponents: this.config.experimental?.serverComponents === true,
+        serverComponents:
+          resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "rsc",
         hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
       },
     );
@@ -657,13 +756,15 @@ export class RouteManager {
       this.config.renderer,
       Boolean(unsupportedIntegrationProvider),
     );
+    const islandsMode =
+      resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands";
     const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
       entry,
       metadata: getClientModuleHydrationPlan(
         entry.modulePath,
         normalizedProjectRoot,
         isolatedMode,
-        planOptions,
+        islandsMode ? { ...planOptions, serverTreeLayouts: true } : planOptions,
       ),
     }));
 
@@ -672,18 +773,18 @@ export class RouteManager {
       resolveFarmMdxComponentsModulePath(resolveMdxConfig(this.config.mdx), normalizedProjectRoot),
       normalizedProjectRoot,
       isolatedMode,
-      planOptions,
+      { ...planOptions, packageReferences: islandsMode },
     );
     const routeEntries = Array.from(this.routes.values()).map((entry) => ({
       entry,
       metadata: isFarmMarkdownPageFile(entry.modulePath)
         ? markdownPagePlan()
-        : getClientModuleHydrationPlan(
-            entry.modulePath,
-            normalizedProjectRoot,
-            isolatedMode,
-            planOptions,
-          ),
+        : getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode, {
+            ...planOptions,
+            serverOwners:
+              resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) ===
+              "islands",
+          }),
     }));
     // Every Markdown page shares the components module, so one warning covers them all.
     const markdownFallback = routeEntries.find(
@@ -706,25 +807,25 @@ export class RouteManager {
     for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
       if (isFarmMarkdownPageFile(entry.modulePath) || !metadata.staticPackageBoundaries) continue;
       logger.info(
-        `[Farm.js] ${entry.pattern} is async, so it renders client components from ${metadata.staticPackageBoundaries.join(", ")} as static HTML: package client components cannot be isolated yet.`,
+        `[Farm.js] ${entry.pattern} renders client components from ${metadata.staticPackageBoundaries.join(", ")} as static HTML: package client components cannot be isolated yet.`,
       );
     }
 
+    // Pages are compared by directory so a layout inside a route group applies
+    // only to the pages in that group.
     enforceFarmIsolatedHydrationRouteBudget(
       layoutEntries.map(({ entry, metadata }) => ({
         pattern: entry.pattern,
-        depth: entry.route.segments.length,
+        depth: getRouteDirectoryDepth(entry.pattern),
         metadata,
       })),
       routeEntries.map(({ entry, metadata }) => ({
-        pattern: entry.pattern,
-        depth: entry.route.segments.length,
+        pattern: getRouteEntryDirectory(entry),
+        depth: getRouteDirectoryDepth(getRouteEntryDirectory(entry)),
         metadata,
       })),
-      (layoutPattern, routePattern) =>
-        layoutPattern === "/" ||
-        routePattern === layoutPattern ||
-        routePattern.startsWith(`${layoutPattern.replace(/\/$/, "")}/`),
+      routeBoundaryCoversDirectory,
+      { serverOwners: islandsMode },
     );
 
     for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
@@ -747,12 +848,11 @@ export class RouteManager {
       const layoutShouldHydrate = layoutEntries.some(
         ({ entry: layout, metadata: layoutMetadata }) =>
           layoutMetadata.shouldHydrate &&
-          (layout.pattern === "/" ||
-            entry.pattern === layout.pattern ||
-            entry.pattern.startsWith(`${layout.pattern.replace(/\/$/, "")}/`)),
+          routeBoundaryCoversDirectory(layout.pattern, getRouteEntryDirectory(entry)),
       );
       return {
         pattern: entry.pattern,
+        ...(entry.directory ? { directory: entry.directory } : {}),
         modulePath: toUrlPath(entry.modulePath),
         shouldHydrate: metadata.shouldHydrate,
         isClientComponent: metadata.isClientComponent,
@@ -766,6 +866,7 @@ export class RouteManager {
               })),
             }
           : {}),
+        ...(usesFarmServerTree(metadata) ? { serverTree: true as const } : {}),
         renderPlan: createFarmRouteRenderPlan({
           pageShouldHydrate: metadata.shouldHydrate,
           layoutShouldHydrate,
@@ -785,6 +886,16 @@ export class RouteManager {
       };
     });
 
+    // Islands mode: the server layouts a hydrating layout's root renders rebuild from their trees.
+    const treeLayoutPatterns = islandsMode
+      ? getFarmServerTreeLayoutPatterns(
+          layoutEntries.map(({ entry, metadata }) => ({
+            pattern: entry.pattern,
+            shouldHydrate: metadata.shouldHydrate,
+            serverTreeLayout: metadata.serverTreeLayout,
+          })),
+        )
+      : new Set<string>();
     const layouts = layoutEntries.map(({ entry, metadata }) => ({
       pattern: entry.pattern,
       modulePath: toUrlPath(entry.modulePath),
@@ -800,6 +911,7 @@ export class RouteManager {
             })),
           }
         : {}),
+      ...(treeLayoutPatterns.has(entry.pattern) ? { serverTree: true as const } : {}),
       suppressedAsyncHydration: metadata.suppressedAsyncHydration,
       ...(metadata.suppressedAsyncHydration && metadata.fallbackReason
         ? { suppressedAsyncHydrationReason: metadata.fallbackReason }
@@ -816,18 +928,46 @@ export class RouteManager {
         containerId: entry.containerId,
         interception: entry.interception,
         fallback: entry.fallback,
-        shouldHydrate: metadata.shouldHydrate,
+        // In islands mode a server slot stays on the server; its client components are islands.
+        shouldHydrate: metadata.shouldHydrate && (!islandsMode || metadata.isClientComponent),
         isClientComponent: metadata.isClientComponent,
         segments: entry.route.segments,
       };
     });
 
+    // A server slot's client components are islands, as a server page's are.
+    const slotPlans = islandsMode
+      ? Array.from(this.routeSlots.values()).map((entry) => ({
+          metadata: getClientModuleHydrationPlan(
+            entry.modulePath,
+            normalizedProjectRoot,
+            isolatedMode,
+            { ...planOptions, serverOwners: true },
+          ),
+        }))
+      : [];
     const isolatedClientBoundaryModules = new Set<string>();
-    for (const { metadata } of [...layoutEntries, ...routeEntries]) {
-      if (!metadata.hasIsolatedClientBoundaries) continue;
+    for (const { metadata } of [...layoutEntries, ...routeEntries, ...slotPlans]) {
+      // A server-tree layout's client components load from its tree, as islands do.
+      if (!metadata.hasIsolatedClientBoundaries && !metadata.serverTreeLayout) continue;
       for (const boundary of metadata.isolatedBoundaries) {
         isolatedClientBoundaryModules.add(path.resolve(boundary.modulePath));
       }
+    }
+
+    // Such a page renders without client JavaScript; `farm build` fails on it (getIslandsErrors).
+    const islandsErrors = [
+      ...layoutEntries.flatMap(({ entry, metadata }) =>
+        metadata.islandsError ? [`layout ${entry.pattern}: ${metadata.islandsError}.`] : [],
+      ),
+      ...routeEntries.flatMap(({ entry, metadata }) =>
+        metadata.islandsError ? [`${entry.pattern}: ${metadata.islandsError}.`] : [],
+      ),
+    ];
+    for (const error of islandsErrors) {
+      if (this.reportedIslandsErrors.has(error)) continue;
+      this.reportedIslandsErrors.add(error);
+      logger.error(`[Farm.js] islands mode cannot hydrate ${error}`);
     }
 
     const manifest = { routes, layouts, slots };
@@ -835,6 +975,7 @@ export class RouteManager {
       projectRoot: normalizedProjectRoot,
       manifest,
       isolatedClientBoundaryModules,
+      islandsErrors,
     };
     return manifest;
   }
@@ -857,11 +998,28 @@ export class RouteManager {
     }
   }
 
+  /**
+   * Where each programmatic page and layout's component lives, read from the evaluated routes
+   * files. The client build imports those modules instead of the routes files.
+   */
+  getProgrammaticClientRoutes(): ProgrammaticClientRoutes {
+    return this.programmaticClientRoutes;
+  }
+
   /** @internal Client modules selected by the compiled hydration ownership plan. */
   getIsolatedClientBoundaryModules(projectRoot: string = this.config.root): ReadonlySet<string> {
     const normalizedProjectRoot = path.resolve(projectRoot);
     this.generateClientManifest(normalizedProjectRoot);
     return this.clientManifestCache?.isolatedClientBoundaryModules ?? new Set();
+  }
+
+  /**
+   * @internal Islands-mode pages with a client component that cannot become an island. Hydrating
+   * such a page whole would ship its server code to the browser, so it stays static instead.
+   */
+  getIslandsErrors(projectRoot: string = this.config.root): readonly string[] {
+    this.generateClientManifest(path.resolve(projectRoot));
+    return this.clientManifestCache?.islandsErrors ?? [];
   }
 
   /**
@@ -940,20 +1098,7 @@ export class RouteManager {
   private createRoutePattern(route: ParsedRoute): string {
     if (route.segments.length === 0) return "/";
 
-    return (
-      "/" +
-      route.segments
-        .map((segment) => {
-          if (!segment.isDynamic) return segment.segment;
-
-          if (segment.isCatchAll) {
-            return segment.isOptional ? `[[...${segment.segment}]]` : `[...${segment.segment}]`;
-          }
-
-          return `[${segment.segment}]`;
-        })
-        .join("/")
-    );
+    return "/" + route.segments.map(formatRouteSegment).join("/");
   }
 
   private registerPageRoute(entry: RouteEntry): void {
@@ -1054,6 +1199,7 @@ export class RouteManager {
             }
           : {}),
         pattern,
+        ...getPageDirectoryField(group.route, pattern),
         source: "file",
         sourceRoot: source.root,
       });
@@ -1067,7 +1213,8 @@ export class RouteManager {
       for (const file of files) {
         const route = parseRoutePath(file);
         const modulePath = path.join(appDir, file);
-        const pattern = this.createRoutePattern(route);
+        // Keyed by directory: `(auth)/layout.tsx` and `layout.tsx` share the URL "/".
+        const pattern = createRouteDirectoryPattern(route);
         const existing = target.get(pattern);
         if (existing?.sourceRoot === source.root) {
           throw new Error(
@@ -1091,6 +1238,7 @@ export class RouteManager {
       const modulePath = path.join(appDir, file);
       const pattern = this.createRoutePattern(slot.route);
       const ownerPattern = this.createRoutePattern(slot.ownerRoute);
+      const ownerDirectory = createRouteDirectoryPattern(slot.ownerRoute);
       const key = `${ownerPattern}:${slot.name}:${slot.interception ? "intercept" : "slot"}:${
         slot.fallback ? "default" : pattern
       }`;
@@ -1109,6 +1257,7 @@ export class RouteManager {
         sourceRoot: source.root,
         name: slot.name,
         ownerPattern,
+        ...(ownerDirectory === ownerPattern ? {} : { ownerDirectory }),
         interception: slot.interception,
         fallback: slot.fallback,
         containerId: createRouteSlotContainerId(slot.name, ownerPattern),
@@ -1176,14 +1325,29 @@ export class RouteManager {
     }
   }
 
-  private async discoverProgrammaticRoutes(source: FarmSourceRoot): Promise<void> {
+  private async discoverProgrammaticRoutes(
+    source: FarmSourceRoot,
+    clientRoutes: ProgrammaticClientRoutes[],
+  ): Promise<void> {
+    if (this.viteServer) trackProgrammaticRouteSources();
     const manifests = await loadProgrammaticRouteManifests({
       root: source.root,
       srcDir: source.srcDir,
       loadModule: (filePath) => this.loadProgrammaticRoutesModule(filePath),
     });
 
+    const graph = this.viteServer ? createEvaluatedRouteGraph(this.viteServer) : undefined;
     for (const { filePath, manifest } of manifests) {
+      if (graph) {
+        clientRoutes.push(
+          resolveProgrammaticClientRoutes({
+            graph,
+            routesFile: toRealPath(filePath),
+            routes: manifest.routes,
+            normalizeRoutePath: normalizeProgrammaticRoutePath,
+          }),
+        );
+      }
       for (const definition of manifest.routes) {
         if (definition.kind === "page") {
           const route = parseProgrammaticRoutePath(definition.path, "page");
@@ -1202,6 +1366,7 @@ export class RouteManager {
             route,
             modulePath,
             pattern,
+            ...getPageDirectoryField(route, pattern),
             source: "programmatic",
             sourceRoot: source.root,
           });
@@ -1209,7 +1374,7 @@ export class RouteManager {
 
         if (definition.kind === "layout") {
           const route = parseProgrammaticRoutePath(definition.path, "layout");
-          const pattern = this.createRoutePattern(route);
+          const pattern = createRouteDirectoryPattern(route);
           const existing = this.layouts.get(pattern);
           if (existing?.sourceRoot === source.root) {
             throw new Error(
@@ -1250,21 +1415,34 @@ export class RouteManager {
   }
 
   /**
-   * Find all layouts that should wrap a given path
+   * Find all layouts that should wrap a given path. A layout inside a route group
+   * wraps only the pages in that group, so it needs the selected page.
    */
   private findMatchingLayouts(
-    pathname: string,
-    pathnameParts = splitRoutePath(pathname),
+    pathnameParts: readonly string[],
+    route: RouteEntry | null,
   ): RouteEntry[] {
     const matchingLayouts: RouteEntry[] = [];
 
-    for (const layoutEntry of this.orderedLayouts) {
-      if (matchRoutePrefixParts(pathnameParts, layoutEntry.route.segments)) {
-        matchingLayouts.push(layoutEntry);
+    for (const { entry, groupScope } of this.orderedLayouts) {
+      if (!matchRoutePrefixParts(pathnameParts, entry.route.segments)) continue;
+      if (
+        groupScope !== null &&
+        !isInRouteGroupScope(route && getRouteEntryDirectory(route), groupScope)
+      ) {
+        continue;
       }
+      matchingLayouts.push(entry);
     }
 
     return matchingLayouts;
+  }
+
+  private matchPageRoute(pathnameParts: readonly string[]): RouteEntry | null {
+    for (const routeEntry of this.routes.values()) {
+      if (matchRouteParts(pathnameParts, routeEntry.route.segments).matches) return routeEntry;
+    }
+    return null;
   }
 
   private findMatchingRouteSlots(
@@ -1313,6 +1491,9 @@ export class RouteManager {
         matches.push({
           name: selected.entry.name,
           ownerPattern: selected.entry.ownerPattern,
+          ...(selected.entry.ownerDirectory
+            ? { ownerDirectory: selected.entry.ownerDirectory }
+            : {}),
           containerId: selected.entry.containerId,
           interception: selected.entry.interception,
           fallback: false,
@@ -1327,6 +1508,7 @@ export class RouteManager {
         matches.push({
           name: fallback.name,
           ownerPattern: fallback.ownerPattern,
+          ...(fallback.ownerDirectory ? { ownerDirectory: fallback.ownerDirectory } : {}),
           containerId: fallback.containerId,
           interception: false,
           fallback: true,
@@ -1356,14 +1538,29 @@ export class RouteManager {
   private findNearestBoundary(
     pathname: string,
     boundaries: Map<string, RouteEntry>,
+    route?: RouteEntry | null,
   ): RouteEntry | null {
     const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
     let bestMatch: RouteEntry | null = null;
+    let page = route;
 
     for (const boundaryEntry of boundaries.values()) {
       if (!matchRoutePrefix(normalizedPath, boundaryEntry.route.segments)) continue;
+      const groupScope = getRouteGroupScope(boundaryEntry.pattern);
+      if (groupScope !== null) {
+        if (page === undefined) page = this.matchPageRoute(splitRoutePath(normalizedPath));
+        if (!isInRouteGroupScope(page && getRouteEntryDirectory(page), groupScope)) continue;
+      }
 
-      if (!bestMatch || boundaryEntry.route.segments.length > bestMatch.route.segments.length) {
+      // The deepest URL wins; a group boundary beats its parent at the same URL.
+      const depth = boundaryEntry.route.segments.length;
+      const bestDepth = bestMatch?.route.segments.length ?? -1;
+      if (
+        !bestMatch ||
+        depth > bestDepth ||
+        (depth === bestDepth &&
+          getRouteDirectoryDepth(boundaryEntry.pattern) > getRouteDirectoryDepth(bestMatch.pattern))
+      ) {
         bestMatch = boundaryEntry;
       }
     }
@@ -1390,6 +1587,30 @@ export class RouteManager {
     }
   }
 
+  /** The page routes a docs adapter answers before Farm's own page rendering. */
+  private getDocsAdapterRoutes():
+    | { owns: (routePath: string) => boolean; prerender: boolean }
+    | undefined {
+    const docs = this.config.docs;
+    if (
+      !docs ||
+      typeof docs !== "object" ||
+      !docs.enabled ||
+      !docs.adapter ||
+      !docs.adapter.server ||
+      !docs.adapter.react ||
+      !isReactRenderer(this.config.renderer)
+    ) {
+      return undefined;
+    }
+    const entry = `/${String(docs.entry || "docs").replace(/^\/+|\/+$/g, "")}`;
+    return {
+      owns: (routePath) =>
+        entry === "/" || routePath === entry || routePath.startsWith(`${entry}/`),
+      prerender: docs.prerender === true,
+    };
+  }
+
   /**
    * Collect SSG pages for static generation
    *
@@ -1405,8 +1626,10 @@ export class RouteManager {
     }));
 
     const i18n = this.getI18nConfig();
+    const docsAdapterRoutes = this.getDocsAdapterRoutes();
     const result = await collectSSGPages(routes, (filePath) => this.loadRouteModule(filePath), {
       suggestStaticRendering: shouldSuggestStaticRenderingForI18n(i18n),
+      ...(docsAdapterRoutes ? { docsAdapterRoutes } : {}),
     });
     if (!i18n) {
       return result;
@@ -1434,7 +1657,8 @@ export class RouteManager {
     };
   }
 
-  private toRoutePathname(pathname: string): string {
+  /** A request pathname as routes see it: without the basePath and, with i18n, the locale. */
+  toRoutePathname(pathname: string): string {
     const i18n = this.getI18nConfig();
     // Locale stripping removes the basePath too; production strips it the same way.
     return i18n
@@ -1443,11 +1667,16 @@ export class RouteManager {
   }
 
   private localizeRedirectDestination(destination: string, locale?: string): string {
-    if (!locale || !destination.startsWith("/") || destination.startsWith("//")) {
+    if (!destination.startsWith("/") || destination.startsWith("//")) {
       return destination;
     }
     const i18n = this.getI18nConfig();
-    return i18n ? localizeFarmHref(destination, locale, i18n) : destination;
+    // Like the production entry: an app-relative destination stays inside the basePath.
+    return locale && i18n
+      ? localizeFarmHref(destination, locale, i18n)
+      : this.config.basePath
+        ? applyFarmBasePath(destination, this.config.basePath)
+        : destination;
   }
 
   private getI18nConfig(): ResolvedFarmI18nConfig | undefined {
@@ -1495,13 +1724,29 @@ export class RouteManager {
   }
 }
 
+/** A page's directory pattern when route groups make it differ from its URL pattern. */
+function getPageDirectoryField(route: ParsedRoute, pattern: string): { directory?: string } {
+  const directory = createRouteDirectoryPattern(route);
+  return directory === pattern ? {} : { directory };
+}
+
+/**
+ * Substitute decoded route params into a redirect destination, encoding each path segment as the
+ * production server does. `catchAllSegments` holds the decoded segments a catch-all consumed, so
+ * a slash decoded from `%2F` stays inside its segment instead of becoming a separator.
+ */
 export function interpolateRedirectDestination(
   destination: string,
   params: Record<string, string>,
+  catchAllSegments: Readonly<Record<string, readonly string[]>> = {},
 ): string {
   let result = destination;
 
-  for (const [key, value] of Object.entries(params)) {
+  for (const [key, rawValue] of Object.entries(params)) {
+    const segments = catchAllSegments[key];
+    const value = segments
+      ? segments.map(encodeConfigRouteSegment).join("/")
+      : encodeConfigRouteSegment(rawValue);
     // Longest token first: [[...key]] contains [...key], which contains [key].
     result = replaceAll(result, `[[...${key}]]`, value);
     result = replaceAll(result, `[...${key}]`, value);
@@ -1511,6 +1756,15 @@ export function interpolateRedirectDestination(
   }
 
   return result;
+}
+
+/** The decoded segments a matched route's catch-all consumed; each earlier segment takes one. */
+function getCatchAllParamSegments(
+  segments: readonly RouteSegment[],
+  urlParts: readonly string[],
+): Record<string, readonly string[]> {
+  const index = segments.findIndex((segment) => segment.isCatchAll);
+  return index === -1 ? {} : { [segments[index].segment]: urlParts.slice(index) };
 }
 
 function getMetadataImageSuffix(pathname: string): {
@@ -1602,5 +1856,13 @@ async function safeGlobFiles(pattern: string, cwd: string): Promise<string[]> {
     return await globFiles(pattern, cwd);
   } catch {
     return [];
+  }
+}
+
+function toRealPath(filePath: string): string {
+  try {
+    return realpathSync(filePath);
+  } catch {
+    return filePath;
   }
 }

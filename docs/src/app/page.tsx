@@ -19,8 +19,10 @@ import {
   Plug,
   Rocket,
   Route,
+  Server,
+  Smartphone,
   Terminal,
-} from "lucide-react";
+} from "../components/icons";
 import type { LucideIcon } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import auth0IconUrl from "simple-icons/icons/auth0.svg?url";
@@ -90,7 +92,16 @@ export const metadata = {
     description: homepageDescription,
     url: "https://farmjs.dev/",
     siteName: "Farm.js",
-    type: "website",
+    // Discord plays og:video only when og:type is video or video.*.
+    type: "video.other",
+    videos: [
+      {
+        url: "/videos/farmjs-link-preview.mp4",
+        type: "video/mp4",
+        width: 2400,
+        height: 1260,
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
@@ -460,21 +471,28 @@ const reactCompilerConfigVariants = [
 ] as const satisfies readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
 const reactCompilerConfigSuffix = `  } }),
 });`;
+// examples/react-compiler-js-framework-benchmark: the official js-framework-benchmark harness,
+// Farm hybrid against the harness's React Hooks and Solid entries. Each figure is the weakest of
+// the recorded runs (BENCHMARK_RESULTS*.md, FRAMEWORK_COMPARISON*.md), so the page never claims
+// more than the slowest measurement supports. Re-run them after a renderer release.
 const reactCompilerMetrics = [
   {
-    description: "The compiler reduced the median latency of the benchmarked update path by 88.2%.",
-    label: "Median update latency",
-    value: "88.2% lower",
+    description:
+      "Swapping two of 1,000 rows was 4.9× faster than the benchmark's React Hooks entry in the weakest recorded run.",
+    label: "Row swap vs React",
+    value: "4.9× faster",
   },
   {
-    description: "The same state update was 8.5 times faster with the compiler on.",
-    label: "State update speed",
-    value: "8.5× faster",
+    description:
+      "The official-weighted CPU score across all nine operations was 1.29× faster than React Hooks in the weakest recorded run.",
+    label: "Overall vs React",
+    value: "1.29× faster",
   },
   {
-    description: "The compiled update caused no extra component renders.",
-    label: "Extra renders",
-    value: "0",
+    description:
+      "The official-weighted CPU score was 1.081 for Farm and 1.072 for Solid in the same run (1.00 = fastest).",
+    label: "CPU vs Solid",
+    value: "Within 1%",
   },
 ] as const;
 
@@ -619,7 +637,6 @@ function BrandIcon({ src, className }: { src: string; className?: string }) {
   return (
     <img
       alt=""
-      aria-hidden
       className={cx("brightness-0 invert", className)}
       decoding="async"
       fetchPriority="low"
@@ -647,7 +664,7 @@ function ButtonLink({
   return (
     <a
       className={cx(
-        "inline-flex min-w-0 items-center justify-center border font-mono font-normal uppercase tracking-normal transition-[background-color,border-color,color,transform] duration-150 active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+        "farm-action-link font-mono",
         size === "default" && "h-11 gap-2 px-5 text-[11px]",
         size === "compact" && "h-9 gap-1.5 px-4 text-[10px]",
         variant === "primary" && "border-white bg-white text-black hover:bg-white/88",
@@ -740,14 +757,11 @@ function ProductStackTile({
   duplicate: boolean;
 }) {
   const Icon = item.icon;
-  const className = cx(
-    "flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 bg-black px-4 font-mono text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.07] hover:text-white/82 focus-visible:z-10 focus-visible:bg-white/[0.07] focus-visible:text-white focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-white/36 sm:w-44 sm:text-[11px]",
-    itemIndex % 2 === 0 && "bg-white/[0.045]",
-  );
+  const className = cx("farm-stack-tile font-mono", itemIndex % 2 === 0 && "bg-white/[0.045]");
 
   return (
     <a
-      aria-label={`${item.label} website (opens in a new tab)`}
+      aria-label={duplicate ? undefined : `${item.label} website (opens in a new tab)`}
       aria-hidden={duplicate ? true : undefined}
       className={className}
       href={item.href}
@@ -757,13 +771,13 @@ function ProductStackTile({
     >
       {item.brand ? (
         <BrandIcon
-          className={cx("shrink-0 opacity-72", item.wordmark ? "h-[11px] w-[35px]" : "size-[18px]")}
+          className={item.wordmark ? "h-[11px] w-[35px]" : "size-[18px]"}
           src={item.brand}
         />
       ) : Icon ? (
-        <Icon aria-hidden className="size-[18px] shrink-0 opacity-72" strokeWidth={1.5} />
+        <Icon aria-hidden className="size-[18px]" strokeWidth={1.5} />
       ) : null}
-      {item.wordmark ? null : <span className="whitespace-nowrap">{item.label}</span>}
+      {item.wordmark ? null : <span>{item.label}</span>}
     </a>
   );
 }
@@ -1121,12 +1135,8 @@ function FeatureCell({
         <div className="text-white/52">
           <IndexedLabel icon={Icon} index={index} label={label} />
         </div>
-        <h3 className="mt-6 max-w-[31rem] text-balance font-geist-pixel text-xl font-medium leading-[1.2] tracking-normal text-white/92 sm:text-2xl">
-          {title}
-        </h3>
-        <p className="mt-3 max-w-[31rem] text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-          {body}
-        </p>
+        <h3 className="farm-feature-title font-geist-pixel">{title}</h3>
+        <p className="farm-feature-body text-sm leading-6 sm:text-base sm:leading-7">{body}</p>
       </div>
       {children}
     </article>
@@ -1135,7 +1145,15 @@ function FeatureCell({
 
 function DeveloperExperienceGrid() {
   return (
-    <section className="farm-full-rule grid w-full lg:grid-cols-2">
+    <section
+      aria-labelledby="developer-experience-title"
+      className="farm-full-rule grid w-full lg:grid-cols-2"
+    >
+      {/* The hero's H1 is the only visible heading above these cards; this keeps the outline
+          from skipping a level, as the benchmark section's heading does. */}
+      <h2 className="sr-only" id="developer-experience-title">
+        Developer experience
+      </h2>
       <FeatureCell
         body="Start the whole app once, then see every page request and response time as you work."
         icon={Terminal}
@@ -1188,9 +1206,10 @@ function DeveloperExperienceGrid() {
       <FeatureCell
         body={
           <>
-            Farm prepares safe state updates at build time. In our test, they were{" "}
-            <span className="font-mono font-bold text-white">8.5× faster</span> with no extra
-            component renders. React handles anything the compiler cannot safely optimize.
+            Farm prepares safe state updates at build time. On js-framework-benchmark it was{" "}
+            <span className="font-mono font-bold text-white">1.29× faster</span> than React Hooks
+            overall and <span className="font-mono font-bold text-white">within 1%</span> of Solid
+            on CPU. React handles anything the compiler cannot safely optimize.
           </>
         }
         className="border-t border-white/12 lg:border-l"
@@ -1356,10 +1375,8 @@ function DeploymentVisual() {
             <div
               key={`${tile.row}_${tile.col}`}
               className={cx(
-                "group/tile absolute flex size-[20%] items-center justify-center overflow-hidden rounded-none border border-white/[0.08] transition-[background-color,border-color] duration-150",
-                tile.brand
-                  ? "bg-white/[0.055] group-hover/deployment:border-white/[0.14] group-hover/deployment:bg-white/[0.075]"
-                  : "bg-white/[0.012]",
+                "farm-deploy-tile group/tile",
+                tile.brand ? "farm-deploy-tile-brand" : "bg-white/[0.012]",
               )}
               style={{
                 left: `${tile.col * 20}%`,
@@ -1369,13 +1386,8 @@ function DeploymentVisual() {
             >
               {tile.brand ? (
                 <>
-                  <BrandIcon
-                    className="size-7 opacity-72 transition-[opacity,transform] duration-150 group-hover/tile:-translate-y-1 group-hover/tile:opacity-90"
-                    src={tile.brand}
-                  />
-                  <span className="pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center font-mono text-[7px] font-normal uppercase tracking-normal text-white/68 opacity-0 transition-[opacity,transform] duration-150 group-hover/tile:translate-y-0 group-hover/tile:opacity-100">
-                    {tile.label}
-                  </span>
+                  <BrandIcon className="farm-deploy-tile-icon" src={tile.brand} />
+                  <span className="farm-deploy-tile-label font-mono">{tile.label}</span>
                 </>
               ) : (
                 <span className="size-px bg-white/12" />
@@ -1453,6 +1465,26 @@ function MarkdownMirrorsVisual() {
     <div className="farm-feature-spotlight relative flex min-h-[340px] min-w-0 items-center overflow-hidden px-6 py-8 sm:px-10">
       <div className="relative z-10 w-full">
         <BlogFigure fit kind="landing-markdown" />
+      </div>
+    </div>
+  );
+}
+
+function BackendsVisual() {
+  return (
+    <div className="farm-feature-spotlight relative flex min-h-[340px] min-w-0 items-center overflow-hidden px-6 py-8 sm:px-10">
+      <div className="relative z-10 w-full">
+        <BlogFigure fit kind="landing-backends" />
+      </div>
+    </div>
+  );
+}
+
+function MobileVisual() {
+  return (
+    <div className="farm-feature-spotlight relative flex min-h-[340px] min-w-0 items-center overflow-hidden px-6 py-8 sm:px-10">
+      <div className="relative z-10 w-full">
+        <BlogFigure fit kind="landing-mobile" />
       </div>
     </div>
   );
@@ -1574,6 +1606,32 @@ function FoundationGrid() {
         title="Every page, readable by agents"
       >
         <MarkdownMirrorsVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Mount any app with a fetch handler, like Hono or Elysia, or any Node.js framework, like Express, Koa, Fastify, or NestJS, on one API route. It runs in development and production beside your typed routes."
+        className="border-t border-white/12"
+        icon={Server}
+        index="02.9"
+        label="Bring your backend"
+        title="Keep the backend you already have"
+      >
+        <BackendsVisual />
+      </FeatureCell>
+      <FeatureCell
+        body={
+          <>
+            <code className="font-mono text-white">farm dev --mobile</code> puts your pages in a
+            native frame with tabs, stacks, sheets, and the back gesture. Draw a route with native
+            views or React Native when it needs more. In preview on emulators and simulators.
+          </>
+        }
+        className="border-t border-white/12 lg:border-l"
+        icon={Smartphone}
+        index="02.10"
+        label="Mobile"
+        title="The same pages, as a native app"
+      >
+        <MobileVisual />
       </FeatureCell>
     </section>
   );
@@ -1757,7 +1815,7 @@ function IntegrationsSection() {
                 <a
                   key={item.label}
                   aria-label={`${item.label} integration documentation`}
-                  className="group absolute grid place-items-center bg-white/[0.055] transition-[background-color,color] duration-150 hover:z-10 hover:bg-white focus-visible:z-10 focus-visible:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+                  className="farm-integration-tile group"
                   href={item.href}
                   style={{
                     height: "16.6666667%",
@@ -1768,20 +1826,11 @@ function IntegrationsSection() {
                   title={`${item.label} integration`}
                 >
                   {"brand" in item ? (
-                    <BrandIcon
-                      className="size-7 opacity-60 transition-[filter,opacity,transform] duration-150 group-hover:-translate-y-1 group-hover:invert-0 group-hover:opacity-100 group-focus-visible:-translate-y-1 group-focus-visible:invert-0 group-focus-visible:opacity-100"
-                      src={item.brand}
-                    />
+                    <BrandIcon className="farm-integration-tile-icon" src={item.brand} />
                   ) : Icon ? (
-                    <Icon
-                      aria-hidden
-                      className="size-7 text-white/60 transition-[color,transform] duration-150 group-hover:-translate-y-1 group-hover:text-black group-focus-visible:-translate-y-1 group-focus-visible:text-black"
-                      strokeWidth={1.35}
-                    />
+                    <Icon aria-hidden className="farm-integration-tile-glyph" strokeWidth={1.35} />
                   ) : null}
-                  <span className="pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center font-mono text-[7px] font-normal uppercase tracking-normal text-black/55 opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
-                    {item.label}
-                  </span>
+                  <span className="farm-integration-tile-label font-mono">{item.label}</span>
                 </a>
               );
             })}

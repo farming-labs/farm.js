@@ -1,6 +1,8 @@
 export * from "./types";
 export type { FarmAgentUserConfig, FarmAgentJsonLd } from "./agent-config";
 export type { FarmAgentCrawlers, FarmCrawlerPolicy } from "./agent-crawlers";
+export type { FarmAppManifestConfig } from "./app-manifest-config";
+export type { FarmAppManifest, FarmAppManifestServer, FarmAppManifestTool } from "./app-manifest";
 export { defineRenderer, REACT_RENDERER } from "./renderer";
 export type {
   FarmRenderer,
@@ -177,7 +179,11 @@ export * from "./markdown";
 export * from "./app-markdown";
 export * from "./observability";
 export { classifyFarmAgent, type FarmAgentIdentity } from "./agent-identity";
-export type { FarmMCPEndpointTool } from "./mcp-catalog";
+export {
+  registerFarmMCPServer,
+  type FarmMCPEndpointTool,
+  type FarmMCPServerRegistration,
+} from "./mcp-catalog";
 export * from "./devtools-config";
 export type { FarmDevtoolsSnapshot, FarmDevtoolsDiagnostic, FarmDevtoolsRuntime } from "./devtools";
 export * from "./dev-indicators";
@@ -197,6 +203,19 @@ export * from "./server-query";
 export * from "./server-query-client";
 export * from "./server-action-security";
 export * from "./deployment";
+export {
+  FARM_RSC_INSTALL_HINT,
+  findFarmAppPackageDir,
+  formatFarmRscBlockingMessage,
+  formatFarmRscFallbackMessage,
+  inspectFarmServerComponents,
+  type FarmServerComponentsStatus,
+} from "./server-components-status";
+export type {
+  FarmServerComponentsConfig,
+  FarmServerComponentsMode,
+  FarmServerComponentsOptions,
+} from "./server-components-mode";
 export type {
   FarmImageConfig,
   FarmImageFormat,
@@ -253,7 +272,7 @@ export {
   useSearchParams,
 } from "./navigation";
 export type { FarmRedirectSignal, FarmRedirectStatus } from "./navigation";
-export { cookies, headers } from "./headers";
+export { cookies, getCspNonce, headers } from "./headers";
 export type { ReadonlyHeaders, ReadonlyRequestCookies, RequestCookie } from "./headers";
 export type {
   PluginRequestContext,
@@ -279,6 +298,7 @@ export type {
   FarmPluginRuntimeHooks,
   FarmPluginRuntimeRequestOptions,
   FarmPluginRuntimeRequestHandler,
+  FarmPluginRuntimeRequestScope,
   FarmPluginRuntimeSession,
   FarmPluginDiscoveredRoute,
   FarmPluginRouterHooks,
@@ -302,6 +322,7 @@ export type {
   ShutdownPayload,
 } from "./plugin";
 export type { MiddlewareProps, PagePropsWithMiddleware, PageProps } from "./types";
+export type { FarmSearchParams } from "./search-params";
 export type {
   FarmUserConfig,
   ResolvedFarmConfig,

@@ -9,7 +9,11 @@ import {
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
 import { getHashTargetElement } from "./hash-target";
-import { isFarmExternalNavigationURL, resolveFarmNavigationURL } from "./navigation-url";
+import {
+  isFarmBlockedNavigationURL,
+  isFarmExternalNavigationURL,
+  resolveFarmNavigationURL,
+} from "./navigation-url";
 import { applyFarmMetadataToDocument, type NavigationMetadata } from "./metadata-reconciler";
 import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
 import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-state";
@@ -20,6 +24,8 @@ import {
   readFarmPageDataRedirect,
   type FarmPageDataRedirect,
 } from "../navigation/page-data-redirect";
+import { getFarmIslandValueHeaders } from "./island-value-protocol";
+import { runFarmNavigationDelegates } from "./navigation-delegate";
 
 export { getHashTargetElement } from "./hash-target";
 export { isFarmExternalNavigationURL } from "./navigation-url";
@@ -77,6 +83,15 @@ export interface RouterOptions {
   scrollRestoration?: boolean;
   shouldUseDocumentNavigation?: (pathname: string) => boolean;
   deploymentId?: string;
+  /**
+   * Islands mode in `farm dev`: navigates as the production client does, by fetching the page
+   * itself. Resolves the page's data once its shell arrives, or null for a navigation the page-data
+   * endpoint answers instead.
+   */
+  fetchNavigationDocument?: (
+    path: string,
+    context: { signal: AbortSignal; refresh: boolean },
+  ) => Promise<PageData | null>;
 }
 
 interface CacheEntry {
@@ -179,6 +194,12 @@ function getActiveLayoutChainHeader(): string | undefined {
 // Global router instance
 let routerInstance: SPARouter | null = null;
 
+/** What a navigation handler learns about the navigation besides its data. */
+export interface FarmNavigationRenderInfo {
+  /** A refresh of the page on screen (`router.refresh()`, or after a server action). */
+  refresh?: boolean;
+}
+
 export class SPARouter {
   private cache: Map<string, CacheEntry> = new Map();
   private prefetchingUrls: Set<string> = new Set();
@@ -207,9 +228,9 @@ export class SPARouter {
     controller: AbortController;
   };
   private scrollElements: Map<string, HTMLElement> = new Map();
-  private options: Required<Omit<RouterOptions, "deploymentId">> &
-    Pick<RouterOptions, "deploymentId">;
-  private onNavigate?: (data: PageData) => Promise<void>;
+  private options: Required<Omit<RouterOptions, "deploymentId" | "fetchNavigationDocument">> &
+    Pick<RouterOptions, "deploymentId" | "fetchNavigationDocument">;
+  private onNavigate?: (data: PageData, info?: FarmNavigationRenderInfo) => Promise<void>;
   private clientPlugins?: Pick<
     FarmClientPluginManager,
     | "beginNavigation"
@@ -239,6 +260,7 @@ export class SPARouter {
       scrollRestoration: options.scrollRestoration ?? true,
       shouldUseDocumentNavigation: options.shouldUseDocumentNavigation ?? (() => false),
       deploymentId: options.deploymentId ?? readBrowserDeploymentId(),
+      fetchNavigationDocument: options.fetchNavigationDocument,
     };
 
     if (typeof window !== "undefined") {
@@ -296,7 +318,9 @@ export class SPARouter {
   /**
    * Set the navigation handler that updates React
    */
-  setNavigationHandler(handler: (data: PageData) => Promise<void>) {
+  setNavigationHandler(
+    handler: (data: PageData, info?: FarmNavigationRenderInfo) => Promise<void>,
+  ) {
     this.onNavigate = handler;
   }
 
@@ -329,6 +353,8 @@ export class SPARouter {
 
     // Relative targets resolve against the current document, not the origin.
     const url = resolveFarmNavigationURL(href, window.location.href);
+    // Every document navigation below, including the error fallback, uses this URL.
+    if (isFarmBlockedNavigationURL(url)) return;
     const pathname = url.pathname;
     const search = url.search;
     const fullPath = pathname + search;
@@ -365,16 +391,19 @@ export class SPARouter {
     }
 
     const from = window.location.pathname + window.location.search;
-    // A redirect continues a navigation that already passed blockers and
-    // saved the scroll position of the page it leaves.
+    const action = replace ? "replace" : "push";
+    // A redirect continues a navigation that already passed blockers, delegates
+    // and saved the scroll position of the page it leaves.
     if (redirectCount === 0) {
+      if (await this.shouldBlockNavigation({ from, to: fullPath, action })) {
+        return;
+      }
+      // A refresh re-renders the page on screen; only a move to another page is offered.
       if (
-        await this.shouldBlockNavigation({
-          from,
-          to: fullPath,
-          action: replace ? "replace" : "push",
-        })
+        !(refresh && fullPath === from) &&
+        (await runFarmNavigationDelegates({ url: url.href, from, to: fullPath, action }))
       ) {
+        this.cancelActiveNavigation();
         return;
       }
 
@@ -399,14 +428,13 @@ export class SPARouter {
       });
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
-      // Fetch page data (from cache or server)
-      const pageData = await this.fetchPageData(
-        fullPath,
-        true,
-        from,
-        refresh,
-        navigation.controller.signal,
-      );
+      // Fetch page data (from cache or server). Islands mode in dev fetches the page itself.
+      const pageData =
+        (await this.options.fetchNavigationDocument?.(fullPath, {
+          signal: navigation.controller.signal,
+          refresh,
+        })) ??
+        (await this.fetchPageData(fullPath, true, from, refresh, navigation.controller.signal));
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
@@ -423,6 +451,7 @@ export class SPARouter {
               scroll,
               state,
               url,
+              refresh,
             })
           : Promise.resolve(),
       );
@@ -709,6 +738,7 @@ export class SPARouter {
     scroll: boolean;
     state: unknown;
     url: URL;
+    refresh?: boolean;
   }): Promise<void> {
     const historyUrl = resolveFarmNavigationURL(
       options.pageData.canonicalPath || options.fullPath,
@@ -748,7 +778,7 @@ export class SPARouter {
     _hydrateFarmI18n(options.pageData.i18n);
 
     if (this.onNavigate) {
-      await this.onNavigate(options.pageData);
+      await this.onNavigate(options.pageData, { refresh: options.refresh === true });
     }
 
     if (options.scroll) {
@@ -883,6 +913,8 @@ export class SPARouter {
         "X-Farm-SPA": "1",
         ...(activeLayoutChain ? { "X-Farm-Layout-Chain": activeLayoutChain } : {}),
         ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
+        // Islands mode: the server leaves out island values this browser holds.
+        ...getFarmIslandValueHeaders(),
       }),
     });
 

@@ -3,6 +3,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { renderViewportHead } from "../metadata";
+import {
+  ensureFarmDocumentHead,
+  ensureFarmDocumentMeta,
+  ensureFarmDocumentRoot,
+  extractFarmFullDocument,
+} from "../server/full-document";
 
 const universalBuildSource = fs.readFileSync(
   path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
@@ -11,14 +18,26 @@ const universalBuildSource = fs.readFileSync(
 
 // The production handler is emitted from a template literal, so the snippet is
 // extracted from the source and un-escaped (\\ -> \, \` -> `, \$ -> $) before
-// being executed the way the emitted bundle runs it.
+// being executed the way the emitted bundle runs it: the shared full-document
+// composer, then the buffered response's footer injection.
 function extractEmittedFullDocumentInjection(): string {
-  const start = universalBuildSource.indexOf("fullHtml = html\n            // Inject CSS link");
-  const end = universalBuildSource.indexOf("// Add DOCTYPE if not present", start);
-  expect(start).toBeGreaterThan(-1);
-  expect(end).toBeGreaterThan(start);
-  const emitted = universalBuildSource.slice(start, end).replace(/\\([\\`$])/g, "$1");
-  return emitted.slice(0, emitted.lastIndexOf(";") + 1);
+  const composeStart = universalBuildSource.indexOf(
+    "const composeFarmFullDocument = function(markup) {",
+  );
+  const composeEnd = universalBuildSource.indexOf("\n        };\n", composeStart);
+  const injectStart = universalBuildSource.indexOf(
+    "fullHtml = composeFarmFullDocument(extractFarmFullDocument(html) || html)",
+  );
+  const injectEnd = universalBuildSource.indexOf("\n            );\n", injectStart);
+  expect(composeStart).toBeGreaterThan(-1);
+  expect(composeEnd).toBeGreaterThan(composeStart);
+  expect(injectStart).toBeGreaterThan(composeEnd);
+  expect(injectEnd).toBeGreaterThan(injectStart);
+  const emitted =
+    universalBuildSource.slice(composeStart, composeEnd + "\n        };".length) +
+    "\n" +
+    universalBuildSource.slice(injectStart, injectEnd + "\n            );".length);
+  return emitted.replace(/\\([\\`$])/g, "$1");
 }
 
 function serializeFarmInlineValue(value: unknown): string {
@@ -39,8 +58,19 @@ function renderFarmClientBootstrapScript(
   );
 }
 
-function createInjector() {
-  return new Function(
+function renderFarmClientEntryScript(): string {
+  return '<script type="module" src="/__farm_client_js_src__"></script>';
+}
+
+const MODULE_PRELOAD_TAGS =
+  '\n  <link rel="modulepreload" href="/chunks/react-h1.js" fetchpriority="low">';
+
+/** Islands mode's boot entry, which a document that hydrates nothing at load starts with. */
+const BOOT_SCRIPT =
+  '<script type="module" src="/__farm_client_boot_src__" data-farm-runtime="/__farm_client_js_src__"></script>';
+
+function createInjector(viewportTags = renderViewportHead(undefined), bootsClient = false) {
+  const inject = new Function(
     "html",
     "title",
     "metaTags",
@@ -52,8 +82,41 @@ function createInjector() {
     "clientPageProps",
     "renderFarmClientBootstrapScript",
     "renderFarmRendererHydrationScript",
-    "let fullHtml;\n" + extractEmittedFullDocumentInjection() + "\nreturn fullHtml;",
-  ) as (
+    "ensureFarmDocumentMeta",
+    "viewportTags",
+    "renderFarmClientEntryScript",
+    "renderFarmClientModulePreloads",
+    "route",
+    "extractFarmFullDocument",
+    "ensureFarmDocumentHead",
+    "ensureFarmDocumentRoot",
+    "addFarmFallbackIcon",
+    "hasFavicon",
+    // Set before the composer runs, as the handler does once the whole page has rendered.
+    `let fullHtml;\nlet farmBootsClient = ${bootsClient};\n` +
+      // Props without defer() values: prepared as they are, with no snapshot to write.
+      "const farmDeferredData = { data: { page: clientPageProps, slots: routeSlotPayload }, records: [] };\n" +
+      'const renderFarmDeferredDataScript = () => "";\n' +
+      "const farmEntryScript = farmBootsClient ? " +
+      JSON.stringify(BOOT_SCRIPT) +
+      " : renderFarmClientEntryScript();\n" +
+      extractEmittedFullDocumentInjection() +
+      "\nreturn fullHtml;",
+  );
+  return ((...args: unknown[]) =>
+    inject(
+      ...args,
+      ensureFarmDocumentMeta,
+      viewportTags,
+      renderFarmClientEntryScript,
+      () => MODULE_PRELOAD_TAGS,
+      { clientModule: undefined },
+      extractFarmFullDocument,
+      ensureFarmDocumentHead,
+      ensureFarmDocumentRoot,
+      (markup: string) => markup,
+      true,
+    )) as (
     html: string,
     title: string,
     metaTags: string,
@@ -69,6 +132,33 @@ function createInjector() {
 }
 
 describe("generated full-document injection", () => {
+  it("starts a document that hydrates nothing at load with the boot entry and no preloads", () => {
+    const html = "<html><head><title>App</title></head><body><main>page</main></body></html>";
+    const args = [
+      html,
+      "Farm.js App",
+      "",
+      "",
+      false,
+      { hasExplicitTitle: false },
+      { __farmCanonicalPath: "/post" },
+      [],
+      {},
+      renderFarmClientBootstrapScript,
+      () => "",
+    ] as const;
+
+    const eager = createInjector()(...args);
+    expect(eager).toContain(MODULE_PRELOAD_TAGS);
+    expect(eager).toContain(renderFarmClientEntryScript());
+    expect(eager).not.toContain("__farm_client_boot_src__");
+
+    const booting = createInjector(undefined, true)(...args);
+    expect(booting).not.toContain("modulepreload");
+    expect(booting).toContain(BOOT_SCRIPT);
+    expect(booting.match(/<script type="module"/g)).toHaveLength(1);
+  });
+
   it("keeps $-sequences in page props literal when injecting the bootstrap script", () => {
     const inject = createInjector();
 
@@ -177,5 +267,54 @@ describe("generated full-document injection", () => {
     expect(universalBuildSource).toContain(
       `() => '<html lang="en"' + farmThemeDocument.attributes + '>'`,
     );
+  });
+
+  it("opens a layout's document head with the charset and the route's viewport", () => {
+    const viewport = renderViewportHead({ maximumScale: 1, themeColor: "#fff" });
+    const fullHtml = createInjector(viewport)(
+      "<html><head><title>App</title></head><body><main>page</main></body></html>",
+      "Farm.js App",
+      "",
+      "",
+      false,
+      { hasExplicitTitle: false },
+      {},
+      [],
+      {},
+      renderFarmClientBootstrapScript,
+      () => "",
+    );
+
+    const head = fullHtml.slice(fullHtml.indexOf("<head>"), fullHtml.indexOf("</head>"));
+    expect(head.startsWith('<head><meta charset="utf-8">')).toBe(true);
+    expect(head).toContain(
+      '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" data-farm-metadata>',
+    );
+    expect(head).toContain('<meta name="theme-color" content="#fff" data-farm-metadata>');
+    // The client entry's module preloads follow the stylesheet in the layout's own head.
+    expect(head).toContain(
+      '<link rel="stylesheet" href="/__farm_client_css_href__">' + MODULE_PRELOAD_TAGS,
+    );
+  });
+
+  it("keeps the charset and viewport a layout's document writes itself", () => {
+    const fullHtml = createInjector()(
+      '<html><head><meta charSet="utf-8"/><meta name="viewport" content="width=500"/></head>' +
+        "<body><main>page</main></body></html>",
+      "Farm.js App",
+      "",
+      "",
+      false,
+      { hasExplicitTitle: false },
+      {},
+      [],
+      {},
+      renderFarmClientBootstrapScript,
+      () => "",
+    );
+
+    expect(fullHtml.match(/<meta\b[^>]*charset/gi)).toHaveLength(1);
+    expect(fullHtml.match(/name="viewport"/g)).toHaveLength(1);
+    expect(fullHtml).toContain('content="width=500"');
   });
 });

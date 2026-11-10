@@ -686,6 +686,19 @@
 .bf-st--live {
   background: #d8d8d8;
 }
+/* A step that refused the call: the same circle as a check, without its brightness. */
+.bf-st--no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3em;
+  height: 1.3em;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  background: none;
+  color: #8a8a8a;
+  font-size: 0.78em;
+  line-height: 1;
+}
 .bf-st--ok {
   display: inline-flex;
   align-items: center;
@@ -714,6 +727,82 @@
   width: auto;
   height: 0.95em;
   color: #ededed;
+}
+
+/* Landing mobile card: the phone panel reads as a device and its screen fills the body. */
+.blog-figure[data-figure="landing-mobile"] [data-panel="phone"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.blog-figure[data-figure="landing-mobile"] [data-panel="phone"] .bf-body {
+  flex: 1;
+  padding: 0.9em;
+}
+.bf-vphone {
+  height: 100%;
+}
+/* A modal sheet: the panel's own surface, raised over the dimmed screen it opened from. */
+.bf-vsheet {
+  border-color: rgb(255 255 255 / 0.22);
+  border-radius: 3px;
+  background: #0b0b0b;
+}
+.bf-vgrip {
+  position: absolute;
+  top: 0.6em;
+  left: 42%;
+  width: 16%;
+  height: 0.25em;
+  border-radius: 1em;
+  background: rgb(255 255 255 / 0.25);
+}
+/* One screen on the phone; screens slide and fade as layers. The phone clips them. */
+.bf-vlayer {
+  position: absolute;
+  inset: 0;
+}
+/* A screen being pushed carries a hairline on its leading edge over the one it covers. */
+.bf-vlayer--edge {
+  border-left: 1px solid rgb(255 255 255 / 0.18);
+  background: #070707;
+}
+.bf-vphone {
+  overflow: hidden;
+}
+
+/* A pushed screen's back chevron, at the header's text size. */
+.bf-vback {
+  position: absolute;
+  top: 2.4%;
+  display: inline-flex;
+  width: 1.15em;
+  height: 1.15em;
+  color: #cfcfcf;
+}
+.bf-vback svg {
+  width: 100%;
+  height: 100%;
+}
+/* Streets on the React Native map: hairlines over the hatching. */
+.bf-vroad {
+  position: absolute;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.16);
+}
+/* A map pin: the one bright mark on the React Native screen. */
+.bf-vpin {
+  position: absolute;
+  width: 0.8em;
+  height: 0.8em;
+  margin: -0.4em 0 0 -0.4em;
+  border-radius: 50%;
+  background: #ededed;
+}
+/* The tab bar's current tab: a brighter edge, not a fill. */
+.bf-vblock--tab {
+  border-color: rgb(255 255 255 / 0.32);
+  background: #1c1c1c;
 }
 
 /* Phones: figures with a phone layout swap to it, a single column of the same panels and

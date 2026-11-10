@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 import type { FarmIntegrationHandlerContext } from "@farm.js/core";
+import type { StripeBillingUpgradeProrationBehavior } from "./client.js";
 
 export type StripeBillingOwner = {
   kind: "user" | "organization";
@@ -48,6 +49,12 @@ export type StripeBillingSoftLimit =
 
 export interface StripeBillingSeatsOptions {
   mode?: StripeBillingSeatsMode;
+  /**
+   * How Stripe prorates a seat change made through the upgrade route. Only the server sets
+   * this; a `prorationBehavior` in the request body is ignored.
+   * @default "create_prorations"
+   */
+  prorationBehavior?: StripeBillingUpgradeProrationBehavior;
 }
 
 export interface StripeBillingMeterGuard {
@@ -105,7 +112,13 @@ export interface StripeBillingPlan {
 }
 
 export interface StripeBillingProduct {
+  /** Listed in the product catalog. Default `true`. */
   public?: boolean;
+  /**
+   * Lets checkout sell a product with `public: false`. Hidden products are
+   * refused otherwise, so knowing an id is not enough to buy one.
+   */
+  purchasable?: boolean;
   name?: string;
   description?: string;
   kind: StripeBillingProductKind;
@@ -228,6 +241,8 @@ export interface StripeBillingHooks {
   onCheckoutCompleted?(
     snapshot: StripeBillingSnapshot & {
       sessionId: string;
+      /** The product this checkout sold. For a one-time product without a plan the snapshot keeps the owner's plan product. */
+      purchasedProductId: string | null;
     },
     args: StripeBillingArgs,
   ): Promise<void> | void;

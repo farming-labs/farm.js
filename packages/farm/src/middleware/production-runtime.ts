@@ -1,3 +1,4 @@
+import { _withFarmResponseHeaders } from "../owned-response";
 import type {
   CookieJar,
   CookieOptions,
@@ -18,7 +19,7 @@ import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { stripFarmBasePath } from "../base-path";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
-import type { ResolvedFarmServerConfig } from "../server-http";
+import { withFarmRequestClientAddress, type ResolvedFarmServerConfig } from "../server-http";
 import {
   parseMiddlewareCookieHeader,
   serializeMiddlewareCookie as serializeCookie,
@@ -27,9 +28,12 @@ import {
 import {
   compileMiddlewareConfig,
   compileMiddlewareRoute,
-  matchesMiddlewareRoute,
   matchesMiddlewareConfig as matchesPreparedMiddlewareConfig,
+  matchesMiddlewareConfigAt,
+  matchesMiddlewareRouteAt,
+  toMiddlewareRoutePathname,
 } from "./matcher";
+import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -42,6 +46,13 @@ export interface ProductionMiddlewareRunnerOptions {
   modules?: ProductionMiddlewareModuleEntry[];
   i18n?: ResolvedFarmI18nConfig;
   server?: Pick<ResolvedFarmServerConfig, "trustProxy">;
+  /** The app's public API path (`api.basePath`); `/api` middleware guards it too. */
+  apiBasePath?: string;
+  /**
+   * @internal The app matches pages against the request path as received, without stripping
+   * basePath or locale (the RSC entry), so middleware matches that path too.
+   */
+  rawPathRouting?: boolean;
 }
 
 export interface ProductionMiddlewareRequestOptions {
@@ -61,6 +72,11 @@ export interface ProductionMiddlewareResult {
   context: Map<string, any>;
   headers: Headers;
   handled: boolean;
+  /**
+   * Middleware without `cache: "public"` ran and let the request through. It may have been a
+   * guard (an IP allowlist, an API key header), so the response must not reach a shared cache.
+   */
+  guarded: boolean;
   /** Middleware called notFound(): answer with the app's not-found page. */
   notFound?: true;
 }
@@ -326,34 +342,6 @@ function createResponseShim(headers: WebResponseHeaderMap): WebResponseShimState
   };
 }
 
-function withNodeRequestShape(
-  request: Request,
-  trustProxy: boolean,
-  clientAddress: string | undefined,
-): Request {
-  const requestWithShape = request as Request & {
-    socket?: { remoteAddress?: string };
-  };
-
-  if (!requestWithShape.socket) {
-    const forwardedFor = trustProxy
-      ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-      : undefined;
-    try {
-      // A web Request carries no socket, so the address comes from a trusted
-      // proxy or from the server adapter's own connection. Never invent one:
-      // reporting `127.0.0.1` used to make every visitor look like the same
-      // client, which collapsed per-client rate limiting into one shared
-      // bucket. Leave it undefined so a consumer can tell that it does not know.
-      requestWithShape.socket = { remoteAddress: forwardedFor || clientAddress || undefined };
-    } catch {
-      // Some Request implementations may not be extensible.
-    }
-  }
-
-  return requestWithShape;
-}
-
 function createHandledResponse(
   body: BodyInit | null,
   init: ResponseInit,
@@ -378,8 +366,9 @@ function createWebMiddlewareContext(
   parent?: MiddlewareContext["parent"],
   trustProxy = false,
   clientAddress?: string,
+  toRoutePathname?: (pathname: string) => string,
 ): WebMiddlewareContextState {
-  let currentRequest = withNodeRequestShape(request, trustProxy, clientAddress);
+  let currentRequest = withFarmRequestClientAddress(request, trustProxy, clientAddress);
   let handledResponse: Response | null = null;
   const url = new URL(currentRequest.url);
   const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
@@ -401,6 +390,7 @@ function createWebMiddlewareContext(
     response: responseShim.response as any,
     url,
     pathname: url.pathname,
+    routePathname: toMiddlewareRoutePathname(url.pathname, toRoutePathname),
     searchParams: url.searchParams,
     method: currentRequest.method || "GET",
     params: {},
@@ -437,7 +427,7 @@ function createWebMiddlewareContext(
     rewrite(rewriteUrl: string): void {
       ctx._rewriteUrl = rewriteUrl;
       const nextUrl = new URL(rewriteUrl, currentRequest.url);
-      currentRequest = withNodeRequestShape(
+      currentRequest = withFarmRequestClientAddress(
         new Request(nextUrl, currentRequest),
         trustProxy,
         clientAddress,
@@ -445,6 +435,7 @@ function createWebMiddlewareContext(
       ctx.request = currentRequest as any;
       ctx.url = nextUrl;
       ctx.pathname = nextUrl.pathname;
+      ctx.routePathname = toMiddlewareRoutePathname(nextUrl.pathname, toRoutePathname);
       ctx.searchParams = nextUrl.searchParams;
       ctx.route = nextUrl.pathname;
     },
@@ -536,8 +527,8 @@ function toMiddlewareConfig(
     handlers?: MiddlewareFunction[];
   },
 ): MiddlewareConfig {
-  const { matcher, exclude, runtime } = entry;
-  return { matcher, exclude, runtime };
+  const { matcher, exclude, runtime, cache } = entry;
+  return { matcher, exclude, runtime, cache };
 }
 
 function normalizeConfigMiddleware(config?: FarmMiddlewareConfig | null): {
@@ -628,6 +619,7 @@ function emptyResult(request: Request): ProductionMiddlewareResult {
     context: new Map(),
     headers: new Headers(),
     handled: false,
+    guarded: false,
   };
 }
 
@@ -638,6 +630,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
   const entries = [...configMiddleware.entries, ...fileMiddleware];
   const globalConfig = configMiddleware.globalConfig;
   if (globalConfig) compileMiddlewareConfig(globalConfig);
+  const toMiddlewarePathnames = createFarmAPIMiddlewarePathnames(options.apiBasePath);
 
   return async function runProductionMiddleware(
     request: Request,
@@ -647,23 +640,42 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       return emptyResult(request);
     }
 
+    // Match the app path page routing sees: without basePath (the locale step
+    // strips it too), so file and config middleware run beneath a basePath.
+    const toRoutePathname = (pathname: string) =>
+      options.i18n?.enabled
+        ? stripFarmLocaleFromPathname(pathname, options.i18n)
+        : stripFarmBasePath(pathname, options.i18n?.basePath ?? "/");
     let contextState = createWebMiddlewareContext(
       request,
       undefined,
       options.server?.trustProxy === true,
       requestOptions.clientAddress,
+      toRoutePathname,
     );
     let ctx = contextState.ctx;
     let currentRequest = contextState.getRequest();
-    // Match the app path page routing sees: without basePath (the locale step
-    // strips it too), so file and config middleware run beneath a basePath.
-    const initialPathname = options.i18n?.enabled
-      ? stripFarmLocaleFromPathname(ctx.pathname, options.i18n)
-      : stripFarmBasePath(ctx.pathname, options.i18n?.basePath ?? "/");
+    const initialRequestPathname = ctx.pathname;
+    const initialPathname = toRoutePathname(initialRequestPathname);
+    // Middleware guards every path a page can match: with raw-path routing that includes the
+    // request path itself, so a guard under app/<basePath>/ or app/[lang]/ runs for its page.
+    const matchPathnames = (pathname: string, requestPathname: string) =>
+      options.rawPathRouting && requestPathname !== pathname
+        ? [
+            ...new Set([
+              ...toMiddlewarePathnames(pathname),
+              ...toMiddlewarePathnames(requestPathname),
+            ]),
+          ]
+        : toMiddlewarePathnames(pathname);
     let parentData: MiddlewareContext["parent"] | undefined;
 
     if (globalConfig) {
-      const globalMatch = matchesPreparedMiddlewareConfig(initialPathname, globalConfig, ctx);
+      const globalMatch = matchesMiddlewareConfigAt(
+        matchPathnames(initialPathname, initialRequestPathname),
+        globalConfig,
+        ctx,
+      );
       if (!globalMatch.matched) {
         return emptyResult(request);
       }
@@ -672,35 +684,47 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       }
     }
 
-    const applicable = entries
-      .map((entry) => ({
-        entry,
-        routeMatch:
-          entry.source === "config"
-            ? { matched: true }
-            : matchesMiddlewareRoute(initialPathname, entry),
-      }))
-      .filter((candidate) => candidate.routeMatch.matched);
-
-    if (applicable.length === 0) {
-      return {
-        request: currentRequest,
-        response: null,
-        data: new Map(ctx.data),
-        context: new Map(ctx.locals),
-        headers: mapToHeaders(contextState.headers),
-        handled: false,
-      };
+    // A ctx.rewrite() target is guarded as a direct request for it is: once a
+    // pass over the entries ends on a rewritten path, the entries matching that
+    // path which have not run yet get a pass of their own. Each entry runs at
+    // most once, so repeated rewrites end after at most one pass per entry.
+    const ran = new Set<ProductionMiddlewareEntry>();
+    let guarded = false;
+    function* applicableMiddleware() {
+      for (
+        let pathname = initialPathname, requestPathname = initialRequestPathname, pass = 0;
+        ;
+        pass++
+      ) {
+        const pathnames = matchPathnames(pathname, requestPathname);
+        if (pass > 0 && globalConfig) {
+          if (!matchesMiddlewareConfigAt(pathnames, globalConfig, ctx).matched) return;
+        }
+        for (const entry of entries) {
+          if (ran.has(entry)) continue;
+          const routeMatch =
+            entry.source === "config"
+              ? { matched: true }
+              : matchesMiddlewareRouteAt(pathnames, entry);
+          if (routeMatch.matched) yield { entry, routeMatch, pathname, pathnames };
+        }
+        const rewrittenRequestPathname = new URL(currentRequest.url).pathname;
+        const rewrittenPathname = toRoutePathname(rewrittenRequestPathname);
+        if (rewrittenPathname === pathname && rewrittenRequestPathname === requestPathname) return;
+        pathname = rewrittenPathname;
+        requestPathname = rewrittenRequestPathname;
+      }
     }
 
-    for (const candidate of applicable) {
-      const { entry, routeMatch } = candidate;
+    for (const { entry, routeMatch, pathname, pathnames } of applicableMiddleware()) {
       const configMatch = entry.config
-        ? matchesPreparedMiddlewareConfig(initialPathname, entry.config, ctx)
+        ? matchesMiddlewareConfigAt(pathnames, entry.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
       }
+      ran.add(entry);
+      if (entry.config?.cache !== "public") guarded = true;
 
       if (parentData) {
         contextState = createWebMiddlewareContext(
@@ -708,6 +732,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
           parentData,
           options.server?.trustProxy === true,
           requestOptions.clientAddress,
+          toRoutePathname,
         );
         ctx = contextState.ctx;
       }
@@ -722,7 +747,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       const middlewareStartTime = Date.now();
       const middlewareEvent = {
         route: entry.path,
-        pathname: initialPathname,
+        pathname,
         name: entry.filePath,
       };
       emitFarmEvent({ type: "middleware.start", ...middlewareEvent });
@@ -748,6 +773,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
 
@@ -765,6 +791,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
 
@@ -795,6 +822,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
         if (isFarmNotFoundError(error)) {
@@ -806,6 +834,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
             notFound: true,
           };
         }
@@ -832,6 +861,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       context: new Map(ctx.locals),
       headers: mapToHeaders(contextState.headers),
       handled: false,
+      guarded,
     };
   };
 }
@@ -844,7 +874,6 @@ export function applyProductionMiddlewareHeaders(
     return response;
   }
 
-  const headers = new Headers(response.headers);
   const getSetCookie = (middlewareHeaders as Headers & { getSetCookie?: () => string[] })
     .getSetCookie;
   const setCookies = getSetCookie
@@ -852,21 +881,60 @@ export function applyProductionMiddlewareHeaders(
     : middlewareHeaders.get("set-cookie")
       ? [middlewareHeaders.get("set-cookie")!]
       : [];
-  for (const [key, value] of middlewareHeaders) {
-    if (key.toLowerCase() === "set-cookie") continue;
-    // A returned Response's headers are authoritative and preserved (matching
-    // the dev runtime, where the Response is applied after ctx.headers). ctx
-    // headers only add keys the Response did not already set.
-    if (headers.has(key)) continue;
-    headers.set(key, value);
-  }
-  for (const cookie of setCookies) {
-    headers.append("Set-Cookie", cookie);
-  }
+  return _withFarmResponseHeaders(response, (headers) => {
+    for (const [key, value] of middlewareHeaders) {
+      const name = key.toLowerCase();
+      if (name === "set-cookie") continue;
+      // Vary is a list a cache reads whole: a response varies on what middleware read as well as
+      // on what the page varies on (islands mode's F-Layouts), so both lists are kept.
+      if (name === "vary") {
+        // Header names are case-insensitive: keep the first spelling of each.
+        const values = new Map<string, string>();
+        for (const entry of [headers.get("vary"), value].flatMap((list) =>
+          list ? list.split(",") : [],
+        )) {
+          const field = entry.trim();
+          if (field && !values.has(field.toLowerCase())) values.set(field.toLowerCase(), field);
+        }
+        headers.set("Vary", Array.from(values.values()).join(", "));
+        continue;
+      }
+      // A returned Response's headers are authoritative and preserved (matching
+      // the dev runtime, where the Response is applied after ctx.headers). ctx
+      // headers only add keys the Response did not already set.
+      if (headers.has(key)) continue;
+      headers.set(key, value);
+    }
+    for (const cookie of setCookies) {
+      headers.append("Set-Cookie", cookie);
+    }
+  });
+}
 
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
+const PRIVATE_CACHE_DIRECTIVE = /(?:^|,)\s*(?:private|no-store)\s*(?:[,=]|$)/i;
+// Directives a CDN reads in place of Cache-Control (RFC 9213 and the platform names).
+const CDN_CACHE_CONTROL_HEADERS = [
+  "cdn-cache-control",
+  "vercel-cdn-cache-control",
+  "netlify-cdn-cache-control",
+  "cloudflare-cdn-cache-control",
+];
+
+/**
+ * Keep a response that middleware let through out of shared caches. A CDN keys its copy by URL
+ * and serves it without running the guard again, so a page an IP allowlist or API key header
+ * let one visitor read would reach everyone. A Cache-Control that a shared cache may store
+ * becomes `private, no-store`; a private one is left as it is.
+ *
+ * @internal
+ */
+export function _withFarmGuardedResponseCache(response: Response): Response {
+  const shareable = !PRIVATE_CACHE_DIRECTIVE.test(response.headers.get("cache-control") ?? "");
+  if (!shareable && !CDN_CACHE_CONTROL_HEADERS.some((name) => response.headers.has(name))) {
+    return response;
+  }
+  return _withFarmResponseHeaders(response, (headers) => {
+    if (shareable) headers.set("Cache-Control", "private, no-store");
+    for (const name of CDN_CACHE_CONTROL_HEADERS) headers.delete(name);
   });
 }

@@ -11,7 +11,11 @@ import type { ServerRenderer } from "../server/renderer";
 import { setEnv } from "../env";
 import { withFarmRouteContext } from "../route-context";
 import { createDeferredDataResponse } from "../deferred";
-import { searchParamsToObject } from "../search-params";
+import {
+  createFarmSearchParams,
+  searchParamsToObject,
+  type FarmSearchParams,
+} from "../search-params";
 import {
   createFarmDeploymentMismatchResponse,
   getFarmDeploymentMismatch,
@@ -29,7 +33,7 @@ import {
   createFarmPageDataRedirectResponse,
   getFarmPageDataRedirect,
 } from "../navigation/page-data-redirect";
-import { mergeMetadata } from "../metadata";
+import { mergeMetadata, mergeModuleViewport } from "../metadata";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
 // They are injected via Nitro hooks (ready hook) or set during build
@@ -171,7 +175,7 @@ async function defaultHandler({
 
       // Load route module to get metadata
       const routeModule = await rm.loadRouteModule(route.modulePath);
-      const loadingBoundary = rm.getMatchingLoading(targetPathname);
+      const loadingBoundary = rm.getMatchingLoading(targetPathname, route);
       const loadingModule = loadingBoundary
         ? await rm.loadRouteModule(loadingBoundary.modulePath)
         : null;
@@ -234,7 +238,7 @@ async function defaultHandler({
         props: withFarmRouteContext(
           {
             params,
-            searchParams: Promise.resolve(searchParams),
+            searchParams: createFarmSearchParams(searchParams),
             path: targetUrl.pathname,
           },
           routeContext,
@@ -256,6 +260,9 @@ async function defaultHandler({
             await (layoutModule as any).generateMetadata({ params: routeProps.params }),
           );
         }
+        mergedMetadata = await mergeModuleViewport(mergedMetadata, layoutModule, {
+          params: routeProps.params,
+        });
       }
       mergedMetadata = mergeMetadata(mergedMetadata, routeModule.metadata);
       if (typeof (routeModule as any).generateMetadata === "function") {
@@ -264,6 +271,7 @@ async function defaultHandler({
           await (routeModule as any).generateMetadata(routeProps),
         );
       }
+      mergedMetadata = await mergeModuleViewport(mergedMetadata, routeModule, routeProps);
 
       const renderPlan = createFarmRouteRenderPlan({
         pageShouldHydrate: shouldHydrate,
@@ -474,7 +482,7 @@ async function parseRouteModuleProps(
   input: {
     props: {
       params: Record<string, string>;
-      searchParams: Promise<Record<string, string | string[] | undefined>>;
+      searchParams: FarmSearchParams;
       path: string;
       [key: string]: unknown;
     };
@@ -507,7 +515,7 @@ async function parseRouteModuleProps(
     ...input.props,
     params,
     search,
-    searchParams: Promise.resolve(search as Record<string, string | string[] | undefined>),
+    searchParams: createFarmSearchParams(search as Record<string, string | string[] | undefined>),
   };
 }
 

@@ -101,6 +101,16 @@ export interface ResendIntegrationInput<TTemplates extends EmailTemplates = Emai
   allowUnauthenticated?: boolean;
   /** Extra trusted origins, using the `serverActions.allowedOrigins` syntax. */
   allowedOrigins?: readonly string[];
+  /**
+   * Let callers set `from`, `replyTo`, `cc`, `bcc`, `attachments`, `tags`, and
+   * `topicId` in the request body. Off by default: those come from the template
+   * and `defaults`, and a request that sets them is rejected, so a caller
+   * allowed to send one template cannot send it as someone else, copy it to
+   * extra recipients, or attach files (Resend fetches an attachment `path` URL).
+   * `to` is always the caller's, including an array of recipients: check it in
+   * `authorize`.
+   */
+  allowCallerHeaders?: boolean;
 }
 
 interface ResolvedResendConfig {
@@ -165,6 +175,34 @@ async function guardEmailRoute(
   if (input.allowUnauthenticated === true) return null;
 
   return Response.json({ error: MISSING_EMAIL_AUTHORIZE_ERROR }, { status: 401 });
+}
+
+const CALLER_HEADER_FIELDS = [
+  "from",
+  "replyTo",
+  "cc",
+  "bcc",
+  "attachments",
+  "tags",
+  "topicId",
+] as const;
+
+/** Refuse caller-supplied sender, copy, attachment, and tracking fields unless the app opted in. */
+function rejectCallerHeaders(
+  body: Record<string, unknown>,
+  input: { allowCallerHeaders?: boolean },
+): Response | null {
+  if (input.allowCallerHeaders === true) return null;
+  const fields = CALLER_HEADER_FIELDS.filter((field) => body[field] != null);
+  if (fields.length === 0) return null;
+  return Response.json(
+    {
+      error:
+        `Email request sets ${fields.join(", ")}, which come from the template and defaults. ` +
+        "Set `allowCallerHeaders: true` on the email integration to accept them from callers.",
+    },
+    { status: 400 },
+  );
 }
 
 async function readEmailRouteJson(request: Request): Promise<Record<string, unknown> | Response> {
@@ -397,6 +435,8 @@ export function resend<const TTemplates extends EmailTemplates>(
 
           const parsedBody = await readEmailRouteJson(request);
           if (parsedBody instanceof Response) return parsedBody;
+          const rejected = rejectCallerHeaders(parsedBody, input);
+          if (rejected) return rejected;
           const body = parsedBody as unknown as ResendEmailSendInput<TTemplates>;
           const resolved = await resolveTemplate(body.templateId);
 
@@ -440,7 +480,7 @@ export function resend<const TTemplates extends EmailTemplates>(
             return Response.json(
               {
                 error:
-                  "Resend email sending requires a from address. Configure defaults.from, RESEND_FROM_EMAIL, or pass body.from.",
+                  "Resend email sending requires a from address. Configure defaults.from, RESEND_FROM_EMAIL, or the template's from.",
               },
               {
                 status: 400,
@@ -507,6 +547,8 @@ export function resend<const TTemplates extends EmailTemplates>(
 
           const parsedBody = await readEmailRouteJson(request);
           if (parsedBody instanceof Response) return parsedBody;
+          const rejected = rejectCallerHeaders(parsedBody, input);
+          if (rejected) return rejected;
           const body = parsedBody as unknown as ResendEmailScheduleInput<TTemplates>;
           let when: string;
 
@@ -566,7 +608,7 @@ export function resend<const TTemplates extends EmailTemplates>(
             return Response.json(
               {
                 error:
-                  "Resend email scheduling requires a from address. Configure defaults.from, RESEND_FROM_EMAIL, or pass body.from.",
+                  "Resend email scheduling requires a from address. Configure defaults.from, RESEND_FROM_EMAIL, or the template's from.",
               },
               {
                 status: 400,

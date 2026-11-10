@@ -31,7 +31,7 @@ test.describe("Async server pages importing client components", () => {
 
   test("client components of an async page hydrate as islands", async ({ page }) => {
     await page.goto("/async-client-import");
-    const island = page.locator("farm-client-boundary[data-farm-client-boundary]");
+    const island = page.locator("f-island[src]");
     await expect(island).toHaveCount(1);
     await expect(island).toHaveAttribute("data-farm-hydrated", "true");
 

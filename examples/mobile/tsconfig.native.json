@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "customConditions": ["react-native"]
+  },
+  "include": [
+    "src/**/*.native.tsx",
+    "src/**/*.android.tsx",
+    "src/**/*.ios.tsx",
+    "src/native/**/*"
+  ],
+  "exclude": []
+}

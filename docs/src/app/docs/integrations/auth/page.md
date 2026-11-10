@@ -120,7 +120,8 @@ auth0({
 
 When a signed-out request matches, the provider integration redirects it to the configured sign-in route and keeps the current path as a return target. A session or profile endpoint can still return `401` when called directly.
 
-`protectedRoutes` uses the same [matcher syntax](/docs/middleware#matcher-syntax) as Farm middleware and is compared against the pathname the router resolves the request to, so an encoded spelling such as `/%64ashboard` is gated exactly like `/dashboard`.
+`protectedRoutes` uses the same [matcher syntax](/docs/middleware#matcher-syntax) as Farm middleware and is compared against the pathname the router resolves the request to, so an encoded spelling such as `/%64ashboard`, a locale prefix such as `/fr/dashboard`, and a
+`basePath` prefix are gated exactly like `/dashboard`.
 
 Auth.js and Better Auth only mount their provider handlers. Protect application pages with the provider's server helper or with your own [Farm middleware](/docs/middleware).
 
@@ -131,6 +132,15 @@ Auth.js and Better Auth only mount their provider handlers. Protect application 
 - Set `APP_BASE_URL` for Auth0 or Supabase when the public production origin cannot be inferred from the incoming request.
 - Register the same absolute callback URL in the provider dashboard.
 - `returnTo` values are intentionally limited to root-relative app paths. External URLs are ignored.
+
+## Mobile apps
+
+In a [mobile app](/docs/mobile), native screens sign in with device tokens issued from the web
+session. That needs the integration to read sessions: `@farm.js/better-auth` and Farm's built-in
+`auth` do; Auth0, Auth.js, WorkOS, Supabase, and Clerk do not yet, so their native screens stay
+signed out while web screens work as usual. A custom integration opts in with a
+`session(request)` reader that returns `{ id, userId?, expiresAt? }` or `null`. See
+[Authentication on mobile](/docs/auth#mobile-apps).
 
 ## Production checklist
 

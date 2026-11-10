@@ -2,6 +2,8 @@
 // the requests between them) rather than repeating the code blocks next to them. Each script is a
 // pure function of time: the server renders its final frame and the client player replays it.
 
+import { siExpress, siFastify, siHono, siNestjs } from "simple-icons";
+
 export type FigureKind =
   | "integration"
   | "agents"
@@ -19,7 +21,13 @@ export type FigureKind =
   | "agents-site"
   | "agents-observe"
   | "landing-markdown"
-  | "landing-strata";
+  | "landing-strata"
+  | "landing-backends"
+  | "landing-mobile"
+  | "agent-layers"
+  | "agent-authorize"
+  | "ast-native"
+  | "mobile-arch";
 export type IconKey =
   | "stripe"
   | "cloudflare"
@@ -31,7 +39,10 @@ export type IconKey =
   | "relay"
   | "chat"
   | "tool"
-  | "page";
+  | "page"
+  | "globe"
+  | "react"
+  | "sheet";
 
 export interface WireFrame {
   /** 0..1 how much of the connector is drawn. */
@@ -1661,6 +1672,338 @@ const landingStrata: FigureSpec = {
   },
 };
 
+/* ---------- landing 02.9: one API route, the backend you already have behind it ---------- */
+
+/** A filled brand mark in the same tile as the line glyphs. */
+const markGlyph = (path: string) =>
+  `<span class="bf-item-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="${path}"/></svg></span>`;
+const BACKEND_MARKS = {
+  hono: markGlyph(siHono.path),
+  express: markGlyph(siExpress.path),
+  fastify: markGlyph(siFastify.path),
+  nest: markGlyph(siNestjs.path),
+  // Elysia has no published mark in simple-icons; a code glyph stands in rather than a guess.
+  code: glyph("m16 18 6-6-6-6", "m8 6-6 6 6 6"),
+  swap: G.swap,
+  server: G.server,
+};
+type BackendSide = "fetch" | "node";
+const BACKENDS: Record<BackendSide, [keyof typeof BACKEND_MARKS, string, string][]> = {
+  fetch: [
+    ["hono", "Hono", "app.fetch"],
+    ["code", "Elysia", "app.fetch"],
+    // The last row of each side is the catch-all: anything with the same calling convention.
+    ["swap", "Any fetch app", "(request) =&gt; Response"],
+  ],
+  node: [
+    ["express", "Express", "app"],
+    ["fastify", "Fastify", "server.emit"],
+    ["nest", "NestJS", "getInstance()"],
+    ["server", "Any Node app", "(req, res) listener"],
+  ],
+};
+// Requests alternate between the two helpers until every mounted app has answered once.
+const BACKEND_REQUESTS: [BackendSide, number][] = [
+  ["fetch", 0],
+  ["node", 0],
+  ["fetch", 1],
+  ["node", 1],
+  ["node", 2],
+  ["fetch", 2],
+  ["node", 3],
+];
+const BACKEND_GAP = 0.62;
+const BACKEND_START = 0.9;
+const BACKEND_RUN = 0.5;
+const landingBackends: FigureSpec = {
+  duration:
+    BACKEND_START + (BACKEND_REQUESTS.length - 1) * BACKEND_GAP + PULSE + BACKEND_RUN + HOLD,
+  stage: { w: 440, h: 300 },
+  label:
+    "Requests to one Farm API route reach the app mounted behind it: any app with a fetch handler, such as Hono or Elysia, through mountFetchHandler, and any Node.js app, such as Express, Fastify, or NestJS, through mountNodeHandler",
+  panels: [
+    {
+      id: "route",
+      x: 110,
+      y: 0,
+      w: 220,
+      h: 44,
+      flow: true,
+      icon: "farm",
+      kicker: "One API route",
+      label: "/api/[...path]",
+    },
+    { id: "fetch", x: 0, y: 76, w: 205, h: 224, title: "Fetch" },
+    { id: "node", x: 235, y: 76, w: 205, h: 224, title: "Node" },
+  ],
+  wires: {
+    fetch: [
+      [190, 44],
+      [190, 60],
+      [102, 60],
+      [102, 76],
+    ],
+    node: [
+      [250, 44],
+      [250, 60],
+      [337, 60],
+      [337, 76],
+    ],
+  },
+  frame(t) {
+    const sent = BACKEND_REQUESTS.map((_, i) => BACKEND_START + i * BACKEND_GAP);
+    const landed = sent.map((at) => at + PULSE);
+    const answered = landed.map((at) => at + BACKEND_RUN);
+    const side = (name: BackendSide) =>
+      BACKENDS[name]
+        .map(([mark, label, sub], index) => {
+          const request = BACKEND_REQUESTS.findIndex(([s, i]) => s === name && i === index);
+          const arrive = landed[request];
+          const done = answered[request];
+          const status = step(t, arrive, done);
+          const cls = t >= arrive && t < done ? "bf-von" : t < arrive ? "bf-item--wait" : "";
+          return `<span class="bf-item${cls ? ` ${cls}` : ""}">${BACKEND_MARKS[mark]}<span class="bf-item-text"><span class="bf-item-name">${label}</span><span class="bf-item-sub">${sub}</span></span>${t >= done ? '<span class="bf-item-meta">200</span>' : ""}<span class="bf-item-state">${status}</span></span>`;
+        })
+        .join("");
+    const pulses = (name: BackendSide) =>
+      sent.filter((_, i) => BACKEND_REQUESTS[i][0] === name).map((at): [number] => [at]);
+    const hot = (name: BackendSide) =>
+      BACKEND_REQUESTS.some(([s], i) => s === name && t >= landed[i] && t < answered[i])
+        ? ("hot" as const)
+        : undefined;
+    return {
+      slots: {
+        route: step(t, sent[0], answered[answered.length - 1]),
+        fetch: side("fetch"),
+        "fetch:meta": "mountFetchHandler",
+        node: side("node"),
+        "node:meta": "mountNodeHandler",
+      },
+      wires: {
+        fetch: wire(t, 0.1, pulses("fetch")),
+        node: wire(t, 0.2, pulses("node")),
+      },
+      states: {
+        route: busy(t, sent[0], landed[landed.length - 1]),
+        fetch: hot("fetch"),
+        node: hot("node"),
+      },
+    };
+  },
+};
+
+/* ---------- landing 02.10: the same pages, on the phone, in a native frame ---------- */
+
+type MobileScreen = {
+  id: string;
+  icon: IconKey;
+  kicker: string;
+  route: string;
+  kind: string;
+  tab: number;
+};
+const MOBILE_SCREENS: MobileScreen[] = [
+  { id: "web", icon: "globe", kicker: "Web screen", route: "/notes", kind: "WebView", tab: 0 },
+  {
+    id: "native",
+    icon: "phone",
+    kicker: "Native screen",
+    route: "/notes/[id]",
+    kind: "Native views",
+    tab: 0,
+  },
+  { id: "rn", icon: "react", kicker: "React Native", route: "/map", kind: "React Native", tab: 1 },
+  { id: "modal", icon: "sheet", kicker: "Modal sheet", route: "/notes/new", kind: "Sheet", tab: 0 },
+];
+const MOBILE_LANE = (i: number) => i * 92; // top of each route pill
+const MOBILE_HUB = 176; // where the four connectors meet the phone
+// The route pills are only as wide as their text; with the phone they sit centred on the stage.
+const MOBILE_PILL_X = 8;
+const MOBILE_PILL_W = 130;
+const MOBILE_PHONE_X = 182;
+const MOBILE_PHONE_W = 250;
+const MOBILE_H = 340;
+const MOBILE_JOIN_X = (MOBILE_PILL_X + MOBILE_PILL_W + MOBILE_PHONE_X) / 2;
+const MOBILE_START = 0.6;
+const MOBILE_STEP = 1.5;
+/** Rectangles (x, y, w, h in % of the screen) that sketch each screen's content. */
+const SCREEN_BLOCKS: Record<string, [number, number, number, number][]> = {
+  web: [
+    [6, 3, 88, 13],
+    [6, 19, 88, 13],
+    [6, 35, 88, 13],
+    [6, 51, 88, 13],
+  ],
+  native: [
+    [16, 3, 50, 7],
+    [6, 14, 88, 3],
+    [6, 20, 80, 3],
+    [6, 26, 86, 3],
+    [6, 32, 52, 3],
+    [6, 40, 88, 30],
+  ],
+  rn: [[0, 0, 100, 84]],
+  modal: [],
+};
+const block = ([x, y, w, h]: [number, number, number, number], opacity: number, cls = "", dx = 0) =>
+  `<span class="bf-vblock${cls ? ` ${cls}` : ""}" style="left:${(x + dx).toFixed(2)}%;top:${y}%;width:${w}%;height:${h}%;opacity:${opacity.toFixed(3)}"></span>`;
+/** A back chevron in a pushed screen's header. */
+const backChevron = (opacity: number, dx: number) =>
+  `<span class="bf-vback" style="left:${(4 + dx).toFixed(2)}%;opacity:${opacity.toFixed(3)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></span>`;
+const road = ([x, y, w, h]: [number, number, number, number], opacity: number) =>
+  `<span class="bf-vroad" style="left:${x}%;top:${y}%;width:${w}%;height:${h}%;opacity:${opacity.toFixed(3)}"></span>`;
+const lerp = (from: number, to: number, amount: number) => from + (to - from) * amount;
+/** One screen, drawn as a layer that can slide (x, in % of its width) and fade as a unit. */
+const layer = (content: string, x: number, opacity: number, cls = "") =>
+  `<span class="bf-vlayer${cls}" style="transform:translateX(${x.toFixed(2)}%);opacity:${clamp(opacity).toFixed(3)}">${content}</span>`;
+/** A screen's content, `since` seconds after it opened (its own small entrance plays inside). */
+function screenContent(id: string, since: number) {
+  const content = SCREEN_BLOCKS[id];
+  if (id === "native") {
+    return backChevron(1, 0) + content.map((rect) => block(rect, 1)).join("");
+  }
+  let html = content
+    .map((rect, i) => block(rect, (id === "modal" ? 0.35 : 1) * ease(prog(since, i * 0.08, 0.3))))
+    .join("");
+  if (id === "rn") {
+    // Two streets cross the map, then a pin drops onto it.
+    const streets = ease(prog(since, 0.15, 0.3));
+    html += road([0, 56, 100, 1.2], streets) + road([30, 0, 1.8, 84], streets);
+    const drop = ease(prog(since, 0.4, 0.35));
+    html += `<span class="bf-vpin" style="left:50%;top:${(26 + 8 * drop).toFixed(2)}%;opacity:${drop.toFixed(3)}"></span>`;
+  }
+  return html;
+}
+/** The native frame's tab bar: two tabs and a highlight at `at` (0 is the first tab). */
+const tabBar = (at: number, opacity: number) =>
+  [0, 1].map((tab) => block([8 + tab * 46, 89, 38, 8], opacity)).join("") +
+  block([8 + at * 46, 89, 38, 8], opacity, "bf-vblock--tab");
+/** The new-note sheet: risen `since` seconds after opening, then lowered by `away` (0 to 1). */
+function sheet(since: number, away: number) {
+  const top = 100 - 72 * ease(prog(since, 0.05, 0.55)) * (1 - away);
+  const form = (
+    [
+      [8, 13, 46, 6],
+      [8, 25, 84, 12],
+      [8, 42, 84, 30],
+    ] as [number, number, number, number][]
+  )
+    .map((rect, i) => block(rect, ease(prog(since, 0.45 + i * 0.08, 0.3))))
+    .join("");
+  const save = block([8, 79, 38, 10], ease(prog(since, 0.7, 0.3)), "bf-vblock--tab");
+  return `<span class="bf-vblock bf-vsheet" style="left:0%;top:${top.toFixed(2)}%;width:100%;height:72%"><span class="bf-vgrip"></span>${form}${save}</span>`;
+}
+const landingMobile: FigureSpec = {
+  duration: MOBILE_START + (MOBILE_SCREENS.length - 1) * MOBILE_STEP + PULSE + 0.9 + HOLD,
+  stage: { w: 440, h: MOBILE_H },
+  label:
+    "Four routes of one Farm app open on a phone inside a native frame with tabs: a web screen, a natively drawn screen, a React Native screen, and a modal sheet",
+  panels: [
+    ...MOBILE_SCREENS.map((screen, i) => ({
+      id: screen.id,
+      x: MOBILE_PILL_X,
+      y: MOBILE_LANE(i) + 16,
+      w: MOBILE_PILL_W,
+      h: 44,
+      flow: true,
+      icon: screen.icon,
+      kicker: screen.kicker,
+      label: screen.route,
+    })),
+    { id: "phone", x: MOBILE_PHONE_X, y: 0, w: MOBILE_PHONE_W, h: MOBILE_H, title: "Phone" },
+  ],
+  wires: Object.fromEntries(
+    MOBILE_SCREENS.map((screen, i): [string, [number, number][]] => {
+      const y = MOBILE_LANE(i) + 38;
+      return [
+        `to-${screen.id}`,
+        [
+          [MOBILE_PILL_X + MOBILE_PILL_W, y],
+          [MOBILE_JOIN_X, y],
+          [MOBILE_JOIN_X, MOBILE_HUB],
+          [MOBILE_PHONE_X, MOBILE_HUB],
+        ],
+      ];
+    }),
+  ),
+  frame(t) {
+    const tapped = MOBILE_SCREENS.map((_, i) => MOBILE_START + i * MOBILE_STEP);
+    const opened = tapped.map((at) => at + PULSE);
+    // The screen on the phone: the last one whose pulse has landed.
+    let current = -1;
+    opened.forEach((at, i) => {
+      if (t >= at) current = i;
+    });
+    const screen = MOBILE_SCREENS[current];
+    const since = current >= 0 ? t - opened[current] : 0;
+    // How far the change to the current screen has come; the outgoing screen leaves on the same
+    // clock, so no transition is ever cut halfway.
+    const change = ease(prog(since, 0, 0.45));
+    const last = MOBILE_SCREENS[MOBILE_SCREENS.length - 1];
+    let phone = "";
+    if (screen) {
+      const previous = MOBILE_SCREENS[current - 1];
+      if (previous && change < 1) {
+        // A push moves the screen underneath a third of the way left, as a native stack does;
+        // anything else crossfades.
+        const pushed = screen.id === "native";
+        phone += layer(
+          screenContent(previous.id, 9),
+          pushed ? -30 * change : 0,
+          pushed ? 1 - 0.65 * change : 1 - change,
+        );
+      }
+      const pushed = screen.id === "native";
+      const modal = screen.id === "modal";
+      if (modal && previous) {
+        // A modal is presented over the screen it was opened from, which stays and dims.
+        phone = layer(screenContent(previous.id, 9), 0, lerp(1, 0.35, change));
+        phone += tabBar(previous.tab, lerp(1, 0.35, change));
+        phone += sheet(since, 0);
+      } else {
+        phone += layer(
+          screenContent(screen.id, since),
+          pushed ? 100 * (1 - change) : 0,
+          pushed ? 1 : ease(prog(since, 0, 0.25)),
+          pushed && change < 1 ? " bf-vlayer--edge" : "",
+        );
+        // The native frame's tab bar; its highlight slides to the current tab.
+        const fromTab = previous ? previous.tab : screen.tab;
+        phone += tabBar(lerp(fromTab, screen.tab, ease(prog(since, 0, 0.35))), 1);
+      }
+    } else {
+      // The loop opens where it ended: the sheet slides back down and the screen under it clears,
+      // so restarting never jumps.
+      const away = ease(prog(t, 0, 0.45));
+      const clear = 1 - ease(prog(t, 0.25, 0.3));
+      const under = MOBILE_SCREENS[MOBILE_SCREENS.length - 2];
+      phone += layer(screenContent(under.id, 9), 0, lerp(0.35, 1, away) * clear);
+      phone += tabBar(under.tab, lerp(0.35, 1, away) * clear);
+      if (away < 1) phone += sheet(9, away);
+    }
+    // The header types the route as its screen opens; at the restart it fades with the sheet.
+    const route = screen ? screen.route : last.route;
+    const typing = screen && since < 0.05 + route.length / 28 + 0.2;
+    const meta = screen
+      ? `${esc(typed(route, since, 0.05, 28))}${typing ? caret : ""}`
+      : `<span style="opacity:${(1 - ease(prog(t, 0, 0.3))).toFixed(3)}">${esc(route)}</span>`;
+    const slots: Record<string, string> = {
+      phone: `<span class="bf-vprev bf-vphone">${phone}</span>`,
+      "phone:meta": meta,
+    };
+    const states: Record<string, PanelState | undefined> = {
+      phone: current >= 0 && since < 0.6 ? "hot" : undefined,
+    };
+    const wires: Record<string, WireFrame> = {};
+    MOBILE_SCREENS.forEach((s, i) => {
+      slots[s.id] = step(t, tapped[i], opened[i] + 0.3);
+      states[s.id] = busy(t, tapped[i], opened[i] + 0.3);
+      wires[`to-${s.id}`] = wire(t, 0.1 + i * 0.08, [[tapped[i]]], current >= 0 && current !== i);
+    });
+    return { slots, wires, states };
+  },
+};
+
 /* ---------- phone layouts: the same panels and connectors in one column (post figures only) ---------- */
 // Stages are 360 units wide, so type renders near its desktop size on a phone instead of shrinking.
 
@@ -1776,6 +2119,434 @@ agentsCode.narrow = {
   },
 };
 
+/* ---------- agent-native post: the four layers, and who a tool call runs as ---------- */
+
+// One request, both halves of the answer: what an agent can read, and what it can call. Lines
+// stream in as each pulse lands, so the card shows the exchange rather than a list of features.
+const READ_LINES: [string, string][] = [
+  ["bf-dim", "200 text/markdown"],
+  ["bf-hi", "# Pricing"],
+  ["", "- Hobby: free"],
+  ["", "- Pro: $20 / month"],
+];
+const ACT_LINES: [string, string][] = [
+  ["bf-dim", "tools/list -> 2 tools"],
+  ["bf-hi", "create_project"],
+  ["", 'name: "Invoice redesign"'],
+  ["bf-dim", "201 project-3"],
+];
+const agentLayers: FigureSpec = {
+  duration: 0.5 + BEAT * 0.6 + PULSE + 4 * 0.3 + 0.6 + HOLD,
+  stage: { w: 440, h: 258 },
+  label:
+    "One origin answers an agent twice: the page as Markdown it can read, and a typed tool it can call",
+  panels: [
+    {
+      id: "agent",
+      x: 120,
+      y: 0,
+      w: 200,
+      h: 48,
+      flow: true,
+      icon: "agent",
+      kicker: "Agent",
+      label: "acme.test",
+    },
+    { id: "read", x: 0, y: 96, w: 205, h: 162, title: "Reads" },
+    { id: "act", x: 235, y: 96, w: 205, h: 162, title: "Calls" },
+  ],
+  wires: {
+    read: [
+      [170, 48],
+      [170, 72],
+      [102, 72],
+      [102, 96],
+    ],
+    act: [
+      [270, 48],
+      [270, 72],
+      [337, 72],
+      [337, 96],
+    ],
+  },
+  frame(t) {
+    const asked = 0.5;
+    const acted = asked + BEAT * 0.6;
+    const readAt = asked + PULSE;
+    const actAt = acted + PULSE;
+    const stream = (lines: [string, string][], at: number) =>
+      lines
+        .map(
+          ([cls, text], i) =>
+            `<span class="bf-line${cls ? ` ${cls}` : ""}" style="opacity:${ease(
+              prog(t, at + i * 0.3, 0.3),
+            ).toFixed(3)}">${esc(text)}</span>`,
+        )
+        .join("");
+    const settled = actAt + ACT_LINES.length * 0.3;
+    return {
+      slots: {
+        agent: step(t, 0.2, settled),
+        read: stream(READ_LINES, readAt),
+        "read:meta": t >= readAt ? "/pricing.md" : "",
+        act: stream(ACT_LINES, actAt),
+        "act:meta": t >= actAt ? "/api/mcp" : "",
+      },
+      wires: {
+        read: wire(t, 0.1, [[asked]]),
+        act: wire(t, 0.2, [[acted]]),
+      },
+      states: {
+        agent: busy(t, 0.2, acted),
+        read: busy(t, readAt, readAt + READ_LINES.length * 0.3),
+        act: busy(t, actAt, settled),
+      },
+    };
+  },
+};
+
+// The same tools/call, from two callers, through the one pipeline the HTTP route already had.
+// The reader never reaches the handler: its catalog does not contain the tool.
+const CALL_STEPS: [GlyphKey, string, string][] = [
+  ["swap", "authorize", "per-caller catalog"],
+  ["server", "middleware", "the route's own"],
+  ["file", "schema", "the route's zod"],
+  ["model", "handler", "creates the project"],
+];
+const READER_RESULTS = ["not found", "", "", ""];
+const WRITER_RESULTS = ["2 tools", "demo-writer", "valid", "project-3"];
+const agentAuthorize: FigureSpec = {
+  duration: 0.6 + PULSE + CALL_STEPS.length * BEAT + HOLD,
+  label:
+    "One tools/call for create_project: the reader is refused at authorization, and the writer runs the route's own middleware, schema, and handler",
+  panels: [
+    {
+      id: "call",
+      x: 205,
+      y: 0,
+      w: 350,
+      h: 48,
+      flow: true,
+      icon: "tool",
+      kicker: "tools/call",
+      label: "create_project",
+    },
+    { id: "reader", x: 0, y: 112, w: 365, h: 288, title: "Bearer demo-reader" },
+    { id: "writer", x: 395, y: 112, w: 365, h: 288, title: "Bearer demo-writer" },
+  ],
+  wires: {
+    read: [
+      [330, 48],
+      [330, 80],
+      [182, 80],
+      [182, 112],
+    ],
+    write: [
+      [430, 48],
+      [430, 80],
+      [577, 80],
+      [577, 112],
+    ],
+  },
+  frame(t) {
+    const sent = 0.6;
+    const begin = sent + PULSE;
+    // The reader is stopped by the first step, so only that row ever runs.
+    const rows = (results: string[], stops: boolean) =>
+      CALL_STEPS.map(([icon, name, sub], i) => {
+        const start = begin + i * BEAT;
+        const end = start + BEAT * 0.75;
+        const blocked = stops && i > 0;
+        const finished = t >= end;
+        const last = i === CALL_STEPS.length - 1;
+        if (blocked)
+          return row(icon, name, esc(sub), "", '<span class="bf-st"></span>', "bf-item--wait");
+        const status = stops
+          ? t >= end
+            ? '<span class="bf-st bf-st--no">✕</span>'
+            : step(t, start, end)
+          : step(t, start, end);
+        return row(
+          icon,
+          name,
+          esc(sub),
+          finished ? results[i] : "",
+          status,
+          t >= start && (!finished || last) ? "bf-von" : t < start ? "bf-item--wait" : "",
+        );
+      }).join("");
+    const settled = begin + CALL_STEPS.length * BEAT;
+    return {
+      slots: {
+        call: step(t, 0.2, settled),
+        reader: rows(READER_RESULTS, true),
+        "reader:meta": t >= begin + BEAT * 0.75 ? "refused" : "",
+        writer: rows(WRITER_RESULTS, false),
+        "writer:meta": t >= settled ? "created" : "",
+      },
+      wires: {
+        read: wire(t, 0.1, [[sent]]),
+        write: wire(t, 0.2, [[sent]]),
+      },
+      states: {
+        call: busy(t, 0.2, sent),
+        reader: busy(t, begin, begin + BEAT * 0.75),
+        writer: busy(t, begin, settled),
+      },
+    };
+  },
+};
+
+/* ---------- the mobile analyzer: which tier a screen gets ---------- */
+
+// Each row maps a web element to its native view, or flags one that cannot port.
+// The rows fade in as the pulse lands, so a reader watches the analyzer sort the page.
+const AST_PORTS: [string, string][] = [
+  ["div", "View"],
+  ["img", "Image"],
+  ["input", "TextInput"],
+  ["ul", "List"],
+];
+const AST_BLOCKS = ["canvas", "iframe", "window", "arbitrary CSS"];
+const astRow = (a: string, b: string | null, t: number, at: number) =>
+  t < at
+    ? ""
+    : `<span style="display:flex;justify-content:space-between;gap:0.6em;opacity:${ease(
+        prog(t, at, 0.3),
+      ).toFixed(2)}"><span>${a}</span><span style="color:${b ? "#8fb8a0" : "#9a9a9a"}">${
+        b ? `&rarr; ${b}` : "&#x2715;"
+      }</span></span>`;
+const AST = { fork: 1.15, merge: 3.0, out: 3.9 };
+
+const astNative: FigureSpec = {
+  duration: 6.1,
+  stage: { w: 1010, h: 560 },
+  label:
+    "The analyzer maps each element to a native view, flags what it cannot, and picks a tier per screen: native if it needs no JavaScript, react-native if it needs the device, web if anything blocks",
+  panels: [
+    { id: "page", x: 24, y: 234, w: 140, h: 92, title: "page.tsx" },
+    { id: "analyze", x: 212, y: 234, w: 152, h: 92, title: "Analyze" },
+    { id: "ports", x: 412, y: 80, w: 214, h: 140, title: "Maps to native" },
+    { id: "blocks", x: 412, y: 340, w: 214, h: 140, title: "Cannot port" },
+    { id: "decide", x: 672, y: 234, w: 150, h: 92, title: "Decide" },
+    { id: "native", x: 870, y: 84, w: 140, h: 88, title: "native" },
+    { id: "rn", x: 870, y: 236, w: 140, h: 88, title: "react-native" },
+    { id: "web", x: 870, y: 388, w: 140, h: 88, title: "web" },
+  ],
+  wires: {
+    pa: [
+      [164, 280],
+      [212, 280],
+    ],
+    ap: [
+      [364, 280],
+      [388, 280],
+      [388, 150],
+      [412, 150],
+    ],
+    ab: [
+      [364, 280],
+      [388, 280],
+      [388, 410],
+      [412, 410],
+    ],
+    pd: [
+      [626, 150],
+      [648, 150],
+      [648, 280],
+      [672, 280],
+    ],
+    bd: [
+      [626, 410],
+      [648, 410],
+      [648, 280],
+      [672, 280],
+    ],
+    dn: [
+      [822, 280],
+      [846, 280],
+      [846, 128],
+      [870, 128],
+    ],
+    dr: [
+      [822, 280],
+      [870, 280],
+    ],
+    dw: [
+      [822, 280],
+      [846, 280],
+      [846, 432],
+      [870, 432],
+    ],
+  },
+  frame: (t) => {
+    const arrive = AST.fork + PULSE;
+    const hot = (at: number): PanelState | undefined =>
+      t >= at + PULSE && t < at + PULSE + 0.5 ? "hot" : undefined;
+    const examining = t >= arrive && t < AST.merge ? ("hot" as PanelState) : undefined;
+    return {
+      slots: {
+        page: "your web page",
+        analyze: "Oxc &rarr; AST",
+        ports: AST_PORTS.map(([a, b], i) => astRow(a, b, t, arrive + i * 0.22)).join(""),
+        blocks: AST_BLOCKS.map((a, i) => astRow(a, null, t, arrive + i * 0.22)).join(""),
+        decide: "needs JS? blocked?",
+        native: "server-rendered, no JS",
+        rn: "runs on the device",
+        web: "a WebView",
+      },
+      wires: {
+        pa: wire(t, 0.1, [[0.35]]),
+        ap: wire(t, AST.fork - 0.3, [[AST.fork]]),
+        ab: wire(t, AST.fork - 0.3, [[AST.fork]]),
+        pd: wire(t, AST.merge - 0.3, [[AST.merge]]),
+        bd: wire(t, AST.merge - 0.3, [[AST.merge]]),
+        dn: wire(t, AST.out - 0.2, [[AST.out]]),
+        dr: wire(t, AST.out - 0.2, [[AST.out + 0.12]]),
+        dw: wire(t, AST.out - 0.2, [[AST.out + 0.24]]),
+      },
+      states: {
+        page: hot(0),
+        analyze: hot(0.35),
+        ports: examining,
+        blocks: examining,
+        decide: hot(AST.merge),
+        native: hot(AST.out),
+        rn: hot(AST.out + 0.12),
+        web: hot(AST.out + 0.24),
+      },
+    };
+  },
+};
+
+// A runtime companion to ast-native: how a screen actually runs on the device. The navigator picks
+// one of three screen kinds by route; a web screen is a WebView that reaches the one backend over
+// the origin-scoped bridge; the device-capability channel is drawn but ships nothing yet.
+const MA = { tap: 0.3, fork: 1.2, web: 2.2, back: 2.9, srv: 3.7, fn: 4.5, ret: 5.3 };
+/** A body line that fades in once t passes `at`; each is its own block so lines stack. */
+const maSub = (s: string, t: number, at: number, color = "#c6c6c6") =>
+  t < at
+    ? ""
+    : `<span style="display:block;opacity:${ease(prog(t, at, 0.3)).toFixed(
+        2,
+      )};color:${color}">${s}</span>`;
+
+const mobileArch: FigureSpec = {
+  duration: 7,
+  stage: { w: 1020, h: 600 },
+  label:
+    "A screen on the device: the native navigator picks one of four screen kinds by route, and every kind is served by your one backend — a web screen through the origin-scoped bridge, a server screen by fetching the page's rendered tree, and a React Native screen by calling the server functions it imports",
+  panels: [
+    { id: "tap", x: 24, y: 252, w: 150, h: 96, title: "A tap" },
+    { id: "nav", x: 214, y: 252, w: 176, h: 96, title: "Navigator" },
+    { id: "web", x: 440, y: 24, w: 188, h: 96, title: "Web screen" },
+    { id: "srv", x: 440, y: 168, w: 188, h: 96, title: "Server screen" },
+    { id: "native", x: 440, y: 312, w: 188, h: 96, title: "React Native" },
+    { id: "plat", x: 440, y: 456, w: 188, h: 96, title: "page.kt · page.swift" },
+    { id: "bridge", x: 676, y: 24, w: 180, h: 96, title: "__farmBridge" },
+    { id: "server", x: 880, y: 144, w: 140, h: 240, title: "mobile.server" },
+  ],
+  wires: {
+    tn: [
+      [174, 300],
+      [214, 300],
+    ],
+    nw: [
+      [390, 300],
+      [415, 300],
+      [415, 72],
+      [440, 72],
+    ],
+    ns: [
+      [390, 300],
+      [415, 300],
+      [415, 216],
+      [440, 216],
+    ],
+    nn: [
+      [390, 300],
+      [415, 300],
+      [415, 360],
+      [440, 360],
+    ],
+    np: [
+      [390, 300],
+      [415, 300],
+      [415, 504],
+      [440, 504],
+    ],
+    wb: [
+      [628, 72],
+      [676, 72],
+    ],
+    bs: [
+      [856, 72],
+      [868, 72],
+      [868, 180],
+      [880, 180],
+    ],
+    sv: [
+      [628, 216],
+      [880, 216],
+    ],
+    fn: [
+      [628, 360],
+      [880, 360],
+    ],
+  },
+  frame: (t) => {
+    const hot = (a: number, b: number): PanelState | undefined =>
+      t >= a && t < b ? "hot" : undefined;
+    const dim = (at: number): PanelState | undefined => (t >= at ? "dim" : undefined);
+    return {
+      slots: {
+        tap: maSub("Link · navigateTo", t, 0),
+        nav:
+          maSub("routes &rarr; one screen", t, MA.tap) +
+          maSub("farm-routes.json", t, MA.tap + 0.15, "#7a7a7a"),
+        web: maSub("a WebView", t, MA.fork) + maSub("ships today", t, MA.fork + 0.15, "#8fb8a0"),
+        srv:
+          maSub("server-rendered views", t, MA.fork + 0.12) +
+          maSub("Android views · UIKit", t, MA.fork + 0.27, "#8fb8a0"),
+        native:
+          maSub("Hermes · JSI · modules", t, MA.fork + 0.24) +
+          maSub("Android today", t, MA.fork + 0.39, "#c9a77a"),
+        plat:
+          maSub("fully native", t, MA.fork + 0.36) +
+          maSub("placeholder &mdash; not built", t, MA.fork + 0.51, "#9a9a9a"),
+        bridge:
+          maSub("origin-scoped", t, MA.web) +
+          maSub("nav · call · opt-in modules", t, MA.web + 0.15, "#7a7a7a"),
+        server:
+          maSub("SSR · auth · data", t, MA.back) +
+          maSub("the rendered tree", t, MA.srv, "#8fb8a0") +
+          maSub("api/__farm/native/fn", t, MA.fn, "#7a7a7a"),
+      },
+      wires: {
+        tn: wire(t, 0.05, [[MA.tap]]),
+        nw: wire(t, MA.fork - 0.3, [[MA.fork]]),
+        ns: wire(t, MA.fork - 0.3, [[MA.fork + 0.12]]),
+        nn: wire(t, MA.fork - 0.3, [[MA.fork + 0.24]]),
+        np: wire(t, MA.fork - 0.3, [[MA.fork + 0.36]]),
+        wb: wire(t, MA.web - 0.3, [[MA.web]]),
+        bs: wire(t, MA.back - 0.3, [[MA.back], [MA.ret, false]]),
+        sv: wire(t, MA.srv - 0.3, [[MA.srv]]),
+        fn: wire(t, MA.fn - 0.3, [[MA.fn]]),
+      },
+      states: {
+        tap: hot(0, MA.tap + PULSE),
+        nav: hot(MA.tap + PULSE, MA.fork + PULSE),
+        web: hot(MA.web - 0.1, MA.back + PULSE),
+        srv: hot(MA.srv - 0.1, MA.srv + PULSE + 0.45),
+        native: hot(MA.fn - 0.1, MA.fn + PULSE + 0.45),
+        plat: dim(MA.fork + 0.36 + PULSE),
+        bridge: hot(MA.web + PULSE, MA.back + PULSE),
+        server: hot(MA.back, MA.ret + PULSE),
+      },
+    };
+  },
+};
+
 export const FIGURES: Record<FigureKind, FigureSpec> = {
   integration,
   agents,
@@ -1794,6 +2565,42 @@ export const FIGURES: Record<FigureKind, FigureSpec> = {
   "agents-observe": agentsObserve,
   "landing-markdown": landingMarkdown,
   "landing-strata": landingStrata,
+  "landing-backends": landingBackends,
+  "landing-mobile": landingMobile,
+  "agent-layers": agentLayers,
+  "agent-authorize": agentAuthorize,
+  "ast-native": astNative,
+  "mobile-arch": mobileArch,
+};
+
+// The two callers stack, so a phone reads the refused run above the one that completes.
+agentAuthorize.narrow = {
+  stage: { w: 360, h: 660 },
+  panels: [
+    {
+      id: "call",
+      x: 10,
+      y: 0,
+      w: 340,
+      h: 48,
+      flow: true,
+      icon: "tool",
+      kicker: "tools/call",
+      label: "create_project",
+    },
+    { id: "reader", x: 10, y: 96, w: 340, h: 250, title: "Bearer demo-reader" },
+    { id: "writer", x: 10, y: 382, w: 340, h: 250, title: "Bearer demo-writer" },
+  ],
+  wires: {
+    read: [
+      [180, 48],
+      [180, 96],
+    ],
+    write: [
+      [180, 346],
+      [180, 382],
+    ],
+  },
 };
 
 /** SVG path with rounded elbows through the given stage points. */

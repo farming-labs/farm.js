@@ -626,7 +626,7 @@ function createNitroWorkflowHTTPHandler(
   server: ResolvedFarmServerConfig,
 ): string {
   return `
-import { H3 } from "h3";
+import { H3 } from "nitro/h3";
 import { runTask } from "nitro/task";
 import {
   createFarmRequestBodyErrorResponse,

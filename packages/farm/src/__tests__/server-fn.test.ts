@@ -305,7 +305,9 @@ describe("createServerFn", () => {
 
     const result = await runWithServerActionRequest(request, () => inspect());
 
-    expect(result.request).toBe(request);
+    // The guarded app view of the action request: same URL, headers, and signal.
+    expect(result.request?.url).toBe(request.url);
+    expect(result.request?.headers).toBe(request.headers);
     expect(result.signal).toBe(request.signal);
     controller.abort();
     expect(result.signal.aborted).toBe(true);
@@ -416,7 +418,10 @@ describe("createServerFn", () => {
 
     const result = await _runWithCurrentRequest(request, () => inspect());
 
-    expect(result.request).toBe(request);
+    // A view of the render request whose header reads count as request reads (PPR, ISR).
+    expect(result.request).toBeInstanceOf(Request);
+    expect(result.request?.url).toBe(request.url);
+    expect(result.request?.headers).toBe(request.headers);
     expect(result.tenant).toBe("acme");
     expect(result.signal).toBe(request.signal);
   });

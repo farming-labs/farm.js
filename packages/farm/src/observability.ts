@@ -3,6 +3,7 @@ import {
   _runWithFarmRequestSpan,
   configureFarmTracing,
   getFarmTraceContext,
+  hashFarmCacheKey,
   normalizeFarmTracingConfig,
   recordFarmEventTrace,
   resetFarmTracing,
@@ -215,12 +216,13 @@ export type FarmMCPEvent = FarmEventBase & {
 
 /**
  * An agent surface answered a request: a Markdown mirror or `page.md`, llms.txt,
- * llms-full.txt, or the API catalog. `agent` is what the User-Agent declares,
+ * llms-full.txt, the API catalog, the AI catalog (`ai-catalog.json` or `ard.json`),
+ * or an MCP server card. `agent` is what the User-Agent declares,
  * not a verified identity.
  */
 export type FarmAgentEvent = FarmEventBase & {
   type: "agent.read";
-  surface: "markdown" | "llms" | "llms-full" | "api-catalog";
+  surface: "markdown" | "llms" | "llms-full" | "api-catalog" | "ai-catalog" | "mcp-server-card";
   /** The path served, such as `/pricing.md`; never the query string. */
   route: string;
   /** For Markdown, the partial view asked for. */
@@ -418,6 +420,9 @@ export function emitFarmEvent(input: FarmEventInput): FarmEvent {
     level: inferFarmEventLevel(input.type),
     ...input,
   } as FarmEvent;
+  // A redirect target's query can carry tokens or personal data (`/verify?token=`); logs,
+  // traces and handlers get the path only.
+  if (event.type === "route.redirect") event.to = event.to.replace(/[?#][\s\S]*$/, "");
 
   const traceContext = recordFarmEventTrace(event);
   if (traceContext) {
@@ -577,7 +582,11 @@ function formatFarmEventDetails(event: FarmEvent): string {
     "count",
   ]) {
     const value = record[key];
-    if (value !== undefined) {
+    if (key === "key" && typeof value === "string") {
+      // Cache and PPR shell keys embed call arguments and query strings: print the digest
+      // tracing exports, which still correlates events.
+      details.push(`key_hash=${hashFarmCacheKey(value)}`);
+    } else if (value !== undefined) {
       details.push(`${key}=${formatDetailValue(value)}`);
     }
   }

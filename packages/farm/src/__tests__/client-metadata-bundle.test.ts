@@ -21,7 +21,7 @@ it("preserves the existing rendering bindings and configuration validation", () 
 
 describe.each(["production", "development"])("published client metadata (%s)", (environment) => {
   it.each(["import", "require"])("keeps configuration helpers out of %s bundles", async (kind) => {
-    for (const name of ["Link", "getTheme", "createClientPluginManager"]) {
+    for (const name of ["Link", "getTheme", "createClientPluginManager", "navigateTo"]) {
       const result = await build({
         absWorkingDir: packageRoot,
         stdin: {
@@ -40,16 +40,17 @@ describe.each(["production", "development"])("published client metadata (%s)", (
         external: ["react", "react-dom", "react-dom/*"],
       });
       const code = result.outputFiles[0].text;
-      for (const helper of [
-        "resolveFarmAgentConfig",
-        "resolveFarmAgentCrawlers",
-        "resolveFarmLlmsTxtConfig",
-        "resolveFarmNoindexPreviews",
+      // Minified output renames functions, so look for text from their bodies.
+      for (const [helper, text] of [
+        ["resolveFarmAgentConfig", "must be a boolean."],
+        ["resolveFarmAgentCrawlers", "agent.crawlers must be"],
+        ["resolveFarmLlmsTxtConfig", "agent.llmsTxt must be"],
+        ["resolveFarmNoindexPreviews", "agent.noindexPreviews must be"],
       ]) {
-        expect(code.includes(helper), `${name} retains ${helper}`).toBe(false);
+        expect(code.includes(text), `${name} retains ${helper}`).toBe(false);
       }
-      // Metadata rendering and escaping still run during client navigation.
-      expect(code.includes("serializeJsonLd")).toBe(true);
+      // Metadata rendering and escaping (serializeJsonLd) still run during client navigation.
+      if (name === "navigateTo") expect(code).toMatch(/\.replace\(\/<\/g,\s*["'`]\\\\u003c["'`]\)/);
     }
   });
 });

@@ -65,6 +65,11 @@ export function resolveFarmI18nConfig(
   if (sameSite !== "lax" && sameSite !== "strict" && sameSite !== "none") {
     throw new Error('i18n.cookie.sameSite must be "lax", "strict", or "none".');
   }
+  // Browsers silently discard a SameSite=None cookie that lacks Secure, so the
+  // locale would never persist.
+  if (sameSite === "none" && input.cookie?.secure === false) {
+    throw new Error('i18n.cookie.secure cannot be false when i18n.cookie.sameSite is "none".');
+  }
   const direction: Record<string, FarmI18nDirection> = {};
   for (const [rawLocale, value] of Object.entries(input.direction || {})) {
     const locale = canonicalizeLocale(rawLocale);
@@ -96,7 +101,7 @@ export function resolveFarmI18nConfig(
       ),
       path: normalizeCookiePath(input.cookie?.path),
       sameSite,
-      secure: input.cookie?.secure ?? options.mode === "production",
+      secure: input.cookie?.secure ?? (sameSite === "none" || options.mode === "production"),
     },
     direction,
   };

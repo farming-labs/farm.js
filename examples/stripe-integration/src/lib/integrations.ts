@@ -35,6 +35,12 @@ export const appIntegrations = {
     products: stripeProducts,
     instance: stripeInstance,
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+    // The portal only opens for the customer this returns. A real app reads the signed-in
+    // user's Stripe customer id from its session; this example has no sign-in, so it uses a
+    // test-mode customer from the environment and the portal stays closed without one.
+    resolveCustomer() {
+      return process.env.STRIPE_EXAMPLE_CUSTOMER_ID ?? null;
+    },
     log(event: FarmIntegrationLogEvent) {
       console.log("[stripe-example]", event.phase, event.route?.path || "none");
     },

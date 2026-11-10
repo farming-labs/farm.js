@@ -24,6 +24,7 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 | [MSW](/docs/plugins/msw)               | Share request handlers across development SSR and the browser without shipping production mocks.  |
 | [Partytown](/docs/plugins/partytown)   | Move explicitly opted-in third-party scripts from the main thread into a web worker.              |
 | [PWA](/docs/plugins/pwa)               | Generate a route-aware service worker for offline navigation, caching, and safe updates.          |
+| [Progress](/docs/plugins/progress)     | Show a top progress bar while a client navigation is in flight.                                   |
 | [Search](/docs/plugins/search)         | Generate a chunked browser search index from emitted static pages.                                |
 | [Scripts](/docs/plugins/scripts)       | Load external browser SDKs with typed handles, timing, consent, dependencies, and retries.        |
 | [Sentry](/docs/plugins/sentry)         | Report server errors with Farm event and route context, trace requests, and flush on shutdown.    |
@@ -229,7 +230,9 @@ still available; a failed error hook does not prevent cleanup or replace the sta
 | `runtime.close`     | During graceful shutdown in long-running Node output.        | Nothing.                                                         |
 
 Runtime request hooks apply to page, API, server-action, integration, docs, asset, and general
-requests. Use `runtime.endpoints` when a plugin owns a small exact URL and should not make unrelated
+requests, including Farm's built-in endpoints (`/.well-known/farmjs.json`, the API and AI catalogs,
+`/mcp`, `llms.txt`, `sitemap.xml`, Markdown mirrors, and OpenAPI routes), in development and
+production. Use `runtime.endpoints` when a plugin owns a small exact URL and should not make unrelated
 static pages dynamic. Endpoint paths are application-relative, automatically honor `basePath`, and
 do not accept route parameters or wildcards.
 
@@ -320,14 +323,35 @@ For each application request, Farm runs the runtime hooks in this order:
 
 1. An exact `runtime.endpoints` match runs before ordinary request context and routing.
 2. Otherwise, every `runtime.context` creates request-local values.
-3. Every `runtime.before` runs in plugin order.
-4. Farm calls the page, API route, or integration handler unless a plugin returned a `Response`.
-5. Every `runtime.after` can transform the response, including an endpoint response.
-6. `runtime.error` observes an error if any preceding phase throws.
+3. Every `runtime.before` runs in plugin order, before app
+   [middleware](/docs/middleware). A `Response` returned here skips middleware.
+4. App middleware runs, then Farm calls the page, API route, or integration handler.
+   Integration routes answer before app middleware. A path under the API base path that no route
+   matches gets Farm's JSON 404 here.
+5. Every `runtime.after` can transform the response, including an endpoint response and a
+   response app middleware answered with.
+6. `runtime.error` observes an error if any preceding phase throws. When an API or integration
+   route throws, `runtime.error` observes the throw, Farm answers `500`, and every
+   `runtime.after` still sees that response. A throw from `runtime.context`, `runtime.before`, or
+   `runtime.after` skips the remaining `runtime.after` hooks and fails the request with a `500`:
+   the JSON body `{"error":"Internal Server Error"}` under the API base path or in a
+   `renderer: false` app, and a plain-text `Internal Server Error` for a page.
+
+This order is the same in `farm dev` and in a production build. A thrown route error reaches the
+flat `onError` hook once, with `phase: "runtime"` and `meta.kind` naming the request kind (such as
+`"api"` or `"integration"`).
 
 `runtime.before` may return a new `Request`, return a `Response` to short-circuit, or return nothing. A short-circuit response still passes through `runtime.after`. `runtime.after` may return a new `Response` or return nothing.
 
-Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
+`runtime.before` runs for every request and may be a guard, so in production a response it lets
+through is sent with `Cache-Control: private, no-store` instead of a shared policy, as for
+[middleware](/docs/middleware#caching). A plugin whose `before` decides nothing about access, such
+as logging or analytics, declares `runtime: { cache: "public", before() {} }` to keep the app's
+shared caching.
+
+When a configured rewrite sends the request to an internal destination, every `runtime.before` runs again with the destination `Request` and the same `ctx`, so a guard on `/admin/*` also covers a rewrite that lands there. `runtime.context` and `runtime.after` run once per request.
+
+Runtime hooks don't run for files in `public/`, which are served as static assets first; serve a protected file from a route instead. Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
 
 An endpoint is intentionally isolated from `runtime.context` and `runtime.before`. Perform any
 endpoint-specific authentication inside its handler. Global `runtime.after` and `runtime.error`

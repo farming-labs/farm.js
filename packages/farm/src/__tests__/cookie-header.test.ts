@@ -81,6 +81,19 @@ describe("middleware cookie serialization", () => {
     expect(header).toContain("Max-Age=0");
   });
 
+  it("forces Secure for SameSite=None", () => {
+    // A browser rejects SameSite=None without Secure, so a cross-site cookie
+    // set in development (or with secure: false) would never be stored.
+    const header = serializeMiddlewareCookie("session", "value", {
+      sameSite: "none",
+      secure: false,
+    });
+
+    expect(header).toContain("SameSite=None");
+    expect(header).toContain("Secure");
+    expect(serializeMiddlewareCookieDeletion("session", { sameSite: "none" })).toContain("Secure");
+  });
+
   it("leaves unprefixed cookies untouched", () => {
     expect(applyCookieNamePrefixRequirements("session", { path: "/x" })).toEqual({ path: "/x" });
   });

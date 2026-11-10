@@ -44,7 +44,10 @@ To use Stripe:
 1. Add `.env.local` with `STRIPE_SECRET_KEY`
 2. Optionally add `STRIPE_PRO_YEARLY_PRICE_ID` and `STRIPE_SUPPORTER_PACK_PRICE_ID` to use existing Stripe Price objects
 3. Optionally add `STRIPE_WEBHOOK_SECRET` for signed webhook verification
-4. Run `pnpm dev`
+4. Optionally add `STRIPE_EXAMPLE_CUSTOMER_ID` (a test-mode `cus_...`) to open the Billing Portal;
+   the portal only opens for the customer `resolveCustomer` returns, and session lookups show
+   customer details only to that customer
+5. Run `pnpm dev`
 
 For a real webhook listener, point Stripe or the Stripe CLI at:
 

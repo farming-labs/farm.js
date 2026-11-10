@@ -9,6 +9,7 @@ export {
 } from "./handler";
 export {
   createFarmDocsAdapterHandler,
+  getFarmDocsConfigModuleRoot,
   hasFarmDocsRuntimeAdapter,
   type FarmDocsAdapterHandlerOptions,
 } from "./adapter";
@@ -26,6 +27,8 @@ export type {
   FarmDocsConfigInput,
   FarmDocsNavigationConfig,
   FarmDocsResolvedConfig,
+  FarmDocsResolvedRoot,
+  FarmDocsRootInput,
   FarmDocsSocialImageConfig,
   FarmDocsSocialImageFonts,
   FarmDocsSidebarItem,

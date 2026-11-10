@@ -31,7 +31,7 @@ import {
   type UserConfig,
 } from "vite";
 import { init as initModuleLexer, parse as parseModuleImports } from "es-module-lexer";
-import type { FarmRscPluginOptions, EntryContext } from "./types.js";
+import type { FarmRscPluginOptions, EntryContext, FarmRscMobileClient } from "./types.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
 import type { FarmAPIConfig } from "@farm.js/core/api";
 import type { FarmMiddlewareConfig } from "@farm.js/core/middleware";
@@ -41,19 +41,44 @@ import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import type { FarmCacheUserConfig } from "@farm.js/core/cache";
 import type { FarmI18nUserConfig } from "@farm.js/core/i18n";
 import {
+  collectDevStylesheetUrls,
+  farmFontImportsPlugin,
+  farmImageImportsPlugin,
   generateClientCachePersistenceCode,
+  getPublicFarmImageConfig,
   resolveFarmClientCacheAdapterEntry,
+  resolveFarmClientOptimizeDeps,
+  resolveFarmImageConfig,
+  resolveFarmImageProviderForRuntime,
+  resolveFarmImageServerRuntime,
+  readRouteRenderingDirectiveFromFile,
 } from "@farm.js/core/vite";
 import { generateRscEntry } from "./entries/rsc.js";
 import { resolveMarkdownConfig, type FarmMarkdownUserConfig } from "@farm.js/core/markdown";
 import type { FarmLlmsTxtUserConfig } from "@farm.js/core/internal/production-runtime";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateErrorFallbackEntry } from "./entries/error-fallback.js";
-import { generateClientEntry, serverFnTransportErrorClientRuntime } from "./entries/client.js";
+import {
+  CLIENT_ENTRY_CORE_IMPORTS,
+  generateClientEntry,
+  serverFnTransportErrorClientRuntime,
+} from "./entries/client.js";
 import { transformFarmRouteActionClients } from "./route-action-transform.js";
-import { transformFarmServerFns } from "./server-fn-transform.js";
+import {
+  createFarmServerFnBoundaryModule,
+  isFarmServerFnBoundaryId,
+  transformFarmServerFns,
+} from "./server-fn-transform.js";
 import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-boundary.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
+import {
+  FARM_RSC_MOBILE_CLIENT_ENTRY_NAME,
+  createFarmRscMobileClientManifestPlugin,
+  generateMobileClientEntry,
+  removeFarmRscMobileClientManifest,
+} from "./mobile-client.js";
+import { rscPrivateClientSourcemaps } from "./client-sourcemaps.js";
+import { findDocumentLayouts, findRouteFiles } from "./document-layouts.js";
 import { assertRscPackageCompatibility } from "./compatibility.js";
 import { sendRscDevelopmentResponse } from "./dev-response.js";
 import {
@@ -118,6 +143,13 @@ export type { BuildRscNitroOptions } from "./nitro-build.js";
 export { default as nitro } from "./vite-plugin-nitro.js";
 export type { NitroPluginOptions } from "./vite-plugin-nitro.js";
 
+const PAGE_FILE = /^page\.(tsx|jsx|ts|js)$/;
+
+/** Packages the generated RSC entries import that belong to this plugin, not to the app. */
+const PLUGIN_OWNED_ENTRY_IMPORTS = ["rsc-html-stream/server", "rsc-html-stream/client"];
+
+type FarmImageConfig = NonNullable<Parameters<typeof resolveFarmImageConfig>[0]>;
+
 // Extended config type for Farm.js RSC
 export interface FarmRscConfig {
   srcDir?: string;
@@ -128,13 +160,16 @@ export interface FarmRscConfig {
   api?: FarmAPIConfig;
   server?: FarmServerConfig;
   middleware?: FarmMiddlewareConfig;
+  /** Same options as core's `images`: `<Image>` URLs and the optimizer at `images.path`. */
+  images?: FarmImageConfig;
   port?: number;
   experimental?: {
     /**
-     * Enable React Server Components rendering.
+     * Enable React Server Components rendering. `{ mode: "rsc" }` is the same as `true`; this
+     * pipeline is the `"rsc"` engine of core's `experimental.serverComponents`.
      * @default true
      */
-    serverComponents?: boolean;
+    serverComponents?: boolean | { mode: "rsc" };
     /**
      * Enable React Server Actions and their public POST decoder.
      * @default false
@@ -184,6 +219,8 @@ export interface FarmRscConfig {
    * `oauth` is not supported in RSC apps yet.
    */
   mcp?: FarmMCPUserConfig;
+  /** @internal See `FarmRscPluginOptions.mobileClient`; set by `farm dev` and `farm build`. */
+  mobileClient?: FarmRscMobileClient;
 }
 
 /**
@@ -213,6 +250,8 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     md: config.md,
     agent: config.agent,
     mcp: config.mcp,
+    middleware: config.middleware,
+    images: config.images,
 
     // Vite server configuration
     server: {
@@ -228,15 +267,28 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
       farmMiddlewarePlugin({
         srcDir: config.srcDir ?? "src",
         basePath: config.basePath ?? "/",
+        // API routes in development run through this plugin's middleware, not the RSC entry's.
+        middleware: config.middleware,
         debug,
       }),
       farmApiPlugin({
         srcDir: config.srcDir ?? "src",
+        // The production entry serves API routes from the routes directory; so does development.
+        apiDir: path.join(
+          config.srcDir ?? "src",
+          config.routesDir === undefined ? "app" : config.routesDir.trim(),
+          "api",
+        ),
         debug,
         bodySizeLimit: config.server?.bodySizeLimit,
         // The dev API server mounts the MCP endpoint, as core's does.
         ...(config.mcp ? { plugins: ({ root }) => resolveRscMCPPlugins(config.mcp, root) } : {}),
       }),
+      // localFont() from @farm.js/core/font, with its CSS carried by the bundler: this pipeline
+      // has no step that merges font CSS into a global stylesheet.
+      farmFontImportsPlugin({ basePath: config.basePath ?? "/", importCss: true }),
+      // Static image imports as { src, width, height }, which <Image> sizes from.
+      farmImageImportsPlugin(),
       farmRsc({
         debug,
         encryptActions: config.encryptActions,
@@ -244,6 +296,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
         deploymentId: config.deploymentId,
         routesDir: config.routesDir,
         entries: config.entries,
+        mobileClient: config.mobileClient,
       }),
       ...(Array.isArray(config.plugins) ? config.plugins : []),
     ],
@@ -316,6 +369,11 @@ const VIRTUAL_PREFIX = "\0";
 const VIRTUAL_RSC_ENTRY = "virtual:@farm.js/rsc/entry-rsc";
 const VIRTUAL_SSR_ENTRY = "virtual:@farm.js/rsc/entry-ssr";
 const VIRTUAL_CLIENT_ENTRY = "virtual:@farm.js/rsc/entry-client";
+const VIRTUAL_MOBILE_CLIENT_ENTRY = "virtual:@farm.js/rsc/entry-mobile";
+/** The browser entry, as the client build's `index` input names it. */
+const RSC_CLIENT_ENTRY = "./.farm/rsc-entries/entry.browser.tsx";
+/** The mobile client entry a build of an app with a `mobile` block adds. */
+const RSC_MOBILE_CLIENT_ENTRY = "./.farm/rsc-entries/entry.mobile.tsx";
 const VIRTUAL_HYDRATE_ENTRY = "virtual:@farm.js/rsc/hydrate";
 const OPTIMIZED_BOUNDARY_ADAPTER = "@farm.js/plugin/rsc/optimized-boundary";
 const STRATA_PACKAGE = "@farming-labs/strata";
@@ -394,6 +452,28 @@ async function resolveMiddlewareConfigPaths(
   const projectConfigPath = await findFarmConfigPath(root);
   if (projectConfigPath) paths.push(projectConfigPath);
   return [...new Set(paths)];
+}
+
+// Vite's default config names: `defineConfig` from this package is written in one of them.
+const VITE_CONFIG_FILENAMES = [
+  "vite.config.js",
+  "vite.config.mjs",
+  "vite.config.ts",
+  "vite.config.cjs",
+  "vite.config.mts",
+  "vite.config.cts",
+] as const;
+
+async function findViteConfigPath(root: string): Promise<string | null> {
+  for (const fileName of VITE_CONFIG_FILENAMES) {
+    const candidate = path.join(root, fileName);
+    try {
+      if ((await fs.stat(candidate)).isFile()) return candidate;
+    } catch {
+      // Continue checking supported config names.
+    }
+  }
+  return null;
 }
 
 function isOptimizedBoundaryModule(id: string): boolean {
@@ -674,6 +754,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   // Context passed to entry generators
   let entryContext: EntryContext;
   let rscBuildRoot: string | undefined;
+  /** The app root, when this build adds the mobile client entry. */
+  let mobileClientRoot: string | undefined;
   const middlewareConfigModules = new Map<string, string>();
   let mcpConfigCandidates: string[] | null = null;
 
@@ -784,6 +866,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
 
   return [
     farmEnvironmentFunctionsPlugin() as unknown as Plugin,
+    rscPrivateClientSourcemaps(),
+    createFarmRscMobileClientManifestPlugin(() => mobileClientRoot) as unknown as Plugin,
     {
       name: "@farm.js/plugin/rsc:middleware-config",
       enforce: "pre",
@@ -868,7 +952,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       async config(config: UserConfig, env: ConfigEnv) {
         const c = config as UserConfig & {
           experimental?: {
-            serverComponents?: boolean;
+            serverComponents?: boolean | { mode?: string };
             serverActions?: boolean;
             optimizedBoundary?: boolean;
           };
@@ -889,9 +973,22 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           md?: FarmMarkdownUserConfig | boolean;
           agent?: { llmsTxt?: boolean | FarmLlmsTxtUserConfig };
           mcp?: FarmMCPUserConfig;
+          images?: FarmImageConfig;
         };
         // Check if user enabled RSC in their config
-        rscEnabled = c.experimental?.serverComponents === true;
+        const serverComponents = c.experimental?.serverComponents;
+        if (
+          typeof serverComponents === "object" &&
+          serverComponents !== null &&
+          serverComponents.mode !== "rsc"
+        ) {
+          throw new Error(
+            `[Farm.js] @farm.js/plugin/rsc runs the "rsc" engine; experimental.serverComponents.mode "${String(serverComponents.mode)}" is not supported here.`,
+          );
+        }
+        rscEnabled =
+          serverComponents === true ||
+          (typeof serverComponents === "object" && serverComponents !== null);
         actionsEnabled = c.experimental?.serverActions === true;
         bodySizeLimit = resolveFarmServerConfig(c.server).bodySizeLimit;
         optimizedBoundaryEnabled = c.experimental?.optimizedBoundary === true;
@@ -937,9 +1034,11 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         const middlewareConfigPaths: string[] = [];
         if (hasFarmMiddlewareConfig(c.middleware)) {
           const configPaths = await resolveMiddlewareConfigPaths(root, c.layers);
+          const viteConfigPath = await findViteConfigPath(root);
+          if (viteConfigPath) configPaths.push(viteConfigPath);
           if (configPaths.length === 0) {
             throw new Error(
-              "[Farm.js] RSC config middleware requires an importable farm.config file. " +
+              "[Farm.js] RSC config middleware requires an importable farm.config or vite.config file. " +
                 "Move the middleware to farm.config.ts or src/app/middleware.ts.",
             );
           }
@@ -971,6 +1070,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           env: getResolvedEnv(),
         });
         const srcDir = c.srcDir ?? "src";
+        const clientOptimizeDeps = resolveFarmClientOptimizeDeps(path.resolve(root, srcDir), root);
         const outDir = c.outDir ?? "dist";
         const deploymentId = normalizeFarmDeploymentId(
           options.deploymentId ||
@@ -1007,8 +1107,73 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             : `/${projectSourceDir}${routeSuffix}`;
           return { name: source.name, base, glob: base };
         });
+        // Each page's rendering directive and whether its source reads request state, which the
+        // runtime cannot see from module exports: the same baked input core's server merges.
+        // Later roots override earlier ones, as the entry's merged page map does.
+        const pageRenderingDirectives: Record<string, unknown> = {};
+        for (const source of getFarmSourceRoots(c)) {
+          const routesRoot = path.resolve(root, source.srcDir, configuredRoutesDir);
+          for (const { key, file } of await findRouteFiles(routesRoot, (name) =>
+            PAGE_FILE.test(name),
+          )) {
+            const directive = readRouteRenderingDirectiveFromFile(file);
+            if (directive) pageRenderingDirectives[key] = directive;
+            else delete pageRenderingDirectives[key];
+          }
+        }
+        // Root layouts that render <html> own the document (Next.js's root layout contract).
+        const documentLayouts = [
+          ...new Set(
+            (
+              await Promise.all(
+                getFarmSourceRoots(c).map((source) =>
+                  findDocumentLayouts(path.resolve(root, source.srcDir, configuredRoutesDir)),
+                ),
+              )
+            ).flat(),
+          ),
+        ];
+        // The same images contract as core: without Sharp, "auto" keeps original URLs
+        // (provider "none") instead of pointing <Image> at an optimizer that cannot run.
+        const nitroPreset = process.env.NITRO_PRESET || "vercel";
+        const imageConfig = resolveFarmImageConfig(
+          resolveFarmImageProviderForRuntime(c.images, {
+            root,
+            preset: nitroPreset,
+            dev: env.command === "serve",
+          }),
+        );
+        const publicImageConfig = getPublicFarmImageConfig(imageConfig);
+        // An app with a `mobile` block (RFC 0004): a build adds the mobile entry, and
+        // `farm dev --mobile` makes the browser entry itself the mobile client.
+        const mobileClient =
+          options.mobileClient === "entry" && env.command === "build"
+            ? "entry"
+            : options.mobileClient === "inline" && env.command === "serve"
+              ? "inline"
+              : undefined;
+        mobileClientRoot = mobileClient === "entry" ? root : undefined;
+        // A mobile client from an earlier build must not outlive the `mobile` block.
+        if (env.command === "build" && mobileClient !== "entry") {
+          removeFarmRscMobileClientManifest(root);
+        }
+        // Development always optimizes with Sharp, as core's dev server does.
+        const imageRuntime =
+          env.command === "serve"
+            ? imageConfig.provider === "none"
+              ? "none"
+              : "node"
+            : resolveFarmImageServerRuntime(imageConfig, nitroPreset);
         // Build context for entry generators
         entryContext = {
+          documentLayouts,
+          pageRenderingDirectives,
+          images: {
+            config: imageConfig,
+            public: publicImageConfig,
+            path: imageConfig.path,
+            runtime: imageRuntime,
+          },
           srcDir,
           outDir,
           basePath: c.basePath ?? "/",
@@ -1041,6 +1206,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           clientCachePersistence: generateClientCachePersistenceCode(
             resolveFarmClientCacheAdapterEntry(root, c.cache),
           ),
+          mobileClient,
         };
 
         logInfo(`srcDir: ${entryContext.srcDir}, outDir: ${entryContext.outDir}`);
@@ -1053,6 +1219,12 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         await fs.writeFile(entryRscPath, generateRscEntry(entryContext));
         await fs.writeFile(entrySsrPath, generateSsrEntry(entryContext));
         await fs.writeFile(entryClientPath, generateClientEntry(entryContext));
+        if (mobileClient === "entry") {
+          await fs.writeFile(
+            path.join(entriesDir, "entry.mobile.tsx"),
+            generateMobileClientEntry(RSC_CLIENT_ENTRY),
+          );
+        }
         await fs.writeFile(
           path.join(entriesDir, "error-fallback.tsx"),
           generateErrorFallbackEntry(),
@@ -1065,7 +1237,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         // Entry paths (relative to root) so Vite runs rsc/ssr/client builds (not index.html).
         const entryRsc = "./.farm/rsc-entries/entry.rsc.tsx";
         const entrySsr = "./.farm/rsc-entries/entry.ssr.tsx";
-        const entryClient = "./.farm/rsc-entries/entry.browser.tsx";
+        const entryClient = RSC_CLIENT_ENTRY;
 
         // Resolve @farm.js/core so Vite (and rsc/ssr envs) can load it when app code imports it (fixes "Failed to resolve entry" in dev).
         let farmCorePath: string | null = null;
@@ -1090,6 +1262,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           builder: { sharedConfigBuild: true } as any,
           define: {
             __FARM_API_BASE_URL__: JSON.stringify(api.baseURL),
+            __FARM_IMAGE_CONFIG__: JSON.stringify(entryContext.images?.public),
           },
           ssr: {
             external: [
@@ -1113,6 +1286,20 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           resolve: {
             dedupe: ["react", "react-dom", "react-server-dom-webpack"],
             alias: [
+              // The generated entries import the plugin's own dependencies; resolve them from here
+              // so an app (strict pnpm layout) does not have to install them itself.
+              ...PLUGIN_OWNED_ENTRY_IMPORTS.flatMap((specifier) => {
+                try {
+                  return [
+                    {
+                      find: new RegExp(`^${specifier.replace(/[/.]/g, "\\$&")}$`),
+                      replacement: require_.resolve(specifier),
+                    },
+                  ];
+                } catch {
+                  return [];
+                }
+              }),
               ...Object.entries(layerAliases).map(([find, replacement]) => ({
                 find,
                 replacement,
@@ -1196,7 +1383,14 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             client: {
               build: {
                 outDir: `${outDir}/client`,
-                rollupOptions: { input: { index: entryClient } },
+                rollupOptions: {
+                  input: {
+                    index: entryClient,
+                    ...(mobileClient === "entry"
+                      ? { [FARM_RSC_MOBILE_CLIENT_ENTRY_NAME]: RSC_MOBILE_CLIENT_ENTRY }
+                      : {}),
+                  },
+                },
               },
               resolve: { conditions: ["browser", "import"] },
               // Optimize what the browser entry needs up front. A dependency first
@@ -1210,7 +1404,14 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                   "react-dom",
                   "react-dom/client",
                   "rsc-html-stream/client",
+                  ...CLIENT_ENTRY_CORE_IMPORTS,
+                  // Client components and the packages they use load only once a page renders
+                  // (client references), so they would be found late too.
+                  ...clientOptimizeDeps.include,
                 ],
+                // Packages whose react-server build re-exports a "use client" module: the plugin
+                // loads that module from the package, so pre-bundling them would add a copy.
+                exclude: clientOptimizeDeps.exclude,
               },
             },
           },
@@ -1294,10 +1495,22 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       name: "@farm.js/plugin/rsc:server-fn-actions",
       enforce: "pre",
 
-      transform(code, id) {
-        if (!rscEnabled || !actionsEnabled) return null;
+      // The "use server" boundary for a module whose server functions were
+      // found without an explicit directive. Its exports come from the source
+      // file on disk, never from the request, so nothing else can be named.
+      async load(id) {
+        if (!rscEnabled || !actionsEnabled || !isFarmServerFnBoundaryId(id)) return null;
+        const file = id.split("?", 1)[0]!;
+        this.addWatchFile(file);
+        const source = await fs.readFile(file, "utf8");
+        return createFarmServerFnBoundaryModule(source, file) ?? "export {};\n";
+      },
 
-        const result = transformFarmServerFns(code, id);
+      transform(code, id) {
+        if (!rscEnabled || !actionsEnabled || isFarmServerFnBoundaryId(id)) return null;
+
+        const environment = (this as { environment?: { name?: string } }).environment?.name;
+        const result = transformFarmServerFns(code, id, { environment: environment ?? "rsc" });
         if (!result) return null;
 
         return {
@@ -1373,6 +1586,9 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         if (source.includes("rsc-entries") && source.includes("entry.browser.tsx")) {
           return VIRTUAL_PREFIX + VIRTUAL_CLIENT_ENTRY;
         }
+        if (source.includes("rsc-entries") && source.includes("entry.mobile.tsx")) {
+          return VIRTUAL_PREFIX + VIRTUAL_MOBILE_CLIENT_ENTRY;
+        }
         if (source.includes("rsc-entries") && source.includes("entry.rsc.tsx")) {
           return VIRTUAL_PREFIX + VIRTUAL_RSC_ENTRY;
         }
@@ -1406,6 +1622,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         if (id === VIRTUAL_PREFIX + VIRTUAL_CLIENT_ENTRY) {
           logInfo("Generating client entry");
           return generateClientEntry(entryContext);
+        }
+
+        if (id === VIRTUAL_PREFIX + VIRTUAL_MOBILE_CLIENT_ENTRY) {
+          return generateMobileClientEntry(RSC_CLIENT_ENTRY);
         }
 
         // Handle dynamic hydration entries
@@ -1508,6 +1728,30 @@ if (document.readyState === 'loading') {
         }
 
         logInfo("Dev server middleware ready");
+        // The stylesheets the SSR environment's modules import, for entries/ssr.ts to link in the
+        // head: a client component's CSS module otherwise arrives with its JavaScript, so its
+        // server HTML is unstyled until scripts run. Removed when this server closes.
+        const devStyles = () =>
+          collectDevStylesheetUrls(
+            server.environments.ssr?.moduleGraph.idToModuleMap.values() ?? [],
+            undefined,
+            {
+              cssModules: true,
+            },
+          )
+            .map(
+              (href) =>
+                `<link rel="stylesheet" href="${href.replace(/"/g, "&quot;")}" data-farm-dev-style>`,
+            )
+            .join("");
+        (
+          globalThis as { __FARM_RSC_DEV_CLIENT_STYLES__?: () => string }
+        ).__FARM_RSC_DEV_CLIENT_STYLES__ = devStyles;
+        server.httpServer?.once("close", () => {
+          const scope = globalThis as { __FARM_RSC_DEV_CLIENT_STYLES__?: () => string };
+          if (scope.__FARM_RSC_DEV_CLIENT_STYLES__ === devStyles)
+            delete scope.__FARM_RSC_DEV_CLIENT_STYLES__;
+        });
         const serverStartTime = Date.now();
         let bannerPrinted = false;
 

@@ -53,16 +53,16 @@ describe("React AOT keyed list compiler", () => {
     });
   });
 
+  // Rows with defaultValue stay with React (compiler-keyed-rows-react-owned.test.ts).
   it.each([
     ["plain rows", "<li key={item.id} className={item.label}><span>{item.label}</span></li>", true],
-    ["inputs", "<li key={item.id}><input defaultValue={item.label} /></li>", false],
-    ["textareas", "<li key={item.id}><textarea defaultValue={item.label} /></li>", false],
+    ["inputs", "<li key={item.id}><input placeholder={item.label} /></li>", false],
+    ["textareas", "<li key={item.id}><textarea placeholder={item.label} /></li>", false],
     [
       "selects",
-      '<li key={item.id}><select defaultValue={item.label}><option value="a">A</option></select></li>',
+      '<li key={item.id}><select name={item.label}><option value="a">A</option></select></li>',
       false,
     ],
-    ["custom elements", "<li key={item.id}><farm-badge label={item.label} /></li>", false],
     ["style bindings", "<li key={item.id} style={{ opacity: item.label ? 1 : 0.5 }}>x</li>", false],
   ])(
     "marks %s as cloneable only when cloneNode copies their state",

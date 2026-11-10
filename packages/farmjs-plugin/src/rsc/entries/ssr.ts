@@ -12,9 +12,8 @@ import type { EntryContext } from "../types.js";
  */
 export function generateSsrEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
-  const routesDir = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
-  const routesPath = routesDir ? `/${routesDir}` : "";
-  const globalsCssPath = ctx.globalCssPath ?? `/${ctx.srcDir}${routesPath}/globals.css`;
+  // Only a global stylesheet the build found: a guessed path 404s in apps that import their CSS.
+  const globalsCssPath = ctx.globalCssPath ?? "";
 
   return `
 import React from 'react';
@@ -44,17 +43,26 @@ const cssLinkTag = resolvedCssHref
   : '';
 
 // Work on bytes: chunk boundaries need not align with UTF-8 code points.
-function injectBeforeStream(markerText, tag) {
+function injectBeforeStream(markerText, tagOrResolve) {
   const encoder = new TextEncoder();
   const marker = encoder.encode(markerText);
-  const insertion = encoder.encode(tag);
+  // A function is read when the marker passes, after the shell rendered.
+  let tag = typeof tagOrResolve === 'function' ? undefined : tagOrResolve;
+  let insertion = tag === undefined ? undefined : encoder.encode(tag);
+  const resolveTag = () => {
+    if (tag === undefined) {
+      tag = tagOrResolve();
+      insertion = encoder.encode(tag);
+    }
+    return tag;
+  };
   let buffer = new Uint8Array(0);
   let injected = false;
 
   return new TransformStream({
     transform(chunk, controller) {
       const bytes = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
-      if (injected || !tag) {
+      if (injected || (typeof tagOrResolve !== 'function' && !tag)) {
         controller.enqueue(bytes);
         return;
       }
@@ -72,7 +80,7 @@ function injectBeforeStream(markerText, tag) {
       }
       if (index >= 0) {
         if (index) controller.enqueue(pending.subarray(0, index));
-        controller.enqueue(insertion);
+        if (resolveTag()) controller.enqueue(insertion);
         controller.enqueue(pending.subarray(index));
         buffer = new Uint8Array(0);
         injected = true;
@@ -120,6 +128,8 @@ export async function renderHTML(firstArg, options = {}) {
   // calls client references on the server (for example, a "use client" Counter).
   const payload = await createFromReadableStream(s1);
   const rootElement = payload.root;
+  // The route's resolved metadata as head tags (core's renderMetadataHead), then the stylesheet.
+  const headTags = (typeof payload.metadataHead === 'string' ? payload.metadataHead : '') + cssLinkTag;
   
   function Root() {
     return rootElement;
@@ -174,7 +184,12 @@ export async function renderHTML(firstArg, options = {}) {
             passThrough.on('error', (e) => controller.error(e));
           }
         });
-    let out = webStream.pipeThrough(injectIntoHeadStream(cssLinkTag));
+    // In development, the stylesheets the shell's client components import (CSS modules come from
+    // JavaScript in the browser, so without links their HTML is unstyled until scripts run).
+    const devStyles = globalThis.__FARM_RSC_DEV_CLIENT_STYLES__;
+    let out = webStream.pipeThrough(
+      injectIntoHeadStream(typeof devStyles === 'function' ? () => headTags + devStyles() : headTags),
+    );
     out = out.pipeThrough(injectRSCPayload(s2));
     out = out.pipeThrough(streamingClientScriptInjector);
     return out;
@@ -184,8 +199,10 @@ export async function renderHTML(firstArg, options = {}) {
   debug('Rendering to HTML stream (then buffering)');
   const fullHtmlRaw = await pipeableStreamToString(passThrough);
   let fullHtml = fullHtmlRaw;
-  if (cssLinkTag && fullHtml.includes("</head>")) {
-    fullHtml = fullHtml.replace("</head>", cssLinkTag + "</head>");
+  const bufferedDevStyles = globalThis.__FARM_RSC_DEV_CLIENT_STYLES__;
+  const bufferedHeadTags = headTags + (typeof bufferedDevStyles === 'function' ? bufferedDevStyles() : '');
+  if (bufferedHeadTags && fullHtml.includes("</head>")) {
+    fullHtml = fullHtml.replace("</head>", () => bufferedHeadTags + "</head>");
   }
   ${
     ctx.actionsEnabled

@@ -22,6 +22,7 @@ export function shouldBypassFarmRouterForDottedPath(
   baseDirs: Array<string | false | undefined>,
   /** Dotted paths the renderer serves without a route file, such as a configured /llms.txt. */
   generatedPaths: readonly string[] = [],
+  method = "GET",
 ): boolean {
   if (!pathname.includes(".") || pathname.endsWith(".html")) return false;
   const matchesAppRoute = Boolean(
@@ -30,7 +31,111 @@ export function shouldBypassFarmRouterForDottedPath(
     routeManager?.matchMetadataImage(pathname) ||
     generatedPaths.includes(pathname),
   );
+  if (method !== "GET" && method !== "HEAD") {
+    // Production serves files to GET and HEAD only; any other method reaches the app, which
+    // answers a file's path like any path it has no route for. Vite would serve the file.
+    return !matchesAppRoute && !devServableFileExists(pathname, baseDirs);
+  }
   return !matchesAppRoute || devServableFileExists(pathname, baseDirs);
+}
+
+/**
+ * Whether production's HTTP layer rejects the pathname before any Farm code runs: h3 answers a
+ * path whose percent-encoding does not decode (`/%ZZ`, a truncated `%E0%A4`) with a 400.
+ */
+export function isMalformedFarmRequestPathname(pathname: string): boolean {
+  if (!pathname.includes("%")) return false;
+  try {
+    decodeURI(pathname);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** The 400 production answers a malformed pathname with: h3's JSON error, as Nitro sends it. */
+export const FARM_MALFORMED_REQUEST_BODY = JSON.stringify(
+  { error: true, status: 400, message: "Bad Request" },
+  null,
+  2,
+);
+
+/**
+ * The public file production serves for a GET or HEAD of `pathname`, or null. Nitro's static
+ * handler runs before middleware and routes: it drops one trailing slash, decodes the path
+ * (keeping encoded slashes), and serves that file or the directory's index.html. So
+ * `/hello.txt/` serves hello.txt, and `/docs` and `/docs/` serve docs/index.html.
+ */
+export function resolveFarmPublicFilePath(
+  pathname: string,
+  publicFiles: ReadonlySet<string>,
+): string | null {
+  if (publicFiles.size === 0) return null;
+  let id = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  if (id.includes("%")) {
+    const escaped = id.replace(/%2f/gi, "%252F");
+    try {
+      id = decodeURIComponent(escaped);
+    } catch {
+      id = escaped;
+    }
+  }
+  if (publicFiles.has(id)) return id;
+  const index = `${id === "/" ? "" : id}/index.html`;
+  return publicFiles.has(index) ? index : null;
+}
+
+/**
+ * The public dir's files as `/`-rooted URL paths, listed once and listed again after the
+ * public dir changes, so matching a request against them never touches the filesystem.
+ */
+export function createFarmPublicFileIndex(getPublicDir: () => string | false | undefined): {
+  get(): ReadonlySet<string>;
+  /** Forget the listing when `file` (a watcher event's path) is in the public dir. */
+  invalidate(file: string): void;
+} {
+  const none: ReadonlySet<string> = new Set();
+  let listing: { configured: string; dir: string; files: Set<string> } | undefined;
+  return {
+    get() {
+      const configured = getPublicDir();
+      if (typeof configured !== "string" || configured.length === 0) return none;
+      if (listing?.configured === configured) return listing.files;
+      const dir = path.resolve(configured);
+      listing = { configured, dir, files: listFarmPublicFiles(dir) };
+      return listing.files;
+    },
+    invalidate(file) {
+      if (!listing) return;
+      const resolved = path.resolve(file);
+      if (resolved === listing.dir || resolved.startsWith(listing.dir + path.sep)) {
+        listing = undefined;
+      }
+    },
+  };
+}
+
+function listFarmPublicFiles(dir: string): Set<string> {
+  const files = new Set<string>();
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { recursive: true, withFileTypes: true });
+  } catch {
+    return files;
+  }
+  for (const entry of entries) {
+    const filePath = path.join(entry.parentPath, entry.name);
+    let isFile = entry.isFile();
+    if (!isFile && entry.isSymbolicLink()) {
+      try {
+        isFile = fs.statSync(filePath).isFile();
+      } catch {
+        // A dangling link serves nothing.
+      }
+    }
+    if (isFile) files.add(`/${path.relative(dir, filePath).split(path.sep).join("/")}`);
+  }
+  return files;
 }
 
 /** Vite query flags that turn a file request into a module request. */
@@ -61,6 +166,38 @@ export function isViteModuleRequest(
   return value !== undefined && SCRIPT_FETCH_DESTINATIONS.has(value.toLowerCase());
 }
 
+/** Query flags Vite and its client put on module and asset URLs: HMR, deps, CSS, workers. */
+const VITE_CLIENT_QUERY_FLAGS = ["t", "v", "direct", "html-proxy", "worker_file"] as const;
+const NAVIGATION_FETCH_DESTINATIONS = new Set(["document", "iframe", "frame", "embed", "object"]);
+
+/**
+ * Whether a dev request comes from the running app loading something Vite serves: a module, a
+ * stylesheet, an image or font, or a `fetch()` of an asset URL. A navigation, `curl`, or an agent
+ * asking for the same path is not, and is routed as production routes it: production emits no
+ * file for a path under the project root, so config redirects and rewrites apply to it there.
+ * Without fetch metadata (a browser on an insecure origin, such as a LAN address over http), a
+ * subresource names its page as the referrer and does not ask for HTML.
+ */
+export function isViteDevClientRequest(
+  url: URL,
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  if (isViteModuleRequest(url, headers)) return true;
+  if (VITE_CLIENT_QUERY_FLAGS.some((flag) => url.searchParams.has(flag))) return true;
+  const destination = firstHeaderValue(headers["sec-fetch-dest"]);
+  if (destination !== undefined) {
+    return !NAVIGATION_FETCH_DESTINATIONS.has(destination.toLowerCase());
+  }
+  return (
+    firstHeaderValue(headers.referer) !== undefined &&
+    !(firstHeaderValue(headers.accept) ?? "").includes("text/html")
+  );
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 /** Root files the docs engine answers that an app can serve itself. */
 const DOCS_ENGINE_APP_OWNABLE_PATHS = new Set([
   "/llms.txt",
@@ -77,15 +214,19 @@ const DOCS_ENGINE_APP_OWNABLE_PATHS = new Set([
  * keeps the docs engine off that path, as production does, where platforms
  * serve public files before any route. Other files under the project root do
  * not count: production does not emit them.
+ *
+ * `routePathname` is the request's path as routes see it, without the basePath and locale
+ * prefix. As in production, a trailing slash does not change the file it names.
  */
 export function farmAppOwnsDocsEnginePath(
-  pathname: string,
+  routePathname: string,
   options: {
     generatedPaths: readonly string[];
     routeManager?: DottedPathRouteMatcher | null;
     publicDir: string | false | undefined;
   },
 ): boolean {
+  const pathname = routePathname.length > 1 ? routePathname.replace(/\/+$/, "") : routePathname;
   if (!DOCS_ENGINE_APP_OWNABLE_PATHS.has(pathname)) return false;
   return (
     options.generatedPaths.includes(pathname) ||

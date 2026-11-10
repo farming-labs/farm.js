@@ -1,8 +1,12 @@
 const assert = require("node:assert/strict");
+const path = require("node:path");
 const { test } = require("node:test");
 
 const {
+  assertPackagesBuilt,
   distTagForVersion,
+  findMissingEntryFiles,
+  manifestEntryFiles,
   findStableCoreDependencyMismatches,
   groupPackagesByDistTag,
   isMissingRegistryVersion,
@@ -183,4 +187,65 @@ test("uses the local manifest before a beta version is visible on the registry",
       },
     ],
   );
+});
+
+test("lists every entry file a manifest promises, skipping export patterns", () => {
+  assert.deepEqual(
+    manifestEntryFiles({
+      main: "./dist/index.cjs",
+      types: "dist/index.d.ts",
+      bin: { farm: "./bin/farm.js" },
+      exports: {
+        ".": {
+          types: "./dist/index.d.ts",
+          import: "./dist/index.js",
+          "react-native": "./native.js",
+        },
+        "./client": "./dist/client.js",
+        "./themes/*": "./themes/*.css",
+      },
+    }),
+    [
+      "bin/farm.js",
+      "dist/client.js",
+      "dist/index.cjs",
+      "dist/index.d.ts",
+      "dist/index.js",
+      "native.js",
+    ],
+  );
+});
+
+// @farm.js/ui@0.1.0-beta.2 shipped with native.js and no dist/: its build cleared dist/ and did
+// not finish, and the publish uploaded what was left.
+test("refuses to publish a package whose build output is missing", () => {
+  // path.join, as the guard does, so the fake filesystem matches on Windows too.
+  const dir = path.join(path.sep, "repo", "packages", "farm-ui");
+  const ui = {
+    name: "@farm.js/ui",
+    dir,
+    manifest: {
+      exports: {
+        ".": {
+          types: "./dist/index.d.ts",
+          "react-native": "./native.js",
+          import: "./dist/index.js",
+          default: "./dist/index.js",
+        },
+      },
+    },
+  };
+  const onDisk = new Set([path.join(dir, "native.js")]);
+  const exists = (file) => onDisk.has(file);
+  assert.deepEqual(findMissingEntryFiles([ui], exists), [
+    { package: "@farm.js/ui", file: "dist/index.d.ts" },
+    { package: "@farm.js/ui", file: "dist/index.js" },
+  ]);
+  assert.throws(
+    () => assertPackagesBuilt([ui], exists),
+    /entry files are missing[\s\S]*@farm\.js\/ui: dist\/index\.js/,
+  );
+  onDisk.add(path.join(dir, "dist", "index.js"));
+  onDisk.add(path.join(dir, "dist", "index.d.ts"));
+  assert.doesNotThrow(() => assertPackagesBuilt([ui], exists));
 });

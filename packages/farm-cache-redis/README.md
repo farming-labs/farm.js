@@ -29,6 +29,10 @@ export default defineConfig({
 Farm uses the shared adapter for cached queries, ISR and PPR output, and tag/path invalidation.
 Application code keeps using the cache APIs from `@farm.js/core/cache`.
 
+Entries with a finite `revalidate` are written with a Redis `PX` expiry that covers the fresh window
+plus one more `revalidate` window of stale serving (at least 60 seconds). Entries without a
+`revalidate` have no expiry and stay until they are replaced or invalidated.
+
 Use a distinct namespace for each application or deployment environment. Do not put
 user-specific values in shared keys unless the key includes the user or tenant identity.
 

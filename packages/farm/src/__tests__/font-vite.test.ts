@@ -525,7 +525,9 @@ console.log(demo);`,
     );
     expect(source).toContain("manageFarmDocumentPreloads(");
     expect(source).toContain("manageFarmLinkHeaderPreloads(");
-    expect(source).toContain("isStreaming || !isBuffered || response.body === null");
+    expect(source).toContain(
+      "isStreaming || !isBuffered || (!isLazyPage && response.body === null)",
+    );
     expect(source).toContain("appendFarmLinkHeader(headers, header.value);");
     expect(source).toContain("const routePathname = getFarmRoutePathname(pathname);");
     expect(source).toContain("applyConfiguredResponseHeaders(response, routePathname)");

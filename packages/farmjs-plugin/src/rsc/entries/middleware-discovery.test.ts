@@ -1,4 +1,7 @@
-import { createProductionMiddlewareRunner } from "@farm.js/core/internal/production-runtime";
+import {
+  createProductionMiddlewareRunner,
+  resolveFarmI18nConfig,
+} from "@farm.js/core/internal/production-runtime";
 import { describe, expect, it } from "vitest";
 import type { EntryContext } from "../types.js";
 import { generateRscEntry } from "./rsc.js";
@@ -73,14 +76,65 @@ describe("RSC file middleware discovery", () => {
     expect(modules.map((entry) => entry.path)).toEqual(["/cart"]);
   });
 
-  it("ignores middleware in private and dot folders, like core", () => {
+  it("drops parallel route slot folders, like core", () => {
+    const modules = buildMiddlewareModules({
+      "/dashboard/@team/middleware.ts": { default: () => {} },
+      "/dashboard/@team/settings/middleware.ts": { default: () => {} },
+    });
+    expect(modules.map((entry) => entry.path)).toEqual(["/dashboard", "/dashboard/settings"]);
+  });
+
+  it("guards _private folders, whose pages are routed, and ignores dot folders, like core", () => {
     const modules = buildMiddlewareModules({
       "/_components/middleware.ts": { default: () => {} },
       "/dashboard/_lib/middleware.ts": { default: () => {} },
       "/.cache/middleware.ts": { default: () => {} },
       "/dashboard/middleware.ts": { default: () => {} },
     });
-    expect(modules.map((entry) => entry.path)).toEqual(["/dashboard"]);
+    expect(modules.map((entry) => entry.path)).toEqual([
+      "/_components",
+      "/dashboard",
+      "/dashboard/_lib",
+    ]);
+  });
+
+  it("maps intercepting folders to the URL they intercept, like core", () => {
+    const modules = buildMiddlewareModules({
+      "/feed/@modal/(.)photo/middleware.ts": { default: () => {} },
+      "/feed/list/@modal/(..)photo/middleware.ts": { default: () => {} },
+      "/a/b/c/@modal/(..)(..)photo/middleware.ts": { default: () => {} },
+      "/feed/@modal/(...)photo/middleware.ts": { default: () => {} },
+    });
+    expect(modules.map((entry) => entry.path).sort()).toEqual([
+      "/a/photo",
+      "/feed/photo",
+      "/feed/photo",
+      "/photo",
+    ]);
+  });
+
+  it("does not route pages inside parallel route slots, which RSC does not render", () => {
+    const entry = generateRscEntry(context);
+    const start = entry.indexOf("const pageRoutes = ");
+    const source = entry.slice(start, entry.indexOf(".sort(", start));
+    const pageRoutes = new Function(
+      "pages",
+      "parseRoutePath",
+      "getRoutePatternSpecificity",
+      `${extractFunction(entry, "filePathToRoute")}\nreturn ${source.slice("const pageRoutes = ".length)};`,
+    )(
+      {
+        "/feed/page.tsx": {},
+        "/feed/@modal/(.)photo/[id]/page.tsx": {},
+        "/_private/page.tsx": {},
+      },
+      () => ({ segments: [] }),
+      () => 0,
+    ) as Array<{ filePath: string }>;
+    expect(pageRoutes.map((route) => route.filePath)).toEqual([
+      "/feed/page.tsx",
+      "/_private/page.tsx",
+    ]);
   });
 
   it("runs root middleware before nested middleware", async () => {
@@ -95,5 +149,105 @@ describe("RSC file middleware discovery", () => {
     const runner = createProductionMiddlewareRunner({ modules });
     await runner(new Request("https://example.test/admin/users/7"));
     expect(calls).toEqual(["root", "admin", "users"]);
+  });
+
+  it("runs root middleware before route-group middleware at the same URL path", async () => {
+    const calls: string[] = [];
+    // Glob order puts '/(app)/' and '/(site)/' ahead of '/middleware.ts'.
+    const modules = buildMiddlewareModules({
+      "/(app)/middleware.ts": recordingMiddleware("app", calls),
+      "/(site)/middleware.ts": recordingMiddleware("site", calls),
+      "/middleware.ts": recordingMiddleware("root", calls),
+    });
+    expect(modules.map((entry) => entry.filePath)).toEqual([
+      "/middleware.ts",
+      "/(app)/middleware.ts",
+      "/(site)/middleware.ts",
+    ]);
+
+    const runner = createProductionMiddlewareRunner({ modules });
+    await runner(new Request("https://example.test/admin"));
+    expect(calls).toEqual(["root", "app", "site"]);
+  });
+});
+
+describe("RSC file middleware with api.basePath", () => {
+  it("guards src/app/api routes at the public API path", async () => {
+    const entry = generateRscEntry({ ...context, apiBasePath: "/v2/api" });
+    expect(entry).toContain('const farmApiBasePath = "/v2/api";');
+    // The entry hands its API path to the middleware runner it dispatches API routes with.
+    expect(entry).toMatch(
+      /createProductionMiddlewareRunner\(\{[\s\S]*?apiBasePath: farmApiBasePath,\n/,
+    );
+
+    const modules = buildMiddlewareModules({
+      "/api/admin/middleware.ts": { default: () => new Response("no", { status: 401 }) },
+    });
+    const runner = createProductionMiddlewareRunner({ modules, apiBasePath: "/v2/api" });
+    for (const url of ["/v2/api/admin/users", "/api/admin/users"]) {
+      const result = await runner(new Request(`https://example.test${url}`));
+      expect(result.response?.status, url).toBe(401);
+    }
+  });
+});
+
+describe("RSC file middleware under a basePath or locale prefix", () => {
+  // RSC matchRoute() reads the request path as received, so pages under a basePath live in
+  // app/<basePath>/ and locale pages in app/[lang]/. Their middleware has to run for them.
+  async function blocked(
+    i18n: ReturnType<typeof resolveFarmI18nConfig>,
+    middlewares: Record<string, string>,
+    url: string,
+  ) {
+    const entry = generateRscEntry({ ...context, i18n, basePath: i18n.basePath });
+    expect(entry).toContain("rawPathRouting: true,");
+    const calls: string[] = [];
+    const modules = buildMiddlewareModules(
+      Object.fromEntries(
+        Object.entries(middlewares).map(([file, name]) => [
+          file,
+          {
+            default() {
+              calls.push(name);
+              return new Response("no", { status: 401 });
+            },
+          },
+        ]),
+      ),
+    );
+    const runner = createProductionMiddlewareRunner({ modules, i18n, rawPathRouting: true });
+    const result = await runner(new Request(`https://example.test${url}`));
+    return { status: result.response?.status ?? null, calls };
+  }
+
+  const basePath = resolveFarmI18nConfig(false, {
+    root: "/tmp",
+    mode: "production",
+    basePath: "/console",
+  });
+  const prefixed = resolveFarmI18nConfig(
+    { locales: ["en", "de"], defaultLocale: "en", routing: "prefix" },
+    { root: "/tmp", mode: "production", basePath: "/" },
+  );
+
+  it("guards app/<basePath>/ pages", async () => {
+    await expect(
+      blocked(basePath, { "/console/admin/middleware.ts": "nested" }, "/console/admin"),
+    ).resolves.toEqual({ status: 401, calls: ["nested"] });
+  });
+
+  it("guards app/[lang]/ pages", async () => {
+    await expect(
+      blocked(prefixed, { "/[lang]/admin/middleware.ts": "locale" }, "/de/admin"),
+    ).resolves.toEqual({ status: 401, calls: ["locale"] });
+  });
+
+  it("keeps guards that matched the stripped path", async () => {
+    await expect(
+      blocked(basePath, { "/admin/middleware.ts": "stripped" }, "/console/admin"),
+    ).resolves.toEqual({ status: 401, calls: ["stripped"] });
+    await expect(
+      blocked(prefixed, { "/admin/middleware.ts": "stripped" }, "/de/admin"),
+    ).resolves.toEqual({ status: 401, calls: ["stripped"] });
   });
 });

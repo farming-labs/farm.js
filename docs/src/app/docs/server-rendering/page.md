@@ -98,6 +98,12 @@ because request-bound work in transitive imports cannot be proven safe from the 
 Farm serves generated HTML only for `GET` and `HEAD` requests. Other request methods continue through
 the live route instead of receiving a cached page document.
 
+The build prerenders up to eight pages at once, or as many as the machine has CPU cores when that is
+fewer. Each page renders as its own request, as it would on the production server, so the output does
+not depend on this number. To lower it, for example when pages call a rate-limited API, set Nitro's
+`prerender.concurrency` from a plugin's [`build.configure`](/docs/plugins/create-plugin#extend-builds)
+hook.
+
 **src/app/about/page.tsx**
 
 ```tsx
@@ -176,18 +182,23 @@ navigation, the navigation itself signals user intent, so Farm loads and renders
 destination immediately instead of leaving the previous route visible while waiting for another
 trigger.
 
-| Strategy      | Hydration trigger                                                     |
-| ------------- | --------------------------------------------------------------------- |
-| `load`        | Immediately. This is the default and compatibility-first behavior.    |
-| `interaction` | The first button-like click; Farm replays that click after hydration. |
-| `visible`     | When the route boundary approaches the viewport.                      |
-| `idle`        | During browser idle time, with a timeout fallback.                    |
+| Strategy      | Hydration trigger                                              |
+| ------------- | -------------------------------------------------------------- |
+| `load`        | Immediately. The default, except as below in islands mode.     |
+| `interaction` | The first button-like click or same-page link; replayed after. |
+| `visible`     | When the route boundary approaches the viewport.               |
+| `idle`        | During browser idle time, with a timeout fallback.             |
 
 With [isolated client hydration](/docs/configuration#isolated-client-hydration), each eligible
 client module keeps its own strategy, including after SPA navigation. Sibling boundaries can mix
 all four strategies: one boundary's trigger never hydrates another, and an interaction click is
 claimed and replayed once by the boundary that contains it. Removing a boundary cancels its pending
-observer, idle callback, or interaction listener.
+observer, idle callback, or interaction listener. Islands mode
+(`serverComponents: { mode: "islands" }`) keeps each client module's strategy the same way, and gives
+a module without an `island` export `interaction` when its code provably does nothing before a
+click ([React Server Components](#react-server-components) lists the checks). With
+React Server Components (`{ mode: "rsc" }`), React's client hydrates every client component on load
+and the `island` export has no effect.
 
 Farm uses the same isolated boundary metadata for Vite development, streamed or buffered SSR, and
 statically generated HTML. In development, updating a client module rerenders every live boundary
@@ -231,9 +242,19 @@ export default async function RepoPage() {
 React cannot run an `async` component in the browser, so the page itself stays server-rendered and
 never ships to the client. Each eligible client boundary it renders hydrates as its own island, with
 the props the server passed it. This works by default in React apps; it does not need
-`experimental.isolatedClientHydration`. Under a parent layout that hydrates as a whole route, the
-layout keeps the async page as server HTML and the islands inside it still hydrate, including
-after client navigation between pages of that layout.
+`experimental.isolatedClientHydration`. The same applies to a page, async or not, that renders an
+`async` server component: that component's client components hydrate as islands too.
+
+Under a parent layout that hydrates as a whole route, such as one that wraps the app in a client
+provider, the async page hydrates inside the layout's React tree instead. Farm resolves the page on
+the server into its elements and client-component references, embeds that tree in the HTML, and the
+browser rebuilds it under the layout, so the page's client components read the layout's context and
+share its state. Server JSX passed to a client component, as `children` or any other prop, stays
+server output, Suspense
+content streams in, and the tree is rebuilt after client navigation between pages of that layout.
+A part the server cannot describe this way, such as a server component that calls hooks or a client
+component whose props do not serialize, stays server HTML whose own client components hydrate as
+islands.
 
 Navigating away cancels pending island work and unmounts its roots without waiting for hydration.
 React's early-update diagnostic during that synchronous cancellation is expected; hydration
@@ -241,10 +262,14 @@ mismatches, updates to live roots, and other errors are still reported.
 
 Islands have the same limits as [isolated client leaves](#isolated-client-leaves-without-rsc):
 
-- Props must be serializable. Passing server-rendered JSX as `children` or another prop
-  (`<ClientShell><ServerList /></ClientShell>`) does not cross the boundary.
-- A client component must use a supported export shape and must not sit where the HTML parser moves
-  it, such as directly inside `<table>`.
+- Props must be serializable. Server-rendered JSX passed as `children` or another prop
+  (`<ClientShell><ServerList /></ClientShell>`) crosses only under a hydrating layout (above);
+  elsewhere that one client component keeps its server HTML and Farm logs it once.
+- A client component must export each component by name (`export function Name`,
+  `export { Name }`, `export { Name } from "./name"`, or `export default`), not through
+  `export *`, and must not sit where the HTML parser moves it: directly inside `<table>`, `<tbody>`,
+  `<tr>`, `<select>` or `<svg>`. Inside a `<td>`, `<th>`, `<caption>` or `<foreignObject>` it is
+  fine.
 - An integration provider that wraps the whole route, and does not declare
   `supportsIsolatedHydration: true`, keeps its routes route-wide.
 
@@ -253,9 +278,17 @@ interactive, and Farm logs a warning naming the module and the reason. Fix the r
 the interactive part from a synchronous page. Preact, Solid, Vue, and Svelte keep async pages
 server-only.
 
+In [islands mode](#react-server-components) every page is a server component, so hydrating a page whole
+would ship its module and its server-only imports to the browser. Islands mode never does that:
+`farm build` fails and names each page, the reason, and how to restructure it, and `farm dev` logs
+the same error and serves the page without client JavaScript.
+
 Client components that come from a package, such as the icons in `lucide-react`, cannot be isolated
 yet. An async page renders them as static HTML and still hydrates its own client components as
-islands, and Farm logs which packages it left static.
+islands, and Farm logs which packages it left static. In islands mode every page does the same, and
+so does a layout where each element of the package closes itself and takes no element props, as
+icons do. A package component that wraps content, such as a provider, fails the build instead: render
+it from a local `"use client"` module.
 
 ### Isolated client leaves without RSC
 
@@ -267,6 +300,157 @@ Unsupported routes keep the existing route-wide ownership model. See
 rules. This experiment is disabled when RSC owns the route. Integration providers also keep the
 route-wide root unless they explicitly declare that they can be recreated around independent
 isolated roots.
+
+## React Server Components
+
+Turn on React Server Components in `farm.config.ts`. `farm dev`, `farm build`, and `farm start`
+then run Farm's RSC pipeline on the official `@vitejs/plugin-rsc`: pages and layouts are server
+components, and `"use client"` marks client components.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  experimental: {
+    serverComponents: true,
+  },
+});
+```
+
+That is the whole setup. When the RSC packages are missing, `farm dev` and `farm build` install
+them with the app's package manager: `@farm.js/plugin` at the installed `@farm.js/core` version, and
+`@vitejs/plugin-rsc`, `react`, `react-dom` and `react-server-dom-webpack` at the exact versions the
+plugin requires. Commit the updated `package.json` and lockfile. In CI (`CI` is set) nothing is
+installed: `serverComponents: true` runs without RSC and warns, and an explicit `mode` fails with the
+command to run. Set `FARM_SKIP_RSC_INSTALL=1` anywhere else the build must not change dependencies.
+Fast Refresh works in development without more setup; an app that installs `@vitejs/plugin-react`
+gets its own copy instead of Farm's.
+
+`serverComponents: true` is the same as `serverComponents: { mode: "rsc" }`, React's own server
+components engine. `{ mode: "islands" }` is Farm's own engine
+([RFC 0003](https://github.com/farming-labs/farm.js/blob/main/rfcs/0003-islands-server-components.md)),
+built on [islx](https://github.com/farming-labs/islx), its renderer-agnostic wire format:
+it renders on Farm's normal pipeline, sends static output once as HTML, and hydrates only client
+components ([how islands mode uses islx](/docs/server-rendering/islands), and how it runs
+libraries written for RSC). Client components hydrate while the page streams: one above slow Suspense
+content is interactive before that content arrives, in `farm dev` and in production. A client component that receives server output (`children`, or any element prop) keeps
+that output as a slot of the existing HTML instead of receiving it again. Client components inside
+that output are its descendants, as in RSC: they read its context (a client provider in a page,
+around server content, reaches the consumers in it) and keep their own state, and output it does
+not render at first (a tab, a closed panel) is there when it does. `useId` returns the ids in the
+server HTML, unique across client components. A server page under a
+layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
+components read the provider's context. That layout, and the other server layouts on its pages,
+render as server trees too: the browser rebuilds them from the HTML, so their modules and their
+server-only imports never reach it, and a navigation keeps the provider's state. A provider
+imported straight from a package fails the build; render it from a local `"use client"` module
+(a `providers.tsx`) instead. A large prop value (512 bytes of JSON or more, such as a
+navigation tree) travels once, keyed by its content: client components that share it share one
+copy, and a client navigation leaves out the values the browser already holds. A client navigation
+also leaves out the layouts the browser keeps: the server renders the page and any layout that
+changed, so a layout's client state survives and its HTML is not sent again. A layout the browser
+keeps does not render on that navigation, so put access checks in middleware or a page `guard`,
+not in a layout's body. `router.refresh()` and full loads render every layout. A client
+navigation streams too, in production: the browser shows the page with its Suspense fallbacks as
+soon as the shell arrives, then each boundary as React completes it, and hydrates the client
+components inside. Leaving the page drops the rest of the response. A page under a layout that
+hydrates arrives whole. A PPR route caches
+each segment under its own key next to the full page, and sends every value so the cached HTML
+suits any browser; a prerendered page always sends the whole document. A page under a layout that
+hydrates as one root (a client provider around the pages) sends its large prop values once too,
+in the payload its client components rebuild from. When the browser already renders that layout,
+a navigation to such a page carries only that payload: the browser rebuilds the page in the
+layout's React tree, so the server leaves out the page's HTML. `"use server"`
+functions work from forms, with or without JavaScript, and from client components, in `farm dev`
+and in production. A server component can pass one to a client component as a prop, and can
+declare one inline: an `async` function with `"use server"` as its first statement may read the
+component's variables, which travel with it sealed (AES-GCM, bound to the action) rather than as
+form fields the browser could read or change. Every instance of one build shares the sealing key;
+set `ISLX_ACTIONS_KEY` to keep forms on open pages working across deploys. A `<form>` written in a
+server component posts its action without a page load once JavaScript runs, and a client
+component inside it (a submit button) reads its pending state with `useFormStatus` from
+`react-dom`: islands mode points that import at islx's, which reports the server form's submit and
+is React's anywhere else. A namespace call (`ReactDOM.useFormStatus()`) reads only a form React
+renders. After an
+action called from JavaScript, the page refreshes, as the form posted without JavaScript would show
+it: islands still on the page keep their state and get their new props, and a `redirect()` from the
+action becomes a client navigation. Props and action arguments are not limited to JSON:
+`undefined`, `NaN`, `Infinity`, `-0`, `BigInt`, `Date`, `Map`, `Set`, `URL`, `RegExp`, typed arrays
+and `ArrayBuffer` arrive as themselves (`URL` and `RegExp` in islands mode only; RSC does not
+support them). A promise passed unawaited crosses too: the client component reads it with
+`use()` inside a Suspense boundary, works before it settles, and gets the value with its types
+when it streams in (a rejection arrives without the server's reason). Functions other than server
+actions and class instances do not cross; a client component given one keeps its server HTML and
+is not hydrated. A stylesheet that a server page, layout or server component imports (plain CSS or
+a CSS module) goes into the app's one stylesheet in production, though the module itself stays on
+the server. Islands mode needs none of the RSC packages and is experimental. Both modes share
+the authoring rules on this page, so switching between them is a one-line change; the same contract
+tests (`tests/e2e-server-components`) run against both, in development and in production builds.
+`benchmarks/server-components-payload` compares what each mode sends.
+
+In islands mode a page loads React and Farm's client runtime when it first needs them. A client
+component without an `island` export waits for a click when its code provably does nothing before
+one: it uses no effect, `ref`, form field, or handler other than `onClick` and `onSubmit` (a
+handled link only with a `#` link), and imports nothing but React and the app's own files that
+pass the same checks. Copy buttons, like buttons, menu toggles and tables of contents usually
+qualify; anything else hydrates at load, and an explicit `island` export always wins (see
+[Deferred route islands](#deferred-route-islands)). A layout that hydrates as one root (a client
+provider around the pages) waits the same way when every client component inside it, on the page
+too, passes. A page whose client components all wait, or
+that has none, starts with a 1.6 KB script, and loads the runtime when one is clicked, pressed or
+focused, when one that waits for `"visible"` or `"idle"` is due, when the pointer reaches a link,
+or when a form gets focus. A click made before then is held and replayed once the component has
+hydrated, and a `<form>` written in a server component posts natively until the runtime runs. An
+app with client plugins, a `src/client.ts`, or `docs` loads the runtime on every page. On
+`benchmarks/server-components-payload`, with no change to the app, docs, blog and shop pages load
+1.7 KB of JavaScript (`"rsc"`: 69.9 KB). See
+[how the two modes compare](/docs/server-rendering/islands#how-it-compares-with-react-server-components).
+
+The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
+The build goes to the deploy target's
+output directory, so `farm start` and platform deploys work unchanged.
+
+The RSC pipeline (`serverComponents: true` or `{ mode: "rsc" }`) does not run every Farm feature
+yet:
+
+- `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, `context`, and
+  `security.csp` decide what a request may see or receive. Running the app without them could
+  expose what they protect, so `farm dev` and `farm build` stop with an error that names them,
+  including when a layer (`extends`) sets them.
+- Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, and `observability`
+  are ignored, with a warning.
+
+Islands mode renders on Farm's own pipeline, so it runs all of these.
+
+Before this flag ran the RSC pipeline it only switched off isolated hydration, so some apps set it
+without using React Server Components. If such an app uses `auth`, `integrations` or another
+feature above that RSC cannot run yet, nothing is installed and it keeps running without React
+Server Components, with a warning that says why. `{ mode: "rsc" }` is always treated as a
+deliberate choice. `farm doctor` reports which way an app goes.
+
+A `vite.config.ts` built with `defineConfig` from
+`@farm.js/plugin/rsc` and the `vite` CLI keeps working, as in the
+[`rsc-demo` example](https://github.com/farming-labs/farm.js/tree/main/examples/rsc-demo).
+
+Both setups follow the same route contract:
+
+- **Static pages.** A page that opts in to static rendering, as in [Static rendering](#static-rendering),
+  is prerendered at build time together with its RSC payload. A dynamic route lists its paths with
+  `generateStaticParams()`. Client navigation fetches the payload at `<page>.rsc` (`/index.rsc` for
+  `/`), so a prerendered page navigates without reaching the server. A page that any middleware may
+  handle, and every page of an app with i18n, stays server-rendered, because middleware never sees a
+  static file. Pages with `revalidate` also render on each request for now; the pipeline has no
+  revalidating cache yet. A page that asks to be static and fails to render fails the build.
+- **Metadata.** Layouts and pages resolve `metadata`, `generateMetadata()`, and viewport exports in
+  the same order and with the same title templates as other Farm apps, and the server renders the
+  same head tags.
+- **Images.** `<Image>` follows the app's `images` config. Without `sharp`, `provider: "auto"` keeps
+  original image URLs, and the optimizer at `images.path` runs only when it can.
+- **Root layouts.** A root layout that renders `<html>` owns the document, as in Next.js, and the
+  browser hydrates the whole document.
+
+A client that loaded an older deployment and fetches a prerendered payload from a newer one does not
+get the deployment-mismatch reload that a server-rendered payload triggers.
 
 ## Automatic optimized boundaries
 

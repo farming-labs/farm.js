@@ -1,17 +1,22 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+  type Dirent,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
-import type {
-  DocsLlmsTxtPageInput,
-  DocsMarkdownPage,
-  DocsSitemapPageInput,
-} from "@farming-labs/docs";
+import type { DocsLlmsTxtPageInput, DocsMarkdownPage, DocsSitemapConfig } from "@farming-labs/docs";
 import { docsEngine, loadFarmDocsEngine } from "./engine";
 import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
+import { applyFarmBasePath, normalizeFarmBasePath, stripFarmBasePath } from "../base-path";
 import { FARM_NAVIGATION_HEAD_SELECTOR } from "../client/document-head";
 import { farmAcceptQuality } from "../markdown";
 import type { FarmLayoutFonts } from "../font";
 import { matchesFarmIfNoneMatch } from "../server-http";
+import { stampFarmCspNonce } from "../security";
 import {
   resolveFarmDocsFontAssets,
   toFarmDocsPublicFontAssets,
@@ -42,6 +47,18 @@ export interface FarmDocsHandlerOptions {
   fontStylesheetHref?: string;
   /** Application-owned global stylesheet, including the selected docs theme CSS import. */
   globalStylesheetHref?: string;
+  /**
+   * @internal Whether a path-specific guard (non-root middleware.ts, a config or
+   * integration middleware matcher) covers a docs URL such as `/docs/secret`. Such pages
+   * stay out of llms.txt, llms-full.txt, and the sitemaps, and their `.md` URL answers
+   * only when the guard covers it too.
+   */
+  isPathGuarded?: (pathname: string) => boolean;
+  /**
+   * The app's `basePath`. The docs answer below it, and at the origin root as pages do, and
+   * every link they generate includes it.
+   */
+  basePath?: string;
 }
 
 export interface FarmDocsPage {
@@ -207,19 +224,39 @@ export function resolveFarmDocsContentDir(
   return path.join(root, entryDir);
 }
 
+/** The main docs root, then each of `docs.roots`, each as a resolved config of its own. */
+export function getFarmDocsRoots(docs: FarmDocsResolvedConfig): FarmDocsResolvedConfig[] {
+  return [
+    docs,
+    ...(docs.roots ?? []).map((root) => ({
+      ...docs,
+      entry: root.entry,
+      contentDir: root.contentDir,
+      config: root.config,
+      runtimeConfig: root.runtimeConfig,
+      configOverrides: root.configOverrides,
+      roots: undefined,
+    })),
+  ];
+}
+
 export function getFarmDocsRouteTypeEntries(docs: FarmDocsResolvedConfig | undefined): string[] {
   if (!docs?.enabled) return [];
-  const entry = normalizeEntry(docs.entry);
-  if (entry === "/") return ["/", "/[...docs]"];
-  return [entry, `${entry}/[...docs]`];
+  return getFarmDocsRoots(docs).flatMap((root) => {
+    const entry = normalizeEntry(root.entry);
+    if (entry === "/") return ["/", "/[...docs]"];
+    return [entry, `${entry}/[...docs]`];
+  });
 }
 
 export function getFarmDocsDocumentNavigationMatchers(
   docs: FarmDocsResolvedConfig | undefined,
 ): string[] {
   if (!docs?.enabled) return [];
-  const entry = normalizeEntry(docs.entry);
-  return [entry === "/" ? "/(.*)" : `${entry}(.*)`];
+  return getFarmDocsRoots(docs).map((root) => {
+    const entry = normalizeEntry(root.entry);
+    return entry === "/" ? "/(.*)" : `${entry}(.*)`;
+  });
 }
 
 function getRequestSlug(docs: FarmDocsResolvedConfig, request: Request): string {
@@ -232,9 +269,46 @@ function getRequestSlug(docs: FarmDocsResolvedConfig, request: Request): string 
   return normalizeSlug(pathname.slice(entry.length));
 }
 
+// Discovery skips these entries, so no docs page lives under them.
+function isDiscoverableDocsEntryName(name: string): boolean {
+  return Boolean(name) && !name.startsWith(".") && name !== "node_modules";
+}
+
+/**
+ * Whether `filePath` is a file discovery lists: every segment below `contentDir` is
+ * a real directory (or, last, a real file) spelled exactly as on disk.
+ */
+function isDiscoverableDocsFile(contentDir: string, filePath: string): boolean {
+  const segments = path.relative(contentDir, filePath).split(path.sep);
+  let dir = contentDir;
+  for (const [index, name] of segments.entries()) {
+    if (!isDiscoverableDocsEntryName(name)) return false;
+    let entry: Dirent | undefined;
+    try {
+      entry = readdirSync(dir, { withFileTypes: true }).find(
+        (candidate) => candidate.name === name,
+      );
+    } catch {
+      return false;
+    }
+    const isLast = index === segments.length - 1;
+    if (!entry || !(isLast ? entry.isFile() : entry.isDirectory())) return false;
+    dir = path.join(dir, name);
+  }
+  return true;
+}
+
 function findDocsPageFile(contentDir: string, slug: string): string | null {
-  const segments = slug ? slug.split("/").filter(Boolean) : [];
-  if (!segments.every(isSafeSegment)) return null;
+  // Only a page's canonical slug, the one discovery derives from its file, loads it.
+  // Guards, listings and caches key on that href, so an alias (`a//b`, `a/./b`, `a/page`,
+  // `A/b` on a case-insensitive disk, a symlinked folder) must not reach the same file.
+  const canonicalSlug = trimSlashes(slug);
+  const segments = canonicalSlug ? canonicalSlug.split("/") : [];
+  if (
+    !segments.every((segment) => isSafeSegment(segment) && isDiscoverableDocsEntryName(segment))
+  ) {
+    return null;
+  }
 
   const slugDir = path.join(contentDir, ...segments);
   const candidates =
@@ -242,10 +316,14 @@ function findDocsPageFile(contentDir: string, slug: string): string | null {
       ? DOCS_FILE_NAMES.map((filename) => path.join(contentDir, filename))
       : [
           ...DOCS_FILE_NAMES.map((filename) => path.join(slugDir, filename)),
-          ...DOCS_FILE_EXTENSIONS.map((extension) => path.join(contentDir, `${slug}${extension}`)),
+          ...DOCS_FILE_EXTENSIONS.map((extension) =>
+            path.join(contentDir, `${canonicalSlug}${extension}`),
+          ),
         ];
 
   for (const candidate of candidates) {
+    if (pathToSlug(contentDir, candidate) !== canonicalSlug) continue;
+    if (!isDiscoverableDocsFile(contentDir, candidate)) continue;
     const safePath = resolveExistingFileInside(contentDir, candidate);
     if (safePath) {
       return safePath;
@@ -298,6 +376,32 @@ function titleFromMarkdown(body: string, fallback: string): string {
   return heading || fallback;
 }
 
+/**
+ * A page's date can come from a `git log` over the whole docs history, so it is resolved
+ * on the first read of `lastModified` rather than for every listing that needs only paths.
+ */
+function createLastModifiedResolver(
+  contentDir: string,
+  sourcePath: string,
+  frontmatter: Record<string, string>,
+): { get(): string | undefined; set(value: string | undefined): void } {
+  let resolved = false;
+  let value: string | undefined;
+  return {
+    get() {
+      if (!resolved) {
+        value = resolveFarmDocsPageLastModified(contentDir, sourcePath, frontmatter);
+        resolved = true;
+      }
+      return value;
+    },
+    set(next) {
+      value = next;
+      resolved = true;
+    },
+  };
+}
+
 export function loadFarmDocsPage(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
@@ -310,6 +414,7 @@ export function loadFarmDocsPage(
   const { frontmatter, body } = parseFrontmatter(source);
   const title = frontmatter.title || titleFromMarkdown(body, titleFromSlug(slug));
   const href = createDocsHref(docs.entry, slug);
+  const lastModified = createLastModifiedResolver(contentDir, sourcePath, frontmatter);
 
   return {
     slug,
@@ -318,10 +423,20 @@ export function loadFarmDocsPage(
     section: frontmatter.section,
     href,
     sourcePath,
-    lastModified: resolveFarmDocsPageLastModified(contentDir, sourcePath, frontmatter),
+    get lastModified() {
+      return lastModified.get();
+    },
+    set lastModified(value) {
+      lastModified.set(value);
+    },
     frontmatter,
     body,
   };
+}
+
+/** @internal The `.md` URL serving a docs page's Markdown. */
+export function getFarmDocsMarkdownPath(href: string): string {
+  return href === "/" ? "/.md" : `${href}.md`;
 }
 
 function createDocsHref(entry: string, slug: string): string {
@@ -376,6 +491,7 @@ export function discoverFarmDocsPages(
 
       const source = readFileSync(absolutePath, "utf8");
       const { frontmatter, body } = parseFrontmatter(source);
+      const lastModified = createLastModifiedResolver(contentDir, absolutePath, frontmatter);
       pages.push({
         slug,
         title: frontmatter.title || titleFromMarkdown(body, titleFromSlug(slug)),
@@ -383,7 +499,12 @@ export function discoverFarmDocsPages(
         section: frontmatter.section,
         href: createDocsHref(docs.entry, slug),
         sourcePath: absolutePath,
-        lastModified: resolveFarmDocsPageLastModified(contentDir, absolutePath, frontmatter),
+        get lastModified() {
+          return lastModified.get();
+        },
+        set lastModified(value) {
+          lastModified.set(value);
+        },
       });
     }
   };
@@ -392,13 +513,14 @@ export function discoverFarmDocsPages(
   return pages.sort((a, b) => a.href.localeCompare(b.href));
 }
 
-export function toFarmDocsMarkdownPage(page: LoadedFarmDocsPage): DocsMarkdownPage {
+/** The page as the docs engine links it. `basePath` puts its URL below the app's base path. */
+export function toFarmDocsMarkdownPage(page: LoadedFarmDocsPage, basePath = ""): DocsMarkdownPage {
   const lastModified =
     page.lastModified || page.frontmatter.lastModified || page.frontmatter.lastmod;
 
   return {
     slug: page.slug,
-    url: page.href,
+    url: applyFarmBasePath(page.href, basePath),
     title: page.title,
     description: page.description,
     lastModified,
@@ -406,6 +528,81 @@ export function toFarmDocsMarkdownPage(page: LoadedFarmDocsPage): DocsMarkdownPa
     content: page.body,
     rawContent: page.body,
   };
+}
+
+/**
+ * @internal The request as the docs runtime matches it: on its route path, without the app's
+ * `basePath`. A path outside the base path is left as it is, so the docs keep answering at the
+ * origin root, as pages do.
+ */
+export function toFarmDocsRouteRequest(request: Request, basePath: string): Request {
+  if (!basePath) return request;
+  const url = new URL(request.url);
+  const routePathname = stripFarmBasePath(url.pathname, basePath);
+  if (routePathname === url.pathname) return request;
+  url.pathname = routePathname;
+  return new Request(url, request);
+}
+
+/**
+ * @internal The URL the docs engine joins its site routes to (llms.txt, the agent files): the
+ * request's origin and the app's `basePath`.
+ */
+export function getFarmDocsSiteUrl(request: Request, basePath: string): string {
+  return `${new URL(request.url).origin}${basePath}`;
+}
+
+/** @internal The docs entry as a URL path, below the app's `basePath`. */
+export function getFarmDocsPublicEntry(docs: FarmDocsResolvedConfig, basePath: string): string {
+  return basePath ? applyFarmBasePath(normalizeEntry(docs.entry), basePath) : docs.entry;
+}
+
+/**
+ * @internal The sitemap config for the links the docs engine writes as root-relative paths (the
+ * `Sitemap:` line of robots.txt, the footer of a page's Markdown): its routes below `basePath`.
+ */
+export function toFarmDocsPublicSitemapConfig(
+  sitemap: boolean | DocsSitemapConfig | undefined,
+  basePath: string,
+): boolean | DocsSitemapConfig | undefined {
+  if (!basePath || sitemap === false) return sitemap;
+  const configured = typeof sitemap === "object" ? sitemap : {};
+  return {
+    ...configured,
+    routePrefix: `${basePath}/${trimSlashes(configured.routePrefix ?? "")}`,
+  };
+}
+
+/** @internal The docs sitemap manifest, each page linked below the app's `basePath`. */
+export function buildFarmDocsSitemapManifest(
+  pages: readonly LoadedFarmDocsPage[],
+  docs: FarmDocsResolvedConfig,
+  origin: string,
+  basePath: string,
+) {
+  return docsEngine().buildDocsSitemapManifest({
+    pages: pages.map((page) => ({
+      ...toFarmDocsMarkdownPage(page, basePath),
+      sourcePath: page.sourcePath,
+    })),
+    entry: getFarmDocsPublicEntry(docs, basePath),
+    siteTitle: getDocsTitle(docs),
+    baseUrl: origin,
+  });
+}
+
+/** @internal The docs robots.txt: the docs entry and the sitemap it names below `basePath`. */
+export function renderFarmDocsRobotsTxt(
+  docs: FarmDocsResolvedConfig,
+  origin: string,
+  basePath: string,
+): string {
+  return docsEngine().renderDocsRobotsTxt({
+    entry: getFarmDocsPublicEntry(docs, basePath),
+    sitemap: toFarmDocsPublicSitemapConfig(docs.config.sitemap ?? true, basePath),
+    robots: docs.config.robots ?? true,
+    baseUrl: origin,
+  });
 }
 
 function getDocsTitle(docs: FarmDocsResolvedConfig): string {
@@ -421,21 +618,16 @@ function getDocsDescription(docs: FarmDocsResolvedConfig): string | undefined {
 function getLoadedDocsPages(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
+  isPathGuarded?: (pathname: string) => boolean,
 ): LoadedFarmDocsPage[] {
   return discoverFarmDocsPages(contentDir, docs)
+    .filter((page) => !isPathGuarded?.(page.href))
     .map((page) => loadFarmDocsPage(contentDir, docs, page.slug))
     .filter((page): page is LoadedFarmDocsPage => Boolean(page));
 }
 
 function toDocsLlmsPage(page: LoadedFarmDocsPage): DocsLlmsTxtPageInput {
   return toFarmDocsMarkdownPage(page);
-}
-
-function toDocsSitemapPage(page: LoadedFarmDocsPage): DocsSitemapPageInput {
-  return {
-    ...toFarmDocsMarkdownPage(page),
-    sourcePath: page.sourcePath,
-  };
 }
 
 type CopyMarkdownActionConfig = {
@@ -512,8 +704,9 @@ function renderLastUpdatedText(
   position: "footer" | "below-title",
 ): string {
   const config = resolveLastUpdatedDisplayConfig(docs);
+  if (!config.enabled || config.position !== position) return "";
   const formatted = formatLastModifiedDate(page.lastModified);
-  if (!config.enabled || config.position !== position || !formatted) return "";
+  if (!formatted) return "";
 
   const time = `<time datetime="${escapeAttribute(page.lastModified || "")}">${escapeHtml(formatted)}</time>`;
   const label = config.label.trim();
@@ -567,11 +760,15 @@ function renderReadingTimeMeta(page: LoadedFarmDocsPage, docs: FarmDocsResolvedC
 </div>`;
 }
 
-function renderPixelPageActions(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+function renderPixelPageActions(
+  page: LoadedFarmDocsPage,
+  docs: FarmDocsResolvedConfig,
+  basePath: string,
+): string {
   const copyMarkdown = resolveCopyMarkdownActionConfig(docs);
   if (!copyMarkdown) return "";
 
-  const markdownUrl = `${page.href}.md`;
+  const markdownUrl = applyFarmBasePath(`${page.href}.md`, basePath);
   const includeTitle = copyMarkdown.includeTitle ? "true" : "false";
 
   return `<div class="fd-page-actions" data-page-actions data-actions-alignment="${resolvePageActionsAlignment(docs)}">
@@ -595,9 +792,13 @@ function renderPixelPageActions(page: LoadedFarmDocsPage, docs: FarmDocsResolved
 </div>`;
 }
 
-function renderBelowTitleMeta(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+function renderBelowTitleMeta(
+  page: LoadedFarmDocsPage,
+  docs: FarmDocsResolvedConfig,
+  basePath: string,
+): string {
   const lastUpdated = renderLastUpdatedText(page, docs, "below-title");
-  const actions = renderPixelPageActions(page, docs);
+  const actions = renderPixelPageActions(page, docs, basePath);
   const readingTime = renderReadingTimeMeta(page, docs);
   if (!lastUpdated && !actions && !readingTime) return "";
 
@@ -612,8 +813,9 @@ function renderMarkdownHtmlWithTitleMeta(
   page: LoadedFarmDocsPage,
   docs: FarmDocsResolvedConfig,
   html: string,
+  basePath: string,
 ): string {
-  const meta = renderBelowTitleMeta(page, docs);
+  const meta = renderBelowTitleMeta(page, docs, basePath);
   if (!meta) return html;
 
   const withTitleMeta = html.replace(/(<h1\b[\s\S]*?<\/h1>)/, `$1\n${meta}`);
@@ -629,22 +831,24 @@ function renderPixelPageFooter(page: LoadedFarmDocsPage, docs: FarmDocsResolvedC
 </div>`;
 }
 
-function getDocsLlmsOptions(docs: FarmDocsResolvedConfig, request: Request) {
+function getDocsLlmsOptions(docs: FarmDocsResolvedConfig, request: Request, basePath: string) {
   const configured =
     typeof docs.config.llmsTxt === "object" && docs.config.llmsTxt !== null
       ? docs.config.llmsTxt
       : {};
   return {
     enabled: true,
-    baseUrl: new URL(request.url).origin,
+    baseUrl: getFarmDocsSiteUrl(request, basePath),
     siteTitle: getDocsTitle(docs),
     siteDescription: getDocsDescription(docs),
     ...configured,
   };
 }
 
-function getDocsDiscoveryOptions(docs: FarmDocsResolvedConfig, request: Request) {
+function getDocsDiscoveryOptions(docs: FarmDocsResolvedConfig, request: Request, basePath: string) {
   return {
+    // The discovery files list the docs engine's routes as root-relative paths, which answer at
+    // the origin root too. `llms.baseUrl` gives the site's own URL, below the basePath.
     origin: new URL(request.url).origin,
     entry: docs.entry,
     i18n: null,
@@ -666,7 +870,7 @@ function getDocsDiscoveryOptions(docs: FarmDocsResolvedConfig, request: Request)
       },
     },
     feedback: undefined,
-    llms: getDocsLlmsOptions(docs, request),
+    llms: getDocsLlmsOptions(docs, request, basePath),
     sitemap: docs.config.sitemap ?? true,
     robots: docs.config.robots ?? true,
     openapi: undefined,
@@ -681,17 +885,15 @@ function createFarmDocsPublicResponse(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
   request: Request,
+  isPathGuarded: ((pathname: string) => boolean) | undefined,
+  basePath: string,
 ): Response | null {
   const url = new URL(request.url);
   let loadedPages: LoadedFarmDocsPage[] | undefined;
-  const getPages = () => (loadedPages ??= getLoadedDocsPages(contentDir, docs));
+  // These files are public at the site root, so a page a guard covers is left out.
+  const getPages = () => (loadedPages ??= getLoadedDocsPages(contentDir, docs, isPathGuarded));
   const sitemapManifest = () =>
-    docsEngine().buildDocsSitemapManifest({
-      pages: getPages().map(toDocsSitemapPage),
-      entry: docs.entry,
-      siteTitle: getDocsTitle(docs),
-      baseUrl: url.origin,
-    });
+    buildFarmDocsSitemapManifest(getPages(), docs, url.origin, basePath);
   const textHeaders = (contentType: string) => ({
     "Content-Type": contentType,
     "Cache-Control": "public, max-age=60",
@@ -701,7 +903,7 @@ function createFarmDocsPublicResponse(
   if (llmsFormat) {
     const generated = docsEngine().renderDocsLlmsTxt(
       getPages().map(toDocsLlmsPage),
-      getDocsLlmsOptions(docs, request),
+      getDocsLlmsOptions(docs, request, basePath),
     );
     return new Response(llmsFormat === "llms-full" ? generated.llmsFullTxt : generated.llmsTxt, {
       status: 200,
@@ -735,22 +937,16 @@ function createFarmDocsPublicResponse(
   }
 
   if (docsEngine().resolveDocsRobotsRequest(url, docs.config.robots ?? true)) {
-    return new Response(
-      docsEngine().renderDocsRobotsTxt({
-        entry: docs.entry,
-        sitemap: docs.config.sitemap ?? true,
-        robots: docs.config.robots ?? true,
-        baseUrl: url.origin,
-      }),
-      {
-        status: 200,
-        headers: textHeaders("text/plain; charset=utf-8"),
-      },
-    );
+    return new Response(renderFarmDocsRobotsTxt(docs, url.origin, basePath), {
+      status: 200,
+      headers: textHeaders("text/plain; charset=utf-8"),
+    });
   }
 
   if (docsEngine().isDocsAgentDiscoveryRequest(url)) {
-    const spec = docsEngine().buildDocsAgentDiscoverySpec(getDocsDiscoveryOptions(docs, request));
+    const spec = docsEngine().buildDocsAgentDiscoverySpec(
+      getDocsDiscoveryOptions(docs, request, basePath),
+    );
     const title = getDocsTitle(docs);
     return new Response(
       JSON.stringify({
@@ -772,7 +968,9 @@ function createFarmDocsPublicResponse(
 
   if (docsEngine().isDocsAgentsRequest(url)) {
     return new Response(
-      `${docsEngine().renderDocsAgentsDocument(getDocsDiscoveryOptions(docs, request)).trim()}\n`,
+      `${docsEngine()
+        .renderDocsAgentsDocument(getDocsDiscoveryOptions(docs, request, basePath))
+        .trim()}\n`,
       {
         status: 200,
         headers: textHeaders("text/markdown; charset=utf-8"),
@@ -782,7 +980,9 @@ function createFarmDocsPublicResponse(
 
   if (docsEngine().isDocsSkillRequest(url)) {
     return new Response(
-      `${docsEngine().renderDocsSkillDocument(getDocsDiscoveryOptions(docs, request)).trim()}\n`,
+      `${docsEngine()
+        .renderDocsSkillDocument(getDocsDiscoveryOptions(docs, request, basePath))
+        .trim()}\n`,
       {
         status: 200,
         headers: textHeaders("text/markdown; charset=utf-8"),
@@ -1053,6 +1253,20 @@ function renderCodeCopyButton(className = "code-copy"): string {
   return `<button class="${className}" type="button" data-code-copy data-copied="false" aria-label="Copy code" title="Copy code"><svg class="code-copy-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><svg class="code-copy-check" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"></path></svg></button>`;
 }
 
+const SCRIPT_URL_SCHEME = /^(?:javascript|vbscript|data):/i;
+
+/**
+ * Whether clicking the link runs script in the docs origin. GitHub drops the same schemes
+ * from Markdown links. Browsers ignore tabs and newlines anywhere in a URL and control
+ * characters or spaces before it, so `java\tscript:` still counts.
+ */
+function isScriptUrl(href: string): boolean {
+  const url = href.replace(/[\t\n\r]/g, "");
+  let start = 0;
+  while (start < url.length && url.charCodeAt(start) <= 0x20) start++;
+  return SCRIPT_URL_SCHEME.test(url.slice(start));
+}
+
 function renderMarkdownDocument(
   body: string,
   depth: number,
@@ -1096,6 +1310,7 @@ function renderMarkdownDocument(
   renderer.codespan = (code) => `<code>${escapeHtml(code)}</code>`;
 
   renderer.link = (href, title, text) => {
+    if (href && isScriptUrl(href)) return text;
     const safeHref = href || "";
     const titleAttribute = title ? ` title="${escapeAttribute(title)}"` : "";
     return `<a href="${escapeAttribute(safeHref)}"${titleAttribute}>${text}</a>`;
@@ -1337,10 +1552,11 @@ function renderSidebarLink(
   item: FarmDocsPage,
   activeHref: string,
   docs: FarmDocsResolvedConfig,
+  basePath: string,
   configured?: SidebarNavigationItem,
 ): string {
   const active = item.href === activeHref;
-  return `<a class="fd-sidebar-link${active ? " fd-sidebar-link-active" : ""}" data-active="${active ? "true" : "false"}" href="${escapeAttribute(item.href)}">${renderSidebarLabel(docs, configured?.icon, getSidebarPageLabel(item, configured), "sidebar-link-label fd-sidebar-link-label")}</a>`;
+  return `<a class="fd-sidebar-link${active ? " fd-sidebar-link-active" : ""}" data-active="${active ? "true" : "false"}" href="${escapeAttribute(applyFarmBasePath(item.href, basePath))}">${renderSidebarLabel(docs, configured?.icon, getSidebarPageLabel(item, configured), "sidebar-link-label fd-sidebar-link-label")}</a>`;
 }
 
 function collectConfiguredSidebarPages(
@@ -1407,11 +1623,12 @@ function renderConfiguredSidebarItems(
   maps: ReturnType<typeof createSidebarPageMaps>,
   activeHref: string,
   docs: FarmDocsResolvedConfig,
+  basePath: string,
 ): string {
   const renderedItems: string[] = [];
   for (const item of items) {
     const page = resolveConfiguredSidebarPage(item, maps);
-    const childHtml = renderConfiguredSidebarItems(item.children, maps, activeHref, docs);
+    const childHtml = renderConfiguredSidebarItems(item.children, maps, activeHref, docs, basePath);
 
     if (item.children.length > 0) {
       renderedItems.push(renderConfiguredSidebarSubgroup(item, childHtml, docs));
@@ -1419,7 +1636,7 @@ function renderConfiguredSidebarItems(
     }
 
     const linkHtml = page
-      ? renderSidebarLink(page, activeHref, docs, item)
+      ? renderSidebarLink(page, activeHref, docs, basePath, item)
       : renderExternalSidebarLink(item, activeHref, docs);
     if (linkHtml) renderedItems.push(linkHtml);
   }
@@ -1431,10 +1648,11 @@ function renderConfiguredSidebarSection(
   maps: ReturnType<typeof createSidebarPageMaps>,
   activeHref: string,
   docs: FarmDocsResolvedConfig,
+  basePath: string,
 ): string {
   const label = section.label || "Docs";
   const id = sidebarIdFor(label);
-  const links = renderConfiguredSidebarItems(section.children, maps, activeHref, docs);
+  const links = renderConfiguredSidebarItems(section.children, maps, activeHref, docs, basePath);
   return `<div class="sidebar-folder fd-sidebar-folder" data-state="open">
   <button class="text-fd-muted-foreground sidebar-folder-trigger fd-sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${renderSidebarLabel(docs, section.icon, label, "sidebar-folder-label")}</button>
   <div id="${escapeAttribute(id)}" class="overflow-hidden sidebar-folder-content fd-sidebar-folder-content" data-state="open">
@@ -1447,10 +1665,11 @@ function renderAutoSidebarSectionItems(
   items: FarmDocsPage[],
   activeHref: string,
   docs: FarmDocsResolvedConfig,
+  basePath: string,
 ): string {
   return [...items]
     .sort(compareSidebarPages)
-    .map((item) => renderSidebarLink(item, activeHref, docs))
+    .map((item) => renderSidebarLink(item, activeHref, docs, basePath))
     .join("\n");
 }
 
@@ -1458,6 +1677,7 @@ function renderPixelNavItems(
   pages: FarmDocsPage[],
   activeHref: string,
   docs: FarmDocsResolvedConfig,
+  basePath: string,
 ): string {
   const configuredSidebar = getSidebarNavigation(docs);
   if (configuredSidebar.length > 0) {
@@ -1465,11 +1685,11 @@ function renderPixelNavItems(
     const renderedSections = configuredSidebar
       .map((section) => {
         if (section.children.length > 0) {
-          return renderConfiguredSidebarSection(section, maps, activeHref, docs);
+          return renderConfiguredSidebarSection(section, maps, activeHref, docs, basePath);
         }
         const page = resolveConfiguredSidebarPage(section, maps);
         return page
-          ? renderSidebarLink(page, activeHref, docs, section)
+          ? renderSidebarLink(page, activeHref, docs, basePath, section)
           : renderExternalSidebarLink(section, activeHref, docs);
       })
       .filter(Boolean)
@@ -1498,7 +1718,7 @@ ${renderedSections}
     })
     .map(([section, items]) => {
       const id = sidebarIdFor(section);
-      const links = renderAutoSidebarSectionItems(items, activeHref, docs);
+      const links = renderAutoSidebarSectionItems(items, activeHref, docs, basePath);
       return `<div class="sidebar-folder fd-sidebar-folder" data-state="open">
   <button class="text-fd-muted-foreground sidebar-folder-trigger fd-sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${renderSidebarLabel(docs, undefined, section, "sidebar-folder-label")}</button>
   <div id="${escapeAttribute(id)}" class="overflow-hidden sidebar-folder-content fd-sidebar-folder-content" data-state="open">
@@ -1519,6 +1739,7 @@ function renderPixelPageNav(
   pages: FarmDocsPage[],
   activeHref: string,
   docs: FarmDocsResolvedConfig,
+  basePath: string,
 ): string {
   const orderedPages = getOrderedSidebarPages(pages, docs);
   const activeIndex = orderedPages.findIndex((item) => item.href === activeHref);
@@ -1531,7 +1752,7 @@ function renderPixelPageNav(
   const renderChevron = (direction: "prev" | "next") =>
     `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="${direction === "prev" ? "15 18 9 12 15 6" : "9 18 15 12 9 6"}" /></svg>`;
   const renderCard = (item: FarmDocsPage, direction: "prev" | "next") =>
-    `<a class="fd-page-nav-card fd-page-nav-${direction}" href="${escapeAttribute(item.href)}">
+    `<a class="fd-page-nav-card fd-page-nav-${direction}" href="${escapeAttribute(applyFarmBasePath(item.href, basePath))}">
   <span class="fd-page-nav-title fd-page-nav-title-${direction}">${direction === "prev" ? `${renderChevron(direction)}${escapeHtml(item.title)}` : `${escapeHtml(item.title)}${renderChevron(direction)}`}</span>
   <span class="fd-page-nav-description">${direction === "prev" ? "Previous Page" : "Next Page"}</span>
 </a>`;
@@ -1555,7 +1776,11 @@ function isBreadcrumbEnabled(docs: FarmDocsResolvedConfig): boolean {
   return true;
 }
 
-function renderPixelBreadcrumb(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+function renderPixelBreadcrumb(
+  page: LoadedFarmDocsPage,
+  docs: FarmDocsResolvedConfig,
+  basePath: string,
+): string {
   if (!isBreadcrumbEnabled(docs)) return "";
 
   const segments = trimSlashes(page.slug).split("/").filter(Boolean);
@@ -1566,7 +1791,10 @@ function renderPixelBreadcrumb(page: LoadedFarmDocsPage, docs: FarmDocsResolvedC
   const currentSegment = segments[segments.length - 1];
   const entry = normalizeEntry(docs.entry);
   const parentPath = parentSegments.join("/");
-  const parentHref = entry === "/" ? `/${parentPath}` : `${entry}/${parentPath}`;
+  const parentHref = applyFarmBasePath(
+    entry === "/" ? `/${parentPath}` : `${entry}/${parentPath}`,
+    basePath,
+  );
 
   return `<nav class="fd-breadcrumb" aria-label="Breadcrumb">
   <span class="fd-breadcrumb-item">
@@ -1588,11 +1816,11 @@ function renderDocsSearchTrigger(showIcon = true, className = ""): string {
 
 function renderDocsSearchMount(clientEntry: string): string {
   return `<div id="farm-docs-search-root" data-farm-docs-search-root data-api="/api/docs"></div>
-  <script type="module" src="${escapeAttribute(clientEntry)}"></script>`;
+  ${stampFarmCspNonce(`<script type="module" src="${escapeAttribute(clientEntry)}"></script>`)}`;
 }
 
 function renderDocsSearchBootstrapScript(): string {
-  return `<script>${generateFarmDocsSearchBootstrapRuntime()}</script>`;
+  return stampFarmCspNonce(`<script>${generateFarmDocsSearchBootstrapRuntime()}</script>`);
 }
 
 function renderPixelToc(items: TocItem[]): string {
@@ -1610,8 +1838,8 @@ ${items
 </div>`;
 }
 
-function renderDocsRuntimeScript(docs: FarmDocsResolvedConfig): string {
-  const docsEntry = JSON.stringify(normalizeEntry(docs.entry));
+function renderDocsRuntimeScript(docs: FarmDocsResolvedConfig, basePath: string): string {
+  const docsEntry = JSON.stringify(applyFarmBasePath(normalizeEntry(docs.entry), basePath));
   const reconcileHeadRuntime = `const farmNavigationHeadSelector=${JSON.stringify(FARM_NAVIGATION_HEAD_SELECTOR)};const reconcileDocsHead=(nextDoc)=>{const nextTitle=nextDoc.querySelector("title");document.title=nextTitle?.textContent||"";document.head.querySelectorAll(farmNavigationHeadSelector).forEach((node)=>node.remove());nextDoc.head.querySelectorAll(farmNavigationHeadSelector).forEach((node)=>document.head.appendChild(document.importNode(node,true)))}`;
   return `<script>(()=>{if(window.__farmDocsRuntime)return;window.__farmDocsRuntime=true;document.documentElement.dataset.farmDocsRuntime="true";document.documentElement.dataset.farmDocsRuntimeId=Math.random().toString(36).slice(2);${reconcileHeadRuntime};const docsEntry=${docsEntry};let cleanupToc=()=>{};let closeMobileSidebar=()=>{};const normalizePath=(path)=>path.length>1?path.replace(/\\/+$/,""):path;const isDocsPath=(path)=>{const next=normalizePath(path);const entry=normalizePath(docsEntry);if(next.endsWith(".md"))return false;if(entry==="/")return true;return next===entry||next.startsWith(entry+"/")};const initToc=()=>{cleanupToc();const toc=document.getElementById("nd-toc");if(!toc){cleanupToc=()=>{};return}const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs){const selected=link===active.link;link.dataset.active=selected?"true":"false";link.classList.toggle("fd-toc-link-active",selected)}if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath="polygon(0 "+top+"px,100% "+top+"px,100% "+bottom+"px,0 "+bottom+"px)"};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};const onHashChange=()=>setTimeout(schedule,0);window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",onHashChange);cleanupToc=()=>{window.removeEventListener("scroll",schedule);window.removeEventListener("resize",schedule);window.removeEventListener("hashchange",onHashChange);if(frame)cancelAnimationFrame(frame);frame=0};update()};const getSidebar=()=>document.getElementById("nd-sidebar");const ensureActiveVisible=()=>{const sidebar=getSidebar();if(!sidebar)return;const active=sidebar.querySelector('a[data-active="true"]');if(!(active instanceof HTMLElement))return;const activeRect=active.getBoundingClientRect();const sidebarRect=sidebar.getBoundingClientRect();if(activeRect.top<sidebarRect.top||activeRect.bottom>sidebarRect.bottom)sidebar.scrollTop+=activeRect.top-sidebarRect.top-(sidebar.clientHeight-activeRect.height)/2};const setSidebarActive=(path)=>{const sidebar=getSidebar();if(!sidebar)return;const current=normalizePath(path);for(const link of Array.from(sidebar.querySelectorAll("a[href]"))){try{link.dataset.active=normalizePath(new URL(link.href,location.href).pathname)===current?"true":"false"}catch{}}ensureActiveVisible()};const initMobileSidebar=()=>{const layout=document.getElementById("nd-docs-layout");const sidebar=getSidebar();const toggle=document.querySelector("[data-sidebar-toggle]");const backdrop=document.querySelector("[data-sidebar-backdrop]");if(!layout||!sidebar||!(toggle instanceof HTMLButtonElement))return;const setOpen=(open)=>{layout.dataset.sidebarOpen=open?"true":"false";sidebar.classList.toggle("fd-sidebar-open",open);document.documentElement.dataset.farmDocsSidebar=open?"open":"closed";toggle.setAttribute("aria-expanded",open?"true":"false");toggle.setAttribute("aria-label",open?"Close menu":"Open menu")};const toggleOpen=()=>setOpen(layout.dataset.sidebarOpen!=="true");closeMobileSidebar=()=>setOpen(false);toggle.addEventListener("click",(event)=>{event.preventDefault();toggleOpen()});backdrop?.addEventListener("click",()=>closeMobileSidebar());document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeMobileSidebar()});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(target)closeMobileSidebar()});closeMobileSidebar()};const initSidebarScroll=()=>{const sidebar=getSidebar();if(!sidebar)return;const key="farmdocs:sidebar-scroll:"+location.origin;const getStorage=()=>{try{return window.sessionStorage}catch{return null}};const readSaved=()=>{try{const raw=getStorage()?.getItem(key);if(!raw)return null;const parsed=JSON.parse(raw);return parsed&&typeof parsed==="object"?parsed:null}catch{return null}};const save=(path=location.pathname)=>{try{getStorage()?.setItem(key,JSON.stringify({path,scrollTop:sidebar.scrollTop}))}catch{}};const saved=readSaved();if(saved?.path===location.pathname&&Number.isFinite(Number(saved.scrollTop)))sidebar.scrollTop=Number(saved.scrollTop);ensureActiveVisible();save();sidebar.addEventListener("scroll",()=>save(),{passive:true});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target)return;try{save(new URL(target.href,location.href).pathname)}catch{save()}});window.addEventListener("beforeunload",()=>save())};let navigateController=null;const getPageKey=(root)=>{const article=root.getElementById("nd-page");if(!article)return"";return article.querySelector("h1")?.textContent?.trim()||article.textContent?.replace(/\\s+/g," ").trim().slice(0,160)||""};const swapDocsPage=(html,url)=>{const nextDoc=new DOMParser().parseFromString(html,"text/html");const nextArticle=nextDoc.getElementById("nd-page");const currentArticle=document.getElementById("nd-page");if(!nextArticle||!currentArticle)return false;const nextKey=getPageKey(nextDoc);const importedArticle=document.importNode(nextArticle,true);currentArticle.replaceWith(importedArticle);const renderedArticle=document.getElementById("nd-page");if(!renderedArticle||renderedArticle===currentArticle||(nextKey&&getPageKey(document)!==nextKey))return false;const nextToc=nextDoc.getElementById("nd-toc");const currentToc=document.getElementById("nd-toc");if(nextToc&&currentToc)currentToc.replaceWith(document.importNode(nextToc,true));reconcileDocsHead(nextDoc);setSidebarActive(url.pathname);initToc();closeMobileSidebar();return true};const navigateDocs=async(url,{replace=false,scroll=true}={})=>{if(!isDocsPath(url.pathname))return false;if(navigateController)navigateController.abort();const controller=new AbortController();navigateController=controller;document.documentElement.dataset.farmDocsNavigating="true";try{const response=await fetch(url.href,{cache:"no-store",headers:{accept:"text/html","x-farm-docs-navigate":"1"},signal:controller.signal});if(!response.ok||!((response.headers.get("content-type")||"").includes("text/html")))return false;const html=await response.text();if(!swapDocsPage(html,url))return false;if(replace)history.replaceState({farmDocs:true},"",url.href);else history.pushState({farmDocs:true},"",url.href);if(scroll){if(url.hash){let id=url.hash.slice(1);try{id=decodeURIComponent(id)}catch{}document.getElementById(id)?.scrollIntoView({block:"start"})}else window.scrollTo({top:0,left:0})}return true}catch(error){if(error?.name==="AbortError")return true;return false}finally{if(navigateController===controller){delete document.documentElement.dataset.farmDocsNavigating;navigateController=null}}};const initClientNavigation=()=>{document.addEventListener("click",(event)=>{if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target||target.target||target.hasAttribute("download"))return;let url;try{url=new URL(target.href,location.href)}catch{return}if(url.origin!==location.origin||!isDocsPath(url.pathname))return;if(normalizePath(url.pathname)===normalizePath(location.pathname)&&url.hash)return;event.preventDefault();navigateDocs(url).then((handled)=>{if(!handled)location.href=url.href})});window.addEventListener("popstate",()=>{navigateDocs(new URL(location.href),{replace:true,scroll:false}).then((handled)=>{if(!handled)location.reload()})})};const init=()=>{initToc();initMobileSidebar();initSidebarScroll();initClientNavigation()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
 }
@@ -1624,10 +1852,10 @@ function renderDocsHashRuntimeScript(): string {
   return `<script>(()=>{if(window.__farmDocsHashRuntime)return;window.__farmDocsHashRuntime=true;const scrollToHash=()=>{if(!location.hash)return;let id=location.hash.slice(1);try{id=decodeURIComponent(id)}catch{}document.getElementById(id)?.scrollIntoView({block:"start"})};const schedule=()=>requestAnimationFrame(()=>requestAnimationFrame(scrollToHash));if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",schedule,{once:true});else schedule();window.addEventListener("load",schedule,{once:true});window.addEventListener("hashchange",schedule)})();</script>`;
 }
 
-function renderDocsRuntimeScripts(docs: FarmDocsResolvedConfig): string {
-  return `${renderDocsRuntimeScript(docs)}
+function renderDocsRuntimeScripts(docs: FarmDocsResolvedConfig, basePath: string): string {
+  return stampFarmCspNonce(`${renderDocsRuntimeScript(docs, basePath)}
 ${renderDocsHashRuntimeScript()}
-${renderDocsPageActionsRuntimeScript()}`;
+${renderDocsPageActionsRuntimeScript()}`);
 }
 
 function renderFarmDocsFontPreloads(fontAssets: readonly FarmDocsPublicFontAsset[]): string {
@@ -1670,6 +1898,7 @@ function renderPixelDocsHtml(
   faviconHref: string,
   requestUrl: URL,
   fontAssets: readonly FarmDocsPublicFontAsset[],
+  basePath: string,
   fontStylesheetHref?: string,
   globalStylesheetHref?: string,
 ): string {
@@ -1688,10 +1917,11 @@ function renderPixelDocsHtml(
   const searchEnabled = isFarmDocsSearchEnabled(docs);
   const socialMetadata = isFarmDocsSocialImageEnabled(page, docs)
     ? renderFarmDocsSocialMetadata(
-        createFarmDocsSocialImageDescriptor(page, docs, requestUrl),
+        createFarmDocsSocialImageDescriptor(page, docs, requestUrl, basePath),
         getFarmDocsCustomSocialImage(page),
       )
     : "";
+  const homeHref = escapeAttribute(applyFarmBasePath("/", basePath));
 
   return `<!DOCTYPE html>
 <html class="dark" lang="en" data-docs-theme="${escapeAttribute(themeName)}">
@@ -1714,28 +1944,28 @@ function renderPixelDocsHtml(
       <button class="fd-mobile-nav-btn fd-menu-btn" type="button" data-sidebar-toggle aria-controls="nd-sidebar" aria-expanded="false" aria-label="Open menu">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
       </button>
-      <a class="fd-header-title" href="/">${escapeHtml(navTitle)}</a>
+      <a class="fd-header-title" href="${homeHref}">${escapeHtml(navTitle)}</a>
       <div class="mobile-topbar-actions">
         ${searchEnabled ? renderDocsSearchTrigger(true, "fd-search-trigger-mobile") : ""}
-        <a class="mobile-topbar-link" href="/llms.txt">llms.txt</a>
+        <a class="mobile-topbar-link" href="${escapeAttribute(applyFarmBasePath("/llms.txt", basePath))}">llms.txt</a>
       </div>
     </header>
     <aside id="nd-sidebar" class="fd-sidebar">
       <div class="sidebar-brand fd-sidebar-header">
-        <a class="fd-sidebar-title" href="/">${renderFarmDocsBrandMark()}${renderFarmDocsBrandTitle(navTitle)}</a>
+        <a class="fd-sidebar-title" href="${homeHref}">${renderFarmDocsBrandMark()}${renderFarmDocsBrandTitle(navTitle)}</a>
         <span>/ docs</span>
       </div>
       ${searchEnabled ? `<div class="fd-sidebar-search">${renderDocsSearchTrigger(true, "fd-sidebar-search-btn")}</div>` : ""}
-      ${renderPixelNavItems(pages, page.href, docs)}
+      ${renderPixelNavItems(pages, page.href, docs, basePath)}
     </aside>
     <div class="sidebar-backdrop fd-sidebar-overlay" data-sidebar-backdrop></div>
     <main class="fd-main">
       <div class="fd-page">
       <article id="nd-page" class="prose fd-page-article fd-page-body fd-docs-content">
-        ${renderPixelBreadcrumb(page, docs)}
-${renderMarkdownHtmlWithTitleMeta(page, docs, renderedMarkdown.html)}
+        ${renderPixelBreadcrumb(page, docs, basePath)}
+${renderMarkdownHtmlWithTitleMeta(page, docs, renderedMarkdown.html, basePath)}
         ${renderPixelPageFooter(page, docs)}
-        ${renderPixelPageNav(pages, page.href, docs)}
+        ${renderPixelPageNav(pages, page.href, docs, basePath)}
       </article>
       <nav id="nd-toc" class="fd-toc sticky top-(--fd-docs-row-1) h-[calc(var(--fd-docs-height)-var(--fd-docs-row-1))] flex flex-col [grid-area:toc] w-(--fd-toc-width) pt-12 pe-4 pb-2 max-xl:hidden" data-toc aria-labelledby="toc-title">
       <div class="fd-toc-inner">
@@ -1749,7 +1979,7 @@ ${renderMarkdownHtmlWithTitleMeta(page, docs, renderedMarkdown.html)}
     </main>
   </div>
   ${searchEnabled ? renderDocsSearchMount(clientEntry) : ""}
-  ${renderDocsRuntimeScripts(docs)}
+  ${renderDocsRuntimeScripts(docs, basePath)}
 </body>
 </html>`;
 }
@@ -1762,25 +1992,45 @@ export function createFarmDocsHandler(
   const fontAssets =
     options.fontAssets ?? toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(options.root));
   const fallbackFontPreloadHeader = renderFarmDocsFontPreloadHeader(fontAssets);
+  const basePath = normalizeFarmBasePath(options.basePath);
 
-  return async function handleFarmDocsRequest(request: Request): Promise<Response | null> {
-    if (!docs?.enabled || (request.method !== "GET" && request.method !== "HEAD")) return null;
+  return async function handleFarmDocsRequest(incomingRequest: Request): Promise<Response | null> {
+    if (!docs?.enabled || (incomingRequest.method !== "GET" && incomingRequest.method !== "HEAD")) {
+      return null;
+    }
     await loadFarmDocsEngine();
 
-    const contentDir = resolveFarmDocsContentDir(docs, options);
+    // Docs routes match the request's route path; the links they render include the basePath.
+    const request = toFarmDocsRouteRequest(incomingRequest, basePath);
     const requestUrl = new URL(request.url);
+    // The docs API stays at /api/docs, as the app's API routes do: <basePath>/api/docs is not it.
+    if (
+      request !== incomingRequest &&
+      (requestUrl.pathname === "/api/docs" || requestUrl.pathname.startsWith("/api/docs/"))
+    ) {
+      return null;
+    }
+    const contentDir = resolveFarmDocsContentDir(docs, options);
     const socialImageSlug = getFarmDocsSocialImageSlug(docs, requestUrl);
     if (socialImageSlug !== null) {
       const socialImagePage = loadFarmDocsPage(contentDir, docs, socialImageSlug);
       if (
         !socialImagePage ||
+        // The image sits outside the page's URL, where its guard does not reach, and
+        // draws the page's title.
+        options.isPathGuarded?.(socialImagePage.href) ||
         !isFarmDocsSocialImageEnabled(socialImagePage, docs) ||
         getFarmDocsCustomSocialImage(socialImagePage)
       ) {
         return null;
       }
 
-      const descriptor = createFarmDocsSocialImageDescriptor(socialImagePage, docs, requestUrl);
+      const descriptor = createFarmDocsSocialImageDescriptor(
+        socialImagePage,
+        docs,
+        requestUrl,
+        basePath,
+      );
       if (requestUrl.pathname !== descriptor.imagePath) return null;
 
       const etag = `"${descriptor.hash}"`;
@@ -1801,7 +2051,13 @@ export function createFarmDocsHandler(
       return new Response(renderFarmDocsSocialImageSvg(descriptor), { status: 200, headers });
     }
 
-    const publicResponse = createFarmDocsPublicResponse(contentDir, docs, request);
+    const publicResponse = createFarmDocsPublicResponse(
+      contentDir,
+      docs,
+      request,
+      options.isPathGuarded,
+      basePath,
+    );
     if (publicResponse) return omitFarmDocsHeadBody(request, publicResponse);
 
     if (!isFarmDocsRequest(docs, request)) return null;
@@ -1812,15 +2068,24 @@ export function createFarmDocsHandler(
     // A docs page URL serves Markdown or HTML depending on Accept, so shared caches
     // must key it on Accept. An explicit .md URL always returns Markdown.
     const negotiatesAccept = !requestUrl.pathname.endsWith(".md");
+    // The `.md` URL is the page's content at another path. A guard written for the page
+    // alone (`/docs/secret/:path*` never meets `/docs/secret.md`) did not run for it.
+    if (
+      !negotiatesAccept &&
+      options.isPathGuarded?.(page.href) &&
+      !options.isPathGuarded(getFarmDocsMarkdownPath(page.href))
+    ) {
+      return null;
+    }
     if (shouldReturnMarkdown(request)) {
       const origin = new URL(request.url).origin;
       return omitFarmDocsHeadBody(
         request,
         new Response(
-          docsEngine().renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page), {
+          docsEngine().renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page, basePath), {
             origin,
             llms: docs.config.llmsTxt ?? true,
-            sitemap: docs.config.sitemap,
+            sitemap: toFarmDocsPublicSitemapConfig(docs.config.sitemap, basePath),
           }),
           {
             status: 200,
@@ -1853,6 +2118,7 @@ export function createFarmDocsHandler(
           faviconHref,
           requestUrl,
           activeFontAssets,
+          basePath,
           usesLayoutFonts ? options.fontStylesheetHref : undefined,
           options.globalStylesheetHref,
         ),

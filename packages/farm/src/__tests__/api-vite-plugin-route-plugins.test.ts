@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -26,6 +27,7 @@ type RoutePlugin = { name: string; routes?: PluginRoutesFactory };
 async function createDevHarness(
   routes: Record<string, string>,
   plugins?: (context: { root: string }) => readonly RoutePlugin[] | Promise<readonly RoutePlugin[]>,
+  serverFields: Record<string, unknown> = {},
 ) {
   const root = await mkdtemp(path.join(tmpdir(), "farm-api-route-plugins-"));
   tempDirs.add(root);
@@ -39,7 +41,7 @@ async function createDevHarness(
   const plugin = farmApiPlugin(plugins ? { plugins } : {}) as any;
   let handlerFn: ((req: any, res: any, next: () => void) => Promise<void>) | undefined;
   const server: any = {
-    config: { root },
+    config: { root, server: {} },
     environments: {
       ssr: { runner: { import: (filePath: string) => import(pathToFileURL(filePath).href) } },
     },
@@ -49,6 +51,7 @@ async function createDevHarness(
       },
     },
     watcher: { on() {} },
+    ...serverFields,
   };
   const register = await plugin.configureServer(server);
   register?.();
@@ -56,7 +59,7 @@ async function createDevHarness(
 
   return {
     root,
-    async dispatch(url: string, method = "GET") {
+    async dispatch(url: string, method = "GET", host = "localhost:3000") {
       let passedToNext = false;
       let body = "";
       const res: any = {
@@ -84,7 +87,7 @@ async function createDevHarness(
         once() {},
         emit() {},
       };
-      await handlerFn!({ url, method, headers: { host: "localhost:3000" } }, res, () => {
+      await handlerFn!({ url, method, headers: { host } }, res, () => {
         passedToNext = true;
       });
       for (let waited = 0; waited < 200 && !res.writableEnded && !passedToNext; waited += 5) {
@@ -145,5 +148,46 @@ describe("dev API route plugins", () => {
     });
     expect((await harness.dispatch("/api/echo")).passedToNext).toBe(true);
     expect((await harness.dispatch("/api/users")).body).toBe("users");
+  });
+
+  it("dispatches a plugin's endpoint call to its own listener, not the request's host", async () => {
+    const listen = async (body: string, seen: string[]) => {
+      const server = http.createServer((request, response) => {
+        seen.push(`${request.url} host=${request.headers.host}`);
+        response.end(body);
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      return server;
+    };
+    const ownSeen: string[] = [];
+    const internalSeen: string[] = [];
+    // Stands in for the Vite dev server's listener, and for an internal-only service.
+    const own = await listen("own listener", ownSeen);
+    const internal = await listen("INTERNAL-SERVICE-SECRET", internalSeen);
+    const internalPort = (internal.address() as { port: number }).port;
+    try {
+      const forward: RoutePlugin = {
+        name: "forward",
+        routes: ({ route, api }) => [
+          route.get("/api/forward", {
+            handler: (request) =>
+              api.get("GET", "/api/users")!.invoke(new Request(new URL("/api/users", request.url))),
+          }),
+        ],
+      };
+      const harness = await createDevHarness(
+        { users: `export const GET = async () => new Response("users");\n` },
+        () => [forward],
+        { httpServer: own },
+      );
+      const response = await harness.dispatch("/api/forward", "GET", `localhost:${internalPort}`);
+      expect(response.body).toBe("own listener");
+      expect(ownSeen).toEqual([`/api/users host=localhost:${internalPort}`]);
+      expect(internalSeen).toEqual([]);
+    } finally {
+      await Promise.all(
+        [own, internal].map((server) => new Promise((resolve) => server.close(resolve))),
+      );
+    }
   });
 });

@@ -22,6 +22,7 @@ export type RoutePath =
   | "/boundaries/error"
   | "/boundaries/loading"
   | "/boundaries/suspense"
+  | "/cart"
   | "/contact"
   | "/docs"
   | `/docs/${string}`
@@ -37,6 +38,7 @@ export type RoutePath =
   | `/feature-lab/products/${string}`
   | "/feature-lab/static-metadata"
   | `/feature-lab/static/${string}`
+  | "/hmr-e2e"
   | "/markdown"
   | "/optional-catchall"
   | `/optional-catchall/${string}`
@@ -50,6 +52,8 @@ export type RoutePath =
   | "/redirect-e2e/target"
   | `/repos/${string}/${string}`
   | "/runtime-error-demo"
+  | "/sign-in"
+  | "/sign-up"
   | "/slot-lab"
   | `/slot-lab/photo/${string}`
   | "/storage-demo"
@@ -65,6 +69,7 @@ export type RoutePattern =
   | "/boundaries/error"
   | "/boundaries/loading"
   | "/boundaries/suspense"
+  | "/cart"
   | "/contact"
   | "/docs"
   | "/docs/[...docs]"
@@ -80,6 +85,7 @@ export type RoutePattern =
   | "/feature-lab/products/[id]"
   | "/feature-lab/static-metadata"
   | "/feature-lab/static/[slug]"
+  | "/hmr-e2e"
   | "/markdown"
   | "/optional-catchall/[[...slug]]"
   | "/ppr-demo"
@@ -92,6 +98,8 @@ export type RoutePattern =
   | "/redirect-e2e/target"
   | "/repos/[owner]/[repo]"
   | "/runtime-error-demo"
+  | "/sign-in"
+  | "/sign-up"
   | "/slot-lab"
   | "/slot-lab/photo/[id]"
   | "/storage-demo"
@@ -107,6 +115,7 @@ export type RouteModulePattern =
   | "/boundaries/error"
   | "/boundaries/loading"
   | "/boundaries/suspense"
+  | "/cart"
   | "/contact"
   | "/docs"
   | "/docs/[...docs]"
@@ -122,6 +131,7 @@ export type RouteModulePattern =
   | "/feature-lab/products/[id]"
   | "/feature-lab/static-metadata"
   | "/feature-lab/static/[slug]"
+  | "/hmr-e2e"
   | "/markdown"
   | "/optional-catchall/[[...slug]]"
   | "/ppr-demo"
@@ -134,6 +144,8 @@ export type RouteModulePattern =
   | "/redirect-e2e/target"
   | "/repos/[owner]/[repo]"
   | "/runtime-error-demo"
+  | "/sign-in"
+  | "/sign-up"
   | "/slot-lab"
   | "/slot-lab/photo/[id]"
   | "/storage-demo"
