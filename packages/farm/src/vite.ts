@@ -2530,13 +2530,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
 
           // Vite answers its own endpoints, modules, and files; config routes leave them alone, as
-          // production serves files before its request handler.
+          // production serves files before its request handler. Production's static handler only
+          // answers GET and HEAD, so any other method for a file's path is the app's.
           const isViteOwnedRequest = () =>
             requestUrl.startsWith("/@") ||
             requestUrl.startsWith("/node_modules/") ||
             requestUrl.startsWith("/__farm/") ||
             isViteModuleRequest(parsedRequestUrl, req.headers) ||
-            (requestPathname.includes(".") &&
+            ((requestMethod === "GET" || requestMethod === "HEAD") &&
+              requestPathname.includes(".") &&
               devServableFileExists(requestPathname, [
                 server.config.publicDir,
                 server.config.root,

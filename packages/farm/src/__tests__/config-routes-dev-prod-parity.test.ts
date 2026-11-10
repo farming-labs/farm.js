@@ -89,6 +89,44 @@ const BACKEND_APP: Fixture = {
   "src/app/api/echo/route.ts": ECHO_ROUTE,
 };
 
+const ECHO_ANY_METHOD_ROUTE = `export function GET(request: Request) {
+  return Response.json({ method: request.method, path: new URL(request.url).pathname });
+}
+export const POST = GET;
+export const DELETE = GET;`;
+
+// Encoded captures, and requests for a public file that production's static handler does not
+// answer (it serves only GET and HEAD), so config routes see them.
+const EDGE_APP: Fixture = {
+  "farm.config.ts": `export default {
+  images: { provider: "none" },
+  telemetry: false,
+  redirects: () => [
+    { source: "/cfg/:slug", destination: "/:slug" },
+    { source: "/cfg-all/:path*", destination: "/:path*" },
+    { source: "/moved.txt", destination: "/new-place" },
+    { source: "/src/:path*", destination: "/gone" },
+  ],
+  rewrites: () => [
+    { source: "/rewritten.txt", destination: "/api/echo" },
+    { source: "/rw-enc/:slug", destination: "/api/files/:slug" },
+  ],
+  headers: () => [
+    { source: "/:path*", headers: [{ key: "x-config", value: "on" }] },
+    { source: "/enc/:slug", headers: [{ key: "x-enc", value: "on" }] },
+  ],
+};`,
+  "public/moved.txt": "moved file",
+  "public/rewritten.txt": "rewritten file",
+  "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
+  "src/app/page.tsx": `export default function Page() { return <h1>home page</h1>; }`,
+  "src/app/api/echo/route.ts": ECHO_ANY_METHOD_ROUTE,
+  "src/app/api/files/[slug]/route.ts": `export async function GET(request: Request, context: { params: Promise<{ slug: string }> }) {
+  const { slug } = await context.params;
+  return Response.json({ slug, path: new URL(request.url).pathname });
+}`,
+};
+
 async function createApp(prefix: string, files: Fixture): Promise<string> {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
   temporaryRoots.add(root);
@@ -233,6 +271,73 @@ const expectBackendApp: Run = async (origin) => {
   expect(blockedSource.response.headers.get("x-mw-path")).toBe("/api/echo");
 };
 
+const expectEdgeApp: Run = async (origin) => {
+  // An encoded slash is part of the segment it arrived in, and the destination keeps it encoded,
+  // so the Location stays a path on this origin rather than a protocol-relative URL.
+  for (const [pathname, location] of [
+    ["/cfg/%2F%2Fexample.com", "/%2F%2Fexample.com"],
+    ["/cfg/%2Fexample.com", "/%2Fexample.com"],
+    ["/cfg/a%2Fb", "/a%2Fb"],
+    ["/cfg/plain", "/plain"],
+    ["/cfg/caf%C3%A9", "/caf%C3%A9"],
+    ["/cfg-all/%2F%2Fexample.com/x", "/%2F%2Fexample.com/x"],
+    ["/cfg-all/a/b", "/a/b"],
+  ]) {
+    const redirected = await get(origin, `${pathname}?q=1`);
+    expect(redirected.response.status, pathname).toBe(307);
+    expect(redirected.response.headers.get("location"), pathname).toBe(`${location}?q=1`);
+    expect(redirected.response.headers.get("x-config"), pathname).toBe("on");
+  }
+
+  // A literal second slash is a collapsed separator, never a capture.
+  const collapsed = await get(origin, "/cfg//example.com");
+  expect(collapsed.response.status, "/cfg//example.com").toBe(307);
+  expect(collapsed.response.headers.get("location")).toBe("/example.com");
+
+  // A rewrite passes the capture on encoded; the route decodes it once into its param.
+  const rewritten = await get(origin, "/rw-enc/%2F%2Fexample.com");
+  expect(rewritten.response.status, "/rw-enc/%2F%2Fexample.com").toBe(200);
+  expect(JSON.parse(rewritten.body)).toEqual({
+    slug: "//example.com",
+    path: "/api/files/%2F%2Fexample.com",
+  });
+
+  // A header source matches the encoded segment as one segment.
+  const encodedHeader = await get(origin, "/enc/%2F%2Fexample.com");
+  expect(encodedHeader.response.headers.get("x-enc"), "/enc/%2F%2Fexample.com").toBe("on");
+  const nestedHeader = await get(origin, "/enc/a/b");
+  expect(nestedHeader.response.headers.get("x-enc"), "/enc/a/b").toBeNull();
+
+  // GET and HEAD of a public file are the file, before any config route.
+  for (const method of ["GET", "HEAD"]) {
+    const file = await get(origin, "/moved.txt", { method });
+    expect(file.response.status, `${method} /moved.txt`).toBe(200);
+    expect(file.body).toBe(method === "GET" ? "moved file" : "");
+    const rewrittenFile = await get(origin, "/rewritten.txt", { method });
+    expect(rewrittenFile.response.status, `${method} /rewritten.txt`).toBe(200);
+    expect(rewrittenFile.body).toBe(method === "GET" ? "rewritten file" : "");
+  }
+
+  // Any other method is not the static handler's, so config redirects, rewrites, and headers
+  // apply to it.
+  for (const method of ["POST", "DELETE"]) {
+    const redirected = await get(origin, "/moved.txt?q=1", { method });
+    expect(redirected.response.status, `${method} /moved.txt`).toBe(307);
+    expect(redirected.response.headers.get("location")).toBe("/new-place?q=1");
+    expect(redirected.response.headers.get("x-config")).toBe("on");
+
+    const rewritten = await get(origin, "/rewritten.txt", { method });
+    expect(rewritten.response.status, `${method} /rewritten.txt`).toBe(200);
+    expect(JSON.parse(rewritten.body)).toEqual({ method, path: "/api/echo" });
+    expect(rewritten.response.headers.get("x-config")).toBe("on");
+  }
+
+  // The same holds for a source file, which production does not serve at all.
+  const sourceFile = await get(origin, "/src/app/page.tsx", { method: "POST" });
+  expect(sourceFile.response.status, "POST /src/app/page.tsx").toBe(307);
+  expect(sourceFile.response.headers.get("location")).toBe("/gone");
+};
+
 const cases: Array<[name: string, prefix: string, files: Fixture, run: Run]> = [
   [
     "redirects, rewrites, middleware, and headers",
@@ -247,7 +352,28 @@ const cases: Array<[name: string, prefix: string, files: Fixture, run: Run]> = [
     BACKEND_APP,
     expectBackendApp,
   ],
+  [
+    "encoded captures and non-GET requests for public files",
+    "farm-config-routes-edge-",
+    EDGE_APP,
+    expectEdgeApp,
+  ],
 ];
+
+// Vite's own requests stay Vite's whatever config route matches their path.
+it("leaves Vite module and client requests to Vite in development", async () => {
+  await runInDevelopment("farm-config-routes-vite-", EDGE_APP, async (origin) => {
+    for (const [pathname, headers] of [
+      ["/@vite/client", {}],
+      ["/src/app/page.tsx?import", {}],
+      ["/src/app/page.tsx", { "sec-fetch-dest": "script" }],
+    ] as const) {
+      const response = await get(origin, pathname, { headers });
+      expect(response.response.status, pathname).toBe(200);
+      expect(response.response.headers.get("content-type"), pathname).toContain("javascript");
+    }
+  });
+}, 120_000);
 
 describe.each(cases)("%s", (_name, prefix, files, run) => {
   it("in development", async () => {
