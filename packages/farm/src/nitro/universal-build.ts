@@ -192,7 +192,11 @@ import {
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes } from "./vercel-assets";
-import { collectServerOnlySSRAssets } from "./ssr-public-assets";
+import {
+  assertServerReadSSRAssetsSupported,
+  collectServerOnlySSRAssets,
+  createServerReadSSRAssetsPlugin,
+} from "./ssr-public-assets";
 import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
 import { farmStripPlatformConfigPlugin } from "../build/strip-platform-config";
 import type { FarmPlatform } from "../platform";
@@ -1577,6 +1581,7 @@ export async function buildUniversal(
     }
 
     const { bundle: ssrBundle, entryFile: ssrEntryFile, configuredHeaderRoutes } = ssrResult;
+    assertServerReadSSRAssetsSupported(ssrBundle, preset, root);
     await writeSSRAssetsToClient(ssrBundle, clientOutputDir);
     if (config.docs.enabled) {
       await copyFarmDocsFontAssetsToClient(root, clientOutputDir);
@@ -12926,7 +12931,13 @@ function toFarmNodeResponse(request, response) {
   const serverChunkMinifier = useFarmServerMinifier
     ? createServerChunkMinifyPlugin({ keepNames: keepServerNames, target: "esnext" })
     : null;
-  if (canReusePrebuiltSSR) {
+  // The prebuilt Node output copies the whole SSR bundle, its assets included, beside the
+  // server. When Nitro rebundles the SSR output instead, it must also emit the files that
+  // server code reads from beside itself.
+  const ssrRollupPlugin = canReusePrebuiltSSR
+    ? prebuiltSSRPlugin
+    : createServerReadSSRAssetsPlugin(ssrBundle, ssrOutputDir);
+  if (ssrRollupPlugin) {
     const configuredRollupPlugins = nitroConfig.rollupConfig?.plugins;
     nitroConfig.rollupConfig = {
       ...nitroConfig.rollupConfig,
@@ -12936,7 +12947,7 @@ function toFarmNodeResponse(request, response) {
           : configuredRollupPlugins
             ? [configuredRollupPlugins]
             : []),
-        prebuiltSSRPlugin,
+        ssrRollupPlugin,
       ],
     };
   }
