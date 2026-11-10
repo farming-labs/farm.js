@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 // Libraries written for React Server Components, used the way their docs show for RSC: package
 // client components (providers, Radix parts, a toaster) straight from server components,

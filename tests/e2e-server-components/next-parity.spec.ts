@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 // Behaviors Next.js's App Router tests check (vercel/next.js, test/e2e/app-dir), ported to Farm's
 // API. Like the contract, they run against { mode: "rsc" } and { mode: "islands" }, in `farm dev`

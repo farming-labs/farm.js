@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 // The server components contract. Every test runs against the same app built with
 // { mode: "rsc" } and with { mode: "islands" } (playwright.server-components.config.ts).
