@@ -133,8 +133,15 @@ test("a package's react-server build renders server code, and its use client exp
   const html = await (await request.get("/compat/rsc-kit")).text();
   expect(html).toContain("hello islands from the server build");
   expect(html).toContain("kit quote about engines, rendered on the server");
+  // A server component reached through `export *`, past a "use client" module's names.
+  expect(html).toContain("kit card, rendered on the server");
   expect(html).not.toContain("client fallback");
   const errors = await open(page, "/compat/rsc-kit");
+  // A "use client" module the package renders itself, without exporting it, hydrates.
+  const copy = page.getByTestId("kit-copy");
+  await expect(copy).toHaveText("kit copies: 0");
+  await copy.click();
+  await expect(copy).toHaveText("kit copies: 1");
   const value = page.getByTestId("kit-value");
   await expect(value).toHaveText("kit value: from server");
   await value.click();
