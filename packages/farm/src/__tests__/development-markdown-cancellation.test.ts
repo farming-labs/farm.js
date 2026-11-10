@@ -45,6 +45,8 @@ function runtime({
     `return async function () {
       const docsHeaders = new Headers({ "accept-encoding": "gzip, br" });
       const apiServerBasePath = "/api";
+      // A local of the development caller: the request path as routes see it.
+      const toRoutePathname = (pathname) => pathname;
       ${source.slice(start, end)}
       return markdownResponse;
     };`,

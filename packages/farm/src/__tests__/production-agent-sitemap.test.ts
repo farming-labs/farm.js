@@ -166,6 +166,26 @@ describe("production default sitemap", () => {
       expect((await get("/console.md")).status).toBe(200);
       expect((await get("/index.md")).status).toBe(200);
 
+      // The home page advertises the URL llms.txt links, as other pages advertise
+      // <basePath>/<page>.md.
+      const page = await get("/console");
+      expect(page.headers.get("link")).toContain(
+        '</console/index.md>; rel="alternate"; type="text/markdown"',
+      );
+      expect(await page.text()).toContain(
+        '<link rel="alternate" href="https://acme.test/console/index.md" type="text/markdown">',
+      );
+      for (const pathname of ["/console/index.md", "/console.md"]) {
+        expect((await get(pathname)).headers.get("content-location"), pathname).toBe(
+          "/console/index.md",
+        );
+      }
+      const negotiated = await handler.fetch(
+        new Request("https://acme.test/console", { headers: { accept: "text/markdown" } }),
+      );
+      expect(negotiated.headers.get("content-location")).toBe("/console/index.md");
+      expect((await get("/console/about")).headers.get("link")).toContain("</console/about.md>");
+
       // The generated agent files answer inside the basePath and, as before, at the origin root.
       for (const pathname of ["/llms.txt", "/llms-full.txt", "/sitemap.xml", "/robots.txt"]) {
         expect((await get(`/console${pathname}`)).status, `/console${pathname}`).toBe(200);
@@ -174,6 +194,57 @@ describe("production default sitemap", () => {
       expect(locs(await (await get("/console/sitemap.xml")).text())).toContain(
         "https://acme.test/console/about",
       );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("serves and advertises each locale's home Markdown at <basePath>/<locale>/index.md", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-locale-home-"));
+    try {
+      await writeApp(root, {
+        "src/app/layout.tsx": [
+          'export const metadata = { title: "Console", metadataBase: new URL("https://acme.test") };',
+          "export default function Layout({ children }) { return <main>{children}</main>; }",
+        ].join("\n"),
+        "src/app/page.tsx": [
+          'import { getLocale } from "@farm.js/core/i18n/server";',
+          "export default function Page() { return <p>home {getLocale()}</p>; }",
+        ].join("\n"),
+        "src/app/about/page.tsx": "export default function Page() { return <p>about body</p>; }",
+        "src/messages/en.json": "{}",
+        "src/messages/fr.json": "{}",
+      });
+      const handler = await buildApp(root, {
+        basePath: "/console",
+        i18n: { locales: ["en", "fr"], defaultLocale: "en" },
+      });
+      const get = (pathname: string, init?: RequestInit) =>
+        handler.fetch(new Request(`https://acme.test${pathname}`, init));
+
+      for (const pathname of ["/console/fr/index.md", "/console/fr.md"]) {
+        const markdown = await get(pathname);
+        expect(markdown.status, pathname).toBe(200);
+        expect(markdown.headers.get("content-location"), pathname).toBe("/console/fr/index.md");
+        expect(await markdown.text(), pathname).toContain("home fr");
+      }
+      // The localized home page advertises it, as /console/fr/about advertises its .md URL.
+      const page = await get("/console/fr");
+      expect(page.headers.get("link")).toContain('</console/fr/index.md>; rel="alternate"');
+      expect(await page.text()).toContain(
+        '<link rel="alternate" href="https://acme.test/console/fr/index.md" type="text/markdown">',
+      );
+      const negotiated = await get("/console/fr", { headers: { accept: "text/markdown" } });
+      expect(negotiated.headers.get("content-location")).toBe("/console/fr/index.md");
+      expect((await get("/console/fr/about")).headers.get("link")).toContain(
+        "</console/fr/about.md>",
+      );
+
+      // The default locale's home page keeps <basePath>/index.md.
+      const home = await get("/console/index.md");
+      expect(home.status).toBe(200);
+      expect(await home.text()).toContain("home en");
+      expect((await get("/console")).headers.get("link")).toContain("</console/index.md>");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

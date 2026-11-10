@@ -190,6 +190,23 @@ export default function Page() { return <main>intro</main>; }`,
     expect((await get("/console.md")).status).toBe(200);
     expect((await get("/index.md")).status).toBe(200);
 
+    // The home page advertises the URL llms.txt links, as other pages advertise <basePath>/<page>.md.
+    const page = await get("/console");
+    expect(page.headers.get("link")).toContain(
+      '</console/index.md>; rel="alternate"; type="text/markdown"',
+    );
+    expect(await page.text()).toContain(
+      '<link rel="alternate" href="https://acme.test/console/index.md" type="text/markdown">',
+    );
+    for (const pathname of ["/console/index.md", "/console.md"]) {
+      expect((await get(pathname)).headers.get("content-location"), pathname).toBe(
+        "/console/index.md",
+      );
+    }
+    const negotiated = await fetch(`${origin}/console`, { headers: { accept: "text/markdown" } });
+    expect(negotiated.headers.get("content-location")).toBe("/console/index.md");
+    expect((await get("/console/about")).headers.get("link")).toContain("</console/about.md>");
+
     // The generated agent files answer inside the basePath and, as before, at the origin root.
     for (const pathname of ["/llms.txt", "/llms-full.txt", "/sitemap.xml", "/robots.txt"]) {
       expect((await get(`/console${pathname}`)).status, `/console${pathname}`).toBe(200);
@@ -199,6 +216,51 @@ export default function Page() { return <main>intro</main>; }`,
       "https://acme.test/console/about",
     );
   }, 120_000);
+
+  it.each([
+    ["", ""],
+    ['basePath: "/console", ', "/console"],
+  ])(
+    "serves and advertises each locale's home Markdown at <prefix>/index.md (%s)",
+    async (basePathConfig, base) => {
+      const origin = await startApp(
+        `${basePathConfig}i18n: { locales: ["en", "fr"], defaultLocale: "en" }`,
+        {
+          "src/messages/en.json": "{}",
+          "src/messages/fr.json": "{}",
+          "src/app/page.tsx": `import React from "react";
+import { getLocale } from "@farm.js/core/i18n/server";
+export default function Page() { return <main>home {getLocale()}</main>; }`,
+        },
+      );
+      const get = (pathname: string, init?: RequestInit) => fetch(`${origin}${pathname}`, init);
+
+      for (const pathname of [`${base}/fr/index.md`, `${base}/fr.md`]) {
+        const markdown = await get(pathname);
+        expect(markdown.status, pathname).toBe(200);
+        expect(markdown.headers.get("content-location"), pathname).toBe(`${base}/fr/index.md`);
+        expect(await markdown.text(), pathname).toContain("home fr");
+      }
+      // The localized home page advertises it, as /fr/about advertises /fr/about.md.
+      const page = await get(`${base}/fr`);
+      expect(page.headers.get("link")).toContain(`<${base}/fr/index.md>; rel="alternate"`);
+      expect(await page.text()).toContain(
+        `<link rel="alternate" href="https://acme.test${base}/fr/index.md" type="text/markdown">`,
+      );
+      const negotiated = await get(`${base}/fr`, { headers: { accept: "text/markdown" } });
+      expect(negotiated.headers.get("content-location")).toBe(`${base}/fr/index.md`);
+      expect((await get(`${base}/fr/about`)).headers.get("link")).toContain(
+        `<${base}/fr/about.md>`,
+      );
+
+      // The default locale's home page keeps <basePath>/index.md.
+      const home = await get(`${base}/index.md`);
+      expect(home.status).toBe(200);
+      expect(await home.text()).toContain("home en");
+      expect((await get(base || "/")).headers.get("link")).toContain(`<${base}/index.md>`);
+    },
+    120_000,
+  );
 
   it("names the sitemap in the robots.txt agent.crawlers serves", async () => {
     const origin = await startApp("agent: { crawlers: true }");
