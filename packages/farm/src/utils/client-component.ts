@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import {
+  ensureFarmInternalClientReference,
   ensureFarmPackageClientReference,
   farmPackageClientImportExports,
   FARM_CLIENT_REFERENCE_PRAGMA,
@@ -10,6 +11,7 @@ import {
 import {
   farmReactServerBuildReachesClientModules,
   findFarmPackageManifest,
+  findFarmReactServerClientModules,
   findFarmReactServerClientNames,
   findFarmServerBundledPackage,
 } from "../islands-react-server-exports";
@@ -1634,6 +1636,15 @@ function collectIsolatedClientBoundaries(
             importedBoundaryCount += visit(
               ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
             );
+          }
+          // The `"use client"` modules that build renders itself (react-tweet's video player).
+          for (const clientFile of findFarmReactServerClientModules(
+            content ?? "",
+            moduleSourcePath,
+            specifier,
+          ) ?? []) {
+            const reference = ensureFarmInternalClientReference(projectRoot!, clientFile);
+            if (reference) importedBoundaryCount += visit(reference);
           }
         } else {
           const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());

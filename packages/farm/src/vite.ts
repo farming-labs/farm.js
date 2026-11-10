@@ -212,6 +212,7 @@ import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
 import { rewriteFormStatusImports, type AstNode } from "@farm.js/islx/compiler";
 import {
+  ensureFarmInternalClientReference,
   ensureFarmPackageClientReference,
   FARM_CLIENT_REFERENCE_DIRECTORY,
   FARM_CLIENT_REFERENCE_PRAGMA,
@@ -220,6 +221,7 @@ import {
 import {
   invalidateFarmClientOnlyScan,
   farmRelativeImportFiles,
+  rewriteFarmReactServerClientModuleImports,
   rewriteFarmReactServerImports,
 } from "./islands-react-server-exports";
 import { rewriteFarmReactCacheImport } from "./islands-react-cache-transform";
@@ -4802,6 +4804,19 @@ export const manifest = getManifest();
               });
           if (reactServer !== null) {
             code = reactServer;
+            rewrotePackageImports = true;
+          }
+          // The package's own `"use client"` modules render through their client references.
+          const internal = farmReactServerFiles.has(file)
+            ? rewriteFarmReactServerClientModuleImports({
+                code,
+                file,
+                reference: (clientFile) =>
+                  ensureFarmInternalClientReference(projectRoot, clientFile),
+              })
+            : null;
+          if (internal !== null) {
+            code = internal;
             rewrotePackageImports = true;
           }
         }

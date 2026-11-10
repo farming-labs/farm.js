@@ -3,9 +3,14 @@
 import { createElement as h, useState } from "react";
 
 export { KitProvider, KitValue } from "./provider.js";
+export * from "./hooks.js";
 
 export function KitQuote({ topic }) {
   return h("p", { "data-testid": "kit-quote" }, `kit quote about ${topic}, client fallback`);
+}
+
+export function KitCard({ title }) {
+  return h("p", { "data-testid": "kit-card" }, `${title}, client fallback`);
 }
 
 export function kitGreeting() {
