@@ -37,6 +37,10 @@ export {
   type IntegrationOriginRejection,
   type IntegrationOriginResult,
 } from "./integration-request-security";
+import {
+  rejectCrossSiteNonJSONBody,
+  validateIntegrationRequestOrigin,
+} from "./integration-request-security";
 
 import type { ComponentType, ReactNode } from "react";
 import { api as integrationApi, defineIntegrationAPIOperation } from "./integration-api";
@@ -2447,6 +2451,11 @@ type IntegrationRouteInputValidationResult =
       response: Response;
     };
 
+const CROSS_SITE_JSON_ROUTE_BODY_MESSAGE =
+  "This integration route reads a JSON body, so a request from another origin must send " +
+  'Content-Type: application/json. To accept form posts from other origins, set bodyFormat: "form" ' +
+  "on the route.";
+
 async function validateIntegrationRouteInput(
   route: NormalizedIntegrationRoute,
   request: Request,
@@ -2473,6 +2482,17 @@ async function validateIntegrationRouteInput(
     };
   }
 
+  const bodyFormat = getIntegrationRouteBodyFormat(route);
+  if (
+    schemas.body &&
+    bodyFormat === "json" &&
+    request.method !== "GET" &&
+    request.method !== "HEAD"
+  ) {
+    const rejection = rejectCrossSiteNonJSONBody(request, CROSS_SITE_JSON_ROUTE_BODY_MESSAGE);
+    if (rejection) return { success: false, response: rejection };
+  }
+
   const input: FarmIntegrationRouteInput = {};
   const issues: FarmIntegrationValidationIssue[] = [];
 
@@ -2490,10 +2510,7 @@ async function validateIntegrationRouteInput(
   }
 
   if (schemas.body) {
-    const bodyInput = await readIntegrationValidationBody(
-      request,
-      getIntegrationRouteBodyFormat(route),
-    );
+    const bodyInput = await readIntegrationValidationBody(request, bodyFormat);
 
     if (bodyInput.success) {
       const bodyResult = await parseIntegrationInputSchema("body", schemas.body, bodyInput.data);
@@ -2676,6 +2693,19 @@ async function readIntegrationValidationBody(
 
     const text = await cloneFarmRequest(request).text();
     if (text.trim().length === 0) {
+      return {
+        success: true,
+        data: undefined,
+      };
+    }
+
+    // A browser sends a Blob or byte body with no content type, and a page on another site can
+    // do so in a no-cors fetch with the visitor's cookies, so such a body is not read as JSON,
+    // the same rule API routes follow.
+    if (
+      !request.headers.get("content-type")?.trim() &&
+      !validateIntegrationRequestOrigin(request, { requireOriginMetadata: false }).ok
+    ) {
       return {
         success: true,
         data: undefined,
