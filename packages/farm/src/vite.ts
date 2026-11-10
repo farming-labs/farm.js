@@ -2613,6 +2613,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           const configRewriteSource = (req as FarmDevConfigRewriteRequest)[
             FARM_DEV_CONFIG_REWRITE_SOURCE
           ];
+          // A plugin runtime hook that throws fails the request with the generic JSON 500 on an
+          // API path or with `renderer: false`, and plain text on a page, as in production.
+          const runtimeHookErrorAnswersJSON =
+            rendererDisabled || isFarmAPIPathname(requestPathname, apiServerBasePath);
           if (
             pm &&
             configRewriteSource === undefined &&
@@ -2621,6 +2625,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               configRedirectMatchers.length > 0) &&
             !isViteOwnedRequest()
           ) {
+            let redirect: ReturnType<(typeof configRedirectMatchers)[number]> = null;
             try {
               await pm.runHookParallelFiltered(
                 "beforeRequest",
@@ -2628,27 +2633,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 req,
                 res,
               );
-              let redirect: ReturnType<(typeof configRedirectMatchers)[number]> = null;
               for (const matchRedirect of configRedirectMatchers) {
                 redirect ??= matchRedirect(parsedRequestUrl);
-              }
-              if (redirect) {
-                const redirectResponse = new Response(`Redirecting to ${redirect.destination}`, {
-                  status: redirect.statusCode,
-                  headers: { Location: redirect.destination },
-                });
-                await sendWebResponse(
-                  res,
-                  pm.hasRuntimeRequestHooks()
-                    ? await pm.runRuntimeRequest(
-                        createRequestFromNodeRequest(req, parsedRequestUrl),
-                        () => redirectResponse,
-                        { kind: "page", route: { pathname: requestPathname } },
-                      )
-                    : redirectResponse,
-                );
-                logResponse(requestMethod, requestUrl, res.statusCode, 0, "PAGE");
-                return;
               }
             } catch (error) {
               await emitPluginError("before-request", error, { urlPath: requestUrl });
@@ -2659,12 +2645,40 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               res.end("Internal Server Error");
               return;
             }
+            if (redirect) {
+              let response = new Response(`Redirecting to ${redirect.destination}`, {
+                status: redirect.statusCode,
+                headers: { Location: redirect.destination },
+              });
+              if (pm.hasRuntimeRequestHooks()) {
+                const redirectResponse = response;
+                try {
+                  // The session describes the request as production's does for a path no route
+                  // answers.
+                  response = await pm.runRuntimeRequest(
+                    createRequestFromNodeRequest(req, parsedRequestUrl),
+                    () => redirectResponse,
+                    {
+                      kind: isFarmAPIPathname(requestPathname, apiServerBasePath)
+                        ? "api"
+                        : requestMethod === "GET" || requestMethod === "HEAD"
+                          ? "page"
+                          : "request",
+                      route: { pathname: requestPathname },
+                    },
+                  );
+                } catch {
+                  // The runtime reported the failure to runtime.error and onError.
+                  sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                  logResponse(requestMethod, requestUrl, 500, 0, "PAGE");
+                  return;
+                }
+              }
+              await sendWebResponse(res, response);
+              logResponse(requestMethod, requestUrl, res.statusCode, 0, "PAGE");
+              return;
+            }
           }
-
-          // A plugin runtime hook that throws fails the request with the generic JSON 500 on an
-          // API path or with `renderer: false`, and plain text on a page, as in production.
-          const runtimeHookErrorAnswersJSON =
-            rendererDisabled || isFarmAPIPathname(requestPathname, apiServerBasePath);
 
           // The OpenAPI spec and reference, docs, raw markdown-source, the
           // markdown mirror, the Markdown 404 fallback, and API routes expose

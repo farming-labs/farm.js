@@ -48,6 +48,11 @@ ${TRACED}
 export default {
   images: { provider: "none" },
   telemetry: false,
+  redirects: () => [
+    { source: "/hello/moved/:rest", destination: "/hello" },
+    { source: "/api/moved/:rest", destination: "/api/ok" },
+  ],
+  rewrites: () => [{ source: "/hello/rewritten", destination: "/hello/before-fails" }],
   integrations: {
     acme: defineIntegration({
       category: "custom",
@@ -315,6 +320,7 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
   });
 
   await expectPageHookFailures(origin);
+  await expectConfigRouteHookFailures(origin);
 
   // A built-in route on a page path whose runtime.after throws answers the page's plain-text
   // 500, not the JSON an API path gets.
@@ -362,6 +368,77 @@ async function expectPageHookFailures(origin: string): Promise<void> {
         "after /hello/after-fails 200",
         "error /hello/after-fails after failed",
         "onError runtime after failed",
+      ],
+    },
+  });
+}
+
+// A config redirect passes through the plugin runtime like any response, so a throwing runtime
+// hook fails it as it fails a route: runtime.error observes it, onError gets it once as the
+// "runtime" phase, and the answer is the runtime hook 500, plain text on a page path and JSON
+// under the API base path. A runtime.before that throws on a config rewrite's destination fails
+// the request opened for the requested URL the same way.
+async function expectConfigRouteHookFailures(origin: string): Promise<void> {
+  const init: RequestInit = { redirect: "manual", headers: { accept: "text/html" } };
+  const jsonFailure = {
+    status: 500,
+    contentType: "application/json",
+    cacheControl: null,
+    body: '{"error":"Internal Server Error"}',
+  };
+  const redirected = await request(origin, "/hello/moved/ok", init);
+  expect({ status: redirected.status, trace: redirected.trace }).toEqual({
+    status: 307,
+    trace: ["before page /hello/moved/ok", "after /hello/moved/ok 307"],
+  });
+  expect({
+    "/hello/moved/before-fails": await request(origin, "/hello/moved/before-fails", init),
+    "/hello/moved/after-fails": await request(origin, "/hello/moved/after-fails", init),
+    "/api/moved/before-fails": await request(origin, "/api/moved/before-fails", init),
+    "/api/moved/after-fails": await request(origin, "/api/moved/after-fails", init),
+    "/hello/rewritten": await request(origin, "/hello/rewritten", init),
+  }).toEqual({
+    "/hello/moved/before-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/moved/before-fails",
+        "error /hello/moved/before-fails before failed",
+        "onError runtime before failed",
+      ],
+    },
+    "/hello/moved/after-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/moved/after-fails",
+        "after /hello/moved/after-fails 307",
+        "error /hello/moved/after-fails after failed",
+        "onError runtime after failed",
+      ],
+    },
+    "/api/moved/before-fails": {
+      ...jsonFailure,
+      trace: [
+        "before api /api/moved/before-fails",
+        "error /api/moved/before-fails before failed",
+        "onError runtime before failed",
+      ],
+    },
+    "/api/moved/after-fails": {
+      ...jsonFailure,
+      trace: [
+        "before api /api/moved/after-fails",
+        "after /api/moved/after-fails 307",
+        "error /api/moved/after-fails after failed",
+        "onError runtime after failed",
+      ],
+    },
+    "/hello/rewritten": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/rewritten",
+        "before page /hello/before-fails",
+        "error /hello/rewritten before failed",
+        "onError runtime before failed",
       ],
     },
   });

@@ -45,6 +45,7 @@ export default defineConfig({
   renderer: false,
   images: { provider: "none" },
   telemetry: false,
+  redirects: () => [{ source: "/moved/:rest", destination: "/api/mw-throw" }],
   plugins: [
     definePlugin({
       name: "test:backend-hook-errors",
@@ -461,9 +462,12 @@ async function expectBackendRuntimeHookErrors(origin: string): Promise<void> {
     "/plugin-after-throw",
     "/api/plugin-before-throw",
     "/api/plugin-after-throw",
+    // A config redirect passes through the runtime hooks too.
+    "/moved/plugin-before-throw",
+    "/moved/plugin-after-throw",
   ]) {
     const response = await readResponse(
-      await fetch(`${origin}${pathname}`, { headers: { accept: "text/html" } }),
+      await fetch(`${origin}${pathname}`, { headers: { accept: "text/html" }, redirect: "manual" }),
     );
     expect(response, pathname).toMatchObject({
       status: 500,
