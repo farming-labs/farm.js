@@ -10,7 +10,15 @@ const root = path.resolve(__dirname, "..");
 const requireFromCore = createRequire(path.join(root, "packages", "farm", "package.json"));
 
 // Integrations whose `./client` entry is imported by browser code.
-const clientEntryPackages = ["farm-stripe", "farm-polar", "farm-autumn", "farm-email"];
+const clientEntryPackages = [
+  "farm-stripe",
+  "farm-polar",
+  "farm-autumn",
+  "farm-email",
+  "farm-auth0",
+  "farm-supabase",
+  "farm-workos",
+];
 
 const serverOnlyModule =
   /[\\/]node_modules[\\/](?:stripe|@polar-sh[\\/]sdk|autumn-js|standardwebhooks)[\\/]|(?:[\\/]packages[\\/]farm|[\\/]@farm\.js[\\/]core)[\\/]dist[\\/](?:index|integrations)\.mjs$/;
