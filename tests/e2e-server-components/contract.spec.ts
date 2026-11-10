@@ -485,6 +485,7 @@ test("a server action that leaves its layout unchanged keeps what was typed ther
   const button = page.getByRole("button", { name: /^Layout clicks/ });
   await button.click();
   await expect(button).toHaveText("Layout clicks: 1");
+  await expect(page.getByTestId("layout-streamed")).toBeVisible();
   await page.getByLabel("Layout note").fill("still here");
   await page.getByRole("button", { name: "Bump page" }).click();
   await expect(page.getByTestId("page-count")).toHaveText(`Page count: ${pageCount + 1}`);
