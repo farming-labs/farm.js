@@ -30,6 +30,7 @@ function runtime(config = resolveMarkdownConfig(undefined)) {
       const middlewareHeaders = undefined;
       // A top-level constant of the generated server.
       const farmLocalAPIBasePath = "/api";
+      const farmAppBasePath = "/";
       ${source.slice(start, end)}
       return null;
     };`,

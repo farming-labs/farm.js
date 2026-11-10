@@ -1341,6 +1341,7 @@ describe("custom not-found rendering", () => {
     const renderer = new ServerRenderer(
       { ...createConfig(), basePath: "/console" } as Required<FarmConfig>,
       {
+        toRoutePathname: (pathname: string) => pathname,
         matchMetadataRoute: () => null,
         matchMetadataImage: () => null,
         matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
@@ -1382,6 +1383,7 @@ describe("custom not-found rendering", () => {
     });
     const response = createMockResponse();
     const routeManager = {
+      toRoutePathname: (pathname: string) => pathname,
       matchMetadataRoute: () => null,
       matchMetadataImage: () => null,
       matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
@@ -1430,6 +1432,7 @@ describe("custom not-found rendering", () => {
     const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
     const response = createMockResponse();
     const routeManager = {
+      toRoutePathname: (pathname: string) => pathname,
       matchMetadataRoute: () => null,
       matchMetadataImage: () => null,
       matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
@@ -1567,6 +1570,7 @@ function createRenderer(
           pattern.startsWith(`${layout.pattern}/`),
       ),
     getIsolatedClientBoundaryModules: () => new Set(options.isolatedClientBoundaryModules ?? []),
+    toRoutePathname: (pathname: string) => pathname,
     matchMetadataRoute(pathname: string) {
       const segmentPath = applicationMetadataPattern === "/" ? "" : applicationMetadataPattern;
       if (

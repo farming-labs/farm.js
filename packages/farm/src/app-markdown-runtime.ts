@@ -4,6 +4,7 @@ import type { Metadata, RouteModule } from "./types";
 import {
   FARM_MARKDOWN_PAGE_CHECK_HEADER,
   _getFarmMarkdownPageCheckToken,
+  _resolveFarmMarkdownIndexAlias,
   requestAcceptsMarkdown,
 } from "./markdown";
 import { createFarmMarkdownViewResponse } from "./markdown-view";
@@ -32,10 +33,11 @@ export function isFarmMarkdownPageFile(filePath: string): boolean {
   return /(^|[/\\])page\.mdx?$/i.test(filePath);
 }
 
-export function normalizeFarmMarkdownRoutePath(pathname: string): string {
+/** The page a Markdown request names. `basePath` makes `<basePath>/index.md` the home page too. */
+export function normalizeFarmMarkdownRoutePath(pathname: string, basePath?: string): string {
   const withoutExtension = pathname.replace(/\.md$/i, "");
   const normalized = withoutExtension.startsWith("/") ? withoutExtension : `/${withoutExtension}`;
-  return normalized === "/index" ? "/" : normalized.replace(/\/+$/g, "") || "/";
+  return _resolveFarmMarkdownIndexAlias(normalized.replace(/\/+$/g, "") || "/", basePath);
 }
 
 export function parseMarkdownFrontmatter(source: string): {
@@ -290,6 +292,8 @@ export async function createFarmMarkdownSourceResponse(options: {
   resolveSource: (
     pathname: string,
   ) => Promise<FarmMarkdownPageSource | null> | FarmMarkdownPageSource | null;
+  /** The app's `basePath`, so `<basePath>/index.md` names the home page as `/index.md` does. */
+  basePath?: string;
   /**
    * Runs a request through the app's full pipeline, guards and page rendering
    * included, without following redirects. With it, a page's source is only
@@ -318,7 +322,7 @@ export async function createFarmMarkdownSourceResponse(options: {
     return null;
   }
 
-  const targetPathname = normalizeFarmMarkdownRoutePath(url.pathname);
+  const targetPathname = normalizeFarmMarkdownRoutePath(url.pathname, options.basePath);
   const source = await options.resolveSource(targetPathname);
   if (!source) {
     return null;

@@ -7785,6 +7785,8 @@ function fetchFarmInnerRequest(request, context) {
   return fetch(new Request(request, { headers }), context);
 }
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
+// The app's basePath, so Markdown requests resolve <basePath>/index.md to the home page.
+const farmAppBasePath = ${JSON.stringify(config.basePath)};
 // Reports a failure Farm answers itself (an API or integration route's 500) to the plugin
 // runtime request.
 const farmRuntimeErrorSlot = Symbol("farm.runtime.error.slot");
@@ -10084,6 +10086,7 @@ ${
         request,
         requestUrl: url,
         config: farmMarkdownConfig,
+        basePath: farmAppBasePath,
         routeExists: (targetPathname) =>
           Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
         renderPage: async () => errorResponse,
@@ -10196,6 +10199,7 @@ ${
   const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
     request: cloneFarmRequestWithContext(request),
     config: farmMdxConfig,
+    basePath: farmAppBasePath,
     resolveSource: (targetPathname) => {
       const match = matchPageRoute(getFarmRoutePathname(targetPathname));
       return match?.route?.markdownSource || null;
@@ -10255,6 +10259,7 @@ ${
       // Middleware and configured rewrites have already resolved this URL.
       requestUrl: url,
       config: farmMarkdownConfig,
+      basePath: farmAppBasePath,
       routeExists: (targetPathname) =>
         Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
       renderPage: (targetRequest) => fetchFarmInnerRequest(targetRequest, adapterContext),

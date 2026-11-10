@@ -2853,7 +2853,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 },
               }),
               {
-                basePath: farmConfig.basePath,
+                basePath: farmApp.getConfig().basePath,
                 apiServerBasePath,
                 defaultMCP: () => farmApp.getServerRenderer().getDefaultMCPServer(),
               },
@@ -2965,6 +2965,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   headers: docsHeaders,
                 }),
                 config: farmApp.getConfig().mdx,
+                basePath: farmApp.getConfig().basePath,
                 resolveSource: async (pathname) => {
                   const match = farmApp.getRouteManager().matchRoute(pathname);
                   const sourcePath =
@@ -3008,6 +3009,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   headers: docsHeaders,
                 }),
                 config: farmApp.getConfig().md,
+                basePath: farmApp.getConfig().basePath,
                 routeExists: (pathname) =>
                   Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
                 // The page is rendered by this server's own listener, never the host the
@@ -3045,7 +3047,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           if (!viteModuleRequest && farmRequestWantsMarkdown(requestPathname, req.headers.accept)) {
             const markdownRoute = farmApp
               .getRouteManager()
-              .matchRoute(normalizeFarmMarkdownRoutePath(requestPathname));
+              .matchRoute(normalizeFarmMarkdownRoutePath(requestPathname, farmConfig.basePath));
             if (!markdownRoute.route) {
               await serveBuiltInRoute(
                 () =>

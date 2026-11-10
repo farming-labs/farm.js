@@ -1491,20 +1491,23 @@ export class ServerRenderer {
         return;
       }
 
-      const generatedLlmsKind = this.getGeneratedLlmsKind(pathname);
+      // Generated agent files answer at the path routes see, as root llms.ts, robots.ts, and
+      // sitemap.ts do and as production serves them: /console/llms.txt under basePath "/console".
+      const routePathname = this.routeManager.toRoutePathname(pathname);
+      const generatedLlmsKind = this.getGeneratedLlmsKind(routePathname);
       if (generatedLlmsKind) {
         await this.renderGeneratedLlmsTxt(req, res, generatedLlmsKind);
         completeRender(res.statusCode || 200, pathname);
         return;
       }
 
-      if (pathname === "/robots.txt" && this.getAgentCrawlers().enabled) {
+      if (routePathname === "/robots.txt" && this.getAgentCrawlers().enabled) {
         await this.renderGeneratedRobotsTxt(req, res);
         completeRender(res.statusCode || 200, pathname);
         return;
       }
 
-      if (pathname === "/sitemap.xml" && this.getAgentSitemap().enabled) {
+      if (routePathname === "/sitemap.xml" && this.getAgentSitemap().enabled) {
         await this.renderGeneratedSitemap(req, res);
         completeRender(res.statusCode || 200, pathname);
         return;
