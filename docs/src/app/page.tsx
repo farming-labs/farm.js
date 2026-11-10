@@ -471,31 +471,6 @@ const reactCompilerConfigVariants = [
 ] as const satisfies readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
 const reactCompilerConfigSuffix = `  } }),
 });`;
-// examples/react-compiler-js-framework-benchmark: the official js-framework-benchmark harness,
-// Farm hybrid against the harness's React Hooks and Solid entries. Each figure is the weakest of
-// the recorded runs (BENCHMARK_RESULTS*.md, FRAMEWORK_COMPARISON*.md), so the page never claims
-// more than the slowest measurement supports. Re-run them after a renderer release.
-const reactCompilerMetrics = [
-  {
-    description:
-      "Swapping two of 1,000 rows was 4.9× faster than the benchmark's React Hooks entry in the weakest recorded run.",
-    label: "Row swap vs React",
-    value: "4.9× faster",
-  },
-  {
-    description:
-      "The official-weighted CPU score across all nine operations was 1.29× faster than React Hooks in the weakest recorded run.",
-    label: "Overall vs React",
-    value: "1.29× faster",
-  },
-  {
-    description:
-      "The official-weighted CPU score was 1.081 for Farm and 1.072 for Solid in the same run (1.00 = fastest).",
-    label: "CPU vs Solid",
-    value: "Within 1%",
-  },
-] as const;
-
 const layersConfigTabs = [
   {
     id: "share",
@@ -1065,7 +1040,7 @@ function ReactCompilerVisual() {
       <div className="relative z-10 flex h-[290px] w-full min-w-0 flex-col">
         <HighlightedCodeValueCycle
           autoRotateMs={4200}
-          className="flex h-[248px] min-w-0 flex-col border-b-0"
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
           compact
           copyable
           id="react-compiler-config"
@@ -1075,38 +1050,6 @@ function ReactCompilerVisual() {
           suffixCode={reactCompilerConfigSuffix}
           variants={reactCompilerConfigVariants}
         />
-        <div
-          aria-label="React compiler benchmark results"
-          className="grid h-[42px] shrink-0 grid-cols-[repeat(3,minmax(0,1fr))_2.625rem] border-x border-white/10 bg-black"
-          role="group"
-        >
-          {reactCompilerMetrics.map((metric) => (
-            <div
-              key={metric.label}
-              className="flex min-w-0 flex-col justify-center border-r border-white/8 px-2 sm:px-3"
-              title={metric.description}
-            >
-              <span className="truncate font-mono text-[8.5px] font-bold tabular-nums tracking-normal text-white sm:text-[10px]">
-                {metric.value}
-              </span>
-              <span className="truncate font-mono text-[6.5px] uppercase tracking-normal text-white/38 sm:text-[7.5px]">
-                {metric.label}
-              </span>
-            </div>
-          ))}
-          <a
-            aria-label="See how the React compiler works"
-            className="group grid place-items-center text-white/48 transition-[background-color,color] duration-150 hover:bg-white/[0.04] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
-            href="/docs/renderers/react#experimental-aot-compiler"
-            title="How it works"
-          >
-            <ArrowUpRight
-              aria-hidden
-              className="size-3.5 transition-transform duration-150 group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
-              strokeWidth={1.5}
-            />
-          </a>
-        </div>
       </div>
     </div>
   );
@@ -1206,10 +1149,8 @@ function DeveloperExperienceGrid() {
       <FeatureCell
         body={
           <>
-            Farm prepares safe state updates at build time. On js-framework-benchmark it was{" "}
-            <span className="font-mono font-bold text-white">1.29× faster</span> than React Hooks
-            overall and <span className="font-mono font-bold text-white">within 1%</span> of Solid
-            on CPU. React handles anything the compiler cannot safely optimize.
+            Farm prepares safe state updates at build time and updates the DOM directly. React
+            handles anything the compiler cannot safely optimize.
           </>
         }
         className="border-t border-white/12 lg:border-l"
