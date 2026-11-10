@@ -2611,6 +2611,50 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             );
           };
 
+          // Runs app middleware inside a plugin runtime session `beginRuntimeRequest` opened,
+          // as production runs it inside the runtime request: runtime.after sees a response
+          // middleware answers with, and runtime.error sees a middleware throw. `logResponse`
+          // reports the status of a request middleware handled.
+          const runAppMiddlewareInRuntimeSession = async (
+            runtimeSession: FarmPluginRuntimeSession | undefined,
+            logResponse?: (status: number) => void,
+          ): Promise<boolean> => {
+            const interceptor =
+              runtimeSession && pm?.hasRuntimeHook("after") && middlewareManager?.hasMiddleware()
+                ? interceptFarmDevPageResponse({
+                    req,
+                    res,
+                    pm,
+                    runtimeSession,
+                    hasRuntimeAfterHook: true,
+                    hasAfterResponseHook: false,
+                    hasHTMLTransformHook: false,
+                    renderPayload: {},
+                    method: requestMethod,
+                    urlPath: requestUrl,
+                    pathname: requestPathname,
+                    startTime: Date.now(),
+                    logResponse: (_method, _path, status) => logResponse?.(status),
+                    // The runtime reports a runtime.after failure itself.
+                    emitError: async () => {},
+                  })
+                : undefined;
+            let handled: boolean;
+            try {
+              handled = await runAppMiddlewareForContentRoute();
+            } catch (error) {
+              interceptor?.release();
+              if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
+              throw error;
+            }
+            if (!handled) {
+              interceptor?.release();
+              return false;
+            }
+            if (!interceptor?.isEnded()) logResponse?.(res.statusCode || 200);
+            return true;
+          };
+
           // Built-in endpoints (these content routes, the app manifest, and the API and AI
           // catalogs) answer inside the plugin runtime, as every request does in production:
           // runtime.before can refuse or replace the request, and runtime.after sees the
@@ -2670,7 +2714,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               pm.copyRequestContext(runtimeSession.request, req);
               applyWebRequestToNodeRequest(runtimeSession.request, req);
             }
-            if (await runAppMiddlewareForContentRoute()) {
+            if (await runAppMiddlewareInRuntimeSession(runtimeSession)) {
               await discard();
               return;
             }
@@ -3405,43 +3449,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // App middleware guards API routes, including plugin routes, as the
             // production entry does before it dispatches them. runtime.after sees a response
             // middleware answers with, as in production.
-            const middlewareInterceptor =
-              runtimeSession && pm?.hasRuntimeHook("after") && middlewareManager?.hasMiddleware()
-                ? interceptFarmDevPageResponse({
-                    req,
-                    res,
-                    pm,
-                    runtimeSession,
-                    hasRuntimeAfterHook: true,
-                    hasAfterResponseHook: false,
-                    hasHTMLTransformHook: false,
-                    renderPayload: {},
-                    method,
-                    urlPath,
-                    pathname,
-                    startTime,
-                    logResponse: (logMethod, logPath, status, durationMs) =>
-                      logResponse(logMethod, logPath, status, durationMs, "API"),
-                    // The runtime reports a runtime.after failure itself.
-                    emitError: async () => {},
-                  })
-                : undefined;
-            let middlewareHandled: boolean;
-            try {
-              middlewareHandled = await runAppMiddlewareForContentRoute();
-            } catch (error) {
-              middlewareInterceptor?.release();
-              if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
-              throw error;
-            }
-            if (middlewareHandled) {
-              if (!middlewareInterceptor?.isEnded()) {
-                const duration = Date.now() - startTime;
-                logResponse(method, urlPath, res.statusCode || 200, duration, "API");
-              }
+            if (
+              await runAppMiddlewareInRuntimeSession(runtimeSession, (status) =>
+                logResponse(method, urlPath, status, Date.now() - startTime, "API"),
+              )
+            ) {
               return;
             }
-            middlewareInterceptor?.release();
 
             // The handler gets the session's Request, as in production, unless middleware
             // rewrote the URL or a runtime.before hook read the body.
