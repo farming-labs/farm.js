@@ -174,16 +174,9 @@ async function readResponse(response: Response) {
   };
 }
 
-describe("production middleware errors", () => {
-  let app: ProductionApp | undefined;
-  let logPath = "";
-
-  beforeAll(async () => {
-    logPath = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "farm-mw-error-log-")), "log");
-    app = await startProductionApp(
-      "farm-production-mw-errors-",
-      {
-        "farm.config.ts": `import { appendFileSync } from "node:fs";
+// The app with a plugin and observability hook that record what they see to FARM_MW_ERROR_LOG.
+const TRACED_APP_FILES: Record<string, string> = {
+  "farm.config.ts": `import { appendFileSync } from "node:fs";
 import { defineConfig, definePlugin } from "@farm.js/core";
 
 function record(entry) {
@@ -229,10 +222,56 @@ export default defineConfig({
   ],
 });
 `,
-        ...APP_FILES,
+  ...APP_FILES,
+};
+
+/** Requests `pathname` and returns its response with what the app recorded for it. */
+async function readTrace(origin: string, logPath: string, pathname: string, init?: RequestInit) {
+  await fs.writeFile(logPath, "");
+  const response = await readResponse(await fetch(`${origin}${pathname}`, init));
+  const trace = (await fs.readFile(logPath, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  return { response, trace };
+}
+
+// What both modes answer and report for a throwing API middleware.
+async function expectSharedFailureTraces(origin: string, logPath: string): Promise<void> {
+  const failure = { message: SECRET };
+  // The middleware throw reaches runtime.error and onError once, and runtime.after sees the 500.
+  expect(await readTrace(origin, logPath, "/api/mw-throw")).toEqual({
+    response: {
+      status: 500,
+      contentType: "application/json",
+      cacheControl: "private, no-store",
+      configured: "yes",
+      body: '{"error":"Internal Server Error"}',
+    },
+    trace: [
+      { source: "event", type: "middleware.error", pathname: "/api/mw-throw", ...failure },
+      { source: "runtime.error", pathname: "/api/mw-throw", ...failure },
+      { source: "onError", phase: "runtime", pathname: "/api/mw-throw", ...failure },
+      {
+        source: "runtime.after",
+        pathname: "/api/mw-throw",
+        status: 500,
+        contentType: "application/json",
       },
-      { linkReact: true, env: { FARM_MW_ERROR_LOG: logPath } },
-    );
+    ],
+  });
+}
+
+describe("production middleware errors", () => {
+  let app: ProductionApp | undefined;
+  let logPath = "";
+
+  beforeAll(async () => {
+    logPath = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "farm-mw-error-log-")), "log");
+    app = await startProductionApp("farm-production-mw-errors-", TRACED_APP_FILES, {
+      linkReact: true,
+      env: { FARM_MW_ERROR_LOG: logPath },
+    });
   }, 240_000);
 
   afterAll(async () => {
@@ -303,17 +342,8 @@ export default defineConfig({
     expect(home.headers.get("x-middleware")).toBe("ran");
     await home.body?.cancel();
 
-    const readTrace = async (pathname: string) => {
-      await fs.writeFile(logPath, "");
-      await fetch(`${app!.origin}${pathname}`).then((response) => response.text());
-      return (await fs.readFile(logPath, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-    };
-
     const failure = { message: SECRET };
-    expect(await readTrace("/api/boom")).toEqual([
+    expect((await readTrace(app!.origin, logPath, "/api/boom")).trace).toEqual([
       { source: "event", type: "api.error", pathname: "/api/boom", ...failure },
       { source: "runtime.error", pathname: "/api/boom", ...failure },
       { source: "onError", phase: "runtime", pathname: "/api/boom", ...failure },
@@ -324,18 +354,7 @@ export default defineConfig({
         contentType: "application/json",
       },
     ]);
-    expect(await readTrace("/api/mw-throw")).toEqual([
-      { source: "event", type: "middleware.error", pathname: "/api/mw-throw", ...failure },
-      { source: "runtime.error", pathname: "/api/mw-throw", ...failure },
-      { source: "onError", phase: "runtime", pathname: "/api/mw-throw", ...failure },
-      {
-        source: "runtime.after",
-        pathname: "/api/mw-throw",
-        status: 500,
-        contentType: "application/json",
-      },
-    ]);
-    expect(await readTrace("/mw-throw")).toEqual([
+    expect((await readTrace(app!.origin, logPath, "/mw-throw")).trace).toEqual([
       { source: "event", type: "middleware.error", pathname: "/mw-throw", ...failure },
       { source: "runtime.error", pathname: "/mw-throw", ...failure },
       { source: "onError", phase: "runtime", pathname: "/mw-throw", ...failure },
@@ -346,8 +365,9 @@ export default defineConfig({
         contentType: "text/html; charset=utf-8",
       },
     ]);
+    await expectSharedFailureTraces(app!.origin, logPath);
     // A plugin hook that throws still fails the request: runtime.error runs, runtime.after does not.
-    expect(await readTrace("/plugin-throw")).toEqual([
+    expect((await readTrace(app!.origin, logPath, "/plugin-throw")).trace).toEqual([
       { source: "runtime.error", pathname: "/plugin-throw", message: "plugin-before-failed" },
       {
         source: "onError",
@@ -448,6 +468,25 @@ describe("development middleware errors", () => {
       expect(pageError).toMatchObject({ status: 500, cacheControl: "private, no-store" });
     } finally {
       await app.stop();
+    }
+  }, 120_000);
+
+  it("reports a throwing API middleware as production does", async () => {
+    const logDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "farm-dev-mw-error-log-"));
+    const logPath = path.join(logDirectory, "log");
+    // The dev server loads the config in this process.
+    const previousLog = process.env.FARM_MW_ERROR_LOG;
+    process.env.FARM_MW_ERROR_LOG = logPath;
+    const app = await startDevelopmentApp("farm-dev-mw-errors-traced-", TRACED_APP_FILES, {
+      linkReact: true,
+    });
+    try {
+      await expectSharedFailureTraces(app.origin, logPath);
+    } finally {
+      await app.stop();
+      if (previousLog === undefined) delete process.env.FARM_MW_ERROR_LOG;
+      else process.env.FARM_MW_ERROR_LOG = previousLog;
+      await fs.rm(logDirectory, { recursive: true, force: true });
     }
   }, 120_000);
 

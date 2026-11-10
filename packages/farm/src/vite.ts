@@ -643,6 +643,14 @@ function sendFarmDevErrorJSON(res: ServerResponse): void {
   res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
 }
 
+/** `sendFarmDevErrorJSON`'s 500 as a `Response`, for `runtime.after` to see. */
+function createFarmDevMiddlewareErrorResponse(): Response {
+  return new Response(FARM_INTERNAL_SERVER_ERROR_BODY, {
+    status: 500,
+    headers: { "Content-Type": "application/json", "Cache-Control": "private, no-store" },
+  });
+}
+
 /**
  * The 500 a request answers when a plugin runtime hook throws, as in the production entry: the
  * generic JSON body on an API path or with `renderer: false`, plain text for a page.
@@ -2652,8 +2660,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
           // Runs app middleware inside a plugin runtime session `beginRuntimeRequest` opened,
           // as production runs it inside the runtime request: runtime.after sees a response
-          // middleware answers with, and runtime.error sees a middleware throw. `logResponse`
-          // reports the status of a request middleware handled.
+          // middleware answers with. A middleware throw is rethrown for the caller to report and
+          // answer. `logResponse` reports the status of a request middleware handled.
           const runAppMiddlewareInRuntimeSession = async (
             runtimeSession: FarmPluginRuntimeSession | undefined,
             logResponse?: (status: number) => void,
@@ -2683,8 +2691,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             try {
               handled = await runAppMiddlewareForContentRoute();
             } catch (error) {
+              // The caller answers the throw and reports it to the runtime.
               interceptor?.release();
-              if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
               throw error;
             }
             if (!handled) {
@@ -2752,12 +2760,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               pm.copyRequestContext(runtimeSession.request, req);
               applyWebRequestToNodeRequest(runtimeSession.request, req);
             }
-            if (await runAppMiddlewareInRuntimeSession(runtimeSession)) {
-              await discard();
-              return;
-            }
             let response: Response | void;
             try {
+              if (await runAppMiddlewareInRuntimeSession(runtimeSession)) {
+                await discard();
+                return;
+              }
               response = await respond(
                 runtimeSession?.request ?? createRequestFromNodeRequest(req, new URL(fullUrl)),
               );
@@ -3503,11 +3511,33 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 return;
               }
             } catch (error) {
-              if (res.headersSent) throw error;
-              // The runtime already reported the throw to runtime.error and onError.
+              if (res.headersSent) {
+                if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
+                throw error;
+              }
               logger.error(`Middleware error: ${error}`);
-              logResponse(method, urlPath, 500, Date.now() - startTime, "API");
-              sendFarmDevErrorJSON(res);
+              // As in production, runtime.error and onError observe the throw, and
+              // runtime.after sees the 500 it answers, as for a throwing API route.
+              let response = createFarmDevMiddlewareErrorResponse();
+              if (runtimeSession) {
+                const errorResponse = response;
+                try {
+                  response = await pm!.completeRuntimeRequest(
+                    runtimeSession,
+                    async (_request, runtime) => {
+                      await runtime.reportError(error);
+                      return errorResponse;
+                    },
+                  );
+                } catch {
+                  // A runtime.after hook threw; the runtime reported it.
+                  logResponse(method, urlPath, 500, Date.now() - startTime, "API");
+                  sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                  return;
+                }
+              }
+              logResponse(method, urlPath, response.status, Date.now() - startTime, "API");
+              await sendWebResponse(res, response);
               return;
             }
 
