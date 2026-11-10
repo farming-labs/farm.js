@@ -11863,7 +11863,31 @@ async function handleFarmPluginRequest(request, runtimeOptions, adapterContext) 
 }
 
 ${generatePreloadResponseRuntimeSource()}
-
+${
+  hasPluginRuntime
+    ? `
+// The 500 a request answers when a plugin runtime hook throws, as in farm dev: the generic JSON
+// body on an API path or with renderer: false, plain text for a page.
+function createFarmRuntimeHookErrorResponse(request, error) {
+  console.error("Plugin runtime error:", error);${
+    farmRendererDisabled
+      ? ""
+      : `
+  if (!isFarmLocalAPIPathname(new URL(request.url).pathname)) {
+    return farmOwnedResponse("Internal Server Error", {
+      status: 500,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }`
+  }
+  return farmOwnedResponse(JSON.stringify({ error: "Internal Server Error" }), {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+`
+    : ""
+}
 // Export as Web Standard fetch API
 export async function fetch(request, context) {${
     imageRuntime === "none"
@@ -11966,6 +11990,11 @@ async function handleFarmFetch(request, context) {
                   ? context.waitUntil.bind(context)
                   : undefined,
               },
+            ).catch((error) =>
+              // A runtime hook threw, or something it wraps: runtime.error and onError observed
+              // it, and the remaining runtime.after hooks were skipped. Answer the 500 farm dev
+              // answers, with the headers() config, instead of Nitro's own error response.
+              prepareResponse(request, createFarmRuntimeHookErrorResponse(request, error))
             )
           : ${
             hasInfraAnalyticsRuntime && !hasPluginRuntime

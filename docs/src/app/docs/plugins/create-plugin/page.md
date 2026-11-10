@@ -65,8 +65,9 @@ API and integration requests follow the same contract in `farm dev` and in a pro
 - When an API or integration route throws, Farm answers `500`. `error` runs first with the thrown
   value, then `after` runs with that `500` response. The flat `onError` hook gets the throw once,
   with `phase: "runtime"`.
-- A throw from a `context`, `before`, or `after` hook runs `error` and skips the remaining `after`
-  hooks.
+- A throw from a `context`, `before`, or `after` hook runs `error`, skips the remaining `after`
+  hooks, and answers `500` with Farm's JSON body `{"error":"Internal Server Error"}`. A page
+  request gets a plain-text `Internal Server Error` instead, unless the app sets `renderer: false`.
 
 ### Router, render, build, and dev hooks
 

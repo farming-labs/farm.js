@@ -37,11 +37,32 @@ const APP_FILES: Record<string, string> = {
   "src/app/middleware.ts": middlewareSource,
 };
 
+// renderer: false, with a plugin whose runtime hooks throw on some paths.
 const BACKEND_FILES: Record<string, string> = {
+  "farm.config.ts": `import { defineConfig, definePlugin } from "@farm.js/core";
+
+export default defineConfig({
+  renderer: false,
+  images: { provider: "none" },
+  telemetry: false,
+  plugins: [
+    definePlugin({
+      name: "test:backend-hook-errors",
+      runtime: {
+        before({ request }) {
+          if (request.url.endsWith("/plugin-before-throw")) throw new Error("plugin-before-failed");
+        },
+        after({ request }) {
+          if (request.url.endsWith("/plugin-after-throw")) throw new Error("plugin-after-failed");
+        },
+      },
+    }),
+  ],
+});
+`,
   "src/app/api/mw-throw/route.ts": "export function GET() { return Response.json({ ok: true }); }",
   "src/app/middleware.ts": middlewareSource,
 };
-const BACKEND_CONFIG: FarmUserConfig = { renderer: false, images: { provider: "none" } };
 
 interface ProductionApp {
   origin: string;
@@ -337,6 +358,19 @@ export default defineConfig({
     ]);
     expect(app!.output.join("")).toContain(SECRET);
   });
+
+  it("answers a page whose plugin hook throws with farm dev's plain-text 500", async () => {
+    const response = await readResponse(
+      await fetch(`${app!.origin}/plugin-throw`, { headers: { accept: "text/html" } }),
+    );
+    // Farm's response, with the headers() config, not the server's own error response.
+    expect(response).toMatchObject({
+      status: 500,
+      contentType: "text/plain; charset=utf-8",
+      configured: "yes",
+      body: "Internal Server Error",
+    });
+  });
 });
 
 describe("production middleware errors with renderer: false", () => {
@@ -345,7 +379,6 @@ describe("production middleware errors with renderer: false", () => {
   beforeAll(async () => {
     app = await startProductionApp("farm-production-mw-errors-backend-", BACKEND_FILES, {
       linkReact: false,
-      config: BACKEND_CONFIG,
     });
   }, 240_000);
 
@@ -355,6 +388,10 @@ describe("production middleware errors with renderer: false", () => {
 
   it("answers JSON whatever the path", async () => {
     await expectBackendMiddlewareErrors(app!.origin);
+  });
+
+  it("answers JSON whatever the path when a plugin runtime hook throws", async () => {
+    await expectBackendRuntimeHookErrors(app!.origin);
   });
 });
 
@@ -366,6 +403,24 @@ async function expectBackendMiddlewareErrors(origin: string): Promise<void> {
     expect(response, pathname).toMatchObject({ status: 500, cacheControl: "private, no-store" });
     expect(response.contentType, pathname).toMatch(/^application\/json/);
     expect(JSON.parse(response.body), pathname).toEqual({ error: "Internal Server Error" });
+  }
+}
+
+async function expectBackendRuntimeHookErrors(origin: string): Promise<void> {
+  for (const pathname of [
+    "/plugin-before-throw",
+    "/plugin-after-throw",
+    "/api/plugin-before-throw",
+    "/api/plugin-after-throw",
+  ]) {
+    const response = await readResponse(
+      await fetch(`${origin}${pathname}`, { headers: { accept: "text/html" } }),
+    );
+    expect(response, pathname).toMatchObject({
+      status: 500,
+      contentType: "application/json",
+      body: '{"error":"Internal Server Error"}',
+    });
   }
 }
 
@@ -399,10 +454,10 @@ describe("development middleware errors", () => {
   it("answers JSON whatever the path with renderer: false", async () => {
     const app = await startDevelopmentApp("farm-dev-mw-errors-backend-", BACKEND_FILES, {
       linkReact: false,
-      config: BACKEND_CONFIG,
     });
     try {
       await expectBackendMiddlewareErrors(app.origin);
+      await expectBackendRuntimeHookErrors(app.origin);
     } finally {
       await app.stop();
     }
