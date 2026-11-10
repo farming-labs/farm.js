@@ -300,11 +300,13 @@ Nitro's official deploy docs list these runtime and provider families. Farm's fi
 
 Common preset names include `node-server`, `bun`, `deno-server`, `deno-deploy`, `aws-lambda`, `aws-amplify`, `azure-swa`, `cloudflare-pages`, `cloudflare-module`, `firebase-app-hosting`, `github-pages`, `gitlab-pages`, `netlify`, `netlify-edge`, `vercel`, `zeabur`, and `zerops`. Nitro can add or rename presets over time, so check Nitro's deploy docs when targeting a provider directly.
 
+Farm's Nitro version has no `vercel-edge` preset: Nitro replaced it with `vercel` on Fluid compute. Farm rejects `vercel-edge` as a `deploy.target`, `deploy.preset`, or `--preset` value when it resolves the config, before the build starts. Use the `vercel` target instead.
+
 ## Files server code reads
 
 Server code can import a local file that it reads at runtime, such as a `.wasm` binary an API route imports without `@farm.js/wasm`. Farm deploys that file with the server code and keeps it out of the public assets: in `server/` for `node-server` and `bun`, in the function directory for `vercel` and `netlify`, and in the server output of other Nitro presets that run on Node.
 
-Edge presets (`cloudflare-pages`, `cloudflare-module`, `vercel-edge`, `netlify-edge`) deploy no file to read, and Cloudflare Workers and Vercel Edge also refuse to compile WebAssembly from bytes. On those presets `farm build` fails and names the file. Load the module in the browser instead, with `@farm.js/wasm` or a `?url` import, or deploy that server code to a Node target.
+Edge presets (`cloudflare-pages`, `cloudflare-module`, `netlify-edge`) deploy no file to read, and Cloudflare Workers also refuse to compile WebAssembly from bytes. On those presets `farm build` fails and names the file. Load the module in the browser instead, with `@farm.js/wasm` or a `?url` import, or deploy that server code to a Node target.
 
 ## Build
 
