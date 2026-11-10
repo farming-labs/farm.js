@@ -1,4 +1,4 @@
-import { defineIntegration } from "@farm.js/core";
+import { defineIntegration } from "@farm.js/core/integrations";
 import { createSanityClient } from "./client.js";
 import {
   resolveSanityConfig,

@@ -3,12 +3,17 @@
 import { Writable } from "node:stream";
 import {
   defineRendererDescriptorConformance,
+  defineRendererNativeTreeConformance,
   defineRendererServerConformance,
 } from "@farm.js/renderer-tests";
+import { createFarmNativeTreeResponse } from "@farm.js/core/internal/production-runtime";
+import { lazy } from "preact/compat";
 import { describe, expect, it } from "vitest";
 import { preact } from "../index";
 import * as serverRuntime from "../server";
 import {
+  ErrorBoundary,
+  Suspense,
   createElement,
   generateHydrationScript,
   renderToPipeableStream,
@@ -31,6 +36,21 @@ defineRendererDescriptorConformance({
 });
 
 defineRendererServerConformance(serverRuntime);
+defineRendererNativeTreeConformance(serverRuntime, async (html) => {
+  // As a mobile app's server answers a native-tier screen: the page's HTML read into a tree.
+  const response = await createFarmNativeTreeResponse({
+    request: new Request("https://app.example/trails", {
+      headers: { accept: "application/vnd.farm.native+json" },
+    }),
+    renderPage: () =>
+      new Response(
+        `<!DOCTYPE html><html><head><title>Trails</title></head><body><div id="__farm_page__">${html}</div></body></html>`,
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      ),
+    loadStylesheet: () => "",
+  });
+  return response.json();
+});
 
 describe("Preact renderer", () => {
   it("streams FARMJS elements through Preact's Node renderer", async () => {
@@ -65,6 +85,88 @@ describe("Preact renderer", () => {
     await expect(new Response(stream).text()).resolves.toContain(
       "<p>Streamed through a readable stream</p>",
     );
+  });
+
+  it("puts Farm's CSP nonce on the streaming init script only", async () => {
+    const suspended = () => {
+      const Late = lazy(async () => ({
+        default: () => createElement("p", null, "late content"),
+      }));
+      return createElement(
+        "main",
+        null,
+        createElement("div", {
+          dangerouslySetInnerHTML: { __html: '<script nonce="guess">injected()</script>' },
+        }),
+        createElement(
+          Suspense,
+          { fallback: createElement("p", null, "waiting") },
+          createElement(Late, null),
+        ),
+      );
+    };
+    const scriptTags = (html: string) => html.match(/<script\b[^>]*>/g) ?? [];
+    const expectSecured = (html: string) => {
+      expect(html).toContain("late content");
+      expect(html).toContain('<script nonce="abc123">(function(){class e extends HTMLElement');
+      expect(scriptTags(html).filter((tag) => tag.includes('nonce="abc123"'))).toHaveLength(1);
+      expect(html).toContain('<script nonce="guess">injected()</script>');
+    };
+
+    expectSecured(
+      await new Response(renderToReadableStream(suspended(), { nonce: "abc123" })).text(),
+    );
+    expectSecured(
+      await new Promise<string>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        const destination = new Writable({
+          write(chunk, _encoding, callback) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            callback();
+          },
+        });
+        destination.once("finish", () => resolve(Buffer.concat(chunks).toString("utf8")));
+        const stream = renderToPipeableStream(suspended(), {
+          nonce: "abc123",
+          onShellReady() {
+            stream.pipe(destination);
+          },
+          onShellError: reject,
+          onError: reject,
+        });
+      }),
+    );
+    const unsecured = await new Response(renderToReadableStream(suspended())).text();
+    expect(unsecured).toContain("<script>(function(){class e extends HTMLElement");
+  });
+
+  it("fails the shell when a page throws under the route error boundary", async () => {
+    // Farm wraps a route with an error.tsx this way and renders the error page
+    // itself, with its status, once the shell fails.
+    const Page = () => {
+      throw new Error("page failed");
+    };
+    const Layout = (props: { children?: unknown }) => createElement("body", null, props.children);
+    const Fallback = () => createElement("p", null, "fallback");
+    const route = createElement(
+      ErrorBoundary,
+      { Fallback },
+      createElement(
+        "div",
+        { "data-farm-layout-boundary": "true" },
+        createElement(Layout, null, createElement(Page, null)),
+      ),
+    );
+
+    const outcome = await new Promise<string>((resolve) => {
+      renderToPipeableStream(route, {
+        onShellReady: () => resolve("shell ready"),
+        onShellError: (error) => resolve(`shell error: ${(error as Error).message}`),
+        onError() {},
+      });
+    });
+
+    expect(outcome).toBe("shell error: page failed");
   });
 
   it("does not require a renderer-specific hydration bootstrap", () => {

@@ -1,10 +1,10 @@
 import type { FarmIntegrationAPIOperation } from "@farm.js/core/client";
-import { api } from "@farm.js/core/client";
+import { api } from "@farm.js/core/api/client";
 import {
   createPathInferredClientApi,
   type InferPathInferredClientAPI,
   type PathInferredClientOperation,
-} from "@farm.js/integration-utils/integration";
+} from "@farm.js/integration-utils/client";
 import type { FarmWebhookAckResult } from "@farm.js/integration-utils/webhooks";
 import type { StripeBillingMeterState, StripeBillingUsageProperties } from "./storage.js";
 
@@ -98,6 +98,10 @@ export interface StripeCheckoutResult {
 
 export interface StripeBillingUpgradeInput {
   quantity: number;
+  /**
+   * @deprecated Ignored. The server applies `billing.seats.prorationBehavior`, so a caller
+   * cannot choose what it is charged.
+   */
   prorationBehavior?: StripeBillingUpgradeProrationBehavior;
 }
 

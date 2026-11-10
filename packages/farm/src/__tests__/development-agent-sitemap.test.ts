@@ -1,0 +1,296 @@
+// @vitest-environment node
+
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
+import type { ViteDevServer } from "vite";
+import { createServer } from "../server/create-server";
+import { getAvailablePort } from "./dev-server-port";
+
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const temporaryRoots = new Set<string>();
+const servers = new Set<ViteDevServer>();
+
+afterEach(async () => {
+  await Promise.all([...servers].map((server) => server.close()));
+  servers.clear();
+  await Promise.all(
+    [...temporaryRoots].map((root) =>
+      fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    ),
+  );
+  temporaryRoots.clear();
+});
+
+async function writeModule(root: string, relativePath: string, source: string): Promise<void> {
+  const filePath = path.join(root, relativePath);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, source);
+}
+
+const PAGES = {
+  "src/app/layout.tsx": `import React from "react";
+export const metadata = { title: "Acme", metadataBase: new URL("https://acme.test") };
+export default function Layout({ children }) { return <>{children}</>; }`,
+  "src/app/page.tsx": `import React from "react";
+export default function Page() { return <main>home</main>; }`,
+  "src/app/about/page.tsx": `import React from "react";
+export default function Page() { return <main>about</main>; }`,
+  "src/app/blog/[slug]/page.tsx": `import React from "react";
+export default function Page() { return <main>post</main>; }`,
+  "src/app/drafts/page.tsx": `import React from "react";
+export const metadata = { robots: { index: false } };
+export default function Page() { return <main>drafts</main>; }`,
+  "src/farm.routes.tsx": `import React from "react";
+import { createRoute, defineRoutes, redirect } from "@farm.js/core";
+
+export const Account = createRoute("/account", {
+  guard() { redirect("/"); },
+  component: () => <main>account</main>,
+});
+
+export const Team = createRoute("/team", { component: () => <main>team</main> });
+
+export default defineRoutes(() => [Account, Team]);`,
+};
+
+async function startApp(config: string, files: Record<string, string> = {}): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-sitemap-"));
+  temporaryRoots.add(root);
+
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  for (const pkg of ["react", "react-dom"]) {
+    await fs.symlink(
+      await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
+      path.join(root, "node_modules", pkg),
+      "junction",
+    );
+  }
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
+  await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    `export default { images: { provider: "none" }, ${config} };`,
+  );
+  for (const [relativePath, source] of Object.entries({ ...PAGES, ...files })) {
+    await writeModule(root, relativePath, source);
+  }
+
+  const server = await createServer({ root });
+  servers.add(server);
+  await server.listen(await getAvailablePort());
+  const address = server.httpServer?.address();
+  if (!address || typeof address === "string") throw new Error("Missing dev server address");
+  return `http://localhost:${address.port}`;
+}
+
+const locs = (xml: string) => [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+
+describe("development default sitemap", () => {
+  it("lists static public pages with lastmod on metadataBase, with no config", async () => {
+    const origin = await startApp("");
+
+    const response = await fetch(`${origin}/sitemap.xml`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/xml; charset=utf-8");
+    const xml = await response.text();
+    // Dynamic, noindex, and guarded pages are left out.
+    expect(locs(xml)).toEqual([
+      "https://acme.test/",
+      "https://acme.test/about",
+      "https://acme.test/team",
+    ]);
+    expect(xml.match(/<lastmod>/g)?.length).toBeGreaterThanOrEqual(2);
+  }, 120_000);
+
+  it("leaves out pages a layout marks noindex unless the page sets its own robots", async () => {
+    const origin = await startApp("", {
+      "src/app/staff/layout.tsx": `import React from "react";
+export const metadata = { robots: { index: false } };
+export default function Layout({ children }) { return <>{children}</>; }`,
+      "src/app/staff/page.tsx": `import React from "react";
+export default function Page() { return <main>staff</main>; }`,
+      "src/app/staff/roster/page.tsx": `import React from "react";
+export const metadata = { title: "Roster" };
+export default function Page() { return <main>roster</main>; }`,
+      "src/app/staff/careers/page.tsx": `import React from "react";
+export const metadata = { title: "Careers", robots: { index: true } };
+export default function Page() { return <main>careers</main>; }`,
+    });
+
+    // Each page renders with the merged robots, so only the page that overrides it is indexable.
+    const page = await (await fetch(`${origin}/staff/roster`)).text();
+    expect(page).toContain('name="robots" content="noindex"');
+
+    expect(locs(await (await fetch(`${origin}/sitemap.xml`)).text())).toEqual([
+      "https://acme.test/",
+      "https://acme.test/about",
+      "https://acme.test/staff/careers",
+      "https://acme.test/team",
+    ]);
+    const llms = await (await fetch(`${origin}/llms.txt`)).text();
+    expect(llms).toContain("[Careers]");
+    expect(llms).not.toContain("/staff/roster");
+    expect(llms).not.toMatch(/\/staff\)/);
+  }, 120_000);
+
+  it("links llms.txt to metadataBase, as the sitemap does, not the request's host", async () => {
+    const origin = await startApp("");
+    const llms = await (await fetch(`${origin}/llms.txt`)).text();
+    expect(llms).toContain("(https://acme.test/about.md)");
+    expect(llms).not.toContain(origin);
+  }, 120_000);
+
+  it("turns off with agent.sitemap: false", async () => {
+    const origin = await startApp("agent: { sitemap: false }");
+    expect((await fetch(`${origin}/sitemap.xml`)).status).toBe(404);
+  }, 120_000);
+
+  it("lets a root sitemap.ts or a public sitemap.xml win", async () => {
+    const owned = await startApp("", {
+      "src/app/sitemap.ts": `export default () => [{ url: "https://acme.test/owned" }];`,
+    });
+    expect(locs(await (await fetch(`${owned}/sitemap.xml`)).text())).toEqual([
+      "https://acme.test/owned",
+    ]);
+
+    const file = await startApp("", {
+      "public/sitemap.xml":
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://acme.test/static</loc></url></urlset>',
+    });
+    expect(locs(await (await fetch(`${file}/sitemap.xml`)).text())).toEqual([
+      "https://acme.test/static",
+    ]);
+  }, 120_000);
+
+  it("serves the home page's Markdown and the agent files under basePath, as production does", async () => {
+    const origin = await startApp(
+      'basePath: "/console", agent: { crawlers: true, llmsTxt: true }',
+      {
+        "src/app/docs/intro/page.tsx": `import React from "react";
+export default function Page() { return <main>intro</main>; }`,
+      },
+    );
+    const get = (pathname: string) => fetch(`${origin}${pathname}`);
+
+    // llms.txt links the home page to <basePath>/index.md, and that URL serves it.
+    expect(await (await get("/console/llms.txt")).text()).toContain(
+      "(https://acme.test/console/index.md)",
+    );
+    const home = await get("/console/index.md");
+    expect(home.status).toBe(200);
+    expect(home.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(await home.text()).toContain("home");
+    expect(await (await get("/console/llms-full.txt")).text()).toContain(
+      "URL: https://acme.test/console/index.md\n\n# Acme\n\nSource: /console\n\nhome",
+    );
+    // The other spellings of the home page's Markdown keep working.
+    expect((await get("/console.md")).status).toBe(200);
+    expect((await get("/index.md")).status).toBe(200);
+
+    // The home page advertises the URL llms.txt links, as other pages advertise <basePath>/<page>.md.
+    const page = await get("/console");
+    expect(page.headers.get("link")).toContain(
+      '</console/index.md>; rel="alternate"; type="text/markdown"',
+    );
+    expect(await page.text()).toContain(
+      '<link rel="alternate" href="https://acme.test/console/index.md" type="text/markdown">',
+    );
+    for (const pathname of ["/console/index.md", "/console.md"]) {
+      expect((await get(pathname)).headers.get("content-location"), pathname).toBe(
+        "/console/index.md",
+      );
+    }
+    const negotiated = await fetch(`${origin}/console`, { headers: { accept: "text/markdown" } });
+    expect(negotiated.headers.get("content-location")).toBe("/console/index.md");
+    expect((await get("/console/about")).headers.get("link")).toContain("</console/about.md>");
+
+    // The generated agent files answer inside the basePath and, as before, at the origin root.
+    for (const pathname of ["/llms.txt", "/llms-full.txt", "/sitemap.xml", "/robots.txt"]) {
+      expect((await get(`/console${pathname}`)).status, `/console${pathname}`).toBe(200);
+      expect((await get(pathname)).status, pathname).toBe(200);
+    }
+    expect(locs(await (await get("/console/sitemap.xml")).text())).toContain(
+      "https://acme.test/console/about",
+    );
+  }, 120_000);
+
+  it.each([
+    ["", ""],
+    ['basePath: "/console", ', "/console"],
+  ])(
+    "serves and advertises each locale's home Markdown at <prefix>/index.md (%s)",
+    async (basePathConfig, base) => {
+      const origin = await startApp(
+        `${basePathConfig}i18n: { locales: ["en", "fr"], defaultLocale: "en" }`,
+        {
+          "src/messages/en.json": "{}",
+          "src/messages/fr.json": "{}",
+          "src/app/page.tsx": `import React from "react";
+import { getLocale } from "@farm.js/core/i18n/server";
+export default function Page() { return <main>home {getLocale()}</main>; }`,
+        },
+      );
+      const get = (pathname: string, init?: RequestInit) => fetch(`${origin}${pathname}`, init);
+
+      for (const pathname of [`${base}/fr/index.md`, `${base}/fr.md`]) {
+        const markdown = await get(pathname);
+        expect(markdown.status, pathname).toBe(200);
+        expect(markdown.headers.get("content-location"), pathname).toBe(`${base}/fr/index.md`);
+        expect(await markdown.text(), pathname).toContain("home fr");
+      }
+      // The localized home page advertises it, as /fr/about advertises /fr/about.md.
+      const page = await get(`${base}/fr`);
+      expect(page.headers.get("link")).toContain(`<${base}/fr/index.md>; rel="alternate"`);
+      expect(await page.text()).toContain(
+        `<link rel="alternate" href="https://acme.test${base}/fr/index.md" type="text/markdown">`,
+      );
+      const negotiated = await get(`${base}/fr`, { headers: { accept: "text/markdown" } });
+      expect(negotiated.headers.get("content-location")).toBe(`${base}/fr/index.md`);
+      expect((await get(`${base}/fr/about`)).headers.get("link")).toContain(
+        `<${base}/fr/about.md>`,
+      );
+
+      // The default locale's home page keeps <basePath>/index.md.
+      const home = await get(`${base}/index.md`);
+      expect(home.status).toBe(200);
+      expect(await home.text()).toContain("home en");
+      expect((await get(base || "/")).headers.get("link")).toContain(`<${base}/index.md>`);
+    },
+    120_000,
+  );
+
+  it("matches an md.expose list against route paths under basePath, as llms.txt does", async () => {
+    const origin = await startApp(
+      'basePath: "/console", md: { expose: ["/", "/about"] }, agent: { llmsTxt: true }',
+    );
+    const get = (pathname: string) => fetch(`${origin}${pathname}`);
+
+    // llms.txt links the listed pages to their mirrors, and those mirrors answer.
+    const llms = await (await get("/console/llms.txt")).text();
+    expect(llms).toContain("[Home](https://acme.test/console/index.md)");
+    expect(llms).toContain("[About](https://acme.test/console/about.md)");
+    expect(llms).toContain("[Team](https://acme.test/console/team)");
+    for (const pathname of ["/console/index.md", "/console/about.md"]) {
+      const markdown = await get(pathname);
+      expect(markdown.status, pathname).toBe(200);
+      expect(markdown.headers.get("content-type"), pathname).toBe("text/markdown; charset=utf-8");
+    }
+    expect((await get("/console/about")).headers.get("link")).toContain(
+      '</console/about.md>; rel="alternate"; type="text/markdown"',
+    );
+
+    // A page left off the list has no mirror and advertises none.
+    expect((await get("/console/team.md")).status).toBe(404);
+    expect((await get("/console/team")).headers.get("link")).toBeNull();
+  }, 120_000);
+
+  it("names the sitemap in the robots.txt agent.crawlers serves", async () => {
+    const origin = await startApp("agent: { crawlers: true }");
+    expect(await (await fetch(`${origin}/robots.txt`)).text()).toContain(
+      "Sitemap: https://acme.test/sitemap.xml",
+    );
+  }, 120_000);
+});

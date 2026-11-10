@@ -184,7 +184,7 @@ describe("farmApiPlugin request boundary after failed cold-start discovery", () 
     expect(res.statusCode).toBe(500);
     expect(res.end).toHaveBeenCalled();
     expect(res.setHeader).toHaveBeenCalledWith("Content-Type", "application/json");
-    expect(chunks.join("")).toContain("Internal server error");
+    expect(JSON.parse(chunks.join(""))).toEqual({ error: "Internal Server Error" });
     expect(unhandled).toEqual([]);
   });
 

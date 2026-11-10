@@ -14,6 +14,7 @@ import type {
   MemoryRateLimitStorageOptions,
   MiddlewareResult,
 } from "./types";
+import { matchesMiddlewarePredicate } from "./matcher";
 
 const DEFAULT_MEMORY_RATE_LIMIT_ENTRIES = 100_000;
 
@@ -291,7 +292,8 @@ class MiddlewareChainImpl implements MiddlewareChain {
   ): MiddlewareChain {
     const conditionalMiddleware: MiddlewareFunction = async (ctx, next) => {
       // Evaluate condition - boolean or function
-      const shouldRun = typeof condition === "function" ? condition(ctx) : condition;
+      const shouldRun =
+        typeof condition === "function" ? matchesMiddlewarePredicate(condition, ctx) : condition;
 
       if (!shouldRun) {
         return next();

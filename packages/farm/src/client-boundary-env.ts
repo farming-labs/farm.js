@@ -3,9 +3,10 @@
  *
  * A module entering the client graph runs in the browser. Module-scope reads
  * of non-public process.env values evaluate to undefined there and broke
- * layout hydration in #560, and node: builtin imports are silently stubbed
- * with empty objects by farm:browser-external-stub. Both deserve a clear
- * build-time warning naming the module instead of a runtime mystery (#1065).
+ * layout hydration in #560, and node: builtin imports resolve to browser
+ * stubs whose exports are mostly undefined (see browser-builtins.ts). Both
+ * deserve a clear build-time warning naming the module instead of a runtime
+ * mystery (#1065).
  */
 
 type EstreeNode = { type: string; [key: string]: unknown };
@@ -150,7 +151,7 @@ export function formatClientBoundaryWarning(id: string, findings: ClientBoundary
   }
   if (builtinImports.length > 0) {
     lines.push(
-      `- import of ${builtinImports.join(", ")} — stubbed with an empty object in the browser. Move the import into server-only code.`,
+      `- import of ${builtinImports.join(", ")} — stubbed in the browser, where exports without a Web API equivalent are undefined. Move the import into server-only code.`,
     );
   }
   return lines.join("\n");

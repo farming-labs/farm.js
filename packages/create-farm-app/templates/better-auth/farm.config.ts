@@ -15,9 +15,6 @@ export default defineConfig({
   docs: {
     enabled: true,
   },
-  experimental: {
-    serverComponents: true,
-  },
   migrations: {
     commands: [
       {

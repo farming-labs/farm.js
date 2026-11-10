@@ -46,6 +46,8 @@ type VitePluginOption =
 type HookFunction = (this: unknown, ...args: any[]) => unknown;
 
 const SERVER_RUNTIME_ID = "\0farm:federation:server-runtime";
+/** The upstream plugin that serves server-federation remote entries in development. */
+const SSR_REMOTE_ENTRY_PLUGIN = "mf:ssr-remote-entry";
 
 export function createFarmFederationVitePlugins(
   options: ResolvedFederationOptions,
@@ -116,6 +118,12 @@ export function restrictPluginToClient(plugin: VitePluginLike): VitePluginLike {
   wrapped.resolveId = wrapEnvironmentHook(plugin.resolveId, 2);
   wrapped.load = wrapEnvironmentHook(plugin.load, 1);
   wrapped.transform = wrapEnvironmentHook(plugin.transform, 2);
+  if (plugin.name === SSR_REMOTE_ENTRY_PLUGIN) {
+    // Its dev server mounts the server-federation endpoints: `/__mf_ssr__/*` and `/__mf_runner__`,
+    // which runs Vite's fetchModule for any id under the root without `server.fs.deny`, so it hands
+    // out `.env`. Farm federates browser modules only (#885), so none of them is mounted.
+    delete wrapped.configureServer;
+  }
   return wrapped;
 }
 

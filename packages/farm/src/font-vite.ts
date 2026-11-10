@@ -83,6 +83,12 @@ export interface TransformFarmFontCallsOptions {
   id: string;
   root: string;
   production: boolean;
+  /**
+   * Import each font's generated CSS from the calling module in production too. A pipeline that
+   * does not merge font CSS into Farm's stylesheet afterwards (the React Server Components
+   * build) needs the bundler to carry it.
+   */
+  importCss?: boolean;
   parse: (code: string) => AstNode;
   register: (
     moduleId: string,
@@ -99,7 +105,13 @@ const registries = getGlobalMap<string, FarmFontRegistry>(FONT_REGISTRIES_KEY);
 const remoteBytes = getGlobalMap<string, Promise<Buffer>>(FONT_REMOTE_BYTES_KEY);
 
 export function farmFontImportsPlugin(
-  options: { root?: string; basePath?: string; publicDir?: string | false } = {},
+  options: {
+    root?: string;
+    basePath?: string;
+    publicDir?: string | false;
+    /** See TransformFarmFontCallsOptions.importCss. */
+    importCss?: boolean;
+  } = {},
 ): Plugin {
   let root = normalizeRoot(options.root || process.cwd());
   let production = process.env.NODE_ENV === "production";
@@ -133,7 +145,13 @@ export function farmFontImportsPlugin(
       );
       registry.production = false;
       server.middlewares.use(async (req, res, next) => {
-        const pathname = new URL(req.url || "/", "http://farm.local").pathname;
+        // A path is joined, not resolved: `//` would parse as a URL with an empty host and throw.
+        const target = req.url || "/";
+        const pathname = (
+          target.startsWith("/")
+            ? new URL(`http://farm.local${target}`)
+            : new URL(target, "http://farm.local")
+        ).pathname;
 
         if (pathname === "/@farm/fonts.css") {
           res.statusCode = 200;
@@ -186,6 +204,7 @@ export function farmFontImportsPlugin(
         id,
         root,
         production,
+        importCss: options.importCss,
         parse: (source) => this.parse(source) as unknown as AstNode,
         register: (moduleId, calls) => registry.register(moduleId, calls, production),
       });
@@ -238,11 +257,12 @@ export async function transformFarmFontCalls(
       new Set(calls.map((call) => call.binding).filter((value): value is string => Boolean(value))),
     ),
   );
-  const imports = options.production
-    ? ""
-    : Array.from(new Set(fonts.map((font) => font.id)))
-        .map((id) => `import ${JSON.stringify(`virtual:farm-font-css/${id}.css`)};`)
-        .join("\n");
+  const imports =
+    options.production && !options.importCss
+      ? ""
+      : Array.from(new Set(fonts.map((font) => font.id)))
+          .map((id) => `import ${JSON.stringify(`virtual:farm-font-css/${id}.css`)};`)
+          .join("\n");
 
   return {
     code: `${applyReplacements(options.code, replacements)}\n${imports}\n`,

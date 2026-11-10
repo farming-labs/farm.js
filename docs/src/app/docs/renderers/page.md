@@ -111,7 +111,9 @@ import {
 Actions remain normal typed RPC calls. Solid exposes action state through reactive properties, Vue
 through refs, and Svelte through the callable action's readable-store subscription. Server queries
 share FARMJS's existing browser cache, invalidation, deduplication, stale-while-revalidate, focus,
-and reconnect behavior across all bindings.
+and reconnect behavior across all bindings. During server rendering a query binding returns an
+idle snapshot and starts no read, matching React's `useServerQuery`; the browser loads it after
+hydration.
 
 ## Renderer capability contract
 

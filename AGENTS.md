@@ -1,6 +1,6 @@
 # Farm.js
 
-Farm.js is a full-stack framework for product-integrated applications. It combines Vite-powered development with typed app-directory routing, React Server Components and streaming SSR, server actions and queries, first-party integrations, multiple renderers, and production output through Nitro-backed deployment targets.
+Farm.js is a full-stack framework for the web and agents. It combines Vite-powered development with typed app-directory routing, React Server Components and streaming SSR, server actions and queries, first-party integrations, multiple renderers, and production output through Nitro-backed deployment targets.
 
 Treat the checked-out source, package manifests, tests, and current examples as the source of truth. The framework is moving quickly; do not reconstruct an API from memory, an older beta, another framework, or a stale prose document. Read `skills/farmjs/SKILL.md` before changing public framework behavior, configuration, integrations, renderers, templates, or documentation.
 
@@ -116,11 +116,20 @@ Start with the smallest test that can disprove the change, then broaden accordin
 
 For a bug fix, add a regression test and confirm it fails for the reported mechanism without the fix and passes with it. For timing, platform, deployment, or provider bugs, record the real environment used. Never replace a deterministic readiness signal with an arbitrary sleep.
 
+## Branches and commits
+
+- Name the branch `<type>/<scope>-<change>` in lowercase kebab-case: the PR title's type, then its scope and enough words that someone reading only the branch list knows what changes, for example `fix/middleware-continue-after-false-matcher` or `test/agent-pipeline-report-failed-run-status`. Never push a generated name such as `<user>/<adjective>-<name>-<suffix>`, even when a session or tool assigned it; rename the branch before the first push.
+- Start every branch from the latest `main` (`git fetch origin main && git switch -c <branch> origin/main`). Use one branch per concern, and never reuse a branch after its PR merges: follow-up work starts a new branch from `main`.
+- Write commit subjects in the same `<type>(<scope>): <observable outcome>` form, imperative and at most 72 characters, with a body that explains why and how the change was verified. Make each commit a coherent step; fold fixups into the commit they fix before review instead of pushing `wip` or `fix typo` commits.
+- Never rewrite history someone else may have pulled. Rewrite only your own unmerged branch, push it with `--force-with-lease` rather than `--force`, and never push directly to `main` or to another person's branch.
+- Do not add tool attribution to commits or pull requests (`Co-Authored-By` trailers for tools, session links, "Generated with" footers) unless a maintainer asks for it.
+
 ## Pull requests
 
 - Do not create, push, or merge a pull request unless the developer explicitly asks.
 - One concern per PR. Keep drive-by refactors, dependency upgrades, generated churn, and unrelated formatting out of the diff.
-- Use a conventional, plain-language title: `<type>(<scope>): <observable outcome>`, for example `fix(middleware): continue after a function matcher returns false`.
+- Use a conventional, plain-language title: `<type>(<scope>): <observable outcome>`, for example `fix(middleware): continue after a function matcher returns false`. Name the real scope and say what changes for the user or maintainer, not the activity: `fix(agent): retry run writes Windows refuses while a reader holds the file`, not `fix: agent bug` or `test: update tests`.
+- Apply labels only from those that already exist in the repository, matching the change's type and scope. Do not create new labels without maintainer approval.
 - Write the human-authored description before any bot summary. A generated summary does not replace the implementation record.
 - Link the owning issue when one exists. Non-trivial features should have an agreed problem statement before implementation.
 - UI and documentation presentation changes need screenshots; interaction, streaming, hydration, or timing changes need a short recording or reproducible browser test when visual evidence is material.

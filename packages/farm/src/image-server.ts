@@ -6,6 +6,7 @@ import type {
 } from "./image-config";
 import { matchesFarmIfNoneMatch } from "./server-http";
 import { matchesImagePathPattern } from "./image-pattern";
+import { FARM_ANONYMOUS_CLIENT_ADDRESS } from "./anonymous-client-address";
 
 export interface FarmImageTransformInput {
   source: Uint8Array;
@@ -189,7 +190,7 @@ export function createFarmImageHandler(
         });
       }
 
-      return createOptimizedImageResponse(request, optimized, config);
+      return createOptimizedImageResponse(request, optimized);
     } catch (error) {
       if (!(error instanceof FarmImageRequestError) && !isAbortError(error)) {
         try {
@@ -318,6 +319,9 @@ function parseIpv6Hextets(value: string): number[] | null {
     if (!octets) return null;
     tail = [(octets[0]! << 8) | octets[1]!, (octets[2]! << 8) | octets[3]!];
     text = text.slice(0, lastColon);
+    // In "64:ff9b::1.2.3.4" the tail's colon closes a "::"; restore it, or the
+    // compression parses as a trailing empty group and the address is dropped.
+    if (text.endsWith(":")) text += ":";
     // "::1.2.3.4" leaves "::" here, and "1.2.3.4" alone leaves "" — not IPv6.
     if (text === "") return null;
   }
@@ -400,6 +404,19 @@ export function isPrivateImageAddress(address: string): boolean {
       ((h4 === 0 && h5 === 0xffff) || (h4 === 0xffff && h5 === 0) || (h4 === 0 && h5 === 0));
     if (embedsIpv4 && (h6 !== 0 || h7 !== 0)) {
       return isPrivateIpv4([h6 >> 8, h6 & 0xff, h7 >> 8, h7 & 0xff]);
+    }
+    // Translation prefixes route to the IPv4 host they carry, so they are as
+    // private as it: NAT64 (64:ff9b::/96) holds it in the low 32 bits and
+    // 6to4 (2002::/16) in bits 16-47. Local-use NAT64 (64:ff9b:1::/48) may
+    // place it at any RFC 6052 offset, so none of that prefix is public.
+    if (h0 === 0x64 && h1 === 0xff9b) {
+      if (h2 === 1) return true;
+      if (h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0) {
+        return isPrivateIpv4([h6 >> 8, h6 & 0xff, h7 >> 8, h7 & 0xff]);
+      }
+    }
+    if (h0 === 0x2002) {
+      return isPrivateIpv4([h1 >> 8, h1 & 0xff, h2 >> 8, h2 & 0xff]);
     }
 
     // Unspecified (::) and loopback (::1) in any spelling.
@@ -517,8 +534,8 @@ async function fetchImageSource(
 
   for (let redirectCount = 0; ; redirectCount += 1) {
     throwIfAborted(signal);
-    const sourceFetcher =
-      currentUrl.origin === trustedLocalOrigin ? fetcher : (fetchRemote ?? fetcher);
+    const isTrustedLocal = currentUrl.origin === trustedLocalOrigin;
+    const sourceFetcher = isTrustedLocal ? fetcher : (fetchRemote ?? fetcher);
     const response = await sourceFetcher(currentUrl, {
       method: "GET",
       redirect: "manual",
@@ -526,6 +543,9 @@ async function fetchImageSource(
       headers: {
         accept: "image/avif,image/webp,image/*,*/*;q=0.8",
         "user-agent": "Farm.js Image Optimizer",
+        // This server fetching from itself arrives from a loopback address.
+        // Mark it so the app sees an anonymous visitor, not a trusted local one.
+        ...(isTrustedLocal ? { [FARM_IMAGE_SOURCE_HEADER]: getFarmImageSourceToken() } : {}),
       },
     });
 
@@ -564,6 +584,30 @@ async function fetchImageSource(
       validateRemoteUrl,
     );
   }
+}
+
+const FARM_IMAGE_SOURCE_HEADER = "x-farm-image-source";
+const FARM_IMAGE_SOURCE_TOKEN = Symbol.for("farm.image.sourceToken");
+
+// Per process, shared by every copy of this module. Knowing it only lets a
+// caller be treated as anonymous, never as trusted.
+function getFarmImageSourceToken(): string {
+  const state = globalThis as typeof globalThis & { [FARM_IMAGE_SOURCE_TOKEN]?: string };
+  return (state[FARM_IMAGE_SOURCE_TOKEN] ??= globalThis.crypto.randomUUID());
+}
+
+/**
+ * @internal The adapter context for an incoming request. The optimizer's own fetch of a local
+ * source acts for any visitor, and its cached result is served to all of them, so it reports
+ * an anonymous client address instead of the loopback address it connects from.
+ */
+export function _withFarmImageSourceClientAddress<T extends { clientAddress?: string }>(
+  request: Request,
+  context: T | undefined,
+): T | undefined {
+  const token = (globalThis as { [FARM_IMAGE_SOURCE_TOKEN]?: string })[FARM_IMAGE_SOURCE_TOKEN];
+  if (!token || request.headers.get(FARM_IMAGE_SOURCE_HEADER) !== token) return context;
+  return { ...context, clientAddress: FARM_ANONYMOUS_CLIENT_ADDRESS } as T;
 }
 
 function resolveTrustedLocalOrigin(
@@ -745,12 +789,31 @@ function validateTransformedResult(
   if (!contentType || (contentType === "image/svg+xml" && !config.dangerouslyAllowSVG)) {
     throw new Error("The image transformer returned an unsupported content type");
   }
+  // The type a transformer claims (for Cloudflare, an upstream header) is not
+  // proof. Serve the bytes only as the type they actually are.
+  if (detectImageContentType(result.body) !== contentType) {
+    throw new Error("The image transformer returned bytes that do not match their content type");
+  }
   result.contentType = contentType;
 }
 
+const OPTIMIZED_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/svg+xml",
+]);
+
+/**
+ * The single image type `value` names, or "" for anything else. A list such as
+ * `image/png, image/svg+xml` is not one type: a browser may render it as the
+ * last one, which turns a "png" into a scriptable SVG.
+ */
 function normalizeImageContentType(value: string | null): string {
   const type = value?.split(";", 1)[0].trim().toLowerCase() ?? "";
-  return type.startsWith("image/") ? type : "";
+  return OPTIMIZED_IMAGE_TYPES.has(type) ? type : "";
 }
 
 function matchesRemoteSource(url: URL, config: ResolvedFarmImageConfig): boolean {
@@ -791,11 +854,7 @@ function matchesHostname(hostname: string, pattern: string): boolean {
   return normalizedHostname === normalizedPattern;
 }
 
-function createOptimizedImageResponse(
-  request: Request,
-  image: OptimizedImage,
-  config: ResolvedFarmImageConfig,
-): Response {
+function createOptimizedImageResponse(request: Request, image: OptimizedImage): Response {
   const headers = new Headers({
     "cache-control": image.cacheControl,
     "content-type": image.contentType,
@@ -804,10 +863,10 @@ function createOptimizedImageResponse(
     etag: image.etag,
     vary: "Accept",
     "x-content-type-options": "nosniff",
+    // Every optimized image, not only SVG: if a response is ever rendered as a
+    // document, it still cannot run script or load anything.
+    "content-security-policy": "default-src 'none'; sandbox",
   });
-  if (image.contentType === "image/svg+xml" && config.dangerouslyAllowSVG) {
-    headers.set("content-security-policy", "default-src 'none'; sandbox");
-  }
   if (matchesFarmIfNoneMatch(request.headers.get("if-none-match"), image.etag)) {
     headers.delete("content-length");
     return new Response(null, { status: 304, headers });

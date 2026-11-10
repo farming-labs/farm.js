@@ -313,6 +313,39 @@ describe("route rendering config", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it("points docs adapter pages at docs.prerender instead of route config", async () => {
+    const dir = await createTempDir("farm-static-candidate-docs-");
+    const docsPage = path.join(dir, "docs-page.mdx");
+    const appPage = path.join(dir, "page.tsx");
+    await writeFile(docsPage, "# Guide\n");
+    await writeFile(appPage, `export default function About() { return <main>About</main>; }`);
+    const routes = [
+      { path: "/docs/guide", filePath: docsPage, isDynamic: false, pattern: "/docs/guide" },
+      { path: "/about", filePath: appPage, isDynamic: false, pattern: "/about" },
+    ];
+    const owns = (routePath: string) => routePath.startsWith("/docs/");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await collectSSGPages(routes, async () => ({}) as RouteModule, {
+      docsAdapterRoutes: { owns, prerender: false },
+    });
+
+    const messages = warn.mock.calls.map(([message]) => String(message));
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toContain("/about");
+    expect(messages[0]).not.toContain("/docs/guide");
+    expect(messages[1]).toBe(
+      "[Farm.js] 1 docs page renders on each request. Set `docs.prerender: true` in farm.config.ts to prerender docs pages on Node and serverless targets.",
+    );
+
+    warn.mockClear();
+    await collectSSGPages(routes, async () => ({}) as RouteModule, {
+      docsAdapterRoutes: { owns, prerender: true },
+    });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(String(warn.mock.calls[0]?.[0])).not.toContain("docs");
+  });
+
   it("keeps explicitly static routes dynamic when they read request data", async () => {
     const dir = await createTempDir("farm-request-bound-static-");
     const pagePath = path.join(dir, "page.tsx");

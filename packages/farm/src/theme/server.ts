@@ -1,3 +1,4 @@
+import { decodeCookieName } from "../request-cookies";
 import { getCurrentRequestOrNull } from "../server/request";
 import { _setFarmThemeServerSnapshotResolver } from "./bridge";
 import { resolveFarmThemeConfig } from "./config";
@@ -8,13 +9,29 @@ import type {
   ResolvedFarmThemeConfig,
 } from "./types";
 
-let defaultThemeConfig = resolveFarmThemeConfig(undefined);
+// The app's theme config lives on globalThis, not in a module variable. In development an app
+// that links @farm.js/core runs its pages under Vite's SSR runner, which loads its own copy of
+// this module; the server configures the other copy. A module-local value left the runner's copy
+// on the disabled default, so getTheme() and useTheme() rendered "system".
+const FARM_THEME_DEFAULT_CONFIG = Symbol.for("farm.js.theme.default-config");
+const DISABLED_THEME_CONFIG = resolveFarmThemeConfig(undefined);
+
+type FarmThemeServerGlobal = typeof globalThis & {
+  [FARM_THEME_DEFAULT_CONFIG]?: ResolvedFarmThemeConfig;
+};
+
+function getDefaultThemeConfig(): ResolvedFarmThemeConfig {
+  return (globalThis as FarmThemeServerGlobal)[FARM_THEME_DEFAULT_CONFIG] ?? DISABLED_THEME_CONFIG;
+}
 
 export function _setDefaultFarmThemeConfig(
   config: FarmThemeConfig | ResolvedFarmThemeConfig | false | undefined,
   basePath = "/",
 ): void {
-  defaultThemeConfig = resolveFarmThemeConfig(config, basePath);
+  (globalThis as FarmThemeServerGlobal)[FARM_THEME_DEFAULT_CONFIG] = resolveFarmThemeConfig(
+    config,
+    basePath,
+  );
 }
 
 // The theme preference is cosmetic, so a missing request context must never
@@ -23,16 +40,16 @@ export function _setDefaultFarmThemeConfig(
 // example StackBlitz WebContainers) can lose the store mid-render, and a
 // thrown error here would also take down the error page itself.
 export function getTheme(request: Request | null = getCurrentRequestOrNull()): FarmThemePreference {
-  if (!request) return defaultThemeConfig.default;
-  return readFarmThemePreference(request, defaultThemeConfig);
+  const config = getDefaultThemeConfig();
+  if (!request) return config.default;
+  return readFarmThemePreference(request, config);
 }
 
 export function getThemeSnapshot(
   request: Request | null = getCurrentRequestOrNull(),
 ): FarmThemeSnapshot {
-  const theme = request
-    ? readFarmThemePreference(request, defaultThemeConfig)
-    : defaultThemeConfig.default;
+  const config = getDefaultThemeConfig();
+  const theme = request ? readFarmThemePreference(request, config) : config.default;
   return {
     theme,
     resolvedTheme: theme === "system" ? undefined : theme,
@@ -54,7 +71,7 @@ function readCookie(cookieHeader: string | null, name: string): string | undefin
   for (const entry of cookieHeader.split(";")) {
     const separator = entry.indexOf("=");
     if (separator < 0) continue;
-    const key = decodeCookieValue(entry.slice(0, separator).trim());
+    const key = decodeCookieName(entry.slice(0, separator).trim());
     if (key !== name) continue;
     return decodeCookieValue(entry.slice(separator + 1).trim());
   }
@@ -77,7 +94,7 @@ _setFarmThemeServerSnapshotResolver(() => {
   try {
     return getThemeSnapshot();
   } catch {
-    const theme = defaultThemeConfig.default;
+    const theme = getDefaultThemeConfig().default;
     return {
       theme,
       resolvedTheme: theme === "system" ? undefined : theme,

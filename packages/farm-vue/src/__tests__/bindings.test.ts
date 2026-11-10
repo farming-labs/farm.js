@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import { effectScope } from "vue";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ServerFn } from "@farm.js/core/server-fn";
-import { useAction } from "../bindings";
+import type { ServerQuery } from "@farm.js/core/server-query";
+import { useAction, useServerQuery } from "../bindings";
 
 describe("Vue FARMJS bindings", () => {
   it("exposes action state through refs", async () => {
@@ -29,6 +30,19 @@ describe("Vue FARMJS bindings", () => {
     const action = scope.run(() => useAction((async () => "pong") as ServerFn<unknown, string>))!;
 
     await expect(action()).resolves.toBe("pong");
+    scope.stop();
+  });
+
+  it("loads server queries in the browser", async () => {
+    const query = (async () => ({ email: "vue@example.com" })) as ServerQuery<
+      void,
+      { email: string }
+    >;
+    const scope = effectScope();
+    const account = scope.run(() => useServerQuery(query, undefined))!;
+
+    await vi.waitFor(() => expect(account.data.value).toEqual({ email: "vue@example.com" }));
+    expect(account.status.value).toBe("success");
     scope.stop();
   });
 });

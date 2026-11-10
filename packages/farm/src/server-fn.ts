@@ -3,7 +3,7 @@ import {
   getServerActionSignal,
   runWithServerActionRequest,
 } from "./server-action-security";
-import { _resolveCurrentRequest } from "./server/request-bridge";
+import { _resolveCurrentRequestForApp, _toAppRequestView } from "./server/request-bridge";
 import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "./cache";
 import { ServerActionError, ServerFnFailure, isServerFnFailure } from "./server-fn-error";
 import { getFarmRedirectError } from "./navigation-errors";
@@ -265,11 +265,27 @@ interface ServerFunctionRunner extends ServerFunctionDescriptor {
   readonly run: (input: unknown) => Promise<unknown>;
 }
 
-/** Raised by the internal runner when the caller's input fails the function's input schema. */
+const FARM_SERVER_FN_INPUT_ERROR = Symbol.for("farm.server-fn.input-error");
+
+/**
+ * Raised by the internal runner when the caller's input fails the function's input schema.
+ * Recognized by a `Symbol.for` brand rather than `instanceof`: in development the function can
+ * run under Vite's SSR runner, which loads its own copy of this module, while
+ * `_invokeServerFunction` runs on the dev server's copy.
+ */
 class ServerFnInputError extends Error {
   constructor(readonly cause: unknown) {
     super("Server function input is invalid");
+    Object.defineProperty(this, FARM_SERVER_FN_INPUT_ERROR, { value: true, enumerable: false });
   }
+}
+
+function isServerFnInputError(error: unknown): error is ServerFnInputError {
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    (error as { [FARM_SERVER_FN_INPUT_ERROR]?: unknown })[FARM_SERVER_FN_INPUT_ERROR] === true,
+  );
 }
 
 /** @internal Shared by createServerFn and createServerQuery. */
@@ -355,7 +371,7 @@ export async function _invokeServerFunction(
     const data = await runWithServerActionRequest(request, () => runner.run(input));
     return { ok: true, data };
   } catch (error) {
-    if (error instanceof ServerFnInputError) {
+    if (isServerFnInputError(error)) {
       return { ok: false, reason: "input", error: error.cause };
     }
     if (isServerFnFailure(error)) return { ok: false, reason: "failure", failure: error };
@@ -460,7 +476,11 @@ export function createServerFn(options: {
         : cause;
     }
     const executionContext = getServerActionExecutionContext();
-    const request = executionContext?.request ?? _resolveCurrentRequest();
+    // An action's request carries the caller's cookies too, so it gets the
+    // same guarded view a render does.
+    const request = executionContext
+      ? _toAppRequestView(executionContext.request)
+      : _resolveCurrentRequestForApp();
     const signal = executionContext?.signal ?? request?.signal ?? getServerActionSignal();
     const handlerContext = {
       input,

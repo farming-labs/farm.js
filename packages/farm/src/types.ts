@@ -1,3 +1,5 @@
+import type { FarmServerComponentsConfig } from "./server-components-mode";
+import type { FarmSearchParams } from "./search-params";
 import type { FarmRenderer } from "./renderer";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { FarmAgentUserConfig } from "./agent-config";
@@ -158,8 +160,12 @@ export interface FarmConfig {
   /**
    * Component renderer used for JSX compilation, SSR, and browser hydration.
    * React is used when omitted.
+   *
+   * Set `false` for a backend-only app: API routes, middleware, and server features with no
+   * pages. Farm then builds no browser client, needs no React, and answers unmatched requests
+   * with JSON instead of an HTML page.
    */
-  renderer?: FarmRenderer;
+  renderer?: FarmRenderer | false;
   preset?: NitroPreset;
   deploy?: {
     target?: "vercel" | "cloudflare" | "netlify" | "node" | string;
@@ -232,8 +238,8 @@ export interface FarmConfig {
   telemetry?: boolean;
   /**
    * Request and MCP tool analytics for a Farm Infra project. On only when the server
-   * environment links the app to one (`FARMJS_API_KEY` plus `FARMJS_PROJECT_ID`, or a
-   * project's write-only key). Set to false to never send them.
+   * environment sets `FARMJS_API_KEY` (plus `FARMJS_PROJECT_ID` for a key reaching several
+   * projects). Set to false to never send them.
    */
   analytics?: boolean;
   /**
@@ -252,7 +258,12 @@ export interface FarmConfig {
    */
   suppressLintOnLink?: boolean;
   experimental?: {
-    serverComponents?: boolean;
+    /**
+     * React Server Components. `true` is `{ mode: "rsc" }`: `farm dev` and `farm build` run
+     * React's Flight pipeline from `@farm.js/plugin/rsc`. `{ mode: "islands" }` is reserved for
+     * Farm's own engine (RFC 0003). Pages and layouts are server components either way.
+     */
+    serverComponents?: FarmServerComponentsConfig;
     serverActions?: boolean;
     /**
      * Enables Partial Prerendering (static-shell caching). Routes still opt in
@@ -334,7 +345,7 @@ export interface PluginContextProps {
  */
 export interface PageProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
   params: ResolvePageRouteParams<TRoute>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: FarmSearchParams;
   path: string;
   /**
    * Data from middleware.ts in the same directory or parent directories
@@ -360,7 +371,7 @@ export interface PageProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsD
 
 export interface LoadingProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
   params: ResolvePageRouteParams<TRoute>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: FarmSearchParams;
   search?: Record<string, string | string[] | undefined>;
   path: string;
   middleware?: MiddlewareProps;
@@ -538,6 +549,8 @@ export interface RouteModule<TRoute extends FarmRoutePropsTarget = FarmRouteProp
   generateStaticParams?: GenerateStaticParams<TRoute>;
   metadata?: Metadata & Record<string, any>;
   generateMetadata?: (props: MetadataProps<TRoute>) => Promise<Metadata> | Metadata;
+  viewport?: Viewport;
+  generateViewport?: (props: MetadataProps<TRoute>) => Promise<Viewport> | Viewport;
 }
 
 /** A value accepted for one static route parameter. */
@@ -588,10 +601,36 @@ export interface LayoutModule<TRoute extends FarmRoutePropsTarget = FarmRoutePro
   maxDuration?: FarmRouteMaxDuration;
   metadata?: Metadata & Record<string, any>;
   generateMetadata?: (props: LayoutMetadataProps<TRoute>) => Promise<Metadata> | Metadata;
+  viewport?: Viewport;
+  generateViewport?: (props: LayoutMetadataProps<TRoute>) => Promise<Viewport> | Viewport;
 }
 
 /** A schema.org JSON-LD object, such as `{ "@context": "https://schema.org", "@type": "Article" }`. */
 export type MetadataJsonLd = object;
+
+/** A `theme-color` entry, optionally for one `prefers-color-scheme` media query. */
+export interface ThemeColorDescriptor {
+  color: string;
+  media?: string;
+}
+
+/**
+ * The `viewport` export of a layout or page, and the return value of `generateViewport()`, as in
+ * Next.js. Layouts and the page merge from root to page over the default
+ * `width=device-width, initial-scale=1`.
+ */
+export interface Viewport {
+  width?: string | number;
+  height?: string | number;
+  initialScale?: number;
+  minimumScale?: number;
+  maximumScale?: number;
+  userScalable?: boolean;
+  viewportFit?: "auto" | "cover" | "contain";
+  interactiveWidget?: "resizes-visual" | "resizes-content" | "overlays-content";
+  themeColor?: string | ThemeColorDescriptor | ThemeColorDescriptor[];
+  colorScheme?: string;
+}
 
 export interface Metadata {
   metadataBase?: string | URL;
@@ -643,6 +682,27 @@ export interface Metadata {
           type?: string;
         }>;
     image?: string;
+    /**
+     * `og:video` entries. Point `url` at the media file itself (an MP4, for
+     * example) rather than a player page; relative URLs resolve against
+     * `metadataBase` like `images`.
+     */
+    videos?:
+      | string
+      | {
+          url: string;
+          secureUrl?: string;
+          width?: number;
+          height?: number;
+          type?: string;
+        }
+      | Array<{
+          url: string;
+          secureUrl?: string;
+          width?: number;
+          height?: number;
+          type?: string;
+        }>;
     type?: string;
     locale?: string;
     /** `article:published_time`, rendered when `type` is `"article"`. */

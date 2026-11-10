@@ -1126,7 +1126,8 @@ describe("integrations runtime", () => {
         {
           source: "body",
           path: ["secret", "value"],
-          message: "Invalid property-key path",
+          // Validator messages can quote expected values, so they never reach the caller.
+          message: "Invalid value",
         },
       ],
     });

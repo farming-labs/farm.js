@@ -39,7 +39,7 @@ describe("React AOT queued keyed-array reorder and map hints", () => {
     expect(result.code.match(/_farmApplyMap\d*\(/g)).toHaveLength(2);
     expect(result.code).not.toContain("createCompilerKeyedMapUpdate");
     expect(result.code).not.toContain("createCompilerKeyedArrayMapPipeline");
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it("retains a sort through multiple adjacent standalone map setters", async () => {
@@ -71,7 +71,7 @@ describe("React AOT queued keyed-array reorder and map hints", () => {
     expect(result.code.match(/createCompilerKeyedArrayQueuedMapPipeline\(/g)).toHaveLength(2);
     expect(result.code).not.toContain("createCompilerKeyedMapUpdate");
     expect(result.code).not.toContain("createCompilerKeyedArrayMapPipeline");
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it.each([
@@ -119,6 +119,7 @@ describe("React AOT queued keyed-array reorder and map hints", () => {
 
       expect(result.code).toContain("createCompilerKeyedMapUpdate");
       expect(result.code).not.toContain("keyedRowsMapReorderHintedRuntimeFeature");
+      expect(result.code).not.toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
     },
   );
 
@@ -148,5 +149,6 @@ describe("React AOT queued keyed-array reorder and map hints", () => {
     expect(result.code).toContain("keyedRowsHostEveryHintedRuntimeFeature");
     expect(result.code).not.toContain("createCompilerKeyedArrayQueuedMapPipeline");
     expect(result.code).not.toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 });

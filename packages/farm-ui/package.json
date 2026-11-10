@@ -1,0 +1,55 @@
+{
+  "name": "@farm.js/ui",
+  "version": "0.1.0-beta.3",
+  "description": "Portable UI primitives for Farm.js apps: View, Text, Image, Pressable, TextInput and List that render as DOM on the web and, on a mobile native screen, as native views.",
+  "keywords": [
+    "components",
+    "farm.js",
+    "react",
+    "ui"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-ui"
+  },
+  "files": [
+    "dist",
+    "native.js"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "react-native": "./native.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.3.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  },
+  "peerDependencies": {
+    "react": "^18.3.0 || ^19.0.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

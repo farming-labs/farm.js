@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { FarmClientPlugin } from "./client/plugin";
+import { resolveFarmPlatform } from "./desktop/config";
+import type { FarmPlatform } from "./platform";
 import type { FarmPlugin, FarmPluginClientConfig } from "./plugin";
 
 export interface ResolvedFarmClientPlugin {
@@ -12,6 +14,8 @@ export interface ResolvedFarmClientPlugin {
 }
 
 export interface FarmClientPluginEntryCode {
+  /** No plugin and no app client entry: the entry can skip the plugin manager. */
+  empty: boolean;
   imports: string;
   registrations: string;
   plugins: ResolvedFarmClientPlugin[];
@@ -28,6 +32,13 @@ const CLIENT_KEYS = [
 ] as const;
 const HYDRATION_KEYS = ["before", "after"] as const;
 const NAVIGATION_KEYS = ["before", "loaded", "resolved", "rendered", "error"] as const;
+const MOBILE_SHELL_CLIENT_IMPORT =
+  'import { farmMobileShellClient as __farmMobileShellClient } from "@farm.js/core/internal/client-runtime";';
+const MOBILE_SHELL_CLIENT_REGISTRATION = `  {
+    name: "farm:mobile-shell",
+    enforce: "pre",
+    definition: __farmMobileShellClient,
+  }`;
 const APP_CLIENT_EXTENSIONS = ["ts", "tsx", "js", "jsx", "mts", "mjs"] as const;
 
 /** Resolve the optional application-owned browser lifecycle entry. */
@@ -71,20 +82,30 @@ export function generateFarmClientPluginEntryCode(
   root?: string,
   srcDir = "src",
   appPublicData?: unknown,
+  /** The client build's platform; a web build's mobile client passes `"mobile"`. */
+  platform: FarmPlatform = resolveFarmPlatform(),
 ): FarmClientPluginEntryCode {
   const resolved = resolveFarmClientPlugins(plugins, root);
   const appClientEntry = root ? resolveFarmAppClientEntry(root, srcDir) : undefined;
-  const imports = appClientEntry
+  const appImport = appClientEntry
     ? `import farmAppClientDefinition from ${JSON.stringify(appClientEntry.replace(/\\/g, "/"))};`
     : "";
-  const serializedPlugins = resolved.map(
-    (plugin) => `  {
+  // The mobile client hands in-app navigations to the native shell. Web clients add nothing.
+  const mobileShell = platform === "mobile";
+  const imports = mobileShell
+    ? [MOBILE_SHELL_CLIENT_IMPORT, appImport].filter(Boolean).join("\n")
+    : appImport;
+  const serializedPlugins = mobileShell ? [MOBILE_SHELL_CLIENT_REGISTRATION] : [];
+  serializedPlugins.push(
+    ...resolved.map(
+      (plugin) => `  {
     name: ${JSON.stringify(plugin.name)},
     version: ${serializeOptionalString(plugin.version)},
     enforce: ${serializeOptionalString(plugin.enforce)},
     definition: ${serializeClientLifecycle(plugin.definition, plugin.name)},
     public: ${serializePublicData(plugin.publicData)},
   }`,
+    ),
   );
   if (appClientEntry) {
     assertPublicData(appPublicData, "farm:app-client");
@@ -99,7 +120,7 @@ export function generateFarmClientPluginEntryCode(
 ${serializedPlugins.join(",\n")}
 ]`;
 
-  return { imports, registrations, plugins: resolved };
+  return { imports, registrations, plugins: resolved, empty: serializedPlugins.length === 0 };
 }
 
 function assertClientLifecycle(client: FarmPluginClientConfig, pluginName: string): void {

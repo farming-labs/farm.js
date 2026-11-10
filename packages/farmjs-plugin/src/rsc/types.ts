@@ -55,7 +55,18 @@ export interface FarmRscPluginOptions {
    * @default false
    */
   debug?: boolean;
+
+  /**
+   * @internal Set by `farm dev` and `farm build` for an app with a `mobile` block (RFC 0004).
+   * `"entry"`: the build adds a mobile client entry, which the server points the documents a
+   * mobile shell asks for (`X-Farm-Shell`) at. `"inline"`: the browser entry itself hands in-app
+   * navigations to the shell (`farm dev --mobile`).
+   */
+  mobileClient?: FarmRscMobileClient;
 }
+
+/** @internal See `FarmRscPluginOptions.mobileClient`. */
+export type FarmRscMobileClient = "entry" | "inline";
 
 /**
  * Internal context passed to entry generators.
@@ -86,6 +97,29 @@ export interface EntryContext {
     base: string;
     glob: string;
   }>;
+
+  /**
+   * Route-relative keys of the layouts that render the `<html>` document themselves
+   * (`/layout.tsx`). Below such a root layout the app owns the document, as in Next.js.
+   */
+  documentLayouts?: string[];
+
+  /**
+   * Route-relative page keys to their parsed rendering directive (`"use ssg"`) and whether the
+   * page's source reads request state. The prerender pass merges these with module exports.
+   */
+  pageRenderingDirectives?: Record<string, unknown>;
+
+  /**
+   * The resolved `images` config, its public half for `<Image>`, and the optimizer the server
+   * mounts at `images.path` (`none` when Image keeps original URLs).
+   */
+  images?: {
+    config: unknown;
+    public: unknown;
+    path: string;
+    runtime: "none" | "node" | "cloudflare";
+  };
 
   /** Whether server actions are enabled */
   actionsEnabled: boolean;
@@ -133,6 +167,9 @@ export interface EntryContext {
 
   /** Generated import/init fragments for `cache.client.adapter` persistence. */
   clientCachePersistence?: { imports: string; init: string };
+
+  /** The mobile client of an app with a `mobile` block (see `FarmRscPluginOptions`). */
+  mobileClient?: FarmRscMobileClient;
 }
 
 /**

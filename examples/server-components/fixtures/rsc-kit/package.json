@@ -1,0 +1,17 @@
+{
+  "name": "@farm-fixtures/rsc-kit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A package written for React Server Components, for the contract suite: a react-server build with a server component and a server-only helper, and a default build for client code.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "react-server": "./server.js",
+      "default": "./client.js"
+    }
+  },
+  "peerDependencies": {
+    "react": "*"
+  }
+}

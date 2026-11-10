@@ -25,6 +25,9 @@ describe("health config", () => {
     ]);
     expect(options.startupChecks).toEqual([]);
     expect(options.details).toBe(false);
+    expect(options.cacheMs).toBe(1_000);
+    expect(resolveHealthOptions({ cache: "250ms" }).cacheMs).toBe(250);
+    expect(resolveHealthOptions({ cache: false }).cacheMs).toBe(0);
   });
 
   it("parses supported duration forms", () => {
@@ -40,6 +43,8 @@ describe("health config", () => {
     [{ timeout: null }, "must be milliseconds"],
     [{ timeout: "soon" }, "must be milliseconds"],
     [{ details: "yes" }, "details must be"],
+    [{ cache: 0 }, "health cache must be"],
+    [{ cache: true }, "health cache must be"],
     [{ paths: { liveness: "/" } }, "safe absolute pathname"],
     [{ paths: { liveness: "health/live" } }, "safe absolute pathname"],
     [{ paths: { liveness: "/health/%2fadmin" } }, "unsafe path segment"],

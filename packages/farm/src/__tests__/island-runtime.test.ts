@@ -77,7 +77,7 @@ describe("scheduleFarmIslandHydration", () => {
       },
     );
     document.body.innerHTML =
-      '<farm-client-boundary id="boundary" style="display:contents"><button type="button">Reveal</button></farm-client-boundary>';
+      '<f-island id="boundary" style="display:contents"><button type="button">Reveal</button></farm-client-boundary>';
     const container = document.getElementById("boundary")!;
     const hydrate = vi.fn(() => "visible");
     const scheduled = scheduleFarmIslandHydration({
@@ -105,7 +105,7 @@ describe("scheduleFarmIslandHydration", () => {
       },
     );
     document.body.innerHTML =
-      '<farm-client-boundary id="boundary" style="display:contents"></farm-client-boundary>';
+      '<f-island id="boundary" style="display:contents"></farm-client-boundary>';
     const container = document.getElementById("boundary")!;
     const hydrate = vi.fn(() => "visible");
 

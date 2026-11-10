@@ -10,13 +10,13 @@
     "bench": "node run.mjs"
   },
   "dependencies": {
-    "@farm.js/core": "0.1.0-beta.60",
-    "@farm.js/react": "0.1.0-beta.2",
+    "@farm.js/core": "0.1.49",
+    "@farm.js/react": "0.1.0-beta.34",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.0-beta.60",
+    "@farm.js/cli": "0.1.49",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "playwright": "^1.52.0",

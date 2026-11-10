@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import fs from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +9,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
+import {
+  GUARDED_SOURCE_FILES,
+  LATE_GUARDED_PAGES,
+  LATE_GUARDED_SOURCE_FILES,
+} from "./fixtures/markdown-guarded-sources";
+import {
+  literalRouteExposure,
+  literalRouteFiles,
+  verifyLiteralRouteExposure,
+} from "./markdown-route-contract";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots = new Set<string>();
@@ -32,6 +43,60 @@ async function writeModule(root: string, relativePath: string, source: string): 
 }
 
 describe("development markdown-source middleware ordering", () => {
+  it("serves large layout rows through real HTML rendering and Markdown negotiation", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-md-rows-"));
+    temporaryRoots.add(root);
+    await fs.mkdir(path.join(root, "node_modules"), { recursive: true });
+    for (const pkg of ["react", "react-dom"]) {
+      await fs.symlink(
+        await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
+        path.join(root, "node_modules", pkg),
+        "junction",
+      );
+    }
+    await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+    await writeModule(
+      root,
+      "src/app/layout.tsx",
+      `import React from "react";
+export default function Layout({ children }) { return <>{children}</>; }`,
+    );
+    await writeModule(
+      root,
+      "src/app/rows/page.tsx",
+      `import React from "react";
+export default function Page() {
+  return <main><div>{Array.from({ length: 1000 }, (_, index) => <span key={index}>Item {index}</span>)}</div></main>;
+}`,
+    );
+    const server = await createServer({
+      root,
+      md: { includeMetadata: false },
+      images: { provider: "none" },
+    });
+    servers.add(server);
+    await server.listen(await getAvailablePort());
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+    const origin = `http://localhost:${address.port}`;
+    const expected = `${Array.from({ length: 1_000 }, (_, index) => `Item ${index}`).join(" ")}\n`;
+    for (const suffix of [".md", ""]) {
+      const url = `${origin}/rows${suffix}`;
+      const response = await fetch(url, { headers: { accept: "text/markdown" } });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+      expect(await response.text()).toBe(expected);
+      for (const method of ["GET", "HEAD"]) {
+        const cached = await fetch(url, {
+          method,
+          headers: { accept: "text/markdown", "if-none-match": response.headers.get("etag")! },
+        });
+        expect(cached.status).toBe(304);
+        expect(await cached.text()).toBe("");
+      }
+    }
+  });
+
   it("serves actions from the rendered page through the real Markdown fetch path", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-md-actions-"));
     temporaryRoots.add(root);
@@ -134,19 +199,13 @@ export default function Page() { return <main>Slow page</main>; }`,
       streaming: boolean;
       closed: boolean;
     };
-    const realFetch = globalThis.fetch;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const response = await realFetch(input, init);
-      if (input instanceof Request && input.headers.get("accept") === "text/html") {
-        const current = probe;
-        const read = response.text.bind(response);
-        vi.spyOn(response, "text").mockImplementation(() => {
-          const pending = read();
-          current.reading();
-          return pending;
-        });
-      }
-      return response;
+    // The mirror reads the page through the dev server's own listener; note when it starts
+    // reading the page's HTML body.
+    const realText = Response.prototype.text;
+    vi.spyOn(Response.prototype, "text").mockImplementation(function (this: Response) {
+      const pending = realText.call(this);
+      if (this.headers.get("content-type") === "text/html") probe.reading();
+      return pending;
     });
     const server = await createServer({
       root,
@@ -515,6 +574,27 @@ export default function Page() { return <main>must not render</main>; }`,
         });
       },
     },
+    {
+      matcher: "/members",
+      handler(ctx, next) {
+        if (ctx.cookies.get("member")) return next();
+        return new Response("members require sign-in", { status: 401 });
+      },
+    },
+    {
+      matcher: "/office",
+      handler(ctx, next) {
+        if (ctx.request.headers["x-real-ip"] === "10.0.0.5") return next();
+        return new Response("office network only", { status: 403 });
+      },
+    },
+    {
+      matcher: "/partners",
+      handler(ctx, next) {
+        if (ctx.request.headers["x-api-key"] === "partner-key") return next();
+        return new Response("partners require a key", { status: 401 });
+      },
+    },
   ],
 };`,
     );
@@ -532,6 +612,9 @@ export default function Layout({ children }) {
       `# Private notes\n\nprivate-notes-source\n`,
     );
     await writeModule(root, "src/app/open/page.md", `# Open notes\n\nopen-notes-source\n`);
+    await writeModule(root, "src/app/members/page.md", `# Members\n\nmembers-only-source\n`);
+    await writeModule(root, "src/app/partners/page.md", `# Partners\n\npartners-only-source\n`);
+    await writeModule(root, "src/app/office/page.md", `# Office\n\noffice-only-source\n`);
 
     const server = await createServer({ root, images: { provider: "none" } });
     servers.add(server);
@@ -546,10 +629,258 @@ export default function Layout({ children }) {
     expect(guardedResponse.headers.get("x-markdown-guard")).toBe("yes");
     await expect(guardedResponse.text()).resolves.not.toContain("private-notes-source");
 
+    // The /members matcher does not match /members.md. A guarded page has no
+    // .md version, with or without a session, while the page still renders.
+    for (const headers of [{}, { cookie: "member=1" }] as Record<string, string>[]) {
+      const membersMarkdown = await fetch(`${origin}/members.md`, { headers });
+      expect(membersMarkdown.status).toBe(404);
+      await expect(membersMarkdown.text()).resolves.not.toContain("members-only-source");
+    }
+    const membersPage = await fetch(`${origin}/members`, { headers: { cookie: "member=1" } });
+    expect(membersPage.status).toBe(200);
+    await expect(membersPage.text()).resolves.toContain("members-only-source");
+
+    // A guard trusting a custom header sees the anonymous check without it, so a key holder
+    // cannot put the page's source under a public cache, by `.md` or by negotiation.
+    const keyed = { "x-api-key": "partner-key" };
+    const partnersMarkdown = await fetch(`${origin}/partners.md`, { headers: keyed });
+    expect(partnersMarkdown.status).toBe(404);
+    expect(partnersMarkdown.headers.get("cache-control")).toBe("private, no-store");
+    await expect(partnersMarkdown.text()).resolves.not.toContain("partners-only-source");
+    const partnersNegotiated = await fetch(`${origin}/partners`, {
+      headers: { ...keyed, accept: "text/markdown" },
+    });
+    // The key holder may read the page; whatever represents it stays out of shared caches.
+    expect(partnersNegotiated.headers.get("cache-control")).toBe("private, no-store");
+    await partnersNegotiated.body?.cancel();
+
+    // An IP allowlist sees the anonymous check without the caller's client IP headers.
+    for (const officeHeaders of [
+      { "x-real-ip": "10.0.0.5" },
+      { "x-forwarded-for": "10.0.0.5", "x-real-ip": "10.0.0.5" },
+    ]) {
+      const officeMarkdown = await fetch(`${origin}/office.md`, { headers: officeHeaders });
+      expect(officeMarkdown.status).toBe(404);
+      expect(officeMarkdown.headers.get("cache-control")).toBe("private, no-store");
+      await expect(officeMarkdown.text()).resolves.not.toContain("office-only-source");
+      const officeNegotiated = await fetch(`${origin}/office`, {
+        headers: { ...officeHeaders, accept: "text/markdown" },
+      });
+      expect(officeNegotiated.headers.get("cache-control") ?? "").not.toContain("public");
+      await officeNegotiated.body?.cancel();
+    }
+    const officeIpOpen = await fetch(`${origin}/open.md`, { headers: { "x-real-ip": "10.0.0.5" } });
+    expect(officeIpOpen.status).toBe(200);
+    expect(officeIpOpen.headers.get("cache-control")).toContain("public");
+    await officeIpOpen.body?.cancel();
+
     // Routes outside every matcher keep serving their markdown source.
     const openResponse = await fetch(`${origin}/open.md`);
     expect(openResponse.status).toBe(200);
     expect(openResponse.headers.get("content-type")).toContain("text/markdown");
+    expect(openResponse.headers.get("cache-control")).toContain("public");
     await expect(openResponse.text()).resolves.toContain("open-notes-source");
+    // A public page's source is the same, and still public, for a caller with a key.
+    const keyedOpen = await fetch(`${origin}/open.md`, { headers: keyed });
+    expect(keyedOpen.status).toBe(200);
+    expect(keyedOpen.headers.get("cache-control")).toContain("public");
+    await expect(keyedOpen.text()).resolves.toContain("open-notes-source");
   }, 30_000);
+
+  it("keeps literal exposure and dynamic fallbacks after a long list of route misses", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-md-routes-"));
+    temporaryRoots.add(root);
+    await fs.mkdir(path.join(root, "node_modules"), { recursive: true });
+    for (const pkg of ["react", "react-dom"]) {
+      await fs.symlink(
+        await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
+        path.join(root, "node_modules", pkg),
+        "junction",
+      );
+    }
+    await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+    await writeModule(
+      root,
+      "src/app/layout.tsx",
+      `import React from "react";
+export default function Layout({ children }) { return <>{children}</>; }`,
+    );
+    for (const [file, source] of Object.entries(literalRouteFiles))
+      await writeModule(root, file, source);
+    const server = await createServer({
+      root,
+      md: { expose: literalRouteExposure, includeMetadata: false },
+      images: { provider: "none" },
+    });
+    servers.add(server);
+    await server.listen(await getAvailablePort());
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+    await verifyLiteralRouteExposure(`http://localhost:${address.port}`);
+  });
+
+  it("renders the mirror's page on its own listener, whatever host the caller names", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-md-host-"));
+    temporaryRoots.add(root);
+    await fs.mkdir(path.join(root, "node_modules"), { recursive: true });
+    for (const pkg of ["react", "react-dom"]) {
+      await fs.symlink(
+        await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
+        path.join(root, "node_modules", pkg),
+        "junction",
+      );
+    }
+    await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+    await writeModule(
+      root,
+      "src/app/docs/[...slug]/page.tsx",
+      `import React from "react";
+export default function Page() { return <main>Rendered doc page</main>; }`,
+    );
+    // Stands in for an internal-only service on the developer's machine.
+    const seen: string[] = [];
+    const internal = http.createServer((req, res) => {
+      seen.push(req.url ?? "");
+      res.setHeader("content-type", "text/html");
+      res.end("<h1>INTERNAL-SERVICE-SECRET</h1>");
+    });
+    await new Promise<void>((resolve) => internal.listen(0, "127.0.0.1", resolve));
+    try {
+      const internalPort = (internal.address() as { port: number }).port;
+      const server = await createServer({ root, images: { provider: "none" } });
+      servers.add(server);
+      await server.listen(await getAvailablePort());
+      const address = server.httpServer?.address();
+      if (!address || typeof address === "string") throw new Error("Missing dev server address");
+      const get = (pathname: string, headers: Record<string, string>) =>
+        new Promise<{ status: number; body: string }>((resolve, reject) => {
+          const request = http.request(
+            { host: address.address, port: address.port, path: pathname, headers },
+            (response) => {
+              let body = "";
+              response.setEncoding("utf8");
+              response.on("data", (chunk) => (body += chunk));
+              response.on("end", () => resolve({ status: response.statusCode ?? 0, body }));
+            },
+          );
+          request.on("error", reject);
+          request.end();
+        });
+
+      for (const [pathname, extra] of [
+        ["/docs/x.md?a=1", {}],
+        ["/docs/x", { accept: "text/markdown" }],
+      ] as const) {
+        const response = await get(pathname, { host: `127.0.0.1:${internalPort}`, ...extra });
+        expect(response.body).not.toContain("INTERNAL-SERVICE-SECRET");
+        expect(response.body).toContain("Rendered doc page");
+      }
+      expect(seen).toEqual([]);
+      // The page is read as identity HTML even when the caller accepts compressed bodies.
+      const gzip = await get("/docs/x.md", {
+        host: `localhost:${address.port}`,
+        "accept-encoding": "gzip, br",
+      });
+      expect(gzip.status).toBe(200);
+      expect(gzip.body).toContain("Rendered doc page");
+    } finally {
+      await new Promise((resolve) => internal.close(resolve));
+    }
+  }, 30_000);
+
+  it("serves a page's source only when an anonymous render of the page succeeds", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-md-guards-"));
+    temporaryRoots.add(root);
+    await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+    await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
+    for (const pkg of ["react", "react-dom"]) {
+      await fs.symlink(
+        await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
+        path.join(root, "node_modules", pkg),
+        "junction",
+      );
+    }
+    await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+    for (const [file, source] of Object.entries({
+      ...GUARDED_SOURCE_FILES,
+      ...LATE_GUARDED_SOURCE_FILES,
+    })) {
+      await writeModule(
+        root,
+        file,
+        file.endsWith(".tsx") ? `import React from "react";\n${source}` : source,
+      );
+    }
+    const server = await createServer({ root, images: { provider: "none" } });
+    servers.add(server);
+    await server.listen(await getAvailablePort());
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+    const origin = `http://localhost:${address.port}`;
+    const get = async (pathname: string, headers: Record<string, string> = {}) => {
+      const response = await fetch(`${origin}${pathname}`, { headers, redirect: "manual" });
+      return {
+        status: response.status,
+        cacheControl: response.headers.get("cache-control") ?? "",
+        contentType: response.headers.get("content-type") ?? "",
+        body: await response.text(),
+      };
+    };
+    const signedIn = { cookie: "session=1" };
+    const markdown = { accept: "text/markdown" };
+
+    for (const [page, secret] of [
+      ["/staff", "STAFF-ONLY-SOURCE"],
+      ["/ledger", "LEDGER-ONLY-SOURCE"],
+    ]) {
+      expect((await get(page)).status).toBe(307);
+      expect((await get(page, signedIn)).status).toBe(200);
+      for (const headers of [{}, signedIn]) {
+        const source = await get(`${page}.md`, headers);
+        expect({ page, headers, status: source.status }).toEqual({ page, headers, status: 404 });
+        expect(source.body).not.toContain(secret);
+        expect(source.cacheControl).not.toContain("public");
+        const negotiated = await get(page, { ...headers, ...markdown });
+        if (headers !== signedIn) expect(negotiated.body).not.toContain(secret);
+        expect(negotiated.cacheControl).not.toContain("public");
+      }
+    }
+
+    // An anonymous render that answers 200 is not enough: the check renders the page
+    // to the end and needs the page itself in it.
+    for (const [page, secret] of LATE_GUARDED_PAGES) {
+      expect({ page, status: (await get(page)).status }).toEqual({ page, status: 200 });
+      for (const headers of [{}, signedIn]) {
+        const source = await get(`${page}.md`, headers);
+        expect({ page, headers, status: source.status }).toEqual({ page, headers, status: 404 });
+        expect(source.body).not.toContain(secret);
+        expect(source.cacheControl).not.toContain("public");
+      }
+      const negotiated = await get(page, markdown);
+      expect(negotiated.body).not.toContain(secret);
+      expect(negotiated.cacheControl).not.toContain("public");
+    }
+
+    for (const [pathname, headers] of [
+      ["/open.md", {}],
+      ["/open.md", signedIn],
+      ["/open", markdown],
+      ["/open", { ...signedIn, ...markdown }],
+    ] as const) {
+      const open = await get(pathname, headers);
+      expect({ pathname, headers, status: open.status }).toEqual({
+        pathname,
+        headers,
+        status: 200,
+      });
+      expect(open.contentType).toContain("text/markdown");
+      // Only an anonymous request may fill a shared cache.
+      expect({ pathname, headers, cacheControl: open.cacheControl }).toEqual({
+        pathname,
+        headers,
+        cacheControl: "cookie" in headers ? "private, no-store" : expect.stringContaining("public"),
+      });
+      expect(open.body).toContain("OPEN-SOURCE");
+    }
+  }, 60_000);
 });

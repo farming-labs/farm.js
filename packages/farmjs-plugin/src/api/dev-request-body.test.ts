@@ -14,8 +14,9 @@ const ECHO_ROUTE_FILE = path.join("src", "api", "echo", "route.ts");
 async function createHarness(
   root: string,
   endpointModule: Record<string, Endpoint>,
-  options: { bodySizeLimit?: number | string } = {},
+  options: { bodySizeLimit?: number | string; farmMiddleware?: unknown } = {},
 ): Promise<(req: any, res: any, next: any) => Promise<void>> {
+  const { farmMiddleware, ...pluginOptions } = options;
   mkdirSync(path.join(root, ECHO_ROUTE_DIR), { recursive: true });
   writeFileSync(path.join(root, ECHO_ROUTE_FILE), "export const POST = () => new Response('ok');");
 
@@ -37,9 +38,10 @@ async function createHarness(
       },
     },
     moduleGraph: { invalidateModule: vi.fn() },
+    __farmMiddleware__: farmMiddleware,
   };
 
-  const plugin = farmApi({ srcDir: "src", ...options });
+  const plugin = farmApi({ srcDir: "src", ...pluginOptions });
   const setup = plugin.configureServer!(server as any) as () => void;
   setup();
   await (server as any).__farmApi__.waitForDiscovery();
@@ -159,5 +161,65 @@ it("rejects an oversized body with 413 and enforces the body-size limit", async 
     expect(res.statusCode).toBe(413);
     expect(endpoint).not.toHaveBeenCalled();
     expect(res.setHeader).toHaveBeenCalledWith("cache-control", "no-store");
+  });
+});
+
+/** What the dev middleware sent: the status, the Content-Type, and the body. */
+function readSentResponse(res: ReturnType<typeof makeResponse>) {
+  const chunks = [...res.write.mock.calls, ...res.end.mock.calls]
+    .map((call: unknown[]) => call[0])
+    .filter((chunk) => chunk !== undefined && typeof chunk !== "function")
+    .map((chunk) => Buffer.from(chunk as Uint8Array | string));
+  const contentType = res.setHeader.mock.calls.find(
+    ([name]: unknown[]) => String(name).toLowerCase() === "content-type",
+  )?.[1];
+  return { status: res.statusCode, contentType, body: Buffer.concat(chunks).toString("utf8") };
+}
+
+const INTERNAL_SERVER_ERROR = {
+  status: 500,
+  contentType: "application/json",
+  body: '{"error":"Internal Server Error"}',
+};
+
+it("answers a throwing route with core's generic 500 and keeps the message in the log", async () => {
+  await withTempRoot(async (root) => {
+    const middleware = await createHarness(root, {
+      POST: async () => {
+        throw new Error("route-secret-detail");
+      },
+    });
+    const res = makeResponse();
+    await middleware(makeRequest(Buffer.from("{}"), { method: "POST" }), res, vi.fn());
+
+    expect(readSentResponse(res)).toEqual(INTERNAL_SERVER_ERROR);
+    expect(console.error).toHaveBeenCalledWith(
+      "[API Error] /api/echo:",
+      expect.objectContaining({ message: "route-secret-detail" }),
+    );
+  });
+});
+
+it("answers a throwing app middleware with core's generic 500", async () => {
+  await withTempRoot(async (root) => {
+    const endpoint = vi.fn(async () => new Response("ok"));
+    const middleware = await createHarness(
+      root,
+      { POST: endpoint },
+      {
+        farmMiddleware: {
+          execute: async () => {
+            throw new Error("middleware-secret-detail");
+          },
+        },
+      },
+    );
+    const res = makeResponse();
+    await middleware(makeRequest(Buffer.from("{}"), { method: "POST" }), res, vi.fn());
+
+    expect(endpoint).not.toHaveBeenCalled();
+    expect(readSentResponse(res)).toEqual(INTERNAL_SERVER_ERROR);
+    // Kept out of shared caches, as core's middleware-error 500 is in dev and production.
+    expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "private, no-store");
   });
 });

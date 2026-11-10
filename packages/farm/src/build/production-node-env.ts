@@ -1,3 +1,5 @@
+export { FARM_NODE_ENV_MODULE_FILE, FARM_NODE_ENV_MODULE_SOURCE } from "../nitro/node-server-entry";
+
 const productionNodeEnvStateKey = Symbol.for("@farm.js/core/production-node-env-state");
 
 interface ProductionNodeEnvState {

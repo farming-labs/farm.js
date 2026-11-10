@@ -173,7 +173,7 @@ export function collectFarmLlmsTxtPages(
     }
     if (exclude.some((pattern) => matchesFarmMarkdownRoutePattern(pattern, path))) continue;
     // A page its author keeps out of search stays out of the agent index too.
-    if (isMetadataNoIndex(source.metadata)) continue;
+    if (isFarmMetadataNoIndex(source.metadata)) continue;
 
     // llmstxt.org prefers links to Markdown; use the page's mirror when it has one.
     const target = isFarmMarkdownMirrorExposed(options.markdown, path)
@@ -191,8 +191,44 @@ export function collectFarmLlmsTxtPages(
   return [...pages.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
+/**
+ * The origin generated agent files (llms.txt, llms-full.txt, sitemap.xml) link to: the root
+ * layout's `metadataBase` when it is an absolute http(s) URL, else the request's origin. The
+ * request's host is client input, so a configured base keeps it out of files CDNs may cache.
+ */
+export function resolveFarmAgentOrigin(metadataBase: unknown, requestOrigin: string): string {
+  if (typeof metadataBase !== "string" && !(metadataBase instanceof URL)) return requestOrigin;
+  try {
+    const url = new URL(String(metadataBase));
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : requestOrigin;
+  } catch {
+    return requestOrigin;
+  }
+}
+
+/**
+ * Reads pages linked on `origin` (a configured `metadataBase`) from `readOrigin`, the origin
+ * this server was reached at, so llms-full.txt reads stay on this server whatever the links name.
+ */
+export function readFarmLlmsMarkdownFrom(
+  readOrigin: string,
+  origin: string,
+  read: (url: string) => Promise<string | null>,
+): (url: string) => Promise<string | null> {
+  if (readOrigin === origin) return read;
+  return (url) => {
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      return read(url);
+    }
+    return read(target.origin === origin ? `${readOrigin}${target.pathname}${target.search}` : url);
+  };
+}
+
 /** True when page metadata asks search engines not to index the page. */
-function isMetadataNoIndex(metadata: unknown): boolean {
+export function isFarmMetadataNoIndex(metadata: unknown): boolean {
   if (!metadata || typeof metadata !== "object") return false;
   const robots = (metadata as { robots?: unknown }).robots;
   if (typeof robots === "string") {
@@ -206,13 +242,31 @@ function isMetadataNoIndex(metadata: unknown): boolean {
   );
 }
 
+/**
+ * True when a page renders with noindex. Page metadata merges over its layouts' (root first)
+ * and `robots` is replaced whole, so the page's own `robots` decides, else the nearest
+ * layout's. `layoutMetadata` is the wrapping layouts' metadata, root first.
+ */
+export function isFarmPageNoIndex(
+  pageMetadata: unknown,
+  layoutMetadata: readonly unknown[] = [],
+): boolean {
+  for (const metadata of [pageMetadata, ...[...layoutMetadata].reverse()]) {
+    if (isRecord(metadata) && "robots" in metadata) return isFarmMetadataNoIndex(metadata);
+  }
+  return false;
+}
+
 export function createFarmDefaultLlmsTxt(options: {
   origin: string;
   pages: FarmLlmsTxtPage[];
   config: ResolvedFarmLlmsTxtConfig;
   rootMetadata?: unknown;
+  /** The app's MCP endpoints and AI catalog, listed in an "MCP" section. */
+  mcp?: FarmLlmsTxtLink[];
 }): FarmLlmsTxt {
   const { config, pages } = options;
+  const mcp = options.mcp ?? [];
   const summary = config.summary ?? readMetadataString(options.rootMetadata, "description");
 
   return {
@@ -223,18 +277,21 @@ export function createFarmDefaultLlmsTxt(options: {
       new URL(options.origin).host,
     ...(summary ? { summary } : {}),
     ...(config.details ? { details: config.details } : {}),
-    sections: pages.length
-      ? [
-          {
-            title: "Pages",
-            links: pages.map(({ title, url, description }) => ({
-              title,
-              url,
-              ...(description ? { description } : {}),
-            })),
-          },
-        ]
-      : [],
+    sections: [
+      ...(pages.length
+        ? [
+            {
+              title: "Pages",
+              links: pages.map(({ title, url, description }) => ({
+                title,
+                url,
+                ...(description ? { description } : {}),
+              })),
+            },
+          ]
+        : []),
+      ...(mcp.length ? [{ title: "MCP", links: mcp }] : []),
+    ],
   };
 }
 

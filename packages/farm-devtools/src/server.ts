@@ -5,8 +5,14 @@ import type { ViteDevServer } from "vite";
 import { createModuleInspector, ModuleInspectionError } from "./modules.js";
 import { DEVTOOLS_PATH } from "./types.js";
 
+/** Set by the `farm preview` relay and gateway client on every tunnelled request. */
+const FARM_PREVIEW_REQUEST_HEADER = "x-farm-preview";
+
 /** Guard our early middleware, before Vite's own host/CORS middleware runs. */
 export function isTrustedRequest(req: IncomingMessage, server: ViteDevServer): boolean {
+  // `farm preview` tunnels public visitors in with a localhost Host and marks them; DevTools
+  // describes the developer's machine and is never served on a public preview URL.
+  if (req.headers[FARM_PREVIEW_REQUEST_HEADER] !== undefined) return false;
   try {
     const authority = req.headers.host ?? "";
     if (!authority || /[\s/@\\?#]/.test(authority)) return false;

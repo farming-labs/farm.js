@@ -219,23 +219,108 @@ function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
 }
 
 /**
+ * Marks a hydration context whose subtree the browser never hydrates. Solid
+ * copies a context's own properties into every child context it creates, so
+ * the mark reaches every component and Suspense rerun below it.
+ */
+const FARM_SOLID_SERVER_ONLY = Symbol.for("farm.solid.serverOnly");
+
+/** The part of Solid's server hydration context FARMJS reads and extends. */
+interface SolidServerContext {
+  id: string;
+  noHydrate?: boolean;
+  serialize?(id: string, value: unknown, wait?: boolean): void;
+  [FARM_SOLID_SERVER_ONLY]?: boolean;
+}
+
+function currentServerContext(): SolidServerContext | undefined {
+  return sharedConfig.context as SolidServerContext | undefined;
+}
+
+/**
+ * Solid serializes every resource (and boundary error) it resolves into the
+ * document's hydration script. For a server-only segment that publishes data
+ * the browser never reads: a layout resource can hold session details or
+ * middleware locals. Wrap the root context's `serialize` (child contexts copy
+ * it) to skip writes from a server-only context, the way Solid's own
+ * `noHydrate` does. NoHydration itself is not usable here: it stops Solid from
+ * giving child components their own contexts, so nested Suspense boundaries
+ * share one id and lose their content.
+ */
+function installServerOnlySerialization(context: SolidServerContext): void {
+  const serialize = context.serialize;
+  if (!serialize) return;
+  context.serialize = function (this: unknown, id, value, wait) {
+    const current = currentServerContext();
+    if (!current?.[FARM_SOLID_SERVER_ONLY] || current.noHydrate) {
+      return serialize.call(this, id, value, wait);
+    }
+    // Solid still awaits a deferred stream resource; it just does not write it.
+    current.noHydrate = true;
+    try {
+      return serialize.call(this, id, value, wait);
+    } finally {
+      current.noHydrate = false;
+    }
+  };
+}
+
+/** Render with the current context marked server-only or hydrating. */
+function renderWithServerOnly<T>(serverOnly: boolean, render: () => T): T {
+  const context = currentServerContext();
+  if (!context || context[FARM_SOLID_SERVER_ONLY] === serverOnly) return render();
+  const previous = context[FARM_SOLID_SERVER_ONLY];
+  context[FARM_SOLID_SERVER_ONLY] = serverOnly;
+  try {
+    return render();
+  } finally {
+    context[FARM_SOLID_SERVER_ONLY] = previous;
+  }
+}
+
+/** Host props whose children render with the given server-only mark. */
+function serverHostProps(element: FarmSolidElement, serverOnly: boolean): Record<string, unknown> {
+  const props = normalizeProps(element);
+  const children = Object.getOwnPropertyDescriptor(props, "children")?.get;
+  if (children) {
+    Object.defineProperty(props, "children", {
+      configurable: true,
+      enumerable: true,
+      get: () => renderWithServerOnly(serverOnly, children),
+    });
+  }
+  return props;
+}
+
+/**
  * The client hydrates an island by calling its root component directly in a
  * hydration context it must name up front (see `materializeSolidRoot`). Record
  * the id Solid gives that component on the server and write it on the island
  * container. Guessing it from the first hydration key breaks as soon as the
  * component allocates an id before its first element, as `createUniqueId()`
  * does, and a missed guess falls back to a non-hydrating render.
+ *
+ * Core marks a page the browser does not hydrate with data-farm-client="false";
+ * that page's data stays out of the document. Every other island hydrates.
  */
 function materializeServerIsland(tag: string, element: FarmSolidElement): unknown {
+  const serverOnly =
+    element.props?.["data-farm-segment"] === "page" && element.props["data-farm-client"] !== "true";
   const root = element.children.length === 1 ? element.children[0] : undefined;
-  if (!isFarmSolidElement(root) || typeof root.type !== "function") return undefined;
+  if (!isFarmSolidElement(root) || typeof root.type !== "function") {
+    return createComponent(Dynamic, { ...serverHostProps(element, serverOnly), component: tag });
+  }
 
   const Component = root.type as (props: Record<string, unknown>) => unknown;
   let renderId: string | undefined;
   const recordingRoot = createElement(
     (props: Record<string, unknown>) => {
-      const context = sharedConfig.context as { id: string; noHydrate?: boolean } | undefined;
-      if (context && !context.noHydrate) renderId = context.id;
+      const context = currentServerContext();
+      if (context && !context.noHydrate) {
+        renderId = context.id;
+        // This component's own context, so the mark covers only the island.
+        context[FARM_SOLID_SERVER_ONLY] = serverOnly;
+      }
       return Component(props);
     },
     root.props,
@@ -259,8 +344,13 @@ export function materializeSolidElement(value: unknown): unknown {
   }
 
   if (isServer && typeof value.type === "string" && value.props?.["data-farm-island"] != null) {
-    const island = materializeServerIsland(value.type, value);
-    if (island !== undefined) return island;
+    return materializeServerIsland(value.type, value);
+  }
+
+  // A route slot hydrates in its own root, so it keeps its data even inside a
+  // server-only layout.
+  if (isServer && typeof value.type === "string" && value.props?.["data-farm-route-slot"] != null) {
+    return createComponent(Dynamic, { ...serverHostProps(value, false), component: value.type });
   }
 
   const props = normalizeProps(value);
@@ -277,6 +367,44 @@ export function materializeSolidElement(value: unknown): unknown {
 
   const Component = value.type as any;
   return materializeSolidElement(rejectAsyncComponentResult(createComponent(Component, props)));
+}
+
+function findPageBoundary(value: unknown, depth = 0): FarmSolidElement | undefined {
+  if (depth > 64) return undefined;
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = findPageBoundary(entry, depth + 1);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!isFarmSolidElement(value)) return undefined;
+  if (value.props?.["data-farm-segment"] === "page") return value;
+  const fromChildren = findPageBoundary(value.children, depth + 1);
+  if (fromChildren) return fromChildren;
+  // Core passes a layout its child as a prop. Read plain values only: a getter
+  // is renderer route state that must not be evaluated early.
+  const children = value.props && Object.getOwnPropertyDescriptor(value.props, "children");
+  return children && "value" in children ? findPageBoundary(children.value, depth + 1) : undefined;
+}
+
+/**
+ * Materialize a server document. When no layout hydrates, the browser hydrates
+ * only the page island and route slots, so everything else is server-only and
+ * its resources stay out of the hydration script. When a layout hydrates, the
+ * browser renders the whole layout chain and needs its data. Hydration keys
+ * are unchanged either way.
+ */
+export function materializeSolidDocument(value: unknown): unknown {
+  const context = isServer ? currentServerContext() : undefined;
+  const page = context ? findPageBoundary(value) : undefined;
+  if (context && page) {
+    installServerOnlySerialization(context);
+    if (page.props?.["data-farm-layout-client"] !== "true") {
+      context[FARM_SOLID_SERVER_ONLY] = true;
+    }
+  }
+  return materializeSolidElement(value);
 }
 
 /**

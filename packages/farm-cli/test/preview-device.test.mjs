@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import test from "node:test";
-const { authorizePreviewGatewayPlan, previewCredentialFromEnvironment } = createRequire(
-  import.meta.url,
-)("../dist/index.js");
+const cli = createRequire(import.meta.url)("../dist/index.js");
+const { previewCredentialFromEnvironment } = cli;
+// preview.example.com stands for a gateway the developer runs, so it is trusted explicitly.
+const authorizePreviewGatewayPlan = (plan, options) =>
+  cli.authorizePreviewGatewayPlan(plan, { trustGateway: true, ...options });
 const plan = {
   provider: "farm-gateway",
   gatewayUrl: "https://preview.example.com",
@@ -324,4 +327,164 @@ test("the CI error only suggests an API key where the gateway accepts one", asyn
         /only supports browser sign-in/.test(error.message) && !/API key/.test(error.message),
     );
   });
+});
+
+/** A gateway on this machine that says it signs in through the hosted Infrastructure. */
+async function startClaimingGateway() {
+  const received = [];
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    received.push(`${request.url} ${JSON.stringify(request.headers)} ${body}`);
+    const json = { "content-type": "application/json" };
+    if (request.url === "/api/auth/config")
+      return response.writeHead(200, json).end(
+        JSON.stringify({
+          enabled: true,
+          provider: "device",
+          issuer: "https://app.farmjs.dev/api/auth",
+          clientId: "farm-preview",
+          defaultSessionTtlMs: 3600_000,
+          maxSessionTtlMs: 86400_000,
+        }),
+      );
+    if (request.url === "/api/tunnel/grants")
+      return response
+        .writeHead(200, json)
+        .end(JSON.stringify({ token: "scoped-grant", expiresAt: Date.now() + 3600_000 }));
+    response.writeHead(404).end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const gatewayUrl = `http://127.0.0.1:${server.address().port}`;
+  const saved = new Map();
+  const runtime = (interactive) => ({
+    interactive,
+    // Only the local gateway may be reached; a sign-in would have to go elsewhere.
+    async fetch(url, init) {
+      if (!String(url).startsWith(gatewayUrl)) throw new Error(`Unexpected request to ${url}`);
+      return fetch(url, init);
+    },
+    credentials: {
+      async get(url) {
+        return saved.get(url);
+      },
+      async set(url, value) {
+        saved.set(url, value);
+      },
+      async delete(url) {
+        saved.delete(url);
+      },
+    },
+    async openBrowser() {
+      return true;
+    },
+    async wait() {},
+    async promptDuration() {
+      return undefined;
+    },
+    async confirm() {
+      return true;
+    },
+  });
+  return {
+    server,
+    received,
+    runtime,
+    plan: { ...plan, gatewayUrl, relayUrl: `ws://127.0.0.1:${server.address().port}/agent` },
+  };
+}
+
+test("a gateway that only claims to use Farm.js Infrastructure never receives FARMJS_API_KEY", async () => {
+  const gateway = await startClaimingGateway();
+  try {
+    await withEnv({ FARMJS_API_KEY: "farmjs_fixture_key" }, async () => {
+      for (const interactive of [false, true]) {
+        await assert.rejects(
+          cli.authorizePreviewGatewayPlan(gateway.plan, {
+            runtime: gateway.runtime(interactive),
+            expiresInMs: 60000,
+          }),
+          /isn't the hosted Farm Preview gateway \(https:\/\/preview\.farmjs\.dev\).*pass --trust-gateway/,
+        );
+      }
+      assert.ok(gateway.received.length > 0);
+      assert.ok(!gateway.received.some((entry) => entry.includes("farmjs_fixture_key")));
+
+      // The developer runs this gateway and says so: now it gets the key.
+      const result = await cli.authorizePreviewGatewayPlan(gateway.plan, {
+        runtime: gateway.runtime(false),
+        expiresInMs: 60000,
+        trustGateway: true,
+      });
+      assert.equal(result.relayToken, "scoped-grant");
+      assert.match(gateway.received.at(-1), /Bearer farmjs_fixture_key/);
+    });
+  } finally {
+    gateway.server.close();
+  }
+});
+
+test("the hosted gateway gets FARMJS_API_KEY without opting in, and a saved key stays with its gateway", async () => {
+  const hosted = {
+    ...plan,
+    gatewayUrl: "https://preview.farmjs.dev",
+    relayUrl: "wss://preview.farmjs.dev/agent",
+  };
+  await withEnv({ FARMJS_API_KEY: "farmjs_fixture_key" }, async () => {
+    const f = fixture({
+      interactive: false,
+      config: { issuer: "https://app.farmjs.dev/api/auth" },
+    });
+    await cli.authorizePreviewGatewayPlan(hosted, { runtime: f.runtime, expiresInMs: 60000 });
+    assert.equal(f.calls.at(-1).url, "https://preview.farmjs.dev/api/tunnel/grants");
+    assert.equal(f.calls.at(-1).init.headers.authorization, "Bearer farmjs_fixture_key");
+    assert.equal(f.calls.at(-1).init.redirect, "error");
+
+    // A key saved for a self-hosted gateway was made for it, so it is still sent there.
+    const saved = fixture({
+      interactive: false,
+      cached: "farmjs_saved_for_gateway",
+      config: { issuer: "https://app.farmjs.dev/api/auth" },
+    });
+    await cli.authorizePreviewGatewayPlan(plan, { runtime: saved.runtime, expiresInMs: 60000 });
+    assert.equal(saved.calls.at(-1).init.headers.authorization, "Bearer farmjs_saved_for_gateway");
+    assert.ok(!saved.calls.some(({ init }) => JSON.stringify(init).includes("farmjs_fixture_key")));
+  });
+});
+
+test("farm login won't make a key for a gateway nobody vouched for", async () => {
+  const f = fixture({ config: { issuer: "https://app.farmjs.dev/api/auth" } });
+  await assert.rejects(
+    cli.signInToPreviewGateway(plan.gatewayUrl, f.runtime),
+    /pass --trust-gateway/,
+  );
+  assert.deepEqual(
+    f.calls.map(({ url }) => url),
+    ["https://preview.example.com/api/auth/config"],
+  );
+  assert.equal(f.saved.length, 0);
+});
+
+test("a gateway must use https unless it is on this machine", () => {
+  const target = {
+    localUrl: "http://localhost:3000",
+    host: "localhost",
+    port: 3000,
+    source: "port",
+  };
+  assert.throws(
+    () => cli.createPreviewGatewayPlan(target, { gatewayUrl: "http://preview.example.com" }),
+    /must use https/,
+  );
+  for (const gatewayUrl of [
+    "https://preview.example.com/",
+    "http://localhost:8787",
+    "http://127.0.0.1:8787",
+    "http://[::1]:8787",
+  ]) {
+    assert.equal(
+      cli.createPreviewGatewayPlan(target, { gatewayUrl }).gatewayUrl,
+      gatewayUrl.replace(/\/$/, ""),
+    );
+  }
 });

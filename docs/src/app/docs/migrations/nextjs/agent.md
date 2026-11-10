@@ -135,28 +135,28 @@ Only after Phases 4 to 6 pass: remove `next`, `eslint-config-next` (and `eslint.
 
 Docs: [/docs/routing](/docs/routing), [/docs/layouts](/docs/layouts).
 
-| Next.js                            | Farm                                                   | Status      | Notes                                                                                                                                                               |
-| ---------------------------------- | ------------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app/page.tsx`                     | `src/app/page.tsx`                                     | `same`      | Also `page.md` and `page.mdx`.                                                                                                                                      |
-| `app/layout.tsx` (root)            | `src/app/layout.tsx`                                   | `same`      | A full `<html><body>` layout works, as in the Farm templates; add the charset and viewport `<meta>` tags yourself. Or return a fragment and let Farm own the shell. |
-| Nested `layout.tsx`                | Same file                                              | `same`      | Props: `children`, `params`. Use `LayoutProps` from `@farm.js/core`.                                                                                                |
-| `loading.tsx`                      | Same file                                              | `same`      | Suspense fallback. Props type `LoadingProps`.                                                                                                                       |
-| `error.tsx`                        | Same file, keep `"use client"`                         | `same`      | Props `error` (typed `unknown`), `reset`. Type `ErrorProps`.                                                                                                        |
-| Root `not-found.tsx`               | `src/app/not-found.tsx`                                | `same`      | Or `notFound: { component: "./src/ui/not-found.tsx" }` in config.                                                                                                   |
-| Nested `not-found.tsx`             | Root `not-found` only                                  | `different` | Farm resolves only `src/app/not-found.*`. Move segment-specific UI into the page (render it when data is missing).                                                  |
-| `global-error.tsx`                 | None                                                   | `none`      | Use a root `src/app/error.tsx`; failures before page selection use the root boundary.                                                                               |
-| `template.tsx`                     | None                                                   | `none`      | In a `"use client"` wrapper in the layout, render `<div key={usePathname()}>{children}</div>` to remount per navigation.                                            |
-| `default.tsx`                      | Same file in an `@slot`                                | `same`      | Rendered when no slot page matches.                                                                                                                                 |
-| `(group)` folders                  | Same                                                   | `same`      | Not supported under `src/app/api/`; flatten API route groups. Keep one root `src/app/layout.tsx`.                                                                   |
-| `_private` folders                 | Same                                                   | `same`      | Only `page.*` creates a route, so component folders never become URLs.                                                                                              |
-| `[id]`                             | Same                                                   | `same`      | `params.id` is a string.                                                                                                                                            |
-| `[...slug]` page                   | Same folder                                            | `different` | `params.slug` is a single `/`-joined string, not `string[]`. Use `params.slug.split("/")`. API route catch-alls stay arrays.                                        |
-| `[[...slug]]` page                 | Same folder                                            | `different` | Same string shape; the empty capture is `""`.                                                                                                                       |
-| `@slot` parallel routes            | Same                                                   | `same`      | The layout receives the slot as a prop named after it.                                                                                                              |
-| `(.)`, `(..)`, `(..)(..)`, `(...)` | Same markers inside a slot                             | `same`      | Hard navigation renders the canonical page.                                                                                                                         |
-| `route.ts` under `app/api/`        | `src/app/api/**/route.ts`                              | `same`      | See [Route handlers](#route-handlers).                                                                                                                              |
-| `route.ts` anywhere else           | `defineRoutes` in `src/routes.ts`                      | `different` | `api("/feed.xml", { GET })`; paths may carry file extensions.                                                                                                       |
-| `instrumentation.ts`               | `src/instrumentation.ts` exporting `register(context)` | `same`      | `@vercel/otel` becomes `@farm.js/otel`. See [/docs/observability](/docs/observability).                                                                             |
+| Next.js                            | Farm                                                   | Status      | Notes                                                                                                                                                                                          |
+| ---------------------------------- | ------------------------------------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app/page.tsx`                     | `src/app/page.tsx`                                     | `same`      | Also `page.md` and `page.mdx`.                                                                                                                                                                 |
+| `app/layout.tsx` (root)            | `src/app/layout.tsx`                                   | `same`      | A full `<html><body>` layout works, as in the Farm templates; Farm adds the charset and viewport `<meta>` tags unless the layout writes them. Or return a fragment and let Farm own the shell. |
+| Nested `layout.tsx`                | Same file                                              | `same`      | Props: `children`, `params`. Use `LayoutProps` from `@farm.js/core`.                                                                                                                           |
+| `loading.tsx`                      | Same file                                              | `same`      | Suspense fallback. Props type `LoadingProps`.                                                                                                                                                  |
+| `error.tsx`                        | Same file, keep `"use client"`                         | `same`      | Props `error` (typed `unknown`), `reset`. Type `ErrorProps`.                                                                                                                                   |
+| Root `not-found.tsx`               | `src/app/not-found.tsx`                                | `same`      | Or `notFound: { component: "./src/ui/not-found.tsx" }` in config.                                                                                                                              |
+| Nested `not-found.tsx`             | Root `not-found` only                                  | `different` | Farm resolves only `src/app/not-found.*`. Move segment-specific UI into the page (render it when data is missing).                                                                             |
+| `global-error.tsx`                 | None                                                   | `none`      | Use a root `src/app/error.tsx`; failures before page selection use the root boundary.                                                                                                          |
+| `template.tsx`                     | None                                                   | `none`      | In a `"use client"` wrapper in the layout, render `<div key={usePathname()}>{children}</div>` to remount per navigation.                                                                       |
+| `default.tsx`                      | Same file in an `@slot`                                | `same`      | Rendered when no slot page matches.                                                                                                                                                            |
+| `(group)` folders                  | Same                                                   | `same`      | Not supported under `src/app/api/`; flatten API route groups. Keep one root `src/app/layout.tsx`.                                                                                              |
+| `_private` folders                 | Same                                                   | `same`      | Only `page.*` creates a route, so component folders never become URLs.                                                                                                                         |
+| `[id]`                             | Same                                                   | `same`      | `params.id` is a string.                                                                                                                                                                       |
+| `[...slug]` page                   | Same folder                                            | `different` | `params.slug` is a single `/`-joined string, not `string[]`. Use `params.slug.split("/")`. API route catch-alls stay arrays.                                                                   |
+| `[[...slug]]` page                 | Same folder                                            | `different` | Same string shape; the empty capture is `""`.                                                                                                                                                  |
+| `@slot` parallel routes            | Same                                                   | `same`      | The layout receives the slot as a prop named after it.                                                                                                                                         |
+| `(.)`, `(..)`, `(..)(..)`, `(...)` | Same markers inside a slot                             | `same`      | Hard navigation renders the canonical page.                                                                                                                                                    |
+| `route.ts` under `app/api/`        | `src/app/api/**/route.ts`                              | `same`      | See [Route handlers](#route-handlers).                                                                                                                                                         |
+| `route.ts` anywhere else           | `defineRoutes` in `src/routes.ts`                      | `different` | `api("/feed.xml", { GET })`; paths may carry file extensions.                                                                                                                                  |
+| `instrumentation.ts`               | `src/instrumentation.ts` exporting `register(context)` | `same`      | `@vercel/otel` becomes `@farm.js/otel`. See [/docs/observability](/docs/observability).                                                                                                        |
 
 Typed props: import `PageProps`, `LayoutProps`, `LoadingProps`, `ErrorProps`, `MetadataProps`, `GenerateStaticParams` from `@farm.js/core`; each takes an optional route literal such as `PageProps<"/users/[id]">`.
 
@@ -339,51 +339,33 @@ Dynamic API segments bind through `params`: `src/app/api/todos/[id]/route.ts` ex
 
 #### Option B: server functions as actions
 
-The only supported way to make server functions callable from the browser is Farm's RSC pipeline from `@farm.js/plugin/rsc`, configured in `vite.config.ts` and run with the `vite` CLI (see `examples/rsc-demo`). Setting `experimental.serverComponents` and `experimental.serverActions` in `farm.config.ts` under `farm dev` does not load that pipeline: the server-function transform lives only in `@farm.js/plugin/rsc`. Worse, `experimental.serverActions: true` without the plugin turns off the build check that stops a client component from bundling a `createServerFn` module, so server code and its imports reach the browser. Never set it without the plugin.
+The only supported way to make server functions callable from the browser is Farm's React Server Components pipeline. Turn it on in `farm.config.ts` with `experimental.serverComponents: true`: `farm dev`, `farm build`, and `farm start` then run it on the official `@vitejs/plugin-rsc`, and pages and layouts are server components, as in Next.js. `experimental.serverActions: true` without `serverComponents` does not load that pipeline and turns off the build check that stops a client component from bundling a `createServerFn` module, so server code and its imports reach the browser. Never set it alone.
 
-Install (the RSC plugin refuses to start unless these exact versions resolve; pin React to them even if the Next.js app used another 19.x release):
+Install (the RSC pipeline refuses to start unless these exact versions resolve; pin React to them even if the Next.js app used another 19.x release):
 
 ```bash
 pnpm add @farm.js/core@<version> react@19.2.8 react-dom@19.2.8 react-server-dom-webpack@19.2.8 zod
 pnpm add -D @farm.js/plugin@<version> @vitejs/plugin-rsc@0.5.32 @vitejs/plugin-react vite
 ```
 
-Create `vite.config.ts` (adapted from `examples/rsc-demo`; it reads routes from `src/app` because `routesDir` is left unset):
+Enable it in `farm.config.ts` (routes stay in `src/app`):
 
 ```ts
-import rsc from "@vitejs/plugin-rsc";
-import react from "@vitejs/plugin-react";
-import { defineConfig, nitro } from "@farm.js/plugin/rsc";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
-  srcDir: "src",
   experimental: {
-    // serverComponents defaults to true in this defineConfig.
+    serverComponents: true,
     serverActions: true,
   },
   serverActions: {
     allowedOrigins: [],
     bodySizeLimit: "1mb",
   },
-  plugins: [
-    rsc({
-      serverHandler: false,
-      entries: {
-        rsc: "./.farm/rsc-entries/entry.rsc.tsx",
-        ssr: "./.farm/rsc-entries/entry.ssr.tsx",
-        client: "./.farm/rsc-entries/entry.browser.tsx",
-      },
-    }),
-    react(),
-    nitro({
-      server: { environmentName: "rsc" },
-      config: { preset: process.env.NITRO_PRESET || "vercel" },
-    }),
-  ],
 });
 ```
 
-Copy `examples/rsc-demo/scripts/nitro-post.mjs` into `scripts/` and use the example's scripts: `"dev": "vite"`, `"build": "vite build && node scripts/nitro-post.mjs"`, `"start": "node .output/server/index.mjs"`. These replace the Phase 2 scripts. The Nitro preset defaults to `vercel`; build with `NITRO_PRESET=node-server` for a Node server. Add `tailwindcss()` from `@tailwindcss/vite` to `plugins` if the app uses Tailwind (the RSC pipeline does not add it automatically). `farm.config.ts` is still read for `middleware`; `serverActions` options belong in this `defineConfig`.
+Keep the Phase 2 scripts. Vite plugins and options stay under `vite`, and Tailwind is enabled as in other Farm apps. `@vitejs/plugin-react` is optional and adds Fast Refresh. The pipeline does not run `auth`, `integrations`, Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, `routeRules`, `context`, `redirects`, `rewrites`, `headers`, `security.csp`, or `observability` yet; `farm dev` and `farm build` warn about any the app sets.
 
 | Next.js                                           | Farm (Option B)                                                                                                                                                       | Status                                                                                                                           |
 | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -400,7 +382,7 @@ Copy `examples/rsc-demo/scripts/nitro-post.mjs` into `scripts/` and use the exam
 | `cookies().set()` / `.delete()` inside an action  | None                                                                                                                                                                  | `none`: set cookies in middleware (`context.cookies.set`) or move that action to an Option A endpoint that returns `Set-Cookie`. |
 | `revalidatePath`, `revalidateTag`, `updateTag`    | Same names from `@farm.js/core/cache`, or declare `invalidates: ({ input, result }) => [{ path }, { tag }, { key }]` (applied after success)                          | `rename`                                                                                                                         |
 | Route-scoped actions                              | `createRoute(path, { actions: { update }, defaultAction: "update" })` from `@farm.js/core/routes`, then `useAction(Route)`                                            | Farm addition                                                                                                                    |
-| `serverActions.allowedOrigins`, `bodySizeLimit`   | Same keys in the `@farm.js/plugin/rsc` `defineConfig`; cross-origin requests are rejected (403), bodies over 1 MB return 413                                          | `rename`                                                                                                                         |
+| `serverActions.allowedOrigins`, `bodySizeLimit`   | Same keys in `farm.config.ts`; cross-origin requests are rejected (403), bodies over 1 MB return 413                                                                  | `rename`                                                                                                                         |
 
 Rules for server modules: export each server function inline (`export const x = createServerFn(...)`; re-exporting one is a build error), never define them in a `"use client"` file, and authorize the user inside every handler because each action is a public endpoint.
 
@@ -527,17 +509,17 @@ Docs: [/docs/server-rendering](/docs/server-rendering), [/docs/configuration#iso
 
 Docs: [/docs/routing#metadata-and-og-images](/docs/routing#metadata-and-og-images).
 
-| Next.js                                                   | Farm                                     | Status      | Notes                                                                                                                                                                                                        |
-| --------------------------------------------------------- | ---------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `import type { Metadata, MetadataRoute } from "next"`     | `from "@farm.js/core"`                   | `rename`    |                                                                                                                                                                                                              |
-| `export const metadata`, `generateMetadata`               | Same exports                             | `same`      | `title.default`/`template`, `metadataBase`, `openGraph`, `twitter`, `robots`, `alternates`, `icons`, `manifest`, `verification`, `other`, `keywords`, `authors`.                                             |
-| `title.absolute`                                          | `title.absolute`                         | `keep`      | Names the page as written, past any parent template.                                                                                                                                                         |
-| `viewport`, `generateViewport`, `themeColor`              | None                                     | `none`      | Render `<meta name="viewport">` in a full-document root layout (Farm's generated shell adds a default one only when the layout returns a fragment). Set theme color with `other: { "theme-color": "#000" }`. |
-| `app/favicon.ico`, `icon.*`, `apple-icon.*`               | Files in `public/` plus `metadata.icons` | `different` | `icons: { icon: "/favicon.ico", apple: "/apple-icon.png" }` in the root layout.                                                                                                                              |
-| `opengraph-image.png`, `twitter-image.png` (+ `.alt.txt`) | Same files                               | `same`      |                                                                                                                                                                                                              |
-| `opengraph-image.tsx`, `twitter-image.tsx`                | Same files                               | `rename`    | Return plain JSX (preferred) or keep `new ImageResponse(...)` imported from `@farm.js/core/og`. `params` is a plain object.                                                                                  |
-| `sitemap.ts`, `robots.ts`, `manifest.ts`                  | Same files                               | `same`      | Static `manifest.json`, `sitemap.xml`, `robots.txt` move to `public/`.                                                                                                                                       |
-| `generateSitemaps`                                        | None                                     | `none`      | Nested `sitemap.ts` files per segment, or one sitemap.                                                                                                                                                       |
+| Next.js                                                   | Farm                                     | Status      | Notes                                                                                                                                                            |
+| --------------------------------------------------------- | ---------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `import type { Metadata, MetadataRoute } from "next"`     | `from "@farm.js/core"`                   | `rename`    |                                                                                                                                                                  |
+| `export const metadata`, `generateMetadata`               | Same exports                             | `same`      | `title.default`/`template`, `metadataBase`, `openGraph`, `twitter`, `robots`, `alternates`, `icons`, `manifest`, `verification`, `other`, `keywords`, `authors`. |
+| `title.absolute`                                          | `title.absolute`                         | `keep`      | Names the page as written, past any parent template.                                                                                                             |
+| `viewport`, `generateViewport`, `themeColor`              | `viewport`, `generateViewport`           | `same`      | Merged from root layout to page over the default `width=device-width, initial-scale=1`, with `themeColor` and `colorScheme`, as in Next.                         |
+| `app/favicon.ico`, `icon.*`, `apple-icon.*`               | Files in `public/` plus `metadata.icons` | `different` | `icons: { icon: "/favicon.ico", apple: "/apple-icon.png" }` in the root layout.                                                                                  |
+| `opengraph-image.png`, `twitter-image.png` (+ `.alt.txt`) | Same files                               | `same`      |                                                                                                                                                                  |
+| `opengraph-image.tsx`, `twitter-image.tsx`                | Same files                               | `rename`    | Return plain JSX (preferred) or keep `new ImageResponse(...)` imported from `@farm.js/core/og`. `params` is a plain object.                                      |
+| `sitemap.ts`, `robots.ts`, `manifest.ts`                  | Same files                               | `same`      | Static `manifest.json`, `sitemap.xml`, `robots.txt` move to `public/`.                                                                                           |
+| `generateSitemaps`                                        | None                                     | `none`      | Nested `sitemap.ts` files per segment, or one sitemap.                                                                                                           |
 
 ### Navigation APIs
 
@@ -573,7 +555,7 @@ Docs: [/docs/middleware](/docs/middleware).
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------- |
 | `middleware.ts` (Next 15) or `proxy.ts` (Next 16) at the root | `src/app/middleware.ts` exporting `middleware(request, context)`                           | `different`   |
 | `export const config = { matcher }`                           | Same export; strings like `/dashboard/:path*`, `RegExp`, or functions                      | `different`   |
-| Negative-lookahead string matchers `/((?!api\|_next).*)`      | A `RegExp` matcher such as `/^\/(?!api\/).*/`, or scope the file to a folder               | `different`   |
+| Regex string matchers like `/((?!api\|_next).*)`              | A `RegExp` matcher such as `/^\/(?!api\/).*/`; Farm rejects the string at startup          | `different`   |
 | `NextResponse.next()`                                         | Return nothing                                                                             | `different`   |
 | `NextResponse.redirect(url)`                                  | `return Response.redirect(new URL("/login", request.url), 307)` or `context.redirect(url)` | `different`   |
 | `NextResponse.rewrite(url)`                                   | `context.rewrite("/path")`                                                                 | `different`   |
@@ -605,17 +587,17 @@ export async function middleware(request: Request, context: RequestMiddlewareCon
 
 ### Built-in components and modules
 
-| Next.js                          | Farm                                                                                                                | Status      | Docs                                                      |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------------------------------- |
-| `next/image`                     | `import Image from "@farm.js/core/image"`                                                                           | `rename`    | [/docs/images](/docs/images)                              |
-| `next/font/local`                | `localFont` from `@farm.js/core/font`                                                                               | `rename`    | [/docs/fonts](/docs/fonts)                                |
-| `next/font/google`               | `localFont` with a font package, `remoteFont` with a direct font-file URL, or `@fontsource*` CSS imports            | `different` | [/docs/fonts](/docs/fonts)                                |
-| `next/script`                    | `defineScript` from `@farm.js/scripts/client` plus the `scripts()` plugin, or a plain `<script>` in the root layout | `different` | [/docs/plugins/scripts](/docs/plugins/scripts)            |
-| `next/dynamic`                   | `React.lazy` plus `<Suspense>`                                                                                      | `different` |                                                           |
-| `next/og` `ImageResponse`        | `ImageResponse` from `@farm.js/core/og`; install `@vercel/og`                                                       | `rename`    | Node presets only; not edge or Cloudflare Worker presets. |
-| `next/headers`                   | `@farm.js/core/headers`                                                                                             | `rename`    |                                                           |
-| `next/cache`                     | `@farm.js/core/cache`                                                                                               | `rename`    |                                                           |
-| `next/config`, `next/web-vitals` | None                                                                                                                | `none`      | Use typed env; use the `web-vitals` package directly.     |
+| Next.js                          | Farm                                                                                                                | Status      | Docs                                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------- |
+| `next/image`                     | `import Image from "@farm.js/core/image"`                                                                           | `rename`    | [/docs/images](/docs/images)                                                 |
+| `next/font/local`                | `localFont` from `@farm.js/core/font`                                                                               | `rename`    | [/docs/fonts](/docs/fonts)                                                   |
+| `next/font/google`               | `localFont` with a font package, `remoteFont` with a direct font-file URL, or `@fontsource*` CSS imports            | `different` | [/docs/fonts](/docs/fonts)                                                   |
+| `next/script`                    | `defineScript` from `@farm.js/scripts/client` plus the `scripts()` plugin, or a plain `<script>` in the root layout | `different` | [/docs/plugins/scripts](/docs/plugins/scripts)                               |
+| `next/dynamic`                   | `React.lazy` plus `<Suspense>`                                                                                      | `different` |                                                                              |
+| `next/og` `ImageResponse`        | `ImageResponse` from `@farm.js/core/og`; install `@vercel/og`                                                       | `rename`    | Node, Cloudflare Worker, and `netlify-edge` presets; not other edge presets. |
+| `next/headers`                   | `@farm.js/core/headers`                                                                                             | `rename`    |                                                                              |
+| `next/cache`                     | `@farm.js/core/cache`                                                                                               | `rename`    |                                                                              |
+| `next/config`, `next/web-vitals` | None                                                                                                                | `none`      | Use typed env; use the `web-vitals` package directly.                        |
 
 `next/image`: props `src`, `alt`, `width`, `height`, `fill`, `sizes`, `quality`, `placeholder="blur"`, `blurDataURL`, `unoptimized`, `loader` carry over. Rename `priority` to `preload`. Static imports carry dimensions and blur data. SVG sources skip optimization. Remote hosts need `images.remotePatterns` in `farm.config.ts`.
 
@@ -667,17 +649,13 @@ export const metadata: Metadata = { title: "Create Next App", icons: "/favicon.i
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <html lang="en">
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>{children}</body>
     </html>
   );
 }
 ```
 
-A root layout that returns its own `<html>` document must render the charset and viewport tags itself, as above (the Farm templates do the same); Next added them automatically. A root layout that returns a fragment gets them from Farm's generated shell. `localFont` options must be static and assigned at module scope; `family` is required.
+Farm adds the charset and viewport tags to a root layout's own `<html>` document, as Next does, unless the layout writes them; the `viewport` export sets the viewport tag. `localFont` options must be static and assigned at module scope; `family` is required.
 
 `next/dynamic` with `ssr: false`:
 

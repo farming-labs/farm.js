@@ -18,6 +18,7 @@ export function createRewritesPlugin(
     beforeRequest: overrideBeforeRequest,
     afterResponse: overrideAfterResponse,
     i18n,
+    basePath,
   }: {
     beforeRequest?: (
       req: FarmRequest,
@@ -30,6 +31,8 @@ export function createRewritesPlugin(
       context: FarmPluginContext,
     ) => void | Promise<void>;
     i18n?: ResolvedFarmI18nConfig;
+    /** Sources match the app-relative path, as in production. */
+    basePath?: string;
   } = {},
 ): FarmPlugin {
   const compiledRewrites = rewrites.map((rewrite) => ({
@@ -46,7 +49,7 @@ export function createRewritesPlugin(
         await overrideBeforeRequest(req, res, context);
       }
       const url = resolveFarmRequestURL(req);
-      const routePath = resolveConfigRoutePathname(url.pathname, i18n);
+      const routePath = resolveConfigRoutePathname(url.pathname, i18n, basePath);
       const pathname = routePath.pathname;
 
       for (const { rewrite, pattern } of compiledRewrites) {

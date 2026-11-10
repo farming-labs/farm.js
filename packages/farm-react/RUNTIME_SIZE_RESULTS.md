@@ -62,6 +62,25 @@ Unrelated bundles reject the optional position and reorder runtime markers, and 
 rejects every structural runtime marker. The checked machine-readable result is
 [`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
 
+## Target-free reverse and sort hints
+
+The same target-runtime comparison also builds `keyed-reorder.tsx` and `keyed-sort.tsx` against
+controls selecting the existing target-capable reorder runtime. With Node 24.21.0, React 19.2.8,
+and Vite 8.3.4 on macOS arm64:
+
+| Fixture | Control raw / gzip / Brotli | Plain reorder raw / gzip / Brotli | Gzip saved |
+| ------- | --------------------------: | --------------------------------: | ---------: |
+| Reverse | 239,220 / 73,936 / 63,613 B |       233,098 / 72,503 / 62,270 B |    1,433 B |
+| Sort    | 239,315 / 73,971 / 63,684 B |       233,193 / 72,546 / 62,381 B |    1,425 B |
+
+`pnpm --filter @farm.js/react test:runtime-size` reproduces the comparison, requires at least
+512 B gzip savings per fixture plus a Brotli reduction, and checks that unused Set/Map target
+helpers are absent. Map and append hints and complete reconciliation remain available; target
+bindings in any sibling keyed plan retain the broader runtime. The old feature export remains
+available to previously compiled modules. These are payload measurements, not CPU timing or
+benchmark-rank gains. The upstream benchmark entry's compiled output and production bundle were
+byte-identical before and after this specialization in the same environment.
+
 ## Identity selection with filter hints
 
 `test:runtime-size` also compares `keyed-identity-filter.tsx` with an otherwise identical build

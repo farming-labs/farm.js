@@ -47,7 +47,9 @@ export function serializeMiddlewareCookie(
   if (resolved.expires) cookie += `; Expires=${resolved.expires.toUTCString()}`;
   cookie += `; Path=${resolved.path || "/"}`;
   if (resolved.domain) cookie += `; Domain=${resolved.domain}`;
-  if (resolved.secure) cookie += "; Secure";
+  // Browsers also discard a SameSite=None cookie without Secure, so a set and its
+  // deletion would silently do nothing, as with the name prefixes above.
+  if (resolved.secure || resolved.sameSite === "none") cookie += "; Secure";
   if (resolved.httpOnly) cookie += "; HttpOnly";
   if (resolved.sameSite) {
     cookie += `; SameSite=${resolved.sameSite.charAt(0).toUpperCase()}${resolved.sameSite.slice(1)}`;

@@ -6,7 +6,10 @@ import {
   createFarmDefaultLlmsTxt,
   createFarmLlmsFullRenderer,
   createFarmLlmsMarkdownReader,
+  isFarmPageNoIndex,
+  readFarmLlmsMarkdownFrom,
   renderFarmLlmsFullTxt,
+  resolveFarmAgentOrigin,
   resolveFarmLlmsTxtConfig,
   serializeFarmLlmsTxt,
 } from "../llms-txt";
@@ -253,6 +256,61 @@ describe("collectFarmLlmsTxtPages", () => {
       "/docs/getting-started",
       "/pricing",
     ]);
+  });
+});
+
+describe("isFarmPageNoIndex", () => {
+  const noindex = { robots: { index: false } };
+
+  it("follows the nearest layout's robots when the page sets none", () => {
+    expect(isFarmPageNoIndex({ title: "Roster" }, [{}, noindex])).toBe(true);
+    expect(isFarmPageNoIndex(undefined, [noindex, { title: "Staff" }])).toBe(true);
+    expect(isFarmPageNoIndex({}, [noindex, { robots: "index, follow" }])).toBe(false);
+  });
+
+  it("lets the page's own robots replace its layouts'", () => {
+    expect(isFarmPageNoIndex({ robots: { index: true } }, [noindex])).toBe(false);
+    expect(isFarmPageNoIndex({ robots: "noindex" }, [{ robots: { index: true } }])).toBe(true);
+    // A page that sets robots to nothing renders none, as mergeMetadata spreads it over.
+    expect(isFarmPageNoIndex({ robots: undefined }, [noindex])).toBe(false);
+  });
+
+  it("is false without robots anywhere", () => {
+    expect(isFarmPageNoIndex(undefined)).toBe(false);
+    expect(isFarmPageNoIndex({ title: "About" }, [{ title: "Acme" }])).toBe(false);
+  });
+});
+
+describe("resolveFarmAgentOrigin", () => {
+  it("prefers an absolute http(s) metadataBase over the request's origin", () => {
+    expect(resolveFarmAgentOrigin("https://acme.test/app/", "http://evil.test")).toBe(
+      "https://acme.test",
+    );
+    expect(resolveFarmAgentOrigin(new URL("http://acme.test:8080"), "http://evil.test")).toBe(
+      "http://acme.test:8080",
+    );
+  });
+
+  it("falls back to the request's origin without a usable metadataBase", () => {
+    for (const metadataBase of [undefined, "/relative", "ftp://acme.test", "not a url", 42]) {
+      expect(resolveFarmAgentOrigin(metadataBase, "http://localhost:3000")).toBe(
+        "http://localhost:3000",
+      );
+    }
+  });
+});
+
+describe("readFarmLlmsMarkdownFrom", () => {
+  it("reads links on the configured origin from the origin the request reached", async () => {
+    const read = vi.fn(async (url: string) => url);
+    const rebased = readFarmLlmsMarkdownFrom("http://localhost:3000", "https://acme.test", read);
+
+    expect(await rebased("https://acme.test/docs/a.md?x=1")).toBe(
+      "http://localhost:3000/docs/a.md?x=1",
+    );
+    // Other origins pass through; renderFarmLlmsFullTxt never inlines them anyway.
+    expect(await rebased("https://other.test/b.md")).toBe("https://other.test/b.md");
+    expect(readFarmLlmsMarkdownFrom("https://acme.test", "https://acme.test", read)).toBe(read);
   });
 });
 

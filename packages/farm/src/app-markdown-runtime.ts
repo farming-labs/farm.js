@@ -1,8 +1,16 @@
 import { pathToFileURL } from "url";
 import type { ComponentType } from "react";
 import type { Metadata, RouteModule } from "./types";
-import { requestAcceptsMarkdown } from "./markdown";
+import {
+  FARM_MARKDOWN_PAGE_CHECK_HEADER,
+  _getFarmMarkdownPageCheckToken,
+  _getFarmMarkdownPath,
+  _resolveFarmMarkdownIndexAlias,
+  requestAcceptsMarkdown,
+  type FarmMarkdownRoutePathname,
+} from "./markdown";
 import { createFarmMarkdownViewResponse } from "./markdown-view";
+import { FARM_ANONYMOUS_CLIENT_ADDRESS } from "./anonymous-client-address";
 import type { FarmMdxComponents, FarmMdxResolvedConfig } from "./app-markdown-config";
 
 // Preserve the existing entry points while keeping response-only imports
@@ -27,10 +35,17 @@ export function isFarmMarkdownPageFile(filePath: string): boolean {
   return /(^|[/\\])page\.mdx?$/i.test(filePath);
 }
 
-export function normalizeFarmMarkdownRoutePath(pathname: string): string {
+/**
+ * The page a Markdown request names. With `routePathname`, `<prefix>/index.md` names the home
+ * page under a `basePath` or locale prefix as `/index.md` does at the root.
+ */
+export function normalizeFarmMarkdownRoutePath(
+  pathname: string,
+  routePathname?: FarmMarkdownRoutePathname,
+): string {
   const withoutExtension = pathname.replace(/\.md$/i, "");
   const normalized = withoutExtension.startsWith("/") ? withoutExtension : `/${withoutExtension}`;
-  return normalized === "/index" ? "/" : normalized.replace(/\/+$/g, "") || "/";
+  return _resolveFarmMarkdownIndexAlias(normalized.replace(/\/+$/g, "") || "/", routePathname);
 }
 
 export function parseMarkdownFrontmatter(source: string): {
@@ -149,12 +164,161 @@ export function createFarmMarkdownRouteModule(
   };
 }
 
+const publicSourceResponses = new WeakSet<Response>();
+
+/**
+ * Whether a source response is the one the app served to an anonymous visitor,
+ * so the caller's own middleware headers (a refreshed session cookie, say) must
+ * not be added to it.
+ */
+export function isFarmMarkdownPublicSourceResponse(response: Response): boolean {
+  return publicSourceResponses.has(response);
+}
+
+/**
+ * Request headers that carry no caller identity: what browsers send on their own, conditional
+ * request validators, and the proxy's description of the transport. `Cookie`, `Authorization`,
+ * the client address a proxy reports (`Forwarded`, `Via`, `X-Forwarded-For`, `X-Real-IP` and
+ * the like), and every custom header are left out: an IP allowlist is a guard too.
+ */
+const ANONYMOUS_REQUEST_HEADERS = new Set([
+  "accept",
+  "accept-encoding",
+  "accept-language",
+  "cache-control",
+  "connection",
+  "dnt",
+  "host",
+  "if-match",
+  "if-modified-since",
+  "if-none-match",
+  "if-range",
+  "if-unmodified-since",
+  "keep-alive",
+  "origin",
+  "pragma",
+  "priority",
+  "purpose",
+  "range",
+  "referer",
+  "save-data",
+  "sec-gpc",
+  "sec-purpose",
+  "te",
+  "traceparent",
+  "tracestate",
+  "upgrade-insecure-requests",
+  "user-agent",
+  "x-forwarded-host",
+  "x-forwarded-port",
+  "x-forwarded-proto",
+  "x-request-id",
+]);
+
+function isAnonymousRequestHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    ANONYMOUS_REQUEST_HEADERS.has(lower) ||
+    lower.startsWith("sec-fetch-") ||
+    lower.startsWith("sec-ch-")
+  );
+}
+
+/** The page check needs the whole page, not a 304, a range or a compressed body. */
+const PAGE_CHECK_DROPPED_HEADERS = new Set([
+  "accept-encoding",
+  "if-match",
+  "if-modified-since",
+  "if-none-match",
+  "if-range",
+  "if-unmodified-since",
+  "range",
+]);
+
+/**
+ * The page segment Farm wraps around the page component, inside every layout. A layout
+ * that renders a sign-in prompt instead of its children never renders it.
+ */
+const PAGE_SEGMENT_MARKER = /<div\s[^>]*\bid=["']?__farm_page__["'\s>]/i;
+
+/**
+ * Whether this anonymous request for the page's HTML is answered with the page itself:
+ * a 2xx HTML document, unredirected, rendered to the end (so a `redirect()` under a
+ * loading boundary still sets the status), with the page segment in it.
+ */
+async function anonymousVisitorOpensPage(
+  options: {
+    request: Request;
+    renderPage?: (request: Request) => Response | Promise<Response>;
+  },
+  url: URL,
+  targetPathname: string,
+): Promise<boolean> {
+  const pageUrl = new URL(url);
+  pageUrl.pathname = targetPathname;
+  const headers = new Headers();
+  for (const [name, value] of options.request.headers) {
+    if (!PAGE_CHECK_DROPPED_HEADERS.has(name.toLowerCase())) headers.append(name, value);
+  }
+  headers.set("accept", "text/html");
+  headers.set(FARM_MARKDOWN_PAGE_CHECK_HEADER, _getFarmMarkdownPageCheckToken());
+  const response = await options.renderPage!(
+    new Request(pageUrl, {
+      method: "GET",
+      headers,
+      redirect: "manual",
+      signal: options.request.signal,
+    }),
+  );
+  if (
+    response.status < 200 ||
+    response.status >= 300 ||
+    !response.headers.get("content-type")?.toLowerCase().includes("text/html")
+  ) {
+    void response.body?.cancel().catch(() => {});
+    return false;
+  }
+  return PAGE_SEGMENT_MARKER.test(await response.text());
+}
+
+function hasOnlyAnonymousHeaders(headers: Headers): boolean {
+  for (const name of headers.keys()) {
+    if (!isAnonymousRequestHeader(name)) return false;
+  }
+  return true;
+}
+
+/**
+ * Internal: the client address an adapter reports for the anonymous page check, in place of the
+ * caller's. It is a documentation address (RFC 5737), so no IP allowlist admits it.
+ */
+export const FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS = FARM_ANONYMOUS_CLIENT_ADDRESS;
+
 export async function createFarmMarkdownSourceResponse(options: {
   request: Request;
   config?: FarmMdxResolvedConfig;
   resolveSource: (
     pathname: string,
   ) => Promise<FarmMarkdownPageSource | null> | FarmMarkdownPageSource | null;
+  /**
+   * A request pathname as routes see it, without the `basePath` and locale prefix, so
+   * `<prefix>/index.md` names that prefix's home page as `/index.md` does.
+   */
+  routePathname?: FarmMarkdownRoutePathname;
+  /**
+   * Runs a request through the app's full pipeline, guards and page rendering
+   * included, without following redirects. With it, a page's source is only
+   * served when an anonymous visitor's request for the page's HTML succeeds.
+   * The request is that visitor's, so its client address must not be the caller's
+   * (see FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS).
+   */
+  renderPage?: (request: Request) => Response | Promise<Response>;
+  /**
+   * The caller's client address as the server adapter reports it. A known address
+   * other than the anonymous one is part of the caller's identity, so the page is
+   * checked as an anonymous visitor even for a request with only standard headers.
+   */
+  clientAddress?: string;
 }): Promise<Response | null> {
   if (options.request.method !== "GET" && options.request.method !== "HEAD") {
     return null;
@@ -169,15 +333,87 @@ export async function createFarmMarkdownSourceResponse(options: {
     return null;
   }
 
-  const targetPathname = normalizeFarmMarkdownRoutePath(url.pathname);
+  const targetPathname = normalizeFarmMarkdownRoutePath(url.pathname, options.routePathname);
   const source = await options.resolveSource(targetPathname);
   if (!source) {
     return null;
   }
 
+  // `/page.md` is matched by guards as `/page.md`, not `/page`, and a signed-in
+  // caller passes them. Either way the source would be served without the
+  // page's protection, under a public cache. A page has a Markdown source only
+  // when an anonymous visitor may open it, so ask the app as one: its
+  // middleware, integration guards and route rules see the page's own path.
+  // Any header a browser does not send on its own (an API key, a custom session
+  // header, a client certificate from the proxy) may be what a guard trusts, so
+  // only the standard request headers come along.
+  const anonymous =
+    hasOnlyAnonymousHeaders(options.request.headers) &&
+    (!options.clientAddress || options.clientAddress === FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS);
+  if (options.renderPage && (hasMarkdownExtension || !anonymous)) {
+    const publicUrl = new URL(url);
+    publicUrl.pathname = targetPathname;
+    const publicHeaders = new Headers();
+    for (const [name, value] of options.request.headers) {
+      if (isAnonymousRequestHeader(name)) publicHeaders.append(name, value);
+    }
+    publicHeaders.set("accept", "text/markdown");
+    const publicResponse = await options.renderPage(
+      new Request(publicUrl, {
+        method: options.request.method,
+        headers: publicHeaders,
+        signal: options.request.signal,
+      }),
+    );
+    // Only the source itself counts: a Markdown mirror of the guard's redirect or
+    // refusal carries the route header too.
+    if (
+      publicResponse.headers.get("X-Farm-Markdown-Route") === targetPathname &&
+      publicResponse.headers.has("X-Farm-Markdown-Source")
+    ) {
+      // The body is the anonymous visitor's, but a shared cache never learns from a
+      // request with credentials. A client address or proxy header is not one: proxies
+      // add those to every request.
+      let response = publicResponse;
+      if (options.request.headers.has("cookie") || options.request.headers.has("authorization")) {
+        const headers = new Headers(publicResponse.headers);
+        headers.set("Cache-Control", "private, no-store");
+        response = new Response(publicResponse.body, {
+          status: publicResponse.status,
+          statusText: publicResponse.statusText,
+          headers,
+        });
+      }
+      publicSourceResponses.add(response);
+      return response;
+    }
+    await publicResponse.body?.cancel();
+    // The page is behind a guard. A credentialed caller asking for the page
+    // itself still gets its HTML; `/page.md` has nothing to serve.
+    if (!hasMarkdownExtension) return null;
+    return new Response(`No public Markdown version of ${targetPathname}.\n`, {
+      status: 404,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "private, no-store",
+      },
+    });
+  }
+
+  // The anonymous visitor's own request. Middleware and integration guards have
+  // already passed it, but a guard in page.tsx or layout.tsx (a
+  // `redirect("/sign-in")` when a cookie is missing) only runs when the page
+  // renders, so render the page's HTML as this visitor first.
+  if (options.renderPage && !(await anonymousVisitorOpensPage(options, url, targetPathname))) {
+    return null;
+  }
+
   const headers = new Headers({
     "Content-Type": "text/markdown; charset=utf-8",
-    "Content-Location": targetPathname === "/" ? "/index.md" : `${targetPathname}.md`,
+    "Content-Location": _getFarmMarkdownPath(
+      targetPathname,
+      options.routePathname?.(targetPathname),
+    ),
     "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
     "X-Farm-Markdown-Route": targetPathname,
     "X-Farm-Markdown-Source": source.filePath,

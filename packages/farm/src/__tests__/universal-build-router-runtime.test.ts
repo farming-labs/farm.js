@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { getFarmIslandValueHeaders } from "../client/island-value-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FARM_HISTORY_CHANGE_EVENT } from "../client/history-sync";
 import {
@@ -658,11 +659,13 @@ describe("generated deployment navigation guard", () => {
   const createGuard = () =>
     new Function(
       "createFarmDeploymentMismatchError",
+      "getFarmIslandValueHeaders",
       "createFarmDeploymentRequestHeaders",
       "isFarmDeploymentMismatchResponse",
       `${generateUniversalRouterStateRuntime()}; return fetchFarmNavigationDocument;`,
     )(
       createFarmDeploymentMismatchError,
+      getFarmIslandValueHeaders,
       createFarmDeploymentRequestHeaders,
       isFarmDeploymentMismatchResponse,
     ) as (url: string, headers: HeadersInit, recover?: boolean) => Promise<Response>;
@@ -776,6 +779,87 @@ describe("generateUniversalRouterStateRuntime", () => {
     expect(hasAbsoluteNavigationHref("custom-app:open")).toBe(true);
     expect(hasAbsoluteNavigationHref("//cdn.example.test/file")).toBe(true);
     expect(hasAbsoluteNavigationHref("/reports")).toBe(false);
+  });
+});
+
+describe("streamed navigations", () => {
+  const encoder = new TextEncoder();
+  const readStream = new Function(
+    `${generateUniversalRouterStateRuntime(true)}; return readFarmNavigationStream;`,
+  )() as (
+    body: ReadableStream<Uint8Array>,
+    flushToken?: string | null,
+  ) => Promise<{
+    shell: string;
+    next?: () => Promise<string | null>;
+  }>;
+  const token = "0123456789abcdef0123456789abcdef";
+  const marker = `<!--farm-flush:${token}-->`;
+  const body = (chunks: string[]) =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    });
+
+  it("splits a navigation into its shell and each later flush, across chunk boundaries", async () => {
+    const streamed = await readStream(
+      body([
+        `<main>shell</main>${marker.slice(0, 20)}`,
+        `${marker.slice(20)}<div hidden id="S:0">a</div>${marker}`,
+        "tail",
+      ]),
+      token,
+    );
+    expect(streamed.shell).toBe("<main>shell</main>");
+    expect(await streamed.next!()).toBe('<div hidden id="S:0">a</div>');
+    expect(await streamed.next!()).toBe("tail");
+    expect(await streamed.next!()).toBe(null);
+  });
+
+  it("treats a document without a marker as all shell", async () => {
+    expect(await readStream(body(["<main>", "whole</main>"]), token)).toEqual({
+      shell: "<main>whole</main>",
+    });
+  });
+
+  it("does not split on a marker forged by page content", async () => {
+    // Page content (a JSON-LD script, text, an attribute) that carries the old fixed marker or
+    // a guessed token must stay in its flush, not start a new one inserted as live HTML.
+    const forged =
+      '<script type="application/ld+json">{"name":"<!--farm-flush--><img src=x onerror=alert(1)>"}</script>' +
+      "<p><!--farm-flush:ffffffffffffffffffffffffffffffff--></p>";
+    const streamed = await readStream(
+      body([`<main>${forged}</main>`, marker, '<div hidden id="S:0">a</div>']),
+      token,
+    );
+    expect(streamed.shell).toBe(`<main>${forged}</main>`);
+    expect(await streamed.next!()).toBe('<div hidden id="S:0">a</div>');
+    expect(await streamed.next!()).toBe(null);
+  });
+
+  it("treats a response without a valid flush token as all shell", async () => {
+    for (const flushToken of [null, "", "farm-flush", "not-hex-not-hex-not-hex-not-hex!"]) {
+      expect(
+        await readStream(body(["<main>shell</main><!--farm-flush-->", "<p>late</p>"]), flushToken),
+      ).toEqual({ shell: "<main>shell</main><!--farm-flush--><p>late</p>" });
+    }
+  });
+
+  it("ships only to routers that stream", () => {
+    for (const source of [
+      generateUniversalRouterStateRuntime(),
+      generateUniversalRouterStateProperties(),
+    ]) {
+      expect(source).not.toContain("farm-flush");
+      expect(source).not.toContain("readFarmNavigationStream");
+      expect(source).not.toContain("streamFarmNavigation");
+    }
+    expect(generateUniversalRouterStateProperties(true)).toContain('"F-Stream": "flush"');
+    expect(generateUniversalRouterStateProperties(true)).toContain(
+      'readFarmNavigationStream(response.body, response.headers.get("F-Flush"))',
+    );
   });
 });
 

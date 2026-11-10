@@ -75,6 +75,22 @@ Farm.js is free and open source.
 The browser still renders `page.tsx` at `/pricing`. Requests to `/pricing.md`, or requests to
 `/pricing` with `Accept: text/markdown`, receive the exact contents of `page.md`.
 
+The source is served only for a page an anonymous visitor may open. Farm checks by requesting the
+page as a new request through the same plugin `runtime.before` hooks, middleware, and integration
+guards, with its own `cookies()` and `headers()` and only standard browser headers (no
+cookies, `Authorization`, custom headers such as an API key, or the caller's IP address). The check
+renders the page's HTML as that visitor to the end, without streaming or following redirects, so a
+guard in `page.tsx` or `layout.tsx` counts too, even a `redirect()` under a `<Suspense>` boundary.
+The page has a `.md` version only when it answers with its HTML and the page itself renders in it;
+a redirect to sign-in, a `401`, a `403`, an error, or a layout that shows a sign-in prompt instead
+of its children means it has none. `/account.md` answers `404` even for a
+signed-in caller, and the page is left out of `llms-full.txt`. The check drops `X-Forwarded-For`,
+`X-Real-IP`, `Forwarded`, and `Via`, and in a production build the server reports the documentation address
+`192.0.2.1` as its client, so a page behind an IP allowlist has no public `.md` version either. In
+development the check arrives from the dev server's loopback address. A source sent to a request
+with cookies or `Authorization` uses `Cache-Control: private, no-store`, so only anonymous requests
+fill a shared cache.
+
 ## Configure MDX components
 
 **farm.config.ts**
@@ -148,6 +164,14 @@ export default defineConfig({
 | /pricing | /pricing.md     |
 | /docs    | /docs.md        |
 
+Under a [`basePath`](/docs/configuration#application-base-path) or an i18n locale prefix, mirror
+URLs keep the prefix, and a home page's mirror is `<prefix>/index.md`: `/console/index.md` and
+`/console/fr/index.md` for `basePath: "/console"` with a `fr` locale. The page's `Link` header,
+head alternate, and `Content-Location` name that URL, as `llms.txt` and the default MCP server do;
+`/console.md` and `/console/fr.md` also serve it. `md.expose` entries are route
+paths without the prefix, as in the example above, so `"/pricing"` exposes `/console/pricing.md` and
+`/console/fr/pricing.md`.
+
 ## Use cases
 
 - AI assistants can fetch page content without parsing the full app shell.
@@ -174,6 +198,8 @@ mirrors, and `/llms-full.txt`, which inlines them. See
 ## Per-route options
 
 Routes can include a display title and cache override.
+Literal entries use exact matching without compiling a regular expression. Dynamic entries such
+as `/docs/[...slug]` retain pattern matching; the first matching entry supplies the route options.
 
 ```ts
 export default defineConfig({
@@ -198,6 +224,9 @@ Markdown mirrors call the rendered page, strip scripts/styles and elements hidde
 Content without any `hidden` text (case-insensitive) skips hidden-element parsing. Any occurrence
 still uses the same attribute-aware parser, including quoted values, revealable content, and forms.
 
+When a layout row needs spaces between adjacent items, conversion assembles the row once rather
+than copying it for each separator. Existing prose, letter-split words, and whitespace stay unchanged.
+
 **Terminal**
 
 ```bash
@@ -219,7 +248,9 @@ document head, while ordinary browser requests continue to receive HTML. Set
 Converted mirrors preserve the page response's `Set-Cookie` headers, including on redirects, sign-in errors,
 partial views, `HEAD`, and conditional `304` responses. A mirror that sets cookies uses
 `Cache-Control: private, no-store`, even when `md.cache` is enabled, so a shared cache cannot replay
-one reader's session cookies to another. Cookie-free mirrors keep their configured cache policy.
+one reader's session cookies to another. So does a mirror of a request with cookies or
+`Authorization`, since the page was rendered for that reader. Other mirrors keep their configured
+cache policy.
 
 If the page returns a non-HTML response, such as a JSON error or a `429` rate limit, Farm returns
 that response and its headers (including `Retry-After`) without dispatching the page again.
@@ -277,12 +308,14 @@ curl "http://localhost:3000/pricing.md?max_tokens=2000"
 ```
 
 - `?outline` returns the heading tree. Each entry links to its section and estimates its size in
-  tokens, so an agent can decide what to read.
+  tokens, so an agent can decide what to read. Estimates use the same four-character approximation
+  without constructing a full copy of every section.
 - `?section=<id>` returns one heading and everything under it, up to the next heading at the same
   or a higher level. Ids follow GitHub's heading anchors (`## Team plans` is `team-plans`; a
   repeated heading gets `-1`, `-2`). An unknown id answers `404` with the list of valid ids.
 - `?max_tokens=<n>` returns the page, or the section with `?section`, in parts of about `n` tokens
-  (at least 100). See [Read a long page in parts](#read-a-long-page-in-parts).
+  (at least 100). Remaining-token estimates count the unread lines without copying their text.
+  See [Read a long page in parts](#read-a-long-page-in-parts).
 
 Headings inside fenced code blocks and front matter are ignored. Every Markdown response also
 carries an `ETag`, so an agent can re-check a page with `If-None-Match` and receive `304 Not
@@ -384,6 +417,8 @@ at its `.md` URL and to `Accept: text/markdown`, with `?outline`, `?section`, `?
 `?actions`. HTML pages send the `Link` header, a missing `.md` page answers a Markdown 404, and reads
 fire `agent.read` events. The mirror renders the page through the normal request path, so middleware
 and sign-in gates apply, and a page that must not be shared keeps its private `Cache-Control`.
+Under a `basePath` or locale prefix, a home page's mirror is `<prefix>/index.md` and `md.expose`
+lists route paths without the prefix, as described above.
 
 The RSC renderer currently sets a deployment cookie on HTML page renders. Its generated mirrors
 therefore use `private, no-store` too; setting `md.cache` does not enable shared caching while that

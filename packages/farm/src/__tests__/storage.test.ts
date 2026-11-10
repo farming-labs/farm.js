@@ -8,6 +8,7 @@ import memoryDriver from "unstorage/drivers/memory";
 import { middleware } from "../middleware/chain";
 import { createContext } from "../middleware/context";
 import {
+  _collectFarmStorageModules,
   createFarmStorage,
   createStorageClient,
   defineStorageClient,
@@ -15,6 +16,7 @@ import {
   getStorage,
   initStorage,
   localStorage,
+  memoryStorage,
   mongodbStorage,
   mysqlStorage,
   postgresStorage,
@@ -237,6 +239,48 @@ describe("Storage", () => {
 
     expect(await cache.getItem("users")).toEqual({ total: 1 });
     expect(await readdir(dir)).not.toHaveLength(0);
+  });
+
+  // A name that normalizes to nothing used to return the root store, which
+  // holds every other namespace's keys.
+  it("refuses a namespace that names nothing", async () => {
+    await initStorage({});
+    await getStorage("tenantA").setItem("secret", "A-data");
+
+    for (const namespace of [" ", "/", "::", ":/\\"]) {
+      expect(() => getStorage(namespace)).toThrow(/names no namespace/);
+    }
+    expect(await getStorage().getKeys()).toEqual(["tenantA:secret"]);
+    expect(await getStorage("").getKeys()).toEqual(["tenantA:secret"]);
+    expect(await getStorage("/tenantA/").getItem("secret")).toBe("A-data");
+  });
+
+  it("lists the driver modules a config loads by name, for a production bundle", () => {
+    expect(
+      _collectFarmStorageModules({
+        driver: "redis",
+        mounts: {
+          files: localStorage({ base: "/tmp/files" }),
+          notes: { driver: "fs-lite", base: "/tmp/notes" },
+          db: sqliteStorage({ path: "/tmp/app.db" }),
+          own: defineStorageClient(() => memoryDriver()),
+        },
+      }).sort(),
+    ).toEqual(
+      [
+        "db0",
+        "db0/connectors/node-sqlite",
+        "unstorage/drivers/db0",
+        "unstorage/drivers/fs-lite",
+        "unstorage/drivers/redis",
+      ].sort(),
+    );
+    expect(_collectFarmStorageModules(localStorage())).toEqual(["unstorage/drivers/fs-lite"]);
+    // Memory is core's static default, never loaded by name.
+    expect(
+      _collectFarmStorageModules({ driver: "memory", mounts: { cache: memoryStorage() } }),
+    ).toEqual([]);
+    expect(_collectFarmStorageModules(undefined)).toEqual([]);
   });
 
   it("stores the active storage instance on globalThis", async () => {

@@ -296,6 +296,13 @@ export function createFarmConfigResolutionPlugin(options: { transform: OxcTransf
   };
 }
 
+/**
+ * The app root whose config is being evaluated, read by integrations that keep local development
+ * state under `<root>/.farm` (`farm dev --root` can differ from the working directory). Set on
+ * globalThis because the CLI loads config through core's CommonJS build.
+ */
+const FARM_CONFIG_ROOT = Symbol.for("farm.configRoot");
+
 export async function loadFarmConfigFile<TConfig = Record<string, any>>(
   configPath: string,
   options: { root: string; cacheRoot?: string },
@@ -319,6 +326,9 @@ export async function loadFarmConfigFile<TConfig = Record<string, any>>(
   });
 
   const moduleUrl = `${pathToFileURL(modulePath).href}?t=${Date.now()}`;
+  const configRootState = globalThis as typeof globalThis & { [FARM_CONFIG_ROOT]?: string };
+  const previousConfigRoot = configRootState[FARM_CONFIG_ROOT];
+  configRootState[FARM_CONFIG_ROOT] = cacheRoot;
   try {
     const loaded = await import(/* @vite-ignore */ moduleUrl);
     const config = loaded.default || loaded;
@@ -327,6 +337,7 @@ export async function loadFarmConfigFile<TConfig = Record<string, any>>(
     }
     return config as TConfig;
   } finally {
+    configRootState[FARM_CONFIG_ROOT] = previousConfigRoot;
     await unlink(modulePath).catch(() => undefined);
   }
 }

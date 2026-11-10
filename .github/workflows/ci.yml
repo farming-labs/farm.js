@@ -596,6 +596,7 @@ jobs:
         run: |
           node benchmarks/frameworks/run.mjs --self-check
           node --test benchmarks/compiler-analysis/run.test.mjs
+          node --test examples/react-compiler-js-framework-benchmark/scripts/prepare-metadata.test.mjs examples/react-compiler-js-framework-benchmark/scripts/summarize-official.test.mjs
 
   lint:
     name: Lint
@@ -626,7 +627,8 @@ jobs:
 
   react-compiler-browser:
     name: React Compiler Browser (${{ matrix.builder }})
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -653,6 +655,8 @@ jobs:
           pnpm --filter @farm.js/react build
         env:
           NODE_OPTIONS: --max-old-space-size=12288
+      - name: Verify native input reset parity in development and production
+        run: pnpm --dir packages/farm-react exec node scripts/test-input-reset-browser.mjs
       # Production build of the compiler example, then a real browser through
       # every compiled component (bindings, blocks, keyed rows, ranges, islands).
       - name: Verify compiled output in the browser
@@ -757,7 +761,8 @@ jobs:
 
   wasm-e2e:
     name: WebAssembly E2E (${{ matrix.builder }})
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -787,7 +792,8 @@ jobs:
 
   devtools-e2e:
     name: DevTools E2E (${{ matrix.builder }})
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -817,7 +823,8 @@ jobs:
 
   framework-e2e:
     name: Framework E2E
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
 
     steps:
@@ -843,6 +850,12 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=12288
 
+      - name: Verify islands from packed artifacts
+        run: pnpm test:packed-islands
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+          TMPDIR: ${{ runner.temp }}
+
       - name: Upload Playwright failure artifacts
         if: ${{ failure() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -851,5 +864,6 @@ jobs:
           path: |
             playwright-report/
             test-results/
+            ${{ runner.temp }}/farm-packed-islands-*/test-results/
           if-no-files-found: ignore
           retention-days: 7

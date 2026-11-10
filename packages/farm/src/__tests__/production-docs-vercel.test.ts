@@ -36,6 +36,10 @@ describe("Vercel docs content", () => {
         "export default function Layout({ children }) { return <main>{children}</main>; }",
       );
       await fs.writeFile(
+        path.join(source, "app", "globals.css"),
+        ".farm-docs-globals { color: red; }\n",
+      );
+      await fs.writeFile(
         path.join(source, "app", "docs", "page.md"),
         "---\ntitle: Documentation\n---\n# Documentation\n\n[Upgrade guide](/docs/upgrading)\n",
       );
@@ -95,6 +99,17 @@ describe("Vercel docs content", () => {
         const html = await response.text();
         expect(html).toContain('id="nd-docs-layout"');
         expect(html).toContain('id="nd-sidebar"');
+        // Every stylesheet the page links ships with the deployment, globals.css included.
+        const stylesheets = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(
+          ([, href]) => href,
+        );
+        expect(stylesheets.length).toBeGreaterThan(0);
+        const css = await Promise.all(
+          stylesheets.map((href) =>
+            fs.readFile(path.resolve(root, config.deploy.outputDir, "static", `.${href}`), "utf8"),
+          ),
+        );
+        expect(css.join("")).toContain(".farm-docs-globals");
         if (pathname === "/docs/upgrading") {
           expect(html).toContain("Upgrade packages");
           expect(html).toContain("<table");
@@ -109,6 +124,9 @@ describe("Vercel docs content", () => {
       const appLlms = await handler.fetch(new Request("https://farm.test/llms.txt"));
       expect(appLlms.status).toBe(200);
       expect((await appLlms.text()).startsWith("# App index\n")).toBe(true);
+      // Ownership is decided on the route path, so /llms.txt/ is the app's too, as in dev.
+      const appLlmsSlash = await handler.fetch(new Request("https://farm.test/llms.txt/"));
+      expect((await appLlmsSlash.text()).startsWith("# App index\n")).toBe(true);
       const docsLlms = await handler.fetch(new Request("https://farm.test/.well-known/llms.txt"));
       expect(docsLlms.status).toBe(200);
       const docsLlmsText = await docsLlms.text();
@@ -138,6 +156,241 @@ describe("Vercel docs content", () => {
         ),
       );
       expect(manifest.pages["upgrading/page.md"]).toEqual(expect.any(String));
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("serves the docs engine under basePath and links every page below it", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-vercel-docs-base-path-"));
+    try {
+      await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+      await fs.symlink(
+        packageRoot,
+        path.join(root, "node_modules", "@farm.js", "core"),
+        "junction",
+      );
+      for (const name of ["react", "react-dom"]) {
+        await fs.symlink(
+          await fs.realpath(path.join(packageRoot, "node_modules", name)),
+          path.join(root, "node_modules", name),
+          "junction",
+        );
+      }
+      await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
+      const docsDir = path.join(root, "src", "app", "docs");
+      await fs.mkdir(path.join(docsDir, "guide"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        "export default function Layout({ children }) { return <main>{children}</main>; }",
+      );
+      await fs.writeFile(path.join(docsDir, "page.md"), "---\ntitle: Docs\n---\n# Docs\n");
+      await fs.writeFile(
+        path.join(docsDir, "guide", "page.md"),
+        "---\ntitle: Guide\n---\n# Guide\n",
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          basePath: "/console",
+          images: { provider: "none" },
+          telemetry: false,
+          deploy: { target: "vercel" },
+          docs: { adapter: false, entry: "/docs", contentDir: "src/app/docs" },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "vercel" });
+      const functionRoot = path.resolve(root, config.deploy.outputDir, "functions", "__nitro.func");
+      const { default: handler } = await import(
+        /* @vite-ignore */ pathToFileURL(path.join(functionRoot, "index.mjs")).href
+      );
+      const get = (pathname: string): Promise<Response> =>
+        handler.fetch(new Request(`https://farm.test${pathname}`));
+
+      const page = await get("/console/docs/guide");
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain('href="/console/docs/guide"');
+      expect(html).toContain('href="/console/llms.txt"');
+      expect(html).toContain('const docsEntry="/console/docs"');
+      expect(html).toContain('property="og:url" content="https://farm.test/console/docs/guide"');
+      expect(html).not.toMatch(/href="\/(docs|llms\.txt)/);
+
+      const markdown = await get("/console/docs/guide.md");
+      expect(markdown.status).toBe(200);
+      expect(markdown.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+      expect(await markdown.text()).toContain("URL: /console/docs/guide");
+
+      const llms = await get("/console/llms.txt");
+      expect(llms.status).toBe(200);
+      const llmsText = await llms.text();
+      expect(llmsText).toContain("(https://farm.test/console/docs/guide.md)");
+      expect(llmsText).not.toContain("https://farm.test/docs");
+      expect(await (await get("/console/sitemap.xml")).text()).toContain(
+        "<loc>https://farm.test/console/docs/guide</loc>",
+      );
+      expect(await (await get("/console/robots.txt")).text()).toContain(
+        "Sitemap: https://farm.test/console/sitemap.xml",
+      );
+
+      // Search stays at /api/docs, as the app's API routes do, and links results below basePath.
+      const results = (await (await get("/api/docs?query=guide")).json()) as Array<{
+        url: string;
+      }>;
+      expect(results.map((result) => result.url)).toContain("/console/docs/guide");
+      expect((await get("/console/api/docs?format=llms")).status).toBe(404);
+
+      // Pages answer at the origin root too, and so do the docs.
+      for (const pathname of ["/docs/guide", "/docs/guide.md", "/llms.txt"]) {
+        expect((await get(pathname)).status, pathname).toBe(200);
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("serves the docs config's roots through the adapter's multi-root handler", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-vercel-docs-roots-"));
+    try {
+      await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+      await fs.symlink(
+        packageRoot,
+        path.join(root, "node_modules", "@farm.js", "core"),
+        "junction",
+      );
+      for (const name of ["react", "react-dom"]) {
+        await fs.symlink(
+          await fs.realpath(path.join(packageRoot, "node_modules", name)),
+          path.join(root, "node_modules", name),
+          "junction",
+        );
+      }
+      const adapterDir = path.join(root, "node_modules", "fixture-docs-adapter");
+      await fs.mkdir(adapterDir, { recursive: true });
+      await fs.writeFile(
+        path.join(adapterDir, "package.json"),
+        JSON.stringify({
+          name: "fixture-docs-adapter",
+          type: "module",
+          exports: { "./server": "./server.js", "./react": "./react.js" },
+        }),
+      );
+      // Answers with the root it routed to and that root's page, read from its contentDir.
+      await fs.writeFile(
+        path.join(adapterDir, "server.js"),
+        `import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+export function createFarmDocsMultiRuntimeHandler(configs, options) {
+  return async (request) => {
+    const { pathname } = new URL(request.url);
+    const config = [...configs]
+      .sort((a, b) => b.docsPath.length - a.docsPath.length)
+      .find((c) => pathname === c.docsPath || pathname.startsWith(c.docsPath + "/"));
+    if (!config) return null;
+    const page = readFileSync(resolve(options.rootDir, config.contentDir, "page.md"), "utf8");
+    return Response.json({
+      roots: configs.map((c) => c.docsPath),
+      docsPath: config.docsPath,
+      title: config.nav && config.nav.title,
+      footer: typeof config.renderFooter === "function" ? config.renderFooter() : null,
+      description: (config.metadata && config.metadata.description) || null,
+      page,
+    });
+  };
+}
+`,
+      );
+      await fs.writeFile(
+        path.join(adapterDir, "react.js"),
+        "export function hydrateFarmDocs() {}\n",
+      );
+      await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
+      // The roots are declared once, in the docs config; a function survives to the adapter.
+      await fs.writeFile(
+        path.join(root, "docs.config.ts"),
+        `export default {
+  entry: "docs",
+  nav: { title: "Main" },
+  roots: [
+    { entry: "statewire/docs", nav: { title: "Statewire" }, renderFooter: () => "Statewire footer" },
+  ],
+};
+`,
+      );
+      const source = path.join(root, "src");
+      await fs.mkdir(path.join(source, "app", "docs"), { recursive: true });
+      await fs.mkdir(path.join(source, "app", "statewire", "docs"), { recursive: true });
+      await fs.writeFile(
+        path.join(source, "app", "layout.tsx"),
+        "export default function Layout({ children }) { return <main>{children}</main>; }",
+      );
+      await fs.writeFile(path.join(source, "app", "docs", "page.md"), "# Main docs\n");
+      await fs.writeFile(
+        path.join(source, "app", "statewire", "docs", "page.md"),
+        "# Statewire docs\n",
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          deploy: { target: "vercel" },
+          docs: {
+            adapter: {
+              id: "fixture-docs-adapter",
+              protocol: 1,
+              server: "fixture-docs-adapter/server",
+              react: "fixture-docs-adapter/react",
+            },
+            entry: "/docs",
+            // A serializable override for one root, applied over the docs config's root.
+            roots: [{ entry: "/statewire/docs", metadata: { description: "From farm.config" } }],
+          },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "vercel" });
+
+      await fs.rename(source, path.join(root, "source-not-deployed"));
+      const functionRoot = path.resolve(root, config.deploy.outputDir, "functions", "__nitro.func");
+      // The main root keeps its directory; an extra root's copy sits beside it, not inside it.
+      await expect(
+        fs.readFile(path.join(functionRoot, "farm-docs-content", "page.md"), "utf8"),
+      ).resolves.toBe("# Main docs\n");
+      await expect(
+        fs.readFile(path.join(functionRoot, "farm-docs-roots", "0", "page.md"), "utf8"),
+      ).resolves.toBe("# Statewire docs\n");
+      const { default: handler } = await import(
+        /* @vite-ignore */ pathToFileURL(path.join(functionRoot, "index.mjs")).href
+      );
+      const pages = await Promise.all(
+        ["/docs", "/statewire/docs"].map(async (pathname) => {
+          const response = await handler.fetch(new Request(`https://farm.test${pathname}`));
+          expect(response.status).toBe(200);
+          return response.json();
+        }),
+      );
+      expect(pages).toEqual([
+        {
+          roots: ["/docs", "/statewire/docs"],
+          docsPath: "/docs",
+          title: "Main",
+          footer: null,
+          description: null,
+          page: "# Main docs\n",
+        },
+        {
+          roots: ["/docs", "/statewire/docs"],
+          docsPath: "/statewire/docs",
+          title: "Statewire",
+          footer: "Statewire footer",
+          description: "From farm.config",
+          page: "# Statewire docs\n",
+        },
+      ]);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

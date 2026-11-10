@@ -1,21 +1,19 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import type { FarmIntegrationHandlerContext, FarmIntegrationLogger } from "@farm.js/core";
 import {
+  api as clientApi,
   defineIntegration,
-  forwardIntegrationSetCookies,
-  type FarmIntegrationHandlerContext,
-  type FarmIntegrationLogger,
-} from "@farm.js/core";
-import {
   describeIntegrationOriginRejection,
+  forwardIntegrationSetCookies,
   resolveIntegrationAllowedOrigins,
   validateIntegrationRequestOrigin,
 } from "@farm.js/core/integrations";
-import { api as clientApi } from "@farm.js/core/client";
 import {
   createPathInferredClientApi,
   createDocumentNavigationMatchers,
   escapeHtml,
   getOrigin,
+  createRequestCookie,
   getReturnTo,
   integrationConfig,
   normalizeMatchers,
@@ -191,44 +189,40 @@ function resolvePages(input: SupabaseIntegrationInput): ResolvedSupabasePages {
   };
 }
 
-function serializeCookie(name: string, value: string, options: CookieOptions = {}): string {
-  const parts = [`${name}=${encodeURIComponent(value)}`];
+/**
+ * `@supabase/ssr` sets no `Secure` by default, so its session cookies would go
+ * out without it on https. `createRequestCookie` derives it from the request
+ * and applies the attributes browsers require for SameSite=None and the
+ * `__Host-` / `__Secure-` names. Supabase's own defaults still decide HttpOnly
+ * (off, so the browser client can read the session) and SameSite.
+ */
+function serializeCookie(
+  name: string,
+  value: string,
+  request: Request,
+  options: CookieOptions = {},
+): string {
+  return createRequestCookie(name, value, request, {
+    maxAge: options.maxAge,
+    expires: options.expires,
+    domain: options.domain,
+    path: options.path,
+    secure: options.secure,
+    httpOnly: options.httpOnly === true,
+    sameSite: resolveSameSite(options.sameSite),
+  });
+}
 
-  if (options.maxAge != null) {
-    parts.push(`Max-Age=${Math.floor(options.maxAge)}`);
+function resolveSameSite(sameSite: CookieOptions["sameSite"]): "Lax" | "Strict" | "None" {
+  if (sameSite === true) return "Strict";
+  switch (typeof sameSite === "string" ? sameSite.toLowerCase() : undefined) {
+    case "strict":
+      return "Strict";
+    case "none":
+      return "None";
+    default:
+      return "Lax";
   }
-
-  if (options.domain) {
-    parts.push(`Domain=${options.domain}`);
-  }
-
-  parts.push(`Path=${options.path || "/"}`);
-
-  if (options.expires) {
-    parts.push(`Expires=${options.expires.toUTCString()}`);
-  }
-
-  if (options.httpOnly) {
-    parts.push("HttpOnly");
-  }
-
-  if (options.secure) {
-    parts.push("Secure");
-  }
-
-  if (options.sameSite) {
-    const sameSite =
-      typeof options.sameSite === "string"
-        ? options.sameSite
-        : options.sameSite === true
-          ? "Strict"
-          : undefined;
-    if (sameSite) {
-      parts.push(`SameSite=${sameSite}`);
-    }
-  }
-
-  return parts.join("; ");
 }
 
 function appendSetCookies(headers: Headers, cookies: string[]) {
@@ -787,7 +781,9 @@ function createSupabaseHandler(
       },
       setAll(cookiesToSet) {
         for (const cookie of cookiesToSet) {
-          setCookies.push(serializeCookie(cookie.name, cookie.value, cookie.options));
+          setCookies.push(
+            serializeCookie(cookie.name, cookie.value, context.request, cookie.options),
+          );
         }
       },
     },

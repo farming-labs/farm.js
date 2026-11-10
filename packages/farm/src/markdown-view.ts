@@ -25,7 +25,19 @@ const ATX_HEADING = /^\s{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
 
 /** Parse ATX headings, skipping front matter and fenced code blocks. */
 export function parseFarmMarkdownHeadings(markdown: string): FarmMarkdownHeading[] {
-  const lines = markdown.split("\n");
+  return parseMarkdownHeadingsFromLines(normalizeMarkdownLineEndings(markdown).split("\n"));
+}
+
+/**
+ * CommonMark line endings (`\r\n`, `\r`) as `\n`. A Windows checkout with
+ * `core.autocrlf=true` gives `page.md` CRLF endings, and a `\r` left on each line
+ * would keep every heading from matching.
+ */
+function normalizeMarkdownLineEndings(markdown: string): string {
+  return markdown.includes("\r") ? markdown.replace(/\r\n?/g, "\n") : markdown;
+}
+
+function parseMarkdownHeadingsFromLines(lines: string[]): FarmMarkdownHeading[] {
   const headings: FarmMarkdownHeading[] = [];
   const used = new Map<string, number>();
   let index = 0;
@@ -123,6 +135,9 @@ export function selectFarmMarkdownView(
   const budget = searchParams.get("max_tokens");
   if (!wantsOutline && sectionId === null && budget === null)
     return { status: 200, body: markdown };
+  // Views are derived documents, so they use one line ending; the whole
+  // document above is served with its original bytes.
+  markdown = normalizeMarkdownLineEndings(markdown);
 
   // Links to other views keep the page's own query (`?category=shoes`), so they
   // read the same page this request rendered.
@@ -145,7 +160,7 @@ export function selectFarmMarkdownView(
   if (!wantsOutline && sectionId === null) return withinBudget(markdown);
 
   const lines = markdown.split("\n");
-  const headings = parseFarmMarkdownHeadings(markdown);
+  const headings = parseMarkdownHeadingsFromLines(lines);
   const sectionText = (heading: FarmMarkdownHeading) =>
     lines.slice(heading.start, heading.end).join("\n").trim();
 
@@ -161,10 +176,26 @@ export function selectFarmMarkdownView(
     };
   }
 
+  // Outlines need section lengths, not copies of every overlapping section.
+  // Offsets include the separating newlines and retain JS's UTF-16 counting.
+  const offsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    offsets.push(offset);
+    offset += line.length + 1;
+  }
   const minLevel = headings.reduce((min, heading) => Math.min(min, heading.level), 6);
   const entries = headings.map((heading) => {
     const indent = "  ".repeat(heading.level - minLevel);
-    const tokens = estimateFarmMarkdownTokens(sectionText(heading));
+    let last = heading.end - 1;
+    while (last > heading.start && lines[last]!.trim().length === 0) last--;
+    const first = lines[heading.start]!;
+    const length =
+      offsets[last]! +
+      lines[last]!.trimEnd().length -
+      offsets[heading.start]! -
+      (first.length - first.trimStart().length);
+    const tokens = Math.ceil(length / 4);
     return `${indent}- [${heading.text}](${viewUrl({ section: heading.id })}) ~${tokens} tokens`;
   });
   return {
@@ -191,11 +222,12 @@ function markdownCodeSpan(value: string): string {
 /** The page's forms as JSON, linked back to the page and its Markdown. */
 function selectFarmPageActionsView(
   markdownPath: string,
+  pagePath: string | undefined,
   actions: readonly FarmPageFormAction[],
   headers: Headers,
 ): FarmMarkdownView {
   headers.set("Content-Type", "application/json; charset=utf-8");
-  const page = markdownPath === "/index.md" ? "/" : markdownPath.replace(/\.md$/, "");
+  const page = pagePath ?? (markdownPath === "/index.md" ? "/" : markdownPath.replace(/\.md$/, ""));
   return {
     status: 200,
     body: `${JSON.stringify({ page, markdown: markdownPath, actions }, null, 2)}\n`,
@@ -267,7 +299,11 @@ function selectFarmMarkdownPart(
   const open = fences[end];
   const part = `${head}${lines.slice(start, end).join("\n").replace(/\n+$/, "")}${open ? `\n${open.closer}` : ""}`;
   const next = partUrl(`${end}.${version}`);
-  const remaining = estimateFarmMarkdownTokens(lines.slice(end).join("\n"));
+  // Count the unreturned tail without allocating a copy of it. Each boundary
+  // contributes one newline, exactly as slice(end).join("\n") did.
+  let remainingLength = lines.length - end - 1;
+  for (let index = end; index < lines.length; index++) remainingLength += lines[index]!.length;
+  const remaining = Math.ceil(remainingLength / 4);
   return {
     status: 200,
     body: `${part}\n\n---\n\nContinue: ${next} (about ${remaining} more tokens)\n`,
@@ -358,6 +394,8 @@ export function createFarmMarkdownViewResponse(options: {
   status: number;
   headers: Headers;
   markdownPath: string;
+  /** The page `markdownPath` mirrors; `<prefix>/index.md` mirrors `<prefix>`. */
+  pagePath?: string;
   actions?: readonly FarmPageFormAction[];
 }): Response {
   const url = options.requestUrl ?? new URL(options.request.url);
@@ -365,7 +403,12 @@ export function createFarmMarkdownViewResponse(options: {
     options.status >= 400
       ? { status: options.status, body: options.markdown }
       : url.searchParams.has("actions")
-        ? selectFarmPageActionsView(options.markdownPath, options.actions ?? [], options.headers)
+        ? selectFarmPageActionsView(
+            options.markdownPath,
+            options.pagePath,
+            options.actions ?? [],
+            options.headers,
+          )
         : selectFarmMarkdownView(options.markdown, url.searchParams, options.markdownPath);
   let status = view.status === 200 ? options.status : view.status;
   // Our ETags are always weak, so no entity-tag can satisfy If-Match's strong

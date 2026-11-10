@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -10,6 +11,7 @@ const {
   createFarmDeployPlan,
   formatFarmDeployPlan,
   resolveCloudflareAgentDeployPlan,
+  resolveDeployCliCommand,
   resolveDeployCliExecutable,
 } = require("../dist/index.js");
 
@@ -30,6 +32,72 @@ test("resolves project-local deployment CLIs and Windows shims", async () => {
       path.join(bin, "wrangler.cmd"),
     );
     assert.equal(resolveDeployCliExecutable("vercel", root, "win32"), "vercel.cmd");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("quotes a Windows CLI shim's arguments for cmd.exe", () => {
+  const cli = resolveDeployCliCommand(
+    "wrangler",
+    ["deploy", "--config", String.raw`C:\Users\Jane Doe\app & co\100%\wrangler.json`],
+    path.join(tmpdir(), "farm-cli-deploy-no-local-cli"),
+    "win32",
+  );
+
+  // One escaped command line for cmd.exe, so Node has no arguments to join unquoted. Arguments
+  // are escaped once for cmd.exe and once more for the %* the .cmd shim hands to node.
+  assert.deepEqual(cli, {
+    file: String.raw`wrangler.cmd ^^^"deploy^^^" ^^^"--config^^^" ^^^"C:\Users\Jane^^^ Doe\app^^^ ^^^&^^^ co\100^^^%\wrangler.json^^^"`,
+    args: [],
+    shell: true,
+  });
+});
+
+test("quotes a project-local Windows CLI shim under a path with spaces", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "farm cli deploy "));
+  try {
+    const bin = path.join(root, "node_modules", ".bin");
+    await mkdir(bin, { recursive: true });
+    await writeFile(path.join(bin, "vercel.cmd"), "");
+
+    const cli = resolveDeployCliCommand("vercel", ["--version"], root, "win32");
+
+    const shim = path.join(bin, "vercel.cmd").replace(/([()\][%!^"`<>&|;, *?])/g, "^$1");
+    assert.match(shim, /farm\^ cli\^ deploy\^ /);
+    assert.deepEqual(cli, { file: `${shim} ^^^"--version^^^"`, args: [], shell: true });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runs a project-local deployment CLI from a path with spaces", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "farm cli deploy run "));
+  try {
+    const bin = path.join(root, "node_modules", ".bin");
+    await mkdir(bin, { recursive: true });
+    await writeFile(
+      path.join(root, "wrangler.js"),
+      "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n",
+    );
+    const isWindows = process.platform === "win32";
+    await writeFile(
+      path.join(bin, isWindows ? "wrangler.cmd" : "wrangler"),
+      isWindows
+        ? `@"${process.execPath}" "%~dp0\\..\\..\\wrangler.js" %*\r\n`
+        : `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/../../wrangler.js" "$@"\n`,
+      { mode: 0o755 },
+    );
+    const configPath = path.join(root, "dist", "wrangler & co.json");
+
+    const cli = resolveDeployCliCommand("wrangler", ["deploy", "--config", configPath], root);
+    const output = execFileSync(cli.file, cli.args, {
+      cwd: root,
+      encoding: "utf8",
+      shell: cli.shell,
+    });
+
+    assert.deepEqual(JSON.parse(output), ["deploy", "--config", configPath]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -355,15 +423,34 @@ test("keeps a configured preset that already builds for the flagged platform", a
     root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-edge-preset-"));
     await writeFile(
       path.join(root, "farm.config.mjs"),
+      "export default { deploy: { preset: 'cloudflare-module' } };\n",
+    );
+
+    const plan = await createFarmDeployPlan({ root, cloudflare: true });
+
+    assert.equal(plan.target, "cloudflare");
+    assert.equal(plan.preset, "cloudflare-module");
+    assert.equal(plan.runtime, "edge");
+    assert.equal(plan.outputDir, path.join(root, ".farm", ".output"));
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects the vercel-edge preset before planning a Vercel deploy", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-vercel-edge-"));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
       "export default { deploy: { preset: 'vercel-edge' } };\n",
     );
 
-    const plan = await createFarmDeployPlan({ root, vercel: true });
-
-    assert.equal(plan.target, "vercel");
-    assert.equal(plan.preset, "vercel-edge");
-    assert.equal(plan.runtime, "edge");
-    assert.equal(plan.outputDir, path.join(root, ".vercel", "output"));
+    await assert.rejects(createFarmDeployPlan({ root, vercel: true }), {
+      message:
+        'Deploy preset "vercel-edge" is not supported: Farm\'s Nitro version has no vercel-edge preset. Use the "vercel" preset instead, which deploys Vercel Functions on Fluid compute.',
+    });
   } finally {
     if (root) await rm(root, { recursive: true, force: true });
   }
