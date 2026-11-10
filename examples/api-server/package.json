@@ -16,7 +16,6 @@
   "devDependencies": {
     "@farm.js/cli": "workspace:*",
     "@types/node": "^20.10.5",
-    "typescript": "^5.5.3",
-    "vite": "8.3.4"
+    "typescript": "^5.5.3"
   }
 }

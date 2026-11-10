@@ -237,9 +237,6 @@ importers:
       typescript:
         specifier: ^5.5.3
         version: 5.9.3
-      vite:
-        specifier: 8.3.4
-        version: 8.3.4(@types/node@20.19.21)
 
   examples/auth0-integration:
     dependencies:
