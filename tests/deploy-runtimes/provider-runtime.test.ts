@@ -437,6 +437,79 @@ function createCloudflareWorkerRuntime(preset: CloudflareWorkerPreset, outputDir
   });
 }
 
+/**
+ * Builds a cloudflare-module app with a `cron` entry whose route records the
+ * job name in a storage mount on the `CRON_KV` binding.
+ */
+async function createCloudflareCronFixture(): Promise<{ outputDir: string }> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-cloudflare-module-cron-"));
+  fixtureRoots.push(root);
+
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(
+    corePackageRoot,
+    path.join(root, "node_modules", "@farm.js", "core"),
+    "junction",
+  );
+  for (const name of ["react", "react-dom"]) {
+    await fs.symlink(
+      await fs.realpath(path.join(corePackageRoot, "node_modules", name)),
+      path.join(root, "node_modules", name),
+      "junction",
+    );
+  }
+  await fs.mkdir(path.join(root, "src", "app", "api", "cron", "ping"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({ private: true, type: "module" }, null, 2),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "layout.tsx"),
+    `export default function Layout({ children }) { return <html><body>{children}</body></html>; }`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "page.tsx"),
+    `export default function Page() { return <main>Cloudflare cron runtime</main>; }`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "api", "cron", "ping", "route.ts"),
+    `
+import { cronRoute } from "@farm.js/core/cron";
+import { getStorage } from "@farm.js/core/storage";
+
+export const GET = cronRoute(async (request: Request) => {
+  await getStorage("cron").setItem("ping", request.headers.get("x-farm-cron-name"));
+  return Response.json({ ok: true });
+});
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    `
+export default {
+  cron: { ping: { schedule: "*/5 * * * *", path: "/api/cron/ping" } },
+  storage: { mounts: { cron: { driver: "cloudflare-kv-binding", binding: "CRON_KV" } } },
+};
+`.trim(),
+  );
+
+  const userConfig = await loadConfig(root, undefined, "production");
+  const config = await resolveConfig(
+    {
+      ...userConfig,
+      root,
+      srcDir: "src",
+      images: { provider: "none" },
+      telemetry: false,
+      generateBuildId: () => "cloudflare-module-cron-test",
+      deploy: { target: "cloudflare", preset: "cloudflare-module" },
+    },
+    "production",
+  );
+  await build(config, { root, preset: "cloudflare-module" });
+  return { outputDir: path.resolve(root, config.deploy.outputDir) };
+}
+
 async function expectPngResponse(response: Response): Promise<void> {
   expect(response.status, await response.clone().text()).toBe(200);
   expect(response.headers.get("content-type")).toBe("image/png");
@@ -796,6 +869,39 @@ describe("first-class provider runtime output", () => {
       });
     } finally {
       await runtime.stop();
+    }
+  }, 180_000);
+
+  it("delivers a Cron Trigger to the cron route in the cloudflare-module worker", async () => {
+    const { outputDir } = await createCloudflareCronFixture();
+    const workerDirectory = path.join(outputDir, "server");
+    const wrangler = JSON.parse(
+      await fs.readFile(path.join(workerDirectory, "wrangler.json"), "utf8"),
+    ) as { compatibility_date: string; compatibility_flags: string[]; triggers?: unknown };
+    expect(wrangler.triggers).toEqual({ crons: ["*/5 * * * *"] });
+    // Every module, as Wrangler uploads them: storage drivers load through a
+    // dynamic import that Miniflare cannot follow from the entry.
+    const modules = (await fs.readdir(workerDirectory, { recursive: true }))
+      .filter((file) => /\.m?js$/.test(file))
+      .sort((a, b) => Number(b === "index.mjs") - Number(a === "index.mjs"))
+      .map((file) => ({ type: "ESModule" as const, path: path.join(workerDirectory, file) }));
+    const runtime = new Miniflare({
+      compatibilityDate: wrangler.compatibility_date,
+      compatibilityFlags: wrangler.compatibility_flags,
+      modulesRoot: workerDirectory,
+      modules,
+      bindings: { CRON_SECRET: "cron-value" },
+      kvNamespaces: ["CRON_KV"],
+    });
+
+    try {
+      const worker = await runtime.getWorker();
+      const result = await worker.scheduled({ cron: "*/5 * * * *", scheduledTime: new Date() });
+      expect(result.outcome).toBe("ok");
+      const kv = await runtime.getKVNamespace("CRON_KV");
+      expect(await kv.get("ping")).toBe("ping");
+    } finally {
+      await runtime.dispose();
     }
   }, 180_000);
 });
