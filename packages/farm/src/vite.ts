@@ -842,8 +842,9 @@ function interceptFarmDevPageResponse(options: {
     if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
     delete res[FARM_NODE_RESPONSE_END_PENDING];
   };
-  // A runtime.after failure is the runtime's to report, once, and fails the response with the
-  // runtime hook 500 production answers instead of the response the hook never finished.
+  // A runtime.after failure, or an HTML transform failure inside a runtime session, is the
+  // runtime's to report, once, and fails the response with the runtime hook 500 production
+  // answers instead of the response the hook never finished.
   let runtimeHookFailed = false;
   const endRuntimeRequest = (response: Response) =>
     pm.endRuntimeRequest(runtimeSession!, response).catch((error: unknown) => {
@@ -1043,15 +1044,26 @@ function interceptFarmDevPageResponse(options: {
       .then(async () => {
         if (isHtmlResponse) {
           const fullHtml = Buffer.concat(htmlChunks).toString("utf8");
-          if (!didStreamHtml || bufferPluginResponse) {
-            let html = await pm.runHookSerial("transformHTML", fullHtml);
-            html = await pm.runHookSerial("afterRender", html, renderPayload);
-            originalEndArgs.length = 0;
-            originalEndArgs.push(html);
-            if (callback) originalEndArgs.push(callback);
-          } else {
-            await pm.runHookSerial("transformHTML", fullHtml);
-            await pm.runHookSerial("afterRender", fullHtml, renderPayload);
+          try {
+            if (!didStreamHtml || bufferPluginResponse) {
+              let html = await pm.runHookSerial("transformHTML", fullHtml);
+              html = await pm.runHookSerial("afterRender", html, renderPayload);
+              originalEndArgs.length = 0;
+              originalEndArgs.push(html);
+              if (callback) originalEndArgs.push(callback);
+            } else {
+              await pm.runHookSerial("transformHTML", fullHtml);
+              await pm.runHookSerial("afterRender", fullHtml, renderPayload);
+            }
+          } catch (error) {
+            // Production runs these hooks inside the runtime request, so a throw fails it:
+            // runtime.error and onError ("runtime") observe it, runtime.after does not run, and
+            // the page answers the runtime hook 500.
+            if (runtimeSession) {
+              runtimeHookFailed = true;
+              await pm.failRuntimeRequest(runtimeSession, error);
+            }
+            throw error;
           }
         }
 
@@ -2603,6 +2615,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           const configRewriteSource = (req as FarmDevConfigRewriteRequest)[
             FARM_DEV_CONFIG_REWRITE_SOURCE
           ];
+          // A plugin runtime hook that throws fails the request with the generic JSON 500 on an
+          // API path or with `renderer: false`, and plain text on a page, as in production.
+          const runtimeHookErrorAnswersJSON =
+            rendererDisabled || isFarmAPIPathname(requestPathname, apiServerBasePath);
           if (
             pm &&
             configRewriteSource === undefined &&
@@ -2611,6 +2627,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               configRedirectMatchers.length > 0) &&
             !isViteOwnedRequest()
           ) {
+            let redirect: ReturnType<(typeof configRedirectMatchers)[number]> = null;
             try {
               await pm.runHookParallelFiltered(
                 "beforeRequest",
@@ -2618,27 +2635,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 req,
                 res,
               );
-              let redirect: ReturnType<(typeof configRedirectMatchers)[number]> = null;
               for (const matchRedirect of configRedirectMatchers) {
                 redirect ??= matchRedirect(parsedRequestUrl);
-              }
-              if (redirect) {
-                const redirectResponse = new Response(`Redirecting to ${redirect.destination}`, {
-                  status: redirect.statusCode,
-                  headers: { Location: redirect.destination },
-                });
-                await sendWebResponse(
-                  res,
-                  pm.hasRuntimeRequestHooks()
-                    ? await pm.runRuntimeRequest(
-                        createRequestFromNodeRequest(req, parsedRequestUrl),
-                        () => redirectResponse,
-                        { kind: "page", route: { pathname: requestPathname } },
-                      )
-                    : redirectResponse,
-                );
-                logResponse(requestMethod, requestUrl, res.statusCode, 0, "PAGE");
-                return;
               }
             } catch (error) {
               await emitPluginError("before-request", error, { urlPath: requestUrl });
@@ -2649,12 +2647,40 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               res.end("Internal Server Error");
               return;
             }
+            if (redirect) {
+              let response = new Response(`Redirecting to ${redirect.destination}`, {
+                status: redirect.statusCode,
+                headers: { Location: redirect.destination },
+              });
+              if (pm.hasRuntimeRequestHooks()) {
+                const redirectResponse = response;
+                try {
+                  // The session describes the request as production's does for a path no route
+                  // answers.
+                  response = await pm.runRuntimeRequest(
+                    createRequestFromNodeRequest(req, parsedRequestUrl),
+                    () => redirectResponse,
+                    {
+                      kind: isFarmAPIPathname(requestPathname, apiServerBasePath)
+                        ? "api"
+                        : requestMethod === "GET" || requestMethod === "HEAD"
+                          ? "page"
+                          : "request",
+                      route: { pathname: requestPathname },
+                    },
+                  );
+                } catch {
+                  // The runtime reported the failure to runtime.error and onError.
+                  sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                  logResponse(requestMethod, requestUrl, 500, 0, "PAGE");
+                  return;
+                }
+              }
+              await sendWebResponse(res, response);
+              logResponse(requestMethod, requestUrl, res.statusCode, 0, "PAGE");
+              return;
+            }
           }
-
-          // A plugin runtime hook that throws fails the request with the generic JSON 500 on an
-          // API path or with `renderer: false`, and plain text on a page, as in production.
-          const runtimeHookErrorAnswersJSON =
-            rendererDisabled || isFarmAPIPathname(requestPathname, apiServerBasePath);
 
           // The OpenAPI spec and reference, docs, raw markdown-source, the
           // markdown mirror, the Markdown 404 fallback, and API routes expose
@@ -2788,17 +2814,25 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               applyWebRequestToNodeRequest(runtimeSession.request, req);
             }
             let response: Response | void;
+            let responding = false;
             try {
               if (await runAppMiddlewareInRuntimeSession(runtimeSession)) {
                 await discard();
                 return;
               }
+              responding = true;
               response = await respond(
                 runtimeSession?.request ?? createRequestFromNodeRequest(req, new URL(fullUrl)),
               );
             } catch (error) {
               if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
-              throw error;
+              if (!runtimeSession || !responding || res.headersSent) throw error;
+              // The route answers inside the runtime request, as in production, so its throw
+              // fails that request: runtime.error and onError observed it once, runtime.after
+              // does not run, and the request answers the runtime hook 500 for its path.
+              console.error("[FARM] Built-in route error:", error);
+              sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+              return;
             }
             if (!response) return;
             if (runtimeSession) await sendRuntimeResponse(runtimeSession, response);
@@ -4379,6 +4413,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 })
               : undefined;
 
+          // As in production, a middleware throw inside a runtime session is the runtime's to
+          // report, once, as the "runtime" phase.
+          let middlewareFailed = false;
           try {
             if (middlewareManager?.hasMiddleware()) {
               const middlewareRequest = createRequestFromNodeRequest(req, new URL(fullUrl));
@@ -4388,7 +4425,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 req,
                 res,
                 () => middlewareManager!.execute(req, res),
-              );
+              ).catch((error: unknown) => {
+                middlewareFailed = true;
+                throw error;
+              });
               if (handled) {
                 if (!responseInterceptor?.isEnded()) {
                   const duration = Date.now() - startTime;
@@ -4433,15 +4473,22 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (pm && runtimeSession) {
               await pm.failRuntimeRequest(runtimeSession, error);
             }
-            await emitPluginError("render-page", error, { pathname });
+            if (!(middlewareFailed && runtimeSession)) {
+              await emitPluginError("render-page", error, { pathname });
+            }
             // With `renderer: false` no error page renders: answer the JSON 500 production
             // answers (a throwing middleware, say), not Vite's HTML error page.
             if (rendererDisabled && !res.headersSent) {
               sendFarmDevErrorJSON(res);
               return;
             }
-            // Vite's error page reports it, kept out of caches like production's error document.
-            if (!res.headersSent) res.setHeader("Cache-Control", "private, no-store");
+            // Vite's error page, with its overlay, reports it in place of production's error
+            // document. It is HTML kept out of caches like that document, and runtime.after
+            // sees it through the response interceptor, as it sees the document in production.
+            if (!res.headersSent) {
+              res.setHeader("Content-Type", "text/html; charset=utf-8");
+              res.setHeader("Cache-Control", "private, no-store");
+            }
             next(error);
           }
         }),

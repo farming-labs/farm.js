@@ -33,7 +33,8 @@ afterEach(async () => {
 // server can be asked the same questions.
 const TRACED = `const traced = (request: Request) => {
   const { pathname } = new URL(request.url);
-  return /^\\/(api|integration)\\//.test(pathname) ||
+  return /^\\/(api|integration|docs)\\//.test(pathname) ||
+    pathname === "/docs" ||
     pathname === "/hello" ||
     pathname.startsWith("/hello/") ||
     pathname === "/.well-known/farmjs.json"
@@ -48,6 +49,11 @@ ${TRACED}
 export default {
   images: { provider: "none" },
   telemetry: false,
+  redirects: () => [
+    { source: "/hello/moved/:rest", destination: "/hello" },
+    { source: "/api/moved/:rest", destination: "/api/ok" },
+  ],
+  rewrites: () => [{ source: "/hello/rewritten", destination: "/hello/before-fails" }],
   integrations: {
     acme: defineIntegration({
       category: "custom",
@@ -97,6 +103,8 @@ export default {
   "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
   "src/app/hello/page.tsx": `export default function Page() { return <h1>hello</h1>; }`,
   "src/app/hello/after-fails/page.tsx": `export default function Page() { return <h1>after</h1>; }`,
+  "src/app/hello/transform-fails/page.tsx": `export default function Page() { return <h1>transform-fails-marker</h1>; }`,
+  "src/app/hello/render-fails/page.tsx": `export default function Page() { return <h1>render</h1>; }`,
   "src/app/middleware.ts": `${TRACED}
 export function middleware(request: Request) {
   const pathname = traced(request);
@@ -116,19 +124,39 @@ export function middleware(request: Request) {
   "src/app/api/boom/route.ts": `export function GET(): Response { throw new Error("route failed"); }`,
 };
 
-// A second plugin with an HTML transform hook, which makes farm dev buffer a page response
-// before runtime.after sees it.
+// A second plugin with HTML transform hooks, which make farm dev buffer a page response before
+// runtime.after sees it. transformHTML fails on one page's markup, afterRender on another path.
 const HTML_TRANSFORM_PLUGIN = `
     definePlugin({
       name: "acme:html",
       transformHTML(html: string) {
+        if (html.includes("transform-fails-marker")) throw new Error("transform failed");
+        return html;
+      },
+      afterRender(html: string, { pathname }: { pathname: string }) {
+        if (pathname.endsWith("/render-fails")) throw new Error("render failed");
         return html;
       },
     }),`;
 
+// The built-in docs engine, with a client root layout that fails when it wraps one docs page:
+// farm dev and production wrap docs HTML in the app's client layouts inside the docs route.
+const DOCS_FILES: Record<string, string> = {
+  "src/app/layout.tsx": `"use client";
+export default function Layout({ children }) {
+  if (String(children?.props?.dangerouslySetInnerHTML?.__html ?? "").includes("layout-fails-marker")) {
+    throw new Error("layout failed");
+  }
+  return <main>{children}</main>;
+}`,
+  "src/app/docs/page.md": "---\ntitle: Docs\n---\n# Docs\n",
+  "src/app/docs/layout-fails/page.md":
+    "---\ntitle: Layout fails\n---\n# Layout fails\n\nlayout-fails-marker\n",
+};
+
 async function createApp(
   prefix: string,
-  options: { htmlTransform?: boolean } = {},
+  options: { htmlTransform?: boolean; docs?: boolean } = {},
 ): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   temporaryRoots.add(root);
@@ -142,11 +170,19 @@ async function createApp(
     );
   }
   await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
-  for (const [relativePath, source] of Object.entries(FILES)) {
+  for (const [relativePath, source] of Object.entries({
+    ...FILES,
+    ...(options.docs ? DOCS_FILES : {}),
+  })) {
     await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
     await fs.writeFile(
       path.join(root, relativePath),
-      source.replace("__HTML_TRANSFORM__", options.htmlTransform ? HTML_TRANSFORM_PLUGIN : ""),
+      source
+        .replace("__HTML_TRANSFORM__", options.htmlTransform ? HTML_TRANSFORM_PLUGIN : "")
+        .replace(
+          "telemetry: false,",
+          options.docs ? "telemetry: false,\n  docs: { enabled: true }," : "telemetry: false,",
+        ),
     );
   }
   return root;
@@ -308,6 +344,7 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
   });
 
   await expectPageHookFailures(origin);
+  await expectConfigRouteHookFailures(origin);
 
   // A built-in route on a page path whose runtime.after throws answers the page's plain-text
   // 500, not the JSON an API path gets.
@@ -358,6 +395,129 @@ async function expectPageHookFailures(origin: string): Promise<void> {
       ],
     },
   });
+}
+
+// A config redirect passes through the plugin runtime like any response, so a throwing runtime
+// hook fails it as it fails a route: runtime.error observes it, onError gets it once as the
+// "runtime" phase, and the answer is the runtime hook 500, plain text on a page path and JSON
+// under the API base path. A runtime.before that throws on a config rewrite's destination fails
+// the request opened for the requested URL the same way.
+async function expectConfigRouteHookFailures(origin: string): Promise<void> {
+  const init: RequestInit = { redirect: "manual", headers: { accept: "text/html" } };
+  const jsonFailure = {
+    status: 500,
+    contentType: "application/json",
+    cacheControl: null,
+    body: '{"error":"Internal Server Error"}',
+  };
+  const redirected = await request(origin, "/hello/moved/ok", init);
+  expect({ status: redirected.status, trace: redirected.trace }).toEqual({
+    status: 307,
+    trace: ["before page /hello/moved/ok", "after /hello/moved/ok 307"],
+  });
+  expect({
+    "/hello/moved/before-fails": await request(origin, "/hello/moved/before-fails", init),
+    "/hello/moved/after-fails": await request(origin, "/hello/moved/after-fails", init),
+    "/api/moved/before-fails": await request(origin, "/api/moved/before-fails", init),
+    "/api/moved/after-fails": await request(origin, "/api/moved/after-fails", init),
+    "/hello/rewritten": await request(origin, "/hello/rewritten", init),
+  }).toEqual({
+    "/hello/moved/before-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/moved/before-fails",
+        "error /hello/moved/before-fails before failed",
+        "onError runtime before failed",
+      ],
+    },
+    "/hello/moved/after-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/moved/after-fails",
+        "after /hello/moved/after-fails 307",
+        "error /hello/moved/after-fails after failed",
+        "onError runtime after failed",
+      ],
+    },
+    "/api/moved/before-fails": {
+      ...jsonFailure,
+      trace: [
+        "before api /api/moved/before-fails",
+        "error /api/moved/before-fails before failed",
+        "onError runtime before failed",
+      ],
+    },
+    "/api/moved/after-fails": {
+      ...jsonFailure,
+      trace: [
+        "before api /api/moved/after-fails",
+        "after /api/moved/after-fails 307",
+        "error /api/moved/after-fails after failed",
+        "onError runtime after failed",
+      ],
+    },
+    "/hello/rewritten": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/rewritten",
+        "before page /hello/before-fails",
+        "error /hello/rewritten before failed",
+        "onError runtime before failed",
+      ],
+    },
+  });
+}
+
+// A throwing HTML transform hook (transformHTML or afterRender) fails the page as a throwing
+// runtime hook does: runtime.error observes it, onError gets it once as the "runtime" phase, no
+// runtime.after runs, and the page answers the plain-text 500.
+async function expectHTMLTransformFailures(origin: string): Promise<void> {
+  const accept = { headers: { accept: "text/html" } };
+  expect({
+    "/hello/transform-fails": await request(origin, "/hello/transform-fails", accept),
+    "/hello/render-fails": await request(origin, "/hello/render-fails", accept),
+  }).toEqual({
+    "/hello/transform-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/transform-fails",
+        "middleware /hello/transform-fails",
+        "error /hello/transform-fails transform failed",
+        "onError runtime transform failed",
+      ],
+    },
+    "/hello/render-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/render-fails",
+        "middleware /hello/render-fails",
+        "error /hello/render-fails render failed",
+        "onError runtime render failed",
+      ],
+    },
+  });
+}
+
+// A built-in route whose own handler throws (here the docs engine's layout wrap) fails the
+// request as a throwing runtime hook does: runtime.error observes it, onError gets it once as the
+// "runtime" phase, no runtime.after runs, and a page path answers the plain-text 500.
+async function expectBuiltInRouteFailure(origin: string): Promise<void> {
+  const docs = await request(origin, "/docs", { headers: { accept: "text/html" } });
+  expect({ status: docs.status, trace: docs.trace }).toEqual({
+    status: 200,
+    trace: ["before docs /docs", "middleware /docs", "after /docs 200"],
+  });
+  expect(await request(origin, "/docs/layout-fails", { headers: { accept: "text/html" } })).toEqual(
+    {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before docs /docs/layout-fails",
+        "middleware /docs/layout-fails",
+        "error /docs/layout-fails layout failed",
+        "onError runtime layout failed",
+      ],
+    },
+  );
 }
 
 async function startDevelopment(root: string): Promise<string> {
@@ -420,14 +580,31 @@ describe("plugin runtime hooks for API, integration, and built-in route requests
   }, 240_000);
 });
 
-describe("plugin runtime hook failures on a page with an HTML transform hook", () => {
+describe("plugin runtime and HTML transform hook failures on a page", () => {
   it("in development", async () => {
     const root = await createApp("farm-dev-plugin-runtime-html-", { htmlTransform: true });
-    await expectPageHookFailures(await startDevelopment(root));
+    const origin = await startDevelopment(root);
+    await expectPageHookFailures(origin);
+    await expectHTMLTransformFailures(origin);
   }, 120_000);
 
   it("in a node-server production build", async () => {
     const root = await createApp("farm-prod-plugin-runtime-html-", { htmlTransform: true });
-    await withProduction(root, expectPageHookFailures);
+    await withProduction(root, async (origin) => {
+      await expectPageHookFailures(origin);
+      await expectHTMLTransformFailures(origin);
+    });
+  }, 240_000);
+});
+
+describe("plugin runtime hooks when a built-in route's handler throws", () => {
+  it("in development", async () => {
+    const root = await createApp("farm-dev-plugin-runtime-docs-", { docs: true });
+    await expectBuiltInRouteFailure(await startDevelopment(root));
+  }, 120_000);
+
+  it("in a node-server production build", async () => {
+    const root = await createApp("farm-prod-plugin-runtime-docs-", { docs: true });
+    await withProduction(root, expectBuiltInRouteFailure);
   }, 240_000);
 });

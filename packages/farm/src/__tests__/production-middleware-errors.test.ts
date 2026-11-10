@@ -45,6 +45,7 @@ export default defineConfig({
   renderer: false,
   images: { provider: "none" },
   telemetry: false,
+  redirects: () => [{ source: "/moved/:rest", destination: "/api/mw-throw" }],
   plugins: [
     definePlugin({
       name: "test:backend-hook-errors",
@@ -236,7 +237,7 @@ async function readTrace(origin: string, logPath: string, pathname: string, init
   return { response, trace };
 }
 
-// What both modes answer and report for a throwing API middleware and a throwing page hook.
+// What both modes answer and report for a throwing middleware and a throwing page hook.
 async function expectSharedFailureTraces(origin: string, logPath: string): Promise<void> {
   const failure = { message: SECRET };
   // The middleware throw reaches runtime.error and onError once, and runtime.after sees the 500.
@@ -257,6 +258,36 @@ async function expectSharedFailureTraces(origin: string, logPath: string): Promi
         pathname: "/api/mw-throw",
         status: 500,
         contentType: "application/json",
+      },
+    ],
+  });
+  // On a page the same holds: runtime.error and onError observe the throw once, and
+  // runtime.after sees the HTML 500. The body is the page's error document in production and
+  // Vite's error page, with its overlay, in development, so only its kind is compared.
+  const { response: pageResponse, trace: pageTrace } = await readTrace(
+    origin,
+    logPath,
+    "/mw-throw",
+    { headers: { accept: "text/html" } },
+  );
+  expect(pageResponse.body).toMatch(/^\s*<!DOCTYPE html>/i);
+  expect({ response: { ...pageResponse, body: undefined }, trace: pageTrace }).toEqual({
+    response: {
+      status: 500,
+      contentType: "text/html; charset=utf-8",
+      cacheControl: "private, no-store",
+      configured: "yes",
+      body: undefined,
+    },
+    trace: [
+      { source: "event", type: "middleware.error", pathname: "/mw-throw", ...failure },
+      { source: "runtime.error", pathname: "/mw-throw", ...failure },
+      { source: "onError", phase: "runtime", pathname: "/mw-throw", ...failure },
+      {
+        source: "runtime.after",
+        pathname: "/mw-throw",
+        status: 500,
+        contentType: "text/html; charset=utf-8",
       },
     ],
   });
@@ -431,9 +462,12 @@ async function expectBackendRuntimeHookErrors(origin: string): Promise<void> {
     "/plugin-after-throw",
     "/api/plugin-before-throw",
     "/api/plugin-after-throw",
+    // A config redirect passes through the runtime hooks too.
+    "/moved/plugin-before-throw",
+    "/moved/plugin-after-throw",
   ]) {
     const response = await readResponse(
-      await fetch(`${origin}${pathname}`, { headers: { accept: "text/html" } }),
+      await fetch(`${origin}${pathname}`, { headers: { accept: "text/html" }, redirect: "manual" }),
     );
     expect(response, pathname).toMatchObject({
       status: 500,
@@ -470,7 +504,7 @@ describe("development middleware errors", () => {
     }
   }, 120_000);
 
-  it("reports a throwing API middleware and a throwing page hook as production does", async () => {
+  it("reports a throwing middleware and a throwing page hook as production does", async () => {
     const logDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "farm-dev-mw-error-log-"));
     const logPath = path.join(logDirectory, "log");
     // The dev server loads the config in this process.
