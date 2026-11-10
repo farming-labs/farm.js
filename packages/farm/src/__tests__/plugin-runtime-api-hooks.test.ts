@@ -82,14 +82,16 @@ export default {
           const pathname = traced(request);
           if (!pathname) return;
           trace.push("after " + pathname + " " + response.status);
-          if (pathname.endsWith("/after-fails")) throw new Error("after failed");
+          if (pathname.endsWith("/after-fails") || new URL(request.url).search === "?after-fails") {
+            throw new Error("after failed");
+          }
         },
         error({ request, error }) {
           const pathname = traced(request);
           if (pathname) trace.push("error " + pathname + " " + (error as Error).message);
         },
       },
-    }),
+    }),__HTML_TRANSFORM__
   ],
 };`,
   "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
@@ -100,16 +102,34 @@ export function middleware(request: Request) {
   const pathname = traced(request);
   if (!pathname) return;
   trace.push("middleware " + pathname);
-  if (pathname === "/api/guarded" || pathname === "/.well-known/farmjs.json") {
+  if (pathname === "/api/mw-fails") throw new Error("middleware failed");
+  if (
+    pathname === "/api/guarded" ||
+    (pathname === "/.well-known/farmjs.json" && !new URL(request.url).search)
+  ) {
     return new Response("guarded", { status: 401 });
   }
 }`,
   "src/app/api/ok/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
   "src/app/api/after-fails/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
+  "src/app/api/mw-fails/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
   "src/app/api/boom/route.ts": `export function GET(): Response { throw new Error("route failed"); }`,
 };
 
-async function createApp(prefix: string): Promise<string> {
+// A second plugin with an HTML transform hook, which makes farm dev buffer a page response
+// before runtime.after sees it.
+const HTML_TRANSFORM_PLUGIN = `
+    definePlugin({
+      name: "acme:html",
+      transformHTML(html: string) {
+        return html;
+      },
+    }),`;
+
+async function createApp(
+  prefix: string,
+  options: { htmlTransform?: boolean } = {},
+): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   temporaryRoots.add(root);
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
@@ -124,14 +144,39 @@ async function createApp(prefix: string): Promise<string> {
   await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
   for (const [relativePath, source] of Object.entries(FILES)) {
     await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
-    await fs.writeFile(path.join(root, relativePath), source);
+    await fs.writeFile(
+      path.join(root, relativePath),
+      source.replace("__HTML_TRANSFORM__", options.htmlTransform ? HTML_TRANSFORM_PLUGIN : ""),
+    );
   }
   return root;
 }
 
+interface TracedResponse {
+  status: number;
+  contentType: string | null;
+  cacheControl: string | null;
+  body: string;
+  trace: string[];
+}
+
+/** Requests `pathname`, then reads what the plugin recorded for it. */
+async function request(origin: string, pathname: string, init?: RequestInit) {
+  const response = await fetch(`${origin}${pathname}`, init);
+  const result: TracedResponse = {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    cacheControl: response.headers.get("cache-control"),
+    body: await response.text(),
+    trace: [],
+  };
+  result.trace = await (await fetch(`${origin}/__trace`)).json();
+  return result;
+}
+
 async function expectRuntimeHookContract(origin: string): Promise<void> {
   const results: Record<string, { status: number; trace: string[] }> = {};
-  const thrown: Record<string, { contentType: string | null; body: string }> = {};
+  const thrown: Record<string, Partial<Omit<TracedResponse, "status" | "trace">>> = {};
   for (const pathname of [
     "/api/ok",
     "/api/blocked",
@@ -140,17 +185,17 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
     "/api/boom",
     "/api/before-fails",
     "/api/after-fails",
+    "/api/mw-fails",
     "/integration/boom",
     "/.well-known/farmjs.json",
     "/hello",
   ]) {
-    const response = await fetch(`${origin}${pathname}`);
-    const body = await response.text();
-    if (/\/(boom|before-fails|after-fails)$/.test(pathname)) {
-      thrown[pathname] = { contentType: response.headers.get("content-type"), body };
-    }
-    const trace = await (await fetch(`${origin}/__trace`)).json();
-    results[pathname] = { status: response.status, trace };
+    const { status, trace, ...response } = await request(origin, pathname);
+    if (/\/(boom|before-fails|after-fails|mw-fails)$/.test(pathname)) thrown[pathname] = response;
+    // Only production keeps a response a runtime.before guard let through out of shared
+    // caches (see the plugins docs), so a route's own 500 is compared without that header.
+    if (pathname.endsWith("/boom")) delete thrown[pathname]?.cacheControl;
+    results[pathname] = { status, trace };
   }
 
   expect(results).toEqual({
@@ -208,6 +253,18 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
         "onError runtime after failed",
       ],
     },
+    // App middleware that throws on an API path fails the request like a throwing API route:
+    // runtime.error observes the throw, onError gets it once, and runtime.after sees the 500.
+    "/api/mw-fails": {
+      status: 500,
+      trace: [
+        "before api /api/mw-fails",
+        "middleware /api/mw-fails",
+        "error /api/mw-fails middleware failed",
+        "onError runtime middleware failed",
+        "after /api/mw-fails 500",
+      ],
+    },
     // A throwing integration route follows the same contract (integration routes answer
     // before app middleware).
     "/integration/boom": {
@@ -236,90 +293,141 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
     },
   });
   // A throwing API or integration route, and a throwing runtime hook on an API path, answer
-  // Farm's generic 500 body in both modes, not the server's own error response.
+  // Farm's generic 500 body in both modes, not the server's own error response. A middleware
+  // failure is kept out of shared caches, and a runtime hook failure sets no cache header.
   const internalServerError = {
     contentType: "application/json",
     body: '{"error":"Internal Server Error"}',
   };
   expect(thrown).toEqual({
     "/api/boom": internalServerError,
-    "/api/before-fails": internalServerError,
-    "/api/after-fails": internalServerError,
+    "/api/before-fails": { ...internalServerError, cacheControl: null },
+    "/api/after-fails": { ...internalServerError, cacheControl: null },
+    "/api/mw-fails": { ...internalServerError, cacheControl: "private, no-store" },
     "/integration/boom": internalServerError,
   });
 
-  // On a page, a throwing runtime hook answers a plain-text 500.
-  const pageFailures: Record<string, { status: number; contentType: string | null; body: string }> =
-    {};
-  for (const pathname of ["/hello/before-fails", "/hello/after-fails"]) {
-    const response = await fetch(`${origin}${pathname}`, { headers: { accept: "text/html" } });
-    pageFailures[pathname] = {
-      status: response.status,
-      contentType: response.headers.get("content-type"),
-      body: await response.text(),
-    };
-    await (await fetch(`${origin}/__trace`)).json();
-  }
-  const pageFailure = {
-    status: 500,
-    contentType: "text/plain; charset=utf-8",
-    body: "Internal Server Error",
-  };
-  expect(pageFailures).toEqual({
-    "/hello/before-fails": pageFailure,
-    "/hello/after-fails": pageFailure,
+  await expectPageHookFailures(origin);
+
+  // A built-in route on a page path whose runtime.after throws answers the page's plain-text
+  // 500, not the JSON an API path gets.
+  expect(await request(origin, "/.well-known/farmjs.json?after-fails")).toEqual({
+    ...PAGE_HOOK_FAILURE,
+    trace: [
+      "before page /.well-known/farmjs.json",
+      "middleware /.well-known/farmjs.json",
+      "after /.well-known/farmjs.json 200",
+      "error /.well-known/farmjs.json after failed",
+      "onError runtime after failed",
+    ],
   });
+}
+
+const PAGE_HOOK_FAILURE = {
+  status: 500,
+  contentType: "text/plain; charset=utf-8",
+  cacheControl: null,
+  body: "Internal Server Error",
+};
+
+// On a page, a throwing runtime hook answers a plain-text 500: runtime.error observes it, onError
+// gets it once as the "runtime" phase, and no later runtime.after runs. With an HTML transform
+// hook, farm dev buffers the page before runtime.after sees it; the answer is the same.
+async function expectPageHookFailures(origin: string): Promise<void> {
+  const accept = { headers: { accept: "text/html" } };
+  expect({
+    "/hello/before-fails": await request(origin, "/hello/before-fails", accept),
+    "/hello/after-fails": await request(origin, "/hello/after-fails", accept),
+  }).toEqual({
+    "/hello/before-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/before-fails",
+        "error /hello/before-fails before failed",
+        "onError runtime before failed",
+      ],
+    },
+    "/hello/after-fails": {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before page /hello/after-fails",
+        "middleware /hello/after-fails",
+        "after /hello/after-fails 200",
+        "error /hello/after-fails after failed",
+        "onError runtime after failed",
+      ],
+    },
+  });
+}
+
+async function startDevelopment(root: string): Promise<string> {
+  const server = await createServer({ root });
+  devServers.add(server);
+  await server.listen(await getAvailablePort());
+  const address = server.httpServer?.address();
+  if (!address || typeof address === "string") throw new Error("Missing dev server address");
+  return `http://localhost:${address.port}`;
+}
+
+async function withProduction(root: string, check: (origin: string) => Promise<void>) {
+  const config = await resolveConfig(
+    { ...(await loadConfig(root, undefined, "production")), root, srcDir: "src" },
+    "production",
+  );
+  await build(config, { root, preset: "node-server" });
+
+  const output = path.join(root, ".farm", ".output");
+  const port = await getAvailablePort();
+  const processOutput: string[] = [];
+  const productionServer = spawn(process.execPath, [path.join(output, "server", "index.mjs")], {
+    cwd: path.join(output, "server"),
+    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  productionServer.stdout.on("data", (chunk) => processOutput.push(String(chunk)));
+  productionServer.stderr.on("data", (chunk) => processOutput.push(String(chunk)));
+  const exited = new Promise<void>((resolve) => productionServer.once("exit", () => resolve()));
+
+  try {
+    const origin = `http://127.0.0.1:${port}`;
+    let ready = false;
+    for (let attempt = 0; attempt < 200 && !ready; attempt++) {
+      if (productionServer.exitCode !== null) break;
+      ready = await fetch(`${origin}/_farm/health/ready`).then(
+        (response) => response.ok,
+        () => false,
+      );
+      if (!ready) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(ready, processOutput.join("")).toBe(true);
+
+    await check(origin);
+  } finally {
+    if (productionServer.exitCode === null) productionServer.kill();
+    await exited;
+  }
 }
 
 describe("plugin runtime hooks for API, integration, and built-in route requests", () => {
   it("in development", async () => {
     const root = await createApp("farm-dev-plugin-runtime-api-");
-    const server = await createServer({ root });
-    devServers.add(server);
-    await server.listen(await getAvailablePort());
-    const address = server.httpServer?.address();
-    if (!address || typeof address === "string") throw new Error("Missing dev server address");
-
-    await expectRuntimeHookContract(`http://localhost:${address.port}`);
+    await expectRuntimeHookContract(await startDevelopment(root));
   }, 120_000);
 
   it("in a node-server production build", async () => {
     const root = await createApp("farm-prod-plugin-runtime-api-");
-    const config = await resolveConfig(
-      { ...(await loadConfig(root, undefined, "production")), root, srcDir: "src" },
-      "production",
-    );
-    await build(config, { root, preset: "node-server" });
+    await withProduction(root, expectRuntimeHookContract);
+  }, 240_000);
+});
 
-    const output = path.join(root, ".farm", ".output");
-    const port = await getAvailablePort();
-    const processOutput: string[] = [];
-    const productionServer = spawn(process.execPath, [path.join(output, "server", "index.mjs")], {
-      cwd: path.join(output, "server"),
-      env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    productionServer.stdout.on("data", (chunk) => processOutput.push(String(chunk)));
-    productionServer.stderr.on("data", (chunk) => processOutput.push(String(chunk)));
-    const exited = new Promise<void>((resolve) => productionServer.once("exit", () => resolve()));
+describe("plugin runtime hook failures on a page with an HTML transform hook", () => {
+  it("in development", async () => {
+    const root = await createApp("farm-dev-plugin-runtime-html-", { htmlTransform: true });
+    await expectPageHookFailures(await startDevelopment(root));
+  }, 120_000);
 
-    try {
-      const origin = `http://127.0.0.1:${port}`;
-      let ready = false;
-      for (let attempt = 0; attempt < 200 && !ready; attempt++) {
-        if (productionServer.exitCode !== null) break;
-        ready = await fetch(`${origin}/_farm/health/ready`).then(
-          (response) => response.ok,
-          () => false,
-        );
-        if (!ready) await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      expect(ready, processOutput.join("")).toBe(true);
-
-      await expectRuntimeHookContract(origin);
-    } finally {
-      if (productionServer.exitCode === null) productionServer.kill();
-      await exited;
-    }
+  it("in a node-server production build", async () => {
+    const root = await createApp("farm-prod-plugin-runtime-html-", { htmlTransform: true });
+    await withProduction(root, expectPageHookFailures);
   }, 240_000);
 });

@@ -393,7 +393,21 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             if (farmMiddleware) {
               await farmMiddleware.waitForDiscovery?.();
               const middlewareData = new Map<string, any>();
-              const handled = await farmMiddleware.execute(req, res, pathname, middlewareData);
+              let handled: boolean;
+              try {
+                handled = await farmMiddleware.execute(req, res, pathname, middlewareData);
+              } catch (error) {
+                if (res.headersSent) throw error;
+                // As in core's dev server and production: the generic JSON 500, kept out of
+                // shared caches.
+                logResponse(method, pathname, 500, Date.now() - startTime);
+                console.error("[FARM] Middleware error:", error);
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.setHeader("Cache-Control", "private, no-store");
+                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                return;
+              }
               if (handled) {
                 const duration = Date.now() - startTime;
                 logResponse(method, pathname, res.statusCode || 200, duration);

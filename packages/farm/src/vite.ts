@@ -643,6 +643,14 @@ function sendFarmDevErrorJSON(res: ServerResponse): void {
   res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
 }
 
+/** `sendFarmDevErrorJSON`'s 500 as a `Response`, for `runtime.after` to see. */
+function createFarmDevMiddlewareErrorResponse(): Response {
+  return new Response(FARM_INTERNAL_SERVER_ERROR_BODY, {
+    status: 500,
+    headers: { "Content-Type": "application/json", "Cache-Control": "private, no-store" },
+  });
+}
+
 /**
  * The 500 a request answers when a plugin runtime hook throws, as in the production entry: the
  * generic JSON body on an API path or with `renderer: false`, plain text for a page.
@@ -833,6 +841,28 @@ function interceptFarmDevPageResponse(options: {
     if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
     delete res[FARM_NODE_RESPONSE_END_PENDING];
   };
+  // A runtime.after failure is the runtime's to report, once, and fails the response with the
+  // runtime hook 500 production answers instead of the response the hook never finished.
+  let runtimeHookFailed = false;
+  const endRuntimeRequest = (response: Response) =>
+    pm.endRuntimeRequest(runtimeSession!, response).catch((error: unknown) => {
+      runtimeHookFailed = true;
+      throw error;
+    });
+  const reportFailure = (error: unknown) => {
+    if (!runtimeHookFailed) void options.emitError(error);
+    console.error("Error in afterResponse hook:", error);
+  };
+  const writeRuntimeHookFailure = () => {
+    res.statusCode = 500;
+    res.removeHeader("Content-Length");
+    res.setHeader(
+      "Content-Type",
+      options.jsonError ? "application/json" : "text/plain; charset=utf-8",
+    );
+    originalWriteHead(500);
+    originalWrite(options.jsonError ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error");
+  };
   const htmlChunks: Buffer[] = [];
   const responseChunks: Buffer[] = [];
   let didStreamHtml = false;
@@ -873,27 +903,24 @@ function interceptFarmDevPageResponse(options: {
     const status = res.statusCode || 200;
     const canHaveBody = method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
     pm.copyRequestContext(req, runtimeSession!.request);
-    const done = pm
-      .endRuntimeRequest(
-        runtimeSession!,
-        new Response(canHaveBody ? body : null, {
-          status,
-          headers: createHeadersFromNodeResponse(res),
-        }),
-      )
-      .then(async (runtimeResponse) => {
-        applyWebResponseToNodeResponse(runtimeResponse, res);
-        if (!res.headersSent) originalWriteHead(res.statusCode);
-        originalFlushHeaders?.();
-        if (!runtimeResponse.body) return;
-        const reader = runtimeResponse.body.getReader();
-        for (;;) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          originalWrite(chunk.value);
-          if (typeof res.flush === "function") res.flush();
-        }
-      });
+    const done = endRuntimeRequest(
+      new Response(canHaveBody ? body : null, {
+        status,
+        headers: createHeadersFromNodeResponse(res),
+      }),
+    ).then(async (runtimeResponse) => {
+      applyWebResponseToNodeResponse(runtimeResponse, res);
+      if (!res.headersSent) originalWriteHead(res.statusCode);
+      originalFlushHeaders?.();
+      if (!runtimeResponse.body) return;
+      const reader = runtimeResponse.body.getReader();
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        originalWrite(chunk.value);
+        if (typeof res.flush === "function") res.flush();
+      }
+    });
     // Settled by `end`, which reports a failure; until then a rejection is not unhandled.
     done.catch(() => {});
     runtimeStream = { controller, done };
@@ -992,20 +1019,8 @@ function interceptFarmDevPageResponse(options: {
           hasAfterResponseHook ? pm.runHookParallel("afterResponse", req, res) : undefined,
         )
         .catch((error) => {
-          void options.emitError(error);
-          console.error("Error in afterResponse hook:", error);
-          if (!res.headersSent) {
-            res.statusCode = 500;
-            res.removeHeader("Content-Length");
-            res.setHeader(
-              "Content-Type",
-              options.jsonError ? "application/json" : "text/plain; charset=utf-8",
-            );
-            originalWriteHead(500);
-            originalWrite(
-              options.jsonError ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error",
-            );
-          }
+          reportFailure(error);
+          if (!res.headersSent) writeRuntimeHookFailure();
         })
         .finally(() => {
           restore();
@@ -1054,8 +1069,7 @@ function interceptFarmDevPageResponse(options: {
                 ? Buffer.concat(responseChunks)
                 : toNodeResponseBuffer(firstArg, originalEndArgs[1])
             : null;
-          const runtimeResponse = await pm.endRuntimeRequest(
-            runtimeSession,
+          const runtimeResponse = await endRuntimeRequest(
             new Response(responseBody ? toRequestBody(responseBody) : responseBody, {
               status,
               headers: createHeadersFromNodeResponse(res),
@@ -1088,8 +1102,13 @@ function interceptFarmDevPageResponse(options: {
         originalEnd(...originalEndArgs);
       })
       .catch((error) => {
-        void options.emitError(error);
-        console.error("Error in afterResponse hook:", error);
+        reportFailure(error);
+        if (runtimeHookFailed && !res.headersSent) {
+          restore();
+          writeRuntimeHookFailure();
+          originalEnd(callback);
+          return;
+        }
         const shouldBufferResponse = isHtmlResponse
           ? bufferPluginResponse
           : Boolean(runtimeSession && hasRuntimeAfterHook);
@@ -2654,8 +2673,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
           // Runs app middleware inside a plugin runtime session `beginRuntimeRequest` opened,
           // as production runs it inside the runtime request: runtime.after sees a response
-          // middleware answers with, and runtime.error sees a middleware throw. `logResponse`
-          // reports the status of a request middleware handled.
+          // middleware answers with. A middleware throw is rethrown for the caller to report and
+          // answer. `logResponse` reports the status of a request middleware handled.
           const runAppMiddlewareInRuntimeSession = async (
             runtimeSession: FarmPluginRuntimeSession | undefined,
             logResponse?: (status: number) => void,
@@ -2685,8 +2704,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             try {
               handled = await runAppMiddlewareForContentRoute();
             } catch (error) {
+              // The caller answers the throw and reports it to the runtime.
               interceptor?.release();
-              if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
               throw error;
             }
             if (!handled) {
@@ -2721,6 +2740,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const discard = async () => {
               await computed?.body?.cancel().catch(() => {});
             };
+            // A runtime.after failure answers the runtime hook 500, plain text on a page path.
+            const sendRuntimeResponse = async (
+              runtimeSession: FarmPluginRuntimeSession,
+              response: Response,
+            ) => {
+              let runtimeResponse: Response;
+              try {
+                runtimeResponse = await pm!.endRuntimeRequest(runtimeSession, response);
+              } catch {
+                // The runtime reported the failure to runtime.error and onError.
+                sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                return;
+              }
+              await sendWebResponse(res, runtimeResponse);
+            };
             let runtimeSession: FarmPluginRuntimeSession | undefined;
             if (pm?.hasRuntimeRequestHooks()) {
               try {
@@ -2737,29 +2771,26 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   createRequestFromNodeRequest(req, new URL(fullUrl)),
                   { kind, route },
                 );
-              } catch (error) {
+              } catch {
+                // The runtime reported the failure to runtime.error and onError.
                 await discard();
-                await emitPluginError("runtime-before", error, { pathname: requestPathname });
                 sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
                 return;
               }
               if (runtimeSession.response) {
                 await discard();
-                await sendWebResponse(
-                  res,
-                  await pm.endRuntimeRequest(runtimeSession, runtimeSession.response),
-                );
+                await sendRuntimeResponse(runtimeSession, runtimeSession.response);
                 return;
               }
               pm.copyRequestContext(runtimeSession.request, req);
               applyWebRequestToNodeRequest(runtimeSession.request, req);
             }
-            if (await runAppMiddlewareInRuntimeSession(runtimeSession)) {
-              await discard();
-              return;
-            }
             let response: Response | void;
             try {
+              if (await runAppMiddlewareInRuntimeSession(runtimeSession)) {
+                await discard();
+                return;
+              }
               response = await respond(
                 runtimeSession?.request ?? createRequestFromNodeRequest(req, new URL(fullUrl)),
               );
@@ -2768,10 +2799,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               throw error;
             }
             if (!response) return;
-            await sendWebResponse(
-              res,
-              runtimeSession ? await pm!.endRuntimeRequest(runtimeSession, response) : response,
-            );
+            if (runtimeSession) await sendRuntimeResponse(runtimeSession, response);
+            else await sendWebResponse(res, response);
           };
 
           // OpenAPI routes are app routes, so they live beneath the basePath.
@@ -3505,11 +3534,33 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 return;
               }
             } catch (error) {
-              if (res.headersSent) throw error;
-              // The runtime already reported the throw to runtime.error and onError.
+              if (res.headersSent) {
+                if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
+                throw error;
+              }
               logger.error(`Middleware error: ${error}`);
-              logResponse(method, urlPath, 500, Date.now() - startTime, "API");
-              sendFarmDevErrorJSON(res);
+              // As in production, runtime.error and onError observe the throw, and
+              // runtime.after sees the 500 it answers, as for a throwing API route.
+              let response = createFarmDevMiddlewareErrorResponse();
+              if (runtimeSession) {
+                const errorResponse = response;
+                try {
+                  response = await pm!.completeRuntimeRequest(
+                    runtimeSession,
+                    async (_request, runtime) => {
+                      await runtime.reportError(error);
+                      return errorResponse;
+                    },
+                  );
+                } catch {
+                  // A runtime.after hook threw; the runtime reported it.
+                  logResponse(method, urlPath, 500, Date.now() - startTime, "API");
+                  sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                  return;
+                }
+              }
+              logResponse(method, urlPath, response.status, Date.now() - startTime, "API");
+              await sendWebResponse(res, response);
               return;
             }
 
@@ -4260,7 +4311,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               applyWebRequestToNodeRequest(routedRequest, req);
               pathname = new URL(routedRequest.url).pathname;
             } catch (error) {
-              await emitPluginError("runtime-before", error, { pathname: requestedPathname });
+              // runtime.error and onError observe a hook failure once: the runtime reported a
+              // throw from opening or ending the session, and a rewrite's runtime.before fails
+              // the session here.
+              if (runtimeSession) await pm.failRuntimeRequest(runtimeSession, error);
               sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
               return;
             }

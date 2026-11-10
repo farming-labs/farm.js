@@ -583,6 +583,8 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
               // Fail the request, as core's dev server does. Carrying on would
               // render the page a throwing auth check was meant to protect.
               console.error("[FARM] Middleware error:", e);
+              // Vite's error page reports it, kept out of caches like core's.
+              if (!res.headersSent) res.setHeader("Cache-Control", "private, no-store");
               return passThrough(e);
             }
 
