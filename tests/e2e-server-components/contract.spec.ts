@@ -865,11 +865,24 @@ test("a page that hydrates loads the router only when a navigation needs it", as
 
 test("a link still navigates when the router fails to load", async ({ page }) => {
   test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
-  await page.route("**/farm-client-router-*", (route) => route.abort());
+  let aborted = 0;
+  await page.route("**/farm-client-router-*", (route) => {
+    aborted += 1;
+    return route.abort();
+  });
   await page.goto("/");
   await hydrated(page);
+  // The counter's click starts the client entry, which watches for link intent.
+  await page.getByRole("button", { name: /Count: 5/ }).click();
+  await expect(page.getByRole("button", { name: /Count: 6/ })).toBeVisible();
   await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
-  await page.getByRole("link", { name: "Stream", exact: true }).click();
+  const link = page.getByRole("link", { name: "Stream", exact: true });
+  // A hover that fails leaves the page alone: it must not reload what the visitor is reading.
+  await link.hover();
+  await expect.poll(() => aborted).toBeGreaterThan(0);
+  await page.waitForLoadState("networkidle");
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  await link.click();
   await expect(page).toHaveURL(/\/stream$/);
   await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
   // A new document: the browser navigated itself, without the router.
