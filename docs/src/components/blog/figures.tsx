@@ -136,7 +136,7 @@ function FigureStage({
       {geometry.panels.map((panel) => (
         <div
           key={panel.id}
-          className={`bf-panel${panel.flow ? " bf-flow" : panel.icon ? " bf-node" : ""}${panel.code ? " bf-panel--code" : ""}${panel.note ? " bf-note" : ""}`}
+          className={`bf-panel${panel.flow ? " bf-flow" : panel.icon ? " bf-node" : ""}${panel.code ? " bf-panel--code" : ""}`}
           data-panel={panel.id}
           data-state={frame.states?.[panel.id]}
           style={{
@@ -173,7 +173,7 @@ function FigureStage({
             </>
           ) : panel.code ? (
             <span className="bf-legend">{panel.title}</span>
-          ) : panel.note ? null : (
+          ) : (
             <div className="bf-head">
               <span>{panel.title}</span>
               <span

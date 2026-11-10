@@ -757,35 +757,6 @@
   border-radius: 1em;
   background: rgb(255 255 255 / 0.25);
 }
-/* A callout's label beside the phone: the callout text of the agents figures, no box. */
-.bf-panel.bf-note {
-  border: 0;
-  background: none;
-}
-.bf-note .bf-body {
-  display: flex;
-  height: 100%;
-  align-items: center;
-  padding: 0;
-  overflow: visible;
-}
-.bf-note-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2em;
-  letter-spacing: 0;
-  text-transform: none;
-  white-space: nowrap;
-}
-.bf-note-name {
-  color: #e6e6e6;
-  font-size: 0.86em;
-}
-.bf-note-sub {
-  color: #7a7a7a;
-  font-size: 0.7em;
-}
-
 /* A pushed screen's back chevron, at the header's text size. */
 .bf-vback {
   position: absolute;

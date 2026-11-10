@@ -81,8 +81,6 @@ export interface PanelSpec {
   kicker?: string;
   /** Logos with short names shown as the step's title instead of `label`. */
   badges?: [IconKey, string][];
-  /** A callout's label: no border or fill, just the text the player writes. */
-  note?: boolean;
 }
 
 /** Where a figure's panels and connectors sit on a stage of a given size. */
@@ -1802,63 +1800,23 @@ type MobileScreen = {
   kicker: string;
   route: string;
   kind: string;
-  /** What the screen's callout names it, and the detail under the name. */
-  part: [string, string];
   tab: number;
 };
 const MOBILE_SCREENS: MobileScreen[] = [
-  {
-    id: "web",
-    icon: "globe",
-    kicker: "Web screen",
-    route: "/notes",
-    kind: "WebView",
-    part: ["WebView", "your page"],
-    tab: 0,
-  },
+  { id: "web", icon: "globe", kicker: "Web screen", route: "/notes", kind: "WebView", tab: 0 },
   {
     id: "native",
     icon: "phone",
     kicker: "Native screen",
     route: "/notes/[id]",
     kind: "Native views",
-    part: ["native views", "Android · UIKit"],
     tab: 0,
   },
-  {
-    id: "rn",
-    icon: "react",
-    kicker: "React Native",
-    route: "/map",
-    kind: "React Native",
-    part: ["React Native", "page.native.tsx"],
-    tab: 1,
-  },
-  {
-    id: "modal",
-    icon: "sheet",
-    kicker: "Modal sheet",
-    route: "/notes/new",
-    kind: "Sheet",
-    part: ["sheet", "modal route"],
-    tab: 0,
-  },
+  { id: "rn", icon: "react", kicker: "React Native", route: "/map", kind: "React Native", tab: 1 },
+  { id: "modal", icon: "sheet", kicker: "Modal sheet", route: "/notes/new", kind: "Sheet", tab: 0 },
 ];
 const MOBILE_LANE = (i: number) => i * 84; // top of each route pill
 const MOBILE_HUB = 150; // where the four connectors meet the phone
-// The phone sits between the route pills and a column of callout labels.
-const PILL_W = 168;
-const PHONE = { x: 212, w: 128 };
-const PHONE_RIGHT = PHONE.x + PHONE.w;
-const NOTE_X = 356;
-// Each callout runs from a part of the phone, out of its right edge, to its label.
-const MOBILE_NOTES: { id: string; from: number; to: number; y: number }[] = [
-  { id: "stack", from: 15, to: 22, y: 6 },
-  { id: "screen", from: 140, to: 150, y: 132 },
-  { id: "tabs", from: 272, to: 262, y: 244 },
-];
-const note = (name: string, detail: string, opacity: number) =>
-  `<span class="bf-note-text" style="opacity:${opacity.toFixed(3)}"><span class="bf-note-name">${esc(name)}</span><span class="bf-note-sub">${esc(detail)}</span></span>`;
 const MOBILE_START = 0.6;
 const MOBILE_STEP = 1.5;
 /** Rectangles (x, y, w, h in % of the screen) that sketch each screen's content. */
@@ -1896,56 +1854,35 @@ const landingMobile: FigureSpec = {
   duration: MOBILE_START + (MOBILE_SCREENS.length - 1) * MOBILE_STEP + PULSE + 0.9 + HOLD,
   stage: { w: 440, h: 300 },
   label:
-    "Four routes of one Farm app open on a phone inside a native frame, with callouts naming its parts: the stack, the screen (a WebView, native views, React Native, or a sheet), and the tabs",
+    "Four routes of one Farm app open on a phone inside a native frame with tabs: a web screen, a natively drawn screen, a React Native screen, and a modal sheet",
   panels: [
     ...MOBILE_SCREENS.map((screen, i) => ({
       id: screen.id,
       x: 0,
       y: MOBILE_LANE(i) + 12,
-      w: PILL_W,
+      w: 228,
       h: 44,
       flow: true,
       icon: screen.icon,
       kicker: screen.kicker,
       label: screen.route,
     })),
-    { id: "phone", x: PHONE.x, y: 0, w: PHONE.w, h: 300, title: "" },
-    ...MOBILE_NOTES.map(({ id, y }) => ({
-      id: `note-${id}`,
-      x: NOTE_X,
-      y,
-      w: 440 - NOTE_X,
-      h: 36,
-      note: true,
-    })),
+    { id: "phone", x: 290, y: 0, w: 150, h: 300, title: "Phone" },
   ],
-  wires: {
-    ...Object.fromEntries(
-      MOBILE_SCREENS.map((screen, i): [string, [number, number][]] => {
-        const y = MOBILE_LANE(i) + 34;
-        return [
-          `to-${screen.id}`,
-          [
-            [PILL_W, y],
-            [190, y],
-            [190, MOBILE_HUB],
-            [PHONE.x, MOBILE_HUB],
-          ],
-        ];
-      }),
-    ),
-    ...Object.fromEntries(
-      MOBILE_NOTES.map(({ id, from, to }): [string, [number, number][]] => [
-        `note-${id}`,
+  wires: Object.fromEntries(
+    MOBILE_SCREENS.map((screen, i): [string, [number, number][]] => {
+      const y = MOBILE_LANE(i) + 34;
+      return [
+        `to-${screen.id}`,
         [
-          [PHONE_RIGHT - (id === "stack" ? 0 : 11), from],
-          [348, from],
-          [348, to],
-          [NOTE_X, to],
+          [228, y],
+          [259, y],
+          [259, MOBILE_HUB],
+          [290, MOBILE_HUB],
         ],
-      ]),
-    ),
-  },
+      ];
+    }),
+  ),
   frame(t) {
     const tapped = MOBILE_SCREENS.map((_, i) => MOBILE_START + i * MOBILE_STEP);
     const opened = tapped.map((at) => at + PULSE);
@@ -2009,19 +1946,8 @@ const landingMobile: FigureSpec = {
     }
     const slots: Record<string, string> = {
       phone: `<span class="bf-vprev bf-vphone">${blocks}</span>`,
-      "phone:meta": screen ? screen.route : "",
+      "phone:meta": screen ? screen.kind : "",
     };
-    // The callouts: the tabs as soon as the first screen shows them, the screen every time it
-    // changes (a pulse runs out to its label), and the stack when the native screen is pushed.
-    const tabsAt = opened[0] + 0.25;
-    const stackAt = opened[1];
-    const landed = (at: number) => ease(prog(t, at + 0.35, 0.25));
-    const screenFade = screen ? ease(prog(since, 0.2, 0.3)) : 0;
-    slots["note-screen"] = screen
-      ? note(screen.part[0], screen.part[1], screenFade * landed(opened[0]))
-      : "";
-    slots["note-tabs"] = note("tabs", "a stack per tab", landed(tabsAt));
-    slots["note-stack"] = note("stack", "push · back gesture", landed(stackAt));
     const states: Record<string, PanelState | undefined> = {
       phone: current >= 0 && since < 0.6 ? "hot" : undefined,
     };
@@ -2031,13 +1957,6 @@ const landingMobile: FigureSpec = {
       states[s.id] = busy(t, tapped[i], opened[i] + 0.3);
       wires[`to-${s.id}`] = wire(t, 0.1 + i * 0.08, [[tapped[i]]], current >= 0 && current !== i);
     });
-    wires["note-screen"] = wire(
-      t,
-      opened[0],
-      opened.slice(1).map((at): [number] => [at]),
-    );
-    wires["note-tabs"] = wire(t, tabsAt, [[opened[2]]]);
-    wires["note-stack"] = wire(t, stackAt, [[opened[1] + 0.05]]);
     return { slots, wires, states };
   },
 };
