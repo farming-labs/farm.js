@@ -555,6 +555,10 @@ false }` trims it (a hidden section is `null`); `agent.manifest: false` turns it
   deployments (`FARM_PREVIEW=1`, `VERCEL_ENV=preview`, Netlify deploy-preview/branch-deploy at
   build time, Render PR previews). Test locally with `FARM_PREVIEW=1 farm dev`.
 - Use `after()` only for short post-response work and a jobs integration for durable work.
+  `runtime: local()` runs tasks in the app (give the `jobs` storage namespace a persistent mount;
+  schedule `/api/jobs/_runtime/local/tick` with cron on serverless). `trigger(...)` and
+  `inngest(...)` call code deployed to the provider. `defineJobsRuntime()` adds a runtime; check it
+  with `createJobsRuntimeConformance` from `@farm.js/jobs/testing`.
 - Configure OpenTelemetry and Farm runtime events for correlated traces.
 
 `farm preview` exposes an already-running local app; it does not build or deploy. Bind remote

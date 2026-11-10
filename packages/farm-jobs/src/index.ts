@@ -8,8 +8,48 @@ import {
 } from "@farm.js/core/integrations";
 import type { FarmIntegrationAPIOperation } from "@farm.js/core/client";
 import { integrationConfig } from "@farm.js/integration-utils";
+import { JobsRuntimeError } from "./errors.js";
+import {
+  adaptCustomRuntime,
+  isCustomJobsRuntimeDefinition,
+  type CustomJobsRuntimeDefinition,
+} from "./runtime.js";
+import { resolveScheduledTimestamp } from "./time.js";
 
+export { JobsRuntimeError } from "./errors.js";
+export {
+  defineJobsRuntime,
+  JOBS_RUNTIME_CONTRACT,
+  type CustomJobsRuntimeDefinition,
+  type DefineJobsRuntimeInput,
+  type JobsExecuteInput,
+  type JobsExecuteResult,
+  type JobsRuntime,
+  type JobsRuntimeBatchLaunch,
+  type JobsRuntimeContext,
+  type JobsRuntimeLaunch,
+  type JobsRuntimeLogger,
+  type JobsRuntimeRoute,
+  type JobsRuntimeRouteVerdict,
+  type JobsRuntimeRunStatus,
+  type JobsRuntimeTask,
+  type JobsSerializedError,
+} from "./runtime.js";
+export {
+  local,
+  type JobsKeyValueStorage,
+  type LocalJobsRuntimeOptions,
+  type LocalJobsTickResult,
+} from "./local.js";
+
+/**
+ * The provider runtimes `jobs()` builds itself. `local()` is made with
+ * `defineJobsRuntime()`, so its results report the literal `"local"`.
+ */
 export type JobsRuntimeKind = "trigger" | "inngest";
+
+/** A built-in runtime kind, or the `kind` of a runtime made with `defineJobsRuntime()`. */
+export type JobsRuntimeName = JobsRuntimeKind | (string & {});
 
 export type JobsRunStatus =
   | "queued"
@@ -63,12 +103,19 @@ export interface JobsTaskScheduleDefinition {
 export type JobsTaskSchedule = string | JobsTaskScheduleDefinition;
 
 export interface JobsTaskContext {
-  runtime: JobsRuntimeKind;
+  runtime: JobsRuntimeName;
   task: {
     key: string;
     id: string;
   };
   logger: Pick<Console, "debug" | "info" | "warn" | "error">;
+  /** The run being executed. Set when a runtime such as `local()` calls `run`. */
+  run?: {
+    id: string;
+    attempt: number;
+  };
+  /** Aborts when the runtime gives up on this attempt, for example when its lease ends. */
+  signal?: AbortSignal;
 }
 
 export interface JobsTaskDefaults<TInput> {
@@ -205,15 +252,17 @@ export interface JobsTriggerOptions {
   tags?: readonly string[];
 }
 
-export interface JobsTriggerResult {
+export interface JobsTriggerResult<TKind extends string = JobsRuntimeKind> {
   handleId: string;
   task: string;
-  runtime: JobsRuntimeKind;
+  runtime: TKind;
   queuedAt: string;
   providerTaskId: string;
 }
 
-export interface JobsScheduleResult extends JobsTriggerResult {
+export interface JobsScheduleResult<
+  TKind extends string = JobsRuntimeKind,
+> extends JobsTriggerResult<TKind> {
   scheduledFor: string | number;
 }
 
@@ -223,10 +272,10 @@ export interface JobsBatchTriggerRunResult {
   queuedAt: string;
 }
 
-export interface JobsBatchTriggerResult {
+export interface JobsBatchTriggerResult<TKind extends string = JobsRuntimeKind> {
   batchId: string | null;
   task: string;
-  runtime: JobsRuntimeKind;
+  runtime: TKind;
   providerTaskId: string;
   runs: JobsBatchTriggerRunResult[];
 }
@@ -239,11 +288,11 @@ export interface JobsCancelBody {
   handleId: string;
 }
 
-export interface JobsRunStatusResult<TOutput = unknown> {
+export interface JobsRunStatusResult<TOutput = unknown, TKind extends string = JobsRuntimeKind> {
   handleId: string;
   providerRunId: string | null;
   task: string;
-  runtime: JobsRuntimeKind;
+  runtime: TKind;
   status: JobsRunStatus;
   providerStatus: string | null;
   queuedAt: string | null;
@@ -255,20 +304,20 @@ export interface JobsRunStatusResult<TOutput = unknown> {
   raw: unknown;
 }
 
-export interface JobsCancelResult {
+export interface JobsCancelResult<TKind extends string = JobsRuntimeKind> {
   handleId: string;
   task: string;
-  runtime: JobsRuntimeKind;
+  runtime: TKind;
   canceled: true;
 }
 
-export interface JobsTaskMetadata {
+export interface JobsTaskMetadata<TKind extends string = JobsRuntimeKind> {
   key: string;
   id: string;
   remoteId: string;
   description: string | null;
   schedule: JobsTaskSchedule | null;
-  runtime: JobsRuntimeKind;
+  runtime: TKind;
   configured: boolean;
   capabilities: JobsRuntimeCapabilities;
   paths: {
@@ -315,6 +364,13 @@ export interface InngestJobsRuntimeDefinition {
 }
 
 export type JobsRuntimeDefinition = TriggerJobsRuntimeDefinition | InngestJobsRuntimeDefinition;
+
+/** Anything `jobs({ runtime })` accepts: a built-in runtime or one made with `defineJobsRuntime()`. */
+export type JobsRuntimeInput = JobsRuntimeDefinition | CustomJobsRuntimeDefinition<string>;
+
+/** The `runtime` field results carry for a given runtime input. Built-in runtimes keep `JobsRuntimeKind`. */
+export type InferJobsRuntimeKind<TRuntime> =
+  TRuntime extends CustomJobsRuntimeDefinition<infer TKind> ? TKind : JobsRuntimeKind;
 
 interface ResolvedTriggerJobsConfig {
   kind: "trigger";
@@ -384,8 +440,11 @@ export interface JobsIntegrationInputBase<TTasks extends JobsTaskMap> {
   authorize?: JobsAuthorize;
 }
 
-type JobsIntegrationRuntimeInput<TTasks extends JobsTaskMap> = JobsIntegrationInputBase<TTasks> & {
-  runtime: JobsRuntimeDefinition;
+type JobsIntegrationRuntimeInput<
+  TTasks extends JobsTaskMap,
+  TRuntime extends JobsRuntimeInput,
+> = JobsIntegrationInputBase<TTasks> & {
+  runtime: TRuntime;
   trigger?: never;
   inngest?: never;
 };
@@ -402,49 +461,61 @@ type JobsIntegrationLegacyInput<TTasks extends JobsTaskMap> =
       runtime?: never;
     });
 
-export type JobsIntegrationInput<TTasks extends JobsTaskMap> =
-  | JobsIntegrationRuntimeInput<TTasks>
-  | JobsIntegrationLegacyInput<TTasks>;
+export type JobsIntegrationInput<
+  TTasks extends JobsTaskMap,
+  TRuntime extends JobsRuntimeInput = JobsRuntimeDefinition,
+> = JobsIntegrationRuntimeInput<TTasks, TRuntime> | JobsIntegrationLegacyInput<TTasks>;
 
-type JobsAPI<TTasks extends JobsTaskMap> = {
+type JobsAPI<TTasks extends JobsTaskMap, TKind extends string = JobsRuntimeKind> = {
   [TKey in keyof TTasks & string]: {
     trigger: FarmIntegrationAPIOperation<
       JobsTriggerBody<InferJobsTaskInput<TTasks[TKey]>>,
       never,
-      JobsTriggerResult,
+      JobsTriggerResult<TKind>,
       false,
       "POST"
     >;
     schedule: FarmIntegrationAPIOperation<
       JobsScheduleBody<InferJobsTaskInput<TTasks[TKey]>>,
       never,
-      JobsScheduleResult,
+      JobsScheduleResult<TKind>,
       false,
       "POST"
     >;
     batchTrigger: FarmIntegrationAPIOperation<
       JobsBatchTriggerBody<InferJobsTaskInput<TTasks[TKey]>>,
       never,
-      JobsBatchTriggerResult,
+      JobsBatchTriggerResult<TKind>,
       false,
       "POST"
     >;
     status: FarmIntegrationAPIOperation<
       never,
       JobsStatusQuery,
-      JobsRunStatusResult<InferJobsTaskOutput<TTasks[TKey]>>,
+      JobsRunStatusResult<InferJobsTaskOutput<TTasks[TKey]>, TKind>,
       false,
       "GET"
     >;
-    cancel: FarmIntegrationAPIOperation<JobsCancelBody, never, JobsCancelResult, false, "POST">;
+    cancel: FarmIntegrationAPIOperation<
+      JobsCancelBody,
+      never,
+      JobsCancelResult<TKind>,
+      false,
+      "POST"
+    >;
   };
 } & {
   tasks: {
-    list: FarmIntegrationAPIOperation<never, never, JobsTaskMetadata[], false, "GET">;
+    list: FarmIntegrationAPIOperation<never, never, JobsTaskMetadata<TKind>[], false, "GET">;
   };
 };
 
-type JobsResolvedLaunchOptions = {
+/**
+ * Launch options after Farm merged task defaults with the call's options,
+ * as a runtime's `trigger` receives them. `delayMode` is set by `schedule`:
+ * `"at"` for an absolute time and `"after"` for a relative one.
+ */
+export type JobsResolvedLaunchOptions = {
   queue?: JobsTaskQueueDefinition;
   retryAttempts?: number;
   ttl?: string | number;
@@ -459,7 +530,7 @@ type JobsResolvedLaunchOptions = {
   };
 };
 
-type JobsResolvedBatchItem = {
+export type JobsResolvedBatchItem = {
   input: unknown;
   options: JobsResolvedLaunchOptions;
 };
@@ -470,13 +541,13 @@ type JobsNormalizedTask = {
   pathSegment: string;
   remoteId: string;
   definition: JobsTaskDefinition<any, any>;
-  metadata: JobsTaskMetadata;
+  metadata: JobsTaskMetadata<string>;
 };
 
-type JobsRuntimeStatusResult = Omit<JobsRunStatusResult<unknown>, "task" | "runtime">;
+type JobsRuntimeStatusResult = Omit<JobsRunStatusResult<unknown, string>, "task" | "runtime">;
 
 type JobsRuntimeAdapter = {
-  kind: JobsRuntimeKind;
+  kind: string;
   capabilities: JobsRuntimeCapabilities;
   isConfigured(): boolean;
   resolveRemoteId(taskId: string): string;
@@ -497,7 +568,10 @@ type JobsRuntimeAdapter = {
     runs: JobsBatchTriggerRunResult[];
   }>;
   status(task: JobsNormalizedTask, handleId: string): Promise<JobsRuntimeStatusResult>;
-  cancel(task: JobsNormalizedTask, handleId: string): Promise<JobsCancelResult>;
+  cancel(task: JobsNormalizedTask, handleId: string): Promise<JobsCancelResult<string>>;
+  routes?: ReturnType<typeof adaptCustomRuntime>["routes"];
+  start?(): Promise<void>;
+  dispose?(): Promise<void>;
 };
 
 const TRIGGER_CAPABILITIES: JobsRuntimeCapabilities = {
@@ -527,18 +601,6 @@ const INNGEST_CAPABILITIES: JobsRuntimeCapabilities = {
   concurrencyKey: false,
   idempotencyKey: true,
 };
-
-class JobsRuntimeError extends Error {
-  readonly status: number;
-  readonly data?: unknown;
-
-  constructor(message: string, status = 500, data?: unknown) {
-    super(message);
-    this.name = "JobsRuntimeError";
-    this.status = status;
-    this.data = data;
-  }
-}
 
 export function task<TInput, TOutput>(
   input: JobsTaskInput<TInput, TOutput>,
@@ -908,7 +970,7 @@ function createMetadata(task: JobsNormalizedTask, runtime: JobsRuntimeAdapter) {
       hasConcurrencyKey: !!task.definition.defaults?.concurrencyKey,
       hasIdempotencyKey: !!task.definition.defaults?.idempotencyKey,
     },
-  } satisfies JobsTaskMetadata;
+  } satisfies JobsTaskMetadata<string>;
 }
 
 function normalizeStatus(status: string | null | undefined) {
@@ -976,23 +1038,6 @@ async function requestJSON(url: string, init: RequestInit) {
   return data;
 }
 
-const INNGEST_DURATION_UNITS = {
-  ms: 1,
-  s: 1_000,
-  m: 60_000,
-  h: 3_600_000,
-  d: 86_400_000,
-} as const;
-const INNGEST_MAX_TIMESTAMP = 8_640_000_000_000_000;
-
-function inngestScheduleError(message: string, value: string | number) {
-  return new JobsRuntimeError(message, 400, {
-    code: "JOBS_INVALID_SCHEDULE",
-    runtime: "inngest",
-    value,
-  });
-}
-
 function inngestCapabilityError(
   capability: JobsRuntimeCapability,
   message: string,
@@ -1004,67 +1049,13 @@ function inngestCapabilityError(
   });
 }
 
-function parseInngestDuration(value: string | number): number | undefined {
-  if (typeof value === "number") {
-    return Number.isFinite(value) && value > 0 ? Math.ceil(value) : undefined;
-  }
-
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/i.exec(value);
-  if (!match) return undefined;
-  const amount = Number(match[1]);
-  const unit = match[2].toLowerCase() as keyof typeof INNGEST_DURATION_UNITS;
-  const duration = Math.ceil(amount * INNGEST_DURATION_UNITS[unit]);
-  return Number.isFinite(duration) && duration > 0 ? duration : undefined;
-}
-
-function parseInngestAbsoluteTime(value: string | number): number | undefined {
-  if (typeof value !== "string") return undefined;
-  if (!/^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) return undefined;
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : undefined;
-}
+const INNGEST_SCHEDULE_RUNTIME = { kind: "inngest", label: "Inngest" } as const;
 
 function resolveInngestEventTimestamp(
   options: JobsResolvedLaunchOptions,
   now = Date.now(),
 ): number | undefined {
-  if (options.delay == null) return undefined;
-
-  const absolute =
-    options.delayMode === "after" ? undefined : parseInngestAbsoluteTime(options.delay);
-  if (absolute != null) {
-    if (absolute <= now) {
-      throw inngestScheduleError(
-        "Inngest at/delay timestamps must be in the future.",
-        options.delay,
-      );
-    }
-    return absolute;
-  }
-
-  if (options.delayMode === "at") {
-    throw inngestScheduleError(
-      "Inngest at must be an ISO timestamp with an explicit Z or UTC offset.",
-      options.delay,
-    );
-  }
-
-  const duration = parseInngestDuration(options.delay);
-  if (duration == null) {
-    throw inngestScheduleError(
-      "Inngest after/delay must be positive milliseconds or a duration ending in ms, s, m, h, or d.",
-      options.delay,
-    );
-  }
-
-  const timestamp = now + duration;
-  if (!Number.isSafeInteger(timestamp) || timestamp > INNGEST_MAX_TIMESTAMP) {
-    throw inngestScheduleError(
-      "Inngest after/delay exceeds the supported date range.",
-      options.delay,
-    );
-  }
-  return timestamp;
+  return resolveScheduledTimestamp(options, now, INNGEST_SCHEDULE_RUNTIME);
 }
 
 function createInngestEvent(
@@ -1530,9 +1521,9 @@ function createInngestRuntime(config: InngestJobsRuntimeConfig): JobsRuntimeAdap
   };
 }
 
-function resolveRuntimeDefinition<TTasks extends JobsTaskMap>(
-  input: JobsIntegrationInput<TTasks>,
-): JobsRuntimeDefinition {
+function resolveRuntimeDefinition<TTasks extends JobsTaskMap, TRuntime extends JobsRuntimeInput>(
+  input: JobsIntegrationInput<TTasks, TRuntime>,
+): JobsRuntimeInput {
   if ("runtime" in input && input.runtime) {
     return input.runtime;
   }
@@ -1544,15 +1535,41 @@ function resolveRuntimeDefinition<TTasks extends JobsTaskMap>(
   return inngest(input.inngest as InngestJobsRuntimeConfig);
 }
 
-function createRuntime(runtime: JobsRuntimeDefinition) {
+/** Where a runtime route is mounted. Task segments are kebab-case, so `_runtime` cannot collide. */
+function runtimeRoutePath(basePath: string, kind: string, path: string) {
+  return joinPath(basePath, "_runtime", kind, path);
+}
+
+function createRuntime(
+  runtime: JobsRuntimeInput,
+  basePath: string,
+  registry: ReadonlyMap<string, JobsNormalizedTask>,
+): JobsRuntimeAdapter {
+  if (isCustomJobsRuntimeDefinition(runtime)) {
+    return adaptCustomRuntime(runtime, {
+      basePath,
+      routePath: (kind, path) => runtimeRoutePath(basePath, kind, path),
+      getTask: (key) => registry.get(key),
+    });
+  }
+
   if (runtime.kind === "trigger") {
     return createTriggerRuntime(runtime.config);
   }
 
-  return createInngestRuntime(runtime.config);
+  if (runtime.kind === "inngest") {
+    return createInngestRuntime(runtime.config);
+  }
+
+  throw new TypeError(
+    `Unknown jobs runtime ${JSON.stringify((runtime as { kind?: unknown }).kind)}. Pass trigger(), inngest(), local(), or a runtime made with defineJobsRuntime() as \`jobs({ runtime })\`.`,
+  );
 }
 
-function resolveJobsIntegrationConfig(runtime: JobsRuntimeDefinition) {
+function resolveJobsIntegrationConfig(runtime: JobsRuntimeInput) {
+  // A custom runtime reads its own configuration; Farm has no env keys to report for it.
+  if (isCustomJobsRuntimeDefinition(runtime)) return undefined;
+
   if (runtime.kind === "trigger") {
     const resolved = {
       kind: "trigger" as const,
@@ -1594,7 +1611,7 @@ function resolveJobsIntegrationConfig(runtime: JobsRuntimeDefinition) {
   });
 }
 
-function createJobsApi<TTasks extends JobsTaskMap>(
+function createJobsApi<TTasks extends JobsTaskMap, TKind extends string>(
   tasks: readonly JobsNormalizedTask[],
   tasksPath: string,
 ) {
@@ -1638,7 +1655,7 @@ function createJobsApi<TTasks extends JobsTaskMap>(
     };
   }
 
-  return defineIntegrationAPI(definition as any) as unknown as JobsAPI<TTasks>;
+  return defineIntegrationAPI(definition as any) as unknown as JobsAPI<TTasks, TKind>;
 }
 
 function normalizeTasks<TTasks extends JobsTaskMap>(
@@ -1674,7 +1691,7 @@ function normalizeTasks<TTasks extends JobsTaskMap>(
     }
     seenIds.add(id);
 
-    const metadata: JobsTaskMetadata = {
+    const metadata: JobsTaskMetadata<string> = {
       key,
       id,
       remoteId: runtime.resolveRemoteId(id),
@@ -1903,25 +1920,57 @@ async function authorizeJobsRequest(
   return Response.json({ error: "Forbidden" }, { status: 403 });
 }
 
-export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInput<TTasks>) {
+function createRuntimeRoutes(runtime: JobsRuntimeAdapter) {
+  return (runtime.routes ?? []).map((route) => {
+    const options = {
+      responseFormat: "json" as const,
+      async handler(request: Request) {
+        try {
+          const verdict = await route.verify(request);
+          if (verdict instanceof Response) return verdict;
+          if (verdict !== true) {
+            return Response.json({ error: "Unauthorized jobs runtime request." }, { status: 401 });
+          }
+          return await route.handler(request);
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+    };
+    return route.method === "GET"
+      ? integrationRoute.get<string, unknown>(route.fullPath, options)
+      : integrationRoute.post<string, unknown, unknown>(route.fullPath, options);
+  });
+}
+
+export function jobs<
+  const TTasks extends JobsTaskMap,
+  const TRuntime extends JobsRuntimeInput = JobsRuntimeDefinition,
+>(input: JobsIntegrationInput<TTasks, TRuntime>) {
+  type TKind = InferJobsRuntimeKind<TRuntime>;
   const basePath = normalizeBasePath(input.basePath);
   const tasksPath = joinPath(basePath, "tasks");
   const runtimeDefinition = resolveRuntimeDefinition(input);
-  const runtime = createRuntime(runtimeDefinition);
+  const registry = new Map<string, JobsNormalizedTask>();
+  const runtime = createRuntime(runtimeDefinition, basePath, registry);
   const normalizedTasks = normalizeTasks(input.tasks, basePath, runtime);
+  for (const task of normalizedTasks) registry.set(task.key, task);
 
   return defineIntegration({
     category: "automation",
     type: "jobs",
     instance: {
-      runtime: runtime.kind,
+      runtime: runtime.kind as TKind,
       configured: runtime.isConfigured(),
-      tasks: normalizedTasks.map((task) => task.metadata),
+      tasks: normalizedTasks.map((task) => task.metadata as JobsTaskMetadata<TKind>),
     },
     config: resolveJobsIntegrationConfig(runtimeDefinition),
-    api: createJobsApi<TTasks>(normalizedTasks, tasksPath),
+    api: createJobsApi<TTasks, TKind>(normalizedTasks, tasksPath),
     log: input.log,
+    ...(runtime.start ? { ready: () => runtime.start!() } : {}),
+    ...(runtime.dispose ? { dispose: () => runtime.dispose!() } : {}),
     routes: [
+      ...createRuntimeRoutes(runtime),
       integrationRoute.get<typeof tasksPath, JobsTaskMetadata[]>(tasksPath, {
         responseFormat: "json",
         async handler(request, context) {
@@ -1959,7 +2008,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                 runtime: runtime.kind,
                 queuedAt: triggered.queuedAt,
                 providerTaskId: task.remoteId,
-              } satisfies JobsTriggerResult);
+              } satisfies JobsTriggerResult<string>);
             } catch (error) {
               return errorResponse(error);
             }
@@ -2012,7 +2061,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                 runtime: runtime.kind,
                 providerTaskId: task.remoteId,
                 runs: triggered.runs,
-              } satisfies JobsBatchTriggerResult);
+              } satisfies JobsBatchTriggerResult<string>);
             } catch (error) {
               return errorResponse(error);
             }
@@ -2049,7 +2098,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                 queuedAt: triggered.queuedAt,
                 providerTaskId: task.remoteId,
                 scheduledFor,
-              } satisfies JobsScheduleResult);
+              } satisfies JobsScheduleResult<string>);
             } catch (error) {
               return errorResponse(error);
             }
@@ -2090,7 +2139,8 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                 task: task.key,
                 runtime: runtime.kind,
               } satisfies JobsRunStatusResult<
-                InferJobsTaskOutput<TTasks[typeof task.key & keyof TTasks]>
+                InferJobsTaskOutput<TTasks[typeof task.key & keyof TTasks]>,
+                string
               >);
             } catch (error) {
               return errorResponse(error);
