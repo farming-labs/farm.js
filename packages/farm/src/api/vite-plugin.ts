@@ -25,7 +25,12 @@ import {
   invokeAPIRouteEndpoint,
   resolveAPIRouteEndpoint,
 } from "./route-manager";
-import { isFarmAPIPathname, matchAPIRouteAtBasePath } from "./runtime";
+import {
+  createFarmInternalServerErrorResponse,
+  FARM_INTERNAL_SERVER_ERROR_BODY,
+  isFarmAPIPathname,
+  matchAPIRouteAtBasePath,
+} from "./runtime";
 import { mergePluginAPIRoutes } from "./plugin-route-runtime";
 import type { PluginRoutesFactory } from "./route";
 import { sendWebResponse } from "../server/response";
@@ -289,11 +294,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
         try {
           return await invokeAPIRouteEndpoint(endpoint, request, params, bodySizeLimit);
-        } catch (error: any) {
-          return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
+        } catch (error) {
+          // As in production, the failure stays in the server log, not the response.
+          console.error(`[API Error] ${pathname}:`, error);
+          return createFarmInternalServerErrorResponse();
         }
       };
 
@@ -595,7 +599,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             console.error("[FARM] API error:", error);
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "Internal server error" }));
+            res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
           }
         });
         server.middlewares.use((req, res, next) => {
@@ -621,7 +625,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             }
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "Internal server error" }));
+            res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
           });
         });
       };

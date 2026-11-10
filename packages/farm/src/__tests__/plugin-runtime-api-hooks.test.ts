@@ -121,6 +121,7 @@ async function createApp(prefix: string): Promise<string> {
 
 async function expectRuntimeHookContract(origin: string): Promise<void> {
   const results: Record<string, { status: number; trace: string[] }> = {};
+  const thrown: Record<string, { contentType: string | null; body: string }> = {};
   for (const pathname of [
     "/api/ok",
     "/api/blocked",
@@ -132,7 +133,10 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
     "/hello",
   ]) {
     const response = await fetch(`${origin}${pathname}`);
-    await response.arrayBuffer();
+    const body = await response.text();
+    if (pathname.endsWith("/boom")) {
+      thrown[pathname] = { contentType: response.headers.get("content-type"), body };
+    }
     const trace = await (await fetch(`${origin}/__trace`)).json();
     results[pathname] = { status: response.status, trace };
   }
@@ -198,6 +202,15 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
       status: 200,
       trace: ["before page /hello", "middleware /hello", "after /hello 200"],
     },
+  });
+  // A throwing API or integration route answers production's generic 500 body, in dev too.
+  const internalServerError = {
+    contentType: "application/json",
+    body: '{"error":"Internal Server Error"}',
+  };
+  expect(thrown).toEqual({
+    "/api/boom": internalServerError,
+    "/integration/boom": internalServerError,
   });
 }
 

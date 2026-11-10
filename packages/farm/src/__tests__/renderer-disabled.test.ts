@@ -83,9 +83,11 @@ async function createBackendFixture(): Promise<string> {
     root,
     "src/app/middleware.ts",
     `export function middleware(request: Request, context: { headers: Headers }) {
-  if (new URL(request.url).pathname === "/blocked") {
+  const { pathname } = new URL(request.url);
+  if (pathname === "/blocked") {
     return Response.json({ error: "Blocked" }, { status: 403 });
   }
+  if (pathname === "/middleware-failed") throw new Error("middleware failed");
   context.headers.set("x-backend", "farm");
 }`,
   );
@@ -132,9 +134,13 @@ async function expectBackendResponses(origin: string): Promise<void> {
     await expect(miss.json()).resolves.toEqual({ error: "Not found", pathname });
   }
 
-  const failed = await fetch(`${origin}/boom`);
-  expect(failed.status).toBe(500);
-  expect(failed.headers.get("content-type")).toMatch(/^application\/json/);
+  // A throwing route and throwing middleware answer production's generic 500, in dev too.
+  for (const pathname of ["/boom", "/middleware-failed"]) {
+    const failed = await fetch(`${origin}${pathname}`);
+    expect(failed.status, pathname).toBe(500);
+    expect(failed.headers.get("content-type"), pathname).toBe("application/json");
+    await expect(failed.text(), pathname).resolves.toBe('{"error":"Internal Server Error"}');
+  }
 
   const blocked = await fetch(`${origin}/blocked`);
   expect(blocked.status).toBe(403);

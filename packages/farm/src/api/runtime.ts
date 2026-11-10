@@ -313,6 +313,21 @@ function attachEndpointInvalidations(response: Response, keys: readonly string[]
   });
 }
 
+/**
+ * @internal The JSON body of the generic `500` Farm answers when an API route, a docs API
+ * route, or app middleware throws. It is the production entry's body, so `farm dev` sends the
+ * same one. Typed endpoint failures answer {@link createEndpointFailureResponse} instead.
+ */
+export const FARM_INTERNAL_SERVER_ERROR_BODY = JSON.stringify({ error: "Internal Server Error" });
+
+/** @internal The generic `500` response, with {@link FARM_INTERNAL_SERVER_ERROR_BODY}. */
+export function createFarmInternalServerErrorResponse(): Response {
+  return new Response(FARM_INTERNAL_SERVER_ERROR_BODY, {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export function createEndpointFailureResponse(failure: EndpointFailure<string, unknown>): Response {
   return new Response(
     JSON.stringify({
