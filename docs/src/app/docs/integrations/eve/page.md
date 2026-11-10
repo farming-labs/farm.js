@@ -111,7 +111,7 @@ farm build
 farm deploy --vercel
 ```
 
-For the `vercel` and `vercel-edge` presets, `@farm.js/eve` builds the Eve service and adds its functions, routes, and assets to Farm's Vercel output. The application and agent ship from one project and keep the same public `/eve` routes.
+For the `vercel` preset, `@farm.js/eve` builds the Eve service and adds its functions, routes, and assets to Farm's Vercel output. The application and agent ship from one project and keep the same public `/eve` routes.
 
 To run Eve as an independently deployed service, set an origin instead. Farm will proxy the same public routes to it and skip managed Vercel composition.
 

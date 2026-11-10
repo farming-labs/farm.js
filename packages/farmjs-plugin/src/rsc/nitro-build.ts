@@ -615,8 +615,7 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   // Vercel's Build Output API has its own layout (functions/, static/), which the preset owns when
   // the caller names the deployment directory (`farm build`). Without one, the output keeps the
   // server/ and public/ layout that hand-written post-build scripts copy from.
-  const presetOwnsLayout =
-    options.outputDir !== undefined && (preset === "vercel" || preset === "vercel-edge");
+  const presetOwnsLayout = options.outputDir !== undefined && preset === "vercel";
 
   // The server sets NODE_ENV to "production" unless the deployment chose one, as the core
   // node-server output does. The RSC and SSR bundles read it at runtime: left unset, React loads

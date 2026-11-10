@@ -83,7 +83,7 @@ set of optimized components are not a cross-version API. See the
 | `netlify`                    | `netlify`          | Stable       | Built output runs through Netlify's request pipeline on every supported Node.js version in CI. |
 | Direct Nitro `preset` values | any                | Pass-through | Farm passes the preset to Nitro. Output is not tested by Farm unless it appears above.         |
 
-`deploy.target` values get Farm's defaults and deploy commands. A raw Nitro `preset` such as `vercel-edge`, `netlify-edge`, `cloudflare-module`, `deno`, or `bun` is supported on a best-effort basis. See [Deployment](/docs/deployment).
+`deploy.target` values get Farm's defaults and deploy commands. A raw Nitro `preset` such as `netlify-edge`, `cloudflare-module`, `deno`, or `bun` is supported on a best-effort basis. Farm's Nitro version has no `vercel-edge` preset, so Farm rejects it; use `vercel`. See [Deployment](/docs/deployment).
 
 ## Experimental features
 

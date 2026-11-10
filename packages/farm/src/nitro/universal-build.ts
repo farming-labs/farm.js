@@ -758,7 +758,7 @@ function getEdgeMetadataImageRuntime(preset: string): EdgeMetadataImageRuntime |
  * server code imports it.
  */
 function shouldUseExternalMetadataImageRuntime(preset: string, usesImageRuntime: boolean): boolean {
-  return usesImageRuntime && preset !== "vercel-edge" && !getEdgeMetadataImageRuntime(preset);
+  return usesImageRuntime && !getEdgeMetadataImageRuntime(preset);
 }
 
 /** @internal Exported for tests. */
@@ -12661,7 +12661,7 @@ async function buildNitroUniversal(
   if (nitroBuilderResult.status === "rejected") throw nitroBuilderResult.reason;
   const nitroBuilder = nitroBuilderResult.value;
 
-  const isVercel = preset === "vercel" || preset === "vercel-edge";
+  const isVercel = preset === "vercel";
   const isCloudflareWorker = preset === "cloudflare-module";
   const outputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
   const runtimeServerOutputDir = isVercel
@@ -13674,7 +13674,7 @@ export function resolveFarmNitroOutputConfig(
   preset: string,
   outputDir: string,
 ): NonNullable<NitroConfig["output"]> {
-  const isVercel = preset === "vercel" || preset === "vercel-edge";
+  const isVercel = preset === "vercel";
 
   return {
     dir: outputDir,

@@ -12,7 +12,6 @@ export function getFarmPresetRuntime(preset: string): FarmPresetRuntime {
     preset === "cloudflare-pages" ||
     preset === "cloudflare-module" ||
     preset === "netlify-edge" ||
-    preset === "vercel-edge" ||
     preset === "deno"
   ) {
     return "edge";

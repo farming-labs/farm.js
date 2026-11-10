@@ -155,7 +155,7 @@ export async function explainFarmRoute(
       `The route requires ${runtime.runtime}, but the ${preset} preset emits ${presetRuntime} functions.`,
     );
   }
-  if (runtime.regions?.length && preset !== "vercel" && preset !== "vercel-edge") {
+  if (runtime.regions?.length && preset !== "vercel") {
     warnings.push(`${preset} does not map Farm per-route region hints.`);
   }
   if (runtime.maxDuration && preset !== "vercel") {

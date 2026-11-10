@@ -423,15 +423,34 @@ test("keeps a configured preset that already builds for the flagged platform", a
     root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-edge-preset-"));
     await writeFile(
       path.join(root, "farm.config.mjs"),
+      "export default { deploy: { preset: 'cloudflare-module' } };\n",
+    );
+
+    const plan = await createFarmDeployPlan({ root, cloudflare: true });
+
+    assert.equal(plan.target, "cloudflare");
+    assert.equal(plan.preset, "cloudflare-module");
+    assert.equal(plan.runtime, "edge");
+    assert.equal(plan.outputDir, path.join(root, ".farm", ".output"));
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects the vercel-edge preset before planning a Vercel deploy", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-vercel-edge-"));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
       "export default { deploy: { preset: 'vercel-edge' } };\n",
     );
 
-    const plan = await createFarmDeployPlan({ root, vercel: true });
-
-    assert.equal(plan.target, "vercel");
-    assert.equal(plan.preset, "vercel-edge");
-    assert.equal(plan.runtime, "edge");
-    assert.equal(plan.outputDir, path.join(root, ".vercel", "output"));
+    await assert.rejects(createFarmDeployPlan({ root, vercel: true }), {
+      message:
+        'Deploy preset "vercel-edge" is not supported: Farm\'s Nitro version has no vercel-edge preset. Use the "vercel" preset instead, which deploys Vercel Functions on Fluid compute.',
+    });
   } finally {
     if (root) await rm(root, { recursive: true, force: true });
   }
