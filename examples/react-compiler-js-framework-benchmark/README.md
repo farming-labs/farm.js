@@ -113,6 +113,30 @@ run, as the harness's results table does. Set `FARM_COMPARISON_OUTPUT` to choose
 [FRAMEWORK_COMPARISON_LINUX_CHROMIUM.md](./FRAMEWORK_COMPARISON_LINUX_CHROMIUM.md) is the recorded
 ten-framework run.
 
+## Run everything in one step
+
+`scripts/run-official.sh` does all of the above against a harness checkout: it installs the
+harness and its framework entries with npm lifecycle scripts disabled, prepares the Farm adapters,
+starts the harness server, runs the keyed-identity check and the CPU, memory and size suites, and
+writes `farm-vs-react.json`, `framework-comparison.json`, the raw results and `environment.txt`
+to the output directory. Build `@farm.js/react` first.
+
+```bash
+scripts/run-official.sh /absolute/path/to/js-framework-benchmark /absolute/path/to/output
+```
+
+`CHROME_BINARY`, `FARM_BENCHMARK_FRAMEWORKS` (the harness entries besides the Farm adapters; it
+must include `react-hooks`), `FARM_BENCHMARK_CPU_SAMPLES` and `FARM_BENCHMARK_MEMORY_SAMPLES`
+change the defaults. The script refuses a non-empty `webdriver-ts/results`, so runs are never
+mixed. The size suite gets a `--no-sandbox` Chrome wrapper, because the harness launches it through
+Puppeteer, which Chrome refuses as root and some CI kernels block for unprivileged users.
+
+In CI, run the **CI** workflow manually with the `js-framework-benchmark` input. The
+`js-framework-benchmark Diagnostic` job runs the script on `ubuntu-latest` with the harness
+revision pinned in `.github/workflows/ci.yml`, writes the score table to the job summary, and
+uploads the output directory as an artifact for 14 days. A hosted runner is a shared machine:
+compare builds within one run, and repeat a run before publishing a ranking from it.
+
 These are local results produced by the official harness, not an official leaderboard submission.
 Browser, operating-system, runner, framework versions, harness revision, and sample counts must be
 reported with comparisons. Overall CPU comparisons should use the official-weighted geometric

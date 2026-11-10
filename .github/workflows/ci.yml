@@ -52,6 +52,10 @@ on:
         description: Compare configured header matching with same-code SSR controls
         type: boolean
         default: false
+      js-framework-benchmark:
+        description: Run the official js-framework-benchmark suites for the React compiler and nine other frameworks
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -432,6 +436,47 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  js-framework-benchmark:
+    name: js-framework-benchmark Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.js-framework-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      # The revision the checked-in results use; change it deliberately, with new results.
+      JS_FRAMEWORK_BENCHMARK_REVISION: afe7c118dd217ccae4c10813613ac0d7566b1ef1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build the React renderer and its compiler
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/react build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Check out the official harness
+        run: |
+          git clone --filter=blob:none https://github.com/krausest/js-framework-benchmark.git "${{ runner.temp }}/js-framework-benchmark"
+          git -C "${{ runner.temp }}/js-framework-benchmark" checkout --detach "$JS_FRAMEWORK_BENCHMARK_REVISION"
+      - name: Run the CPU, memory and size suites
+        env:
+          CHROME_BINARY: /usr/bin/google-chrome
+        run: >-
+          examples/react-compiler-js-framework-benchmark/scripts/run-official.sh
+          "${{ runner.temp }}/js-framework-benchmark"
+          "${{ runner.temp }}/js-framework-benchmark-results"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: js-framework-benchmark-${{ github.sha }}
+          path: ${{ runner.temp }}/js-framework-benchmark-results
+          if-no-files-found: warn
+          retention-days: 14
+
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}
@@ -596,7 +641,7 @@ jobs:
         run: |
           node benchmarks/frameworks/run.mjs --self-check
           node --test benchmarks/compiler-analysis/run.test.mjs
-          node --test examples/react-compiler-js-framework-benchmark/scripts/prepare-metadata.test.mjs examples/react-compiler-js-framework-benchmark/scripts/summarize-official.test.mjs
+          node --test examples/react-compiler-js-framework-benchmark/scripts/prepare-metadata.test.mjs examples/react-compiler-js-framework-benchmark/scripts/summarize-official.test.mjs examples/react-compiler-js-framework-benchmark/scripts/compare-frameworks.test.mjs
 
   lint:
     name: Lint
