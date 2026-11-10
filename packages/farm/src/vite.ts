@@ -185,6 +185,7 @@ import {
   devServableFileExists,
   farmAppOwnsDocsEnginePath,
   isMalformedFarmRequestPathname,
+  isViteDevClientRequest,
   isViteModuleRequest,
   resolveFarmPublicFilePath,
   shouldBypassFarmRouterForDottedPath,
@@ -2579,8 +2580,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
 
           // Vite answers its own endpoints, modules, and files; config routes leave them alone, as
-          // production serves files before its request handler. Production's static handler only
-          // answers GET and HEAD, so any other method for a file's path is the app's.
+          // production serves public files before its request handler. Production's static
+          // handler only answers GET and HEAD, so any other method for a file's path is the app's.
+          // Production emits no other file under the project root, so only the dev client's own
+          // requests for one are Vite's; a navigation or curl for it meets config routes first.
           const isViteOwnedRequest = () =>
             requestUrl.startsWith("/@") ||
             requestUrl.startsWith("/node_modules/") ||
@@ -2588,10 +2591,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             isViteModuleRequest(parsedRequestUrl, req.headers) ||
             ((requestMethod === "GET" || requestMethod === "HEAD") &&
               requestPathname.includes(".") &&
-              devServableFileExists(requestPathname, [
-                server.config.publicDir,
-                server.config.root,
-              ]));
+              (devServableFileExists(requestPathname, [server.config.publicDir]) ||
+                (isViteDevClientRequest(parsedRequestUrl, req.headers) &&
+                  devServableFileExists(requestPathname, [server.config.root]))));
 
           // Config headers() and redirects() see the requested URL before any route or app
           // middleware does, as in the production entry: headers() then apply to whatever
