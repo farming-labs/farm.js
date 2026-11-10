@@ -13,6 +13,7 @@ import {
   resolveDeployOutputPath,
 } from "@farm.js/core/internal/cli-runtime";
 import { buildFarm } from "./build";
+import { createSpawnCommand, type SpawnCommand } from "./windows-command";
 
 export interface DeployFarmOptions {
   root?: string;
@@ -742,15 +743,29 @@ export function resolveDeployCliExecutable(
   return existsSync(local) ? local : `${command}${suffix}`;
 }
 
+/**
+ * The process that runs a deployment CLI. On Windows the CLI is a .cmd shim, which runs only
+ * through cmd.exe, so the shim path and arguments (an absolute config path) are quoted for it.
+ */
+export function resolveDeployCliCommand(
+  command: string,
+  args: string[],
+  root: string,
+  platform: NodeJS.Platform = process.platform,
+): SpawnCommand {
+  return createSpawnCommand(resolveDeployCliExecutable(command, root, platform), args, platform);
+}
+
 function runDeployCli(
   command: string,
   args: string[],
   root: string,
   options: Parameters<typeof execFileSync>[2] = {},
 ) {
-  return execFileSync(resolveDeployCliExecutable(command, root), args, {
+  const cli = resolveDeployCliCommand(command, args, root);
+  return execFileSync(cli.file, cli.args, {
     ...options,
-    shell: process.platform === "win32",
+    shell: cli.shell,
   });
 }
 

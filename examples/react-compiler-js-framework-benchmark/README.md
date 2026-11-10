@@ -20,6 +20,17 @@ rows, and installs self-contained production artifacts at:
 - `frameworks/keyed/farm-react-static`
 - `frameworks/keyed/farm-react-hybrid`
 
+Version labels come from the installed renderer and React packages, not a hard-coded release or
+dependency range. Preparation rejects mismatched React/React DOM versions. The Vite config deduplicates
+React and React DOM to the example's pinned copies, including imports from the workspace renderer.
+Compiler-marker validation accepts minifier quote styles but still rejects missing compilation,
+missing delegation, or the wrong reactivity mode. Run `pnpm test:harness` for these reporting guards.
+
+The checked-in results below describe their recorded versions and environment; they are not updated
+by preparing newer artifacts. Keep previous results separately when rerunning with a new version.
+When testing workspace compiler changes, build `@farm.js/react` first: a package version alone does
+not identify unpublished source edits or refresh its built compiler.
+
 Build the official `frameworks/keyed/react-hooks` entry and start the benchmark server. Validate
 identity before measuring:
 
@@ -57,7 +68,19 @@ pnpm summarize:official /absolute/path/to/js-framework-benchmark
 The summarizer requires exactly one result file per framework and operation, rejects stale
 duplicates, verifies keyed/type metadata, recomputes every median from its raw samples, validates
 the documented sample counts, and reads the current official CPU weights from the checked-out
-harness. For a deliberately reduced rerun, pass the actual counts explicitly, for example:
+harness. Each filename must match its JSON framework identity, and all CPU, memory, and size results
+within one variant must have the same full framework/version label. The report retains that label
+in `results.<variant>.framework`; different variants keep their own labels. Mixed-version results
+fail before replacing an existing report. These labels do not distinguish separate runs or
+unpublished builds of the same version; keep those results separately as well. Run
+`pnpm test:harness` for preparation and report-validation coverage.
+
+CPU total medians, per-operation speedup ratios, and aggregate speedups must be positive and finite.
+Invalid calculations fail before replacing an existing report; they are not clamped or omitted.
+Individual zero total samples remain valid when their median is positive, and zero script, paint,
+memory, and size metrics remain supported. Valid samples and scoring formulas are unchanged.
+
+For a deliberately reduced rerun, pass the actual counts explicitly, for example:
 
 ```bash
 FARM_BENCHMARK_CPU_SAMPLES=3 \
@@ -68,6 +91,27 @@ pnpm summarize:official /absolute/path/to/js-framework-benchmark
 
 See [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md) for the checked-in interpretation and
 `BENCHMARK_RESULTS.json` for raw sample arrays and medians from the recorded run.
+[BENCHMARK_RESULTS_LINUX_CHROMIUM.md](./BENCHMARK_RESULTS_LINUX_CHROMIUM.md) and
+`BENCHMARK_RESULTS_LINUX_CHROMIUM.json` are a separate run on a Linux VM with Chromium; compare
+ratios between builds, not absolute times across the two machines.
+
+## Compare with other frameworks
+
+To rank Farm against the harness's own entries, build those entries in the checkout (for example
+`frameworks/keyed/vanillajs`, `solid`, `svelte`, `vue`, `preact-hooks` and `react-compiler-hooks`,
+each with `npm ci && npm run build-prod` where it has a build), add them to the `--framework`
+lists of the `isKeyed` and `bench` commands above, and run the CPU, memory and size suites into an
+otherwise empty `webdriver-ts/results`. Then score every framework in that directory:
+
+```bash
+pnpm compare:frameworks /absolute/path/to/js-framework-benchmark
+```
+
+It recomputes each median from the raw samples, rejects duplicate results, and scores CPU with the
+official weights and memory and size with equal weights, relative to the best framework in the
+run, as the harness's results table does. Set `FARM_COMPARISON_OUTPUT` to choose the JSON path.
+[FRAMEWORK_COMPARISON_LINUX_CHROMIUM.md](./FRAMEWORK_COMPARISON_LINUX_CHROMIUM.md) is the recorded
+ten-framework run.
 
 These are local results produced by the official harness, not an official leaderboard submission.
 Browser, operating-system, runner, framework versions, harness revision, and sample counts must be

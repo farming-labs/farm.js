@@ -119,6 +119,40 @@ describe("supabase protected-route middleware refresh forwarding", () => {
     expect(forwarded![0]).toContain("sb-test-auth-token=rotated-session-value");
   });
 
+  it("marks Supabase session cookies Secure on https and keeps them readable by the browser client", async () => {
+    async function rotate(url: string) {
+      const integration = supabase({
+        instance: (context: SupabaseIntegrationInstanceContext) =>
+          ({
+            auth: {
+              getUser: async () => {
+                // The options @supabase/ssr applies by default: no Secure.
+                context.options.cookies!.setAll!([
+                  {
+                    name: "sb-test-auth-token",
+                    value: "rotated",
+                    options: { path: "/", sameSite: "lax", httpOnly: false, maxAge: 34560000 },
+                  },
+                ]);
+                return { data: { user: { id: "user_verified" } }, error: null };
+              },
+            },
+          }) as unknown as SupabaseIntegrationClient,
+        protectedRoutes: ["/dashboard(.*)"],
+      });
+      const request = new Request(url);
+      const ctx = createContext(request, "/dashboard");
+      await integration.middleware![0].handler(request, ctx);
+      return ctx.req.get<string[]>(FARM_INTEGRATION_SET_COOKIES_KEY)![0];
+    }
+
+    const secure = await rotate("https://app.example.com/dashboard");
+    expect(secure).toContain("; Secure");
+    expect(secure).toContain("SameSite=Lax");
+    expect(secure).not.toContain("HttpOnly");
+    expect(await rotate("http://localhost:3000/dashboard")).not.toContain("Secure");
+  });
+
   it("does not forward anything when getUser verifies without refreshing", async () => {
     const getUser = vi.fn(async () => ({
       data: { user: { id: "user_verified" } },

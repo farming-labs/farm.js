@@ -152,6 +152,23 @@ describe("agent.read events", () => {
     expect(events.every((event: any) => event.route === "/guide.md")).toBe(true);
   });
 
+  it("reports a failed Markdown precondition as 412", () => {
+    const events = capture();
+    const response = createFarmMarkdownViewResponse({
+      request: new Request("https://acme.test/guide.md?outline", {
+        headers: { "if-match": '"stale"' },
+      }),
+      markdown: "# Guide\n",
+      status: 200,
+      headers: new Headers(),
+      markdownPath: "/guide.md",
+    });
+    expect(response.status).toBe(412);
+    expect(events).toEqual([
+      expect.objectContaining({ surface: "markdown", view: "outline", status: 412 }),
+    ]);
+  });
+
   it("does not count Farm's own reads, such as llms-full.txt reading each page", async () => {
     const events = capture();
     const seen: Request[] = [];

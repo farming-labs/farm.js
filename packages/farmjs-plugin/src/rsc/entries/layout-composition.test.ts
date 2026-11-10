@@ -34,9 +34,9 @@ function compose(
   },
 ) {
   const start = entry.indexOf("const LayoutModules = getLayoutModules(pattern);");
-  const end = entry.indexOf("const metadata =", start);
+  const end = entry.indexOf("const configuredRoutesDir =", start);
   const renderStart = entry.indexOf("// Render layout");
-  const renderEnd = entry.indexOf("// Single wrapper", renderStart);
+  const renderEnd = entry.indexOf("// A root layout that renders <html>", renderStart);
   return new AsyncFunction(
     "pattern",
     "getLayoutModules",

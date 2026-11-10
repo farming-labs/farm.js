@@ -1,5 +1,4 @@
-import { resolveFarmDevtoolsConfig } from "@farm.js/core";
-import { definePlugin, type FarmPlugin } from "@farm.js/core/plugin";
+import { definePlugin, type FarmPlugin, resolveFarmDevtoolsConfig } from "@farm.js/core/plugin";
 import type { Plugin } from "vite";
 import type { DevtoolsOptions } from "./types.js";
 
@@ -66,15 +65,47 @@ export function devtools(options: DevtoolsOptions = {}): FarmPlugin {
       return {
         ...config,
         devtools: devtoolsConfig,
-        vite: { ...config.vite, plugins: [vitePlugin, ...(config.vite?.plugins ?? [])] },
+        vite: {
+          ...config.vite,
+          plugins: [vitePlugin, ...(config.vite?.plugins ?? [])],
+          ...(inspect
+            ? {
+                optimizeDeps: {
+                  ...config.vite?.optimizeDeps,
+                  // This tiny module must retain import.meta.hot instead of being prebundled.
+                  exclude: [
+                    ...new Set([
+                      ...(config.vite?.optimizeDeps?.exclude ?? []),
+                      "@farm.js/devtools/internal/hmr",
+                    ]),
+                  ],
+                },
+              }
+            : {}),
+        },
       };
     },
     client: {
-      public: { launcher },
+      public: { launcher, inspect },
       async setup({ isDev, public: config }) {
-        if (!isDev || !config.launcher) return;
-        const { startDevtoolsLauncher } = await import("@farm.js/devtools/client");
-        return startDevtoolsLauncher();
+        if (!isDev || (!config.launcher && !config.inspect)) return;
+        const updates = config.inspect
+          ? (await import("@farm.js/devtools/internal/hmr")).startDevtoolsUpdates()
+          : undefined;
+        try {
+          const launcher = config.launcher
+            ? (await import("@farm.js/devtools/client")).startDevtoolsLauncher()
+            : undefined;
+          return {
+            dispose() {
+              launcher?.dispose();
+              updates?.dispose();
+            },
+          };
+        } catch (error) {
+          updates?.dispose();
+          throw error;
+        }
       },
       close({ state }) {
         state?.dispose();

@@ -89,6 +89,18 @@ export function matchesMiddlewareRoute(
   return { matched: true, params: Object.keys(params).length > 0 ? params : undefined };
 }
 
+/** Match a file middleware route against every pathname the request is served at. */
+export function matchesMiddlewareRouteAt(
+  pathnames: readonly string[],
+  entry: FileMiddlewareRoute,
+): { matched: boolean; params?: Record<string, string> } {
+  for (const pathname of pathnames) {
+    const match = matchesMiddlewareRoute(pathname, entry);
+    if (match.matched) return match;
+  }
+  return { matched: false };
+}
+
 function sameEntries<T>(
   current: readonly T[] | undefined,
   previous: readonly T[] | undefined,
@@ -105,7 +117,7 @@ function toMatcherList(matcher: MiddlewareConfig["matcher"]): MiddlewareMatcher[
 }
 
 function escapeRegex(value: string): string {
-  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+  return value.replace(/[|\\{}()[\]^$*+?.]/g, "\\$&");
 }
 
 function parseColonParam(segment: string): { name: string; modifier?: string } {
@@ -116,6 +128,55 @@ function parseColonParam(segment: string): { name: string; modifier?: string } {
     name: modifier ? raw.slice(0, -1) : raw,
     modifier,
   };
+}
+
+const MATCHER_PARAM_NAME = /^[\p{L}\p{N}_$-]+$/u;
+// Regex syntax, a regex `.*` / `.+` (a literal dot then a glob or a plain `+`),
+// or an inline `:param` after literal text (`/user-:id`). Each compiles to a
+// literal that meets no request.
+const MATCHER_UNSUPPORTED_LITERAL = /[()[\]|\\{}^$?:]|\.[*+]/;
+const MATCHER_BRACKET_PARAM = /^\[\[\.\.\.(.+)\]\]$|^\[\.\.\.(.+)\]$|^\[(.+)\]$/;
+
+function isSupportedMatcherSegment(segment: string): boolean {
+  if (segment === "*" || segment === "**") return true;
+  if (segment.startsWith(":")) return MATCHER_PARAM_NAME.test(parseColonParam(segment).name);
+  const bracket = MATCHER_BRACKET_PARAM.exec(segment);
+  if (bracket) return MATCHER_PARAM_NAME.test(bracket[1] ?? bracket[2] ?? bracket[3]);
+  return !MATCHER_UNSUPPORTED_LITERAL.test(segment);
+}
+
+// A `(.*)` subtree compares its prefix as literal text, so a param or wildcard
+// there would never match either.
+function isLiteralMatcherSegment(segment: string): boolean {
+  return !MATCHER_UNSUPPORTED_LITERAL.test(segment) && !segment.includes("*");
+}
+
+/**
+ * Reject a string matcher Farm cannot compile as written. Next-style strings such
+ * as `/((?!api|_next).*)` or `/(api|trpc)(.*)` would otherwise compile to a
+ * literal that meets no request, so a guard behind them silently never runs.
+ *
+ * @internal
+ */
+export function assertSupportedMiddlewareMatcher(pattern: string): void {
+  if (pattern === "*" || pattern === "/(.*)") return;
+  const subtree = pattern.endsWith("(.*)");
+  const path = subtree ? pattern.slice(0, -4) : pattern;
+  const segments = path.split("/").filter(Boolean);
+  if (segments.every(subtree ? isLiteralMatcherSegment : isSupportedMatcherSegment)) return;
+  throw new Error(
+    `Middleware matcher "${pattern}" is not a supported string pattern, so it would never ` +
+      "match a request and the middleware would not run. String matchers do not accept " +
+      "regular-expression syntax such as groups, alternation, character classes, " +
+      "lookaheads, or `.*`, or a param after literal text such as `/user-:id`. Pass a RegExp instead, for example `matcher: /^\\/(?!api|_next).*/`, " +
+      "or use the supported forms: /path/:param, /path/:param*, /path/[param], " +
+      "/path/[...param], /path/*, /path/**, or a trailing (.*) such as /path(.*).",
+  );
+}
+
+function compileConfigPattern(pattern: string | RegExp, compile: typeof compilePattern) {
+  if (typeof pattern === "string") assertSupportedMiddlewareMatcher(pattern);
+  return compile(pattern);
 }
 
 function compilePathPattern(pattern: string, trailingSlash = false): CompiledPathPattern {
@@ -145,7 +206,18 @@ function compilePathPattern(pattern: string, trailingSlash = false): CompiledPat
       if (modifier === "+") {
         return "/(.+)";
       }
+      if (modifier === "?") {
+        return "(?:/([^/]+))?";
+      }
       return "/([^/]+)";
+    }
+
+    // `[[...slug]]` is an optional catch-all: like `[...slug]`, it also meets
+    // the bare parent path. Checked first, or the `[` branch below reads it as
+    // one required segment named `[...slug]`.
+    if (segment.startsWith("[[...") && segment.endsWith("]]")) {
+      params.push(segment.slice(5, -2));
+      return "(?:/(.*))?";
     }
 
     if (segment.startsWith("[...") && segment.endsWith("]")) {
@@ -205,10 +277,12 @@ export function compileMiddlewareConfig(config: MiddlewareConfig): CompiledMiddl
   const compiled = {
     matcher: config.matcher
       ? toMatcherList(config.matcher).map((matcher) =>
-          typeof matcher === "function" ? matcher : compileMatcherPattern(matcher),
+          typeof matcher === "function"
+            ? matcher
+            : compileConfigPattern(matcher, compileMatcherPattern),
         )
       : undefined,
-    exclude: config.exclude?.map(compilePattern),
+    exclude: config.exclude?.map((pattern) => compileConfigPattern(pattern, compilePattern)),
   };
   compiledConfigCache.set(config, {
     compiled,
@@ -260,14 +334,52 @@ function matchPattern(
   };
 }
 
+/** `ctx` with `pathname` read as `routePathname`; everything else, writes included, is `ctx`. */
+function withRoutePathname(ctx: MiddlewareContext, routePathname: string): MiddlewareContext {
+  return new Proxy(ctx, {
+    get(target, key) {
+      return key === "pathname" || key === "routePathname"
+        ? routePathname
+        : Reflect.get(target, key, target);
+    },
+  });
+}
+
+/**
+ * Evaluate a function matcher or `.when()` condition. Apps write these against
+ * `ctx.pathname`, the raw request path, which is still percent-encoded and still
+ * carries basePath/locale, while string matchers and the router see the route
+ * pathname. Checking the predicate against both keeps `/%61dmin` and
+ * `/console/admin` from walking past `ctx.pathname.startsWith("/admin")`. Only
+ * adds matches: a predicate true for the raw path stays true.
+ */
+export function matchesMiddlewarePredicate(
+  predicate: (ctx: MiddlewareContext) => boolean,
+  ctx: MiddlewareContext,
+  getRoutePathname: () => string | undefined = () => ctx.routePathname,
+): boolean {
+  if (predicate(ctx)) return true;
+  const routePathname = getRoutePathname();
+  if (routePathname === undefined || routePathname === ctx.pathname) return false;
+  return Boolean(predicate(withRoutePathname(ctx, routePathname)));
+}
+
+/** The route pathname for a request path, as string matchers compare it. */
+export function toMiddlewareRoutePathname(
+  pathname: string,
+  toRoutePathname: (pathname: string) => string = (value) => value,
+): string {
+  return canonicalizeRequestPathname(toRoutePathname(pathname));
+}
+
 export function matchesCompiledMiddlewareConfig(
   pathname: string,
   config: CompiledMiddlewareConfig,
   ctx: MiddlewareContext,
 ): { matched: boolean; params?: Record<string, string> } {
   let canonicalPathname: string | undefined;
-  // Canonicalize at most once for the whole config, and skip the work entirely
-  // for configs containing only function matchers.
+  // Canonicalize at most once for the whole config, and only when a pattern or
+  // a function matcher that missed the raw path needs it.
   const getCanonicalPathname = () => (canonicalPathname ??= canonicalizeRequestPathname(pathname));
 
   if (config.exclude) {
@@ -281,7 +393,7 @@ export function matchesCompiledMiddlewareConfig(
   if (config.matcher) {
     for (const matcher of config.matcher) {
       if (typeof matcher === "function") {
-        if (matcher(ctx)) {
+        if (matchesMiddlewarePredicate(matcher, ctx, getCanonicalPathname)) {
           return { matched: true };
         }
         continue;
@@ -312,4 +424,17 @@ export function matchesMiddlewareConfig(
     sameEntries(config.exclude, cached.excludeEntries);
   const compiled = unchanged ? cached.compiled : compileMiddlewareConfig(config);
   return matchesCompiledMiddlewareConfig(pathname, compiled, ctx);
+}
+
+/** Match a middleware config against every pathname the request is served at. */
+export function matchesMiddlewareConfigAt(
+  pathnames: readonly string[],
+  config: MiddlewareConfig,
+  ctx: MiddlewareContext,
+): { matched: boolean; params?: Record<string, string> } {
+  for (const pathname of pathnames) {
+    const match = matchesMiddlewareConfig(pathname, config, ctx);
+    if (match.matched) return match;
+  }
+  return { matched: false };
 }

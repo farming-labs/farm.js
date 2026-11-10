@@ -1,10 +1,13 @@
 import { defineDocs } from "@farming-labs/docs";
 import { pixelBorder } from "@farming-labs/theme-production/pixel-border";
 import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/core";
+import { FARM_VERSION } from "@farm.js/core/version";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { agentSupportInvitation } from "./src/lib/agent-support";
 import {
   siCloudflare,
+  siConvex,
   siNextdotjs,
   siNuxt,
   siPreact,
@@ -32,16 +35,17 @@ const brandPath = (path: string, viewBox = "0 0 24 24") =>
 const brandSvg = (content: string, viewBox = "0 0 24 24") =>
   `<svg viewBox="${viewBox}" focusable="false">${content}</svg>`;
 
+// The build reads this config from the docs app and embeds the fonts in the JSON copy that
+// renders social images. The production server also imports this module (for the adapter's
+// icons and components), where node_modules isn't on disk, so it goes without the fonts there
+// rather than failing every request.
 const resolveGeistFontsDirectory = () => {
   const candidates = [
     path.join(process.cwd(), "node_modules", "geist", "dist", "fonts"),
     path.join(process.cwd(), "docs", "node_modules", "geist", "dist", "fonts"),
     path.join(process.cwd(), "..", "docs", "node_modules", "geist", "dist", "fonts"),
   ];
-  const directory = candidates.find((candidate) => existsSync(candidate));
-  if (!directory)
-    throw new Error("Could not resolve Geist fonts for the Farm.js docs social image.");
-  return directory;
+  return candidates.find((candidate) => existsSync(candidate));
 };
 
 // T3 Chat has no published mark, so its menu entry uses a neutral chat glyph (Lucide).
@@ -50,8 +54,8 @@ const chatIcon = brandSvg(
 );
 
 const geistFontsDirectory = resolveGeistFontsDirectory();
-const embeddedWoff2 = (...segments: string[]) =>
-  `data:font/woff2;base64,${readFileSync(path.join(geistFontsDirectory, ...segments)).toString("base64")}`;
+const embeddedWoff2 = (directory: string, ...segments: string[]) =>
+  `data:font/woff2;base64,${readFileSync(path.join(directory, ...segments)).toString("base64")}`;
 
 const icons = {
   // Lucide paths, serialized like the other sidebar icons below.
@@ -79,6 +83,7 @@ const icons = {
     "m21.47 20.829-2.881-2.881a.572.572 0 0 0-.7-.084 6.854 6.854 0 0 1-7.081 0 .576.576 0 0 0-.7.084l-2.881 2.881a.576.576 0 0 0-.103.69.57.57 0 0 0 .166.186 12 12 0 0 0 14.113 0 .58.58 0 0 0 .239-.423.576.576 0 0 0-.172-.453Zm.002-17.668-2.88 2.88a.569.569 0 0 1-.701.084A6.857 6.857 0 0 0 8.724 8.08a6.862 6.862 0 0 0-1.222 3.692 6.86 6.86 0 0 0 .978 3.764.573.573 0 0 1-.083.699l-2.881 2.88a.567.567 0 0 1-.864-.063A11.993 11.993 0 0 1 6.771 2.7a11.99 11.99 0 0 1 14.637-.405.566.566 0 0 1 .232.418.57.57 0 0 1-.168.448Zm-7.118 12.261a3.427 3.427 0 1 0 0-6.854 3.427 3.427 0 0 0 0 6.854Z",
   ),
   "brand-cloudflare": brandPath(siCloudflare.path),
+  "brand-convex": brandPath(siConvex.path, "-2 -2 28 28"),
   "brand-eve": brandSvg(
     '<rect width="102" height="102" fill="currentColor" stroke="none"></rect><path fill="var(--color-fd-background, #fff)" stroke="none" d="M49.28 66.94 75.03 34.96h-6.89L47.91 60.11l-5.49 6.83h6.86ZM0 34.96h42.4v5.11H0zm0 13.32h27.66v5.11H0zm0 13.54h27.66v5.11H0zm69.63-26.86H102v5.11H69.63zm4.71 13.32H102v5.11H74.34zm0 13.54H102v5.11H74.34z"></path>',
     "0 0 102 102",
@@ -199,6 +204,7 @@ const sidebar = [
       { label: "Internationalization", slug: "internationalization", icon: "languages" },
       { label: "Layouts", slug: "layouts", icon: "layout" },
       { label: "Rendering Model", slug: "server-rendering", icon: "monitor" },
+      { label: "Islands and islx", slug: "server-rendering/islands", icon: "network" },
       { label: "Built-in Authentication", slug: "auth", icon: "lock" },
       { label: "Images", slug: "images", icon: "image" },
       { label: "Fonts", slug: "fonts", icon: "file" },
@@ -214,6 +220,7 @@ const sidebar = [
       { label: "Query and Params", slug: "query", icon: "search" },
       { label: "API Routes", slug: "api-routes", icon: "server" },
       { label: "API Client", slug: "api-client", icon: "terminal" },
+      { label: "Backend-Only Apps", slug: "backend", icon: "server" },
       { label: "Server Queries", slug: "server-queries", icon: "database" },
       { label: "Local-First Patterns", slug: "local-first", icon: "zap" },
       { label: "KV Storage", slug: "storage", icon: "database" },
@@ -280,6 +287,7 @@ const sidebar = [
         icon: "sparkles",
         children: [
           { label: "Agent frameworks", slug: "integrations/agent-frameworks", icon: "sparkles" },
+          { label: "Durable agents", slug: "integrations/agent", icon: "timer" },
           { label: "Eve", slug: "integrations/eve", icon: "brand-eve" },
           {
             label: "Cloudflare Agents",
@@ -317,6 +325,7 @@ const sidebar = [
             slug: "integrations/orm-storage",
             icon: "database",
           },
+          { label: "Convex", slug: "integrations/convex", icon: "brand-convex" },
         ],
       },
     ],
@@ -335,6 +344,17 @@ const sidebar = [
       { label: "Cron", slug: "cron", icon: "timer" },
       { label: "Instant Preview", slug: "preview", icon: "terminal" },
       { label: "Deployment", slug: "deployment", icon: "cloud" },
+      { label: "Desktop Apps", slug: "desktop", icon: "monitor" },
+      {
+        label: "Mobile Apps",
+        icon: "smartphone",
+        children: [
+          { label: "Overview", slug: "mobile", icon: "smartphone" },
+          { label: "The Web Shell", slug: "mobile/shell", icon: "layout" },
+          { label: "Native Screens", slug: "mobile/native-screens", icon: "layers" },
+          { label: "Device Features", slug: "mobile/modules", icon: "plug" },
+        ],
+      },
     ],
   },
   {
@@ -365,6 +385,7 @@ const sidebar = [
           { label: "MSW", slug: "plugins/msw", icon: "shield" },
           { label: "Partytown", slug: "plugins/partytown", icon: "zap" },
           { label: "PWA", slug: "plugins/pwa", icon: "smartphone" },
+          { label: "Progress", slug: "plugins/progress", icon: "activity" },
           { label: "Search", slug: "plugins/search", icon: "search" },
           { label: "Scripts", slug: "plugins/scripts", icon: "code" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
@@ -421,15 +442,21 @@ const config = {
     description: "Farm.js framework documentation powered by @farming-labs/docs.",
   },
   favicon: "/favicon.svg",
+  // The docs MCP describes Farm.js, so it reports the Farm.js version, not this site's.
+  mcp: { version: FARM_VERSION },
+  // List the hand-written /openapi.json (public APIs only) in /.well-known/api-catalog.
+  agent: { apiCatalog: { openapi: "/openapi.json" } },
   socialImage: {
     baseUrl: "https://farmjs.dev",
     siteName: "Farm.js",
     brand: "Farm.js",
-    fonts: {
-      display: embeddedWoff2("geist-pixel", "GeistPixel-Square.woff2"),
-      sans: embeddedWoff2("geist-sans", "Geist-Variable.woff2"),
-      mono: embeddedWoff2("geist-mono", "GeistMono-Variable.woff2"),
-    },
+    fonts: geistFontsDirectory
+      ? {
+          display: embeddedWoff2(geistFontsDirectory, "geist-pixel", "GeistPixel-Square.woff2"),
+          sans: embeddedWoff2(geistFontsDirectory, "geist-sans", "Geist-Variable.woff2"),
+          mono: embeddedWoff2(geistFontsDirectory, "geist-mono", "GeistMono-Variable.woff2"),
+        }
+      : undefined,
   },
   nav: {
     title: "Farm.js",
@@ -447,7 +474,9 @@ const config = {
   llmsTxt: {
     enabled: true,
     siteTitle: "Farm.js Docs",
-    siteDescription: "Complete Farm.js framework documentation.",
+    siteDescription: ["Complete Farm.js framework documentation.", agentSupportInvitation].join(
+      "\n\n",
+    ),
   },
   sitemap: true,
   robots: true,

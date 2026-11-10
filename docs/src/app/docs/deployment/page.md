@@ -190,6 +190,8 @@ HOST=0.0.0.0 PORT=3000 pnpm start
 
 For a VPS, run the same start command behind nginx, Caddy, systemd, or a process manager such as PM2. Environment variables should be provided by the host at runtime, not committed into the bundle.
 
+The server sets `NODE_ENV=production` when the environment leaves it unset, as `next start` does, so packages that read it at runtime agree with the browser bundle. A value the host sets wins.
+
 ### Docker
 
 `farm build` writes a self-contained server, so a multi-stage image installs everything to build and copies only the output into the runtime stage:
@@ -214,6 +216,24 @@ CMD ["node", ".farm/.output/server/index.mjs"]
 ```
 
 The build stage keeps devDependencies because `farm build` runs the CLI. The runtime stage does not need `node_modules`. This file uses the default output directory, `.farm/.output`; if you set `deploy.output`, copy and start that directory instead. Add a `.dockerignore` with `node_modules`, `.farm`, and `.git` so local builds stay out of the image.
+
+### Startup code cache
+
+For the `node-server` preset, `.output/server/index.mjs` is a small launcher: it turns on
+Node's on-disk code cache and then loads the built server, `farm-server.mjs`, beside it. Keep
+starting the server through `index.mjs` as before.
+
+Node otherwise recompiles the whole server bundle from source on every start. The launcher
+writes V8's bytecode to `.output/server/.compile-cache` on the first start, and later starts
+read it instead. On the `examples/basic` app, boot to a first rendered page drops from 185 ms
+to 139 ms.
+
+The cache makes restarts and redeploys of the same build faster. It is written at runtime, so
+give the server a writable output directory to benefit from it — a container with a read-only
+filesystem, or one replaced on every request, simply starts uncached. Nothing depends on it:
+Node checks each entry against the source and its own version, and a stale, corrupt or missing
+cache compiles as before. Set `NODE_COMPILE_CACHE` yourself to put the cache elsewhere, such
+as a writable volume shared by restarts.
 
 ### Hosting platforms
 
@@ -279,6 +299,14 @@ Nitro's official deploy docs list these runtime and provider families. Farm's fi
 | Other Nitro provider docs            | Alwaysdata, AWS Lambda, Cleavr, Deno Deploy, DigitalOcean, EdgeOne Pages, Firebase, Flightcontrol, Genezio, GitHub Pages, GitLab Pages, Heroku, IIS, Koyeb, Platform.sh, Render.com, Zephyr Cloud, Zerops |
 
 Common preset names include `node-server`, `bun`, `deno-server`, `deno-deploy`, `aws-lambda`, `aws-amplify`, `azure-swa`, `cloudflare-pages`, `cloudflare-module`, `firebase-app-hosting`, `github-pages`, `gitlab-pages`, `netlify`, `netlify-edge`, `vercel`, `zeabur`, and `zerops`. Nitro can add or rename presets over time, so check Nitro's deploy docs when targeting a provider directly.
+
+Farm's Nitro version has no `vercel-edge` preset: Nitro replaced it with `vercel` on Fluid compute. Farm rejects `vercel-edge` as a `deploy.target`, `deploy.preset`, or `--preset` value when it resolves the config, before the build starts. Use the `vercel` target instead.
+
+## Files server code reads
+
+Server code can import a local file that it reads at runtime, such as a `.wasm` binary an API route imports without `@farm.js/wasm`. Farm deploys that file with the server code and keeps it out of the public assets: in `server/` for `node-server` and `bun`, in the function directory for `vercel` and `netlify`, and in the server output of other Nitro presets that run on Node.
+
+Edge presets (`cloudflare-pages`, `cloudflare-module`, `netlify-edge`) deploy no file to read, and Cloudflare Workers also refuse to compile WebAssembly from bytes. On those presets `farm build` fails and names the file. Load the module in the browser instead, with `@farm.js/wasm` or a `?url` import, or deploy that server code to a Node target.
 
 ## Build
 

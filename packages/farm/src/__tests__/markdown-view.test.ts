@@ -133,6 +133,27 @@ describe("Markdown sections", () => {
     expect(view.body).toContain("\n  - [Detail 1](/big.md?section=detail-1) ~");
   });
 
+  it("reads CRLF documents, as a Windows checkout writes them, like LF documents", () => {
+    // Git for Windows checks files out with CRLF by default (core.autocrlf=true).
+    const crlf = pricing.replace(/\n/g, "\r\n");
+    expect(parseFarmMarkdownHeadings(crlf)).toEqual(parseFarmMarkdownHeadings(pricing));
+    for (const query of [
+      "outline",
+      "section=plans",
+      "section=faq-1",
+      "section=enterprise",
+      "max_tokens=100",
+      "section=plans&max_tokens=100",
+    ]) {
+      expect(
+        selectFarmMarkdownView(crlf, new URLSearchParams(query), "/pricing.md"),
+        query,
+      ).toEqual(selectFarmMarkdownView(pricing, new URLSearchParams(query), "/pricing.md"));
+    }
+    // The whole document keeps its original bytes.
+    expect(selectFarmMarkdownView(crlf, new URLSearchParams(), "/pricing.md").body).toBe(crlf);
+  });
+
   it("returns the whole document without outline or section", () => {
     expect(selectFarmMarkdownView(pricing, new URLSearchParams(), "/pricing.md")).toEqual({
       status: 200,
@@ -188,6 +209,24 @@ describe("Markdown responses", () => {
     expect(response?.status).toBe(200);
     expect(response?.headers.get("etag")).toMatch(/^W\/"/);
     expect(await response?.text()).toContain("- [Plans](/pricing.md?section=plans)");
+  });
+
+  it("outlines CRLF page.md sources", async () => {
+    const respond = (url: string) =>
+      createFarmMarkdownSourceResponse({
+        request: new Request(url, { headers: { Accept: "text/markdown" } }),
+        resolveSource: () => ({
+          source: pricing.replace(/\n/g, "\r\n"),
+          filePath: "/app/src/app/pricing/page.md",
+        }),
+      });
+    const outline = await respond("http://farm.test/pricing?outline");
+    expect(await outline?.text()).toContain("- [Plans](/pricing.md?section=plans)");
+    const section = await respond("http://farm.test/pricing?section=plans");
+    expect(section?.status).toBe(200);
+    expect(await section?.text()).toBe(
+      "## Plans\n\n### Free\n\nUp to 3 projects.\n\n### Pro\n\nUnlimited projects.\n",
+    );
   });
 
   it("keeps HEAD bodiless", async () => {

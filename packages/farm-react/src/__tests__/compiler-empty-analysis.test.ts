@@ -158,6 +158,71 @@ describe("empty local-name analysis", () => {
   });
 });
 
+describe("local-name miss preflight", () => {
+  it.each([
+    "42",
+    "'local'",
+    "/local/",
+    "`local ${other}`",
+    "other /* local */",
+    "object['local']",
+    "({ 'local': other })",
+    "rows.map(row => row.label)",
+    "value => { const other = value + 1; return other; }",
+    '<main title="local">Local 数 {other}</main>',
+    "<><Other value={other} /></>",
+    "other as number",
+    "other!",
+    "other satisfies number",
+  ])("does not clone or build scopes for a proven miss in %s", (code) => {
+    const input = expression(code);
+    const before = JSON.stringify(input);
+    freeze(input);
+    expect(collectReferencedLocals(input, new Set(["local", "Local", "数"]))).toEqual([]);
+    expect(traversals).toBe(0);
+    expect(clones).toBe(0);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each([
+    ["数 + local", ["local", "数"], ["数", "local"]],
+    ["local as number", ["local"], ["local"]],
+    ["local!", ["local"], ["local"]],
+    ["local satisfies number", ["local"], ["local"]],
+    ["({ local }) => local", ["local"], []],
+    ["function local() { return local; }", ["local"], []],
+    ["object?.[local]", ["local"], ["local"]],
+    ["<Local.Part />", ["Local", "Part"], ["Local"]],
+    ["<main local={other} />", ["local"], []],
+  ] as const)("still builds scopes for a possible match in %s", (code, names, expected) => {
+    const input = expression(code);
+    const before = JSON.stringify(input);
+    freeze(input);
+    expect(collectReferencedLocals(input, new Set(names))).toEqual(expected);
+    expect(traversals).toBe(1);
+    expect(clones).toBe(1);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it("returns fresh arrays and observes changes to a reused name set", () => {
+    const input = expression("local");
+    freeze(input);
+    const names = new Set(["other"]);
+    const first = collectReferencedLocals(input, names);
+    const second = collectReferencedLocals(input, names);
+    expect(first).not.toBe(second);
+    first.push("not a reference");
+    expect(second).toEqual([]);
+    expect(traversals).toBe(0);
+    names.add("local");
+    expect(collectReferencedLocals(input, names)).toEqual(["local"]);
+    expect(traversals).toBe(1);
+    names.delete("local");
+    expect(collectReferencedLocals(input, names)).toEqual([]);
+    expect(traversals).toBe(1);
+  });
+});
+
 describe("empty derived-name analysis", () => {
   it.each(emptyInputs)("keeps an owned clone without building scopes for %s", (code) => {
     const input = expression(code);

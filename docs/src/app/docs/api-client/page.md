@@ -1211,6 +1211,19 @@ Output parsing also runs for direct server calls, form actions, and browser call
 reject the function just like invalid input. Keep the output contract narrow for private data;
 do not rely on TypeScript alone to prevent an extra database field from being returned at runtime.
 
+### Which exports become actions
+
+In the RSC renderer, Farm adds the React server boundary for exported `createServerFn` and
+`createServerQuery` functions, and only those become callable actions. Other exports of the same
+module, such as a plain `async function loadAccount(userId)` helper, stay ordinary server code: the
+browser cannot call them, so they cannot skip the server function's middleware. Client components
+can import only the server functions from that module.
+
+A file that starts with `"use server"` keeps React's rule instead: every exported async function in
+it is a callable action that anyone can invoke by id, without the middleware of the server
+functions beside it. Authorize inside each of those functions, or keep helpers in a module without
+the directive.
+
 ### Composable middleware
 
 Use `createServerMiddleware` for server-only behavior shared by several functions, such as session

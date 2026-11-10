@@ -1,10 +1,10 @@
 import path from "node:path";
 
-// The RSC server needs live middleware functions, but importing the complete
-// application config would also execute and bundle build-only plugins. This
-// static slice keeps the explicit middleware expression and only the
-// top-level bindings reachable from it. Ambiguous config shapes fail during
-// configuration instead of producing a partial runtime config.
+// The RSC server needs live config values such as middleware functions and
+// MCP tools, but importing the complete application config would also execute
+// and bundle build-only plugins. This static slice keeps one explicit config
+// property and only the top-level bindings reachable from it. Ambiguous config
+// shapes fail during configuration instead of producing a partial runtime config.
 
 type AstNode = {
   type: string;
@@ -251,7 +251,11 @@ function resolveConfigObject(
  * leave the guard with a different matcher than the config it came from. Fail
  * on those instead of producing a module that disagrees with the config.
  */
-function unsupportedStatementReason(statement: AstNode, source: string): string | null {
+function unsupportedStatementReason(
+  statement: AstNode,
+  source: string,
+  key: string,
+): string | null {
   switch (statement.type) {
     case "ImportDeclaration":
       if (((statement.specifiers as AstNode[]) ?? []).length > 0) return null;
@@ -271,13 +275,22 @@ function unsupportedStatementReason(statement: AstNode, source: string): string 
   const text = source.slice(statement.start, statement.end).replace(/\s+/g, " ").trim();
   const snippet = text.length > 80 ? `${text.slice(0, 77)}...` : text;
   return statement.type === "ImportDeclaration"
-    ? `the side-effect import \`${snippet}\` would not run with the extracted middleware`
-    : `the top-level statement \`${snippet}\` would not run with the extracted middleware`;
+    ? `the side-effect import \`${snippet}\` would not run with the extracted ${key}`
+    : `the top-level statement \`${snippet}\` would not run with the extracted ${key}`;
 }
 
 export function extractRscMiddlewareConfigModule(
   source: string,
   program: AstNode,
+): ExtractionResult {
+  return extractRscConfigPropertyModule(source, program, "middleware");
+}
+
+/** Extracts `key` from the default-exported config, as a module that exports `{ [key] }`. */
+export function extractRscConfigPropertyModule(
+  source: string,
+  program: AstNode,
+  key: "middleware" | "mcp",
 ): ExtractionResult {
   const body = (program.body as AstNode[]) ?? [];
   const bindings = new Map<string, Binding>();
@@ -287,7 +300,7 @@ export function extractRscMiddlewareConfigModule(
   let order = 0;
 
   for (const statement of body) {
-    const unsupported = unsupportedStatementReason(statement, source);
+    const unsupported = unsupportedStatementReason(statement, source, key);
     if (unsupported) return { kind: "unsupported", reason: unsupported };
 
     if (statement.type === "ImportDeclaration") {
@@ -373,34 +386,34 @@ export function extractRscMiddlewareConfigModule(
   }
 
   const properties = (configObject.properties as AstNode[]) ?? [];
-  let middlewareProperty: AstNode | null = null;
-  let middlewareIndex = -1;
+  let keyProperty: AstNode | null = null;
+  let keyIndex = -1;
   for (const [index, property] of properties.entries()) {
-    if (property.type === "Property" && propertyName(property) === "middleware") {
-      middlewareProperty = property;
-      middlewareIndex = index;
+    if (property.type === "Property" && propertyName(property) === key) {
+      keyProperty = property;
+      keyIndex = index;
     }
   }
-  if (!middlewareProperty) {
+  if (!keyProperty) {
     if (properties.some((property) => property.type === "SpreadElement")) {
       return {
         kind: "unsupported",
-        reason: "middleware may be supplied through a config spread",
+        reason: `${key} may be supplied through a config spread`,
       };
     }
     return { kind: "absent" };
   }
-  if (properties.slice(middlewareIndex + 1).some((property) => property.type === "SpreadElement")) {
+  if (properties.slice(keyIndex + 1).some((property) => property.type === "SpreadElement")) {
     return {
       kind: "unsupported",
-      reason: "a config spread after middleware may override it",
+      reason: `a config spread after ${key} may override it`,
     };
   }
 
-  const middlewareValue = middlewareProperty.value as AstNode;
+  const keyValue = keyProperty.value as AstNode;
   const candidateNames = new Set(bindings.keys());
   const selectedBindings = new Set<Binding>();
-  const pending = [...referencedTopLevelNames(middlewareValue, candidateNames)];
+  const pending = [...referencedTopLevelNames(keyValue, candidateNames)];
   while (pending.length > 0) {
     const name = pending.pop()!;
     const binding = bindings.get(name);
@@ -416,10 +429,10 @@ export function extractRscMiddlewareConfigModule(
   const declarations = [...selectedBindings]
     .sort((a, b) => a.order - b.order)
     .map((binding) => binding.render());
-  const middlewareSource = source.slice(middlewareValue.start, middlewareValue.end);
+  const valueSource = source.slice(keyValue.start, keyValue.end);
   return {
     kind: "module",
-    code: `${declarations.join("\n")}${declarations.length ? "\n" : ""}export default { middleware: ${middlewareSource} };\n`,
+    code: `${declarations.join("\n")}${declarations.length ? "\n" : ""}export default { ${key}: ${valueSource} };\n`,
   };
 }
 
@@ -439,6 +452,13 @@ function sourceLang(file: string): "js" | "jsx" | "ts" | "tsx" {
 }
 
 export async function loadRscMiddlewareConfigModule(configPath: string): Promise<ExtractionResult> {
+  return loadRscConfigPropertyModule(configPath, "middleware");
+}
+
+export async function loadRscConfigPropertyModule(
+  configPath: string,
+  key: "middleware" | "mcp",
+): Promise<ExtractionResult> {
   const [{ readFile }, vite] = await Promise.all([import("node:fs/promises"), import("vite")]);
   const source = await readFile(configPath, "utf8");
   const lang = sourceLang(configPath);
@@ -456,8 +476,9 @@ export async function loadRscMiddlewareConfigModule(configPath: string): Promise
           jsx: "automatic",
           loader: lang,
         });
-  return extractRscMiddlewareConfigModule(
+  return extractRscConfigPropertyModule(
     transformed.code,
     vite.parseAst(transformed.code) as unknown as AstNode,
+    key,
   );
 }

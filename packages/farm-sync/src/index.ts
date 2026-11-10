@@ -1,11 +1,19 @@
+// Subpath entries only: the package root also loads Farm's React client, which a backend-only
+// app (`renderer: false`) does not install.
 import {
-  definePlugin,
   describeIntegrationOriginRejection,
   resolveIntegrationAllowedOrigins,
   validateIntegrationRequestOrigin,
-} from "@farm.js/core";
+} from "@farm.js/core/integrations";
+import { definePlugin } from "@farm.js/core/plugin";
+// Types only, so the root entry is never loaded at runtime.
 import type { FarmSchema, FarmSqlDialect } from "@farm.js/core";
-import { executeSyncOperation, SyncOperationError, type SyncOrmClient } from "./server.js";
+import {
+  executeSyncOperation,
+  PUBLIC_SYNC_SCOPE,
+  SyncOperationError,
+  type SyncOrmClient,
+} from "./server.js";
 import {
   resolveSyncModels,
   type ResolvedSyncModel,
@@ -92,6 +100,15 @@ export function sync(options: SyncPluginOptions) {
     throw new Error("sync(): no models are exposed. Add at least one entry to `models`.");
   }
 
+  for (const [index, entry] of (options.middleware ?? []).entries()) {
+    if (typeof entry !== "function") {
+      throw new TypeError(
+        `sync(): middleware[${index}] must be a function ({ request, context }) => context. ` +
+          "Objects from createServerMiddleware() belong to server functions.",
+      );
+    }
+  }
+
   // Resolved once so an invalid pattern fails at startup, not per request.
   const allowedOrigins = resolveIntegrationAllowedOrigins(
     options.allowedOrigins,
@@ -129,6 +146,9 @@ export function sync(options: SyncPluginOptions) {
               persist: model.persist,
               cursor: model.cursorField ?? null,
               fields: Object.keys(model.fields),
+              // Every caller sees the same rows, so persisted ones can paint
+              // before the server answers. Scoped models wait for it.
+              ...(model.where === false ? { scope: PUBLIC_SYNC_SCOPE } : {}),
             },
           ]),
         ),
@@ -146,6 +166,8 @@ export function sync(options: SyncPluginOptions) {
     // the endpoint on the runtime hook so it is handled by both Nitro and the
     // development server instead of relying solely on the legacy Node hook.
     runtime: {
+      // before only answers the sync endpoint; other responses pass through untouched.
+      cache: "public",
       async before({ request }) {
         return handleSyncRequest(request, undefined, {
           path,
@@ -385,7 +407,7 @@ async function resolveSyncClient(
 
 /** Let the orm runtime detect the driver and build the model client. */
 async function buildOrm(schema: FarmSchema, client: unknown): Promise<SyncOrmClient> {
-  const { createIntegrationOrm } = await import("@farm.js/core");
+  const { createIntegrationOrm } = await import("@farm.js/core/integrations/orm");
   return (await createIntegrationOrm({ schema, client })) as unknown as SyncOrmClient;
 }
 

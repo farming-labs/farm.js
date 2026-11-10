@@ -440,6 +440,24 @@ describe("compression plugin", () => {
       expect(head.headers.get("vary")).toBe("Accept-Encoding");
     });
 
+    it("never reads the body of a response whose body is not created yet", async () => {
+      const lazy = new Response(null, { headers: { "content-type": "text/html" } });
+      Object.defineProperty(lazy, "body", {
+        get() {
+          throw new Error("body read");
+        },
+      });
+      const response = compressFarmResponse(
+        new Request("https://farm.test/", { headers: { "accept-encoding": "gzip" } }),
+        lazy,
+        text,
+        true,
+      );
+
+      expect(response.headers.get("content-encoding")).toBe("gzip");
+      expect(gunzipSync(Buffer.from(await response.arrayBuffer())).toString()).toBe(text);
+    });
+
     it("tolerates a consumer cancelling the compressed body before it is ready", async () => {
       const response = compressFarmResponse(
         new Request("https://farm.test/", { headers: { "accept-encoding": "br" } }),

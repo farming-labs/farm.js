@@ -3,24 +3,46 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { DocsConfig } from "@farming-labs/docs";
 import type { FarmLayoutFonts } from "../font";
+import type { FarmMCPServerRegistration } from "../mcp-catalog";
 import { getFarmDocsAdapterConfigModule } from "./adapter-client";
-import { resolveFarmDocsContentDir } from "./handler";
+import {
+  discoverFarmDocsPages,
+  getFarmDocsMarkdownPath,
+  getFarmDocsRoots,
+  resolveFarmDocsContentDir,
+} from "./handler";
 import type { FarmDocsCompiledManifest } from "./precompiled-runtime";
 import type { FarmDocsResolvedConfig } from "./types";
+
+interface FarmDocsAdapterRuntimeHandlerOptions {
+  rootDir: string;
+  clientEntry: string;
+  stylesheets: string[];
+  resolveLayoutFonts?: (
+    pathname: string,
+  ) => FarmLayoutFonts | undefined | Promise<FarmLayoutFonts | undefined>;
+  loadReactModule?: () => Promise<any>;
+  registerMCPServer?: (server: FarmMCPServerRegistration) => () => void;
+}
 
 interface FarmDocsAdapterServerModule {
   createFarmDocsRuntimeHandler?: (
     config: Record<string, unknown>,
-    options: {
-      rootDir: string;
-      clientEntry: string;
-      stylesheets: string[];
-      resolveLayoutFonts?: (
-        pathname: string,
-      ) => FarmLayoutFonts | undefined | Promise<FarmLayoutFonts | undefined>;
-      loadReactModule?: () => Promise<any>;
-    },
+    options: FarmDocsAdapterRuntimeHandlerOptions,
   ) => (request: Request) => Promise<Response | null>;
+  /** One handler for several docs roots; the first config is the main root. */
+  createFarmDocsMultiRuntimeHandler?: (
+    configs: Record<string, unknown>[],
+    options: FarmDocsAdapterRuntimeHandlerOptions,
+  ) => (request: Request) => Promise<Response | null>;
+  /**
+   * The page paths the runtime renders as HTML, for a build that prerenders them. Older
+   * adapters do not export it, and their pages keep rendering on request.
+   */
+  listFarmDocsPages?: (
+    config: Record<string, unknown>,
+    options: { rootDir: string },
+  ) => readonly string[] | Promise<readonly string[]>;
 }
 
 interface FarmDocsAdapterEdgeCompilerModule {
@@ -44,6 +66,13 @@ export interface FarmDocsAdapterHandlerOptions {
     pathname: string,
   ) => FarmLayoutFonts | undefined | Promise<FarmLayoutFonts | undefined>;
   loadModule: (specifier: string) => Promise<any>;
+  /**
+   * Lists the adapter's MCP endpoint in the app's AI catalog. The adapter knows its
+   * route, name, and version; older adapters ignore it and older hosts do not pass it.
+   */
+  registerMCPServer?: (server: FarmMCPServerRegistration) => () => void;
+  /** The app's path guards; a guarded docs page refuses the adapter. */
+  isPathGuarded?: (pathname: string) => boolean;
 }
 
 export interface FarmDocsAdapterEdgeCompileOptions {
@@ -58,6 +87,31 @@ export function hasFarmDocsRuntimeAdapter(
   docs: FarmDocsResolvedConfig | undefined,
 ): docs is FarmDocsResolvedConfig & { adapter: NonNullable<FarmDocsResolvedConfig["adapter"]> } {
   return Boolean(docs?.enabled && docs.adapter?.server && docs.adapter.react);
+}
+
+/**
+ * The adapter answers pages, Markdown, llms-full.txt, search, and MCP from its own index
+ * and never runs the app's guards, so a docs page behind a path guard would reach anyone.
+ * Refuse that pairing instead of serving it.
+ */
+export function assertFarmDocsAdapterServesNoGuardedPages(
+  docs: FarmDocsResolvedConfig | undefined,
+  options: { root: string; srcDir?: string },
+  isPathGuarded: ((pathname: string) => boolean) | undefined,
+): void {
+  if (!isPathGuarded || !hasFarmDocsRuntimeAdapter(docs)) return;
+  const guarded = getFarmDocsRoots(docs)
+    .flatMap((root) => discoverFarmDocsPages(resolveFarmDocsContentDir(root, options), root))
+    .filter((page) => isPathGuarded(page.href) || isPathGuarded(getFarmDocsMarkdownPath(page.href)))
+    .map((page) => page.href);
+  if (guarded.length === 0) return;
+  throw new Error(
+    `Docs pages behind a path guard (${guarded.join(", ")}) would be public: the docs adapter ` +
+      `${JSON.stringify(docs.adapter.id)} serves their content in llms-full.txt, search, ` +
+      "Markdown, and MCP without running the app's guards. Move those pages out of the docs " +
+      "content directory, or set docs.adapter = false to use Farm's built-in docs runtime, " +
+      "which keeps guarded pages off anonymous surfaces.",
+  );
 }
 
 /**
@@ -76,6 +130,31 @@ async function loadFarmDocsConfigModule(
   return config && typeof config === "object" ? (config as Partial<DocsConfig>) : undefined;
 }
 
+/**
+ * The docs config module's config for the docs root at `entry`: the module's own fields, with
+ * the root of that entry from its `roots` over them. The development and production servers
+ * both read the module through it.
+ *
+ * @internal
+ */
+export function getFarmDocsConfigModuleRoot(
+  moduleConfig: object,
+  entry: string,
+): Record<string, unknown> {
+  const { roots, ...shared } = moduleConfig as Record<string, unknown>;
+  const route = entry.replace(/^\/+|\/+$/g, "");
+  const own = Array.isArray(roots)
+    ? roots.find(
+        (root): root is Record<string, unknown> =>
+          Boolean(root) &&
+          typeof root === "object" &&
+          typeof root.entry === "string" &&
+          root.entry.replace(/^\/+|\/+$/g, "") === route,
+      )
+    : undefined;
+  return own ? { ...shared, ...own } : shared;
+}
+
 function createFarmDocsAdapterRuntimeConfig(
   docs: FarmDocsResolvedConfig,
   options: { root: string; srcDir?: string },
@@ -83,7 +162,7 @@ function createFarmDocsAdapterRuntimeConfig(
 ): Record<string, unknown> {
   return {
     ...(moduleConfig
-      ? { ...moduleConfig, ...docs.configOverrides }
+      ? { ...getFarmDocsConfigModuleRoot(moduleConfig, docs.entry), ...docs.configOverrides }
       : (docs.runtimeConfig ?? docs.config)),
     entry: docs.config.entry || docs.entry.replace(/^\/+|\/+$/g, "") || "docs",
     docsPath: docs.entry,
@@ -106,6 +185,12 @@ export async function compileFarmDocsAdapterEdgeManifest(
 ): Promise<FarmDocsCompiledManifest> {
   if (!hasFarmDocsRuntimeAdapter(docs)) {
     throw new Error("Farm docs adapter requires server and react runtime entrypoints.");
+  }
+  if (docs.roots?.length) {
+    throw new Error(
+      "Several docs roots are not supported on edge deployments yet; they need a Node.js " +
+        "deployment target.",
+    );
   }
   const compilerEntry = docs.adapter.edgeCompiler;
   if (!compilerEntry) {
@@ -158,11 +243,45 @@ export async function compileFarmDocsAdapterEdgeManifest(
 }
 
 /**
+ * The docs page paths the adapter renders, read from its server entry during the build, or
+ * null when the adapter does not list them.
+ */
+export async function listFarmDocsAdapterPages(
+  docs: FarmDocsResolvedConfig,
+  options: { root: string; srcDir?: string },
+): Promise<string[] | null> {
+  if (!hasFarmDocsRuntimeAdapter(docs)) return null;
+  const requireFromApp = createRequire(path.join(options.root, "package.json"));
+  const serverModule = (await import(
+    /* @vite-ignore */ pathToFileURL(requireFromApp.resolve(docs.adapter.server)).href
+  )) as FarmDocsAdapterServerModule;
+  if (typeof serverModule.listFarmDocsPages !== "function") return null;
+
+  const listPages = serverModule.listFarmDocsPages;
+  const pages = (
+    await Promise.all(
+      getFarmDocsRoots(docs).map((root) =>
+        listPages(createFarmDocsAdapterRuntimeConfig(root, options), { rootDir: options.root }),
+      ),
+    )
+  ).flat();
+  if (
+    !Array.isArray(pages) ||
+    pages.some((page) => typeof page !== "string" || !page.startsWith("/"))
+  ) {
+    throw new Error(
+      `Farm docs adapter ${JSON.stringify(docs.adapter.id)} listed docs pages that are not absolute paths.`,
+    );
+  }
+  return [...new Set(pages)];
+}
+
+/**
  * Load a documentation runtime through the versioned adapter descriptor.
  *
  * Core deliberately knows nothing about the adapter's DOM or theme. It only
- * supplies host assets and Vite's module loader; the adapter returns the final
- * Web Request handler.
+ * supplies host assets, Vite's module loader, and a way to list the adapter's MCP
+ * endpoint in the AI catalog; the adapter returns the final Web Request handler.
  */
 export async function createFarmDocsAdapterHandler(
   docs: FarmDocsResolvedConfig,
@@ -171,30 +290,46 @@ export async function createFarmDocsAdapterHandler(
   if (!hasFarmDocsRuntimeAdapter(docs)) {
     throw new Error("Farm docs adapter requires server and react runtime entrypoints.");
   }
+  assertFarmDocsAdapterServesNoGuardedPages(docs, options, options.isPathGuarded);
 
   const serverModule = (await options.loadModule(
     docs.adapter.server,
   )) as FarmDocsAdapterServerModule;
-  if (typeof serverModule.createFarmDocsRuntimeHandler !== "function") {
+  const multiRoot = Boolean(docs.roots?.length);
+  const handlerExport = multiRoot
+    ? "createFarmDocsMultiRuntimeHandler"
+    : "createFarmDocsRuntimeHandler";
+  if (typeof serverModule[handlerExport] !== "function") {
     const adapterId = JSON.stringify(docs.adapter.id);
     const serverEntry = JSON.stringify(docs.adapter.server);
     throw new Error(
-      `Farm docs adapter ${adapterId} does not export createFarmDocsRuntimeHandler from ${serverEntry}. ` +
-        "Upgrade the adapter to a runtime-enabled release.",
+      `Farm docs adapter ${adapterId} does not export ${handlerExport} from ${serverEntry}. ` +
+        (multiRoot
+          ? "Upgrade the adapter to a release that serves several docs roots, or remove the roots."
+          : "Upgrade the adapter to a runtime-enabled release."),
     );
   }
 
-  const runtimeConfig = createFarmDocsAdapterRuntimeConfig(
-    docs,
-    options,
-    await loadFarmDocsConfigModule(docs, options.loadModule),
-  );
-
-  return serverModule.createFarmDocsRuntimeHandler(runtimeConfig as Record<string, unknown>, {
+  const moduleConfig = await loadFarmDocsConfigModule(docs, options.loadModule);
+  const handlerOptions: FarmDocsAdapterRuntimeHandlerOptions = {
     rootDir: options.root,
     clientEntry: options.clientEntry,
     stylesheets: getFarmDocsAdapterStylesheets(options),
     resolveLayoutFonts: options.resolveLayoutFonts,
     loadReactModule: () => options.loadModule(docs.adapter.react!),
-  });
+    ...(options.registerMCPServer ? { registerMCPServer: options.registerMCPServer } : {}),
+  };
+
+  if (multiRoot) {
+    return serverModule.createFarmDocsMultiRuntimeHandler!(
+      getFarmDocsRoots(docs).map((root) =>
+        createFarmDocsAdapterRuntimeConfig(root, options, moduleConfig),
+      ),
+      handlerOptions,
+    );
+  }
+  return serverModule.createFarmDocsRuntimeHandler!(
+    createFarmDocsAdapterRuntimeConfig(docs, options, moduleConfig),
+    handlerOptions,
+  );
 }

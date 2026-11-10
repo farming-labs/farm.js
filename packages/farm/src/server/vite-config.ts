@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { UserConfig as ViteUserConfig } from "vite";
-import type { FarmRenderer } from "../renderer";
+import { isFarmRendererDisabled, type FarmRenderer } from "../renderer";
 
 const FARM_CLIENT_ENTRY_PATTERN =
   "**/{page,layout,loading,error,not-found,default}.{js,jsx,ts,tsx}";
@@ -24,6 +24,10 @@ export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
   "@farm.js/core/query/client",
   "@farm.js/core/server-fn/client",
   "@farm.js/core/server-query/client",
+  // Islands mode's browser runtime: Farm imports islx, which the app reaches only through Farm.
+  "@farm.js/core > @farm.js/islx/client",
+  "@farm.js/core > @farm.js/islx/react",
+  "@farm.js/core > @farm.js/islx/react/client",
 ] as const;
 
 export function getFarmClientOptimizeDepsInclude(renderer?: FarmRenderer): string[] {
@@ -49,8 +53,11 @@ export function createFarmClientOptimizeDepsEntries(
 
 export function createFarmClientOptimizeDepsConfig(
   entries?: readonly string[],
-  renderer?: FarmRenderer,
+  renderer?: FarmRenderer | false,
 ): ViteUserConfig["optimizeDeps"] {
+  // `renderer: false` serves no browser code, so there is nothing to pre-bundle, and Farm's
+  // browser runtimes would pull in React, which a backend-only app does not install.
+  if (isFarmRendererDisabled(renderer)) return { noDiscovery: true, include: [] };
   return {
     // Keep normal application dependency discovery for CJS-only packages, but
     // seed every Farm browser runtime so React is present in the first crawl.
@@ -58,7 +65,7 @@ export function createFarmClientOptimizeDepsConfig(
     // Waiting for the crawl avoids serving a partial optimizer generation and
     // then changing browser hashes while hydration is already in progress.
     holdUntilCrawlEnd: true,
-    include: getFarmClientOptimizeDepsInclude(renderer),
+    include: getFarmClientOptimizeDepsInclude(renderer || undefined),
     // Farm's HTML boots through a virtual module and imports route UI lazily.
     // Explicit entries let Vite finish that crawl before a navigation can
     // rotate the optimizer hash underneath a hydrated React runtime.

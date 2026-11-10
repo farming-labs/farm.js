@@ -144,6 +144,8 @@ export interface FarmMCPServer {
   readonly name: string;
   readonly version: string;
   readonly path: `/api/${string}`;
+  readonly title?: string;
+  readonly description?: string;
 }
 
 export interface FarmMCPAuthorization extends Record<string, unknown> {
@@ -181,6 +183,13 @@ export interface FarmMCPConfig {
   name?: string;
   /** MCP server version. @default "1.0.0" */
   version?: string;
+  /** Display name, sent in `serverInfo` and the server card. */
+  title?: string;
+  /**
+   * What the server does, sent in `serverInfo` and the server card that
+   * `/.well-known/ai-catalog.json` lists. The card keeps the first 100 characters.
+   */
+  description?: string;
   /** Explicit endpoint/standalone tool allowlist. Omit to discover route-owned MCP metadata. */
   tools?: readonly FarmMCPToolDefinition[];
   /** Read-only context for agents, from `defineResource()`. */
@@ -193,6 +202,17 @@ export interface FarmMCPConfig {
   ) => FarmMCPAuthorization | false | Promise<FarmMCPAuthorization | false>;
   /** Deliberate escape hatch for public servers. Authentication is required by default. */
   allowUnauthenticated?: boolean;
+  /**
+   * Most JSON-RPC messages one batched POST may carry. `authorize` runs once per message, so a
+   * larger batch is refused before any of them is authorized. @default 25
+   */
+  maxBatchSize?: number;
+  /**
+   * Most array elements and object members, counted together across nested values, one tool
+   * call's arguments may contain. Larger arguments are refused before validation or the tool
+   * runs. `Infinity` removes the limit. @default 10000
+   */
+  maxToolInputElements?: number;
   /**
    * OAuth discovery for MCP clients. When set, a rejected request's 401 points at
    * RFC 9728 Protected Resource Metadata naming these authorization servers, which

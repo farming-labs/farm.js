@@ -35,13 +35,13 @@ const withEdgeAdapter = {
 
 describe("docs engine deployment runtime", () => {
   it("allows the embedded renderer on edge presets", () => {
-    for (const preset of ["cloudflare-pages", "cloudflare-module", "vercel-edge", "netlify-edge"]) {
+    for (const preset of ["cloudflare-pages", "cloudflare-module", "netlify-edge"]) {
       expect(() => assertFarmDocsRuntimeSupported(withDocs, preset)).not.toThrow();
     }
   });
 
   it("keeps unversioned adapter runtime behavior off edge targets", () => {
-    for (const preset of ["cloudflare-pages", "cloudflare-module", "vercel-edge", "netlify-edge"]) {
+    for (const preset of ["cloudflare-pages", "cloudflare-module", "netlify-edge"]) {
       expect(() => assertFarmDocsRuntimeSupported(withAdapter, preset)).toThrow(
         new RegExp(`docs adapter .* "${preset}" preset deploys to an edge runtime`),
       );
@@ -49,7 +49,7 @@ describe("docs engine deployment runtime", () => {
   });
 
   it("allows adapters with an edge compiler on edge presets", () => {
-    for (const preset of ["cloudflare-pages", "cloudflare-module", "vercel-edge", "netlify-edge"]) {
+    for (const preset of ["cloudflare-pages", "cloudflare-module", "netlify-edge"]) {
       expect(() => assertFarmDocsRuntimeSupported(withEdgeAdapter, preset)).not.toThrow();
     }
   });
@@ -63,7 +63,7 @@ describe("docs engine deployment runtime", () => {
   it("does not affect apps without docs", () => {
     expect(() => assertFarmDocsRuntimeSupported(withoutDocs, "cloudflare-pages")).not.toThrow();
     expect(() =>
-      assertFarmDocsRuntimeSupported({ docs: undefined } as never, "vercel-edge"),
+      assertFarmDocsRuntimeSupported({ docs: undefined } as never, "netlify-edge"),
     ).not.toThrow();
   });
 });

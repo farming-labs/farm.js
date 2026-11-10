@@ -1,4 +1,9 @@
 {
   "$schema": "node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["dist/**", "examples/**", "packages/farm-cli/test/fixtures/**"]
+  "ignorePatterns": [
+    "benchmarks/compiler/src/lib/api.generated.ts",
+    "dist/**",
+    "examples/**",
+    "packages/farm-cli/test/fixtures/**"
+  ]
 }

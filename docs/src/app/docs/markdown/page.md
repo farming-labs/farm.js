@@ -75,6 +75,22 @@ Farm.js is free and open source.
 The browser still renders `page.tsx` at `/pricing`. Requests to `/pricing.md`, or requests to
 `/pricing` with `Accept: text/markdown`, receive the exact contents of `page.md`.
 
+The source is served only for a page an anonymous visitor may open. Farm checks by requesting the
+page as a new request through the same plugin `runtime.before` hooks, middleware, and integration
+guards, with its own `cookies()` and `headers()` and only standard browser headers (no
+cookies, `Authorization`, custom headers such as an API key, or the caller's IP address). The check
+renders the page's HTML as that visitor to the end, without streaming or following redirects, so a
+guard in `page.tsx` or `layout.tsx` counts too, even a `redirect()` under a `<Suspense>` boundary.
+The page has a `.md` version only when it answers with its HTML and the page itself renders in it;
+a redirect to sign-in, a `401`, a `403`, an error, or a layout that shows a sign-in prompt instead
+of its children means it has none. `/account.md` answers `404` even for a
+signed-in caller, and the page is left out of `llms-full.txt`. The check drops `X-Forwarded-For`,
+`X-Real-IP`, `Forwarded`, and `Via`, and in a production build the server reports the documentation address
+`192.0.2.1` as its client, so a page behind an IP allowlist has no public `.md` version either. In
+development the check arrives from the dev server's loopback address. A source sent to a request
+with cookies or `Authorization` uses `Cache-Control: private, no-store`, so only anonymous requests
+fill a shared cache.
+
 ## Configure MDX components
 
 **farm.config.ts**
@@ -148,6 +164,14 @@ export default defineConfig({
 | /pricing | /pricing.md     |
 | /docs    | /docs.md        |
 
+Under a [`basePath`](/docs/configuration#application-base-path) or an i18n locale prefix, mirror
+URLs keep the prefix, and a home page's mirror is `<prefix>/index.md`: `/console/index.md` and
+`/console/fr/index.md` for `basePath: "/console"` with a `fr` locale. The page's `Link` header,
+head alternate, and `Content-Location` name that URL, as `llms.txt` and the default MCP server do;
+`/console.md` and `/console/fr.md` also serve it. `md.expose` entries are route
+paths without the prefix, as in the example above, so `"/pricing"` exposes `/console/pricing.md` and
+`/console/fr/pricing.md`.
+
 ## Use cases
 
 - AI assistants can fetch page content without parsing the full app shell.
@@ -174,6 +198,8 @@ mirrors, and `/llms-full.txt`, which inlines them. See
 ## Per-route options
 
 Routes can include a display title and cache override.
+Literal entries use exact matching without compiling a regular expression. Dynamic entries such
+as `/docs/[...slug]` retain pattern matching; the first matching entry supplies the route options.
 
 ```ts
 export default defineConfig({
@@ -195,6 +221,12 @@ export default defineConfig({
 
 Markdown mirrors call the rendered page, strip scripts/styles and elements hidden by an attribute (`aria-hidden="true"`, or `hidden` except `hidden="until-found"`, which the browser can reveal), convert HTML headings, paragraphs, lists (ordered lists keep their numbers), blockquotes, tables (as GFM tables), and code blocks (keeping a `language-*` class or `data-language` as the fence language) into markdown, then return `text/markdown`. The mirror is built without CSS, so text hidden only by a stylesheet (`display: none`, a collapsed menu) still appears. Mark decorative text `aria-hidden` to keep it out of the mirror as well as out of screen readers.
 
+Content without any `hidden` text (case-insensitive) skips hidden-element parsing. Any occurrence
+still uses the same attribute-aware parser, including quoted values, revealable content, and forms.
+
+When a layout row needs spaces between adjacent items, conversion assembles the row once rather
+than copying it for each separator. Existing prose, letter-split words, and whitespace stay unchanged.
+
 **Terminal**
 
 ```bash
@@ -213,6 +245,53 @@ Farm returns the same markdown representation with `Content-Type: text/markdown`
 document head, while ordinary browser requests continue to receive HTML. Set
 `metadata.alternates.types["text/markdown"]` to point the head link somewhere else.
 
+Converted mirrors preserve the page response's `Set-Cookie` headers, including on redirects, sign-in errors,
+partial views, `HEAD`, and conditional `304` responses. A mirror that sets cookies uses
+`Cache-Control: private, no-store`, even when `md.cache` is enabled, so a shared cache cannot replay
+one reader's session cookies to another. So does a mirror of a request with cookies or
+`Authorization`, since the page was rendered for that reader. Other mirrors keep their configured
+cache policy.
+
+If the page returns a non-HTML response, such as a JSON error or a `429` rate limit, Farm returns
+that response and its headers (including `Retry-After`) without dispatching the page again.
+Bodyless `204`, `205`, and `304` responses also pass through, even if they declare an HTML content
+type; they are not converted or filtered by partial-view parameters. Pass-through responses keep
+the page's own content type and cache policy. `HEAD` keeps the status and
+headers but omits the body. Sign-in redirects and non-HTML `401`/`403` responses continue to use
+the Markdown explanations with the original status. Unused bodies from these explanations and
+terminal `HEAD` responses are cancelled without delaying the response.
+
+HTML `4xx` and `5xx` responses keep their original status and full converted error message.
+Partial-view parameters (`outline`, `section`, `max_tokens`, `cursor`, and `actions`) do not
+filter or replace errors, and a matching `If-None-Match` does not turn an error into `304`.
+Converted errors preserve `WWW-Authenticate`, `Proxy-Authenticate`, `Retry-After`, and `Allow`
+when present. Generated sign-in and redirect explanations also preserve these headers,
+including retry guidance. HTML-specific content lengths, encodings, and ETags are not copied
+onto the converted body. Successful-page views keep their normal selection and validation behavior.
+
+The internal HTML request omits `If-Match`, `If-Unmodified-Since`, `If-None-Match`,
+`If-Modified-Since`, `Range`, and `If-Range`.
+An HTML cache hit or byte fragment cannot be used to construct the Markdown representation.
+Farm evaluates `If-None-Match` against the selected Markdown view's own ETag after conversion;
+HTML ETags do not validate the mirror. Generated mirrors have no `Last-Modified` date and ignore
+`If-Modified-Since`. Byte ranges are not supported: a range request receives the complete selected
+view (or `304` for a matching Markdown ETag), not a slice of HTML. This does not change ordinary
+HTML requests or the page's application-level middleware checks.
+
+Mirrors and raw Markdown sources evaluate `If-Match` before `If-None-Match`, after page and
+view validation. Their ETags are weak: `If-Match: *` succeeds for an existing successful
+representation, but an entity-tag (even the current weak ETag or its strong-looking form)
+cannot satisfy strong comparison. A failed match returns an empty `412` response with
+`Cache-Control: no-store`; it does not replace page errors, redirects, or invalid-view errors.
+Use `If-None-Match` for cache revalidation. `If-Unmodified-Since` is ignored because these
+Markdown representations have no modification date; the HTML page's date is not reused.
+
+The internal page request carries the caller's abort signal. In development, disconnecting the
+Markdown client also cancels the internal HTTP page fetch, including while its body is being read.
+Rendering and server-side fetches that observe their request's signal can stop cooperatively;
+cancellation does not undo work or side effects that have already completed. Normal response
+completion does not cancel the request.
+
 Prerendered pages, such as those exporting `dynamic = "force-static"`, are served as static files in
 production, so they answer every request with HTML. They still send the `Link` header, and their
 `.md` URL works, so agents should follow the header or request the `.md` URL directly.
@@ -229,12 +308,14 @@ curl "http://localhost:3000/pricing.md?max_tokens=2000"
 ```
 
 - `?outline` returns the heading tree. Each entry links to its section and estimates its size in
-  tokens, so an agent can decide what to read.
+  tokens, so an agent can decide what to read. Estimates use the same four-character approximation
+  without constructing a full copy of every section.
 - `?section=<id>` returns one heading and everything under it, up to the next heading at the same
   or a higher level. Ids follow GitHub's heading anchors (`## Team plans` is `team-plans`; a
   repeated heading gets `-1`, `-2`). An unknown id answers `404` with the list of valid ids.
 - `?max_tokens=<n>` returns the page, or the section with `?section`, in parts of about `n` tokens
-  (at least 100). See [Read a long page in parts](#read-a-long-page-in-parts).
+  (at least 100). Remaining-token estimates count the unread lines without copying their text.
+  See [Read a long page in parts](#read-a-long-page-in-parts).
 
 Headings inside fenced code blocks and front matter are ignored. Every Markdown response also
 carries an `ETag`, so an agent can re-check a page with `If-None-Match` and receive `304 Not
@@ -323,7 +404,49 @@ curl "http://localhost:3000/contact.md?actions"
 
 A `page.md` source has no forms, so its `?actions` view is an empty list. The view carries an
 `ETag` like every other Markdown response. Like the mirror itself, it is rendered with the caller's
-request, so it shows the forms that caller would see.
+request, so it shows the forms that caller would see. Farm still renders the page and extracts its
+forms, but skips converting its content to Markdown when only the actions JSON is needed. Error
+responses still return their full Markdown explanation. When a mirror needs both the forms and
+Markdown, they share the same prepared HTML content within that request; nothing is cached across
+callers.
+
+## React Server Components apps
+
+Apps built with `defineConfig` from `@farm.js/plugin/rsc` serve the same mirrors. Every page answers
+at its `.md` URL and to `Accept: text/markdown`, with `?outline`, `?section`, `?max_tokens`, and
+`?actions`. HTML pages send the `Link` header, a missing `.md` page answers a Markdown 404, and reads
+fire `agent.read` events. The mirror renders the page through the normal request path, so middleware
+and sign-in gates apply, and a page that must not be shared keeps its private `Cache-Control`.
+Under a `basePath` or locale prefix, a home page's mirror is `<prefix>/index.md` and `md.expose`
+lists route paths without the prefix, as described above.
+
+The RSC renderer currently sets a deployment cookie on HTML page renders. Its generated mirrors
+therefore use `private, no-store` too; setting `md.cache` does not enable shared caching while that
+cookie is present. This prevents caches from replaying response cookies to another reader.
+
+Set the same `md` options on the RSC config:
+
+```ts title="vite.config.ts"
+import { defineConfig } from "@farm.js/plugin/rsc";
+
+export default defineConfig({
+  md: { expose: ["/", "/pricing", "/docs/[...slug]"] },
+});
+```
+
+`md: false` turns mirrors off. `page.md` sources are not part of the RSC pipeline yet.
+
+RSC apps also serve `/llms.txt` by default, listing their static pages with links to these mirrors.
+It is answered after middleware, like a page. Set `agent.llmsTxt` with the same options as core;
+`full: true` adds `/llms-full.txt`, and `false` turns both off:
+
+```ts title="vite.config.ts"
+export default defineConfig({
+  agent: { llmsTxt: { full: true, exclude: ["/admin/[...rest]"] } },
+});
+```
+
+`llms.ts` and `llms-full.ts` route files are not supported in RSC apps yet.
 
 ## Production notes
 

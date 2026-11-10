@@ -1,4 +1,4 @@
-import { defineConfig, definePlugin, type FarmPlugin } from '@farm.js/core';
+import { defineConfig, definePlugin } from '@farm.js/core';
 import { createLoggerPlugin, createEnvPlugin } from '@farm.js/core/plugin/server';
 import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
@@ -10,21 +10,6 @@ declare global {
     __FARM_CLIENT_PLUGIN_EVENTS__?: string[];
   }
 }
-
-const myCustomPlugin: FarmPlugin = {
-  name: 'my-custom-plugin',
-  
-  async beforeRequest(req, res, context) {
-    res.setHeader('X-Powered-By', 'Farm.js');
-  },
-
-  async transformHTML(html, context) {
-    return html.replace(
-      '</head>',
-      '<meta name="custom" content="Farm.js App" /></head>'
-    );
-  },
-};
 
 const runtimeLifecyclePlugin = definePlugin({
   name: 'runtime-lifecycle-e2e',
@@ -87,6 +72,9 @@ const runtimeLifecyclePlugin = definePlugin({
   },
 
   runtime: {
+    // before() only stops one demo path, so other responses stay CDN cacheable.
+    cache: 'public',
+
     context({ request }) {
       return { requestPath: new URL(request.url).pathname };
     },
@@ -140,10 +128,13 @@ export default defineConfig({
     },
   },
   cron: {
-    dailyCleanup: {
-      schedule: '0 2 * * *',
-      path: '/api/maintenance/cleanup',
-      description: 'Delete expired sessions every night.',
+    provider: 'host',
+    jobs: {
+      dailyCleanup: {
+        schedule: '0 2 * * *',
+        path: '/api/maintenance/cleanup',
+        description: 'Delete expired sessions every night.',
+      },
     },
   },
   experimental: {
@@ -336,9 +327,6 @@ export default defineConfig({
     server: {
       port: 3000,
       strictPort: false,
-    },
-    build: {
-      sourcemap: true,
     },
   },
 });

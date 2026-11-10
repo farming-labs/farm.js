@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createMarkdownMirrorResponse,
   extractFarmPageActions,
@@ -232,6 +232,92 @@ describe("Markdown mirror actions", () => {
     });
     expect(cached.response.status).toBe(304);
   });
+
+  it.each(["GET", "HEAD"])(
+    "skips Markdown-only conversion for successful %s actions views",
+    async (method) => {
+      // Observe the converter's code-block pass without replacing its behavior.
+      // The ordinary mirror is a positive control for this work counter.
+      const replace = vi.spyOn(String.prototype, "replace");
+      const conversions = () =>
+        replace.mock.calls.filter(
+          ([pattern]) => pattern instanceof RegExp && pattern.source.startsWith("<pre\\b"),
+        ).length;
+      try {
+        await mirror("https://acme.test/contact.md", html, { method });
+        expect(conversions()).toBeGreaterThan(0);
+        replace.mockClear();
+        const { response } = await mirror(
+          "https://acme.test/contact.md?actions&outline&section=missing&max_tokens=invalid",
+          html,
+          { method },
+        );
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+        const body = await response.text();
+        expect(method === "HEAD" ? body : JSON.parse(body).actions[0].fields[0].name).toBe(
+          method === "HEAD" ? "" : "email",
+        );
+        expect(conversions()).toBe(0);
+      } finally {
+        replace.mockRestore();
+      }
+    },
+  );
+
+  it.each([200, 201])(
+    "keeps streamed forms, identity, and metadata on a %s actions response",
+    async (status) => {
+      const body =
+        '<html><head><meta name="robots" content="noindex"><link rel="canonical" href="/contact"></head>' +
+        '<body><main><!--$?--><template id="B:0"></template><p>Loading</p><!--/$--></main>' +
+        '<div hidden id="S:0"><form method="post"><input name="email" required><button>Send</button></form>' +
+        '<form hidden><input name="secret"></form></div>' +
+        '<script>$RC("B:0","S:0")</script></body></html>';
+      for (const suffix of [".md", ""]) {
+        const response = await createMarkdownMirrorResponse({
+          request: new Request(`https://acme.test/contact${suffix}?actions&ref=one&ref=two`, {
+            headers: { accept: "text/markdown", cookie: "session=reader" },
+          }),
+          config: resolveMarkdownConfig({ cache: 300 }),
+          renderPage: (request) => {
+            expect(request.url).toBe("https://acme.test/contact?ref=one&ref=two");
+            expect(request.headers.get("cookie")).toBe("session=reader");
+            return new Response(body, {
+              status,
+              headers: {
+                "content-type": "text/html",
+                "set-cookie": "session=renewed; HttpOnly",
+                vary: "Cookie",
+                "x-robots-tag": "nofollow",
+              },
+            });
+          },
+        });
+        expect(response!.status).toBe(status);
+        expect(response!.headers.get("content-location")).toBe("/contact.md");
+        expect(response!.headers.get("cache-control")).toBe("private, no-store");
+        expect(response!.headers.get("set-cookie")).toBe("session=renewed; HttpOnly");
+        expect(response!.headers.get("vary")).toBe(suffix ? "Cookie" : "Accept, Cookie");
+        expect(response!.headers.get("x-robots-tag")).toBe("nofollow, noindex");
+        expect(response!.headers.get("link")).toBe('<https://acme.test/contact>; rel="canonical"');
+        expect(await response!.json()).toEqual({
+          page: "/contact",
+          markdown: "/contact.md",
+          actions: [
+            {
+              type: "form",
+              method: "POST",
+              action: "/contact?ref=one&ref=two",
+              enctype: "application/x-www-form-urlencoded",
+              fields: [{ name: "email", type: "text", required: true }],
+              submit: [{ label: "Send" }],
+            },
+          ],
+        });
+      }
+    },
+  );
 
   it("answers ?actions for a Markdown source with no actions", async () => {
     const response = createFarmMarkdownViewResponse({

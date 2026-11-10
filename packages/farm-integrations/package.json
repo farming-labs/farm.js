@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/integrations",
-  "version": "0.1.26",
+  "version": "0.1.67",
   "description": "Compatibility package that re-exports official Farm.js integrations",
   "license": "MIT",
   "repository": {

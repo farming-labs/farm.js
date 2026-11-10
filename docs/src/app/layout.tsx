@@ -1,6 +1,7 @@
 import type { LayoutProps, Metadata } from "@farm.js/core";
 import { defineLayoutFonts, localFont } from "@farm.js/core/font";
 import { Databuddy } from "@databuddy/sdk/react";
+import { WebMCPDocsSearch } from "../components/webmcp-docs-search";
 import { SITE_URL } from "../lib/site";
 import "./globals.css";
 
@@ -9,9 +10,9 @@ import "./globals.css";
 // pages set their own og title and description rather than inheriting one here.
 export const metadata = {
   metadataBase: new URL(SITE_URL),
-  title: "farmjs.dev - Framework for integrated apps",
+  title: "Farm.js - The framework for the web and agents",
   description:
-    "Farm.js is an easy and fast full-stack framework that blends app foundations and external services into one flow so teams can ship products faster.",
+    "Farm.js is the full-stack framework for the web and agents: apps are agent-ready by default and run any agent runtime you bring. Built on Vite and Nitro.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml", sizes: "any" }],
   },
@@ -67,6 +68,7 @@ export default function RootLayout({ children }: LayoutProps) {
         {children}
       </div>
       <Databuddy clientId="0af7dbbd-628a-44c9-8814-df4138a061b0" trackWebVitals={true} />
+      <WebMCPDocsSearch />
     </>
   );
 }

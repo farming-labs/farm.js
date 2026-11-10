@@ -98,6 +98,10 @@ export type EndpointErrorHandler<TErrors extends EndpointErrorDefinitions> = <
 /** @deprecated Use `EndpointErrorHandler`. */
 export type EndpointFail<TErrors extends EndpointErrorDefinitions> = EndpointErrorHandler<TErrors>;
 
+// A linked app's routes run their own copy of this module under Vite's SSR runner, while the
+// API runtime that catches the failure is core's Node copy, so `instanceof` misses across them.
+const ENDPOINT_FAILURE_SYMBOL = Symbol.for("farm.endpoint.failure");
+
 export class EndpointFailure<TCode extends string = string, TData = unknown> extends Error {
   readonly code: TCode;
   readonly data: TData;
@@ -116,11 +120,23 @@ export class EndpointFailure<TCode extends string = string, TData = unknown> ext
     this.code = code;
     this.data = data;
     this.status = options.status;
+
+    Object.defineProperty(this, ENDPOINT_FAILURE_SYMBOL, { value: true, enumerable: false });
   }
 }
 
 export function isEndpointFailure(value: unknown): value is EndpointFailure<string, unknown> {
-  return value instanceof EndpointFailure;
+  if (value instanceof EndpointFailure) return true;
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<EndpointFailure> & { [ENDPOINT_FAILURE_SYMBOL]?: unknown };
+  return (
+    candidate[ENDPOINT_FAILURE_SYMBOL] === true &&
+    typeof candidate.code === "string" &&
+    Number.isInteger(candidate.status) &&
+    candidate.status! >= 400 &&
+    candidate.status! <= 599
+  );
 }
 
 export type EndpointParamValue = string | string[];
@@ -265,8 +281,11 @@ export type EndpointOptions<
    * transport and endpoint authorization remain required separately.
    */
   mcp?: EndpointMCPOptions;
-  /** @deprecated Use plain functions in `middleware` for Farm endpoint middleware. */
-  use?: any[];
+  /**
+   * @deprecated Not supported: Farm never ran `use` middleware, so `createEndpoint` throws
+   * when it is set. Put plain functions in `middleware` instead.
+   */
+  use?: never;
 };
 
 export type EndpointHandler<
@@ -478,6 +497,14 @@ export function createEndpoint(
 
   if (typeof handler !== "function") {
     throw new TypeError("createEndpoint requires a handler function");
+  }
+  // better-call's `use` never ran in Farm's route runtime, so a guard put there
+  // was silently skipped. Fail at definition time instead of serving unguarded.
+  if ((options as { use?: unknown }).use !== undefined) {
+    throw new TypeError(
+      "createEndpoint does not support the `use` option. Move these functions to `middleware`: " +
+        "each receives the endpoint context and returns an object, true, false, or a Response.",
+    );
   }
 
   const middleware = normalizeEndpointMiddleware(options.middleware);

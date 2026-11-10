@@ -230,3 +230,20 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
     }
   }
 }
+
+/**
+ * Forward a config rewrite to another origin. `fetch()` decodes a compressed body but keeps the
+ * upstream's `Content-Encoding` and `Content-Length`, which then describe bytes the client never gets.
+ */
+export async function fetchFarmExternalRewrite(request: Request): Promise<Response> {
+  const response = await fetch(request);
+  if (!response.headers.has("content-encoding")) return response;
+  const headers = new Headers(response.headers);
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}

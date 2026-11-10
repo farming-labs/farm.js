@@ -4,8 +4,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViteDevServer } from "vite";
+import { _publishFarmMCPCatalog } from "../mcp-catalog";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
 
@@ -30,18 +31,20 @@ async function writeModule(root: string, relativePath: string, source: string): 
   await fs.writeFile(filePath, source);
 }
 
-async function startApp(config = ""): Promise<string> {
+async function startApp(config = "", files: Record<string, string> = {}): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-openapi-"));
   temporaryRoots.add(root);
 
   await fs.mkdir(path.join(root, "node_modules"), { recursive: true });
-  for (const pkg of ["react", "react-dom"]) {
+  for (const pkg of ["react", "react-dom", "zod"]) {
     await fs.symlink(
       await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
       path.join(root, "node_modules", pkg),
       "junction",
     );
   }
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
   await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
   // Use a real farm.config.ts so the OpenAPI config (and its specRoute
   // default of /openapi.json) is resolved, matching how `farm dev` runs.
@@ -65,6 +68,9 @@ export default function Layout({ children }) { return <>{children}</>; }`,
     "src/app/api/health/route.ts",
     `export function GET() { return Response.json({ ok: true }); }`,
   );
+  for (const [relativePath, source] of Object.entries(files)) {
+    await writeModule(root, relativePath, source);
+  }
 
   const server = await createServer({ root });
   servers.add(server);
@@ -88,6 +94,60 @@ describe("development OpenAPI spec route", () => {
     const post = await fetch(`${origin}/openapi.json`, { method: "POST" });
     expect(post.status).toBe(405);
     expect(post.headers.get("allow")).toBe("GET, HEAD");
+  }, 30_000);
+
+  it("documents routes that import app modules the way the dev server resolves them", async () => {
+    const warn = vi.spyOn(console, "warn");
+    const evaluations = "__farmOpenAPILocalImportRouteEvaluations";
+    delete (globalThis as Record<string, unknown>)[evaluations];
+    try {
+      const origin = await startApp("", {
+        "src/lib/todos.ts": `export const todos = [{ id: "1", title: "Write tests", done: false }];`,
+        "src/lib/schemas.ts": `import { z } from "zod";
+export const titleSchema = z.string();`,
+        // Extensionless relative and \`@/\` imports, as apps and examples write them.
+        "src/app/api/todos/route.ts": `import { createEndpoint } from "@farm.js/core/api";
+import { z } from "zod";
+import { todos } from "../../../lib/todos";
+import { titleSchema } from "@/lib/schemas";
+
+globalThis.${evaluations} = (globalThis.${evaluations} ?? 0) + 1;
+
+export const GET = createEndpoint(
+  { query: z.object({ done: z.enum(["true", "false"]).optional() }) },
+  async () => ({ todos }),
+);
+
+export const POST = createEndpoint(
+  { body: z.object({ title: titleSchema }) },
+  async ({ body }) => Response.json({ id: "2", title: body.title }, { status: 201 }),
+);`,
+      });
+
+      expect(await (await fetch(`${origin}/api/todos`)).json()).toEqual({
+        todos: [{ id: "1", title: "Write tests", done: false }],
+      });
+      const spec = await (await fetch(`${origin}/openapi.json`)).json();
+      expect(spec.paths["/todos"].get.parameters).toEqual([
+        expect.objectContaining({ name: "done", in: "query", required: false }),
+      ]);
+      expect(spec.paths["/todos"].post.requestBody).toMatchObject({
+        required: true,
+        content: {
+          "application/json": {
+            schema: { type: "object", properties: { title: { type: "string" } } },
+          },
+        },
+      });
+      expect(
+        warn.mock.calls.filter(([message]) => String(message).startsWith("Could not extract")),
+      ).toEqual([]);
+      // The spec reads the module instance that serves requests rather than evaluating it again.
+      expect((globalThis as Record<string, unknown>)[evaluations]).toBe(1);
+    } finally {
+      warn.mockRestore();
+      delete (globalThis as Record<string, unknown>)[evaluations];
+    }
   }, 30_000);
 
   it("serves the OpenAPI reference and spec beneath the configured basePath", async () => {
@@ -123,4 +183,94 @@ describe("development OpenAPI spec route", () => {
     const origin = await startApp();
     expect((await fetch(`${origin}/.well-known/api-catalog`)).status).toBe(404);
   }, 30_000);
+
+  it("lists the app's MCP servers at /.well-known/ai-catalog.json and in llms.txt", async () => {
+    // What @farm.js/mcp does when it mounts its endpoint; the dev server runs in this process.
+    const unpublish = _publishFarmMCPCatalog(
+      { name: "projects", version: "1.2.0", path: "/api/mcp", title: "Projects" },
+      [],
+    );
+    try {
+      const origin = await startApp(`basePath: "/app",`);
+
+      const catalog = await fetch(`${origin}/app/.well-known/ai-catalog.json`);
+      expect(catalog.status).toBe(200);
+      expect(catalog.headers.get("content-type")).toBe(
+        "application/ai-catalog+json; charset=utf-8",
+      );
+      const { entries } = await catalog.json();
+      expect(entries).toEqual([
+        expect.objectContaining({
+          identifier: "urn:air:localhost:mcp:projects",
+          url: `${origin}/api/mcp/server-card`,
+        }),
+      ]);
+
+      const card = await fetch(entries[0].url);
+      expect(card.status).toBe(200);
+      expect(await card.json()).toMatchObject({
+        name: "localhost/projects",
+        version: "1.2.0",
+        remotes: [{ type: "streamable-http", url: `${origin}/api/mcp` }],
+      });
+
+      const plain = await startApp();
+      const llms = await (await fetch(`${plain}/llms.txt`)).text();
+      expect(llms).toContain("## MCP");
+      expect(llms).toContain(`- [Projects](${plain}/api/mcp)`);
+
+      const optedOut = await startApp(`agent: { aiCatalog: false },`);
+      expect((await fetch(`${optedOut}/.well-known/ai-catalog.json`)).status).toBe(404);
+      expect((await fetch(`${optedOut}/api/mcp/server-card`)).status).toBe(404);
+      expect(await (await fetch(`${optedOut}/llms.txt`)).text()).not.toContain("## MCP");
+    } finally {
+      unpublish();
+    }
+  }, 60_000);
+
+  it("serves /.well-known/farmjs.json as production does, beneath the basePath", async () => {
+    // A server with authorize: anonymous readers see it, not its tools.
+    const unpublish = _publishFarmMCPCatalog(
+      { name: "admin", version: "1.0.0", path: "/api/mcp" },
+      [{ name: "ban_user", kind: "endpoint", method: "POST", path: "/api/ban" }],
+      { public: false },
+    );
+    try {
+      const origin = await startApp(`basePath: "/app",`);
+      const response = await fetch(`${origin}/app/.well-known/farmjs.json`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      const manifest = await response.json();
+      expect(manifest.app).toMatchObject({ basePath: "/app", build: "development" });
+      expect(manifest.mcp.servers).toEqual([
+        expect.objectContaining({ name: "admin", authorization: "required", tools: [] }),
+      ]);
+      const etag = response.headers.get("etag")!;
+      const cached = await fetch(`${origin}/app/.well-known/farmjs`, {
+        headers: { "if-none-match": etag },
+      });
+      expect(cached.status).toBe(304);
+
+      const sectioned = await startApp(
+        `agent: { manifest: { app: { build: false }, mcp: { hide: ["admin"] }, plugins: false } },`,
+      );
+      expect(await (await fetch(`${sectioned}/.well-known/farmjs.json`)).json()).toMatchObject({
+        app: { basePath: "/" },
+        mcp: { servers: [] },
+        plugins: null,
+      });
+      expect(
+        (await (await fetch(`${sectioned}/.well-known/farmjs.json`)).json()).app,
+      ).not.toHaveProperty("build");
+
+      const optedOut = await startApp(`agent: { manifest: false },`);
+      for (const pathname of ["/.well-known/farmjs.json", "/.well-known/farmjs"]) {
+        const off = await fetch(`${optedOut}${pathname}`);
+        expect(off.headers.get("content-type") ?? "").not.toContain("application/json");
+      }
+    } finally {
+      unpublish();
+    }
+  }, 60_000);
 });

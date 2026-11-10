@@ -8,6 +8,8 @@ import { createFarmDocsAPIHandler, createFarmDocsHandler } from "../docs";
 import { compileFarmDocsManifest, FARM_DOCS_COMPILED_ORIGIN } from "../docs/compiler";
 import { createFarmDocsPrecompiledRuntime } from "../docs/precompiled-runtime";
 import type { FarmDocsResolvedConfig } from "../docs/types";
+import { applyFarmCspNonceToResponse, resolveFarmSecurityConfig } from "../security";
+import { _runWithFarmCspNonce } from "../server/request";
 
 const roots: string[] = [];
 
@@ -194,6 +196,89 @@ describe("precompiled docs runtime", () => {
     }
   });
 
+  it("serves pages under basePath and links every page below it", async () => {
+    const { root, docs } = await createFixture();
+    const manifest = await compileFarmDocsManifest(docs, {
+      root,
+      srcDir: "src",
+      clientEntry: "/farm-client.js",
+      fontAssets: [],
+      basePath: "/console",
+    });
+    const compiled = createFarmDocsPrecompiledRuntime(manifest);
+    const get = (pathname: string) =>
+      compiled.handleDocsRequest(new Request(`https://edge.example${pathname}`));
+
+    const page = await get("/console/docs/guide");
+    expect(page?.status).toBe(200);
+    const html = (await page?.text()) || "";
+    expect(html).toContain('href="/console/docs/guide"');
+    expect(html).toContain('const docsEntry="/console/docs"');
+    expect(html).not.toMatch(/href="\/(docs|llms\.txt)/);
+    // The page's social image answers at the URL the page gives it. sharp is
+    // installed here, so the image is the PNG.
+    const image = html.match(/property="og:image" content="([^"]+)"/)?.[1] || "";
+    expect(new URL(image).pathname).toBe("/console/docs/_social/guide/opengraph-image.png");
+    const imageResponse = await get(new URL(image).pathname);
+    expect(imageResponse?.status).toBe(200);
+    expect(imageResponse?.headers.get("content-type")).toBe("image/png");
+
+    expect(await (await get("/console/docs/guide.md"))?.text()).toContain(
+      "URL: /console/docs/guide",
+    );
+    expect(await (await get("/console/llms.txt"))?.text()).toContain(
+      "(https://edge.example/console/docs/guide.md)",
+    );
+    // Pages answer at the origin root too, and so do the docs.
+    expect((await get("/docs/guide"))?.status).toBe(200);
+
+    const results = await compiled.handleAPIRequest(
+      new Request("https://edge.example/api/docs?query=guide"),
+    );
+    const urls = ((await results!.json()) as Array<{ url: string }>).map((result) => result.url);
+    expect(urls).toContain("/console/docs/guide");
+  });
+
+  it("precompiles config without provider credentials and never precompiles diagnostics", async () => {
+    const { root, docs } = await createFixture();
+    docs.config = {
+      ...docs.config,
+      search: {
+        provider: "algolia",
+        appId: "APP",
+        indexName: "docs",
+        searchApiKey: "ALGOLIA_SEARCH_KEY",
+        adminApiKey: "ALGOLIA_ADMIN_SECRET",
+      },
+      ai: { enabled: true, apiKey: "OPENAI_SECRET" },
+    } as FarmDocsResolvedConfig["config"];
+    const manifest = await compileFarmDocsManifest(docs, {
+      root,
+      srcDir: "src",
+      clientEntry: "/farm-client.js",
+      fontAssets: [],
+    });
+    const compiled = createFarmDocsPrecompiledRuntime(manifest);
+
+    const config = await compiled.handleAPIRequest(
+      new Request("https://edge.example/api/docs?format=config"),
+    );
+    expect(config?.status).toBe(200);
+    const configBody = await config!.text();
+    for (const secret of ["ALGOLIA_SEARCH_KEY", "ALGOLIA_ADMIN_SECRET", "OPENAI_SECRET"]) {
+      expect(configBody).not.toContain(secret);
+    }
+    expect(JSON.parse(configBody)).toMatchObject({
+      config: { search: { provider: "algolia", adminApiKey: "[redacted]" } },
+    });
+
+    const diagnostics = await compiled.handleAPIRequest(
+      new Request("https://edge.example/api/docs?format=diagnostics"),
+    );
+    expect(diagnostics?.status).toBe(404);
+    expect(await diagnostics!.text()).not.toContain("OPENAI_SECRET");
+  });
+
   it("serves adapter navigation payloads and a custom API route", async () => {
     const { root, docs } = await createFixture();
     const manifest = await compileFarmDocsManifest(docs, {
@@ -260,5 +345,52 @@ describe("precompiled docs runtime", () => {
         fontAssets: [],
       }),
     ).rejects.toThrow("cannot serialize a custom docs search adapter");
+  });
+
+  it("gives every response its own nonce on Farm's scripts in precompiled pages", async () => {
+    const { root, docs } = await createFixture();
+    await fs.appendFile(
+      path.join(docs.contentDir!, "guide", "page.md"),
+      '\n<script nonce="guess">window.pwned = true</script>\n',
+    );
+    // As the build compiles edge docs in nonce mode: under a marker nonce.
+    const marker = "0123456789abcdef0123456789abcdef";
+    const manifest = await _runWithFarmCspNonce(marker, () =>
+      compileFarmDocsManifest(docs, {
+        root,
+        srcDir: "src",
+        clientEntry: "/farm-client.js",
+        fontAssets: [],
+        fontStylesheetHref: "/farm-fonts.css",
+        globalStylesheetHref: "/assets/globals.css",
+      }),
+    );
+    manifest.cspNonceMarker = marker;
+    const compiled = createFarmDocsPrecompiledRuntime(manifest);
+    const security = resolveFarmSecurityConfig({
+      csp: { policy: "script-src 'self'", nonce: true },
+    });
+
+    for (const nonce of ["firstresponse", "secondresponse"]) {
+      const html = await _runWithFarmCspNonce(nonce, async () => {
+        const response = await compiled.handleDocsRequest(
+          new Request("https://docs.example/docs/guide", { headers: { accept: "text/html" } }),
+        );
+        return applyFarmCspNonceToResponse(response!, security, nonce).text();
+      });
+      const scripts = html.match(/<script\b[^>]*>/gi) ?? [];
+      const farmScripts = scripts.filter((tag) => !/application\/(?:ld\+)?json/.test(tag));
+      expect(html).not.toContain(marker);
+      expect(farmScripts.length).toBeGreaterThan(1);
+      const injected = html.match(/<script\b[^>]*>window\.pwned/);
+      expect(injected).not.toBeNull();
+      for (const tag of farmScripts) {
+        if (injected && injected[0].startsWith(tag)) {
+          expect(tag).not.toMatch(/\bnonce\s*=/);
+        } else {
+          expect(tag).toContain(`nonce="${nonce}"`);
+        }
+      }
+    }
   });
 });

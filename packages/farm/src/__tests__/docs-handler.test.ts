@@ -11,18 +11,17 @@ import {
   createFarmDocsAPIHandler,
   createFarmDocsHandler,
   getFarmDocsDocumentNavigationMatchers,
+  getFarmDocsRouteTypeEntries,
   isFarmDocsAPIRequest,
 } from "../docs";
+import type { FarmDocsAPIOptions } from "../docs/api";
 import {
   createFarmDocsLastModifiedManifest,
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
 } from "../docs/last-modified";
 import { resolveFarmDocsFontAssets } from "../docs/fonts";
-import {
-  addFarmCspNonceToScriptTags,
-  applyFarmCspHashesToPolicy,
-  createFarmCspScriptHashes,
-} from "../security";
+import { applyFarmCspHashesToPolicy, createFarmCspScriptHashes } from "../security";
+import { _runWithFarmCspNonce } from "../server/request";
 describe("getFarmDocsDocumentNavigationMatchers", () => {
   it("routes enabled docs trees through document navigation", () => {
     expect(
@@ -40,6 +39,32 @@ describe("getFarmDocsDocumentNavigationMatchers", () => {
         config: { entry: "docs" },
       }),
     ).toEqual(["/(.*)"]);
+  });
+
+  it("routes every docs root through document navigation and route types", () => {
+    const docs = {
+      enabled: true,
+      entry: "/docs",
+      config: { entry: "docs" },
+      roots: [
+        { entry: "/statewire/docs", config: { entry: "statewire/docs" } },
+        { entry: "/pinboard/docs", config: { entry: "pinboard/docs" } },
+      ],
+    };
+
+    expect(getFarmDocsDocumentNavigationMatchers(docs)).toEqual([
+      "/docs(.*)",
+      "/statewire/docs(.*)",
+      "/pinboard/docs(.*)",
+    ]);
+    expect(getFarmDocsRouteTypeEntries(docs)).toEqual([
+      "/docs",
+      "/docs/[...docs]",
+      "/statewire/docs",
+      "/statewire/docs/[...docs]",
+      "/pinboard/docs",
+      "/pinboard/docs/[...docs]",
+    ]);
   });
 
   it("does not register document navigation for disabled docs", () => {
@@ -781,18 +806,20 @@ describe("createFarmDocsHandler", () => {
   it("keeps code-copy controls compatible with nonce and static-hash CSP", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
-    const response = await handler(
-      new Request("http://farm.test/docs/guide", { headers: { accept: "text/html" } }),
-    );
-    const html = (await response?.text()) || "";
+    // Rendered for a nonce-mode response: the docs runtime scripts are Farm's own.
+    const html = await _runWithFarmCspNonce("docs-nonce", async () => {
+      const response = await handler(
+        new Request("http://farm.test/docs/guide", { headers: { accept: "text/html" } }),
+      );
+      return (await response?.text()) || "";
+    });
 
     expect(html).toContain("data-code-copy");
     expect((html.match(/<[a-z][^>]*>/gi) || []).some((tag) => /\son[a-z]+\s*=/i.test(tag))).toBe(
       false,
     );
 
-    const nonceHtml = addFarmCspNonceToScriptTags(html, "docs-nonce");
-    const scriptTags = nonceHtml.match(/<script\b[^>]*>/gi) || [];
+    const scriptTags = html.match(/<script\b[^>]*>/gi) || [];
     expect(scriptTags.length).toBeGreaterThan(0);
     expect(scriptTags.every((tag) => tag.includes('nonce="docs-nonce"'))).toBe(true);
 
@@ -982,6 +1009,91 @@ describe("createDocsAPI", () => {
     expect(headResponse?.status).toBe(200);
     expect(headResponse?.headers.get("content-type")).toBe("application/json");
     await expect(headResponse?.text()).resolves.toBe("");
+  });
+
+  it("keeps docs provider credentials and server paths out of config and diagnostics", async () => {
+    const root = await createDocsFixture();
+    const secrets = [
+      "ALGOLIA_ADMIN_SECRET",
+      "ALGOLIA_SEARCH_KEY",
+      "OPENAI_SECRET",
+      "GROQ_SECRET",
+      "MCP_SESSION_SECRET",
+    ];
+    const contentDir = path.join(root, "src", "app", "docs");
+    // The shape a production server receives: env evaluated at build time, absolute paths.
+    const options = {
+      rootDir: root,
+      srcDir: "src",
+      docs: {
+        enabled: true,
+        entry: "/docs",
+        contentDir,
+        configPath: path.join(root, "docs.config.ts"),
+        config: {
+          entry: "docs",
+          docsPath: "/docs",
+          contentDir,
+          nav: { title: "Farm API Docs" },
+          search: {
+            provider: "algolia",
+            appId: "APP",
+            indexName: "docs",
+            searchApiKey: "ALGOLIA_SEARCH_KEY",
+            adminApiKey: "ALGOLIA_ADMIN_SECRET",
+          },
+          ai: {
+            enabled: true,
+            apiKey: "OPENAI_SECRET",
+            providers: { groq: { baseUrl: "https://api.groq.test", apiKey: "GROQ_SECRET" } },
+          },
+          mcp: { headers: { "X-Docs-Session": "MCP_SESSION_SECRET" } },
+          internalOnly: { note: "not a docs config field" },
+        },
+      },
+    } as unknown as FarmDocsAPIOptions;
+    // Production servers and the precompiled runtime build this handler without diagnostics.
+    const handler = createFarmDocsAPIHandler(options);
+
+    for (const query of ["format=config", "type=config", "format=docs-config"]) {
+      const response = await handler(new Request(`http://farm.test/api/docs?${query}`));
+      expect(response?.status).toBe(200);
+      const body = await response!.text();
+      for (const value of [...secrets, root, "not a docs config field"]) {
+        expect(body).not.toContain(value);
+      }
+      expect(JSON.parse(body)).toMatchObject({
+        contentDir: "src/app/docs",
+        config: {
+          contentDir: "src/app/docs",
+          nav: { title: "Farm API Docs" },
+          search: { provider: "algolia", appId: "APP", adminApiKey: "[redacted]" },
+          ai: { enabled: true, providers: { groq: { baseUrl: "https://api.groq.test" } } },
+        },
+        map: { source: { file: "docs.config.ts" } },
+      });
+    }
+
+    const agentSpec = await handler(new Request("http://farm.test/api/docs/agent/spec"));
+    const agentSpecBody = await agentSpec!.text();
+    expect(agentSpecBody).not.toContain(root);
+    expect(JSON.parse(agentSpecBody).pages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourcePath: "./src/app/docs/guide/page.md" }),
+      ]),
+    );
+
+    const diagnostics = await handler(new Request("http://farm.test/api/docs?format=diagnostics"));
+    expect(diagnostics?.status).toBe(404);
+    expect(await diagnostics!.text()).not.toContain(root);
+
+    const devHandler = createFarmDocsAPIHandler({ ...options, diagnostics: true });
+    const devDiagnostics = await devHandler(
+      new Request("http://farm.test/api/docs?format=diagnostics"),
+    );
+    expect(devDiagnostics?.status).toBe(200);
+    const devBody = await devDiagnostics!.text();
+    for (const value of secrets) expect(devBody).not.toContain(value);
   });
 
   it("creates Next-style GET and POST route handlers for Farm API routes", async () => {

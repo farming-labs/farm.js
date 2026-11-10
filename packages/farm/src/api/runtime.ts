@@ -7,12 +7,13 @@ import {
 import { isEndpointFailure, type EndpointFailure } from "./endpoint";
 import {
   bufferFarmRequestBody,
+  cloneFarmRequest,
   createFarmRequestBodyErrorResponse,
   DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT,
 } from "../server-http";
 import { DEFAULT_FARM_API_BASE_PATH, normalizeFarmAPIBasePath } from "./config";
 import { resolveFarmAPICanonicalPathname } from "./server-path";
-import { parseRouteSchema } from "./route-schema";
+import { parseRouteSchema, toPublicValidationIssues } from "./route-schema";
 import { omitFarmResponseBody } from "../response-body";
 
 export { registerAPIRouteShape, type APIRouteShapeSource } from "./route-shape";
@@ -32,6 +33,7 @@ import {
   type APIRouteParams,
   type APIRouteMatch,
 } from "./route-pattern";
+import { validateIntegrationRequestOrigin } from "../integration-request-security";
 /**
  * Every method an API route module can export. Route discovery in core and in
  * the plain-Vite plugin reads this list, so a handler exported under any of
@@ -311,6 +313,21 @@ function attachEndpointInvalidations(response: Response, keys: readonly string[]
   });
 }
 
+/**
+ * @internal The JSON body of the generic `500` Farm answers when an API route, a docs API
+ * route, or app middleware throws. It is the production entry's body, so `farm dev` sends the
+ * same one. Typed endpoint failures answer {@link createEndpointFailureResponse} instead.
+ */
+export const FARM_INTERNAL_SERVER_ERROR_BODY = JSON.stringify({ error: "Internal Server Error" });
+
+/** @internal The generic `500` response, with {@link FARM_INTERNAL_SERVER_ERROR_BODY}. */
+export function createFarmInternalServerErrorResponse(): Response {
+  return new Response(FARM_INTERNAL_SERVER_ERROR_BODY, {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export function createEndpointFailureResponse(failure: EndpointFailure<string, unknown>): Response {
   return new Response(
     JSON.stringify({
@@ -340,7 +357,7 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
 
   if (contentType === "multipart/form-data") {
     try {
-      return { body: formDataToObject(await request.clone().formData()) };
+      return { body: formDataToObject(await cloneFarmRequest(request).formData()) };
     } catch {
       return invalidRequestBody("The request body is not valid multipart form data.");
     }
@@ -348,7 +365,7 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
 
   let text: string;
   try {
-    text = await request.clone().text();
+    text = await cloneFarmRequest(request).text();
   } catch {
     if (contentType === "application/json" || contentType?.endsWith("+json")) {
       return invalidRequestBody("The request body is not valid JSON.");
@@ -382,7 +399,9 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
 
   // A body is only parsed as JSON when the request says it is JSON, or when it
   // declares no type at all (the permissive path kept for non-browser callers
-  // that omit the header).
+  // that omit the header). A browser omits it too, for a Blob or byte body, and
+  // will send that cross-site in a no-cors fetch with the visitor's cookies, so
+  // a typeless body from another origin is not read as JSON either.
   //
   // Parsing a *declared* non-JSON type as JSON removed the barrier that keeps
   // browsers from reaching this surface cross-origin: `text/plain`,
@@ -391,6 +410,9 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
   // without a preflight. Honouring the declared type means such a request no
   // longer arrives as a parsed JSON object.
   if (contentType === undefined) {
+    if (!validateIntegrationRequestOrigin(request, { requireOriginMetadata: false }).ok) {
+      return { body: undefined };
+    }
     try {
       return { body: JSON.parse(text) };
     } catch {
@@ -452,21 +474,24 @@ async function validateInput(
   if (!schema) return value;
   try {
     return await parseRouteSchema(schema, value);
-  } catch (validationError: any) {
+  } catch (validationError) {
     return Response.json(
       {
         error,
-        details: (validationError.issues || validationError.errors || []).map((issue: any) => ({
-          path: issue.path,
-          message: issue.message,
-          code: issue.code,
-        })),
+        details: toPublicValidationIssues(validationError),
       },
       { status: 400 },
     );
   }
 }
 
-// The MCP tool registry, published by @farm.js/mcp. It lives behind this
-// edge-safe entry so the plugin never pulls core's main index into a worker.
-export { _findFarmMCPEndpointTool, _publishFarmMCPCatalog } from "../mcp-catalog";
+// The MCP tool registry, published by @farm.js/mcp, and the AI catalog's list of MCP
+// servers Farm does not serve. They live behind this edge-safe entry so a plugin or
+// docs runtime never pulls core's main index into a worker.
+export {
+  _findFarmMCPEndpointTool,
+  _publishFarmMCPCatalog,
+  registerFarmMCPServer,
+  type FarmMCPCatalogDetails,
+  type FarmMCPServerRegistration,
+} from "../mcp-catalog";

@@ -16,6 +16,7 @@ export const productQuery = createServerQuery({
   }),
   key: ({ input }) => ["product", input.id],
   staleTime: "30s",
+  mcp: { name: "get_product", description: "Read a demo product by id." },
   async handler({ input }) {
     queryCalls++;
     return {

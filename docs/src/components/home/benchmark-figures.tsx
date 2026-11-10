@@ -1,6 +1,13 @@
 "use client";
 
-import { type PointerEvent, type ReactNode, type RefObject, useRef, useState } from "react";
+import {
+  type PointerEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { benchmarkReport, formatBenchmarkDuration } from "../../lib/framework-benchmark";
 import {
   Callout,
@@ -135,13 +142,18 @@ function Stage({
   pointer: ReturnType<typeof usePointer>[1];
   children: ReactNode;
 }) {
+  // The drawings are decorative and animate only in the browser, so the server sends the empty
+  // frame (which keeps its size) and the drawing arrives with hydration. That keeps several
+  // kilobytes of polygon points per figure out of the homepage HTML.
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => setDrawn(true), []);
   return (
     <div
       className="benchmark-illustration benchmark-hairline relative mt-4 flex h-64 flex-col sm:h-72"
       ref={rootRef}
     >
       <svg aria-hidden className="min-h-0 w-full flex-1" viewBox={view.join(" ")} {...pointer}>
-        <LensContext.Provider value={camera}>{children}</LensContext.Provider>
+        {drawn ? <LensContext.Provider value={camera}>{children}</LensContext.Provider> : null}
       </svg>
       <div
         aria-hidden

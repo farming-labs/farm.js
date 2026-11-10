@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  <strong>A framework for building fast, full-stack, product-integrated applications.</strong>
+  <strong>The framework for the web and agents.</strong>
 </p>
 
 <p align="center">
-  Farm.js combines Vite's instant development experience with typed app-directory routing, secure Server Actions, streaming SSR, and production-ready deployment output. React is the default renderer, and beta Preact, Solid, Vue, and Svelte adapters use the same routing and server contracts. See <a href="https://farmjs.dev/docs/stability">Stability and Support</a> for what 0.1 covers.
+  Every Farm.js app serves its pages to people and to AI agents: server-rendered HTML, a Markdown copy of each page, and <code>llms.txt</code>, on by default. Turn on MCP and your server functions become tools agents can call. Bring any agent runtime: <a href="https://farmjs.dev/docs/integrations/eve">Eve</a> and <a href="https://farmjs.dev/docs/integrations/cf-agent">Cloudflare Agents</a> plug in through Farm's open <a href="https://farmjs.dev/docs/integrations#agent-runtimes">agent runtime contract</a>, and the <a href="https://farmjs.dev/docs/integrations/agent-frameworks">AI SDK, Mastra, LangGraph, and the OpenAI Agents SDK</a> run in a plain API route. Built on Vite and Nitro, with typed routes, Server Actions, and streaming SSR. React is the default renderer, and beta Preact, Solid, Vue, and Svelte adapters use the same routing and server contracts. See <a href="https://farmjs.dev/docs/stability">Stability and Support</a> for what 0.1 covers.
 </p>
 
 <p align="center">
@@ -32,19 +32,19 @@
 
 ## ✨ Built for Full-Stack Products
 
-| Feature                            | What it gives you                                                                                                                                                                                                                                          |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ⚛️ **Custom RSC renderer**         | A purpose-built RSC, streaming SSR, and client hydration pipeline, with optional Rust-native rendering for eligible host-only regions through [Strata](https://github.com/farming-labs/strata).                                                            |
-| 🔄 **Server Actions**              | Write mutations next to your components with `"use server"`, form actions, optional encrypted bound arguments, and configurable request security.                                                                                                          |
-| ⚡ **Blazingly fast development**  | Vite-powered startup, on-demand transforms, and fast HMR keep the feedback loop nearly instant.                                                                                                                                                            |
-| 🧭 **Typed app-directory routing** | Pages, layouts, route groups, dynamic segments, loading states, error boundaries, middleware, and generated route types.                                                                                                                                   |
-| 🧩 **Flexible rendering**          | Choose streaming SSR, static generation, ISR, PPR, or deferred hydration islands route by route.                                                                                                                                                           |
-| 🛠️ **Full-stack primitives**       | Build with API routes, server functions, middleware, caching, KV storage, cron handlers, OpenAPI, and post-response work.                                                                                                                                  |
-| 🔌 **First-party integrations**    | Add authentication, billing, email, jobs, AI, API keys, databases, and provider-owned routes through one typed integration model.                                                                                                                          |
-| 🎭 **Renderer choice**             | React by default, with Preact, Solid, Vue, and Svelte renderers selected by one line of config — same routes, server functions, and integrations everywhere.                                                                                               |
-| 🧪 **AOT React compiler**          | An experimental compiler turns eligible components into direct DOM updates that skip reconciliation (~6.8x faster keyed swaps, ~2x less CPU in the [benchmark](./benchmarks/compiler)), falling back to normal React whenever eligibility can't be proven. |
-| 🚀 **Production-ready output**     | Build deployable server and client output with Nitro-powered adapters and per-route runtime controls.                                                                                                                                                      |
-| 🎨 **Great defaults**              | Start with TypeScript, Tailwind CSS, sensible conventions, and a clean project structure—without assembling the framework yourself.                                                                                                                        |
+| Feature                            | What it gives you                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ⚛️ **Custom RSC renderer**         | A purpose-built RSC, streaming SSR, and client hydration pipeline, with optional Rust-native rendering for eligible host-only regions through [Strata](https://github.com/farming-labs/strata).                                                                                                                                                                 |
+| 🔄 **Server Actions**              | Write mutations next to your components with `"use server"`, form actions, optional encrypted bound arguments, and configurable request security.                                                                                                                                                                                                               |
+| ⚡ **Blazingly fast development**  | Vite-powered startup, on-demand transforms, and fast HMR keep the feedback loop nearly instant.                                                                                                                                                                                                                                                                 |
+| 🧭 **Typed app-directory routing** | Pages, layouts, route groups, dynamic segments, loading states, error boundaries, middleware, and generated route types.                                                                                                                                                                                                                                        |
+| 🧩 **Flexible rendering**          | Choose streaming SSR, static generation, ISR, PPR, or deferred hydration islands route by route.                                                                                                                                                                                                                                                                |
+| 🛠️ **Full-stack primitives**       | Build with API routes, server functions, middleware, caching, KV storage, cron handlers, OpenAPI, and post-response work.                                                                                                                                                                                                                                       |
+| 🔌 **First-party integrations**    | Add authentication, billing, email, jobs, AI, API keys, databases, and provider-owned routes through one typed integration model.                                                                                                                                                                                                                               |
+| 🎭 **Renderer choice**             | React by default, with Preact, Solid, Vue, and Svelte renderers selected by one line of config — same routes, server functions, and integrations everywhere.                                                                                                                                                                                                    |
+| 🧪 **AOT React compiler**          | An experimental compiler turns eligible components into direct DOM updates that skip reconciliation (on [js-framework-benchmark](./examples/react-compiler-js-framework-benchmark), 1.29× faster than React Hooks overall, 4.9× faster keyed row swaps, and within 1% of Solid's CPU score), falling back to normal React whenever eligibility can't be proven. |
+| 🚀 **Production-ready output**     | Build deployable server and client output with Nitro-powered adapters and per-route runtime controls.                                                                                                                                                                                                                                                           |
+| 🎨 **Great defaults**              | Start with TypeScript, Tailwind CSS, sensible conventions, and a clean project structure—without assembling the framework yourself.                                                                                                                                                                                                                             |
 
 > **Experimental native rendering:** Farm.js can automatically send eligible, server-only React subtrees through the [Strata](https://github.com/farming-labs/strata) native renderer while safely falling back to normal React rendering for unsupported trees.
 
@@ -106,7 +106,7 @@ export default function HomePage() {
 }
 ```
 
-> 💡 **Tailwind CSS is pre-configured!** Just use Tailwind classes - no setup needed. See [TAILWIND_SETUP.md](./TAILWIND_SETUP.md) for details.
+> 💡 **Tailwind CSS is pre-configured!** Apps from `create-app` include it, so just use Tailwind classes. In an existing app, install `tailwindcss` and `@tailwindcss/vite` and add `@import "tailwindcss";` to your stylesheet; Farm loads the Vite plugin for you.
 
 Add a root layout in `src/app/layout.tsx`:
 
@@ -187,7 +187,7 @@ export default defineConfig({
 });
 ```
 
-See [farm.config.ts documentation](./PLUGIN_SYSTEM.md) for all options.
+See the [configuration docs](https://farmjs.dev/docs/configuration) for all options.
 
 ### Route-level Boundaries
 
@@ -253,26 +253,34 @@ export default function DashboardPage() {
 
 ## 🔌 Plugin System
 
-Extend Farm.js with powerful plugins:
+Extend the framework with plugins: request hooks, HTML transforms, build and dev hooks, browser hooks, typed API routes, and their own database tables.
 
 ```typescript
 import { definePlugin } from "@farm.js/core";
 
 export const myPlugin = definePlugin({
-  name: "my-plugin",
+  name: "acme:my-plugin",
 
-  async beforeRequest(req, res, context) {
-    // Add custom logic before request processing
+  runtime: {
+    before({ request }) {
+      // Runs before Farm's route handler. Return a Response to answer early.
+    },
+    after({ response }) {
+      // Return a new Response to change headers or the body.
+      return response;
+    },
   },
 
-  async transformHTML(html, context) {
-    // Modify HTML output
-    return html;
+  render: {
+    html(html) {
+      // Rewrite a page's rendered HTML.
+      return html;
+    },
   },
 });
 ```
 
-See [Plugin System Guide](./PLUGIN_SYSTEM.md) for comprehensive documentation.
+See the [Plugin System guide](./PLUGIN_SYSTEM.md) for every plugin option and hook, and [Create a Plugin](https://farmjs.dev/docs/plugins/create-plugin) for walkthroughs.
 
 ## 🎯 Core Concepts
 

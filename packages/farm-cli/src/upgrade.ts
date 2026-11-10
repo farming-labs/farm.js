@@ -29,6 +29,8 @@ export interface FarmUpgradeCommand {
   command: FarmPackageManager;
   args: string[];
   cwd: string;
+  /** The package manager's environment. Default: this process's. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface FarmUpgradePlan {
@@ -304,7 +306,7 @@ function getDependencySectionFlags(
   return ["--save-peer"];
 }
 
-function runFarmUpgradeCommand(command: FarmUpgradeCommand): Promise<void> {
+export function runFarmUpgradeCommand(command: FarmUpgradeCommand): Promise<void> {
   return new Promise((resolve, reject) => {
     const isWindows = process.platform === "win32";
     // Node rejects spawning .cmd/.bat files without a shell since the fix for
@@ -314,7 +316,7 @@ function runFarmUpgradeCommand(command: FarmUpgradeCommand): Promise<void> {
     // the arguments are literal flags plus name@channel package specs.
     const child = spawn(command.command, command.args, {
       cwd: command.cwd,
-      env: process.env,
+      env: command.env ?? process.env,
       stdio: "inherit",
       shell: isWindows,
     });

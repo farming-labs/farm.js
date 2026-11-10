@@ -1,18 +1,20 @@
 /**
  * Built-in Farm Infra analytics.
  *
- * On whenever the server environment links the app to a Farm Infra project:
- * `FARMJS_API_KEY` plus `FARMJS_PROJECT_ID`, or a project's write-only key alone.
- * `analytics: false` in farm.config turns it off. It never sends without that link.
+ * On whenever the server environment sets `FARMJS_API_KEY`. A key scoped to one project
+ * names it; a key reaching several projects also needs `FARMJS_PROJECT_ID`.
+ * `analytics: false` in farm.config turns it off. It never sends without a key.
  *
- * Only server-side metadata leaves the app: the matched route template, method,
+ * Only server-side metadata leaves the app: the route template (see route-label.ts), method,
  * status, duration, registered MCP tool outcomes and a self-reported agent
  * category. No URLs, query strings, headers, cookies, bodies, IPs or errors.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { FarmPlugin, FarmPluginRuntimeAfterEvent } from "../plugin";
 import { classifyFarmAgent, type FarmAgentIdentity } from "../agent-identity";
 import { onFarmEvent } from "../observability";
 import { getCurrentRequestOrNull } from "../server/request";
+import { getFarmRouteLabel } from "../route-label";
 
 export type FarmInfraAnalyticsEnvironment = "production" | "staging" | "development";
 
@@ -20,13 +22,18 @@ export interface FarmInfraAnalyticsDiagnostic {
   code: "dropped" | "retry" | "disabled";
   count?: number;
   status?: number;
+  /**
+   * Why Farm Infra refused the key, for `disabled`: it reaches several projects and no
+   * project was named, it lacks analytics:write, or it only sends another environment.
+   */
+  reason?: "project" | "permission" | "environment";
 }
 
 export interface FarmInfraAnalyticsExporterOptions {
   endpoint: string;
   /** A Farm Infra API key (`farmjs_…`), or a project's write-only ingestion key (`fti_…`). */
   key: string;
-  /** Needed with an API key; an ingestion key names its own project. */
+  /** Needed only for an API key reaching several projects; one project's key names it. */
   projectId?: string;
   environment?: FarmInfraAnalyticsEnvironment;
   onDiagnostic?: (event: FarmInfraAnalyticsDiagnostic) => void | Promise<void>;
@@ -98,15 +105,14 @@ export function resolveFarmInfraAnalytics(
   const key = env.FARMJS_API_KEY?.trim();
   if (!key || env[FARM_PRERENDER_ENV] === "1") return { off: null };
   const ingestionKey = INGESTION_KEY.test(key);
+  // Optional: Farm Infra resolves the project of a key scoped to exactly one.
   const projectId = env.FARMJS_PROJECT_ID?.trim() || undefined;
-  // FARMJS_API_KEY also authorizes other Farm Infra APIs; without a project it only does that.
-  if (!ingestionKey && !projectId) return { off: null };
   if (!ingestionKey && !API_KEY.test(key)) {
     return {
       off: "FARMJS_API_KEY isn't a Farm Infra API key (farmjs_…) or write-only key (fti_…)",
     };
   }
-  if (!ingestionKey && !PROJECT.test(projectId!)) {
+  if (!ingestionKey && projectId && !PROJECT.test(projectId)) {
     return { off: "FARMJS_PROJECT_ID isn't a Farm Infra project ID (proj_…)" };
   }
   if (env.FARMJS_ENVIRONMENT && !ENVIRONMENTS.includes(env.FARMJS_ENVIRONMENT as never)) {
@@ -130,7 +136,9 @@ export function resolveFarmInfraAnalytics(
     options: {
       endpoint: endpoint.href,
       key,
-      ...(ingestionKey ? {} : { projectId, environment: defaultFarmInfraEnvironment(env) }),
+      ...(ingestionKey
+        ? {}
+        : { ...(projectId ? { projectId } : {}), environment: defaultFarmInfraEnvironment(env) }),
     },
   };
 }
@@ -177,6 +185,42 @@ function retryAt(value: string | null, now: number): number {
   return Number.isFinite(date) ? Math.max(now, Math.min(date, now + 86_400_000)) : now;
 }
 
+const REFUSALS: Record<string, FarmInfraAnalyticsDiagnostic["reason"]> = {
+  project: "project",
+  api_key_permission: "permission",
+  api_key_environment: "environment",
+};
+
+/** The known error code of a 400 or 403 from Farm Infra, reading at most 1 KiB within 500 ms. */
+async function refusal(response: Response): Promise<FarmInfraAnalyticsDiagnostic["reason"]> {
+  const reader = response.body?.getReader();
+  if (!reader) return undefined;
+  let text = "";
+  const decoder = new TextDecoder();
+  const deadline = Date.now() + 500;
+  try {
+    while (text.length < 1024 && Date.now() < deadline) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise<{ done: true; value?: undefined }>((resolve) => {
+          timer = setTimeout(() => resolve({ done: true }), deadline - Date.now());
+        }),
+      ]).finally(() => clearTimeout(timer));
+      if (chunk.done) break;
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    const code = (JSON.parse(text) as { error?: unknown }).error;
+    return typeof code === "string" && Object.prototype.hasOwnProperty.call(REFUSALS, code)
+      ? REFUSALS[code]
+      : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+}
+
 /** Bounded best-effort delivery. Never retains a Request, Response, or payload body. */
 export function createFarmInfraAnalyticsExporter(
   options: FarmInfraAnalyticsExporterOptions,
@@ -186,9 +230,10 @@ export function createFarmInfraAnalyticsExporter(
     "content-type": "application/json",
     authorization: `Bearer ${options.key}`,
   };
-  // An API key also names the project and environment it writes to.
+  // An API key names the environment it writes to, and the project when it reaches several.
+  // A write-only key names both itself.
   if (!INGESTION_KEY.test(options.key)) {
-    requestHeaders["x-farm-project"] = options.projectId!;
+    if (options.projectId) requestHeaders["x-farm-project"] = options.projectId;
     requestHeaders["x-farm-environment"] = options.environment ?? defaultFarmInfraEnvironment();
   }
   type Item = { event: FarmInfraAnalyticsEvent; enqueuedAt: number; attempts: number };
@@ -262,6 +307,8 @@ export function createFarmInfraAnalyticsExporter(
           body,
         });
         status = response.status;
+        // Only a refusal's error code is read, from a bounded prefix, and never logged as text.
+        const reason = status === 400 || status === 403 ? await refusal(response) : undefined;
         // The receipt body is not needed; never wait for or log arbitrary response text.
         void response.body?.cancel().catch(() => {});
         if (response.ok) {
@@ -272,7 +319,7 @@ export function createFarmInfraAnalyticsExporter(
         if ([400, 401, 403, 404, 413, 415].includes(status) || (status >= 300 && status < 400)) {
           stopped = true;
           queue.length = 0;
-          diagnostic({ code: "disabled", status });
+          diagnostic({ code: "disabled", status, ...(reason ? { reason } : {}) });
           break;
         }
         if (status !== 408 && status !== 429 && status < 500) {
@@ -328,7 +375,8 @@ interface State {
 interface RequestMetadata {
   id: string;
   agent: FarmInfraAgentIdentity;
-  route: string;
+  /** Read when an event is made: a handler may label the route while it answers. */
+  route: object | undefined;
   completed: boolean;
   waitUntil(promise: Promise<unknown>): void;
 }
@@ -337,13 +385,13 @@ const CONTEXT_KEY = "farm.infra.analytics";
 
 function beginRequest(
   request: Request,
-  pattern: unknown,
+  route: object | undefined,
   waitUntil: (promise: Promise<unknown>) => void,
 ): RequestMetadata {
   return {
     id: uuid(),
     agent: classifyFarmInfraAgent(request.headers.get("user-agent")),
-    route: routeTemplate(pattern),
+    route,
     completed: false,
     waitUntil,
   };
@@ -359,12 +407,29 @@ function requestEvent(
     id: uuid(),
     requestId: metadata.id,
     timestamp: new Date().toISOString(),
-    route: metadata.route,
+    route: routeTemplate(getFarmRouteLabel(metadata.route)),
     agent: metadata.agent,
     kind: "request",
     method,
     status,
     durationMs: duration(durationMs),
+  };
+}
+
+function toolEvent(
+  metadata: RequestMetadata,
+  event: { tool: string; outcome: "success" | "error"; durationMs: number },
+): FarmInfraAnalyticsEvent {
+  return {
+    id: uuid(),
+    requestId: metadata.id,
+    timestamp: new Date().toISOString(),
+    route: routeTemplate(getFarmRouteLabel(metadata.route)),
+    agent: metadata.agent,
+    kind: "mcp.tool",
+    tool: event.tool,
+    outcome: event.outcome,
+    durationMs: duration(event.durationMs),
   };
 }
 
@@ -387,6 +452,8 @@ export function farmInfraAnalyticsPlugin(
       return state;
     },
     runtime: {
+      // Recording a request decides nothing about who may read the response.
+      cache: "public",
       start(context) {
         const { exporter } = context.state;
         context.state.unsubscribe = onFarmEvent(
@@ -397,17 +464,7 @@ export function farmInfraAnalyticsPlugin(
             const metadata = context.requestContext.get<RequestMetadata>(request, contextKey);
             // Streaming MCP transports can return their HTTP Response before the tool finishes.
             if (!metadata) return;
-            exporter.enqueue({
-              id: uuid(),
-              requestId: metadata.id,
-              timestamp: new Date().toISOString(),
-              route: metadata.route,
-              agent: metadata.agent,
-              kind: "mcp.tool",
-              tool: event.tool,
-              outcome: event.outcome,
-              durationMs: duration(event.durationMs),
-            });
+            exporter.enqueue(toolEvent(metadata, event));
             metadata.waitUntil(exporter.flush());
           },
           { unfiltered: true },
@@ -415,13 +472,15 @@ export function farmInfraAnalyticsPlugin(
       },
       before(event) {
         if (event.kind === "asset" || !event.state) return;
-        event.req.set(
-          contextKey,
-          beginRequest(event.request, event.route?.pattern, event.waitUntil),
-        );
+        event.req.set(contextKey, beginRequest(event.request, event.route, event.waitUntil));
       },
       after(event: FarmPluginRuntimeAfterEvent<State>) {
-        const metadata = event.req.get<RequestMetadata>(contextKey);
+        // A plugin endpoint answers before any runtime.before hook runs.
+        const metadata =
+          event.req.get<RequestMetadata>(contextKey) ??
+          (event.kind === "endpoint"
+            ? beginRequest(event.request, event.route, event.waitUntil)
+            : undefined);
         if (!metadata || metadata.completed || !event.state) return;
         metadata.completed = true;
         if (!METHODS.has(event.request.method)) return;
@@ -452,24 +511,37 @@ export interface FarmInfraAnalyticsRecorder {
 }
 
 /**
- * The same request reporting without a plugin runtime, so a production server that has
- * no plugins doesn't import one. MCP is a plugin, so there are no tool calls to correlate.
+ * The same reporting without a plugin runtime, so a production server whose plugins only add
+ * routes (`@farm.js/mcp` without OAuth among them) doesn't import one. Tool calls happen inside
+ * the request, which an API route may have rewritten by then, so each request's metadata
+ * travels in an async scope of its own rather than keyed by its Request.
  */
 export function farmInfraAnalyticsRecorder(
   options: FarmInfraAnalyticsExporterOptions,
   send?: typeof fetch,
 ): FarmInfraAnalyticsRecorder {
   const exporter = createFarmInfraAnalyticsExporter(options, send);
+  const requests = new AsyncLocalStorage<RequestMetadata>();
+  const unsubscribe = onFarmEvent(
+    (event: unknown) => {
+      if (!isToolEvent(event)) return;
+      const metadata = requests.getStore();
+      if (!metadata) return;
+      exporter.enqueue(toolEvent(metadata, event));
+      metadata.waitUntil(exporter.flush());
+    },
+    { unfiltered: true },
+  );
   return {
     async record(request, runtime, waitUntil, handler) {
       if (runtime.kind === "asset") return handler();
       const background = (promise: Promise<unknown>) =>
         waitUntil ? waitUntil(promise) : void promise.catch(() => {});
-      const metadata = beginRequest(request, runtime.route?.pattern, background);
+      const metadata = beginRequest(request, runtime.route, background);
       const startedAt = performance.now();
       let response: Response;
       try {
-        response = await handler();
+        response = await requests.run(metadata, handler);
       } catch (error) {
         background(exporter.flush());
         throw error;
@@ -482,7 +554,10 @@ export function farmInfraAnalyticsRecorder(
       background(exporter.flush());
       return response;
     },
-    close: () => exporter.close(),
+    close() {
+      unsubscribe();
+      return exporter.close();
+    },
   };
 }
 
@@ -499,14 +574,39 @@ function linkedOptions(
   return {
     ...resolved.options,
     onDiagnostic(event) {
-      if (event.code === "disabled") {
-        warn(
-          `[Farm] Farm Infra analytics stopped: Farm Infra answered ${event.status}. ` +
-            "Check FARMJS_API_KEY and FARMJS_PROJECT_ID, then restart the server.",
-        );
-      }
+      if (event.code !== "disabled") return;
+      // A key for another environment, such as a production key in development, is expected.
+      if (event.reason === "environment") return;
+      warn(`[Farm] Farm Infra analytics stopped: ${stopReason(event)}`);
     },
   };
+}
+
+const KEYS_PAGE = "the API keys page (https://app.farmjs.dev/dashboard/settings)";
+
+function stopReason(event: FarmInfraAnalyticsDiagnostic): string {
+  if (event.reason === "project") {
+    return (
+      "FARMJS_API_KEY reaches more than one project. Set FARMJS_PROJECT_ID " +
+      "or use a key scoped to one project, then restart the server."
+    );
+  }
+  if (event.reason === "permission") {
+    return (
+      "this key can't send analytics. Create a Site analytics key on " +
+      `${KEYS_PAGE}, set it as FARMJS_API_KEY, then restart the server.`
+    );
+  }
+  if (event.status === 401) {
+    return (
+      "Farm Infra answered 401: FARMJS_API_KEY was revoked or has expired. Create a new " +
+      `Site analytics key on ${KEYS_PAGE}, then restart the server.`
+    );
+  }
+  return (
+    `Farm Infra answered ${event.status}. ` +
+    "Check FARMJS_API_KEY and FARMJS_PROJECT_ID, then restart the server."
+  );
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   classifyFarmInfraAgent,
   createFarmInfraAnalyticsExporter,
   createFarmInfraAnalyticsPlugin,
+  createFarmInfraAnalyticsRecorder,
   defaultFarmInfraEnvironment,
   farmInfraAnalyticsPlugin,
   farmInfraAnalyticsRecorder,
@@ -42,16 +43,32 @@ const sentEvents = (send: { mock: { calls: unknown[][] } }) =>
   );
 
 describe("Farm Infra link from the environment", () => {
-  it("stays off, silently, unless the environment names a project", () => {
+  it("stays off, silently, without a key or while prerendering", () => {
     expect(resolveFarmInfraAnalytics({})).toEqual({ off: null });
-    // FARMJS_API_KEY alone also authorizes other Infra APIs (site checks), so it isn't a link.
-    expect(resolveFarmInfraAnalytics({ FARMJS_API_KEY: apiKey })).toEqual({ off: null });
+    expect(resolveFarmInfraAnalytics({ FARMJS_PROJECT_ID: projectId })).toEqual({ off: null });
     const warn = vi.fn();
-    expect(createFarmInfraAnalyticsPlugin({ FARMJS_API_KEY: apiKey }, warn)).toBeNull();
+    expect(createFarmInfraAnalyticsPlugin({ FARMJS_PROJECT_ID: projectId }, warn)).toBeNull();
+    expect(
+      createFarmInfraAnalyticsPlugin({ FARMJS_API_KEY: apiKey, FARM_PRERENDER: "1" }, warn),
+    ).toBeNull();
     // The build's prerender worker renders pages; those requests aren't traffic.
     expect(
       createFarmInfraAnalyticsPlugin({ FARMJS_API_KEY: ingestionKey, FARM_PRERENDER: "1" }, warn),
     ).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("links with an API key alone, naming its environment", () => {
+    // Farm Infra resolves the project of a key scoped to exactly one.
+    expect(resolveFarmInfraAnalytics({ FARMJS_API_KEY: apiKey, NODE_ENV: "production" })).toEqual({
+      options: {
+        endpoint: "https://app.farmjs.dev/api/telemetry/v1/events",
+        key: apiKey,
+        environment: "production",
+      },
+    });
+    const warn = vi.fn();
+    expect(createFarmInfraAnalyticsPlugin({ FARMJS_API_KEY: apiKey }, warn)).not.toBeNull();
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -382,6 +399,143 @@ describe("runtime plugin", () => {
   });
 });
 
+describe("Farm Infra refusals", () => {
+  const refused = (status: number, body?: unknown) =>
+    new Response(body === undefined ? null : JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Sends three requests' events through the recorder, so a refusal can repeat. */
+  async function run(response: () => Response, env: Record<string, string> = {}) {
+    const send = vi.spyOn(globalThis, "fetch").mockImplementation(async () => response());
+    const warn = vi.fn();
+    const recorder = createFarmInfraAnalyticsRecorder({ FARMJS_API_KEY: apiKey, ...env }, warn)!;
+    for (let i = 0; i < 3; i++) {
+      const work: Promise<unknown>[] = [];
+      await recorder.record(
+        new Request("https://app.example/"),
+        { route: { pattern: "/" } },
+        (job) => work.push(job),
+        async () => new Response("ok"),
+      );
+      await Promise.all(work);
+    }
+    await recorder.close();
+    for (const [message] of warn.mock.calls) expect(String(message)).not.toContain(apiKey);
+    return { send, warn };
+  }
+
+  it("asks once for FARMJS_PROJECT_ID when the key reaches several projects", async () => {
+    const { send, warn } = await run(() =>
+      refused(400, { error: "project", message: "Send x-farm-project" }),
+    );
+    expect(send).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toMatch(/Set FARMJS_PROJECT_ID or use a key scoped to one/);
+  });
+
+  it("points a key without analytics:write, such as farm login's, to a Site analytics key", async () => {
+    const { send, warn } = await run(() =>
+      refused(403, { error: "api_key_permission", message: "This API key can't send analytics." }),
+    );
+    expect(send).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toMatch(/this key can't send analytics/);
+    expect(warn.mock.calls[0]![0]).toMatch(/Site analytics key/);
+    expect(warn.mock.calls[0]![0]).toMatch(/app\.farmjs\.dev/);
+  });
+
+  it("stops quietly for a key restricted to another environment", async () => {
+    const { send, warn } = await run(
+      () => refused(403, { error: "api_key_environment", message: "only production" }),
+      { FARMJS_ENVIRONMENT: "development" },
+    );
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]![1]!.headers).toMatchObject({
+      "x-farm-environment": "development",
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("says once that a revoked or expired key was refused", async () => {
+    const { send, warn } = await run(() => refused(401, { error: "api_key" }));
+    expect(send).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toMatch(/401: FARMJS_API_KEY was revoked or has expired/);
+  });
+
+  it("keeps the generic warning for an unknown or unreadable refusal", async () => {
+    for (const response of [
+      () => refused(403, { error: "server_only" }),
+      () => refused(403, { error: "__proto__" }),
+      () => new Response("not json", { status: 400 }),
+      () => refused(404),
+    ]) {
+      const { send, warn } = await run(response);
+      expect(send).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]![0]).toMatch(/Farm Infra answered 40[034]\. Check FARMJS_API_KEY/);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("never lets a refusal or a failed send break the request", async () => {
+    for (const fails of [
+      () => {
+        throw new Error("network");
+      },
+      () => refused(403, { error: "api_key_permission" }),
+    ]) {
+      const send = vi.spyOn(globalThis, "fetch").mockImplementation(async () => fails());
+      const recorder = createFarmInfraAnalyticsRecorder({ FARMJS_API_KEY: apiKey }, vi.fn())!;
+      const response = await recorder.record(
+        new Request("https://app.example/"),
+        {},
+        undefined,
+        async () => new Response("ok", { status: 201 }),
+      );
+      expect(response.status).toBe(201);
+      await expect(recorder.close()).resolves.toBeUndefined();
+      expect(send).toHaveBeenCalled();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("reads at most a bounded prefix of a refusal, without waiting on a stalled body", async () => {
+    vi.useFakeTimers();
+    try {
+      const cancelled = vi.fn();
+      const stalled = new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"error":"api_key_permission"'));
+          },
+          cancel: cancelled,
+        }),
+        { status: 403 },
+      );
+      const onDiagnostic = vi.fn();
+      const exporter = createFarmInfraAnalyticsExporter(
+        { endpoint, key: apiKey, environment: "production", onDiagnostic },
+        vi.fn<typeof fetch>().mockResolvedValue(stalled),
+      );
+      exporter.enqueue(event());
+      const flushing = exporter.flush();
+      await vi.runAllTimersAsync();
+      await flushing;
+      expect(cancelled).toHaveBeenCalled();
+      expect(onDiagnostic.mock.calls).toEqual([[{ code: "disabled", status: 403 }]]);
+      await exporter.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("recorder for servers without a plugin runtime", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -442,6 +596,56 @@ describe("recorder for servers without a plugin runtime", () => {
       expect.objectContaining({ route: "/[unmatched]", status: 404 }),
     ]);
   });
+
+  it("ties each MCP tool call to its request, even one an API route rewrote", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const recorder = farmInfraAnalyticsRecorder(options, send);
+    const work: Promise<unknown>[] = [];
+    const tool = (name: string, outcome: "success" | "error") =>
+      emitFarmEvent({
+        type: "mcp.tool.complete",
+        route: "/api/mcp",
+        server: "store",
+        tool: name,
+        outcome,
+        durationMs: 4,
+      });
+    const request = new Request("https://app.example/api/mcp", {
+      method: "POST",
+      headers: { "user-agent": "Claude-User/1.0" },
+    });
+    await recorder.record(
+      request,
+      { route: { pattern: "/api/mcp" } },
+      (job) => work.push(job),
+      () =>
+        // The route handles a copy of the request, as API routes may.
+        _runWithCurrentRequest(new Request(request), async () => {
+          await Promise.resolve();
+          tool("list_orders", "success");
+          tool("refund_order", "error");
+          return new Response("{}");
+        }),
+    );
+    // Outside any request, and after close, a tool call isn't reported.
+    tool("outside", "success");
+    await Promise.all(work);
+    await recorder.close();
+    tool("after_close", "success");
+    const events = sentEvents(send);
+    const recorded = events.find(({ kind }) => kind === "request")!;
+    expect(events.filter(({ kind }) => kind === "mcp.tool")).toEqual(
+      ["list_orders:success", "refund_order:error"].map((call) =>
+        expect.objectContaining({
+          tool: call.split(":")[0],
+          outcome: call.split(":")[1],
+          requestId: recorded.requestId,
+          route: "/api/mcp",
+          agent: { family: "anthropic", category: "agent", identity: "self-reported" },
+        }),
+      ),
+    );
+  });
 });
 
 describe("bounded sender", () => {
@@ -474,6 +678,25 @@ describe("bounded sender", () => {
     exporter.enqueue(event());
     await exporter.flush();
     expect(send).toHaveBeenCalledTimes(10);
+  });
+
+  it("names only the environment for an API key without a project ID", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const exporter = createFarmInfraAnalyticsExporter(
+      { endpoint, key: apiKey, environment: "development" },
+      send,
+    );
+    exporter.enqueue(event());
+    const flushed = exporter.flush();
+    await vi.runAllTimersAsync();
+    await flushed;
+    expect(send.mock.calls[0]![1]!.headers).toEqual({
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+      "x-farm-environment": "development",
+    });
+    expect(send.mock.calls[0]![1]!.headers).not.toHaveProperty("x-farm-project");
+    await exporter.close();
   });
 
   it("names the project and environment for an API key", async () => {

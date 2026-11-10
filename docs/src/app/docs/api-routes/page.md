@@ -154,7 +154,7 @@ export const GET = createEndpoint(
 );
 ```
 
-Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues.
+Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues. Each issue in `details` has a `path` and `code`. Its `message` is a generic `"Invalid value"`, because a validator's own message can quote what it expected, such as a literal header token; only refinement messages you write (`code: "custom"`) and type mismatches (`code: "invalid_type"`, which name types, not values) are returned as is.
 
 Generated callers use the schema's **input** type for body and query values; middleware and
 handlers receive its parsed **output** type. For example, a field declared as
@@ -341,6 +341,8 @@ Only literal `false` is the default denial signal. Returning `null`, `undefined`
 
 Endpoint middleware is local to one `createEndpoint` declaration and can use its validated input. Use `src/app/**/middleware.ts` for path-level behavior shared by many routes, such as request tracing, common headers, or an early rewrite before endpoint parsing.
 
+Put endpoint guards in `middleware`. `createEndpoint` throws if you pass a `use` option, which Farm never ran.
+
 > **Authorization boundary**
 >
 > Derive users, roles, tenants, and rate-limit identities from the trusted `Request` or server state. Middleware context is created only on the server and is never accepted from client input. Keep resource-specific permission checks close to the resource query even when shared authentication runs in middleware.
@@ -465,6 +467,171 @@ context. Invalidation is declarative rather than inferred: database writes do no
 every affected query. Existing client-side `invalidate` options remain supported for
 caller-specific cache relationships, and handlers can continue calling `invalidate(...)` or
 `revalidatePath(...)` directly.
+
+## Mount another backend framework
+
+You can mount an existing backend app on a catch-all route and keep its routes, middleware, and
+validators. Farm has two optional helpers, one per calling convention, so any JavaScript backend
+that exposes either one works. Each returns a handler for every HTTP method, and you export the
+ones the app handles:
+
+- `mountFetchHandler` from `@farm.js/core/api` for any app with a Web `fetch` handler, a
+  `(request: Request) => Response` function or an object with a `fetch` method, such as Hono and
+  Elysia.
+- `mountNodeHandler` from `@farm.js/core/api/node` for any Node.js `(req, res)` listener, such as
+  Express, Koa, Fastify, and Nest.
+
+The frameworks named on this page are the ones Farm's tests mount. Another framework works the same
+way once you pass its fetch handler or its Node.js listener.
+
+### Hono and Elysia
+
+A plain route export receives the Web `Request` and can return a `Response`, the same contract as
+a Hono or Elysia app's `fetch` handler. `mountFetchHandler` accepts an app with a `fetch` method or
+a plain `(request: Request) => Response | Promise<Response>` function.
+
+**src/app/api/hono/[...path]/route.ts**
+
+```ts
+import { mountFetchHandler } from "@farm.js/core/api";
+import { Hono } from "hono";
+
+const app = new Hono();
+
+app.get("/hello/:name", (c) => c.json({ hello: c.req.param("name") }));
+app.post("/echo", async (c) => c.json({ got: await c.req.json() }, 201));
+
+export const { GET, POST } = mountFetchHandler(app, { stripMountPath: true });
+```
+
+**src/app/api/elysia/[...path]/route.ts**
+
+```ts
+import { mountFetchHandler } from "@farm.js/core/api";
+import { Elysia } from "elysia";
+
+const app = new Elysia()
+  .get("/hello/:name", ({ params }) => ({ hello: params.name }))
+  .post("/echo", ({ body, set }) => {
+    set.status = 201;
+    return { got: body };
+  });
+
+export const { GET, POST } = mountFetchHandler(app, { stripMountPath: true });
+```
+
+### Express, Koa, Fastify, and Nest
+
+`mountNodeHandler` accepts a Node.js `(req, res)` listener, or a promise of one for a framework
+that starts asynchronously. It runs the listener against an in-memory `req` and `res` built from
+the request.
+
+**src/app/api/express/[...path]/route.ts**
+
+```ts
+import { mountNodeHandler } from "@farm.js/core/api/node";
+import express from "express";
+
+const app = express();
+app.use(express.json());
+app.get("/users/:id", (req, res) => res.json({ id: req.params.id }));
+app.post("/users", (req, res) => res.status(201).json(req.body));
+
+export const { GET, POST } = mountNodeHandler(app, { stripMountPath: true });
+```
+
+For Koa, pass the app's listener:
+
+```ts
+export const { GET, POST } = mountNodeHandler(koa.callback(), { stripMountPath: true });
+```
+
+For Fastify, wait until the app is ready, then hand each request to its server:
+
+```ts
+const ready = fastify.ready();
+
+export const { GET, POST } = mountNodeHandler(
+  async (req, res) => {
+    await ready;
+    fastify.server.emit("request", req, res);
+  },
+  { stripMountPath: true },
+);
+```
+
+For Nest, initialize the app and pass its HTTP adapter's instance. Nest's decorators need
+`"experimentalDecorators": true` in your `tsconfig.json`.
+
+**src/app/api/nest/[...path]/route.ts**
+
+```ts
+import "reflect-metadata";
+import { mountNodeHandler } from "@farm.js/core/api/node";
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "../../../../nest/app.module";
+
+const app = NestFactory.create(AppModule).then(async (nest) => {
+  await nest.init();
+  return nest.getHttpAdapter().getInstance();
+});
+
+export const { GET, POST } = mountNodeHandler(app, { stripMountPath: true });
+```
+
+The app reads the request body as a stream, and its response streams back as soon as it sends
+headers, so server-sent events work. Some things a Node.js server provides are not available:
+
+- **Node.js runtimes only.** `mountNodeHandler` imports `node:http`. Use `mountFetchHandler` for
+  edge and worker targets.
+- **No socket.** `req.socket.remoteAddress` is not set, so `req.ip` in Express is `undefined`. WebSocket
+  upgrades and the framework's own `listen()`, timeouts, and keep-alive settings do not apply;
+  Farm's server handles the connection.
+- **Errors go to Farm.** If the listener throws, rejects, or calls `next(error)` before it responds,
+  Farm answers as it does for any failed route. A Connect-style `next()` with no response answers
+  `404`.
+
+### Base path
+
+- **`stripMountPath: true`** hands the app only the part of the path below the catch-all, so its
+  routes don't repeat where Farm serves them. `/api/hono/hello/farm` reaches the app as
+  `/hello/farm`, and the app keeps working if the route moves or
+  [`api.basePath`](/docs/configuration#api-client-base-url) changes. Segments stay encoded as the
+  client sent them. Paths the app builds itself, such as redirect locations, are then relative to
+  the mount rather than to the site.
+- **Without `stripMountPath`** (the default), the app receives the request unchanged, with the full
+  URL. Give it the route's public path as its base path, such as `basePath("/api/hono")` in Hono,
+  `prefix: "/api/elysia"` in Elysia, or `app.use("/api/express", router)` in Express. With any other
+  base path, every request misses its routes and gets the app's own 404.
+
+### Without the helper
+
+The helpers only save boilerplate. Exporting a `fetch`-based app's handler yourself behaves the
+same as `mountFetchHandler(app)` without `stripMountPath`:
+
+```ts
+import { Hono } from "hono";
+
+const app = new Hono().basePath("/api/hono");
+app.get("/hello/:name", (c) => c.json({ hello: c.req.param("name") }));
+
+const handle = (request: Request) => app.fetch(request);
+export { handle as GET, handle as POST };
+```
+
+### What a mounted app gets from Farm
+
+- **Only the methods you export.** Farm answers a method the route file does not export with
+  `405` before the app sees it. Leave out `HEAD` to keep Farm answering it from your `GET` export,
+  as for any route. Export plain names (`export const { GET, POST } = ...`): Farm reads the route's
+  methods from its export names.
+- **One plain route.** `createEndpoint` features that come from each endpoint's declared shape do
+  not apply to the app's routes: typed client inference, OpenAPI generation, typed errors, MCP tool
+  opt-in, declared invalidation, and endpoint middleware. Use `createEndpoint` routes for those,
+  alongside the mounted app.
+
+These recipes are covered by Farm's tests with Hono 4, Elysia 1.4, Express 5, Koa 3, Fastify 5,
+and Nest 11 on Node, in development and in a `node-server` production build.
 
 ## When to use integrations instead
 

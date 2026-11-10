@@ -170,7 +170,12 @@ function createIntegration(options: {
     },
   });
 
-  async function call(pathWithQuery: string, method: string, body?: unknown) {
+  async function call(
+    pathWithQuery: string,
+    method: string,
+    body?: unknown,
+    extraHeaders: Record<string, string> = {},
+  ) {
     const path = pathWithQuery.split("?")[0]!;
     const route = integration.routes.find(
       (entry: { path: string; method: unknown }) =>
@@ -180,7 +185,11 @@ function createIntegration(options: {
 
     const request = new Request(`http://example.com${pathWithQuery}`, {
       method,
-      headers: { "content-type": "application/json", "x-farm-integration-client": "1" },
+      headers: {
+        "content-type": "application/json",
+        "x-farm-integration-client": "1",
+        ...extraHeaders,
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const response = await route.handler(
@@ -195,6 +204,33 @@ function createIntegration(options: {
 
   return { call, saved, checkoutCompleted };
 }
+
+describe("stripe billing routes and other sites", () => {
+  it("refuses a cross-site POST before acting for the signed-in owner", async () => {
+    const { call } = createIntegration({
+      signedInOwner: ownerA,
+      seeded: [{ owner: ownerA, customerId: "cus_a" }],
+    });
+    // A text/plain form on another site, sent with the visitor's session cookie.
+    const crossSite = {
+      origin: "https://evil.example",
+      "content-type": "text/plain",
+      "sec-fetch-site": "cross-site",
+    };
+    for (const path of [
+      "/billing/portal",
+      "/billing/checkout",
+      "/billing/report-usage",
+      "/billing/usage",
+    ]) {
+      expect((await call(path, "POST", { customerId: "cus_a" }, crossSite)).status, path).toBe(403);
+    }
+    // The app's own page still opens the portal.
+    expect(
+      (await call("/billing/portal", "POST", {}, { origin: "http://example.com" })).status,
+    ).toBe(200);
+  });
+});
 
 describe("stripe billing portal authorization", () => {
   it("refuses an unauthenticated caller that supplies a customerId", async () => {
@@ -268,20 +304,35 @@ describe("stripe billing session lookup authorization", () => {
       session: sessionFor(ownerA, "cus_a"),
     });
 
-    await call("/billing/session?sessionId=cs_test_session", "GET");
+    const result = await call("/billing/session?sessionId=cs_test_session", "GET");
 
     expect(saved.map((snapshot) => snapshot.owner.id)).not.toContain(ownerB.id);
     expect(checkoutCompleted).not.toContain(`${ownerB.kind}:${ownerB.id}`);
+    expect(result.json).toMatchObject({ id: "cs_test_session", status: "complete" });
+    expect(JSON.stringify(result.json)).not.toContain("cus_a");
+    expect(JSON.stringify(result.json)).not.toContain(ownerA.email!);
   });
 
-  it("still persists the caller's own checkout", async () => {
+  it("returns only status fields to an anonymous caller", async () => {
+    const { call } = createIntegration({
+      signedInOwner: null,
+      session: sessionFor(ownerA, "cus_a"),
+    });
+
+    const result = await call("/billing/session?sessionId=cs_test_session", "GET");
+
+    expect(result.json).toMatchObject({ customerId: null, customerEmail: null, metadata: {} });
+  });
+
+  it("still persists and returns the caller's own checkout", async () => {
     const { call, saved } = createIntegration({
       signedInOwner: ownerA,
       session: sessionFor(ownerA, "cus_a"),
     });
 
-    await call("/billing/session?sessionId=cs_test_session", "GET");
+    const result = await call("/billing/session?sessionId=cs_test_session", "GET");
 
     expect(saved.map((snapshot) => snapshot.owner.id)).toContain(ownerA.id);
+    expect(result.json.customerId).toBe("cus_a");
   });
 });

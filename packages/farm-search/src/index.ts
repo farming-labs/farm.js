@@ -1,4 +1,5 @@
 import { definePlugin } from "@farm.js/core/plugin";
+import { isFarmRendererDisabled } from "@farm.js/core/renderer";
 import { normalizeBasePath, withBasePath, writeSearchIndex } from "./build.js";
 import { resolveSearchOptions, type SearchOptions } from "./config.js";
 import type { FarmSearchPublicConfig } from "./types.js";
@@ -37,6 +38,13 @@ export function search(options: SearchOptions = {}) {
     enforce: "post",
 
     configure(config) {
+      // A backend-only app has no pages to index.
+      if (isFarmRendererDisabled(config.renderer)) {
+        throw new Error(
+          "[farm:search] Search indexes static pages, but this app sets `renderer: false` and has no pages. " +
+            "Remove search(), or remove `renderer: false` to render pages.",
+        );
+      }
       if (
         (config.plugins ?? []).filter((candidate) => candidate.name === "farm:search").length > 1
       ) {

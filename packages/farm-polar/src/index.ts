@@ -7,14 +7,19 @@ import {
   validateEvent as validatePolarWebhookEvent,
   WebhookVerificationError as PolarWebhookVerificationError,
 } from "@polar-sh/sdk/webhooks";
+import type {
+  FarmIntegration,
+  FarmIntegrationAPI,
+  FarmIntegrationHandlerContext,
+  FarmIntegrationLogger,
+} from "@farm.js/core";
 import {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
   defineIntegration,
   integrationRoute,
-  type FarmIntegration,
-  type FarmIntegrationAPI,
-  type FarmIntegrationHandlerContext,
-  type FarmIntegrationLogger,
-} from "@farm.js/core";
+} from "@farm.js/core/integrations";
 import {
   integrationConfig,
   normalizeWebhookConfig,
@@ -230,6 +235,12 @@ export interface PolarIntegrationInput {
   accessToken?: string;
   server?: "sandbox" | "production";
   appBaseUrl?: string;
+  /**
+   * Origins besides the app's own that may call the billing routes, in
+   * `serverActions.allowedOrigins` pattern syntax. The routes act for the signed-in caller from its
+   * cookies, so a request from any other origin is refused.
+   */
+  allowedOrigins?: readonly string[];
   webhooks?: PolarWebhookConfig;
   productsPath?: string;
   statusPath?: string;
@@ -916,6 +927,10 @@ export function polar<const TInput extends PolarIntegrationInput>(
 export function polar<TInput extends PolarIntegrationInput>(
   input: TInput,
 ): PolarIntegrationResult<FarmIntegrationAPI> {
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    input.allowedOrigins,
+    "polar().allowedOrigins",
+  );
   const accessToken = input.accessToken ?? process.env.POLAR_ACCESS_TOKEN ?? "";
   const server =
     input.server ?? (process.env.POLAR_SERVER as "sandbox" | "production" | undefined) ?? "sandbox";
@@ -1335,6 +1350,8 @@ export function polar<TInput extends PolarIntegrationInput>(
       integrationRoute.post(usagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as PolarBillingUsageInput;
           if (!body.key) {
             return new Response("A billing usage key is required.", { status: 400 });
@@ -1369,6 +1386,8 @@ export function polar<TInput extends PolarIntegrationInput>(
       integrationRoute.post(meterUsagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as PolarBillingMeterUsageInput;
           if (!body.key) {
             return new Response("A Polar meter key is required.", { status: 400 });
@@ -1507,6 +1526,8 @@ export function polar<TInput extends PolarIntegrationInput>(
       integrationRoute.post(reportUsagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as PolarBillingReportUsageInput;
           if (!body.key) {
             return new Response("A Polar meter key is required.", { status: 400 });
@@ -1599,7 +1620,10 @@ export function polar<TInput extends PolarIntegrationInput>(
               {
                 name: meter.eventName,
                 externalCustomerId: resolved.externalCustomerId,
-                externalId: body.idempotencyKey,
+                // Polar dedupes externalId across the organization, so a
+                // caller's key is kept to its own customer: one customer can
+                // never claim, and so drop, another customer's usage event.
+                externalId: `${resolved.externalCustomerId}:${body.idempotencyKey}`,
                 timestamp: occurredAt,
                 metadata,
               },
@@ -1658,6 +1682,8 @@ export function polar<TInput extends PolarIntegrationInput>(
       integrationRoute.post(checkPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as PolarBillingCheckInput;
           if (!body.key) {
             return new Response("A billing check key is required.", { status: 400 });
@@ -1701,6 +1727,8 @@ export function polar<TInput extends PolarIntegrationInput>(
       integrationRoute.post(checkoutPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as PolarCheckoutInput;
           if (!body.productId) {
             return new Response("A Polar product id is required.", { status: 400 });
@@ -1741,6 +1769,8 @@ export function polar<TInput extends PolarIntegrationInput>(
       integrationRoute.post(portalPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as PolarPortalInput;
           const resolved = await requireOwner(ctx, billing, sdk);
           const returnPath = resolveAppPath(body.returnTo ?? "/", "Polar portal returnTo") ?? "/";
@@ -1759,4 +1789,21 @@ export function polar<TInput extends PolarIntegrationInput>(
       ...webhookRoutes,
     ],
   });
+}
+
+/**
+ * The billing routes act for the signed-in caller from its session cookie, and a page on another
+ * site can send them a simple POST (a text/plain form, a no-cors fetch) with no preflight. A browser
+ * sends such a POST with its page's Origin, so a foreign origin, or one the browser marks
+ * cross-site, is refused before the body is read. A caller with no Origin at all (a server, a
+ * script) is not a browser on another site and keeps working, as with the email routes.
+ */
+function rejectForeignOrigin(request: Request, allowedOrigins: readonly string[]): Response | null {
+  const origin = validateIntegrationRequestOrigin(request, {
+    allowedOrigins,
+    requireOriginMetadata: false,
+  });
+  return origin.ok
+    ? null
+    : Response.json({ error: describeIntegrationOriginRejection(origin.reason) }, { status: 403 });
 }

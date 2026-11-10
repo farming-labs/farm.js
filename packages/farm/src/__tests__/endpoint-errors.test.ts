@@ -204,4 +204,96 @@ describe("typed endpoint errors", () => {
       ),
     ).toThrow('Endpoint error "invalid" status must be an integer between 400 and 599');
   });
+  it("does not echo expected literal, enum, or pattern values in validation errors", async () => {
+    const secret = "Bearer s3cr3t-cron-token";
+    const endpoint = createEndpoint(
+      {
+        method: "POST",
+        headers: z.object({ authorization: z.literal(secret) }),
+        query: z.object({ plan: z.enum(["internal-x9", "pro"]) }).partial(),
+        body: z.object({
+          key: z.string().regex(/^sk_live_[a-z0-9]+$/),
+          slug: z.string().refine((slug) => slug !== "taken", "Slug is taken"),
+        }),
+      },
+      () => ({ ran: true }),
+    );
+    const invoke = (path: string, init: RequestInit) =>
+      invokeAPIRouteEndpoint(
+        endpoint,
+        new Request(`https://farm.test${path}`, { method: "POST", ...init }),
+      );
+    const body = JSON.stringify({ key: "sk_live_ok", slug: "free" });
+
+    const headers = await invoke("/api/cron", {
+      headers: { authorization: "Bearer guess", "content-type": "application/json" },
+      body,
+    });
+    const headersText = await headers.text();
+    expect(headers.status).toBe(400);
+    expect(headersText).not.toContain("s3cr3t");
+    expect(JSON.parse(headersText)).toEqual({
+      error: "Invalid request headers",
+      details: [{ path: ["authorization"], code: "invalid_value", message: "Invalid value" }],
+    });
+
+    const query = await invoke("/api/cron?plan=free", {
+      headers: { authorization: secret, "content-type": "application/json" },
+      body,
+    });
+    expect(query.status).toBe(400);
+    expect(await query.text()).not.toContain("internal-x9");
+
+    const invalidBody = await invoke("/api/cron", {
+      headers: { authorization: secret, "content-type": "application/json" },
+      body: JSON.stringify({ key: "sk_test", slug: "taken" }),
+    });
+    expect(invalidBody.status).toBe(400);
+    const bodyText = await invalidBody.text();
+    expect(bodyText).not.toContain("sk_live");
+    // A refinement message is the app's own text, so it still reaches the caller.
+    expect(JSON.parse(bodyText).details).toEqual([
+      { path: ["key"], code: "invalid_format", message: "Invalid value" },
+      { path: ["slug"], code: "custom", message: "Slug is taken" },
+    ]);
+  });
+
+  it("serializes a failure raised by another copy of the endpoint module", async () => {
+    // A linked app's route loads its own copy of @farm.js/core/api under Vite's SSR runner.
+    vi.resetModules();
+    const routeCopy = await import("../api/endpoint");
+    expect(routeCopy.EndpointFailure).not.toBe(EndpointFailure);
+    const lookup = routeCopy.createEndpoint(
+      "/api/products/:id",
+      {
+        errors: { notFound: { status: 404, message: "Nope", data: z.object({ id: z.string() }) } },
+      },
+      async ({ error }) => error("notFound", { id: "1" }),
+    );
+
+    const response = await invokeAPIRouteEndpoint(
+      lookup,
+      new Request("https://farm.test/api/products/1"),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "notFound", message: "Nope", data: { id: "1" } },
+    });
+  });
+
+  it("keeps an error that only looks like a typed failure private", async () => {
+    const lookalike = createEndpoint("/api/lookalike", {}, async () => {
+      throw Object.assign(new Error("secret detail"), {
+        name: "EndpointFailure",
+        code: "notFound",
+        status: 404,
+        data: { leaked: true },
+      });
+    });
+
+    await expect(
+      invokeAPIRouteEndpoint(lookalike, new Request("https://farm.test/api/lookalike")),
+    ).rejects.toThrow("secret detail");
+  });
 });

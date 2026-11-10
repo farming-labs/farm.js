@@ -110,6 +110,7 @@ export function createFarmProductionSiteReporter(
   const retryIntervalMs = options.retryIntervalMs ?? RETRY_INTERVAL_MS;
   const send = options.fetch ?? globalThis.fetch;
   const reportStates = new Map<string, OriginReportState>();
+  let reportingSkipped: false | "disabled" | "not-production" | undefined;
   const attestation: FarmProductionSiteAttestation = {
     schemaVersion: FARM_PRODUCTION_SITE_TELEMETRY_SCHEMA_VERSION,
     eventType: FARM_PRODUCTION_SITE_ATTESTATION_EVENT_TYPE,
@@ -121,6 +122,9 @@ export function createFarmProductionSiteReporter(
 
   return {
     handleAttestation(request) {
+      // Nearly every request is for another path: skip the environment reads and
+      // the URL parse. A request for this path always contains it in its URL.
+      if (!request.url.includes(FARM_PRODUCTION_SITE_ATTESTATION_PATH)) return null;
       if (productionTelemetryDisabled()) return null;
 
       let pathname: string;
@@ -153,11 +157,20 @@ export function createFarmProductionSiteReporter(
       });
     },
     report(requestUrl, waitUntil) {
-      if (productionTelemetryDisabled()) return;
-      if (!isFarmProductionDeploymentEnvironment()) {
-        debug("production-site check-in skipped outside a production deployment");
-        return;
+      // Read the environment on the first request rather than on every one:
+      // reading process.env is slow, and it does not change while a deployment
+      // serves traffic.
+      if (reportingSkipped === undefined) {
+        reportingSkipped = productionTelemetryDisabled()
+          ? "disabled"
+          : isFarmProductionDeploymentEnvironment()
+            ? false
+            : "not-production";
+        if (reportingSkipped === "not-production") {
+          debug("production-site check-in skipped outside a production deployment");
+        }
       }
+      if (reportingSkipped) return;
 
       const siteUrl = detectFarmProductionSiteOrigin(requestUrl);
       if (!siteUrl) return;

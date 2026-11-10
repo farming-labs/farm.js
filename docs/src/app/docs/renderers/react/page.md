@@ -1361,6 +1361,13 @@ setItems((current) => current.toSpliced(firstIndex, 25, ...firstRefresh));
 setItems((current) => current.toSpliced(secondIndex, 25, ...secondRefresh));
 ```
 
+When every keyed list in a component is plain and has no identity, `Set` membership, or `Map`
+lookup targets, single-item position hints (including range removal) select a smaller runtime
+without target tracking. Ordinary map and append updates and complete reconciliation remain
+available. Any sibling with targets, conditional content, host scopes, or broader structural hints
+retains the corresponding full-capability runtime. Batch insertion and window replacement keep
+their existing runtimes. This changes payload size, not array-method or React behavior.
+
 At build time, Farm recognizes concise functional setters or setter blocks containing exactly one
 direct `return`. The position—and, for `toSpliced()`, delete count—must be a safe-integer literal or
 compiler-safe runtime expression.
@@ -1463,6 +1470,12 @@ Farm recognizes the concise functional-setter form and a setter block containing
 Metadata is recorded only when the result is an ordinary native array, the executed method is the
 native `toReversed()` method, and the reorder chain starts at the committed collection. A custom or
 unavailable method therefore keeps its normal behavior and never enters the fast path.
+
+When every compiled keyed-row plan in a component is plain and has no identity, `Set`, or `Map`
+target bindings, reverse and sort hints omit the unused target-update runtime from the bundle.
+Separate map and append updates and complete reconciliation remain available. Components that need
+target bindings, nested host blocks, row conditionals, or combined structural hints retain their
+existing runtime capabilities. No new option is required.
 
 At update time, Farm verifies the committed source token, equal lengths, every source row identity,
 and the exact reversed result before moving the DOM. The runtime leaves one row in place and moves
@@ -1768,8 +1781,11 @@ DOM write.
 
 No API or option is added. Reports count the prepared map and reorder calls through the existing
 `keyedMapUpdateHints`, `keyedArraySortHints`, and `keyedArrayReorderHints` fields. Modules that do
-not contain a supported map-and-reorder pipeline do not retain its optional runtime. Farm does not
-polyfill `Array.prototype.toSorted` or `Array.prototype.toReversed`.
+not contain a supported map-and-reorder pipeline do not retain its optional runtime. When every
+keyed list in a component is target-free, the compiler also omits identity-selection, membership,
+and map-lookup target machinery. A target used by any sibling list keeps the full target runtime;
+map, append, reorder, and complete-reconciliation behavior is unchanged. Farm does not polyfill
+`Array.prototype.toSorted` or `Array.prototype.toReversed`.
 
 #### Keyed array sort hints
 
@@ -1953,6 +1969,11 @@ checkboxes and radios update `.checked`, and controlled single or multiple selec
 selected options. The runtime avoids assigning an equal value, captures the focused text control's
 selection before the compiler microtask, and restores the range after its keyed boundary commits.
 Composition handlers remain React event props, so IME event order is unchanged.
+
+Controlled input `value` updates also synchronize the native reset value, so a form reset uses
+the latest committed value. React-owned focused number inputs defer this synchronization to
+React's blur handling to preserve editing behavior. Checkbox and radio `defaultChecked` behavior
+is unchanged.
 
 React exposes `event.currentTarget` only while an event handler is running. If a functional
 compiler-state updater refers to one of its properties, the transform snapshots that property read

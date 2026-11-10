@@ -40,6 +40,8 @@ A layout file wraps every page below its folder. Use this for dashboards, docs, 
 
 With experimental React Server Components enabled, layouts compose in the same order: the root layout wraps the nested layout, which wraps the page. Adding a dashboard layout does not remove the root navigation or its Client Component providers. Layouts receive `children` and the matched `params`, following `LayoutProps`; server-only layouts do not require client hydration just because they wrap interactive children.
 
+A layout without `"use client"` or `export const hydrate = true` stays on the server: its module and everything it imports are left out of the browser bundle, even when pages below it hydrate. A hydrating layout is the exception, because the browser renders the whole layout chain of the pages it wraps. The layouts above and below a hydrating layout ship to the browser with it, so keep secrets and server-only imports out of them.
+
 **src/app/dashboard/layout.tsx**
 
 ```tsx
@@ -54,6 +56,34 @@ export default function DashboardLayout({ children }: LayoutProps) {
   );
 }
 ```
+
+## Route group layouts
+
+A [route group](/docs/routing#route-groups) folder such as `(auth)` adds no URL segment, but it can
+have its own `layout.tsx`. That layout wraps only the pages inside the group, nested inside the
+parent layouts. Pages outside the group don't get it.
+
+```txt
+src/app/
+  layout.tsx            # wraps every page
+  (auth)/
+    layout.tsx          # wraps /sign-in and /sign-up only
+    sign-in/page.tsx
+    sign-up/page.tsx
+  dashboard/page.tsx    # root layout only
+```
+
+`/sign-in` renders the root layout, then the `(auth)` layout, then the page. Sibling groups can each
+have their own layout, and a group can have its own `loading.tsx` and `error.tsx`, which take
+precedence over the parent's for the pages in that group.
+
+Client navigation keeps every layout the two pages share. Moving from `/sign-in` to `/sign-up` keeps
+the `(auth)` layout mounted, so state in a `"use client"` group layout survives the navigation.
+Moving from `/sign-in` to a page in another group swaps the group layout and keeps the root layout.
+
+A URL that matches no page belongs to no group, so the not-found page renders with the ungrouped
+layouts only (the root layout, when there is one). An app can skip the top-level `layout.tsx` and
+give each group its own layout instead.
 
 ## Route boundaries
 

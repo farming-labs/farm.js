@@ -40,3 +40,55 @@ export async function parseRouteSchema(schema: RouteSchema, value: unknown): Pro
   if (schema.parse) return schema.parse(value);
   throw new TypeError("Route validators must implement Standard Schema or parse().");
 }
+
+/** A validation issue that is safe to send to the caller. */
+export interface PublicValidationIssue {
+  path: (string | number)[];
+  code?: string;
+  message: string;
+}
+
+/**
+ * Describes validator issues without their messages. A validator's default
+ * message can quote what it expected, such as a literal, enum, or pattern, and
+ * schemas sometimes hold secrets (`z.literal(\`Bearer ${token}\`)`). Only
+ * refinement messages (`code: "custom"`), which the app wrote, are kept.
+ */
+// Messages safe to return: the app's own refinement text, and type mismatches,
+// which name types ("expected string, received number"), never a schema value.
+// Every other built-in message can quote an expected literal, enum or pattern.
+const PUBLIC_MESSAGE_CODES = new Set(["custom", "invalid_type"]);
+
+export function toPublicValidationIssues(error: unknown): PublicValidationIssue[] {
+  const issues = (error as { issues?: unknown; errors?: unknown } | null | undefined)?.issues;
+  const list = Array.isArray(issues)
+    ? issues
+    : Array.isArray((error as { errors?: unknown } | null | undefined)?.errors)
+      ? ((error as { errors: unknown[] }).errors as unknown[])
+      : [];
+  return list.map((issue) => {
+    const { path, code, message } = (issue ?? {}) as {
+      path?: unknown;
+      code?: unknown;
+      message?: unknown;
+    };
+    return {
+      path: Array.isArray(path) ? path.map(toPublicPathSegment) : [],
+      ...(typeof code === "string" ? { code } : {}),
+      message:
+        PUBLIC_MESSAGE_CODES.has(code as string) && typeof message === "string" && message
+          ? message
+          : "Invalid value",
+    };
+  });
+}
+
+function toPublicPathSegment(segment: unknown): string | number {
+  const key =
+    segment && typeof segment === "object" && "key" in segment
+      ? (segment as { key: unknown }).key
+      : segment;
+  if (typeof key === "number") return key;
+  if (typeof key === "symbol") return key.description || key.toString();
+  return String(key);
+}

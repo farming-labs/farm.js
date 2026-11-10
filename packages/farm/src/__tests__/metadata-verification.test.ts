@@ -49,7 +49,7 @@ describe("metadata verification", () => {
   });
 
   it("renders nothing when unset or empty", () => {
-    expect(renderMetadataHead({ title: "Farm" }).tags).toBe("");
+    expect(renderMetadataHead({}).tags).toBe("");
     expect(renderMetadataHead({ verification: { google: "", other: { "": "x" } } }).tags).toBe("");
   });
 

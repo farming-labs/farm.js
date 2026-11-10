@@ -33,8 +33,10 @@ export interface FarmOTelOptions {
   instrumentations?: Array<Instrumentation | Instrumentation[]>;
   /**
    * Metric readers to export with. Farm registers a meter provider only when
-   * this is set or `OTEL_METRICS_EXPORTER` names an exporter, so an app that
-   * only asked for traces never gets a metrics pipeline it did not configure.
+   * this is set, `OTEL_METRICS_EXPORTER` names an exporter, or an OTLP endpoint
+   * (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`) is
+   * set, so an app that configured no metrics destination never gets a
+   * metrics pipeline.
    */
   metricReaders?: NonNullable<ConstructorParameters<typeof NodeSDK>[0]>["metricReaders"];
   /**

@@ -1,5 +1,6 @@
 // @vitest-environment node
 import fs from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,12 +23,17 @@ type FailurePhase =
   | "setup"
   | "devServerCreated"
   | "configResolved"
-  | "buildStart";
+  | "buildStart"
+  | "runtime-start";
 type ResourceState = {
   phase?: FailurePhase;
   originalError: unknown;
   events: string[];
   reported?: unknown;
+  reportedPhase?: string;
+  runtimeStarts?: number;
+  reportGate?: Promise<void>;
+  onReport?: () => void;
   server?: ViteDevServer;
   reporterFailure?: "sync" | "async";
   cleanupFailures?: boolean;
@@ -39,6 +45,9 @@ type ResourceState = {
   onViteClose?: () => void;
   viteCloseGate?: Promise<void>;
   onViteServer?: (server: ViteDevServer) => void;
+  secondaryReporter?: boolean;
+  secondaryGate?: Promise<void>;
+  onSecondaryReport?: () => void;
 };
 const projects: Array<{ root: string; state: ResourceState }> = [];
 
@@ -122,14 +131,27 @@ export default {
     devServerCreated() { fail("devServerCreated"); },
     configResolved() { fail("configResolved"); },
     buildStart() { fail("buildStart"); },
+    runtime: { start() { state.runtimeStarts = (state.runtimeStarts ?? 0) + 1; fail("runtime-start"); } },
     onError(event) {
       state.events.push("onError");
       state.reported = event.error;
+      state.reportedPhase = event.phase;
+      state.onReport?.();
       if (state.reporterFailure === "sync") throw new Error("error reporter failed");
       if (state.reporterFailure === "async") return Promise.reject(new Error("error reporter failed"));
+      return state.reportGate;
+    },
+  }, {
+    name: "secondary-error-reporter",
+    async onError() {
+      if (!state.secondaryReporter) return;
+      state.events.push("secondary-report-start");
+      state.onSecondaryReport?.();
+      await state.secondaryGate;
+      state.events.push("secondary-report-finish");
     },
   }],
-  vite: { server: { middlewareMode: state.phase === "vite-buildStart" }, plugins: [{
+  vite: { server: { strictPort: true, middlewareMode: state.phase === "vite-buildStart" }, plugins: [{
     name: "startup-vite-close",
     enforce: "pre",
     config() { fail("vite-config"); },
@@ -189,6 +211,50 @@ const closedEvents = [
 ];
 
 describe("development server creation failure cleanup", () => {
+  it.each(["sync", "async"] as const)(
+    "finishes other error reporters before cleanup when one fails %s",
+    async (reporterFailure) => {
+      const { root, state } = await createProject("setup");
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      state.reporterFailure = reporterFailure;
+      state.secondaryReporter = true;
+      state.secondaryGate = release.promise;
+      state.onSecondaryReport = entered.resolve;
+      let settled = false;
+      const result = createServer({ root }).then(
+        () => {
+          settled = true;
+        },
+        (error) => {
+          settled = true;
+          return error;
+        },
+      );
+      try {
+        await Promise.race([entered.promise, result]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(settled).toBe(false);
+        expect(state.events).toEqual(["register", "onError", "secondary-report-start"]);
+        expect(state.server!.watcher.closed).toBe(false);
+        release.resolve();
+        expect(await result).toBe(state.originalError);
+        expect(state.events).toEqual([
+          "register",
+          "onError",
+          "secondary-report-start",
+          "secondary-report-finish",
+          ...closedEvents.slice(2),
+        ]);
+      } finally {
+        release.resolve();
+        await result;
+      }
+    },
+    60_000,
+  );
+
   it.each([
     "vite-configure",
     "vite-file-configure",
@@ -455,5 +521,131 @@ describe("development server creation failure cleanup", () => {
     expect(server.watcher.closed).toBe(false);
     await Promise.all([server.close(), server.close()]);
     expect(state.events).toEqual(closedEvents.filter((event) => event !== "onError"));
+  }, 60_000);
+});
+
+describe("development startup error reporting", () => {
+  it("serves a fresh instance after a reported runtime start failure", async () => {
+    const { root, state } = await createProject("runtime-start");
+    await fs.writeFile(
+      path.join(root, "src", "app", "page.tsx"),
+      "export default function Page() { return <main>startup recovered</main>; }",
+    );
+    await expect(startDevServer({ root }, await getAvailablePort())).rejects.toBe(
+      state.originalError,
+    );
+    expect(state.server!.watcher.closed).toBe(true);
+    expect(state.events).toEqual(closedEvents);
+    state.phase = undefined;
+    state.events.length = 0;
+    const server = await startDevServer({ root }, await getAvailablePort());
+    const address = server.httpServer!.address();
+    if (!address || typeof address === "string") throw new Error("Missing server address");
+    const response = await fetch(`http://localhost:${address.port}/`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("startup recovered");
+    expect(state.runtimeStarts).toBe(2);
+    expect(state.events).toEqual(["register"]);
+    await server.close();
+    expect(state.events).toEqual(closedEvents.filter((event) => event !== "onError"));
+  }, 60_000);
+
+  it("reports a runtime start failure before releasing its resources", async () => {
+    const { root, state } = await createProject("runtime-start");
+    await expect(startDevServer({ root }, await getAvailablePort())).rejects.toBe(
+      state.originalError,
+    );
+    expect(state.reported).toBe(state.originalError);
+    expect(state.reportedPhase).toBe("startDevServer");
+    expect(state.runtimeStarts).toBe(1);
+    expect(state.events).toEqual(closedEvents);
+    expect(state.server!.watcher.closed).toBe(true);
+    expect(state.server!.httpServer!.listening).toBe(false);
+  }, 60_000);
+
+  it("reports an occupied port without starting the plugin runtime", async () => {
+    const { root, state } = await createProject();
+    const occupied = createHttpServer();
+    await new Promise<void>((resolve, reject) => {
+      occupied.once("error", reject);
+      occupied.listen(0, "localhost", resolve);
+    });
+    try {
+      const address = occupied.address();
+      if (!address || typeof address === "string") throw new Error("Missing occupied port");
+      const result = startDevServer({ root }, address.port);
+      await expect(result).rejects.toThrow(/already in use/);
+      const error = await result.catch((error) => error);
+      expect(state.reported).toBe(error);
+      expect(state.reportedPhase).toBe("startDevServer");
+      expect(state.runtimeStarts ?? 0).toBe(0);
+      expect(state.events).toEqual(closedEvents);
+      expect(state.server!.watcher.closed).toBe(true);
+      expect(state.server!.httpServer!.listening).toBe(false);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        occupied.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  }, 60_000);
+
+  it.each(["sync", "async"] as const)(
+    "keeps the original startup failure when the %s reporter and cleanup fail",
+    async (reporterFailure) => {
+      const { root, state } = await createProject("runtime-start");
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      state.reporterFailure = reporterFailure;
+      state.cleanupFailures = true;
+      // Unknown thrown values must survive reporting and teardown unchanged.
+      state.originalError = null;
+      await expect(startDevServer({ root }, await getAvailablePort())).rejects.toBe(null);
+      expect(state.reported).toBe(null);
+      expect(state.events).toEqual(closedEvents);
+      expect(state.server!.watcher.closed).toBe(true);
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining("error hooks"),
+        expect.objectContaining({ message: "error reporter failed" }),
+      );
+    },
+    60_000,
+  );
+
+  it("awaits the startup error reporter before shutting down its resources", async () => {
+    const { root, state } = await createProject("runtime-start");
+    const reporting = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    state.onReport = reporting.resolve;
+    state.reportGate = release.promise;
+    let settled = false;
+    const result = startDevServer({ root }, await getAvailablePort()).then(
+      () => {
+        settled = true;
+      },
+      (error) => {
+        settled = true;
+        return error;
+      },
+    );
+    try {
+      await Promise.race([reporting.promise, result]);
+      expect(settled).toBe(false);
+      expect(state.events).toEqual(["register", "onError"]);
+      expect(state.server!.watcher.closed).toBe(false);
+      release.resolve();
+      expect(await result).toBe(state.originalError);
+      expect(state.events).toEqual(closedEvents);
+    } finally {
+      release.resolve();
+      await result;
+    }
+  }, 60_000);
+
+  it("does not report a creation failure twice through startDevServer", async () => {
+    const { root, state } = await createProject("setup");
+    await expect(startDevServer({ root }, await getAvailablePort())).rejects.toBe(
+      state.originalError,
+    );
+    expect(state.reportedPhase).toBe("createServer");
+    expect(state.events).toEqual(closedEvents);
   }, 60_000);
 });

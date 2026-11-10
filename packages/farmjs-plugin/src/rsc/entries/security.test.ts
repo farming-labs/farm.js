@@ -5,6 +5,9 @@ import {
   _runWithAPIRequestRuntime,
   _runWithCurrentRequest,
   _runWithAfterRequest,
+  mergeMetadata,
+  mergeModuleViewport,
+  resolveMetadataTitle,
 } from "@farm.js/core/internal/production-runtime";
 import { transformWithEsbuild } from "vite";
 import {
@@ -45,6 +48,19 @@ describe("generated server action security", () => {
     expect(generateClientEntry({ ...context, globalCssPath: undefined })).not.toContain(
       "globals.css",
     );
+  });
+
+  it("hands API routes a clone that cannot cancel the action's request body", () => {
+    const entry = generateRscEntry(context);
+
+    // A plain clone, once collected, cancels the original's unread body on the undici in
+    // Node 22.13 to 22.20, so the server action that reads the original after a declined API
+    // match would see an empty or already-used body.
+    expect(entry).toContain("await handleAPIRequest(cloneFarmRequestWithContext(request))");
+    expect(entry).toMatch(
+      /import \{[^}]*\bcloneFarmRequestWithContext\b[^}]*\} from '@farm\.js\/core\/internal\/production-runtime'/,
+    );
+    expect(entry).not.toContain("request.clone()");
   });
 
   it("validates and bounds requests before decoding or executing actions", () => {
@@ -126,7 +142,7 @@ describe("generated server action security", () => {
 
   it("binds paired local callers to the RSC request's route runtime", async () => {
     const entry = generateRscEntry(context);
-    const start = entry.indexOf("async function handler(request, context)");
+    const start = entry.indexOf("async function handleFarmPageOrMarkdown(request, context)");
     const end = entry.indexOf("export default", start);
     const { api } = createApiClients<{
       hello: {
@@ -144,6 +160,7 @@ describe("generated server action security", () => {
       "handleAPIRequest",
       "handleFarmRequest",
       "farmApiBasePath",
+      "farmMarkdownConfig",
       `${entry.slice(start, end)}; return handler;`,
     )(
       _runWithAPIRequestRuntime,
@@ -152,6 +169,7 @@ describe("generated server action security", () => {
       dispatch,
       async () => Response.json(await api.hello.get()),
       "/backend",
+      { enabled: false },
     );
     const response = await handle(
       new Request("https://farm.test/page", { headers: { cookie: "session=rsc" } }),
@@ -181,7 +199,7 @@ describe("generated server action security", () => {
     const actionValidation = entry.indexOf("validateServerActionRequest(request");
     const middleware = entry.indexOf("const middlewareResult = await executeMiddleware(request");
     const apiDispatch = entry.indexOf(
-      "const apiResponse = await handleAPIRequest(request.clone())",
+      "const apiResponse = await handleAPIRequest(cloneFarmRequestWithContext(request))",
     );
     const actionDecode = entry.indexOf("await prepareServerActionRequest(");
     expect(apiClassification).toBeGreaterThan(-1);
@@ -287,37 +305,46 @@ describe("generated server action security", () => {
     expect(rejected?.headers.get("allow")).toBe("GET, HEAD, QUERY");
   });
 
-  it("merges layout/page metadata and clears stale document metadata during navigation", () => {
+  it("merges layout/page metadata and clears stale document metadata during navigation", async () => {
     const serverEntry = generateRscEntry(context);
     const clientEntry = generateClientEntry(context);
 
     const rootToNestedLayouts = serverEntry.indexOf(
       "for (let depth = 0; depth <= parts.length; depth++)",
     );
-    const layoutMetadata = serverEntry.indexOf(
-      "...LayoutModules.map((layoutModule) => layoutModule.metadata)",
-    );
-    const pageMetadata = serverEntry.indexOf("pageMetadata,", layoutMetadata);
     expect(rootToNestedLayouts).toBeGreaterThan(-1);
-    expect(layoutMetadata).toBeGreaterThan(-1);
-    expect(layoutMetadata).toBeLessThan(pageMetadata);
 
-    const mergeStart = serverEntry.indexOf("function mergeDocumentMetadata(...sources)");
-    const mergeEnd = serverEntry.indexOf("\n}\n\n/**\n * Find modules", mergeStart) + 2;
-    const mergeDocumentMetadata = new Function(
-      `${serverEntry.slice(mergeStart, mergeEnd)}; return mergeDocumentMetadata;`,
-    )() as (...sources: Array<{ title?: string; description?: string } | undefined>) => {
-      title?: string;
-      description?: string;
-    };
+    const resolveStart = serverEntry.indexOf("async function resolveFarmRouteMetadata(");
+    const resolveEnd = serverEntry.indexOf("\n}\n", resolveStart) + 2;
+    expect(resolveStart).toBeGreaterThan(-1);
+    const resolveFarmRouteMetadata = new Function(
+      "mergeMetadata",
+      "mergeModuleViewport",
+      `${serverEntry.slice(resolveStart, resolveEnd)}; return resolveFarmRouteMetadata;`,
+    )(mergeMetadata, mergeModuleViewport) as (
+      layouts: Array<Record<string, unknown>>,
+      page: Record<string, unknown> | undefined,
+      props: { params: Record<string, string>; searchParams: Record<string, string> },
+    ) => Promise<Record<string, any>>;
+    // Layouts root to leaf, then the page; generateMetadata() results merge like static
+    // metadata, and a layout's title template wraps the titles below it.
+    const metadata = await resolveFarmRouteMetadata(
+      [
+        { metadata: { title: { template: "%s · Site", default: "Site" }, description: "Root" } },
+        { generateMetadata: async () => ({ title: "Nested" }) },
+      ],
+      {
+        generateMetadata: async ({ params }: { params: { id: string } }) => ({
+          description: `Page ${params.id}`,
+        }),
+      },
+      { params: { id: "1" }, searchParams: {} },
+    );
+    expect(resolveMetadataTitle(metadata.title)).toBe("Nested · Site");
+    expect(metadata.description).toBe("Page 1");
     expect(
-      mergeDocumentMetadata(
-        { title: "Root", description: "Root description" },
-        { title: "Nested" },
-        { description: "Page description" },
-      ),
-    ).toEqual({ title: "Nested", description: "Page description" });
-    expect(mergeDocumentMetadata(undefined, {})).toEqual({});
+      await resolveFarmRouteMetadata([], undefined, { params: {}, searchParams: {} }),
+    ).not.toHaveProperty("title");
 
     const layoutsStart = serverEntry.indexOf("function getRouteModules(");
     const layoutsEnd = serverEntry.indexOf("\n}\n\n/**\n * Main request handler", layoutsStart) + 2;
@@ -339,8 +366,8 @@ describe("generated server action security", () => {
       { title: "Nearest" },
     ]);
 
-    expect(serverEntry).toContain("title: typeof metadata?.title === 'string'");
-    expect(serverEntry).toContain("description: typeof metadata?.description === 'string'");
+    expect(serverEntry).toContain("title: metadataTitle,");
+    expect(serverEntry).toContain("description: typeof metadata.description === 'string'");
     expect(clientEntry).toContain("document.title = payload.metadata.title");
     expect(clientEntry).toContain("document.title = ''");
     expect(clientEntry).toContain(
@@ -655,7 +682,7 @@ describe("RSC client link interceptor respects modified and non-primary clicks",
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const slice = entry.slice(start, end);
-    return new Function("location", "history", "nav", `${slice} return handleClick;`) as (
+    return new Function("location", "history", "navigate", `${slice} return handleClick;`) as (
       location: any,
       history: any,
       nav: any,
@@ -705,8 +732,9 @@ describe("RSC client link interceptor respects modified and non-primary clicks",
     const e = makeEvent(makeLink());
     handleClick(e);
     expect(e.preventDefault).toHaveBeenCalledOnce();
-    expect(history.pushState).toHaveBeenCalledWith(null, "", `${origin}/page`);
-    expect(nav).toHaveBeenCalledOnce();
+    // The router's navigate() offers it to delegates, then writes history.
+    expect(nav).toHaveBeenCalledExactlyOnceWith(`${origin}/page`, "push");
+    expect(history.pushState).not.toHaveBeenCalled();
   });
 
   it.each([

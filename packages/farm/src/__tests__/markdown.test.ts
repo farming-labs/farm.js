@@ -4,6 +4,7 @@ import React, { createElement, Suspense } from "react";
 import { renderToReadableStream } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../config";
+import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import {
   applyMarkdownNegotiationHeaders,
   createMarkdownMirrorResponse,
@@ -231,6 +232,33 @@ describe("createMarkdownMirrorResponse", () => {
     expect(explicit?.headers.get("vary")).toBe("Cookie");
   });
 
+  it("keeps a credentialed caller's mirror private when the page sets no cache policy", async () => {
+    // RSC pages answer a signed-in caller without Cache-Control; md.cache must not make
+    // that reader's copy public.
+    const config = resolveMarkdownConfig({ expose: ["/account"], cache: 60 });
+    const renderPage = (request: Request) =>
+      new Response(
+        `<html><body><main><h1>${request.headers.get("cookie") ? "Ada's account" : "Account"}</h1></main></body></html>`,
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    for (const headers of [{ Cookie: "session=a" }, { Authorization: "Bearer a" }]) {
+      const mirror = await createMarkdownMirrorResponse({
+        request: new Request("http://farm.test/account.md", { headers }),
+        config,
+        routeExists: () => true,
+        renderPage,
+      });
+      expect(mirror?.headers.get("cache-control")).toBe("private, no-store");
+    }
+    const anonymous = await createMarkdownMirrorResponse({
+      request: new Request("http://farm.test/account.md"),
+      config,
+      routeExists: () => true,
+      renderPage,
+    });
+    expect(anonymous?.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
+  });
+
   it("returns null when the target page route does not exist", async () => {
     const config = resolveMarkdownConfig({
       expose: ["/pricing"],
@@ -333,6 +361,95 @@ describe("getFarmMarkdownAlternatePath", () => {
     expect(getFarmMarkdownAlternatePath(pricingOnly, "/pricing")).toBe("/pricing.md");
     expect(getFarmMarkdownAlternatePath(pricingOnly, "/account")).toBeNull();
     expect(getFarmMarkdownAlternatePath(resolveMarkdownConfig(false), "/pricing")).toBeNull();
+  });
+});
+
+describe("Markdown under a basePath and locale prefix", () => {
+  // Routes see /console/fr/about as /about, as the route manager and production strip it.
+  const routePathname = (pathname: string) =>
+    stripFarmLocaleFromPathname(pathname, {
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing: "prefix-except-default",
+      basePath: "/console",
+    });
+
+  it("advertises a home page's Markdown at <prefix>/index.md, as llms.txt links it", () => {
+    const everyPage = resolveMarkdownConfig(undefined);
+    const advertised = (pathname: string) =>
+      getFarmMarkdownAlternatePath(everyPage, pathname, { routePathname });
+
+    expect(advertised("/console")).toBe("/console/index.md");
+    expect(advertised("/console/fr")).toBe("/console/fr/index.md");
+    expect(advertised("/console/fr/about")).toBe("/console/fr/about.md");
+    expect(advertised("/console/about")).toBe("/console/about.md");
+    // Without a prefix, the home page keeps /index.md.
+    expect(getFarmMarkdownAlternatePath(everyPage, "/")).toBe("/index.md");
+  });
+
+  it("serves <prefix>/index.md and <prefix>.md as that prefix's home page", () => {
+    const everyPage = resolveMarkdownConfig(undefined);
+    const target = (pathname: string) =>
+      resolveMarkdownMirrorTarget(everyPage, pathname, { routePathname });
+
+    for (const pathname of ["/console/fr/index.md", "/console/fr.md"]) {
+      expect(target(pathname), pathname).toMatchObject({
+        pathname: "/console/fr",
+        markdownPath: "/console/fr/index.md",
+      });
+    }
+    for (const pathname of ["/console/index.md", "/console.md"]) {
+      expect(target(pathname), pathname).toMatchObject({
+        pathname: "/console",
+        markdownPath: "/console/index.md",
+      });
+    }
+    // Only a home page has an index alias.
+    expect(target("/console/about/index.md")).toMatchObject({
+      pathname: "/console/about/index",
+      markdownPath: "/console/about/index.md",
+    });
+  });
+
+  it("matches md.expose against route paths, as llms.txt does", () => {
+    const config = resolveMarkdownConfig({ expose: ["/", { route: "/about", title: "About" }] });
+    const target = (pathname: string) =>
+      resolveMarkdownMirrorTarget(config, pathname, { routePathname });
+
+    expect(target("/console/about.md")).toMatchObject({
+      pathname: "/console/about",
+      route: { route: "/about", title: "About" },
+    });
+    expect(target("/console/fr/about.md")).toMatchObject({ route: { route: "/about" } });
+    expect(target("/console/fr/index.md")).toMatchObject({
+      pathname: "/console/fr",
+      route: { route: "/" },
+    });
+    expect(target("/console/secret.md")).toBeNull();
+    expect(getFarmMarkdownAlternatePath(config, "/console/about", { routePathname })).toBe(
+      "/console/about.md",
+    );
+    expect(getFarmMarkdownAlternatePath(config, "/console/secret", { routePathname })).toBeNull();
+  });
+
+  it("names the home page itself in the actions view of <prefix>/index.md", async () => {
+    const response = await createMarkdownMirrorResponse({
+      request: new Request("http://farm.test/console/fr/index.md?actions"),
+      config: resolveMarkdownConfig(undefined),
+      routePathname,
+      renderPage: (request) => {
+        expect(new URL(request.url).pathname).toBe("/console/fr");
+        return new Response('<main><form method="post"><button>Go</button></form></main>', {
+          headers: { "content-type": "text/html" },
+        });
+      },
+    });
+
+    expect(response?.headers.get("content-location")).toBe("/console/fr/index.md");
+    expect(await response?.json()).toMatchObject({
+      page: "/console/fr",
+      markdown: "/console/fr/index.md",
+    });
   });
 });
 
@@ -688,6 +805,35 @@ describe("htmlToMarkdown", () => {
     ).toBe("Hello ex**am**ple\n");
   });
 
+  it("separates items in a layout row that has no text of its own", () => {
+    // JSX drops the line breaks between siblings, so a flex row of a label and
+    // a value renders as `<span>00</span><span>Basic starter</span>`.
+    expect(
+      htmlToMarkdown(
+        '<main><div class="eyebrow"><span>00</span><span>FARMJS / Basic starter</span></div>' +
+          '<div class="command"><span>01</span><code>npm run dev</code></div>' +
+          '<nav><span><a href="/docs"><span>Docs</span></a></span>' +
+          '<span><span aria-hidden="true">/</span><a href="/gh"><span>GitHub</span></a></span></nav></main>',
+        { includeMetadata: false },
+      ),
+    ).toBe("00 FARMJS / Basic starter\n\n01 npm run dev\n\nDocs GitHub\n");
+  });
+
+  it("keeps a letter-split word joined in a layout container", () => {
+    expect(
+      htmlToMarkdown(
+        "<main><div><span>a</span><span>g</span><span>e</span><span>n</span><span>t</span><span>s</span></div></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("agents\n");
+    // Text of the container's own means it is prose, not a row of items.
+    expect(
+      htmlToMarkdown("<main><div>ex<span>am</span><span>ple</span></div></main>", {
+        includeMetadata: false,
+      }),
+    ).toBe("example\n");
+  });
+
   it("prefers page content over layout chrome", () => {
     expect(
       htmlToMarkdown(
@@ -852,6 +998,8 @@ describe("Markdown mirrors of protected pages", () => {
     );
     expect(head?.status).toBe(302);
     expect(await head?.text()).toBe("");
-    expect(await mirror(new Response("oops", { status: 500 }))).toBeNull();
+    const failure = new Response("oops", { status: 500 });
+    expect(await mirror(failure)).toBe(failure);
+    expect(await failure.text()).toBe("oops");
   });
 });

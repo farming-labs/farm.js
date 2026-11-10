@@ -55,6 +55,7 @@ the separate Hints plugin.
 | Routes      | Filter pages, layouts, loading states, and error boundaries; inspect source paths and effective runtime, regions, and duration. |
 | API         | Registered methods and paths, source modules, and server runtime controls. Selecting an endpoint never invokes it.              |
 | Systems     | Integration routes, middleware/provider/model counts, request middleware, and KV mount metadata.                                |
+| Plugins     | Active Farm plugins in execution order, with versions and declared server/client hook names.                                    |
 | Runtime     | Deployment target, Nitro preset, output directory, schedules, workflows, layers, feature switches, and environment key names.   |
 | Inspect     | Source and served JavaScript for already-transformed browser modules, with imports and importers.                               |
 | Diagnostics | Runtime configuration checks shared with `farm doctor`. These are not TypeScript or accessibility checks.                       |
@@ -64,6 +65,18 @@ Use **Refresh** to capture the latest workspace state. The footer pairs Hints-st
 **Development only** and **Esc to close** labels with the snapshot time and copy feedback.
 If the server becomes unavailable, DevTools identifies the stale snapshot instead
 of silently presenting it as current. Press `/` in Routes or API to focus its filter.
+
+### Plugin registration
+
+**Plugins** uses the active plugin manager, including integration-contributed plugins, rather
+than listing raw configuration. Order is `pre`, normal, then `post`, preserving registration
+order within each group. Expand a plugin to see its version, whether it declares API routes,
+and separate server/client hook lists. Legacy hooks appear under their original names.
+
+This is not an execution trace: parallel lifecycle hooks can complete in a different order,
+and a registered hook may not run for every request. Plugin options, public data, function
+source, and private setup state are excluded. Vite-only plugins and the app-owned
+`src/client.ts` entry are not Farm plugin registrations and are not listed here.
 
 ## Inspect source and generated code
 
@@ -75,7 +88,21 @@ not have dedicated language grammars. Copy preserves the original text, not high
 
 This is a **source-to-output comparison**, not a per-plugin transform timeline or an exact diff.
 It does not instrument transform hooks, run modules, or trigger transformations just to populate
-the inspector. After an edit, reload the app and refresh Inspect so the served transform is current.
+the inspector.
+
+### Live updates
+
+Keep **Inspect** open while editing an already-loaded browser module. DevTools retains your
+selected module and refreshes its source and cached output after Vite completes the HMR update.
+While an update is pending, the previous code stays visible with an explicit stale label. Failed
+updates and a disconnected development server also label that code instead of presenting it as
+current. Fix the error or reconnect to resume updates; **Refresh** is available after an error.
+
+This uses the application's existing Vite HMR connection, not polling or a second socket. Other
+views keep their filters and selection and indicate when to refresh the workspace snapshot.
+A full page reload closes DevTools with the application; reopen it afterward. Standalone access
+to `/__farm/devtools` has no parent-app HMR connection, so use **Refresh** there. With
+`inspect: false`, the HMR listener is not installed. Hiding the launcher does not disable it.
 
 Only known, already-transformed browser modules inside the project are eligible. Server-only
 modules, virtual modules, dependencies, hidden paths, and symlinks escaping the project are

@@ -14,16 +14,13 @@ describe("Farm Nitro output layout", () => {
     });
   });
 
-  it.each(["vercel", "vercel-edge"])(
-    "uses Vercel's native Build Output layout for %s",
-    (preset) => {
-      expect(resolveFarmNitroOutputConfig(preset, "/tmp/farm-output")).toEqual({
-        dir: "/tmp/farm-output",
-        serverDir: path.join("/tmp/farm-output", "functions", "__nitro.func"),
-        publicDir: path.join("/tmp/farm-output", "static"),
-      });
-    },
-  );
+  it("uses Vercel's native Build Output layout for vercel", () => {
+    expect(resolveFarmNitroOutputConfig("vercel", "/tmp/farm-output")).toEqual({
+      dir: "/tmp/farm-output",
+      serverDir: path.join("/tmp/farm-output", "functions", "__nitro.func"),
+      publicDir: path.join("/tmp/farm-output", "static"),
+    });
+  });
 
   it.each(["cloudflare-pages", "cloudflare-module", "netlify", "netlify-edge"])(
     "leaves the %s preset's native directories untouched",

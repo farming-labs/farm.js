@@ -19,6 +19,7 @@ import { REACT_RENDERER } from "../renderer";
 import { Link } from "../client/link";
 import { setFarmBasePath } from "../base-path";
 import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
+import { getCspNonce, headers } from "../headers";
 
 type MockResponse = FarmResponse & {
   body: string;
@@ -45,41 +46,70 @@ afterEach(async () => {
 });
 
 describe("file route loading.tsx and error.tsx", () => {
-  it("uses one fresh CSP nonce for the response header and every framework script", async () => {
-    const response = createMockResponse();
-    const renderer = createRenderer(
-      {
-        [routeModulePath]: {
-          default: function DashboardPage() {
-            return React.createElement(
-              "main",
-              null,
-              "Nonce protected",
-              React.createElement("script", { nonce: "stale-app-nonce" }, "window.appReady=true"),
-            );
+  it.each(["streamed", "buffered"])(
+    "gives the response nonce to framework scripts and opted-in app scripts only (%s)",
+    async (mode) => {
+      const response = createMockResponse();
+      const renderer = createRenderer(
+        {
+          [routeModulePath]: {
+            default: function DashboardPage() {
+              return React.createElement(
+                "main",
+                null,
+                "Nonce protected",
+                React.createElement("script", {
+                  "data-app": "stale",
+                  nonce: "stale-app-nonce",
+                  dangerouslySetInnerHTML: { __html: "window.stale=true" },
+                }),
+                React.createElement("div", {
+                  dangerouslySetInnerHTML: {
+                    __html:
+                      '<script data-app="injected">window.injected=true</script>' +
+                      '<script data-app="guessed" nonce="guessed">window.guessed=true</script>',
+                  },
+                }),
+                React.createElement("script", {
+                  "data-app": "opted-in",
+                  nonce: getCspNonce(),
+                  dangerouslySetInnerHTML: { __html: "window.appReady=true" },
+                }),
+              );
+            },
           },
         },
-      },
-      {
-        clientMetadata: { isClientComponent: true, shouldHydrate: true },
-        security: {
-          csp: { nonce: true, policy: "default-src 'self'; script-src 'self'" },
+        {
+          clientMetadata: { isClientComponent: true, shouldHydrate: true },
+          security: {
+            csp: { nonce: true, policy: "default-src 'self'; script-src 'self'" },
+          },
         },
-      },
-    );
+      );
 
-    await renderer.renderPage(createMockRequest("/dashboard"), response);
+      if (mode === "buffered") {
+        vi.spyOn(renderer as any, "rootLayoutRendersDocument").mockResolvedValue(true);
+      }
+      await renderer.renderPage(createMockRequest("/dashboard"), response);
 
-    const policy = String(response.headers.get("content-security-policy"));
-    const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
-    const document = new JSDOM(response.body).window.document;
-    expect(nonce).toBeTruthy();
-    expect(document.querySelectorAll("script").length).toBeGreaterThan(0);
-    expect(
-      Array.from(document.querySelectorAll("script")).every((script) => script.nonce === nonce),
-    ).toBe(true);
-    expect(policy).not.toContain("unsafe-inline");
-  });
+      const policy = String(response.headers.get("content-security-policy"));
+      const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
+      const document = new JSDOM(response.body).window.document;
+      const scripts = Array.from(document.querySelectorAll("script"));
+      const nonceOf = (selector: string) => document.querySelector(selector)?.getAttribute("nonce");
+      expect(nonce).toBeTruthy();
+      expect(policy).not.toContain("unsafe-inline");
+      // Farm's own document scripts: bootstrap data, Vite and Farm client entries.
+      const frameworkScripts = scripts.filter((script) => !script.hasAttribute("data-app"));
+      expect(frameworkScripts.length).toBeGreaterThan(2);
+      expect(frameworkScripts.every((script) => script.getAttribute("nonce") === nonce)).toBe(true);
+      expect(nonceOf('script[src="/@farm/client.js"]')).toBe(nonce);
+      expect(nonceOf('script[data-app="opted-in"]')).toBe(nonce);
+      expect(nonceOf('script[data-app="stale"]')).toBeNull();
+      expect(nonceOf('script[data-app="injected"]')).toBeNull();
+      expect(nonceOf('script[data-app="guessed"]')).toBeNull();
+    },
+  );
 
   it("bypasses reusable PPR shells when CSP nonces are enabled", async () => {
     const response = createMockResponse();
@@ -104,6 +134,58 @@ describe("file route loading.tsx and error.tsx", () => {
 
     expect(response.headers.get("x-farm-ppr")).toBe("bypass");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("never caches a PPR shell whose layout read the request", async () => {
+    const visit = async (renderer: any, user: string, url: string) => {
+      const response = createMockResponse();
+      const request = createMockRequest(url);
+      request.headers["x-user"] = user;
+      await renderer.renderPage(request, response);
+      return response;
+    };
+    const createPPRRenderer = (readsRequest: boolean) => {
+      const renderer = createRenderer(
+        {
+          [routeModulePath]: {
+            ppr: true,
+            default: function DashboardPage() {
+              return React.createElement("main", null, "PPR page");
+            },
+          },
+          [dashboardLayoutModulePath]: {
+            default: function DashboardLayout({ children }: { children: React.ReactNode }) {
+              const visitor = readsRequest ? (headers().get("x-user") ?? "anon") : "shared";
+              return React.createElement("article", null, `visitor=${visitor}`, children);
+            },
+          },
+        },
+        { dashboardLayoutMetadata: { shouldHydrate: false } },
+      ) as any;
+      renderer.config.experimental.ppr = true;
+      return renderer;
+    };
+
+    // The shell cache is process-wide, so each case uses its own search key.
+    const reading = createPPRRenderer(true);
+    const readingWrites = vi.spyOn(reading, "cachePPRShell");
+    expect((await visit(reading, "alice", "/dashboard?ppr=reads")).body).toContain("visitor=alice");
+    await Promise.all(readingWrites.mock.results.map((result) => result.value));
+    const bob = await visit(reading, "bob", "/dashboard?ppr=reads");
+    expect(bob.body).not.toContain("alice");
+    expect(bob.body).toContain("visitor=bob");
+    expect(bob.headers.get("x-farm-ppr")).not.toBe("hit");
+    expect(readingWrites).not.toHaveBeenCalled();
+
+    // A layout that does not read the request still produces a reusable shell.
+    const shared = createPPRRenderer(false);
+    const sharedWrites = vi.spyOn(shared, "cachePPRShell");
+    await visit(shared, "alice", "/dashboard?ppr=shared");
+    expect(sharedWrites).toHaveBeenCalledTimes(1);
+    await Promise.all(sharedWrites.mock.results.map((result) => result.value));
+    expect((await visit(shared, "bob", "/dashboard?ppr=shared")).headers.get("x-farm-ppr")).toBe(
+      "hit",
+    );
   });
 
   it("renders the nearest loading.tsx while a file route suspends", async () => {
@@ -601,6 +683,37 @@ describe("file route loading.tsx and error.tsx", () => {
       }
     });
 
+    it("links to the root layout's metadataBase and still reads pages from this server", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(
+        {
+          ...pages,
+          [layoutModulePath]: {
+            ...pages[layoutModulePath],
+            metadata: {
+              ...pages[layoutModulePath].metadata,
+              metadataBase: "https://acme.test/app",
+            },
+          },
+        },
+        { routes, layouts: { "/": layoutModulePath }, agent: { llmsTxt: true } },
+      );
+      const request = createDevRequest("/llms-full.txt");
+      request.headers = { host: "evil.test" };
+
+      await renderer.renderPage(request, response);
+
+      expect(response.body).toContain("URL: https://acme.test/dashboard.md");
+      expect(response.body).toContain("dashboard-markdown-body");
+      expect(response.body).not.toContain("evil.test");
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      const index = createMockResponse();
+      await renderer.renderPage(createDevRequest("/llms.txt"), index);
+      expect(index.body).toContain("- [Dashboard](https://acme.test/dashboard.md)");
+    });
+
     it("reads pages from an HTTPS dev server, verifying the requested hostname", async () => {
       // The certificate names farm.test and no IP address.
       const { cert, key } = createSelfSignedCertificate("farm.test");
@@ -1026,9 +1139,7 @@ describe("file route loading.tsx and error.tsx", () => {
     // The layout keeps this page as server HTML, so the client component must arrive as an island
     // the client can start, not as plain markup inside the layout's React tree.
     expect(response.body).toContain('data-farm-client="false"');
-    expect(response.body).toMatch(
-      /<farm-client-boundary[^>]*data-farm-client-boundary="\/src\/counter\.tsx"/,
-    );
+    expect(response.body).toMatch(/<f-island src="\/src\/counter\.tsx"/);
   });
 
   it("renders a hydrating layout tree directly in #root, matching the client tree", async () => {
@@ -1230,6 +1341,7 @@ describe("custom not-found rendering", () => {
     const renderer = new ServerRenderer(
       { ...createConfig(), basePath: "/console" } as Required<FarmConfig>,
       {
+        toRoutePathname: (pathname: string) => pathname,
         matchMetadataRoute: () => null,
         matchMetadataImage: () => null,
         matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
@@ -1271,6 +1383,7 @@ describe("custom not-found rendering", () => {
     });
     const response = createMockResponse();
     const routeManager = {
+      toRoutePathname: (pathname: string) => pathname,
       matchMetadataRoute: () => null,
       matchMetadataImage: () => null,
       matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
@@ -1319,6 +1432,7 @@ describe("custom not-found rendering", () => {
     const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
     const response = createMockResponse();
     const routeManager = {
+      toRoutePathname: (pathname: string) => pathname,
       matchMetadataRoute: () => null,
       matchMetadataImage: () => null,
       matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
@@ -1448,7 +1562,15 @@ function createRenderer(
   const routeManager = {
     getRoutes: () => toRouteEntries(options.routes),
     getLayouts: () => toRouteEntries(options.layouts),
+    getRouteLayouts: (pattern: string) =>
+      [...toRouteEntries(options.layouts).values()].filter(
+        (layout) =>
+          layout.pattern === "/" ||
+          pattern === layout.pattern ||
+          pattern.startsWith(`${layout.pattern}/`),
+      ),
     getIsolatedClientBoundaryModules: () => new Set(options.isolatedClientBoundaryModules ?? []),
+    toRoutePathname: (pathname: string) => pathname,
     matchMetadataRoute(pathname: string) {
       const segmentPath = applicationMetadataPattern === "/" ? "" : applicationMetadataPattern;
       if (

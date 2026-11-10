@@ -228,10 +228,24 @@ managed startup. The application still owns the Agent class and bindings in both
 
 Same-origin WebSockets prevent cross-origin configuration drift, but they do not prove who the user is. Reject unauthorized HTTP and WebSocket requests before they enter an Agent.
 
+A WebSocket handshake is not subject to CORS, and browsers attach cookies to it. When the session
+lives in a cookie, check `Origin` as well, or any site the user visits can open the socket as that
+user and read the replies.
+
 ```ts
+import { env } from "cloudflare:workers";
 import { getSession } from "./auth";
 
+// Your public app origins, for example "https://app.example.com,http://localhost:5173".
+const allowedOrigins = new Set(env.APP_ORIGINS.split(","));
+
 async function authorize(request: Request) {
+  // Browsers always send Origin on WebSocket handshakes and POSTs; non-browser clients may omit it.
+  const origin = request.headers.get("origin");
+  if (origin && !allowedOrigins.has(origin)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
   const session = await getSession(request);
   if (!session?.user) {
     return new Response("Unauthorized", { status: 401 });
@@ -243,6 +257,14 @@ await routeAgentRequest(request, env, {
   onBeforeRequest: authorize,
 });
 ```
+
+Compare against a configured list rather than the request URL: in development the Worker sees
+Wrangler's loopback address, not the address in the browser.
+
+During `farm dev`, the Agent proxy already refuses cross-site requests and WebSocket upgrades with
+`403` before they reach Wrangler. Same-origin requests, requests without an `Origin` (such as
+`curl`), and top-level `GET` navigations (such as OAuth callbacks) still pass. Production requests
+go straight to the Worker, so keep the check above in `authorize`.
 
 Also validate every callable argument, enforce resource ownership inside the Worker, store secrets with Wrangler rather than public Farm env, and rate-limit expensive model or tool operations.
 

@@ -11,6 +11,14 @@ export type {
   RouteMethod,
 } from "./api/route";
 export type { RouteSchema } from "./api/route-schema";
+// Here as well as on the main entry: a plugin that reads Farm's devtools settings must not
+// import the main entry, which loads React and breaks Preact, Solid, Vue, and Svelte apps
+// that don't install it.
+export {
+  resolveFarmDevtoolsConfig,
+  type ResolvedFarmDevtoolsConfig,
+  type FarmDevtoolsUserConfig,
+} from "./devtools-config";
 export type { EndpointMCPMetadata, EndpointMCPOptions } from "./api/endpoint";
 // Reachable from every route a plugin declares (each endpoint carries its
 // OpenAPI metadata), so it must be nameable from this entry the same way
@@ -380,6 +388,13 @@ export interface FarmPluginRuntimeHooks<
 > {
   /** Exact request endpoints owned by this plugin. */
   endpoints?: readonly FarmPluginRuntimeEndpoint<TState, TIntegrationInstance, TIntegrationBound>[];
+  /**
+   * Whether a response `before` lets through may be stored by a shared cache (a CDN). `before`
+   * runs for every request and may be a guard, so by default (`"private"`) Farm sends those
+   * responses with `Cache-Control: private, no-store`. Set `"public"` when `before` never
+   * decides who may read a response, as for logging or analytics.
+   */
+  cache?: "private" | "public";
   start?(
     event: FarmPluginRuntimeEventFor<
       FarmPluginRuntimeStartEvent<TState, TIntegrationInstance>,
@@ -430,7 +445,18 @@ export interface FarmPluginRuntimeRequestOptions {
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
-export type FarmPluginRuntimeRequestHandler = (request: Request) => MaybePromise<Response>;
+export interface FarmPluginRuntimeRequestScope {
+  /**
+   * Runs `runtime.error` for a failure the handler answers itself, such as an API route that
+   * threw and became a 500. `runtime.after` still runs on the response the handler returns.
+   */
+  reportError(error: unknown): Promise<void>;
+}
+
+export type FarmPluginRuntimeRequestHandler = (
+  request: Request,
+  scope: FarmPluginRuntimeRequestScope,
+) => MaybePromise<Response>;
 
 export interface FarmPluginRuntimeSession {
   request: Request;
@@ -1351,6 +1377,66 @@ export class PluginManager {
     return this.runtimeClosePromise;
   }
 
+  private async runBeforeHooks(
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+    ctx: Readonly<Record<string, unknown>>,
+  ): Promise<{ request: Request; response?: Response }> {
+    let activeRequest = request;
+    for (const plugin of this.getSortedPlugins()) {
+      const before = plugin.runtime?.before;
+      if (!before) continue;
+
+      const result = await before({
+        ...this.createRuntimeBaseEvent(plugin, activeRequest, options, waitUntil),
+        ctx,
+      });
+
+      if (result instanceof Request) {
+        this.copyRequestStore(activeRequest, result);
+        this.copyRuntimeRequestContext(activeRequest, result);
+        activeRequest = result;
+        continue;
+      }
+      if (result instanceof Response) {
+        return { request: activeRequest, response: result };
+      }
+      if (result !== undefined) {
+        throw new TypeError(
+          `Farm plugin "${plugin.name}" runtime.before must return a Request, Response, or undefined`,
+        );
+      }
+    }
+    return { request: activeRequest };
+  }
+
+  /**
+   * Runs only `runtime.before` for a request Farm re-routed internally, such as
+   * a configured rewrite, so guards also see the destination URL. The session
+   * opened for `source` keeps its context; context and after hooks don't rerun.
+   */
+  async runRuntimeBeforeForRewrite(
+    source: Request,
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions = {},
+  ): Promise<Request | Response> {
+    if (!this.hasRuntimeHook("before")) return request;
+    this.copyRequestContext(source, request);
+    const waitUntil = options.waitUntil
+      ? (promise: Promise<unknown>) => options.waitUntil?.(Promise.resolve(promise))
+      : (promise: Promise<unknown>) => {
+          void Promise.resolve(promise).catch(() => {});
+        };
+    const result = await this.runBeforeHooks(
+      request,
+      options,
+      waitUntil,
+      this.runtimeRequestContexts.get(request) ?? Object.freeze({}),
+    );
+    return result.response ?? result.request;
+  }
+
   async beginRuntimeRequest(
     request: Request,
     options: FarmPluginRuntimeRequestOptions = {},
@@ -1393,36 +1479,17 @@ export class PluginManager {
         waitUntil,
       );
 
-      let response: Response | undefined;
-      for (const plugin of this.getSortedPlugins()) {
-        const before = plugin.runtime?.before;
-        if (!before) continue;
-
-        const result = await before({
-          ...this.createRuntimeBaseEvent(plugin, activeRequest, activeOptions, waitUntil),
-          ctx: runtimeContext,
-        });
-
-        if (result instanceof Request) {
-          this.copyRequestStore(activeRequest, result);
-          this.copyRuntimeRequestContext(activeRequest, result);
-          activeRequest = result;
-          continue;
-        }
-        if (result instanceof Response) {
-          response = result;
-          break;
-        }
-        if (result !== undefined) {
-          throw new TypeError(
-            `Farm plugin "${plugin.name}" runtime.before must return a Request, Response, or undefined`,
-          );
-        }
-      }
+      const before = await this.runBeforeHooks(
+        activeRequest,
+        activeOptions,
+        waitUntil,
+        runtimeContext,
+      );
+      activeRequest = before.request;
 
       return {
         request: activeRequest,
-        response,
+        response: before.response,
         ctx: runtimeContext,
         startedAt,
         options: activeOptions,
@@ -1498,9 +1565,34 @@ export class PluginManager {
     handler: FarmPluginRuntimeRequestHandler,
     options: FarmPluginRuntimeRequestOptions = {},
   ): Promise<Response> {
-    const session = await this.beginRuntimeRequest(request, options);
+    return this.completeRuntimeRequest(await this.beginRuntimeRequest(request, options), handler);
+  }
+
+  /**
+   * Finishes a session `beginRuntimeRequest` opened, as `runRuntimeRequest` does: the handler
+   * answers unless `before` already did, then `after` runs. A server that has work between
+   * `before` and the handler (the dev server runs app middleware there) splits the two.
+   */
+  async completeRuntimeRequest(
+    session: FarmPluginRuntimeSession,
+    handler: FarmPluginRuntimeRequestHandler,
+  ): Promise<Response> {
     try {
-      const response = session.response ?? (await handler(session.request));
+      const response =
+        session.response ??
+        (await handler(session.request, {
+          // Not a failed session: the handler answers, so `after` runs and a later throw in it
+          // is still reported.
+          reportError: (error) =>
+            this.runRuntimeErrorHooks(
+              session.request,
+              error,
+              session.ctx,
+              Date.now() - session.startedAt,
+              session.options,
+              session.waitUntil,
+            ),
+        }));
       if (!(response instanceof Response)) {
         throw new TypeError("Farm plugin runtime handlers must return a Response");
       }
@@ -1574,6 +1666,31 @@ export class PluginManager {
 
     const plugins = this.getSortedPlugins().filter(include);
 
+    if (hookName === "onError") {
+      // Reporters must not suppress each other or let cleanup race a pending
+      // report. Keep invocation order/concurrency, then surface the first
+      // observed reporter failure only after every started report has settled.
+      const failures: unknown[] = [];
+      const reports: Promise<void>[] = [];
+      for (const plugin of plugins) {
+        for (const hook of this.getPluginHooks(plugin, hookName)) {
+          reports.push(
+            (async () => {
+              try {
+                const hookContext = this.getHookContext(plugin, hookName, args);
+                await hook.apply(plugin, [...args, hookContext]);
+              } catch (error) {
+                failures.push(error);
+              }
+            })(),
+          );
+        }
+      }
+      await Promise.all(reports);
+      if (failures.length > 0) throw failures[0];
+      return false;
+    }
+
     // Run selected hooks sequentially for deterministic execution and short-circuiting.
     const sequentialHooks = new Set<keyof FarmPlugin>([
       "ready",
@@ -1623,11 +1740,18 @@ export class PluginManager {
     } else {
       // Run other hooks in parallel
       const promises: Promise<any>[] = [];
-      for (const plugin of plugins) {
-        for (const hook of this.getPluginHooks(plugin, hookName)) {
-          const hookContext = this.getHookContext(plugin, hookName, args);
-          promises.push((hook as any).apply(plugin, [...args, hookContext]));
+      try {
+        for (const plugin of plugins) {
+          for (const hook of this.getPluginHooks(plugin, hookName)) {
+            const hookContext = this.getHookContext(plugin, hookName, args);
+            promises.push((hook as any).apply(plugin, [...args, hookContext]));
+          }
         }
+      } catch (error) {
+        // A synchronous failure skips the normal Promise.all below. Observe
+        // already-started work without waiting for it or invoking later hooks.
+        void Promise.all(promises).catch(() => {});
+        throw error;
       }
       await Promise.all(promises);
     }
@@ -1928,4 +2052,3 @@ export namespace definePlugin {
     };
   }
 }
-export { farmPlugin } from "./vite";

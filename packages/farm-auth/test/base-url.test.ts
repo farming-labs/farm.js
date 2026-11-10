@@ -61,7 +61,7 @@ describe("resolveFarmAuthBaseURL", () => {
 describe("resolveFarmAuthTrustedOrigins", () => {
   it("keeps the deployment and branch hosts reachable beside the canonical domain", () => {
     expect(
-      resolveFarmAuthTrustedOrigins({
+      resolveFarmAuthTrustedOrigins("production", {
         VERCEL_ENV: "production",
         VERCEL_URL: "my-app-a1b2c3.vercel.app",
         VERCEL_PROJECT_PRODUCTION_URL: "app.example.com",
@@ -75,6 +75,6 @@ describe("resolveFarmAuthTrustedOrigins", () => {
   });
 
   it("is empty off Vercel", () => {
-    expect(resolveFarmAuthTrustedOrigins({} as NodeJS.ProcessEnv)).toEqual([]);
+    expect(resolveFarmAuthTrustedOrigins("production", {} as NodeJS.ProcessEnv)).toEqual([]);
   });
 });

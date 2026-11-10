@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isFarmRendererDisabled } from "./renderer";
 import { getDeployTargetForPreset } from "./config";
 import { resolveCronConfig, type FarmCronJob } from "./cron";
 import {
@@ -8,6 +9,7 @@ import {
   type ResolvedFarmRouteRuntimeConfig,
 } from "./route-runtime";
 import type { FarmConfig } from "./types";
+import type { FarmPlugin } from "./plugin";
 import type { FarmDiscoveredWorkflow } from "./workflows";
 
 type RouteMapEntry = {
@@ -102,6 +104,7 @@ export type FarmDevtoolsSnapshot = {
     apiRoutes: number;
     middleware: number;
     integrations: number;
+    plugins: number;
     storageMounts: number;
     cronJobs: number;
     workflows: number;
@@ -135,6 +138,15 @@ export type FarmDevtoolsSnapshot = {
     middlewareCount: number;
     providerCount: number;
     schemaModelCount: number;
+  }>;
+  plugins: Array<{
+    name: string;
+    version?: string;
+    order: number;
+    enforce: "pre" | "normal" | "post";
+    serverHooks: string[];
+    clientHooks: string[];
+    routes: boolean;
   }>;
   storage: Array<{
     mount: string;
@@ -181,8 +193,86 @@ export interface CreateFarmDevtoolsSnapshotInput {
   middlewareManager: MiddlewareManagerLike;
   config?: FarmConfig & { openapi?: { enabled?: boolean } };
   workflows?: readonly FarmDiscoveredWorkflow[];
+  /** Active plugins in the plugin manager's execution order, not raw config. */
+  plugins?: readonly FarmPlugin[];
   now?: () => Date;
   env?: Record<string, string | undefined>;
+}
+
+/** Read declared metadata only. Never execute hooks, accessors, or serialize state/public data. */
+function collectPlugins(plugins: readonly FarmPlugin[]): FarmDevtoolsSnapshot["plugins"] {
+  const valueAt = (value: unknown, key: string): unknown =>
+    value && (typeof value === "object" || typeof value === "function")
+      ? Object.getOwnPropertyDescriptor(value, key)?.value
+      : undefined;
+  const hooks = (value: unknown, names: readonly string[], prefix = "") =>
+    names.filter((key) => typeof valueAt(value, key) === "function").map((key) => prefix + key);
+  return plugins.map((plugin, index) => {
+    const serverHooks = hooks(plugin, [
+      "configure",
+      "setup",
+      "init",
+      "ready",
+      "devServerCreated",
+      "config",
+      "configResolved",
+      "buildStart",
+      "buildEnd",
+      "routeDiscovered",
+      "routesGenerated",
+      "middlewareDiscovered",
+      "apiRouteDiscovered",
+      "beforeRouteMatch",
+      "afterRouteMatch",
+      "beforeRender",
+      "afterRender",
+      "beforeApiHandler",
+      "afterApiHandler",
+      "onError",
+      "hmrUpdate",
+      "beforeBundle",
+      "afterBundle",
+      "beforeNitroBuild",
+      "afterNitroBuild",
+      "shutdown",
+      "beforeRequest",
+      "afterResponse",
+      "transformHTML",
+      "transformPage",
+    ] satisfies (keyof FarmPlugin)[]);
+    for (const [group, names] of [
+      ["runtime", ["start", "context", "before", "after", "error", "close"]],
+      ["router", ["discovered", "generated", "before", "after"]],
+      ["render", ["before", "html"]],
+      ["build", ["before", "configure", "after"]],
+      ["dev", ["server", "update"]],
+    ] as const)
+      serverHooks.push(...hooks(valueAt(plugin, group), names, `${group}.`));
+    const client = valueAt(plugin, "client");
+    const clientHooks = hooks(client, ["setup", "error", "performance", "close"], "client.");
+    clientHooks.push(
+      ...hooks(valueAt(client, "hydration"), ["before", "after"], "client.hydration."),
+    );
+    clientHooks.push(
+      ...hooks(
+        valueAt(client, "navigation"),
+        ["before", "loaded", "resolved", "rendered", "error"],
+        "client.navigation.",
+      ),
+    );
+    const name = valueAt(plugin, "name");
+    const version = valueAt(plugin, "version");
+    const enforce = valueAt(plugin, "enforce");
+    return {
+      name: typeof name === "string" ? name : "Unnamed plugin",
+      ...(typeof version === "string" ? { version } : {}),
+      order: index + 1,
+      enforce: enforce === "pre" || enforce === "post" ? enforce : "normal",
+      serverHooks,
+      clientHooks,
+      routes: valueAt(plugin, "routes") !== undefined,
+    };
+  });
 }
 
 function normalizePath(value: string): string {
@@ -443,7 +533,9 @@ export async function createFarmDevtoolsSnapshot(
   );
   const env = input.env || process.env;
 
-  if (pageRoutes.length === 0) {
+  // `renderer: false` serves API routes only, so pages and layouts are not expected.
+  const servesPages = !isFarmRendererDisabled(config.renderer);
+  if (servesPages && pageRoutes.length === 0) {
     diagnostics.push({
       severity: "warning",
       code: "NO_PAGE_ROUTES",
@@ -452,7 +544,7 @@ export async function createFarmDevtoolsSnapshot(
       action: `Add ${input.srcDir}/app/page.tsx or a programmatic page route.`,
     });
   }
-  if (layoutRoutes.length === 0) {
+  if (servesPages && layoutRoutes.length === 0) {
     diagnostics.push({
       severity: "warning",
       code: "ROOT_LAYOUT_MISSING",
@@ -501,6 +593,7 @@ export async function createFarmDevtoolsSnapshot(
   const docs = config.docs;
   const docsEnabled = featureEnabled(docs);
   const allRoutes = sortByPath([...pageRoutes, ...layoutRoutes, ...loadingRoutes, ...errorRoutes]);
+  const plugins = collectPlugins(input.plugins ?? []);
 
   return {
     generatedAt: (input.now?.() || new Date()).toISOString(),
@@ -525,6 +618,7 @@ export async function createFarmDevtoolsSnapshot(
       apiRoutes: apiRoutes.length,
       middleware: middleware.length,
       integrations: integrations.length,
+      plugins: plugins.length,
       storageMounts: storage.entries.length,
       cronJobs: cron.jobs.length,
       workflows: workflows.length,
@@ -535,6 +629,7 @@ export async function createFarmDevtoolsSnapshot(
     apiRoutes,
     middleware,
     integrations,
+    plugins,
     storage: storage.entries,
     cron: cron.jobs,
     workflows,

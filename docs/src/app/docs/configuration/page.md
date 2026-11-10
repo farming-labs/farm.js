@@ -98,6 +98,9 @@ dedicated [React](/docs/renderers/react), [Preact](/docs/renderers/preact),
 [Solid](/docs/renderers/solid), [Vue](/docs/renderers/vue), and
 [Svelte](/docs/renderers/svelte) guides.
 
+Set `renderer: false` for an API server with no pages: Farm then builds no browser client and
+needs no React. See [Backend-Only Apps](/docs/backend).
+
 ### Preact
 
 Install Preact and its FARMJS renderer adapter:
@@ -286,7 +289,7 @@ mount, and shortcut together.
 | integrations  | Registering built-in or custom integrations.                                           |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.            |
 | mcp           | Composing API routes and standalone tools in one authenticated MCP server.             |
-| agent         | Opt-in agent readiness: llms.txt, JSON-LD, AI crawler rules, and an API catalog.       |
+| agent         | Agent readiness: llms.txt and JSON-LD by default, crawler rules, and an API catalog.   |
 | theme         | Enabling light, dark, and system modes with client and server APIs.                    |
 | storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client.      |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                         |
@@ -299,6 +302,8 @@ mount, and shortcut together.
 | telemetry     | Controlling automatic production-site reporting to Farm's usage dashboard.             |
 | analytics     | Turning off request and MCP analytics for an app linked to a Farm Infra project.       |
 | deploy        | Selecting a target, preset, and output directory.                                      |
+| desktop       | The native desktop app `--desktop` builds ([Desktop Apps](/docs/desktop)).             |
+| mobile        | Preview: the mobile app config ([Mobile Apps](/docs/mobile)).                          |
 | deploymentId  | Detecting stale browser requests during rolling deployments.                           |
 | trailingSlash | Choosing the canonical URL shape for application page routes and links.                |
 | routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns.      |
@@ -330,6 +335,14 @@ Farm keeps the options it needs to produce its production output: `root`, `base`
 `build.ssr`, `build.ssrEmitAssets`, `build.write`, `build.lib`, `build.watch`,
 `build.rollupOptions.input`, and `build.rollupOptions.output`), and any `build`, `define`, or
 `esbuild` value Farm sets for that build. Use `basePath` and `publicDir` in Farm's config instead.
+
+`vite.build.sourcemap` never publishes client source maps. A client map carries the original
+source of each module, including code Farm strips from the browser bundle such as
+`createServerOnlyFn` bodies and `generateMetadata`, so any enabled value builds hidden maps (the
+JS names no map) and writes them to `.farm/client-sourcemaps/` instead of the public output. Upload
+them from there to your error tracker. RSC apps built with `@farm.js/plugin/rsc` do the same for
+`build.sourcemap` in `vite.config.ts`, writing the maps to `dist/client-sourcemaps/` beside
+`dist/client/`.
 
 During development, Farm loads server modules through Vite's `ssr` environment runner. With
 React Server Components enabled, RSC entries use a separate `rsc` runner and resolution conditions;
@@ -394,9 +407,12 @@ public URL in the browser bundle.
 
 A root-relative API root is also mounted by Farm in development and production. For example,
 `api: { basePath: "/v2/api" }` makes a route declared at `app/api/users/route.ts` available at
-`/v2/api/users`. Farm treats an absolute `baseURL` as external and does not remount the current
-application's API routes for it. `basePath` rejects backslashes, control characters, and `.` or
-`..` segments, including encoded path separators. Root-relative `baseURL` and `basePath` values
+`/v2/api/users`. The route still answers at `/api/users` too, and middleware guards both paths:
+`src/app/api/**/middleware.ts` files run for either prefix, and a middleware `matcher` written for
+`/api/...` or `/v2/api/...` matches the request at both. Integration guards, such as an auth
+integration's `protectedRoutes`, match both prefixes the same way. Farm treats an absolute `baseURL` as
+external and does not remount the current application's API routes for it. `basePath` rejects
+backslashes, control characters, and `.` or `..` segments, including encoded path separators. Root-relative `baseURL` and `basePath` values
 must begin with one slash; network-path references such as `//api.example.com` are rejected so the
 server mount and browser URL cannot resolve to different origins or paths.
 
@@ -440,9 +456,32 @@ mixed declarations, the resolved catalog, and permission checks.
 
 ## Agent readiness
 
-`agent` holds opt-in features that help AI agents and crawlers understand a public site, and decide
-which of them may use it. All of them are off by default, so internal tools and private dashboards
-are unaffected.
+`agent` holds features that help AI agents and crawlers understand a public site, and decide which
+of them may use it. The ones that only describe what agents can already read are on by default:
+`jsonLd` (a schema.org `WebSite` built from your metadata), `llmsTxt` and `sitemap` (an index of
+your static pages and a `/sitemap.xml` of them, when the [docs engine](/docs/docs-engine) isn't
+serving its own), `mcp` (a [read-only MCP server](#default-mcp-server) over those same pages at
+`/mcp`, when the app has no MCP server of its own), `aiCatalog` (discovery
+for the [MCP server](/docs/plugins/mcp#discovery) you already serve, when you serve one), and
+`manifest` (the [app manifest](#app-manifest) at `/.well-known/farmjs.json`). The rest,
+which expose more or change who may crawl, are opt-in. Turn a default off with `false`, for example
+on an internal tool:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  agent: {
+    jsonLd: false,
+    llmsTxt: false,
+    sitemap: false,
+    mcp: false,
+    aiCatalog: false,
+    manifest: false,
+  },
+});
+```
+
+Pages without Open Graph metadata also get `og:title` and `og:description` from their own title and
+description, so social cards and agents citing a page have something to show.
 
 ```ts title="farm.config.ts"
 import { defineConfig } from "@farm.js/core";
@@ -466,12 +505,15 @@ export default defineConfig({
 on a preview deployment; [Preview deployments](/docs/deployment#preview-deployments) covers how
 Farm detects one.
 
+Left unset, `llmsTxt` serves `/llms.txt` without `/llms-full.txt` (which renders every page); with
+the docs engine enabled it stays off, since the docs engine answers `/llms.txt` itself.
 `llmsTxt: true` serves [`/llms.txt`](https://llmstxt.org): a Markdown index of every static page,
 with each page's metadata title and description, linking to its [Markdown mirror](/docs/markdown)
 when one is exposed. An options object sets the `title` and `summary` (the root layout's metadata by
 default), adds `details` Markdown, and narrows the list with `include` and `exclude` route patterns,
 which use the same syntax as `md.expose`. Dynamic routes are left out because they have no single
-URL.
+URL, and so are pages a path-specific guard covers, as for the [sitemap](#sitemap). Links use the
+root layout's `metadataBase`, or the request's origin when it has none, as for the sitemap.
 
 It also serves `/llms-full.txt`: the same header, then a block per listed page with its title, URL,
 and description, separated by `---`. Pages with an exposed Markdown mirror get it inlined; a page
@@ -491,9 +533,10 @@ structured format, and receives the generated pages and defaults to build on. Wh
 [docs engine](/docs/docs-engine) is enabled too, the app's own files take `/llms.txt` and
 `/llms-full.txt`.
 
-`jsonLd: true` adds a schema.org `Organization` to page heads, built from the site's metadata: the
-site name or title, `metadataBase`, and description. A page with none of those gets no JSON-LD. An
-object sets the `type` (emitted as `@type`) and fields such as `name`, `url`, `logo`, and `sameAs`.
+`jsonLd` adds a schema.org entity to page heads, built from the site's metadata: the site name or
+title, `metadataBase`, and description. A page with none of those gets no JSON-LD. Left unset, the
+entity is a `WebSite`; `true` makes it an `Organization`, and an object sets the `type` (emitted as
+`@type`) and fields such as `name`, `url`, `logo`, and `sameAs`.
 
 Pages and layouts add their own structured data with `metadata.jsonLd`, an object or an array of
 objects. It works without `agent.jsonLd`; when both are set, the site script comes first.
@@ -546,6 +589,72 @@ export const metadata: Metadata = {
 Values are passed through as written, so use absolute URLs. Spread a result to add schema.org
 properties the builder does not model, for example `{ ...jsonLd.product(input), gtin13: "..." }`.
 
+### Sitemap
+
+Left unset, `sitemap` serves `/sitemap.xml` listing every static page with a `<lastmod>`: the time
+the page's file last changed, read when the server builds. Dynamic routes, pages whose metadata
+says `robots: { index: false }` (their own, or a layout's when the page sets no `robots`), pages
+behind a route [`guard`](/docs/routing#route-guards), and
+pages a guard written for their path covers are left out: a `middleware.ts` in the page's folder or
+a parent below the root, a config middleware `matcher` that names the path, or an integration's
+`protectedRoutes`. Guards that cover every path (a root `middleware.ts`, middleware without a
+matcher or with a catch-all or function matcher, a plugin's `runtime.before` hook) hide nothing,
+since they name no page; the content behind them stays private, because pages are read as a
+signed-out visitor. URLs use the root layout's `metadataBase`, or the request's origin when it has
+none, the same origin the generated `llms.txt` links to; set `metadataBase` so crawlers and caches
+always see your canonical host. With the docs engine enabled it stays off, since the docs engine
+answers `/sitemap.xml` itself. Leave out other pages with `exclude`:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  agent: {
+    sitemap: { exclude: ["/admin/[...path]", "/settings"] },
+  },
+});
+```
+
+`include` narrows the list the same way, and `sitemap: false` turns it off. `llmsTxt` takes the
+same `include` and `exclude`. A `public/sitemap.xml`
+or a root [`sitemap.ts`](/docs/routing#application-metadata-routes), which can list dynamic pages,
+replaces the generated file.
+
+### Default MCP server
+
+Left unset, `mcp` serves a read-only [MCP](https://modelcontextprotocol.io) server at `/mcp`
+(Streamable HTTP) with three tools over the app's public pages:
+
+| Tool           | What it does                                                                      |
+| -------------- | --------------------------------------------------------------------------------- |
+| `list_pages`   | Each page's path, title, URL, and description.                                    |
+| `search_pages` | Pages whose title, description, or path matches every word of a `query`.          |
+| `read_page`    | One page as Markdown, from its [Markdown mirror](/docs/markdown), by path or URL. |
+
+The pages are the static pages `llms.txt` and the sitemap list that have a Markdown mirror: dynamic
+routes, pages whose metadata says `robots: { index: false }` (or inherits it from a layout), and pages a path-specific guard
+covers (see [Sitemap](#sitemap)) are left out, and `read_page` answers only for a listed page; `md.expose`
+leaves out more. Pages are read the way `llms-full.txt` reads them, as a fresh request without the
+caller's cookies or credentials, so a page a root middleware or plugin `runtime.before` hook keeps
+private answers as signed out. The server has no write tools and never reaches API routes, server functions, sessions, or
+environment values.
+
+It names itself after the app's `package.json` (`name` and `version`, or Farm's version without
+one), and joins the [AI catalog](#ai-catalog), its card at `/mcp/server-card`, the `MCP` section of
+`llms.txt`, and the [app manifest](#app-manifest), which lists its tools. It follows the app
+`basePath`. The handler loads on the first `/mcp` request; other requests only compare a path.
+
+The app's own MCP always wins, in development and in production alike. The default steps aside when:
+
+- a route of the app answers `/mcp` (a page, a programmatic route, or a dynamic route that matches it);
+- an API route is mounted at `/api/mcp`;
+- `@farm.js/mcp` is configured, through the top-level [`mcp`](/docs/plugins/mcp) config or `apiMcp()`;
+- another MCP server is listed with
+  [`registerFarmMCPServer`](/docs/plugins/mcp#list-an-mcp-server-farm-does-not-serve), as the
+  [docs engine](/docs/docs-engine) does for its own MCP endpoint.
+
+With the docs engine enabled, `mcp` is off by default, since the docs engine serves `/mcp`
+itself. `mcp: false` turns it off. React Server Components apps (`experimental.serverComponents`)
+don't serve it yet.
+
 ### AI crawlers
 
 `crawlers` serves a generated `/robots.txt` with a group per category you set:
@@ -561,8 +670,8 @@ fetch pages to cite or link them in answers, including ones acting on a user's r
 vendors say may not follow robots.txt. `training` covers crawlers and tokens that decide whether
 content trains models; blocking them does not affect search engines such as Googlebot.
 
-The file ends with `User-agent: *` / `Allow: /`, then a `Sitemap:` line when the app has a
-`sitemap.ts` and the root layout sets `metadataBase`. Farm does not build that URL from the request's
+The file ends with `User-agent: *` / `Allow: /`, then a `Sitemap:` line when the app serves a
+sitemap (`sitemap.ts` or the generated one) and the root layout sets `metadataBase`. Farm does not build that URL from the request's
 `Host` header, since CDNs cache robots.txt. `crawlers: true` serves only those default lines.
 
 ```ts title="farm.config.ts"
@@ -590,6 +699,98 @@ The app's own file wins. Farm serves `/robots.txt` from, in order:
 2. A root [`robots.ts` metadata route](/docs/routing#application-metadata-routes) in `src/app`.
 3. The generated file from `agent.crawlers`.
 4. The [docs engine](/docs/docs-engine)'s robots.txt, when the docs engine is enabled.
+
+### AI catalog
+
+When the app mounts an MCP server, through the top-level [`mcp`](/docs/plugins/mcp) config or
+`apiMcp()`, or serves the [default one](#default-mcp-server), Farm serves `/.well-known/ai-catalog.json` (and the same entries at
+`/.well-known/ard.json`) listing a server card for it, serves the card at `<endpoint>/server-card`,
+and adds an `MCP` section to the generated `llms.txt` that names the endpoint. The card carries only
+the server's identity and URL, never its tools, and listing it does not skip `authorize`.
+[MCP discovery](/docs/plugins/mcp#discovery) shows both documents. MCP servers Farm does not serve,
+such as the [docs engine](/docs/docs-engine)'s endpoint, join the catalog through
+[`registerFarmMCPServer`](/docs/plugins/mcp#list-an-mcp-server-farm-does-not-serve).
+`aiCatalog: false` turns all three off; an app without an MCP server serves none of them.
+
+### App manifest
+
+Every app serves `/.well-known/farmjs.json` (and, for Farm 0.1.34's readers, `/.well-known/farmjs`)
+to any client: Farm's version and the installed `@farm.js/*` packages, the renderer and base path,
+the MCP tools Farm serves with their JSON Schemas, WebMCP browser tools, each integration's
+category and provider (never its configuration), plugin names, and the site's public origin from
+`FARM_SITE_URL` or the host's production address.
+[Farm Infra analytics](/docs/infra-analytics) lists every field, and
+[Site URL](/docs/infra-analytics#site-url) shows where the origin comes from.
+
+There is one public document, and everyone gets the same one, Farm Infra included. It lists only
+what an anonymous client could already find. An MCP server that requires `authorize`, or a public
+one whose path a path-specific guard covers (middleware or an integration's `protectedRoutes`, as
+for the [sitemap](#sitemap)), shows only its name, version, path and `authorization: "required"`,
+with empty `tools`, `resources` and `prompts`. Endpoint tools never include their HTTP method or
+route.
+
+`manifest` takes an object to choose what the document shows. Every section is shown by default:
+
+| Option         | Values                                      | Effect                                                                                                                                              |
+| -------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`          | `boolean` or `{ version, renderer, build }` | `false` serves `app: null`; a field set to `false` is left out. `basePath` always stays.                                                            |
+| `packages`     | `boolean` or `"names"`                      | `"names"` lists the packages with `null` versions.                                                                                                  |
+| `mcp`          | `boolean` or `{ schemas, hide }`            | `schemas: false` drops tools' `inputSchema` and `outputSchema`. `hide` leaves out a server (`"store"`) or one of its tools (`"store/list_orders"`). |
+| `webmcp`       | `boolean` or `{ hide }`                     | `hide` leaves out browser tools by name.                                                                                                            |
+| `integrations` | `boolean`                                   | `false` serves `integrations: null`.                                                                                                                |
+| `agent`        | `boolean`                                   | `false` serves `agent: null`.                                                                                                                       |
+| `plugins`      | `boolean`                                   | `false` serves `plugins: null`.                                                                                                                     |
+| `site`         | `boolean`                                   | `false` serves `site: null`.                                                                                                                        |
+
+A hidden section stays in the document as `null`, so readers can tell "hidden by the app" from an
+empty list, which means there is nothing to show:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  agent: {
+    manifest: {
+      app: { build: false },
+      packages: "names",
+      mcp: { schemas: false, hide: ["internal", "store/refund_order"] },
+      webmcp: { hide: ["delete_todo"] },
+      plugins: false,
+    },
+  },
+});
+```
+
+```json title="/.well-known/farmjs.json"
+{
+  "schemaVersion": 1,
+  "app": { "farm": "0.1.41", "renderer": "react", "basePath": "/" },
+  "packages": { "@farm.js/core": null, "@farm.js/mcp": null },
+  "mcp": {
+    "servers": [
+      {
+        "name": "store",
+        "version": "1.0.0",
+        "path": "/api/mcp",
+        "authorization": "none",
+        "resources": [],
+        "prompts": [],
+        "tools": [{ "name": "list_orders", "source": "endpoint", "readOnlyHint": true }]
+      }
+    ]
+  },
+  "webmcp": { "enabled": true, "tools": [{ "name": "list_todos", "inputSchemaSource": "none" }] },
+  "integrations": [{ "key": "billing", "category": "payment", "type": "stripe" }],
+  "agent": { "apiCatalog": null, "llmsTxt": true, "openapi": null },
+  "plugins": null,
+  "site": { "url": "https://acme.com" }
+}
+```
+
+Unknown options and invalid values fail when the config loads. `manifest: false` turns the
+document off at both paths.
+
+Earlier releases gave a request Farm Infra signed for the app's `FARMJS_API_KEY` a fuller view,
+with protected servers' tools and endpoint routes. That view is gone: Farm Infra reads the same
+public document, and `analytics: false` no longer changes it.
 
 ### API catalog
 
@@ -843,18 +1044,49 @@ security: {
 }
 ```
 
-For dynamic HTML, Farm generates a fresh nonce for every response, adds it to the directive that
-governs script elements (`script-src-elem`, then `script-src`, then `default-src`), and stamps every
-script element in the streamed document. Any existing script `nonce` attribute is normalized to the
-fresh response nonce so application-authored inline scripts follow the same policy.
-Script contents, including Unicode text, are preserved across streamed response chunks.
+For dynamic HTML, Farm generates a fresh nonce for every response before rendering it and adds it to
+the directive that governs script elements (`script-src-elem`, then `script-src`, then
+`default-src`). Only scripts that are given the nonce carry it: Farm's own bootstrap, hydration,
+theme, and client entry scripts, the renderer's streaming scripts (React, Preact, Solid, and Svelte
+receive the nonce), and scripts your app opts in. Every other script element in the response loses
+its `nonce` attribute, so markup injected into the page through `dangerouslySetInnerHTML`, CMS
+content, or a reflected value cannot run, even when it brings its own `nonce`. Script contents,
+including Unicode text, are preserved across streamed response chunks.
 
-For fully prerendered HTML, the same option keeps the page static. Farm removes the build-time nonce,
-hashes the exact contents of every inline script with SHA-256, and emits a route-specific policy with
-those hashes. External scripts still need their origin in `script-src` or `script-src-elem`. Dynamic
-responses and PPR shells continue to use fresh nonces, so a nonce is never cached or reused. Keep
-`reportOnly` on while auditing and verify every third-party script and connection before enforcing the
-policy.
+To let an inline script of your own run, give it the response nonce with `getCspNonce()` from
+`@farm.js/core` in a server-rendered page or layout. It returns `undefined` when `nonce` is off, so
+the same code works without a policy:
+
+```tsx
+import { getCspNonce } from "@farm.js/core";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html>
+      <body>
+        {children}
+        <script
+          nonce={getCspNonce()}
+          dangerouslySetInnerHTML={{ __html: "window.appReady = true" }}
+        />
+      </body>
+    </html>
+  );
+}
+```
+
+For fully prerendered HTML, the same option keeps the page static. Farm hashes the exact contents of
+the inline scripts that carry the nonce (its own and the ones you opted in) with SHA-256, removes the
+build-time nonce, and emits a route-specific policy with those hashes. Inline scripts that were not
+opted in get no hash and do not run. External scripts still need their origin in `script-src` or
+`script-src-elem`. A nonce is never cached or reused: in nonce mode Farm renders PPR routes per
+request instead of serving a shared shell. Keep `reportOnly` on while auditing and verify every
+third-party script and connection before enforcing the policy.
+
+Before this release, nonce mode gave the response nonce to every script element in the document,
+including app-authored ones, and prerendered pages hashed every inline script. If your app renders
+inline scripts of its own under `nonce: true`, add `nonce={getCspNonce()}` to each one; until then
+the policy blocks them, which `reportOnly` shows without breaking the page.
 
 Without `nonce: true`, Farm warns when a configured policy would block its inline framework scripts.
 
@@ -889,13 +1121,13 @@ The RSC development bridge applies these limits too. `POST`, `PUT`, `PATCH`, `DE
 bodies keep their original bytes, including multipart uploads and binary data. `GET` and `HEAD`
 remain bodyless. Action origin validation runs before buffering an action body.
 
-`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` values. Farm uses those headers for the client address and public request URL only when the proxy is trusted. A directly exposed Farm server must leave it disabled so a client cannot spoof the address or authority used by rate limits, redirects, authentication callbacks, logs, or access policy.
+`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` values. Farm uses those headers for the client address and public request URL only when the proxy is trusted. The client address is the last `X-Forwarded-For` hop, the one your proxy appended: a proxy that appends (nginx `$proxy_add_x_forwarded_for`, most load balancers) keeps whatever the client sent ahead of it, so earlier hops are never trusted. Behind a chain of proxies that address is the one the closest proxy saw; pass a rate-limit `keyGenerator` if you need an outer proxy's view. A directly exposed Farm server must leave it disabled so a client cannot spoof the address or authority used by rate limits, redirects, authentication callbacks, logs, or access policy.
 
 Workflow runner secrets are accepted only through `Authorization: Bearer <secret>` or `X-Farm-Workflow-Secret`. Farm does not accept secrets in query strings because URLs are commonly retained in logs, browser history, and referrer data.
 
 The long-running Node adapter applies `headersTimeout`, `requestTimeout`, and `keepAliveTimeout` to its HTTP server. `headersTimeout` limits how long a client can occupy a connection while sending headers, and `requestTimeout` limits receipt of the complete request. These are transport timeouts, not limits on route-handler or database execution. Durations accept milliseconds or strings such as `"15s"`, `"2m"`, and `"1h"`.
 
-On `SIGTERM` or `SIGINT`, Node output immediately fails readiness, stops accepting connections, drains active responses and streams through Nitro, and then runs Farm integration and plugin cleanup. `gracefulShutdownTimeout` is the maximum drain period before remaining connections are forced closed. The process starts plugin and integration runtime state before it begins listening, so a successful readiness response means startup completed.
+On `SIGTERM` or `SIGINT`, Node and Bun output immediately fails readiness, stops accepting connections, drains active responses and streams through Nitro, and then runs Farm integration and plugin cleanup. `gracefulShutdownTimeout` is the maximum drain period before remaining connections are forced closed. The process starts plugin and integration runtime state before it begins listening, so a successful readiness response means startup completed.
 
 Farm exposes two non-cacheable production health handlers by default:
 
@@ -908,10 +1140,10 @@ Customize both paths through `server.health`, or set `health: false` when an ada
 
 Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.
 
-Server actions run on the React Server Components pipeline from `@farm.js/plugin/rsc` (see the
-[`rsc-demo` example](https://github.com/farming-labs/farm.js/tree/main/examples/rsc-demo)). The
-`experimental` flags below configure that pipeline; on their own they do not make server functions
-callable from the browser, and Farm keeps rejecting client imports of server-function modules.
+Server actions run on the React Server Components pipeline, which `experimental.serverComponents`
+turns on (see [React Server Components](/docs/server-rendering#react-server-components)).
+`experimental.serverActions` without `serverComponents` does not make server functions callable
+from the browser, and Farm keeps rejecting client imports of server-function modules.
 
 ```ts
 import { defineConfig } from "@farm.js/core";
@@ -949,6 +1181,33 @@ When streamed action input exceeds the limit, Farm cancels it without awaiting p
 
 Rejected requests use generic, non-cacheable responses: `403` for origin failures, `413` for oversized bodies, and `415` for unsupported content types. Detailed parsing or execution errors stay in server logs.
 
+### Middleware does not protect actions
+
+An action is addressed by its id, not by the route that renders it. The browser POSTs it to the
+current page's URL, and any page URL works, so the action runs under the middleware of whatever URL
+the request names. A guard in `src/app/admin/middleware.ts` does not stop a POST to `/` that invokes
+an action defined for the admin page. Next.js behaves the same way.
+
+Authorize inside every action that reads or changes protected data:
+
+```ts
+"use server";
+
+import { auth } from "@farm.js/auth/server";
+import { db } from "@/db";
+
+export async function deleteProject(projectId: string) {
+  const user = await auth.user({ required: true });
+  const project = await db.project.findUnique({ where: { id: projectId } });
+  if (project?.ownerId !== user.id) throw new Error("Forbidden");
+  await db.project.delete({ where: { id: projectId } });
+}
+```
+
+For checks that many actions share, define them as `createServerFn` functions with
+`createServerMiddleware` (see [Composable middleware](/docs/api-client#composable-middleware)): that
+middleware runs for every call of the function, whichever URL carried it.
+
 ## Next-style route exports
 
 Farm route modules can expose compact rendering options directly on the page when the behavior belongs to that route.
@@ -978,8 +1237,18 @@ For redirects and rewrites, the incoming query string is preserved when the dest
 query. A query written in the destination replaces the incoming query string.
 Rewrites use after-files semantics in development and production: an existing Farm page, API,
 integration, docs, image, or metadata route wins, and the rewrite is considered only as a fallback.
+A rewrite destination on another origin is proxied: Farm forwards the request there and returns the
+upstream response, in development and production.
+Both modes handle a request in the same order: redirects first, before any route or middleware;
+then rewrites; then app middleware; then the route. An internal rewrite is routed as a direct
+request for its destination would be, so the destination's middleware and its page or API route
+answer it, and middleware for the requested path does not run.
+With a `basePath`, sources match the path below it, as routes do: `/old` matches a request for
+`/console/old`. An internal redirect destination is sent with the `basePath`, so `/new` redirects to
+`/console/new`; a destination that already starts with it is kept.
 Configured response headers are applied after route handlers in both modes, so they win when the
-same header is returned by a handler. `Link` is additive: handler and configured link values are
+same header is returned by a handler. They match the requested path and also apply to redirects
+and middleware responses. `Link` is additive: handler and configured link values are
 merged instead of replacing one another. `Set-Cookie` is also additive, and each handler or
 configured cookie remains a separate response header.
 
@@ -1019,7 +1288,18 @@ export default defineConfig({
 
 `render: "static"` maps to prerendering. `render: "dynamic"` forces a dynamic response. `swr` and `isr` accept `true` or a TTL in seconds. `cors: true` applies permissive API CORS headers; pass an object when you need a specific origin, methods, or headers.
 
+On Netlify, an `isr` rule caches a response on Netlify's CDN only when Farm sends it with a shared
+`Cache-Control`. A response Farm marks `private` or `no-store` (a request with cookies or an
+`Authorization` header, middleware data, a render that read the request, an error, or a dynamic
+render with no cache policy such as `revalidate`) is never stored for other visitors. The same
+holds for any other response of an `isr` route, API routes and middleware responses included:
+only a `200` to a request without `Cookie` or `Authorization`, with no `Set-Cookie` and no `Vary`
+on either, is cached on the CDN. The rest are sent `Cache-Control: private, no-store` unless they
+set their own.
+
 API routes remain same-origin by default in development and production. Add `cors` only to route patterns that intentionally form a cross-origin browser API.
+
+A `cors` rule answers a browser preflight (`OPTIONS` with `Origin` and `Access-Control-Request-Method`) with `204` before middleware and routes run. Every other `OPTIONS` request reaches app middleware and the route: an API route's `OPTIONS` export, or `405` with an `Allow` header when it has none. `farm dev` behaves the same way. Vite's own development requests (modules, `/@vite/client`, `/@fs/`) keep Vite's default CORS for `localhost` origins. An app that sets `vite.server.cors` hands CORS for every development request back to Vite.
 
 Rules can also provide `runtime`, `regions`, and `maxDuration` defaults. File pages, API routes, and layouts can override them with named exports. See [Route Runtime](/docs/route-runtime) for inheritance and deployment behavior.
 
@@ -1060,6 +1340,13 @@ export default defineConfig({
   },
 });
 ```
+
+`cron.provider` picks who runs the schedules. `"host"`, the default, is the platform you deploy to
+with `deploy.target` or `deploy.preset` (Vercel Cron, Cloudflare Cron Triggers, or Nitro tasks).
+`"farmjs"` hands them to Farm.js Infra: use `cron: { provider: "farmjs", jobs: { ... } }`, or
+`cron: { provider: "farmjs" }` with route-local schedules, then run
+`farm cron sync --url https://app.example.com --apply` after deployment. See
+[Cron: choose the provider](/docs/cron#choose-the-provider) for credentials, planning, and cleanup.
 
 See [Cron](/docs/cron) for route protection, local commands, UTC syntax, deployment behavior, and reliability boundaries.
 
@@ -1135,8 +1422,9 @@ retention, preview-environment, opt-out, and static-export details.
 
 ## Farm Infra analytics
 
-An app whose server environment sets `FARMJS_API_KEY` and `FARMJS_PROJECT_ID` reports request and MCP
-tool analytics to that Farm Infra project. Set `analytics: false` to never send them. See
+An app whose server environment sets `FARMJS_API_KEY` to a Site analytics key reports request and
+MCP tool analytics to that key's Farm Infra project. A key reaching several projects also needs
+`FARMJS_PROJECT_ID`. Set `analytics: false` to never send them. See
 [Farm Infra analytics](/docs/infra-analytics) for what is sent and how.
 
 ## Deployment config
@@ -1187,5 +1475,5 @@ Prefer a CI release or commit identifier when a deployment runs on multiple serv
 - Prefer `routeRules` for broad URL patterns and platform-level cache/header behavior.
 - Keep `serverActions.allowedOrigins` empty unless the deployment has a known proxy-origin mismatch.
 - Give every rolling release one stable `deploymentId`; do not generate a different value per server instance.
-- Treat every server action as a public endpoint and authorize the current user inside the action or middleware.
+- Treat every server action as a public endpoint and authorize the current user inside the action or its `createServerMiddleware`; route middleware does not run for the action's own route.
 - Keep `farm.config.ts` as the single control plane instead of spreading framework behavior across many root files.

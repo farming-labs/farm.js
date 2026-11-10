@@ -13,8 +13,10 @@ export function useArtworkMotion<T extends HTMLElement>() {
     if (!element || !("IntersectionObserver" in window)) return;
     let visible = false;
     const update = () => setMotion(!document.hidden && visible ? "running" : "paused");
-    const observer = new IntersectionObserver(([entry]) => {
-      visible = entry.isIntersecting;
+    // A callback can carry several entries for one element (off screen, then back on after a
+    // navigation scrolls to the top); the last one is current.
+    const observer = new IntersectionObserver((entries) => {
+      visible = entries[entries.length - 1].isIntersecting;
       update();
     });
     observer.observe(element);

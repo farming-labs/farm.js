@@ -1,9 +1,34 @@
+import { _withFarmResponseHeaders } from "./owned-response";
 import { stripFarmBasePath } from "./base-path";
 import { _findFarmMCPEndpointTool, type FarmMCPEndpointTool } from "./mcp-catalog";
 import { createFarmMarkdownViewResponse, FARM_MARKDOWN_VIEW_PARAMS } from "./markdown-view";
 
 /** Content type for Markdown responses, including agent-facing error bodies. */
 export const FARM_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
+
+/**
+ * @internal Header on the anonymous page render that decides whether a page's Markdown
+ * source is public. Its value is a per-process secret, so a client cannot set it: the
+ * render it selects is buffered to the end, where a late `redirect()` or `notFound()`
+ * still sets the status instead of a script in an already-sent 200 document.
+ */
+export const FARM_MARKDOWN_PAGE_CHECK_HEADER = "x-farm-markdown-page-check";
+const MARKDOWN_PAGE_CHECK_TOKEN = Symbol.for("farm.markdownPageCheckToken");
+
+/** @internal The value of {@link FARM_MARKDOWN_PAGE_CHECK_HEADER} for this process. */
+export function _getFarmMarkdownPageCheckToken(): string {
+  const state = globalThis as unknown as Record<PropertyKey, string | undefined>;
+  return (state[MARKDOWN_PAGE_CHECK_TOKEN] ??= globalThis.crypto.randomUUID());
+}
+
+/** @internal Whether a request is Farm's own anonymous page check. */
+export function _isFarmMarkdownPageCheck(
+  value: string | readonly string[] | null | undefined,
+): boolean {
+  const state = globalThis as unknown as Record<PropertyKey, string | undefined>;
+  const token = state[MARKDOWN_PAGE_CHECK_TOKEN];
+  return Boolean(token) && typeof value === "string" && value === token;
+}
 
 export function farmRequestWantsMarkdown(
   pathname: string,
@@ -64,12 +89,27 @@ export interface FarmMarkdownResolvedConfig {
 }
 
 export interface FarmMarkdownMirrorTarget {
+  /** The page's public pathname, with the app's `basePath` and locale prefix. */
   pathname: string;
   route: FarmMarkdownResolvedRoute | null;
+  /** The page's canonical `.md` URL: `<prefix>/index.md` for a home page. */
+  markdownPath: string;
 }
+
+/**
+ * A request pathname as routes see it: without the app's `basePath` and, with i18n, the locale
+ * prefix. `/console/fr/about` is `/about` under basePath "/console" with a `fr` locale.
+ */
+export type FarmMarkdownRoutePathname = (pathname: string) => string;
 
 export interface ResolveMarkdownMirrorTargetOptions {
   accept?: string | null;
+  /**
+   * Strips the app's `basePath` and locale prefix, so `<prefix>/index.md` names that prefix's
+   * home page as `/index.md` does, and that is the `.md` URL the home page advertises.
+   * `md.expose` is matched against the stripped path, as llms.txt reads it.
+   */
+  routePathname?: FarmMarkdownRoutePathname;
 }
 
 export interface CreateMarkdownMirrorResponseOptions {
@@ -81,11 +121,15 @@ export interface CreateMarkdownMirrorResponseOptions {
   renderPage: (request: Request) => Response | Promise<Response>;
   /** The app's public API path, so a form posting to an API route can be matched to its MCP tool. */
   apiServerBasePath?: string;
+  /** See {@link ResolveMarkdownMirrorTargetOptions.routePathname}. */
+  routePathname?: FarmMarkdownRoutePathname;
 }
 
 export interface ApplyMarkdownNegotiationHeadersOptions {
   config?: FarmMarkdownResolvedConfig;
   pathname: string;
+  /** See {@link ResolveMarkdownMirrorTargetOptions.routePathname}. */
+  routePathname?: FarmMarkdownRoutePathname;
 }
 
 export function resolveMarkdownConfig(
@@ -135,10 +179,15 @@ export function resolveMarkdownMirrorTarget(
     return null;
   }
 
-  const targetPathname = normalizeMarkdownRoute(
-    hasMarkdownExtension ? pathname.slice(0, -".md".length) || "/" : pathname,
+  const targetPathname = _resolveFarmMarkdownIndexAlias(
+    normalizeMarkdownRoute(
+      hasMarkdownExtension ? pathname.slice(0, -".md".length) || "/" : pathname,
+    ),
+    options.routePathname,
   );
-  const route = findExposedMarkdownRoute(config, targetPathname);
+  // `md.expose` lists route paths, as llms.txt and the default MCP server read them.
+  const routePathname = options.routePathname?.(targetPathname) ?? targetPathname;
+  const route = findExposedMarkdownRoute(config, routePathname);
   if (!route && config.expose !== true) {
     return null;
   }
@@ -146,6 +195,7 @@ export function resolveMarkdownMirrorTarget(
   return {
     pathname: targetPathname,
     route,
+    markdownPath: _getFarmMarkdownPath(targetPathname, routePathname),
   };
 }
 
@@ -163,6 +213,7 @@ export async function createMarkdownMirrorResponse(
   const hasMarkdownExtension = requestUrl.pathname.toLowerCase().endsWith(".md");
   const target = resolveMarkdownMirrorTarget(options.config, requestUrl.pathname, {
     accept: options.request.headers.get("accept"),
+    routePathname: options.routePathname,
   });
   if (!target) {
     return null;
@@ -178,13 +229,28 @@ export async function createMarkdownMirrorResponse(
   for (const name of FARM_MARKDOWN_VIEW_PARAMS) pageUrl.searchParams.delete(name);
   const headers = new Headers(options.request.headers);
   headers.set("accept", "text/html");
+  // Fetch complete HTML, not a cached/partial representation selected by the
+  // Markdown caller. The final view evaluates its own ETag preconditions below.
+  headers.delete("if-match");
+  headers.delete("if-unmodified-since");
+  headers.delete("if-none-match");
+  headers.delete("if-modified-since");
+  headers.delete("range");
+  headers.delete("if-range");
 
   const pageResponse = await options.renderPage(
     new Request(pageUrl, {
       method: "GET",
       headers,
+      signal: options.request.signal,
     }),
   );
+
+  // These statuses cannot carry a representation, even with an HTML content
+  // type. Preserve the terminal response before conversion or view selection.
+  if (pageResponse.status === 204 || pageResponse.status === 205 || pageResponse.status === 304) {
+    return pageResponse;
+  }
 
   // A redirect is answered as a redirect even when it carries an HTML body, as
   // the development renderer's redirects do.
@@ -194,17 +260,38 @@ export async function createMarkdownMirrorResponse(
     // A page behind sign-in redirects or answers 401/403 without HTML. Say so in
     // Markdown with the same status, rather than falling through to a 404 that
     // tells the agent the page does not exist.
-    return createMarkdownAccessResponse(
+    const accessResponse = createMarkdownAccessResponse(
       pageResponse,
       target.pathname,
       pageUrl,
       options.request.method === "HEAD",
     );
+    if (accessResponse || options.request.method === "HEAD") {
+      // The replacement has no use for the original body. Cancellation must not
+      // delay headers (a streaming source can take arbitrarily long to settle).
+      void pageResponse.body?.cancel().catch(() => {});
+      return (
+        accessResponse ??
+        new Response(null, {
+          status: pageResponse.status,
+          statusText: pageResponse.statusText,
+          headers: pageResponse.headers,
+        })
+      );
+    }
+    // Rendering already handled this request. Returning null would ask the
+    // caller to dispatch again, losing errors such as 429 at an explicit .md URL.
+    return pageResponse;
   }
 
   const html = await pageResponse.text();
-  const markdownPath = target.pathname === "/" ? "/index.md" : `${target.pathname}.md`;
-  const actions = extractFarmPageActions(html, pageUrl);
+  const markdownPath = target.markdownPath;
+  // Forms and Markdown read the same prepared content. Keep it request-local,
+  // and keep the no-form actions view free of content preparation altogether.
+  // Error responses are read in full, not as action/partial views.
+  const region =
+    pageResponse.status < 400 && /<form\b/i.test(html) ? readHtmlContentRegion(html) : undefined;
+  const actions = region === undefined ? [] : extractPageActionsFromRegion(region, pageUrl);
   for (const form of actions) {
     // Only a same-origin target can be an endpoint of this app.
     if (!form.action?.startsWith("/")) continue;
@@ -214,12 +301,21 @@ export async function createMarkdownMirrorResponse(
       _findFarmMCPEndpointTool(form.method, stripFarmBasePath(pathname), options.apiServerBasePath);
     if (tool) form.tool = tool;
   }
-  const markdown = htmlToMarkdown(html, {
-    title: target.route?.title,
-    includeMetadata: options.config?.includeMetadata ?? true,
-    sourcePath: target.pathname,
-    actionsPath: actions.length > 0 ? `${markdownPath}?actions` : undefined,
-  });
+  // The actions view uses only the forms as JSON. Errors still need their full
+  // Markdown explanation, regardless of the requested view.
+  const markdown =
+    pageResponse.status < 400 && requestUrl.searchParams.has("actions")
+      ? ""
+      : convertHtmlToMarkdown(
+          html,
+          {
+            title: target.route?.title,
+            includeMetadata: options.config?.includeMetadata ?? true,
+            sourcePath: target.pathname,
+            actionsPath: actions.length > 0 ? `${markdownPath}?actions` : undefined,
+          },
+          region,
+        );
   const headersOut = new Headers({
     "Content-Type": "text/markdown; charset=utf-8",
     "Content-Location": markdownPath,
@@ -234,15 +330,23 @@ export async function createMarkdownMirrorResponse(
     const name = token.trim();
     if (name && name.toLowerCase() !== "accept") appendHeaderToken(headersOut, "Vary", name);
   }
-  // A page that must not be shared keeps that policy for its Markdown mirror.
+  // A page that must not be shared keeps that policy for its Markdown mirror. A page
+  // rendered with the caller's credentials is theirs even when it sets no policy, as RSC
+  // pages do not: `md.cache` must not make a signed-in reader's copy public.
   const pageCacheControl = pageResponse.headers.get("cache-control");
   const cache = target.route?.cache ?? options.config?.cache ?? false;
   headersOut.set(
     "Cache-Control",
     pageCacheControl && isPrivateCacheControl(pageCacheControl)
       ? pageCacheControl
-      : createMarkdownCacheHeader(cache),
+      : headers.has("cookie") || headers.has("authorization")
+        ? "private, no-store"
+        : createMarkdownCacheHeader(cache),
   );
+  preserveMarkdownResponseCookies(pageResponse.headers, headersOut);
+  if (pageResponse.status >= 400) {
+    preserveMarkdownResponseControlHeaders(pageResponse.headers, headersOut);
+  }
 
   // The mirror is the same document in another format, so it keeps the page's
   // indexing rules and points search engines at the page as the canonical copy.
@@ -266,6 +370,7 @@ export async function createMarkdownMirrorResponse(
     status: pageResponse.status,
     headers: headersOut,
     markdownPath,
+    pagePath: target.pathname,
     actions,
   });
 }
@@ -285,6 +390,8 @@ function createMarkdownAccessResponse(
     "Cache-Control": "no-store",
     "X-Farm-Markdown-Route": pathname,
   });
+  preserveMarkdownResponseCookies(pageResponse.headers, headers);
+  preserveMarkdownResponseControlHeaders(pageResponse.headers, headers);
   let body: string;
   if (redirect) {
     let target: string;
@@ -298,14 +405,35 @@ function createMarkdownAccessResponse(
       `# Redirected\n\n\`${pathname}\` redirects to [${target}](${target}). ` +
       "The page may require signing in.\n";
   } else {
-    const authenticate = pageResponse.headers.get("www-authenticate");
-    if (authenticate) headers.set("WWW-Authenticate", authenticate);
     body =
       pageResponse.status === 401
         ? `# Sign-in required\n\n\`${pathname}\` requires signing in.\n`
         : `# Access denied\n\nThis account cannot read \`${pathname}\`.\n`;
   }
   return new Response(head ? null : body, { status: pageResponse.status, headers });
+}
+
+function preserveMarkdownResponseControlHeaders(source: Headers, target: Headers): void {
+  // These describe how to recover from the response, not the HTML representation.
+  for (const name of ["WWW-Authenticate", "Proxy-Authenticate", "Retry-After", "Allow"]) {
+    const value = source.get(name);
+    if (value !== null) target.set(name, value);
+  }
+}
+
+function preserveMarkdownResponseCookies(source: Headers, target: Headers): void {
+  const getSetCookie = source.getSetCookie;
+  const cookies =
+    typeof getSetCookie === "function"
+      ? getSetCookie.call(source)
+      : source.has("set-cookie")
+        ? [source.get("set-cookie")!]
+        : [];
+  if (cookies.length === 0) return;
+  // Keep separate fields (including Expires commas and same-name scoped cookies).
+  for (const cookie of cookies) target.append("Set-Cookie", cookie);
+  // A cached mirror must never replay a caller's session cookie to another reader.
+  target.set("Cache-Control", "private, no-store");
 }
 
 export function applyMarkdownNegotiationHeaders(
@@ -316,19 +444,16 @@ export function applyMarkdownNegotiationHeaders(
     return response;
   }
 
-  const alternatePath = getFarmMarkdownAlternatePath(options.config, options.pathname);
+  const alternatePath = getFarmMarkdownAlternatePath(options.config, options.pathname, {
+    routePathname: options.routePathname,
+  });
   if (!alternatePath) {
     return response;
   }
 
-  const headers = new Headers(response.headers);
-  appendHeaderToken(headers, "Vary", "Accept");
-  headers.append("Link", `<${alternatePath}>; rel="alternate"; type="text/markdown"`);
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
+  return _withFarmResponseHeaders(response, (headers) => {
+    appendHeaderToken(headers, "Vary", "Accept");
+    headers.append("Link", `<${alternatePath}>; rel="alternate"; type="text/markdown"`);
   });
 }
 
@@ -348,6 +473,72 @@ const BLOCK_TAGS =
 const BOX_TAGS =
   /<\/?(label|button|input|select|textarea|option|output|meter|progress|td|th)\b[^>]*>/gi;
 
+// Layout containers whose children are often a row of separate items (a flex
+// label and value, a nav of links) rather than running text.
+const LAYOUT_ROW =
+  /<(div|nav|section|header|footer|aside|main|article|figure|figcaption|dt|dd)\b([^>]*)>((?:(?!<\/?(?:div|nav|section|header|footer|aside|main|article|figure|figcaption|dt|dd|p|h[1-6]|ul|ol|li|table|pre|blockquote)\b)[\s\S])*?)<\/\1>/gi;
+const HTML_TOKEN = /<\/?([a-zA-Z][\w:-]*)\b[^>]*?(\/?)>|[^<]+/g;
+
+/**
+ * JSX drops the line breaks between siblings, so a flex row written as
+ * `<span>00</span>` and `<span>Basic starter</span>` on two lines renders as
+ * `<span>00</span><span>Basic starter</span>`, and the text reads "00Basic
+ * starter". Inside a layout container with no text of its own, each child
+ * element is its own item, so a space goes between them. A container with text
+ * of its own is prose, and children of one character each are a letter-split
+ * word, so both keep their markup as written.
+ */
+function separateLayoutRowItems(source: string): string {
+  return source.replace(
+    LAYOUT_ROW,
+    (container: string, tag: string, attributes: string, content: string) => {
+      const boundaries: number[] = [];
+      const items: string[] = [];
+      let depth = 0;
+      let previousEnd = -1;
+      let item = "";
+      for (const match of content.matchAll(HTML_TOKEN)) {
+        const [token, name, selfClosing] = match;
+        const index = match.index ?? 0;
+        if (name === undefined) {
+          if (depth === 0) {
+            if (token.trim()) return container;
+            previousEnd = -1;
+          } else {
+            item += token;
+          }
+          continue;
+        }
+        const closing = token.startsWith("</");
+        const isVoid = selfClosing === "/" || VOID_TAGS.has(name.toLowerCase());
+        if (closing) {
+          depth = Math.max(0, depth - 1);
+        } else {
+          if (depth === 0 && previousEnd === index) boundaries.push(index);
+          if (!isVoid) depth += 1;
+        }
+        if (depth === 0) {
+          previousEnd = index + token.length;
+          items.push(decodeHtml(item).trim());
+          item = "";
+        }
+      }
+      if (boundaries.length === 0) return container;
+      if (items.filter(Boolean).every((text) => text.length === 1)) return container;
+      // Append disjoint spans in source order instead of slicing the growing
+      // row again for every separator.
+      let separated = "";
+      let start = 0;
+      for (const boundary of boundaries) {
+        separated += `${content.slice(start, boundary)} `;
+        start = boundary;
+      }
+      separated += content.slice(start);
+      return `<${tag}${attributes}>${separated}</${tag}>`;
+    },
+  );
+}
+
 export function htmlToMarkdown(
   html: string,
   options: {
@@ -358,8 +549,16 @@ export function htmlToMarkdown(
     actionsPath?: string;
   } = {},
 ): string {
+  return convertHtmlToMarkdown(html, options);
+}
+
+function convertHtmlToMarkdown(
+  html: string,
+  options: NonNullable<Parameters<typeof htmlToMarkdown>[1]>,
+  region?: string,
+): string {
   const title = options.title ?? extractHtmlTitle(html);
-  let source = readHtmlContentRegion(html);
+  let source = region ?? readHtmlContentRegion(html);
 
   // Code blocks are set aside behind placeholders so the tidying below never
   // touches them, and each gets a fence longer than any backtick run inside it,
@@ -399,6 +598,7 @@ export function htmlToMarkdown(
       return `\n\n${CODE_BLOCK_MARK}${codeBlocks.length - 1}${CODE_BLOCK_MARK}\n\n`;
     },
   );
+  source = separateLayoutRowItems(source);
   source = source.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_, level, content) => {
     return `\n\n${"#".repeat(Number(level))} ${toInlineMarkdown(content).trim()}\n\n`;
   });
@@ -500,6 +700,31 @@ function normalizeMarkdownRouteInput(input: FarmMarkdownRouteInput): FarmMarkdow
   };
 }
 
+/**
+ * @internal `<prefix>/index` names the page at `<prefix>` when that is a home page: `/index` at
+ * the app's root, `/console/index` under basePath "/console", `/fr/index` for the `fr` locale,
+ * and `/console/fr/index` for both. Request paths still carry the prefix at this point.
+ */
+export function _resolveFarmMarkdownIndexAlias(
+  pathname: string,
+  routePathname?: FarmMarkdownRoutePathname,
+): string {
+  if (pathname === "/index") return "/";
+  if (!routePathname || !pathname.endsWith("/index")) return pathname;
+  const prefix = pathname.slice(0, -"/index".length);
+  return routePathname(prefix) === "/" ? prefix : pathname;
+}
+
+/**
+ * @internal A page's canonical `.md` URL. A home page's is `<prefix>/index.md`, as llms.txt, the
+ * default MCP server, and other pages' `<prefix>/<page>.md` URLs name it; `<prefix>.md` still
+ * serves it. `routePathname` is `pathname` as routes see it.
+ */
+export function _getFarmMarkdownPath(pathname: string, routePathname = pathname): string {
+  if (routePathname !== "/") return `${pathname}.md`;
+  return pathname === "/" ? "/index.md" : `${pathname.replace(/\/+$/, "")}/index.md`;
+}
+
 function normalizeMarkdownRoute(route: string): string {
   const withoutMarkdownExtension = route.toLowerCase().endsWith(".md") ? route.slice(0, -3) : route;
   const withSlash = withoutMarkdownExtension.startsWith("/")
@@ -588,9 +813,13 @@ export function getFarmMarkdownMirrorPath(pathname: string): string {
 export function getFarmMarkdownAlternatePath(
   config: FarmMarkdownResolvedConfig | undefined,
   pathname: string,
+  options: Pick<ResolveMarkdownMirrorTargetOptions, "routePathname"> = {},
 ): string | null {
-  const target = resolveMarkdownMirrorTarget(config, pathname, { accept: "text/markdown" });
-  return target ? getMarkdownAlternatePath(target.pathname) : null;
+  const target = resolveMarkdownMirrorTarget(config, pathname, {
+    accept: "text/markdown",
+    routePathname: options.routePathname,
+  });
+  return target ? target.markdownPath : null;
 }
 
 /** @internal Whether `pathname` has a Markdown mirror under `config`. */
@@ -635,6 +864,8 @@ function routeMatches(pattern: string, pathname: string): boolean {
   if (pattern === pathname) {
     return true;
   }
+  // Only bracket segments can match anything other than the literal pattern.
+  if (!pattern.includes("[")) return false;
 
   let source = "";
   pattern.split("/").forEach((segment, index) => {
@@ -691,17 +922,32 @@ function extractHtmlTitle(html: string): string | undefined {
  * first, while its hidden segments and boundary comments are still there.
  */
 function readHtmlContentRegion(html: string): string {
+  return extractHtmlBody(_readFarmRenderedHtml(html));
+}
+
+/**
+ * @internal A rendered page as a reader sees it, whole: streamed Suspense content in place, and
+ * scripts, styles, comments, and hidden elements removed. The native tier reads pages this way too.
+ */
+/**
+ * The rendered page's markup: streamed boundaries in place, without scripts, styles, comments, or
+ * hidden elements. `aria-hidden` content goes too unless `keepAriaHidden`: the Markdown mirror
+ * reads what a screen reader gets, while the native tree draws what a browser shows.
+ */
+export function _readFarmRenderedHtml(
+  html: string,
+  options: { keepAriaHidden?: boolean } = {},
+): string {
   const streamed = readStreamedBoundaryInstructions(html);
-  return extractHtmlBody(
-    removeHiddenElements(
-      resolveStreamedBoundaries(
-        html
-          .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-          .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-          .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ""),
-        streamed,
-      ).replace(/<!--[\s\S]*?-->/g, ""),
-    ),
+  return removeHiddenElements(
+    resolveStreamedBoundaries(
+      html
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ""),
+      streamed,
+    ).replace(/<!--[\s\S]*?-->/g, ""),
+    options.keepAriaHidden,
   );
 }
 
@@ -825,7 +1071,10 @@ const FORM_ENCTYPES = new Set([
  */
 export function extractFarmPageActions(html: string, pageUrl: URL): FarmPageFormAction[] {
   if (!/<form\b/i.test(html)) return [];
-  const region = readHtmlContentRegion(html);
+  return extractPageActionsFromRegion(readHtmlContentRegion(html), pageUrl);
+}
+
+function extractPageActionsFromRegion(region: string, pageUrl: URL): FarmPageFormAction[] {
   const labelsFor = new Map<string, string>();
   for (const match of region.matchAll(/<label\b([^>]*)>([\s\S]*?)<\/label>/gi)) {
     const target = readDecodedAttribute(match[1]!, "for");
@@ -1161,7 +1410,10 @@ const VOID_TAGS = new Set([
  * Markdown mirror should get what a screen reader gets. `hidden="until-found"`
  * stays, since that content can still be found and revealed.
  */
-function removeHiddenElements(html: string): string {
+function removeHiddenElements(html: string, keepAriaHidden = false): string {
+  // Both supported attribute names contain "hidden". Only prove absence here;
+  // any occurrence (including text or quoted values) uses the complete parser.
+  if (!/hidden/i.test(html)) return html;
   const openingTag = /<([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
   let closingTags: Map<number, number> | undefined;
   let result = "";
@@ -1169,7 +1421,7 @@ function removeHiddenElements(html: string): string {
   let match: RegExpExecArray | null;
   while ((match = openingTag.exec(html))) {
     const [tag, name, attributes] = match;
-    if (!isHiddenElement(attributes)) continue;
+    if (!isHiddenElement(attributes, keepAriaHidden)) continue;
     const start = match.index;
     let end = start + tag.length;
     if (!VOID_TAGS.has(name.toLowerCase()) && !isSelfClosingTag(tag)) {
@@ -1187,13 +1439,13 @@ function removeHiddenElements(html: string): string {
   return result + html.slice(cursor);
 }
 
-function isHiddenElement(attributes: string): boolean {
+function isHiddenElement(attributes: string, keepAriaHidden = false): boolean {
   const attribute = /([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
   let match: RegExpExecArray | null;
   while ((match = attribute.exec(attributes))) {
     const name = match[1]!.toLowerCase();
     const value = (match[2] ?? match[3] ?? match[4] ?? "").trim().toLowerCase();
-    if (name === "aria-hidden" && value === "true") return true;
+    if (name === "aria-hidden" && value === "true" && !keepAriaHidden) return true;
     if (name === "hidden" && value !== "until-found") return true;
   }
   return false;

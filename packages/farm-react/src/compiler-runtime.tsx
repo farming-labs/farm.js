@@ -3042,6 +3042,8 @@ export interface CompilerKeyedRowsBlockProps {
    * row can be cloned from one already built with its bindings reapplied.
    */
   cloneRows?: boolean;
+  /** Compiler-emitted lookup sharing plain-row binding path prefixes. */
+  targets?: (root: Element) => (Element | null)[];
 }
 
 export interface CompilerKeyedRange {
@@ -3133,14 +3135,13 @@ interface CompilerHmrRegistryEntry {
 
 type CompilerHmrRegistry = Map<string, CompilerHmrRegistryEntry>;
 
-const COMPILER_HMR_REGISTRY = Symbol.for("@farm.js/react/compiler-hmr-registry");
-
 function getCompilerHmrRegistry(): CompilerHmrRegistry {
+  const registryKey = Symbol.for("@farm.js/react/compiler-hmr-registry");
   const globalTarget = globalThis as typeof globalThis & Record<symbol, unknown>;
-  const existing = globalTarget[COMPILER_HMR_REGISTRY];
+  const existing = globalTarget[registryKey];
   if (existing instanceof Map) return existing as CompilerHmrRegistry;
   const registry: CompilerHmrRegistry = new Map();
-  globalTarget[COMPILER_HMR_REGISTRY] = registry;
+  globalTarget[registryKey] = registry;
   return registry;
 }
 
@@ -3318,6 +3319,16 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
   if (name === "value" && (isInputElement(element) || isTextAreaElement(element))) {
     const nextValue = value === null || value === undefined ? "" : String(value);
     if (element.value !== nextValue) element.value = nextValue;
+    // React synchronizes controlled input values with the native reset baseline.
+    // Focused number inputs defer this to blur to preserve in-progress editing.
+    if (
+      value != null &&
+      isInputElement(element) &&
+      (element.type !== "number" || element.ownerDocument.activeElement !== element) &&
+      element.defaultValue !== nextValue
+    ) {
+      element.defaultValue = nextValue;
+    }
     return;
   }
 
@@ -3346,8 +3357,37 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
   } else if (value === true && !stringifiesBoolean) {
     element.setAttribute(attributeName, "");
   } else {
-    element.setAttribute(attributeName, String(value));
+    element.setAttribute(attributeName, compilerAttributeValue(element, name, String(value)));
   }
+}
+
+// React's sanitizeURL: a URL may start with C0 controls or spaces, and the
+// parser drops tabs and newlines anywhere, so all of these still mean javascript:.
+const JAVASCRIPT_URL =
+  // oxlint-disable-next-line no-control-regex
+  /^[\u0000-\u001F ]*j[\r\n\t]*a[\r\n\t]*v[\r\n\t]*a[\r\n\t]*s[\r\n\t]*c[\r\n\t]*r[\r\n\t]*i[\r\n\t]*p[\r\n\t]*t[\r\n\t]*:/i;
+// React 19 replaces these URLs; React 18 only warns and writes them.
+const BLOCKS_JAVASCRIPT_URLS = Number.parseInt(React.version, 10) > 18;
+
+/**
+ * The string React writes for a host prop: the same props React 19 runs
+ * through sanitizeURL (custom elements are left alone, as React does).
+ */
+function compilerAttributeValue(element: Element, name: string, value: string): string {
+  if (
+    !BLOCKS_JAVASCRIPT_URLS ||
+    (name !== "href" &&
+      name !== "src" &&
+      name !== "action" &&
+      name !== "formAction" &&
+      name !== "data")
+  ) {
+    return value;
+  }
+  const tag = element.localName;
+  return (name !== "data" || tag === "object") && !tag.includes("-") && JAVASCRIPT_URL.test(value)
+    ? "javascript:throw new Error('React has blocked a javascript: URL as a security precaution.')"
+    : value;
 }
 
 type CompilerBlockRefresh = (afterCommit?: () => void, dirtyState?: ReadonlySet<number>) => void;
@@ -4482,13 +4522,18 @@ function readKeyedRowBindingValues(
 }
 
 type CompilerKeyedRowSource = Pick<CompilerKeyedRowsBlockProps, "bindings" | "create"> &
-  Partial<Pick<CompilerKeyedRowsBlockProps, "cloneRows">>;
+  Partial<Pick<CompilerKeyedRowsBlockProps, "cloneRows" | "targets">>;
 
 // With cloneRows, everything outside the bindings is identical for every row.
 // Once one row is built from its descriptor, the rest clone it and reapply
 // their bindings. Keyed by the props object: a new render, which can close
 // over new values, derives a new skeleton.
-const KEYED_ROW_TEMPLATES = /* @__PURE__ */ new WeakMap<object, Element>();
+interface KeyedRowTemplate {
+  element: Element;
+  classNames: (string | undefined)[];
+}
+
+const KEYED_ROW_TEMPLATES = /* @__PURE__ */ new WeakMap<object, KeyedRowTemplate>();
 
 function createKeyedRowInstance(
   props: CompilerKeyedRowSource,
@@ -4499,7 +4544,7 @@ function createKeyedRowInstance(
 ): CompilerKeyedRowInstance {
   const template = props.cloneRows && KEYED_ROW_TEMPLATES.get(props);
   const element = template
-    ? (template.cloneNode(true) as Element)
+    ? (template.element.cloneNode(true) as Element)
     : createCompilerHostElement(document, props.create(item, index));
   const instance: CompilerKeyedRowInstance = {
     key,
@@ -4510,16 +4555,29 @@ function createKeyedRowInstance(
     conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
   };
   if (props.cloneRows) {
-    const targets: (Element | null)[] = [];
+    let targets = props.targets?.(element);
     let found = true;
-    for (const binding of props.bindings) {
-      const target = findCompilerHostTarget(element, binding.path);
-      found &&= target !== null;
-      targets.push(target);
+    if (
+      !targets ||
+      targets.length !== props.bindings.length ||
+      !props.bindings.every((_, index) => targets![index] != null)
+    ) {
+      // Validate every binding, including sparse lookup results, before using
+      // generated targets. Incomplete lookups retain the full existing walk.
+      targets = [];
+      for (const binding of props.bindings) {
+        const target = findCompilerHostTarget(element, binding.path);
+        found &&= target !== null;
+        targets.push(target);
+      }
     }
     if (found) instance.targets = targets as Element[];
     if (template) {
       for (let bindingIndex = 0; bindingIndex < targets.length; bindingIndex += 1) {
+        const value = instance.values[bindingIndex];
+        // Only primitive strings can reuse the class copied by cloneNode.
+        // Other values still need the normal coercion and attribute semantics.
+        if (typeof value === "string" && value === template.classNames[bindingIndex]) continue;
         commitKeyedRowBinding(
           props.bindings[bindingIndex],
           instance,
@@ -4540,7 +4598,7 @@ function keyedRowTemplate(
   props: CompilerKeyedRowSource,
   element: Element,
   targets: readonly (Element | null)[],
-): Element | undefined {
+): KeyedRowTemplate | undefined {
   // A clone updates bound attributes in place, which keeps a built row's
   // attribute order only if this row has every one of them. Otherwise wait for
   // a row that does.
@@ -4556,10 +4614,24 @@ function keyedRowTemplate(
     }
   }
   const template = element.cloneNode(true) as Element;
-  for (const binding of props.bindings) {
+  const classNames: (string | undefined)[] = [];
+  const classTargets = new Set<Element>();
+  for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
+    const binding = props.bindings[bindingIndex];
     if (binding.kind === "text") findCompilerHostTarget(template, binding.path)!.textContent = "";
+    if (
+      binding.kind === "attribute" &&
+      (binding.name === "className" || binding.name === "class")
+    ) {
+      const target = targets[bindingIndex]!;
+      // A preceding class binding may change the clone before this one runs.
+      if (!classTargets.has(target)) {
+        classNames[bindingIndex] = target.getAttribute("class") ?? undefined;
+        classTargets.add(target);
+      }
+    }
   }
-  return template;
+  return { element: template, classNames };
 }
 
 function applyKeyedRowBindings(
@@ -6907,17 +6979,32 @@ interface KeyedRowConditionalRuntime {
     item: unknown,
     index: number,
   ): ReadonlyMap<number, readonly unknown[]>;
-  changed(previous: readonly unknown[] | undefined, next: readonly unknown[]): boolean;
-  /** Renders one row's conditional boundary. */
-  element(props: RowConditionalProps): React.ReactElement;
-  /** Subscribes a block's conditional boundaries to its listener map. */
-  owner(listeners: RowConditionalListeners): RowConditionalOwner;
-  /** Refreshes changed boundaries synchronously, then calls afterCommit once. */
-  notify(
-    listeners: RowConditionalListeners,
-    changes: readonly RowConditionalChange[],
-    afterCommit?: () => void,
+  refresh(
+    props: CompilerKeyedRowsBlockProps,
+    instance: CompilerKeyedRowInstance,
+    key: KeyedRowKey,
+    item: unknown,
+    index: number,
+    changes: RowConditionalChange[],
   ): void;
+  /** Owns conditional rendering and subscriptions only for features that need them. */
+  create(context: KeyedRowConditionalContext): KeyedRowConditionalBlock;
+}
+
+interface KeyedRowConditionalContext {
+  readonly state: { readonly fallback: boolean };
+  readonly currentProps: CompilerKeyedRowsBlockProps;
+  readonly renderVersion: number;
+}
+
+type KeyedRowConditionalRender = Parameters<CompilerKeyedRowsBlockProps["render"]>[1];
+
+interface KeyedRowConditionalBlock {
+  readonly listeners: RowConditionalListeners;
+  readonly render: KeyedRowConditionalRender;
+  prune(instances: ReadonlyMap<KeyedRowKey, CompilerKeyedRowInstance>): void;
+  /** Refreshes changed boundaries synchronously, then calls afterCommit once. */
+  notify(changes: readonly RowConditionalChange[], afterCommit?: () => void): void;
 }
 
 type RowConditionalListeners = Map<KeyedRowKey, Map<number, RowConditionalRefresh>>;
@@ -7201,14 +7288,7 @@ function reconcileCompilerKeyedMapUpdate(
       }
     }
     applyKeyedRowBindings(props, instance, item, index);
-    const conditionalValues =
-      conditionals?.readValues(props, item, index) || EMPTY_KEYED_ROW_CONDITIONAL_VALUES;
-    for (const [id, values] of conditionalValues) {
-      if (conditionals?.changed(instance.conditionalValues.get(id), values)) {
-        conditionalChanges.push({ key, id, item, index });
-      }
-    }
-    instance.conditionalValues = conditionalValues;
+    conditionals?.refresh(props, instance, key, item, index, conditionalChanges);
     instance.item = item;
   }
   return {
@@ -9207,6 +9287,9 @@ function reconcileCompilerKeyedArrayFilter(
   return instances;
 }
 
+const renderKeyedRowConditional: KeyedRowConditionalRender = (item, index, _id, render) =>
+  render(item, index);
+
 function createKeyedRowConditionalRuntime(): KeyedRowConditionalRuntime {
   class FarmKeyedRowConditional extends React.Component<RowConditionalProps, RowConditionalState> {
     static displayName = "FarmCompiledKeyedRowConditional";
@@ -9263,31 +9346,50 @@ function createKeyedRowConditionalRuntime(): KeyedRowConditionalRuntime {
     }
   }
 
-  return {
-    element: (props) =>
-      React.createElement(FarmKeyedRowConditional, {
-        key: `${props.rowKey}:${props.id}`,
-        ...props,
-      }),
-    readValues: readKeyedRowConditionalValues,
-    changed: keyedRowConditionalChanged,
-    owner: (listeners) => ({
-      subscribe(key, id, refresh) {
-        let row = listeners.get(key);
+  class ConditionalBlock implements KeyedRowConditionalBlock {
+    readonly listeners: RowConditionalListeners = new Map();
+    private readonly owner: RowConditionalOwner = {
+      subscribe: (key, id, refresh) => {
+        let row = this.listeners.get(key);
         if (!row) {
           row = new Map();
-          listeners.set(key, row);
+          this.listeners.set(key, row);
         }
         row.set(id, refresh);
         return () => {
-          const current = listeners.get(key);
+          const current = this.listeners.get(key);
           if (current?.get(id) !== refresh) return;
           current.delete(id);
-          if (current.size === 0) listeners.delete(key);
+          if (current.size === 0) this.listeners.delete(key);
         };
       },
-    }),
-    notify(listeners, changes, afterCommit) {
+    };
+
+    constructor(private readonly context: KeyedRowConditionalContext) {}
+
+    readonly render: KeyedRowConditionalRender = (item, index, id, render) => {
+      if (this.context.state.fallback) return render(item, index);
+      const rowKey = keyedRowIdentity(this.context.currentProps.rowKey(item, index));
+      return React.createElement(FarmKeyedRowConditional, {
+        key: `${rowKey}:${id}`,
+        owner: this.owner,
+        rowKey,
+        id,
+        renderVersion: this.context.renderVersion,
+        item,
+        index,
+        render,
+      });
+    };
+
+    prune(instances: ReadonlyMap<KeyedRowKey, CompilerKeyedRowInstance>): void {
+      if (this.listeners.size === 0) return;
+      for (const key of this.listeners.keys()) {
+        if (!instances.has(key)) this.listeners.delete(key);
+      }
+    }
+
+    notify(changes: readonly RowConditionalChange[], afterCommit?: () => void): void {
       let pending = changes.length;
       const committed = () => {
         pending -= 1;
@@ -9298,11 +9400,25 @@ function createKeyedRowConditionalRuntime(): KeyedRowConditionalRuntime {
       // 18 cannot expose a transient row where text and branch disagree.
       flushSync(() => {
         for (const change of changes) {
-          const refresh = listeners.get(change.key)?.get(change.id);
+          const refresh = this.listeners.get(change.key)?.get(change.id);
           if (refresh) refresh(change.item, change.index, committed);
           else committed();
         }
       });
+    }
+  }
+
+  return {
+    create: (context) => new ConditionalBlock(context),
+    readValues: readKeyedRowConditionalValues,
+    refresh(props, instance, key, item, index, changes) {
+      const values = readKeyedRowConditionalValues(props, item, index);
+      for (const [id, next] of values) {
+        if (keyedRowConditionalChanged(instance.conditionalValues.get(id), next)) {
+          changes.push({ key, id, item, index });
+        }
+      }
+      instance.conditionalValues = values;
     },
   };
 }
@@ -9335,7 +9451,7 @@ function createKeyedRowsBlockComponentCore(
     private fallbackVersion = 0;
     private fallbackKeysWereUnsafe = false;
     private propSyncQueued = false;
-    private currentProps = this.props;
+    currentProps = this.props;
     private definitionVersion = owner.getDefinitionVersion?.();
     declare private stop: (() => void) | undefined;
     declare private id: number | undefined;
@@ -9343,16 +9459,15 @@ function createKeyedRowsBlockComponentCore(
     private reactElements: readonly Element[] = [];
     private keyedTargets = options.keyedTargets?.(this.props);
     private collectionToken: object | undefined;
-    private renderVersion = 0;
+    renderVersion = 0;
     private readonly eventHandlers = new Map<
       KeyedRowKey,
       Map<number, React.EventHandler<React.SyntheticEvent>>
     >();
-    private readonly conditionalListeners: RowConditionalListeners = new Map();
+    private readonly conditionals = options.conditionals?.create(this);
     private instancesByElement = new WeakMap<Element, CompilerKeyedRowInstance>();
     // False after a rebuild without delegated events left surviving rows unindexed.
     private elementIndexComplete = true;
-    private readonly conditionalOwner = options.conditionals?.owner(this.conditionalListeners);
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
@@ -9526,22 +9641,24 @@ function createKeyedRowsBlockComponentCore(
       const eventTarget = event.target as Node | null;
       if (!instance || !eventTarget) return;
       const capture = name.endsWith("Capture");
-      const matches = (this.currentProps.events || [])
-        .filter((descriptor) => descriptor.name === name && descriptor.path !== undefined)
-        .map((descriptor) => ({
-          descriptor,
-          target: findCompilerHostTarget(instance.element, descriptor.path || []),
-        }))
-        .filter((match): match is { descriptor: CompilerKeyedRowEvent; target: Element } =>
-          Boolean(
-            match.target && (match.target === eventTarget || match.target.contains(eventTarget)),
-          ),
-        )
-        .sort((left, right) =>
-          capture
-            ? (left.descriptor.path?.length || 0) - (right.descriptor.path?.length || 0)
-            : (right.descriptor.path?.length || 0) - (left.descriptor.path?.length || 0),
-        );
+      const descriptors = this.currentProps.events || [];
+      const matches: { descriptor: CompilerKeyedRowEvent; target: Element }[] = [];
+      // Snapshot all matching targets before invoking a handler: a handler can
+      // replace the DOM or update the descriptors for the next event.
+      for (let index = 0, length = descriptors.length; index < length; index += 1) {
+        if (!(index in descriptors)) continue;
+        const descriptor = descriptors[index];
+        if (descriptor.name !== name || descriptor.path === undefined) continue;
+        const target = findCompilerHostTarget(instance.element, descriptor.path || []);
+        if (target && (target === eventTarget || target.contains(eventTarget))) {
+          matches.push({ descriptor, target });
+        }
+      }
+      matches.sort((left, right) =>
+        capture
+          ? (left.descriptor.path?.length || 0) - (right.descriptor.path?.length || 0)
+          : (right.descriptor.path?.length || 0) - (left.descriptor.path?.length || 0),
+      );
 
       for (const match of matches) {
         this.invokeDelegatedEvent(match.descriptor, instance, event, match.target);
@@ -9565,24 +9682,6 @@ function createKeyedRowsBlockComponentCore(
         }),
       );
     }
-
-    private rowConditional = (
-      item: unknown,
-      index: number,
-      conditionalId: number,
-      render: (item: unknown, index: number) => React.ReactNode,
-    ): React.ReactNode => {
-      if (this.state.fallback || !options.conditionals) return render(item, index);
-      return options.conditionals.element({
-        owner: this.conditionalOwner!,
-        rowKey: keyedRowIdentity(this.currentProps.rowKey(item, index)),
-        id: conditionalId,
-        renderVersion: this.renderVersion,
-        item,
-        index,
-        render,
-      });
-    };
 
     private hasReactOwnedRows(props: CompilerKeyedRowsBlockProps = this.currentProps): boolean {
       return Boolean(
@@ -9620,13 +9719,6 @@ function createKeyedRowsBlockComponentCore(
       if (this.eventHandlers.size === 0) return;
       for (const key of this.eventHandlers.keys()) {
         if (!this.instances.has(key)) this.eventHandlers.delete(key);
-      }
-    }
-
-    private pruneConditionalListeners(): void {
-      if (this.conditionalListeners.size === 0) return;
-      for (const key of this.conditionalListeners.keys()) {
-        if (!this.instances.has(key)) this.conditionalListeners.delete(key);
       }
     }
 
@@ -9694,7 +9786,7 @@ function createKeyedRowsBlockComponentCore(
       this.reactElements = elements;
       this.rebuildElementIndex(instances);
       this.pruneEventHandlers();
-      this.pruneConditionalListeners();
+      this.conditionals?.prune(this.instances);
       this.commitCurrentCollection();
       return true;
     }
@@ -9741,7 +9833,7 @@ function createKeyedRowsBlockComponentCore(
     ): void {
       // Changes are only reported when the conditional runtime is present.
       if (changes.length === 0) afterCommit?.();
-      else options.conditionals!.notify(this.conditionalListeners, changes, afterCommit);
+      else this.conditionals!.notify(changes, afterCommit);
     }
 
     private refreshDirtyBindings(
@@ -9900,22 +9992,14 @@ function createKeyedRowsBlockComponentCore(
         } else {
           applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
         }
-        const conditionalValues = this.readConditionalValues(
+        options.conditionals?.refresh(
           this.currentProps,
+          existing,
+          key,
           rows.items[index],
           index,
+          conditionalChanges,
         );
-        for (const [id, values] of conditionalValues) {
-          if (options.conditionals?.changed(existing.conditionalValues.get(id), values)) {
-            conditionalChanges.push({
-              key,
-              id,
-              item: rows.items[index],
-              index,
-            });
-          }
-        }
-        existing.conditionalValues = conditionalValues;
         existing.item = rows.items[index];
         existing.index = index;
       }
@@ -10059,22 +10143,14 @@ function createKeyedRowsBlockComponentCore(
         } else {
           applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
         }
-        const conditionalValues = this.readConditionalValues(
+        options.conditionals?.refresh(
           this.currentProps,
+          existing,
+          key,
           rows.items[index],
           index,
+          conditionalChanges,
         );
-        for (const [id, values] of conditionalValues) {
-          if (options.conditionals?.changed(existing.conditionalValues.get(id), values)) {
-            conditionalChanges.push({
-              key,
-              id,
-              item: rows.items[index],
-              index,
-            });
-          }
-        }
-        existing.conditionalValues = conditionalValues;
         existing.item = rows.items[index];
         existing.index = index;
       }
@@ -10084,7 +10160,7 @@ function createKeyedRowsBlockComponentCore(
         instance.element.remove();
         this.instances.delete(instance.key);
         this.eventHandlers.delete(instance.key);
-        this.conditionalListeners.delete(instance.key);
+        this.conditionals?.listeners.delete(instance.key);
       }
       this.commitCurrentCollection(dirtyState);
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
@@ -10139,7 +10215,7 @@ function createKeyedRowsBlockComponentCore(
         this.instancesByElement = new WeakMap();
         this.elementIndexComplete = true;
         this.eventHandlers.clear();
-        this.conditionalListeners.clear();
+        this.conditionals?.listeners.clear();
         this.commitCurrentCollection(dirtyState);
         afterCommit?.();
         return;
@@ -10180,10 +10256,14 @@ function createKeyedRowsBlockComponentCore(
         let oldIndex = 0;
         for (const key of this.instances.keys()) oldIndices.set(key, oldIndex++);
       }
-      for (const [key, instance] of this.instances) {
-        if (!nextKeys.has(key)) {
-          instance.scope?.cleanup();
-          if (hasSurvivingRows) instance.element.remove();
+      // A complete replacement removes scope-free rows in bulk below. Retain
+      // cleanup for host-capable runtimes even if the current props changed.
+      if (hasSurvivingRows || options.hostBlocks) {
+        for (const [key, instance] of this.instances) {
+          if (!nextKeys.has(key)) {
+            instance.scope?.cleanup();
+            if (hasSurvivingRows) instance.element.remove();
+          }
         }
       }
 
@@ -10216,22 +10296,14 @@ function createKeyedRowsBlockComponentCore(
           } else {
             applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
           }
-          const conditionalValues = this.readConditionalValues(
+          options.conditionals?.refresh(
             this.currentProps,
+            existing,
+            key,
             rows.items[index],
             index,
+            conditionalChanges,
           );
-          for (const [id, values] of conditionalValues) {
-            if (options.conditionals?.changed(existing.conditionalValues.get(id), values)) {
-              conditionalChanges.push({
-                key,
-                id,
-                item: rows.items[index],
-                index,
-              });
-            }
-          }
-          existing.conditionalValues = conditionalValues;
           existing.item = rows.items[index];
           existing.index = index;
           nextInstances.push(existing);
@@ -10298,7 +10370,7 @@ function createKeyedRowsBlockComponentCore(
         this.rebuildElementIndex(this.instances);
       }
       this.pruneEventHandlers();
-      this.pruneConditionalListeners();
+      this.conditionals?.prune(this.instances);
       this.commitCurrentCollection(dirtyState);
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
     }
@@ -10361,7 +10433,7 @@ function createKeyedRowsBlockComponentCore(
             this.instances = positionedInstances;
             this.rebuildElementIndex(this.instances);
             this.pruneEventHandlers();
-            this.pruneConditionalListeners();
+            this.conditionals?.prune(this.instances);
           }
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
@@ -10385,7 +10457,7 @@ function createKeyedRowsBlockComponentCore(
             // those instances already hold their current item and index.
             this.rebuildElementIndex(this.instances);
             this.pruneEventHandlers();
-            this.pruneConditionalListeners();
+            this.conditionals?.prune(this.instances);
           }
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
@@ -10414,12 +10486,12 @@ function createKeyedRowsBlockComponentCore(
             }
             for (const key of delta.removedKeys) {
               this.eventHandlers.delete(key);
-              this.conditionalListeners.delete(key);
+              this.conditionals?.listeners.delete(key);
             }
           } else {
             this.rebuildElementIndex(this.instances);
             this.pruneEventHandlers();
-            this.pruneConditionalListeners();
+            this.conditionals?.prune(this.instances);
           }
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
@@ -10437,7 +10509,7 @@ function createKeyedRowsBlockComponentCore(
           // Removed rows leave the root; survivors keep their elements and entries.
           if (!this.elementIndexComplete) this.rebuildElementIndex(this.instances);
           this.pruneEventHandlers();
-          this.pruneConditionalListeners();
+          this.conditionals?.prune(this.instances);
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
           return;
@@ -10555,12 +10627,15 @@ function createKeyedRowsBlockComponentCore(
       this.instancesByElement = new WeakMap();
       this.elementIndexComplete = true;
       this.eventHandlers.clear();
-      this.conditionalListeners.clear();
+      this.conditionals?.listeners.clear();
     }
 
     render(): React.ReactNode {
       this.renderVersion += 1;
-      const container = this.currentProps.render(this.rowEvent, this.rowConditional);
+      const container = this.currentProps.render(
+        this.rowEvent,
+        this.conditionals?.render || renderKeyedRowConditional,
+      );
       if (!React.isValidElement(container) || typeof container.type !== "string") {
         throw new TypeError(
           `Compiled keyed rows ${this.currentProps.id} must own one host container.`,
@@ -11199,6 +11274,15 @@ export const keyedRowsPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsPlainPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:plain-position-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner, {
+      keyedUpdates: keyedPositionUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsBatchPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:batch-position-hinted",
   create: (owner) => ({
@@ -11222,6 +11306,24 @@ export const keyedRowsReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
   create: (owner) => ({
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       keyedUpdates: keyedReorderUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsPlainReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:plain-reorder-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner, {
+      keyedUpdates: keyedReorderUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsPlainMapReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:plain-map-reorder-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner, {
+      keyedUpdates: keyedMapReorderUpdateRuntime,
     }),
   }),
 };
@@ -12002,7 +12104,43 @@ export function createCompiledComponentWithFeatures<Props>(
     current: definition,
   };
   const refreshListeners = new Set<() => void>();
+  const component = createCompiledComponentRuntime(
+    definitionReference,
+    runtimeFeatures,
+    refreshListeners,
+  );
 
+  if (definition.hmrId) {
+    getCompilerHmrRegistry().set(definition.hmrId, {
+      component: component as React.ComponentType<unknown>,
+      definition: definitionReference as CompiledDefinitionReference<unknown>,
+      refreshListeners,
+      stateSignature,
+      runtimeSignature,
+    });
+  }
+
+  return component;
+}
+
+/**
+ * Compiler target when import.meta.hot is absent. The refresh-capable entry
+ * remains available for development and existing hand-authored definitions.
+ * Keeping that choice at the call site makes its registry tree-shakable.
+ * @internal
+ */
+export function createCompiledComponentWithoutRefresh<Props>(
+  definition: CompiledComponentDefinition<Props>,
+  runtimeFeatures: readonly CompilerRuntimeFeature[],
+): React.ComponentType<Props> {
+  return createCompiledComponentRuntime({ current: definition }, runtimeFeatures);
+}
+
+function createCompiledComponentRuntime<Props>(
+  definitionReference: CompiledDefinitionReference<Props>,
+  runtimeFeatures: readonly CompilerRuntimeFeature[],
+  refreshListeners?: Set<() => void>,
+): React.ComponentType<Props> {
   class FarmCompiledComponent extends React.Component<Props, Record<string, never>, boolean> {
     private root: Element | null = null;
     private mounted = false;
@@ -12384,7 +12522,7 @@ export function createCompiledComponentWithFeatures<Props>(
 
     componentDidMount(): void {
       this.mounted = true;
-      refreshListeners.add(this.refreshDefinition);
+      refreshListeners?.add(this.refreshDefinition);
       // React replays this lifecycle when Activity/Suspense reappears. Publish
       // the current committed props before rebuilding dependency tracking, and
       // drain state queued while hidden through the ordinary update path.
@@ -12463,7 +12601,7 @@ export function createCompiledComponentWithFeatures<Props>(
       // the global refresh listener, allowing this instance to be collected.
       this.activeBinding = null;
       this.activeDependencies = null;
-      refreshListeners.delete(this.refreshDefinition);
+      refreshListeners?.delete(this.refreshDefinition);
     }
 
     render(): React.ReactNode {
@@ -12517,20 +12655,8 @@ export function createCompiledComponentWithFeatures<Props>(
   }
 
   (FarmCompiledComponent as React.ComponentType<Props>).displayName =
-    `FarmCompiled(${definition.displayName})`;
-  const component = FarmCompiledComponent as React.ComponentType<Props>;
-
-  if (definition.hmrId) {
-    getCompilerHmrRegistry().set(definition.hmrId, {
-      component: component as React.ComponentType<unknown>,
-      definition: definitionReference as CompiledDefinitionReference<unknown>,
-      refreshListeners,
-      stateSignature,
-      runtimeSignature,
-    });
-  }
-
-  return component;
+    `FarmCompiled(${definitionReference.current.displayName})`;
+  return FarmCompiledComponent as React.ComponentType<Props>;
 }
 
 const COMPLETE_RUNTIME_FEATURES: readonly CompilerRuntimeFeature[] = [

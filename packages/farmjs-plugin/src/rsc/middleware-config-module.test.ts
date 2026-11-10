@@ -1,6 +1,9 @@
 import { parseAst } from "vite";
 import { describe, expect, it } from "vitest";
-import { extractRscMiddlewareConfigModule } from "./middleware-config-module.js";
+import {
+  extractRscConfigPropertyModule,
+  extractRscMiddlewareConfigModule,
+} from "./middleware-config-module.js";
 
 function extract(source: string) {
   return extractRscMiddlewareConfigModule(source, parseAst(source) as never);
@@ -113,5 +116,47 @@ export default defineConfig({ middleware: { matcher, handler } });`;
     if (result.kind !== "module") return;
     expect(result.code).toContain('const matcher = ["/admin"];');
     expect(result.code).toContain("function handler() {}");
+  });
+});
+
+describe("RSC mcp config extraction", () => {
+  function extractMcp(source: string) {
+    return extractRscConfigPropertyModule(source, parseAst(source) as never, "mcp");
+  }
+
+  it("keeps the mcp tools from a Vite config without its plugins", () => {
+    const source = `
+import tailwindcss from "@tailwindcss/vite";
+import rsc from "@vitejs/plugin-rsc";
+import { defineConfig, nitro } from "@farm.js/plugin/rsc";
+import { productQuery } from "./src/actions/server-query.ts";
+import { GET as listUsers } from "./src/api/users/route.ts";
+const nitroPreset = process.env.NITRO_PRESET || "vercel";
+export default defineConfig({
+  srcDir: "src",
+  mcp: {
+    name: "demo",
+    tools: [{ endpoint: listUsers, name: "list_users" }, productQuery],
+  },
+  plugins: [tailwindcss(), rsc(), nitro({ config: { preset: nitroPreset } })],
+});`;
+
+    const result = extractMcp(source);
+    expect(result.kind).toBe("module");
+    if (result.kind !== "module") return;
+    expect(result.code).toContain('import { productQuery } from "./src/actions/server-query.ts";');
+    expect(result.code).toContain('import { GET as listUsers } from "./src/api/users/route.ts";');
+    expect(result.code).toContain("export default { mcp: {");
+    for (const dropped of ["tailwindcss", "plugin-rsc", "nitroPreset", "defineConfig"]) {
+      expect(result.code).not.toContain(dropped);
+    }
+  });
+
+  it("reports a config without mcp as absent and a spread as ambiguous", () => {
+    expect(extractMcp("export default { srcDir: 'src' };").kind).toBe("absent");
+    expect(extractMcp("const base = {};\nexport default { ...base };")).toEqual({
+      kind: "unsupported",
+      reason: "mcp may be supplied through a config spread",
+    });
   });
 });

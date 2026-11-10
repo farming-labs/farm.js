@@ -115,6 +115,71 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The host, then what it's made with: a small mark that says so on hover or focus. */
+.agent-check-host {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+}
+.agent-check-host > h1 {
+  min-width: 0;
+}
+.agent-check-made-with {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 0.03);
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+.agent-check-made-with > :is(img, svg) {
+  width: 16px;
+  height: 16px;
+}
+.agent-check-made-with::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 10;
+  padding: 5px 9px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 5px;
+  background: #0a0a0a;
+  color: #ededed;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -4px);
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
+}
+.agent-check-made-with:is(:hover, :focus-visible) {
+  border-color: rgb(255 255 255 / 0.3);
+  background: rgb(255 255 255 / 0.06);
+}
+.agent-check-made-with:is(:hover, :focus-visible)::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-check-made-with,
+  .agent-check-made-with::after {
+    transition: none;
+  }
+}
 .agent-check-verdict {
   margin-top: 16px;
   color: #aaa;
@@ -154,11 +219,43 @@
 .agent-check-meter span[data-on] {
   background: #ededed;
 }
+/* Two groups: what to do next (bordered buttons), then quiet report utilities. */
 .agent-check-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px 32px;
   margin-top: 32px;
+}
+.agent-check-action-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.agent-check-actions .agent-check-action-group[data-quiet] {
+  gap: 4px 20px;
+}
+.agent-check-actions [data-quiet] :is(a, button) {
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgb(255 255 255 / 0.56);
+}
+@media (max-width: 639px) {
+  .agent-check-action-group:not([data-quiet]) {
+    display: grid;
+    width: 100%;
+  }
+  .agent-check-action-group:not([data-quiet]) :is(a, button) {
+    justify-content: center;
+  }
+  /* Keep the command with the buttons it belongs to. */
+  .agent-check-action-group[data-quiet] {
+    order: 4;
+  }
 }
 .agent-check-actions :is(a, button) {
   display: inline-flex;
@@ -174,6 +271,48 @@
   text-transform: uppercase;
   cursor: pointer;
 }
+/* The next step comes first and reads like the site's primary button. */
+.agent-check-actions .agent-check-primary {
+  gap: 10px;
+  border-color: #fff;
+  background: #fff;
+  color: #000;
+}
+/* A Farm site's upgrade command, on its own quiet line under the buttons. */
+.agent-check-command {
+  display: flex;
+  flex-basis: 100%;
+  order: 3;
+  align-items: center;
+  gap: 12px;
+  margin: -8px 0 0;
+  color: rgb(255 255 255 / 0.56);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.agent-check-command code {
+  color: #ededed;
+  font-family: inherit;
+  font-size: 12px;
+  text-transform: none;
+}
+.agent-check-actions .agent-check-command button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+}
+.agent-check-action-status {
+  align-self: center;
+  color: #ff8a8a;
+  font-size: 12px;
+}
+.agent-check-actions button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
 .agent-check-actions button[hidden] {
   display: none;
 }
@@ -181,6 +320,20 @@
   .agent-check-actions :is(a, button):hover {
     border-color: rgb(255 255 255 / 0.42);
   }
+  .agent-check-actions .agent-check-command button:hover,
+  .agent-check-actions [data-quiet] :is(a, button):hover {
+    color: #ededed;
+  }
+  .agent-check-actions .agent-check-primary:hover {
+    border-color: #fff;
+    background: rgb(255 255 255 / 0.88);
+  }
+}
+
+/* The check page moves focus to the report's heading when it arrives; that's for screen
+   readers, so it draws no ring. */
+#agent-check-host:focus {
+  outline: none;
 }
 
 /* The report is long and dense, so its section rules are quieter than the site's. */
@@ -390,5 +543,70 @@
   }
   .agent-check-rows .agent-check-evidence {
     margin: 0 24px 16px;
+  }
+}
+
+/* Phones and tablets: long hosts, URLs and labels wrap instead of cutting off, and every
+   control is at least 40px tall. */
+@media (max-width: 900px) {
+  .agent-check-hero h1,
+  .agent-check-meta {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .agent-check-meta {
+    line-height: 1.6;
+  }
+  /* A wrapped host keeps its mark beside the first line. */
+  .agent-check-host {
+    align-items: flex-start;
+  }
+  .agent-check-made-with {
+    margin-top: 2px;
+  }
+  /* Card and row titles wrap beside their status instead of truncating. */
+  .agent-check-gaps .agents-now-top {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .agent-check-gaps .agents-now-top .truncate,
+  .agent-check-rows summary .truncate {
+    overflow: visible;
+    white-space: normal;
+  }
+}
+@media (max-width: 600px) {
+  .agent-check-hero h1 {
+    font-size: clamp(28px, 9vw, 36px);
+  }
+  /* The command gets its own line under its label, and wraps inside long paths. */
+  .agent-check-command {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 12px;
+    margin-top: 0;
+  }
+  .agent-check-command > span {
+    grid-column: 1 / -1;
+  }
+  .agent-check-command code {
+    overflow-wrap: anywhere;
+  }
+}
+@media (max-width: 900px), (pointer: coarse) {
+  .agent-check-actions [data-quiet] :is(a, button),
+  .agent-check-actions .agent-check-command button,
+  .agent-check-saw summary {
+    min-height: 40px;
+  }
+  .agent-check-actions .agent-check-command button {
+    min-width: 40px;
+    justify-content: center;
+  }
+  /* The made-with mark stays small; its hit area doesn't. */
+  .agent-check-made-with::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
   }
 }

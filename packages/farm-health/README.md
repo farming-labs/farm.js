@@ -23,8 +23,9 @@ export default defineConfig({
 ```
 
 The plugin serves `/health/live`, `/health/ready`, and `/health/startup`, respects Farm's
-`basePath`, runs checks concurrently with bounded timeouts, and never returns provider errors or
-stack traces. Required failures return `503`; optional failures return `200` with a `degraded`
+`basePath`, runs checks concurrently with bounded timeouts, shares one readiness run between
+concurrent probes (reused for one second by default), and never returns provider errors or stack
+traces. Required failures return `503`; optional failures return `200` with a `degraded`
 status. Exact runtime endpoints keep the checks off ordinary requests and preserve static pages.
 
 See the [Farm Health documentation](https://farmjs.dev/docs/plugins/health) for probe semantics,

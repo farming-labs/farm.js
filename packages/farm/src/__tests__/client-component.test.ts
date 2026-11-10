@@ -3,6 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolveConfig } from "../config";
 import { logger } from "../utils";
 import {
   describeSuppressedAsyncHydration,
@@ -18,6 +19,7 @@ import {
   resolveFarmIsolatedClientHydrationMode,
   resolveModuleSourcePath,
   stripUseClientDirective,
+  usesFarmServerTree,
 } from "../utils/client-component";
 
 const tempDirs: string[] = [];
@@ -248,6 +250,17 @@ describe("client component path resolution", () => {
       expect(getClientModuleMetadata(path.join(root, "src/app/layout.tsx"), root)).toEqual(
         hydrated,
       );
+    });
+
+    it("follows the default @/ alias to a configured srcDir", async () => {
+      const root = writeAliasFixture({
+        "components/nav.tsx": clientNav,
+        "app/layout.tsx":
+          'import { Nav } from "@/components/nav";\nexport default function Layout({ children }) { return <html><body><Nav />{children}</body></html>; }\n',
+      });
+      await resolveConfig({ root, srcDir: "." });
+
+      expect(getClientModuleMetadata(path.join(root, "app/layout.tsx"), root)).toEqual(hydrated);
     });
 
     it("follows tsconfig paths, including comments and trailing commas", () => {
@@ -730,10 +743,7 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     const pageFile = path.join(root, "src", "app", "page.tsx");
     const clientFile = path.join(root, "src", "client.tsx");
     fs.mkdirSync(path.dirname(pageFile), { recursive: true });
-    fs.writeFileSync(
-      clientFile,
-      `'use client';\nfunction Counter() { return null; }\nexport { Counter };\n`,
-    );
+    fs.writeFileSync(clientFile, `'use client';\nexport * from "./counter-implementation";\n`);
     fs.writeFileSync(
       pageFile,
       `import { Counter } from "../client";\nexport default function Page() { return <Counter />; }\n`,
@@ -977,6 +987,119 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     });
   });
 
+  it("hydrates the client components of an async server component a page renders as islands", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-section-"));
+    tempDirs.push(root);
+
+    const appDir = path.join(root, "src", "app");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "star-button.tsx"),
+      '"use client";\nexport function StarButton() { return null; }\n',
+    );
+    fs.writeFileSync(
+      path.join(appDir, "repo-section.tsx"),
+      'import { StarButton } from "./star-button";\nexport default async function RepoSection() { return <StarButton />; }\n',
+    );
+    // Neither page is async itself: the async component it renders cannot run in a client root.
+    const page = path.join(appDir, "page.tsx");
+    fs.writeFileSync(
+      page,
+      'import RepoSection from "./repo-section";\nexport default function Page() { return <main><RepoSection /></main>; }\n',
+    );
+
+    expect(getClientModuleMetadata(page, root)).toMatchObject({
+      shouldHydrate: false,
+      suppressedAsyncHydration: true,
+    });
+    const plan = getClientModuleHydrationPlan(page, root, "off", { asyncOwnerIslands: true });
+    expect(plan.asyncOwnerIslands).toBe(true);
+    expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath)).toEqual([
+      path.join(appDir, "star-button.tsx"),
+    ]);
+  });
+
+  it("keeps an async page's client boundaries that receive React elements", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-elements-"));
+    tempDirs.push(root);
+
+    const appDir = path.join(root, "src", "app");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "shell.tsx"),
+      '"use client";\nexport function Shell(props) { return props.children; }\n',
+    );
+    const asyncPage = path.join(appDir, "page.tsx");
+    fs.writeFileSync(
+      asyncPage,
+      'import { Shell } from "./shell";\nexport default async function Page() { return <Shell toc={<nav />}><article /></Shell>; }\n',
+    );
+
+    // Below a hydrating layout the server tree carries the elements; elsewhere the boundary keeps
+    // its server HTML at runtime. Either way the analysis keeps the island.
+    const plan = getClientModuleHydrationPlan(asyncPage, root, "off", { asyncOwnerIslands: true });
+    expect(plan.fallbackReason).toBeUndefined();
+    expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath)).toEqual([
+      path.join(appDir, "shell.tsx"),
+    ]);
+    expect(usesFarmServerTree(plan)).toBe(true);
+
+    // A synchronous page keeps rejecting them: it hydrates as a whole instead.
+    const syncPage = path.join(appDir, "sync", "page.tsx");
+    fs.mkdirSync(path.dirname(syncPage), { recursive: true });
+    fs.writeFileSync(
+      syncPage,
+      'import { Shell } from "../shell";\nexport default function Page() { return <Shell toc={<nav />}><article /></Shell>; }\n',
+    );
+    expect(getClientModuleHydrationPlan(syncPage, root, "enabled").fallbackReason).toMatch(
+      /receives React elements/,
+    );
+  });
+
+  it("analyzes a page that re-exports another module's default as that module", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-reexport-"));
+    tempDirs.push(root);
+
+    const siteDir = path.join(root, "src", "site");
+    const appDir = path.join(root, "src", "app");
+    fs.mkdirSync(siteDir, { recursive: true });
+    fs.mkdirSync(path.join(appDir, "sync"), { recursive: true });
+    fs.writeFileSync(
+      path.join(siteDir, "star-button.tsx"),
+      '"use client";\nexport function StarButton() { return null; }\n',
+    );
+    fs.writeFileSync(
+      path.join(siteDir, "home.tsx"),
+      'import { StarButton } from "./star-button";\nexport default async function Home() { return <StarButton />; }\n',
+    );
+    fs.writeFileSync(
+      path.join(siteDir, "sync.tsx"),
+      'import { StarButton } from "./star-button";\nexport default function Sync() { return <StarButton />; }\n',
+    );
+    const asyncPage = path.join(appDir, "page.tsx");
+    fs.writeFileSync(asyncPage, '"use ssg; 3600";\nexport { default } from "../site/home";\n');
+    const syncPage = path.join(appDir, "sync", "page.tsx");
+    fs.writeFileSync(syncPage, 'export { default } from "../../site/sync";\n');
+
+    expect(getClientModuleMetadata(asyncPage, root)).toMatchObject({
+      shouldHydrate: false,
+      suppressedAsyncHydration: true,
+    });
+    const plan = getClientModuleHydrationPlan(asyncPage, root, "off", { asyncOwnerIslands: true });
+    expect(plan).toMatchObject({ asyncOwnerIslands: true, hasIsolatedClientBoundaries: true });
+    expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath)).toEqual([
+      path.join(siteDir, "star-button.tsx"),
+    ]);
+    // Under a hydrating layout, the re-exported async page renders through the server tree.
+    expect(usesFarmServerTree(plan)).toBe(true);
+
+    expect(getClientModuleMetadata(syncPage, root)).toEqual({
+      isClientComponent: false,
+      shouldHydrate: true,
+      islandStrategy: "load",
+    });
+  });
+
   describe("Markdown pages", () => {
     function markdownProject(componentsSource: string) {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-markdown-"));
@@ -1074,6 +1197,35 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
         getClientModuleHydrationPlan(page, root, "enabled", { asyncOwnerIslands: true })
           .fallbackReason,
       ).toBe("package client boundary icon-kit cannot yet be isolated");
+    });
+
+    it("renders package client components through their client references in islands mode", () => {
+      const { root, componentsFile } = markdownProject(
+        'import { Icon } from "icon-kit";\nimport { CopyButton } from "./components/copy-button";\nexport const components = { Icon, CopyButton };\n',
+      );
+      const packageRoot = path.join(root, "node_modules", "icon-kit");
+      fs.mkdirSync(packageRoot, { recursive: true });
+      fs.writeFileSync(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({ name: "icon-kit", exports: "./index.js" }),
+      );
+      fs.writeFileSync(
+        path.join(packageRoot, "index.js"),
+        '"use client";\nexport function Icon() { return null; }\n',
+      );
+
+      const plan = getMarkdownPageHydrationPlan(componentsFile, root, "off", {
+        asyncOwnerIslands: true,
+        packageReferences: true,
+      });
+      expect(plan.fallbackReason).toBeUndefined();
+      expect(plan.staticPackageBoundaries).toBeUndefined();
+      expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath).sort()).toEqual(
+        [
+          path.join(root, ".farm", "client-references", "icon-kit", "Icon.tsx"),
+          path.join(root, "src", "components", "copy-button.tsx"),
+        ].sort(),
+      );
     });
 
     it("keeps an async page's islands beside package client components it renders statically", () => {
@@ -1200,17 +1352,17 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     });
 
     it("keeps correctness fallbacks and reports why", () => {
+      // Element children no longer reject an async page's islands: below a hydrating layout the
+      // server tree carries them, and elsewhere that one boundary keeps its server HTML.
       const { root, pageFile } = asyncPage("<StarButton><p>server child</p></StarButton>");
       expect(getClientModuleHydrationPlan(pageFile, root, "off", islands)).toMatchObject({
-        suppressedAsyncHydration: true,
-        hasIsolatedClientBoundaries: false,
-        fallbackReason:
-          "the client boundary imported from ./star-button receives React elements, which cannot cross the boundary as serialized props",
+        hasIsolatedClientBoundaries: true,
+        asyncOwnerIslands: true,
       });
 
       const reexport = asyncPage(
         "<StarButton count={stars} />",
-        '"use client";\nfunction StarButton() { return null; }\nexport { StarButton };\n',
+        '"use client";\nexport * from "./star-button-implementation";\n',
       );
       expect(
         getClientModuleHydrationPlan(reexport.pageFile, reexport.root, "off", islands),
@@ -1461,6 +1613,35 @@ export function Chart() {}
     expect(source).toContain("[Farm.js] Loading boundary failed to load and was skipped: ");
   });
 
+  it("imports modules by absolute URL in development, so Vite's ?import does not make a second copy", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const start = source.indexOf("function farmModuleUrl(reference) {");
+    const end = source.indexOf("\n}\n", start);
+    expect(start).toBeGreaterThan(-1);
+    // The helper as the generated client has it: evaluate the template literal's text.
+    const emitted = new Function(`return \`${source.slice(start, end + 2)}\`;`)() as string;
+    const farmModuleUrl = new Function("location", `${emitted}\nreturn farmModuleUrl;`)({
+      origin: "http://localhost:3000",
+    }) as (reference: unknown) => unknown;
+
+    // A layout imports theme.tsx statically; the server tree loads it by reference. Both must
+    // resolve to one module, or the page reads a different React context than the layout provides.
+    expect(farmModuleUrl("/src/components/theme.tsx")).toBe(
+      "http://localhost:3000/src/components/theme.tsx",
+    );
+    expect(farmModuleUrl("/node_modules/.vite/deps/x.js?v=1")).toBe(
+      "http://localhost:3000/node_modules/.vite/deps/x.js?v=1",
+    );
+    expect(farmModuleUrl("/src/app/page.vue")).toBe("http://localhost:3000/src/app/page.vue");
+    // Vite serves other files as JavaScript only with ?import, so they keep its rewrite.
+    expect(farmModuleUrl("/src/app/docs/page.md")).toBe("/src/app/docs/page.md");
+    expect(farmModuleUrl("//cdn.example.com/x.js")).toBe("//cdn.example.com/x.js");
+    expect(farmModuleUrl("https://cdn.example.com/x.js")).toBe("https://cdn.example.com/x.js");
+    expect(source).not.toMatch(
+      /import\(\/\* @vite-ignore \*\/ (?!farmModuleUrl\()[a-zA-Z.]+\)\.then|load: \(reference\) => import\(\/\* @vite-ignore \*\/ reference\)/,
+    );
+  });
+
   it("reports the failing loading module without masking the original error", async () => {
     const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
     const start = source.indexOf("async function buildClientHydrationElement(");
@@ -1470,7 +1651,7 @@ export function Chart() {}
 
     const emittedFunction = source.slice(start, end);
     const testableFunction = emittedFunction.replace(
-      "import(/* @vite-ignore */ loadingModulePath)",
+      "import(/* @vite-ignore */ farmModuleUrl(loadingModulePath))",
       "loadModule(loadingModulePath)",
     );
     expect(testableFunction).not.toBe(emittedFunction);
@@ -1526,7 +1707,9 @@ export function Chart() {}
     const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
 
     expect(source).toContain("const layoutComponentCache = new Map();");
-    expect(source).toContain("async function loadLayoutComponents(layouts = [])");
+    expect(source).toContain(
+      "async function loadLayoutComponents(layouts = [], params = {}, source)",
+    );
     expect(source).toContain("for (const layout of layouts)");
     expect(source).toContain("function wrapWithLoadedLayouts(element, loadedLayouts, params)");
     expect(source).toContain("for (let index = loadedLayouts.length - 1; index >= 0; index--)");
@@ -1535,7 +1718,7 @@ export function Chart() {}
     expect(source).toContain(": findLayouts(window.location.pathname);");
     expect(source).toContain("import { isFarmRouteActive } from '@farm.js/core/router'");
     expect(source).toContain(
-      "layout.pattern === '/' || isFarmRouteActive(layout.pattern, pathname, { exact: false })",
+      "if (urlPattern !== '/' && !isFarmRouteActive(urlPattern, pathname, { exact: false })) continue;",
     );
     expect(source).not.toContain("map(decodeRouteSegment).join('/')");
     expect(source).toContain("return urlSegment === routeSegment.segment ? {} : null;");
@@ -1557,8 +1740,12 @@ export function Chart() {}
     expect(start).toBeGreaterThan(-1);
     const emittedFunction = source.slice(start, end);
 
-    const layoutsLoaded = emittedFunction.indexOf("await loadLayoutComponents(layouts)");
-    const pageImported = emittedFunction.indexOf("import(/* @vite-ignore */ modulePath)");
+    const layoutsLoaded = emittedFunction.indexOf(
+      "await loadLayoutComponents(layouts, params, hydrationOptions.layoutSource)",
+    );
+    const pageImported = emittedFunction.indexOf(
+      "import(/* @vite-ignore */ farmModuleUrl(modulePath))",
+    );
     expect(layoutsLoaded).toBeGreaterThan(-1);
     expect(pageImported).toBeGreaterThan(-1);
     expect(layoutsLoaded).toBeLessThan(pageImported);
@@ -1664,32 +1851,32 @@ export function Chart() {}
 
     expect(productionSource).toContain("disposeFarmIsolatedClientBoundaries(document);");
     expect(developmentSource).toContain("if (hydrationController.signal.aborted) return;");
-    expect(developmentSource).toContain(
-      "Boolean(rootContainer.querySelector('farm-client-boundary[data-farm-client-boundary]'))",
-    );
+    expect(developmentSource).toContain("Boolean(rootContainer.querySelector('f-island[src]'))");
     const isolatedBootstrap = developmentSource.indexOf(
       "if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate)",
     );
     const missingModuleGuard = developmentSource.indexOf("if (!modulePath)", isolatedBootstrap);
     expect(isolatedBootstrap).toBeGreaterThan(-1);
     expect(missingModuleGuard).toBeGreaterThan(isolatedBootstrap);
-    // An islands-only page releases the pre-hydration hold once its load islands are
-    // live, or clicks and submits outside every island stay held forever. It must not
-    // replay held targets into server HTML that no client code owns.
+    // An islands-only page releases the pre-hydration hold once its islands are scheduled,
+    // or clicks and submits outside every island stay held forever. It must not replay held
+    // targets into server HTML that no client code owns.
     const isolatedBranch = developmentSource.slice(
       isolatedBootstrap,
       developmentSource.indexOf("if (!shouldHydrate)", isolatedBootstrap),
     );
+    // Islands mode hydrates the document (so islx watches streamed islands); otherwise #root.
+    // The first pass takes no cancellation signal: a navigation disposes the islands it removes
+    // with their DOM, and one in a layout it keeps still waits for its trigger.
     const isolatedHydrate = isolatedBranch.indexOf(
-      "await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);",
+      'await hydrateFarmIsolatedClientBoundaries(${islandValues ? "document" : "rootContainer"});',
     );
-    const abortGuard = isolatedBranch.indexOf("if (hydrationController.signal.aborted) return;");
     const release = isolatedBranch.indexOf("markFarmHydrated();");
     expect(isolatedHydrate).toBeGreaterThan(-1);
-    expect(abortGuard).toBeGreaterThan(isolatedHydrate);
-    expect(release).toBeGreaterThan(abortGuard);
+    expect(release).toBeGreaterThan(isolatedHydrate);
     expect(isolatedBranch.indexOf("return;", release)).toBeGreaterThan(release);
     expect(isolatedBranch).not.toContain("replayPreHydrationClicks(");
+    expect(productionSource).toContain("await hydrateFarmIsolatedClientBoundaries(document);");
   });
 
   it("uses a document swap when generated SPA navigation leaves the app root", () => {
@@ -1711,7 +1898,7 @@ export function Chart() {}
     expect(source).toContain("delete window.__farmDocsRuntime;");
     expect(source).toContain("script.replaceWith(freshScript);");
     expect(source).toContain('document.documentElement.dataset.farmDocsRuntime === "true"');
-    expect(source).toContain("const swapped = await this.swapContent(");
+    expect(source).toContain("let swapped = await this.swapContent(");
     expect(source).toContain(
       "const targetUrl = new URL(targetPath || window.location.href, window.location.origin);",
     );
@@ -1749,8 +1936,8 @@ export function Chart() {}
     );
 
     expect(source.match(/refresh: function\(options = \{\}\)/g)).toHaveLength(2);
-    expect(source).toContain(
-      'if (!options.refresh && matched?.route.navigation === "client-render")',
+    expect(source).toMatch(
+      /if \(\s*!options\.refresh &&\s*matched\?\.route\.navigation === "client-render" &&/,
     );
     expect(source).toContain("options.refresh ? null : matchInterceptedRouteSlot(pathname, from)");
     expect(source).toContain("fetchPage: async function(url, interceptFrom, fresh = false");

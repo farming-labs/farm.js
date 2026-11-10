@@ -32,6 +32,17 @@ export interface RendererServerFixture {
     element: unknown,
   ): { html: string; head: string } | Promise<{ html: string; head: string }>;
   generateHydrationScript?: () => string;
+  renderToPipeableStream?(
+    element: unknown,
+    callbacks: {
+      onShellReady(): void;
+      onShellError(error: unknown): void;
+      onError(error: unknown): void;
+    },
+  ): { pipe(destination: NodeJS.WritableStream): void };
+  renderToReadableStream?(
+    element: unknown,
+  ): ReadableStream<Uint8Array> | Promise<ReadableStream<Uint8Array>>;
 }
 
 export interface RendererRootFixture {
@@ -241,6 +252,62 @@ export function defineRendererServerConformance(runtime: RendererServerFixture):
       const zero = await runtime.renderToString(runtime.createElement("div", null, 0));
       expect(zero).toContain("0");
     });
+
+    // Farm answers a shell error with the route's error.tsx and a 500 (or with
+    // redirect()/notFound()), which it can only do before the shell is sent.
+    const Throwing = () => {
+      throw new Error(`${runtime.name} shell failed`);
+    };
+    const throwingShell = () =>
+      runtime.createElement(
+        "main",
+        null,
+        runtime.createElement(runtime.markFunctionComponent?.(Throwing) ?? Throwing, null),
+      );
+
+    it("reports a component that throws in the shell as a shell error", async () => {
+      const renderToPipeableStream = runtime.renderToPipeableStream;
+      if (!renderToPipeableStream) return;
+
+      // Farm calls the renderer where a synchronous throw rejects the render
+      // too, so either form reaches the error page.
+      const outcome = await new Promise<string>((resolve) => {
+        const shellError = (error: unknown) => resolve(`shell error: ${(error as Error).message}`);
+        try {
+          renderToPipeableStream(throwingShell(), {
+            onShellReady: () => resolve("shell ready"),
+            onShellError: shellError,
+            onError() {},
+          });
+        } catch (error) {
+          shellError(error);
+        }
+      });
+
+      expect(outcome).toBe(`shell error: ${runtime.name} shell failed`);
+    });
+
+    it("errors the readable stream when a component throws in the shell", async () => {
+      const renderToReadableStream = runtime.renderToReadableStream;
+      if (!renderToReadableStream) return;
+
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", onUnhandled);
+      try {
+        await expect(
+          Promise.resolve()
+            .then(() => renderToReadableStream(throwingShell()))
+            .then((stream) => new Response(stream).text()),
+        ).rejects.toThrow(`${runtime.name} shell failed`);
+        // Unhandled rejections are reported after a macrotask turn.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+      }
+
+      expect(unhandled).toEqual([]);
+    });
   });
 }
 
@@ -387,6 +454,139 @@ export function defineRendererClientConformance(options: {
       root.unmount();
       await settleClientRender(() => expect(container.childNodes).toHaveLength(0));
       container.remove();
+    });
+  });
+}
+
+export type RendererServerQueryFixture = (input: undefined) => Promise<{ email: string }>;
+
+/**
+ * Server rendering must not read or fill the browser query cache: that cache
+ * is one module-level store, so on the server it is shared by every request.
+ * `renderQuery` server renders a component that reads `query` through the
+ * renderer's server query binding and prints `account=<email>` or
+ * `account=loading`.
+ */
+export function defineRendererServerQueryConformance(options: {
+  name: string;
+  renderQuery(query: RendererServerQueryFixture): string | Promise<string>;
+}): void {
+  describe(`${options.name} server query conformance`, () => {
+    it("never shows one visitor's query result to the next server render", async () => {
+      let visitor = "alice";
+      const reads: Promise<unknown>[] = [];
+      const query: RendererServerQueryFixture = () => {
+        const read = Promise.resolve({ email: `${visitor}@example.com` });
+        reads.push(read);
+        return read;
+      };
+      // Let any read a render started finish and land in a cache before the
+      // next visitor renders.
+      const settleReads = async () => {
+        await Promise.all(reads);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      };
+
+      const alice = await options.renderQuery(query);
+      await settleReads();
+      visitor = "bob";
+      const bob = await options.renderQuery(query);
+      await settleReads();
+
+      expect(bob).not.toContain("alice@example.com");
+      // Like React's server snapshot, the browser fetch starts after hydration.
+      expect(reads).toHaveLength(0);
+      expect(alice).toContain("account=loading");
+      expect(bob).toContain("account=loading");
+    });
+  });
+}
+
+/** What `createFarmNativeTreeResponse` answers: the parts of the tree this conformance reads. */
+export interface RendererNativeTreeNode {
+  type: string;
+  tag?: string;
+  href?: string;
+  name?: string;
+  form?: { action: string; method: string; fields?: Array<{ name: string; value: string }> };
+  submit?: Record<string, unknown>;
+  children?: Array<RendererNativeTreeNode | string>;
+}
+
+/**
+ * The native tier draws a page from the HTML the server renders, so it must read every renderer's
+ * markup the same way: its comment markers, hydration keys, and fragment boundaries included.
+ * `toTree` turns a page's HTML into the native tree, as a mobile app's server would answer it.
+ */
+export function defineRendererNativeTreeConformance(
+  runtime: RendererServerFixture,
+  toTree: (html: string) => Promise<{ unsupported: string[]; root: RendererNativeTreeNode }>,
+): void {
+  describe(`${runtime.name} native tree conformance`, () => {
+    it("draws a static page, a list, a link, and a form the same as any renderer", async () => {
+      const h = runtime.createElement;
+      const Trail = (props: Record<string, unknown>) =>
+        h("li", null, h("a", { href: `/trails/${String(props.id)}` }, props.name as string));
+      runtime.markFunctionComponent?.(Trail);
+      const trails = [
+        { id: "creek", name: "Creek Loop" },
+        { id: "ridge", name: "Ridge Traverse" },
+      ];
+      const html = await runtime.renderToString(
+        h(
+          "main",
+          null,
+          h("h1", null, "Trails"),
+          // Adjacent text and values: renderers separate them with comment markers.
+          h("p", null, "Hello ", "Ada", "!"),
+          false,
+          null,
+          h(
+            "ul",
+            null,
+            trails.map((trail) => h(Trail, { key: trail.id, id: trail.id, name: trail.name })),
+          ),
+          h(
+            "form",
+            { method: "post", action: "/api/reports" },
+            h("input", { type: "hidden", name: "trail", value: "creek" }),
+            h("textarea", { name: "text" }),
+            h("button", null, "Post"),
+          ),
+        ),
+      );
+      const tree = await toTree(html);
+      expect(tree.unsupported).toEqual([]);
+      const text = (node: RendererNativeTreeNode | string): string =>
+        typeof node === "string" ? node : (node.children ?? []).map(text).join("");
+      const find = (
+        node: RendererNativeTreeNode | string,
+        test: (node: RendererNativeTreeNode) => boolean,
+      ): RendererNativeTreeNode[] =>
+        typeof node === "string"
+          ? []
+          : [
+              ...(test(node) ? [node] : []),
+              ...(node.children ?? []).flatMap((child) => find(child, test)),
+            ];
+      expect(find(tree.root, (node) => node.tag === "h1").map(text)).toEqual(["Trails"]);
+      expect(find(tree.root, (node) => node.tag === "p").map(text)).toEqual(["Hello Ada!"]);
+      expect(
+        find(tree.root, (node) => node.href !== undefined).map((link) => [link.href, text(link)]),
+      ).toEqual([
+        ["https://app.example/trails/creek", "Creek Loop"],
+        ["https://app.example/trails/ridge", "Ridge Traverse"],
+      ]);
+      const [form] = find(tree.root, (node) => node.form !== undefined);
+      expect(form?.form).toEqual({
+        action: "https://app.example/api/reports",
+        method: "post",
+        fields: [{ name: "trail", value: "creek" }],
+      });
+      expect(find(form!, (node) => node.type === "TextInput").map((field) => field.name)).toEqual([
+        "text",
+      ]);
+      expect(find(form!, (node) => node.submit !== undefined).map(text)).toEqual(["Post"]);
     });
   });
 }

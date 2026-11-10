@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { applyFarmBasePath } from "../base-path";
 import { isMissingPackageError } from "../optional-peer";
 import type { LoadedFarmDocsPage } from "./handler";
 import type {
@@ -133,11 +134,16 @@ function resolveBaseUrl(requestUrl: URL, config: FarmDocsSocialImageConfig | und
   return config?.baseUrl ? new URL(config.baseUrl) : new URL(requestUrl.origin);
 }
 
+/**
+ * `imagePath` is the image's route path, which a request is matched on. `pageUrl` and `imageUrl`
+ * are public URLs, below the app's `basePath`.
+ */
 export function createFarmDocsSocialImageDescriptor(
   page: LoadedFarmDocsPage,
   docs: FarmDocsResolvedConfig,
   requestUrl: URL,
   format: FarmDocsSocialImageFormat = "svg",
+  basePath = "",
 ): FarmDocsSocialImageDescriptor {
   const config = getSocialImageConfig(docs);
   const siteName = config?.siteName || getNavTitle(docs);
@@ -154,7 +160,7 @@ export function createFarmDocsSocialImageDescriptor(
   const slugPath = encodeSlugPath(page.slug) || "index";
   const imagePath = `${entry}/_social/${slugPath}/opengraph-image.${format}`;
   const baseUrl = resolveBaseUrl(requestUrl, config);
-  const pageUrl = new URL(page.href, baseUrl).href;
+  const pageUrl = new URL(applyFarmBasePath(page.href, basePath), baseUrl).href;
   const imageAlt = `${title} — ${siteName} documentation`;
   const hash = createHashValue({
     version: FARM_DOCS_SOCIAL_IMAGE_VERSION,
@@ -177,7 +183,7 @@ export function createFarmDocsSocialImageDescriptor(
     pageHref: page.href,
     pageUrl,
     imagePath,
-    imageUrl: new URL(`${imagePath}?v=${hash}`, baseUrl).href,
+    imageUrl: new URL(`${applyFarmBasePath(imagePath, basePath)}?v=${hash}`, baseUrl).href,
     imageAlt,
     illustration,
     fonts: config?.fonts,

@@ -1,0 +1,39 @@
+{
+  "name": "farm-example-mobile",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "dev:mobile": "farm dev --mobile",
+    "dev:ios": "farm dev --mobile --os ios",
+    "build": "farm build",
+    "build:mobile": "farm build --mobile",
+    "build:apk": "farm build --mobile --apk",
+    "build:ios": "farm build --mobile --os ios",
+    "start": "farm start",
+    "report": "farm config inspect --mobile --report",
+    "smoke": "node scripts/smoke.mjs",
+    "type-check": "tsc --noEmit && tsc --noEmit -p tsconfig.native.json"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@farm.js/ui": "workspace:*",
+    "@react-native-community/netinfo": "12.0.1",
+    "farm-swift-sample": "link:./modules/farm-swift-sample",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "@farm.js/mobile": "workspace:*",
+    "@farm.js/native": "workspace:*",
+    "@react-native/metro-config": "0.88.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react-native": "0.88.1",
+    "typescript": "^5.3.3",
+    "vite": "8.3.4"
+  }
+}

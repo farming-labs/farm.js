@@ -1,12 +1,26 @@
 # Jobs Integration Example
 
-This example shows the new `jobs({...})` integration with two runtime helpers:
+This example shows the `jobs({...})` integration with three runtime helpers:
 
+- `runtime: local()` runs each task's `run` in this app
 - `runtime: trigger({ ... })` for Trigger.dev
 - `runtime: inngest({ ... })` for Inngest
 
-Set `JOBS_RUNTIME=trigger` or `JOBS_RUNTIME=inngest` in `.env.local` to switch which one
-is mounted by [integrations.ts](./src/lib/integrations.ts).
+Set `JOBS_RUNTIME=local`, `JOBS_RUNTIME=trigger`, or `JOBS_RUNTIME=inngest` in `.env.local` to
+switch which one is mounted by [integrations.ts](./src/lib/integrations.ts). Set it for both
+`farm build` and the server, because [farm.config.ts](./farm.config.ts) reads it too.
+
+Local env:
+
+```sh
+JOBS_RUNTIME=local
+# Guards /api/jobs/_runtime/local/tick outside development.
+CRON_SECRET=...
+```
+
+With `local()`, runs are kept in `.data/jobs` through the `jobs` storage mount in
+`farm.config.ts`. A production build refuses the in-memory default, because a restart would lose
+its runs.
 
 Trigger.dev env:
 

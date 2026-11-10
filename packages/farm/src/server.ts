@@ -15,3 +15,4 @@ export { getTheme, getThemeSnapshot } from "./theme/server";
 export * from "./server-action-security";
 export * from "./layers";
 export * from "./environment";
+export { resolveFarmMCPConfig, resolveFarmMCPPlugin, type FarmMCPUserConfig } from "./mcp-config";

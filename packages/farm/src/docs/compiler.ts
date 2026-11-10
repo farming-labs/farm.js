@@ -1,8 +1,10 @@
 import path from "node:path";
+import { normalizeFarmBasePath, stripFarmBasePath } from "../base-path";
 import type { FarmDocsResolvedConfig } from "./types";
 import {
   createFarmDocsHandler,
   discoverFarmDocsPages,
+  getFarmDocsMarkdownPath,
   loadFarmDocsPage,
   resolveFarmDocsContentDir,
   toFarmDocsMarkdownPage,
@@ -21,6 +23,10 @@ export interface CompileFarmDocsManifestOptions {
   fontAssets: readonly FarmDocsPublicFontAsset[];
   fontStylesheetHref?: string;
   globalStylesheetHref?: string;
+  /** Docs URLs a path-specific guard covers: compiled as pages, never listed or searched. */
+  isPathGuarded?: (pathname: string) => boolean;
+  /** The app's `basePath`, which the compiled links include. */
+  basePath?: string;
 }
 
 function normalizePathname(pathname: string): string {
@@ -78,13 +84,14 @@ function loadPages(contentDir: string, docs: FarmDocsResolvedConfig): LoadedFarm
     .sort((a, b) => a.href.localeCompare(b.href));
 }
 
-function findSocialImagePath(html: string): string | null {
+/** The route path of the page's social image, which links it below the `basePath`. */
+function findSocialImagePath(html: string, basePath: string): string | null {
   const match =
     /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i.exec(html) ||
     /<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i.exec(html);
   if (!match?.[1]) return null;
   try {
-    return new URL(match[1], FARM_DOCS_COMPILED_ORIGIN).pathname;
+    return stripFarmBasePath(new URL(match[1], FARM_DOCS_COMPILED_ORIGIN).pathname, basePath);
   } catch {
     return null;
   }
@@ -108,6 +115,7 @@ export async function compileFarmDocsManifest(
 ): Promise<FarmDocsCompiledManifest> {
   const contentDir = resolveFarmDocsContentDir(docs, options);
   const pages = loadPages(contentDir, docs);
+  const basePath = normalizeFarmBasePath(options.basePath);
   const absolutePaths = [
     path.resolve(options.root),
     path.resolve(contentDir),
@@ -120,27 +128,34 @@ export async function compileFarmDocsManifest(
     fontAssets: options.fontAssets,
     fontStylesheetHref: options.fontStylesheetHref,
     globalStylesheetHref: options.globalStylesheetHref,
+    isPathGuarded: options.isPathGuarded,
+    basePath,
   });
   const apiHandler = createFarmDocsAPIHandler({
     rootDir: options.root,
     srcDir: options.srcDir,
     docs,
+    isPathGuarded: options.isPathGuarded,
+    basePath,
   });
+  // The API answers anyone, so a guarded page has no API Markdown and no search entry.
+  const publicPages = pages.filter((page) => !options.isPathGuarded?.(page.href));
   const routes: Record<string, FarmDocsCompiledResponse> = {};
   const apiMarkdown: Record<string, FarmDocsCompiledResponse> = {};
 
   for (const page of pages) {
     const htmlResponse = await addHandlerRoute(routes, page.href, handler, absolutePaths);
-    const markdownPath = page.href === "/" ? "/.md" : `${page.href}.md`;
+    const markdownPath = getFarmDocsMarkdownPath(page.href);
     await addHandlerRoute(routes, markdownPath, handler, absolutePaths);
 
     if (htmlResponse) {
-      const socialImagePath = findSocialImagePath(await htmlResponse.text());
+      const socialImagePath = findSocialImagePath(await htmlResponse.text(), basePath);
       if (socialImagePath && !routes[normalizePathname(socialImagePath)]) {
         await addHandlerRoute(routes, socialImagePath, handler, absolutePaths);
       }
     }
 
+    if (options.isPathGuarded?.(page.href)) continue;
     const apiResponse = await apiHandler(
       new Request(
         `${FARM_DOCS_COMPILED_ORIGIN}/api/docs?format=markdown&path=${encodeURIComponent(page.slug)}`,
@@ -222,6 +237,7 @@ export async function compileFarmDocsManifest(
     protocol: 1,
     originPlaceholder: FARM_DOCS_COMPILED_ORIGIN,
     entry: docs.entry,
+    ...(basePath ? { basePath } : {}),
     routes,
     api: {
       static: apiStatic,
@@ -229,8 +245,8 @@ export async function compileFarmDocsManifest(
       empty: await compileResponse(emptyResponse, absolutePaths),
       post: await compileResponse(postResponse, absolutePaths),
       search: {
-        pages: pages.map((page) => ({
-          ...toFarmDocsMarkdownPage(page),
+        pages: publicPages.map((page) => ({
+          ...toFarmDocsMarkdownPage(page, basePath),
           sourcePath: `farm-docs:${page.slug || "index"}`,
         })),
         search: searchConfig ?? true,

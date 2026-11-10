@@ -1,0 +1,48 @@
+{
+  "name": "farm-server-components-example",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build",
+    "build:rsc": "FARM_SERVER_COMPONENTS_MODE=rsc farm build --preset node-server",
+    "build:islands": "FARM_SERVER_COMPONENTS_MODE=islands farm build --preset node-server",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm-fixtures/rsc-kit": "link:./fixtures/rsc-kit",
+    "@farm.js/core": "workspace:*",
+    "@radix-ui/react-dialog": "1.1.18",
+    "@tanstack/react-query": "^5.107.1",
+    "client-only": "^0.0.1",
+    "cmdk": "1.1.1",
+    "jotai": "^3.0.1",
+    "lucide-react": "1.69.0",
+    "motion": "^12.42.2",
+    "next-themes": "^0.4.6",
+    "react": "19.2.8",
+    "react-aria-components": "1.22.1",
+    "react-dom": "19.2.8",
+    "react-hook-form": "^7.91.0",
+    "react-markdown": "10.1.0",
+    "react-server-dom-webpack": "19.2.8",
+    "react-tweet": "^3.3.1",
+    "react-wrap-balancer": "^1.1.1",
+    "recharts": "3.10.1",
+    "server-only": "^0.0.1",
+    "sonner": "^2.0.8",
+    "swr": "^2.5.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "@farm.js/mobile": "workspace:*",
+    "@farm.js/plugin": "workspace:*",
+    "@types/react": "19.2.13",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-rsc": "0.5.32",
+    "typescript": "5.9.3",
+    "vite": "8.3.4"
+  }
+}

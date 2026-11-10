@@ -59,7 +59,8 @@ export async function createNitroConfig(
     distDir,
   });
   const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
-  const cloudflareCronConfig = createFarmCronCloudflareConfig(farmCron.jobs);
+  const cloudflareCronConfig =
+    farmCron.provider === "host" ? createFarmCronCloudflareConfig(farmCron.jobs) : undefined;
 
   // Create a runtime registry file to store route managers
   // This will be populated at runtime through Nitro hooks
@@ -255,7 +256,7 @@ import type { H3Event } from 'h3';
 import { farmRegistry } from '../farm-registry';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { searchParamsToObject } from '@farm.js/core/internal/production-runtime';
+import { createFarmSearchParams, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 import { createFarmLegacyRequest, renderFarmLegacyErrorHtml, renderFarmLegacyHtml } from '@farm.js/core/internal/production-runtime';
 
 export default defineEventHandler(async (event: H3Event) => {
@@ -427,7 +428,7 @@ export default defineEventHandler(async (event: H3Event) => {
       // Create page props
       const rawPageProps = {
         params,
-        searchParams: Promise.resolve(searchParamsObject),
+        searchParams: createFarmSearchParams(searchParamsObject),
         path: pathname,
       };
       const pageProps = routeModule.__farmResolveRouteProps
@@ -446,7 +447,7 @@ export default defineEventHandler(async (event: H3Event) => {
               ...rawPageProps,
               params: parsedParams,
               search: parsedSearch,
-              searchParams: Promise.resolve(parsedSearch),
+              searchParams: createFarmSearchParams(parsedSearch),
             };
           })();
       
@@ -675,7 +676,7 @@ export default defineEventHandler(async (event: H3Event) => {
     },
     // Experimental features
     experimental: {
-      tasks: farmWorkflows.workflows.length > 0 || farmCron.jobs.length > 0,
+      tasks: farmWorkflows.workflows.length > 0 || Object.keys(farmCron.tasks).length > 0,
     },
     wasm: false, // Disable for now to avoid issues
   };

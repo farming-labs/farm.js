@@ -73,6 +73,11 @@ describe("experimental optimized boundary", () => {
     expect(resolved.optimizeDeps.exclude).toEqual(
       expect.arrayContaining(["@farming-labs/strata", "@farming-labs/strata/react-server"]),
     );
+    // The RSC environment renders the boundaries, and ssr.external does not reach it.
+    expect(resolved.environments.rsc.resolve.external).toEqual([
+      "@farming-labs/strata",
+      "@farming-labs/strata/react-server",
+    ]);
 
     const staticPlugin = plugins.find(
       (candidate) => candidate.name === "@farm.js/plugin/rsc:optimized-boundary",
