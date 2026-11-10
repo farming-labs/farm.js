@@ -166,6 +166,38 @@ export function isViteModuleRequest(
   return value !== undefined && SCRIPT_FETCH_DESTINATIONS.has(value.toLowerCase());
 }
 
+/** Query flags Vite and its client put on module and asset URLs: HMR, deps, CSS, workers. */
+const VITE_CLIENT_QUERY_FLAGS = ["t", "v", "direct", "html-proxy", "worker_file"] as const;
+const NAVIGATION_FETCH_DESTINATIONS = new Set(["document", "iframe", "frame", "embed", "object"]);
+
+/**
+ * Whether a dev request comes from the running app loading something Vite serves: a module, a
+ * stylesheet, an image or font, or a `fetch()` of an asset URL. A navigation, `curl`, or an agent
+ * asking for the same path is not, and is routed as production routes it: production emits no
+ * file for a path under the project root, so config redirects and rewrites apply to it there.
+ * Without fetch metadata (a browser on an insecure origin, such as a LAN address over http), a
+ * subresource names its page as the referrer and does not ask for HTML.
+ */
+export function isViteDevClientRequest(
+  url: URL,
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  if (isViteModuleRequest(url, headers)) return true;
+  if (VITE_CLIENT_QUERY_FLAGS.some((flag) => url.searchParams.has(flag))) return true;
+  const destination = firstHeaderValue(headers["sec-fetch-dest"]);
+  if (destination !== undefined) {
+    return !NAVIGATION_FETCH_DESTINATIONS.has(destination.toLowerCase());
+  }
+  return (
+    firstHeaderValue(headers.referer) !== undefined &&
+    !(firstHeaderValue(headers.accept) ?? "").includes("text/html")
+  );
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 /** Root files the docs engine answers that an app can serve itself. */
 const DOCS_ENGINE_APP_OWNABLE_PATHS = new Set([
   "/llms.txt",

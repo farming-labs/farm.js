@@ -106,9 +106,11 @@ const EDGE_APP: Fixture = {
     { source: "/cfg-all/:path*", destination: "/:path*" },
     { source: "/moved.txt", destination: "/new-place" },
     { source: "/src/:path*", destination: "/gone" },
+    { source: "/package.json", destination: "/", permanent: false },
   ],
   rewrites: () => [
     { source: "/rewritten.txt", destination: "/api/echo" },
+    { source: "/lib/rewritten-source.ts", destination: "/api/echo" },
     { source: "/rw-enc/:slug", destination: "/api/files/:slug" },
   ],
   headers: () => [
@@ -118,6 +120,10 @@ const EDGE_APP: Fixture = {
 };`,
   "public/moved.txt": "moved file",
   "public/rewritten.txt": "rewritten file",
+  "lib/rewritten-source.ts": "export const rewrittenSource = true;",
+  "lib/data.json": '{"unrouted":true}',
+  "src/app/styles.css": "h1 { color: red; }",
+  "src/app/logo.svg": '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
   "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
   "src/app/page.tsx": `export default function Page() { return <h1>home page</h1>; }`,
   "src/app/api/echo/route.ts": ECHO_ANY_METHOD_ROUTE,
@@ -336,6 +342,23 @@ const expectEdgeApp: Run = async (origin) => {
   const sourceFile = await get(origin, "/src/app/page.tsx", { method: "POST" });
   expect(sourceFile.response.status, "POST /src/app/page.tsx").toBe(307);
   expect(sourceFile.response.headers.get("location")).toBe("/gone");
+
+  // A GET or HEAD for a file under the project root production never emits is a path like any
+  // other there: config redirects and rewrites, and headers(), apply to it.
+  for (const method of ["GET", "HEAD"]) {
+    const redirected = await get(origin, "/src/app/page.tsx?q=1", { method });
+    expect(redirected.response.status, `${method} /src/app/page.tsx`).toBe(307);
+    expect(redirected.response.headers.get("location")).toBe("/gone?q=1");
+    expect(redirected.response.headers.get("x-config")).toBe("on");
+
+    const rootFile = await get(origin, "/package.json", { method });
+    expect(rootFile.response.status, `${method} /package.json`).toBe(307);
+    expect(rootFile.response.headers.get("location")).toBe("/");
+  }
+  const rewrittenSource = await get(origin, "/lib/rewritten-source.ts");
+  expect(rewrittenSource.response.status, "GET /lib/rewritten-source.ts").toBe(200);
+  expect(JSON.parse(rewrittenSource.body)).toEqual({ method: "GET", path: "/api/echo" });
+  expect(rewrittenSource.response.headers.get("x-config")).toBe("on");
 };
 
 const cases: Array<[name: string, prefix: string, files: Fixture, run: Run]> = [
@@ -360,18 +383,47 @@ const cases: Array<[name: string, prefix: string, files: Fixture, run: Run]> = [
   ],
 ];
 
-// Vite's own requests stay Vite's whatever config route matches their path.
+// Vite's own requests stay Vite's whatever config route matches their path: its endpoints, and
+// the running app's module, stylesheet, asset, and fetch() requests for a source file.
 it("leaves Vite module and client requests to Vite in development", async () => {
   await runInDevelopment("farm-config-routes-vite-", EDGE_APP, async (origin) => {
-    for (const [pathname, headers] of [
-      ["/@vite/client", {}],
-      ["/src/app/page.tsx?import", {}],
-      ["/src/app/page.tsx", { "sec-fetch-dest": "script" }],
+    for (const [pathname, headers, contentType] of [
+      ["/@vite/client", {}, "javascript"],
+      ["/src/app/page.tsx?import", {}, "javascript"],
+      ["/src/app/page.tsx", { "sec-fetch-dest": "script" }, "javascript"],
+      ["/src/app/page.tsx?t=1700000000000", {}, "javascript"],
+      ["/src/app/page.tsx?raw", {}, "javascript"],
+      ["/src/app/page.tsx?url", {}, "javascript"],
+      ["/src/app/page.tsx?worker", {}, "javascript"],
+      // A module request from a page on an insecure origin carries no fetch metadata.
+      ["/src/app/page.tsx", { referer: `${origin}/`, accept: "*/*" }, "javascript"],
+      ["/src/app/styles.css", { "sec-fetch-dest": "script" }, "javascript"],
+      ["/src/app/styles.css", { "sec-fetch-dest": "style", accept: "text/css" }, "text/css"],
+      ["/src/app/styles.css?direct", { accept: "text/css" }, "text/css"],
+      ["/src/app/logo.svg", { "sec-fetch-dest": "image" }, "image/svg+xml"],
+      ["/package.json", { "sec-fetch-dest": "empty" }, "json"],
+      ["/lib/rewritten-source.ts", { "sec-fetch-dest": "script" }, "javascript"],
     ] as const) {
       const response = await get(origin, pathname, { headers });
-      expect(response.response.status, pathname).toBe(200);
-      expect(response.response.headers.get("content-type"), pathname).toContain("javascript");
+      const label = `${pathname} ${JSON.stringify(headers)}`;
+      expect(response.response.status, label).toBe(200);
+      expect(response.response.headers.get("content-type"), label).toContain(contentType);
     }
+
+    // A navigation to a source file is the browser asking for a page, with or without metadata.
+    for (const headers of [
+      { "sec-fetch-dest": "document" },
+      { referer: `${origin}/`, accept: "text/html,application/xhtml+xml,*/*;q=0.8" },
+    ]) {
+      const redirected = await get(origin, "/src/app/page.tsx", { headers });
+      expect(redirected.response.status, JSON.stringify(headers)).toBe(307);
+      expect(redirected.response.headers.get("location")).toBe("/gone");
+    }
+
+    // A source file no config route matches is still Vite's file.
+    const unrouted = await get(origin, "/lib/data.json");
+    expect(unrouted.response.status).toBe(200);
+    expect(JSON.parse(unrouted.body)).toEqual({ unrouted: true });
   });
 }, 120_000);
 
