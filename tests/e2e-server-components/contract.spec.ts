@@ -527,6 +527,29 @@ test("a server action that leaves its layout unchanged keeps what was typed ther
   await expect(page.getByLabel("Layout note")).toHaveValue("still here");
 });
 
+test("a server route slot stays on the server, and its client component hydrates", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "the rsc pipeline does not render route slots");
+  const errors = collectErrors(page);
+  const scripts: Promise<string>[] = [];
+  page.on("response", (response) => {
+    if (response.request().resourceType() === "script")
+      scripts.push(response.text().catch(() => ""));
+  });
+  await page.goto("/slots");
+  await hydrated(page);
+  await expect(page.getByTestId("slot-note")).toHaveText("SERVER_SLOT_MARKER_6f1c");
+  const button = page.getByRole("button", { name: /^Slot clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Slot clicks: 1");
+  await page.waitForLoadState("networkidle");
+  expect(
+    (await Promise.all(scripts)).filter((text) => text.includes("SERVER_SLOT_MARKER")),
+  ).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test("a server action passed as a prop works before JavaScript loads", async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();

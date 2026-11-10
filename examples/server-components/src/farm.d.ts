@@ -81,6 +81,7 @@ export type RoutePath =
   | "/search"
   | "/server-fn-middleware"
   | "/server-query"
+  | "/slots"
   | `/static/${string}`
   | "/stream"
   | "/timing"
@@ -159,6 +160,7 @@ export type RoutePattern =
   | "/search"
   | "/server-fn-middleware"
   | "/server-query"
+  | "/slots"
   | "/static/[slug]"
   | "/stream"
   | "/timing"
@@ -239,6 +241,7 @@ export type RouteModulePattern =
   | "/search"
   | "/server-fn-middleware"
   | "/server-query"
+  | "/slots"
   | "/static/[slug]"
   | "/stream"
   | "/timing"
