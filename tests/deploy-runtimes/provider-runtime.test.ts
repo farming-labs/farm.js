@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { NetlifyDev } from "@netlify/dev";
 import { Miniflare } from "miniflare";
 import { afterAll, describe, expect, it } from "vitest";
@@ -296,7 +298,7 @@ export const GET = createEndpoint(
 
 type CloudflareWorkerPreset = "cloudflare-pages" | "cloudflare-module";
 
-type CloudflareImageSource = {
+type ImageRouteSource = {
   /** Adds a generated `opengraph-image` route. */
   metadataRoute?: true;
   /** Adds `/api/card`, which imports `ImageResponse` from this module. */
@@ -304,10 +306,10 @@ type CloudflareImageSource = {
 };
 
 /** Builds an app whose image routes render a 600x315 PNG with @vercel/og. */
-async function createCloudflareImageFixture(
-  preset: CloudflareWorkerPreset,
-  { metadataRoute, apiRoute }: CloudflareImageSource,
-): Promise<string> {
+async function createImageFixture(
+  preset: CloudflareWorkerPreset | "netlify-edge",
+  { metadataRoute, apiRoute }: ImageRouteSource,
+): Promise<{ root: string; outputDir: string }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), `farm-${preset}-image-`));
   fixtureRoots.push(root);
 
@@ -359,12 +361,58 @@ async function createCloudflareImageFixture(
       images: { provider: "none" },
       telemetry: false,
       generateBuildId: () => `${preset}-image-test`,
-      deploy: { target: "cloudflare", preset },
+      deploy: { target: preset === "netlify-edge" ? "netlify" : "cloudflare", preset },
     },
     "production",
   );
   await build(config, { root, preset });
-  return path.resolve(root, config.deploy.outputDir);
+  return { root, outputDir: path.resolve(root, config.deploy.outputDir) };
+}
+
+/**
+ * Calls the netlify-edge function the way Netlify Edge Functions do, from a copy
+ * outside the app. Netlify bundles a bare import in an edge function from the
+ * app's node_modules with Node conditions, which load @vercel/og's Node build
+ * away from its wasm and font files, so the function must not need node_modules.
+ */
+async function requestIsolatedNetlifyEdgeFunction(
+  root: string,
+  requestPaths: string[],
+): Promise<Response[]> {
+  const functionDir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-netlify-edge-function-"));
+  fixtureRoots.push(functionDir);
+  await fs.cp(path.join(root, ".netlify", "edge-functions", "server"), functionDir, {
+    recursive: true,
+  });
+  const script = `
+const { default: handler } = await import(process.argv[1]);
+const responses = [];
+for (const requestPath of process.argv.slice(2)) {
+  const response = await handler(new Request(new URL(requestPath, "https://farm-runtime.test")), { ip: "127.0.0.1" });
+  responses.push({
+    status: response.status,
+    headers: [...response.headers],
+    body: Buffer.from(await response.arrayBuffer()).toString("base64"),
+  });
+}
+process.stdout.write(JSON.stringify(responses));
+`;
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      script,
+      pathToFileURL(path.join(functionDir, "server.js")).href,
+      ...requestPaths,
+    ],
+    { cwd: functionDir, maxBuffer: 16 * 1024 * 1024 },
+  );
+  return (
+    JSON.parse(stdout) as { status: number; headers: [string, string][]; body: string }[]
+  ).map(
+    ({ status, headers, body }) => new Response(Buffer.from(body, "base64"), { status, headers }),
+  );
 }
 
 function createCloudflareWorkerRuntime(preset: CloudflareWorkerPreset, outputDir: string) {
@@ -660,11 +708,11 @@ describe("first-class provider runtime output", () => {
       "a metadata route and a @farm.js/core/og API route",
       { metadataRoute: true, apiRoute: "@farm.js/core/og" },
     ],
-  ] as [CloudflareWorkerPreset, string, CloudflareImageSource][]) {
+  ] as [CloudflareWorkerPreset, string, ImageRouteSource][]) {
     it(`renders an image from ${label} in the ${preset} worker`, async () => {
       const runtime = createCloudflareWorkerRuntime(
         preset,
-        await createCloudflareImageFixture(preset, source),
+        (await createImageFixture(preset, source)).outputDir,
       );
       try {
         for (const requestPath of [
@@ -678,6 +726,34 @@ describe("first-class provider runtime output", () => {
       } finally {
         await runtime.dispose();
       }
+    }, 180_000);
+  }
+
+  for (const [label, source] of [
+    [
+      "a metadata route and a @farm.js/core/og API route",
+      { metadataRoute: true, apiRoute: "@farm.js/core/og" },
+    ],
+    ["a @vercel/og API route", { apiRoute: "@vercel/og" }],
+  ] as [string, ImageRouteSource][]) {
+    it(`renders an image from ${label} in a self-contained netlify-edge function`, async () => {
+      const { root } = await createImageFixture("netlify-edge", source);
+      const server = await fs.readFile(
+        path.join(root, ".netlify", "edge-functions", "server", "server.js"),
+        "utf8",
+      );
+      expect(
+        server.match(/from\s*["']@vercel\/og["']|import\(\s*["']@vercel\/og["']\s*\)/)?.[0],
+      ).toBeUndefined();
+
+      const requestPaths = [
+        "/",
+        ...(source.metadataRoute ? ["/opengraph-image"] : []),
+        "/api/card",
+      ];
+      const [page, ...images] = await requestIsolatedNetlifyEdgeFunction(root, requestPaths);
+      expect(page.status).toBe(200);
+      for (const image of images) await expectPngResponse(image);
     }, 180_000);
   }
 
