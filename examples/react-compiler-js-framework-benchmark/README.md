@@ -91,6 +91,9 @@ pnpm summarize:official /absolute/path/to/js-framework-benchmark
 
 See [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md) for the checked-in interpretation and
 `BENCHMARK_RESULTS.json` for raw sample arrays and medians from the recorded run.
+[BENCHMARK_RESULTS_LINUX_CHROMIUM.md](./BENCHMARK_RESULTS_LINUX_CHROMIUM.md) and
+`BENCHMARK_RESULTS_LINUX_CHROMIUM.json` are a separate run on a Linux VM with Chromium; compare
+ratios between builds, not absolute times across the two machines.
 
 These are local results produced by the official harness, not an official leaderboard submission.
 Browser, operating-system, runner, framework versions, harness revision, and sample counts must be
