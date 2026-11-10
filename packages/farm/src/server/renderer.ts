@@ -336,6 +336,7 @@ export interface FarmNavigationFragmentSlot {
   containerId: string;
   module: { default?: any };
   props: Record<string, unknown>;
+  shouldHydrate?: boolean;
 }
 
 export interface FarmNavigationFragmentInput {
@@ -1049,7 +1050,7 @@ export class ServerRenderer {
           continue;
         }
         let slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
-        slotElement = this.wrapClientGraph(slotElement);
+        if (slot.shouldHydrate !== false) slotElement = this.wrapClientGraph(slotElement);
         slotProps[slot.name] = this.rendererRuntime.createElement(
           "div",
           {
@@ -2157,7 +2158,7 @@ export class ServerRenderer {
                   slot.module.default,
                   slot.props,
                 );
-                slotElement = this.wrapClientGraph(slotElement);
+                if (slot.shouldHydrate) slotElement = this.wrapClientGraph(slotElement);
                 slotElement = this.rendererRuntime.createElement(
                   "div",
                   {

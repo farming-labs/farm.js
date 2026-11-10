@@ -928,14 +928,26 @@ export class RouteManager {
         containerId: entry.containerId,
         interception: entry.interception,
         fallback: entry.fallback,
-        shouldHydrate: metadata.shouldHydrate,
+        // In islands mode a server slot stays on the server; its client components are islands.
+        shouldHydrate: metadata.shouldHydrate && (!islandsMode || metadata.isClientComponent),
         isClientComponent: metadata.isClientComponent,
         segments: entry.route.segments,
       };
     });
 
+    // A server slot's client components are islands, as a server page's are.
+    const slotPlans = islandsMode
+      ? Array.from(this.routeSlots.values()).map((entry) => ({
+          metadata: getClientModuleHydrationPlan(
+            entry.modulePath,
+            normalizedProjectRoot,
+            isolatedMode,
+            { ...planOptions, serverOwners: true },
+          ),
+        }))
+      : [];
     const isolatedClientBoundaryModules = new Set<string>();
-    for (const { metadata } of [...layoutEntries, ...routeEntries]) {
+    for (const { metadata } of [...layoutEntries, ...routeEntries, ...slotPlans]) {
       // A server-tree layout's client components load from its tree, as islands do.
       if (!metadata.hasIsolatedClientBoundaries && !metadata.serverTreeLayout) continue;
       for (const boundary of metadata.isolatedBoundaries) {
