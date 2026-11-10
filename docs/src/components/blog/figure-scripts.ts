@@ -1836,12 +1836,7 @@ const SCREEN_BLOCKS: Record<string, [number, number, number, number][]> = {
     [6, 40, 88, 30],
   ],
   rn: [[0, 0, 100, 84]],
-  modal: [
-    [6, 3, 88, 13],
-    [6, 19, 88, 13],
-    [6, 35, 88, 13],
-    [6, 51, 88, 13],
-  ],
+  modal: [],
 };
 const block = ([x, y, w, h]: [number, number, number, number], opacity: number, cls = "", dx = 0) =>
   `<span class="bf-vblock${cls ? ` ${cls}` : ""}" style="left:${(x + dx).toFixed(2)}%;top:${y}%;width:${w}%;height:${h}%;opacity:${opacity.toFixed(3)}"></span>`;
@@ -1850,6 +1845,47 @@ const backChevron = (opacity: number, dx: number) =>
   `<span class="bf-vback" style="left:${(4 + dx).toFixed(2)}%;opacity:${opacity.toFixed(3)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></span>`;
 const road = ([x, y, w, h]: [number, number, number, number], opacity: number) =>
   `<span class="bf-vroad" style="left:${x}%;top:${y}%;width:${w}%;height:${h}%;opacity:${opacity.toFixed(3)}"></span>`;
+const lerp = (from: number, to: number, amount: number) => from + (to - from) * amount;
+/** One screen, drawn as a layer that can slide (x, in % of its width) and fade as a unit. */
+const layer = (content: string, x: number, opacity: number, cls = "") =>
+  `<span class="bf-vlayer${cls}" style="transform:translateX(${x.toFixed(2)}%);opacity:${clamp(opacity).toFixed(3)}">${content}</span>`;
+/** A screen's content, `since` seconds after it opened (its own small entrance plays inside). */
+function screenContent(id: string, since: number) {
+  const content = SCREEN_BLOCKS[id];
+  if (id === "native") {
+    return backChevron(1, 0) + content.map((rect) => block(rect, 1)).join("");
+  }
+  let html = content
+    .map((rect, i) => block(rect, (id === "modal" ? 0.35 : 1) * ease(prog(since, i * 0.08, 0.3))))
+    .join("");
+  if (id === "rn") {
+    // Two streets cross the map, then a pin drops onto it.
+    const streets = ease(prog(since, 0.15, 0.3));
+    html += road([0, 56, 100, 1.2], streets) + road([30, 0, 1.8, 84], streets);
+    const drop = ease(prog(since, 0.4, 0.35));
+    html += `<span class="bf-vpin" style="left:50%;top:${(26 + 8 * drop).toFixed(2)}%;opacity:${drop.toFixed(3)}"></span>`;
+  }
+  return html;
+}
+/** The native frame's tab bar: two tabs and a highlight at `at` (0 is the first tab). */
+const tabBar = (at: number, opacity: number) =>
+  [0, 1].map((tab) => block([8 + tab * 46, 89, 38, 8], opacity)).join("") +
+  block([8 + at * 46, 89, 38, 8], opacity, "bf-vblock--tab");
+/** The new-note sheet: risen `since` seconds after opening, then lowered by `away` (0 to 1). */
+function sheet(since: number, away: number) {
+  const top = 100 - 72 * ease(prog(since, 0.05, 0.55)) * (1 - away);
+  const form = (
+    [
+      [8, 13, 46, 6],
+      [8, 25, 84, 12],
+      [8, 42, 84, 30],
+    ] as [number, number, number, number][]
+  )
+    .map((rect, i) => block(rect, ease(prog(since, 0.45 + i * 0.08, 0.3))))
+    .join("");
+  const save = block([8, 79, 38, 10], ease(prog(since, 0.7, 0.3)), "bf-vblock--tab");
+  return `<span class="bf-vblock bf-vsheet" style="left:0%;top:${top.toFixed(2)}%;width:100%;height:72%"><span class="bf-vgrip"></span>${form}${save}</span>`;
+}
 const landingMobile: FigureSpec = {
   duration: MOBILE_START + (MOBILE_SCREENS.length - 1) * MOBILE_STEP + PULSE + 0.9 + HOLD,
   stage: { w: 440, h: 300 },
@@ -1893,60 +1929,60 @@ const landingMobile: FigureSpec = {
     });
     const screen = MOBILE_SCREENS[current];
     const since = current >= 0 ? t - opened[current] : 0;
-    let blocks = "";
+    // How far the change to the current screen has come; the outgoing screen leaves on the same
+    // clock, so no transition is ever cut halfway.
+    const change = ease(prog(since, 0, 0.45));
+    const last = MOBILE_SCREENS[MOBILE_SCREENS.length - 1];
+    let phone = "";
     if (screen) {
-      const content = SCREEN_BLOCKS[screen.id];
-      const under = screen.id === "modal";
-      if (screen.id === "native") {
-        // A pushed screen slides in from the right edge, as a native stack does, with a back
-        // chevron in its header.
-        const push = ease(prog(since, 0, 0.45));
-        const dx = 24 * (1 - push);
-        const shown = ease(prog(since, 0, 0.2));
-        blocks += backChevron(shown, dx);
-        blocks += content.map((rect) => block(rect, shown, "", dx)).join("");
+      const previous = MOBILE_SCREENS[current - 1];
+      if (previous && change < 1) {
+        // A push moves the screen underneath a third of the way left, as a native stack does;
+        // anything else crossfades.
+        const pushed = screen.id === "native";
+        phone += layer(
+          screenContent(previous.id, 9),
+          pushed ? -30 * change : 0,
+          pushed ? 1 - 0.65 * change : 1 - change,
+        );
+      }
+      const pushed = screen.id === "native";
+      const modal = screen.id === "modal";
+      if (modal && previous) {
+        // A modal is presented over the screen it was opened from, which stays and dims.
+        phone = layer(screenContent(previous.id, 9), 0, lerp(1, 0.35, change));
+        phone += tabBar(previous.tab, lerp(1, 0.35, change));
+        phone += sheet(since, 0);
       } else {
-        blocks += content
-          .map((rect, i) => block(rect, (under ? 0.35 : 1) * ease(prog(since, i * 0.08, 0.3))))
-          .join("");
+        phone += layer(
+          screenContent(screen.id, since),
+          pushed ? 100 * (1 - change) : 0,
+          pushed ? 1 : ease(prog(since, 0, 0.25)),
+          pushed && change < 1 ? " bf-vlayer--edge" : "",
+        );
+        // The native frame's tab bar; its highlight slides to the current tab.
+        const fromTab = previous ? previous.tab : screen.tab;
+        phone += tabBar(lerp(fromTab, screen.tab, ease(prog(since, 0, 0.35))), 1);
       }
-      if (screen.id === "rn") {
-        // Two streets cross the map, then a pin drops onto it.
-        const streets = ease(prog(since, 0.15, 0.3));
-        blocks += road([0, 56, 100, 1.2], streets) + road([30, 0, 1.8, 84], streets);
-        const drop = ease(prog(since, 0.4, 0.35));
-        blocks += `<span class="bf-vpin" style="left:50%;top:${(26 + 8 * drop).toFixed(2)}%;opacity:${drop.toFixed(3)}"></span>`;
-      }
-      // The native frame: a tab bar with the screen's tab lit. A modal sheet covers it.
-      blocks += [0, 1]
-        .map((tab) =>
-          block(
-            [8 + tab * 46, 89, 38, 8],
-            under ? 0.35 : 1,
-            tab === screen.tab ? "bf-vblock--tab" : "",
-          ),
-        )
-        .join("");
-      if (under) {
-        // The sheet rises from the bottom edge over the screen it was opened from: a new-note
-        // form with a title, two fields, and a save button.
-        const top = 100 - 72 * ease(prog(since, 0.05, 0.55));
-        const form = (
-          [
-            [8, 13, 46, 6],
-            [8, 25, 84, 12],
-            [8, 42, 84, 30],
-          ] as [number, number, number, number][]
-        )
-          .map((rect, i) => block(rect, ease(prog(since, 0.45 + i * 0.08, 0.3))))
-          .join("");
-        const save = block([8, 79, 38, 10], ease(prog(since, 0.7, 0.3)), "bf-vblock--tab");
-        blocks += `<span class="bf-vblock bf-vsheet" style="left:0%;top:${top.toFixed(2)}%;width:100%;height:72%"><span class="bf-vgrip"></span>${form}${save}</span>`;
-      }
+    } else {
+      // The loop opens where it ended: the sheet slides back down and the screen under it clears,
+      // so restarting never jumps.
+      const away = ease(prog(t, 0, 0.45));
+      const clear = 1 - ease(prog(t, 0.25, 0.3));
+      const under = MOBILE_SCREENS[MOBILE_SCREENS.length - 2];
+      phone += layer(screenContent(under.id, 9), 0, lerp(0.35, 1, away) * clear);
+      phone += tabBar(under.tab, lerp(0.35, 1, away) * clear);
+      if (away < 1) phone += sheet(9, away);
     }
+    // The header types the route as its screen opens; at the restart it fades with the sheet.
+    const route = screen ? screen.route : last.route;
+    const typing = screen && since < 0.05 + route.length / 28 + 0.2;
+    const meta = screen
+      ? `${esc(typed(route, since, 0.05, 28))}${typing ? caret : ""}`
+      : `<span style="opacity:${(1 - ease(prog(t, 0, 0.3))).toFixed(3)}">${esc(route)}</span>`;
     const slots: Record<string, string> = {
-      phone: `<span class="bf-vprev bf-vphone">${blocks}</span>`,
-      "phone:meta": screen ? screen.kind : "",
+      phone: `<span class="bf-vprev bf-vphone">${phone}</span>`,
+      "phone:meta": meta,
     };
     const states: Record<string, PanelState | undefined> = {
       phone: current >= 0 && since < 0.6 ? "hot" : undefined,

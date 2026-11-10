@@ -757,6 +757,20 @@
   border-radius: 1em;
   background: rgb(255 255 255 / 0.25);
 }
+/* One screen on the phone; screens slide and fade as layers. The phone clips them. */
+.bf-vlayer {
+  position: absolute;
+  inset: 0;
+}
+/* A screen being pushed carries a hairline on its leading edge over the one it covers. */
+.bf-vlayer--edge {
+  border-left: 1px solid rgb(255 255 255 / 0.18);
+  background: #070707;
+}
+.bf-vphone {
+  overflow: hidden;
+}
+
 /* A pushed screen's back chevron, at the header's text size. */
 .bf-vback {
   position: absolute;
