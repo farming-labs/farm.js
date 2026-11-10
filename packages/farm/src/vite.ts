@@ -2812,17 +2812,25 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               applyWebRequestToNodeRequest(runtimeSession.request, req);
             }
             let response: Response | void;
+            let responding = false;
             try {
               if (await runAppMiddlewareInRuntimeSession(runtimeSession)) {
                 await discard();
                 return;
               }
+              responding = true;
               response = await respond(
                 runtimeSession?.request ?? createRequestFromNodeRequest(req, new URL(fullUrl)),
               );
             } catch (error) {
               if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
-              throw error;
+              if (!runtimeSession || !responding || res.headersSent) throw error;
+              // The route answers inside the runtime request, as in production, so its throw
+              // fails that request: runtime.error and onError observed it once, runtime.after
+              // does not run, and the request answers the runtime hook 500 for its path.
+              console.error("[FARM] Built-in route error:", error);
+              sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+              return;
             }
             if (!response) return;
             if (runtimeSession) await sendRuntimeResponse(runtimeSession, response);

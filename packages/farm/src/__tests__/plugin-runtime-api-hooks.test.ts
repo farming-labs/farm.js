@@ -33,7 +33,8 @@ afterEach(async () => {
 // server can be asked the same questions.
 const TRACED = `const traced = (request: Request) => {
   const { pathname } = new URL(request.url);
-  return /^\\/(api|integration)\\//.test(pathname) ||
+  return /^\\/(api|integration|docs)\\//.test(pathname) ||
+    pathname === "/docs" ||
     pathname === "/hello" ||
     pathname.startsWith("/hello/") ||
     pathname === "/.well-known/farmjs.json"
@@ -138,9 +139,24 @@ const HTML_TRANSFORM_PLUGIN = `
       },
     }),`;
 
+// The built-in docs engine, with a client root layout that fails when it wraps one docs page:
+// farm dev and production wrap docs HTML in the app's client layouts inside the docs route.
+const DOCS_FILES: Record<string, string> = {
+  "src/app/layout.tsx": `"use client";
+export default function Layout({ children }) {
+  if (String(children?.props?.dangerouslySetInnerHTML?.__html ?? "").includes("layout-fails-marker")) {
+    throw new Error("layout failed");
+  }
+  return <main>{children}</main>;
+}`,
+  "src/app/docs/page.md": "---\ntitle: Docs\n---\n# Docs\n",
+  "src/app/docs/layout-fails/page.md":
+    "---\ntitle: Layout fails\n---\n# Layout fails\n\nlayout-fails-marker\n",
+};
+
 async function createApp(
   prefix: string,
-  options: { htmlTransform?: boolean } = {},
+  options: { htmlTransform?: boolean; docs?: boolean } = {},
 ): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   temporaryRoots.add(root);
@@ -154,11 +170,19 @@ async function createApp(
     );
   }
   await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
-  for (const [relativePath, source] of Object.entries(FILES)) {
+  for (const [relativePath, source] of Object.entries({
+    ...FILES,
+    ...(options.docs ? DOCS_FILES : {}),
+  })) {
     await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
     await fs.writeFile(
       path.join(root, relativePath),
-      source.replace("__HTML_TRANSFORM__", options.htmlTransform ? HTML_TRANSFORM_PLUGIN : ""),
+      source
+        .replace("__HTML_TRANSFORM__", options.htmlTransform ? HTML_TRANSFORM_PLUGIN : "")
+        .replace(
+          "telemetry: false,",
+          options.docs ? "telemetry: false,\n  docs: { enabled: true }," : "telemetry: false,",
+        ),
     );
   }
   return root;
@@ -474,6 +498,28 @@ async function expectHTMLTransformFailures(origin: string): Promise<void> {
   });
 }
 
+// A built-in route whose own handler throws (here the docs engine's layout wrap) fails the
+// request as a throwing runtime hook does: runtime.error observes it, onError gets it once as the
+// "runtime" phase, no runtime.after runs, and a page path answers the plain-text 500.
+async function expectBuiltInRouteFailure(origin: string): Promise<void> {
+  const docs = await request(origin, "/docs", { headers: { accept: "text/html" } });
+  expect({ status: docs.status, trace: docs.trace }).toEqual({
+    status: 200,
+    trace: ["before docs /docs", "middleware /docs", "after /docs 200"],
+  });
+  expect(await request(origin, "/docs/layout-fails", { headers: { accept: "text/html" } })).toEqual(
+    {
+      ...PAGE_HOOK_FAILURE,
+      trace: [
+        "before docs /docs/layout-fails",
+        "middleware /docs/layout-fails",
+        "error /docs/layout-fails layout failed",
+        "onError runtime layout failed",
+      ],
+    },
+  );
+}
+
 async function startDevelopment(root: string): Promise<string> {
   const server = await createServer({ root });
   devServers.add(server);
@@ -548,5 +594,17 @@ describe("plugin runtime and HTML transform hook failures on a page", () => {
       await expectPageHookFailures(origin);
       await expectHTMLTransformFailures(origin);
     });
+  }, 240_000);
+});
+
+describe("plugin runtime hooks when a built-in route's handler throws", () => {
+  it("in development", async () => {
+    const root = await createApp("farm-dev-plugin-runtime-docs-", { docs: true });
+    await expectBuiltInRouteFailure(await startDevelopment(root));
+  }, 120_000);
+
+  it("in a node-server production build", async () => {
+    const root = await createApp("farm-prod-plugin-runtime-docs-", { docs: true });
+    await withProduction(root, expectBuiltInRouteFailure);
   }, 240_000);
 });
