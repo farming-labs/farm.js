@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { build, type Rollup } from "vite";
+import { build, type Plugin, type Rollup } from "vite";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 
 const temporaryRoots: string[] = [];
@@ -22,7 +22,11 @@ describe("client-only reached from islands server code", () => {
     "src/lib/styles.ts": "export const label = 1;\n",
   };
 
-  async function buildIslands(page: string, extra: Record<string, string> = {}) {
+  async function buildIslands(
+    page: string,
+    extra: Record<string, string> = {},
+    plugins: Plugin[] = [],
+  ) {
     const root = mkdtempSync(path.join(tmpdir(), "farm-client-only-"));
     temporaryRoots.push(root);
     for (const [file, contents] of Object.entries({ ...files, ...extra, "src/page.ts": page })) {
@@ -33,6 +37,7 @@ describe("client-only reached from islands server code", () => {
       root,
       logLevel: "silent",
       plugins: [
+        ...plugins,
         farmEnvironmentFunctionsPlugin({
           root,
           srcDir: "src",
@@ -84,6 +89,19 @@ describe("client-only reached from islands server code", () => {
         ".shared/client.ts":
           '"use client";\nimport { Button } from "aria-kit";\nexport const label = Button;\n',
       }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not read a file for a plugin's virtual script", async () => {
+    const theme: Plugin = {
+      name: "virtual-theme",
+      resolveId: (id) => (id === "virtual:theme.ts" ? id : null),
+      load: (id) => (id === "virtual:theme.ts" ? "export const theme = 1;\n" : null),
+    };
+    await expect(
+      buildIslands('import { theme } from "virtual:theme.ts";\nexport default theme;\n', {}, [
+        theme,
+      ]),
     ).resolves.toBeUndefined();
   });
 

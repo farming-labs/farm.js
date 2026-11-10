@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
 import type { FarmEnvironment } from "./environment";
@@ -191,7 +191,7 @@ export function farmEnvironmentFunctionsPlugin(
         // workspace package holds is outside the root, so its own directive has to count too.
         const clientCode =
           getFarmClientReachableModules(root, root).has(path.resolve(file)) ||
-          hasUseClientDirective(readFileSync(file, "utf8"));
+          (existsSync(file) && hasUseClientDirective(readFileSync(file, "utf8")));
         const reached = clientCode ? null : findFarmClientOnlyImport(code, file);
         if (reached) {
           const chain = reached.chain.map((step) => path.relative(root, step)).join(" -> ");
