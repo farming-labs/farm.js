@@ -243,33 +243,25 @@ function functionSource(value: unknown, pluginName: string, location: string): s
     return `(${source})`;
   }
 
-  // `async (x) => {}` and a method named `async` share a prefix, so only the
-  // parser can tell an arrow from a method. A method is never an expression.
-  if (source.includes("=>") && !/^class\b/.test(source) && parsesAsExpression(source)) {
-    return `(${source})`;
-  }
+  if (!/^class\b/.test(source)) {
+    // `async (x) => {}` and a method named `async` share a prefix. A method is
+    // named after its key, so only the method has this source and that name.
+    // This runs per request in production too, so it must not compile code.
+    if (/^async\s*\(/.test(source) && value.name !== "async") return `(${source})`;
 
-  const method = source.match(/^(async\s+)?(\*\s*)?[$A-Z_a-z][$\w]*\s*(\([\s\S]*)$/);
-  if (method) {
-    const asyncPrefix = method[1] ?? "";
-    const generator = method[2] ? "*" : "";
-    return `(${asyncPrefix}function${generator}${method[3]})`;
+    const method = source.match(/^(async\s+)?(\*\s*)?[$A-Z_a-z][$\w]*\s*(\([\s\S]*)$/);
+    if (method) {
+      const asyncPrefix = method[1] ?? "";
+      const generator = method[2] ? "*" : "";
+      return `(${asyncPrefix}function${generator}${method[3]})`;
+    }
+
+    if (source.includes("=>")) return `(${source})`;
   }
 
   throw new TypeError(
     `Client plugin "${pluginName}" ${location} must use a function, method, or arrow function`,
   );
-}
-
-/** Compiles without running, so the hook's code never executes at build time. */
-function parsesAsExpression(source: string): boolean {
-  try {
-    new Function(`return (${source}\n);`);
-    return true;
-  } catch (error) {
-    if (error instanceof SyntaxError) return false;
-    throw error;
-  }
 }
 
 function assertPublicData(value: unknown, pluginName: string): void {
