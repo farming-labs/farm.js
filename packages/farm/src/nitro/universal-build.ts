@@ -8087,7 +8087,32 @@ function createFarmFlushToken() {
   return token;
 }
 
-async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken = "") {
+${
+  farmIslandsMode
+    ? `async function farmKeptLayoutsRender(ReactDOMServer, layouts, keptCount, params) {
+  let element = null;
+  for (let index = keptCount - 1; index >= 0; index--) {
+    const Layout = layouts[index].module.default;
+    if (Layout) element = React.createElement(Layout, { children: element, params });
+  }
+  try {
+    const rendered = await renderFarmElement(
+      ReactDOMServer,
+      wrapWithFarmIntegrationProviders(element),
+    );
+    if (rendered.stream) {
+      const reader = rendered.stream.getReader();
+      while (!(await reader.read()).done);
+    }
+    return rendered.streamErrors.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+`
+    : ""
+}async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken = "") {
   // Written after each React flush in a streamed navigation (flushToken): the browser swaps in
   // the shell, then adds each Suspense boundary as soon as the flush that completed it ends.
   // The token is random per response and reaches the browser in the F-Flush header, so page
@@ -10657,7 +10682,7 @@ ${
           ? 0
           : countFarmKeptLayouts(request, farmSegmentLayouts, params);
       // The root layout always renders, so keeping one layout keeps nothing.
-      const farmKeptLayouts = farmKeptLayoutCount > 1 ? farmKeptLayoutCount : 0;`
+      let farmKeptLayouts = farmKeptLayoutCount > 1 ? farmKeptLayoutCount : 0;`
           : `const farmKeptLayouts = 0;`
       }
       ${
@@ -10974,7 +10999,21 @@ ${
         const farmPayloadOnlyNavigation = false;
         const farmFlushToken = "";`
         }
-        const renderPageElement = async () => {
+        const renderPageElement = async () => {${
+          farmIslandsMode
+            ? `
+            // The browser chooses which layouts it says it keeps, so a kept layout still runs: a
+            // guard in it decides this request. Only its markup is left out. A layout that fails
+            // here renders whole, so notFound() and redirect() answer as on any other request.
+            if (
+              farmKeptLayouts > 0 &&
+              !(await farmKeptLayoutsRender(ReactDOMServer, applicableLayouts, farmKeptLayouts, params))
+            ) {
+              farmKeptLayouts = 0;
+              pprCanCache = false;
+            }`
+            : ""
+        }
             // First, render the page content
             let pageElement;
 

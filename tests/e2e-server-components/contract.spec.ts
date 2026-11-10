@@ -228,6 +228,32 @@ test("a navigation request gets the layouts it keeps as boundaries, and flush ma
   expect(hydrating).toContain('data-farm-layout-pattern="/context"');
   expect(hydrating).not.toContain("data-farm-layout-key");
 
+  // The header is the browser's word, so a layout that guards its pages still runs.
+  const keptGuard = JSON.stringify(["/", "/guarded"]);
+  for (const headers of [
+    { Accept: "text/html" },
+    { Accept: "text/html", "F-Layouts": keptGuard },
+  ]) {
+    const denied = await request.get("/guarded", { headers });
+    expect(denied.status()).toBe(404);
+    expect(await denied.text()).not.toContain("Guarded page");
+  }
+  const allowed = await request.get("/guarded", {
+    headers: { Accept: "text/html", "F-Layouts": keptGuard, "X-Guard": "allow" },
+  });
+  expect(allowed.status()).toBe(200);
+  const allowedHtml = await allowed.text();
+  expect(allowedHtml).toContain("Guarded page");
+  expect(allowedHtml).toContain('data-farm-layout-key="/guarded" data-farm-layout-kept="true"');
+  expect(allowedHtml).not.toContain("Guarded layout");
+  // Running a layout with a client island in it does not cost the segment.
+  const island = await (
+    await request.get("/action-layout", {
+      headers: { Accept: "text/html", "F-Layouts": JSON.stringify(["/", "/action-layout"]) },
+    })
+  ).text();
+  expect(island).toContain('data-farm-layout-key="/action-layout" data-farm-layout-kept="true"');
+
   // F-Stream: flush marks where each React flush ends, with the token from F-Flush.
   const streamed = await fetch(`${baseURL}/stream`, {
     headers: { Accept: "text/html", "F-Stream": "flush" },

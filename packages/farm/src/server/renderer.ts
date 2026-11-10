@@ -905,7 +905,7 @@ export class ServerRenderer {
 
   private async renderElementToCompleteHTML(
     element: unknown,
-    options: { rejectLateNavigation?: boolean } = {},
+    options: { rejectLateNavigation?: boolean; rejectLateErrors?: boolean } = {},
   ): Promise<string> {
     const streaming = getFarmRendererStreamingCapabilitiesForRuntime(this.config.renderer, "node");
     const renderToPipeableStream = streaming.node
@@ -944,9 +944,10 @@ export class ServerRenderer {
             // A redirect() or notFound() under a loading boundary decides the status
             // when the caller needs one, as production's buffered render does.
             else if (
-              options.rejectLateNavigation &&
               lateNavigation === undefined &&
-              (isFarmRedirectError(error) || isFarmNotFoundError(error))
+              (options.rejectLateErrors ||
+                (options.rejectLateNavigation &&
+                  (isFarmRedirectError(error) || isFarmNotFoundError(error))))
             ) {
               lateNavigation = error;
             }
@@ -2105,7 +2106,30 @@ export class ServerRenderer {
               renderedRouteSlots.length === 0
                 ? countFarmKeptLayouts(requestHeader(req, "f-layouts"), layouts, params)
                 : 0;
-            const keptLayouts = keptLayoutCount > 1 ? keptLayoutCount : 0;
+            let keptLayouts = keptLayoutCount > 1 ? keptLayoutCount : 0;
+            // The browser chooses which layouts it says it keeps, so a kept layout still runs: a
+            // guard in it decides this request. Only its markup is left out. A layout that fails
+            // here renders whole, so notFound() and redirect() answer as on any other request.
+            if (keptLayouts > 0) {
+              let keptElement: unknown = null;
+              for (let i = keptLayouts - 1; i >= 0; i--) {
+                const KeptLayout = layoutModules[i]?.default;
+                if (KeptLayout) {
+                  keptElement = this.rendererRuntime.createElement(KeptLayout, {
+                    children: keptElement,
+                    params,
+                  });
+                }
+              }
+              try {
+                await this.renderElementToCompleteHTML(
+                  await this.wrapWithIntegrationProviders(keptElement),
+                  { rejectLateErrors: true },
+                );
+              } catch {
+                keptLayouts = 0;
+              }
+            }
             let wrappedElement: any = pageElement;
             for (let i = layoutModules.length - 1; i >= 0; i--) {
               const layoutModule = layoutModules[i];
