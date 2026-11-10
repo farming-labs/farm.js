@@ -1818,9 +1818,10 @@ const MOBILE_SCREENS: MobileScreen[] = [
 const MOBILE_LANE = (i: number) => i * 84; // top of each route pill
 const MOBILE_HUB = 150; // where the four connectors meet the phone
 // The route pills are only as wide as their text; with the phone they sit centred on the stage.
-const MOBILE_PILL_X = 30;
+const MOBILE_PILL_X = 14;
 const MOBILE_PILL_W = 168;
-const MOBILE_PHONE_X = 260;
+const MOBILE_PHONE_X = 234;
+const MOBILE_PHONE_W = 192;
 const MOBILE_JOIN_X = (MOBILE_PILL_X + MOBILE_PILL_W + MOBILE_PHONE_X) / 2;
 const MOBILE_START = 0.6;
 const MOBILE_STEP = 1.5;
@@ -1908,7 +1909,7 @@ const landingMobile: FigureSpec = {
       kicker: screen.kicker,
       label: screen.route,
     })),
-    { id: "phone", x: MOBILE_PHONE_X, y: 0, w: 150, h: 300, title: "Phone" },
+    { id: "phone", x: MOBILE_PHONE_X, y: 0, w: MOBILE_PHONE_W, h: 300, title: "Phone" },
   ],
   wires: Object.fromEntries(
     MOBILE_SCREENS.map((screen, i): [string, [number, number][]] => {
