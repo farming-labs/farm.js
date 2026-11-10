@@ -219,5 +219,7 @@ it("answers a throwing app middleware with core's generic 500", async () => {
 
     expect(endpoint).not.toHaveBeenCalled();
     expect(readSentResponse(res)).toEqual(INTERNAL_SERVER_ERROR);
+    // Kept out of shared caches, as core's middleware-error 500 is in dev and production.
+    expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "private, no-store");
   });
 });
