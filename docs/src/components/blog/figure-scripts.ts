@@ -2,7 +2,7 @@
 // the requests between them) rather than repeating the code blocks next to them. Each script is a
 // pure function of time: the server renders its final frame and the client player replays it.
 
-import { siExpress, siFastify, siHono, siKoa, siNestjs } from "simple-icons";
+import { siExpress, siFastify, siHono, siNestjs } from "simple-icons";
 
 export type FigureKind =
   | "integration"
@@ -1680,25 +1680,26 @@ const markGlyph = (path: string) =>
 const BACKEND_MARKS = {
   hono: markGlyph(siHono.path),
   express: markGlyph(siExpress.path),
-  koa: markGlyph(siKoa.path),
   fastify: markGlyph(siFastify.path),
   nest: markGlyph(siNestjs.path),
   // Elysia has no published mark in simple-icons; a code glyph stands in rather than a guess.
   code: glyph("m16 18 6-6-6-6", "m8 6-6 6 6 6"),
   swap: G.swap,
+  server: G.server,
 };
 type BackendSide = "fetch" | "node";
 const BACKENDS: Record<BackendSide, [keyof typeof BACKEND_MARKS, string, string][]> = {
   fetch: [
     ["hono", "Hono", "app.fetch"],
     ["code", "Elysia", "app.fetch"],
-    ["swap", "Your handler", "(request) =&gt; Response"],
+    // The last row of each side is the catch-all: anything with the same calling convention.
+    ["swap", "Any fetch app", "(request) =&gt; Response"],
   ],
   node: [
     ["express", "Express", "app"],
-    ["koa", "Koa", "koa.callback()"],
     ["fastify", "Fastify", "server.emit"],
     ["nest", "NestJS", "getInstance()"],
+    ["server", "Any Node app", "(req, res) listener"],
   ],
 };
 // Requests alternate between the two helpers until every mounted app has answered once.
@@ -1719,7 +1720,7 @@ const landingBackends: FigureSpec = {
     BACKEND_START + (BACKEND_REQUESTS.length - 1) * BACKEND_GAP + PULSE + BACKEND_RUN + HOLD,
   stage: { w: 440, h: 300 },
   label:
-    "Requests to one Farm API route reach the app mounted behind it: Hono, Elysia, or a fetch handler through mountFetchHandler, and Express, Koa, Fastify, or NestJS through mountNodeHandler",
+    "Requests to one Farm API route reach the app mounted behind it: any app with a fetch handler, such as Hono or Elysia, through mountFetchHandler, and any Node.js app, such as Express, Fastify, or NestJS, through mountNodeHandler",
   panels: [
     {
       id: "route",

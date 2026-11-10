@@ -471,13 +471,18 @@ caller-specific cache relationships, and handlers can continue calling `invalida
 ## Mount another backend framework
 
 You can mount an existing backend app on a catch-all route and keep its routes, middleware, and
-validators. Farm has two optional helpers. Each returns a handler for every HTTP method, and you
-export the ones the app handles:
+validators. Farm has two optional helpers, one per calling convention, so any JavaScript backend
+that exposes either one works. Each returns a handler for every HTTP method, and you export the
+ones the app handles:
 
-- `mountFetchHandler` from `@farm.js/core/api` for apps built on the Web `fetch` API, such as Hono
-  and Elysia.
-- `mountNodeHandler` from `@farm.js/core/api/node` for Node.js frameworks, such as Express, Koa,
-  Fastify, and Nest.
+- `mountFetchHandler` from `@farm.js/core/api` for any app with a Web `fetch` handler, a
+  `(request: Request) => Response` function or an object with a `fetch` method, such as Hono and
+  Elysia.
+- `mountNodeHandler` from `@farm.js/core/api/node` for any Node.js `(req, res)` listener, such as
+  Express, Koa, Fastify, and Nest.
+
+The frameworks named on this page are the ones Farm's tests mount. Another framework works the same
+way once you pass its fetch handler or its Node.js listener.
 
 ### Hono and Elysia
 

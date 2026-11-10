@@ -1603,7 +1603,7 @@ function FoundationGrid() {
         <MarkdownMirrorsVisual />
       </FeatureCell>
       <FeatureCell
-        body="Mount a Hono, Elysia, Express, Koa, Fastify, or NestJS app on one API route. It runs in development and production beside your typed routes."
+        body="Mount any app with a fetch handler, like Hono or Elysia, or any Node.js framework, like Express, Koa, Fastify, or NestJS, on one API route. It runs in development and production beside your typed routes."
         className="border-t border-white/12"
         icon={Server}
         index="02.9"
