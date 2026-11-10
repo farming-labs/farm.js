@@ -6060,19 +6060,35 @@ function matchLocalIntegrationRequest(request) {
   }
 }
 
-async function handleIntegrationRequest(request, ranMiddleware, clientAddress) {
+async function handleIntegrationRequest(request, ranMiddleware, clientAddress, reportRuntimeError) {
   ${
     options.hasServerRuntimeIntegrations
-      ? `return dispatchIntegrationRequests(
-    serverRuntimeIntegrations,
-    {
-      config: integrationRuntimeConfig,
-      isDev: false,
-      isProd: true,
-    },
-    request,
-    { ranMiddleware, clientAddress },
-  );`
+      ? `try {
+    return await dispatchIntegrationRequests(
+      serverRuntimeIntegrations,
+      {
+        config: integrationRuntimeConfig,
+        isDev: false,
+        isProd: true,
+      },
+      request,
+      { ranMiddleware, clientAddress },
+    );
+  } catch (error) {
+    // Integration middleware on any other request keeps failing that request.
+    if (!matchLocalIntegrationRequest(request)) throw error;
+    // A throwing integration route answers 500, as an API route does: a plugin's
+    // runtime.error observes the throw, and runtime.after still sees this 500.
+    console.error("[Integration Error] " + new URL(request.url).pathname + ":", error);
+    await reportRuntimeError?.(error);
+    return {
+      response: new Response(JSON.stringify({ error: "Internal Server Error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+      setCookies: [],
+    };
+  }`
       : `return { response: null, setCookies: [] };`
   }
 }
@@ -7764,7 +7780,8 @@ function fetchFarmInnerRequest(request, context) {
   return fetch(new Request(request, { headers }), context);
 }
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
-// Reports a failure Farm answers itself (an API route's 500) to the plugin runtime request.
+// Reports a failure Farm answers itself (an API or integration route's 500) to the plugin
+// runtime request.
 const farmRuntimeErrorSlot = Symbol("farm.runtime.error.slot");
 const farmOpenAPIReference = ${JSON.stringify(openAPIReference)};
 ${
@@ -9953,6 +9970,7 @@ async function resolveFarmRequestInContext(
     cloneFarmRequestWithContext(request),
     farmIntegrationRanMiddleware,
     adapterContext?.clientAddress,
+    adapterContext?.[farmRuntimeErrorSlot],
   );
   if (integrationDispatch.response) {
     return integrationDispatch.response;
@@ -10006,6 +10024,7 @@ async function resolveFarmRequestInContext(
       cloneFarmRequestWithContext(request),
       farmIntegrationRanMiddleware,
       adapterContext?.clientAddress,
+      adapterContext?.[farmRuntimeErrorSlot],
     );
     farmIntegrationSetCookies = [...farmIntegrationSetCookies, ...rewrittenDispatch.setCookies];
     if (rewrittenDispatch.response) {
