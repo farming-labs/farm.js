@@ -3,6 +3,7 @@ import {
   type DocsSearchSourcePage,
   type PerformDocsSearchOptions,
 } from "@farming-labs/docs";
+import { stripFarmBasePath } from "../base-path";
 import { replaceFarmCspNonceMarker } from "../security";
 
 export interface FarmDocsCompiledResponse {
@@ -28,6 +29,11 @@ export interface FarmDocsCompiledManifest {
    */
   cspNonceMarker?: string;
   entry: string;
+  /**
+   * The app's `basePath`. Routes are keyed by route path, and the docs answer below the base
+   * path as well as at the origin root.
+   */
+  basePath?: string;
   /** Public docs API route. Older manifests default to `/api/docs`. */
   apiPath?: string;
   routes: Record<string, FarmDocsCompiledResponse>;
@@ -194,7 +200,9 @@ export function createFarmDocsPrecompiledRuntime(
   return {
     async handleDocsRequest(request) {
       if (request.method !== "GET" && request.method !== "HEAD") return null;
-      const pathname = normalizePathname(new URL(request.url).pathname);
+      const pathname = normalizePathname(
+        stripFarmBasePath(new URL(request.url).pathname, manifest.basePath ?? ""),
+      );
       const compiled =
         request.headers.get("x-farm-docs-navigation") === "1"
           ? manifest.navigation?.[pathname]

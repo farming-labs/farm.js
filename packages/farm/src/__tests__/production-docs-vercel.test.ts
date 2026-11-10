@@ -161,6 +161,96 @@ describe("Vercel docs content", () => {
     }
   }, 180_000);
 
+  it("serves the docs engine under basePath and links every page below it", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-vercel-docs-base-path-"));
+    try {
+      await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+      await fs.symlink(
+        packageRoot,
+        path.join(root, "node_modules", "@farm.js", "core"),
+        "junction",
+      );
+      for (const name of ["react", "react-dom"]) {
+        await fs.symlink(
+          await fs.realpath(path.join(packageRoot, "node_modules", name)),
+          path.join(root, "node_modules", name),
+          "junction",
+        );
+      }
+      await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
+      const docsDir = path.join(root, "src", "app", "docs");
+      await fs.mkdir(path.join(docsDir, "guide"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        "export default function Layout({ children }) { return <main>{children}</main>; }",
+      );
+      await fs.writeFile(path.join(docsDir, "page.md"), "---\ntitle: Docs\n---\n# Docs\n");
+      await fs.writeFile(
+        path.join(docsDir, "guide", "page.md"),
+        "---\ntitle: Guide\n---\n# Guide\n",
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          basePath: "/console",
+          images: { provider: "none" },
+          telemetry: false,
+          deploy: { target: "vercel" },
+          docs: { adapter: false, entry: "/docs", contentDir: "src/app/docs" },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "vercel" });
+      const functionRoot = path.resolve(root, config.deploy.outputDir, "functions", "__nitro.func");
+      const { default: handler } = await import(
+        /* @vite-ignore */ pathToFileURL(path.join(functionRoot, "index.mjs")).href
+      );
+      const get = (pathname: string): Promise<Response> =>
+        handler.fetch(new Request(`https://farm.test${pathname}`));
+
+      const page = await get("/console/docs/guide");
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain('href="/console/docs/guide"');
+      expect(html).toContain('href="/console/llms.txt"');
+      expect(html).toContain('const docsEntry="/console/docs"');
+      expect(html).toContain('property="og:url" content="https://farm.test/console/docs/guide"');
+      expect(html).not.toMatch(/href="\/(docs|llms\.txt)/);
+
+      const markdown = await get("/console/docs/guide.md");
+      expect(markdown.status).toBe(200);
+      expect(markdown.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+      expect(await markdown.text()).toContain("URL: /console/docs/guide");
+
+      const llms = await get("/console/llms.txt");
+      expect(llms.status).toBe(200);
+      const llmsText = await llms.text();
+      expect(llmsText).toContain("(https://farm.test/console/docs/guide.md)");
+      expect(llmsText).not.toContain("https://farm.test/docs");
+      expect(await (await get("/console/sitemap.xml")).text()).toContain(
+        "<loc>https://farm.test/console/docs/guide</loc>",
+      );
+      expect(await (await get("/console/robots.txt")).text()).toContain(
+        "Sitemap: https://farm.test/console/sitemap.xml",
+      );
+
+      // Search stays at /api/docs, as the app's API routes do, and links results below basePath.
+      const results = (await (await get("/api/docs?query=guide")).json()) as Array<{
+        url: string;
+      }>;
+      expect(results.map((result) => result.url)).toContain("/console/docs/guide");
+      expect((await get("/console/api/docs?format=llms")).status).toBe(404);
+
+      // Pages answer at the origin root too, and so do the docs.
+      for (const pathname of ["/docs/guide", "/docs/guide.md", "/llms.txt"]) {
+        expect((await get(pathname)).status, pathname).toBe(200);
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it("serves the docs config's roots through the adapter's multi-root handler", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-vercel-docs-roots-"));
     try {
