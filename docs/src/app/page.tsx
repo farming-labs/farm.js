@@ -471,23 +471,28 @@ const reactCompilerConfigVariants = [
 ] as const satisfies readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
 const reactCompilerConfigSuffix = `  } }),
 });`;
-// benchmarks/compiler, published build, Chromium. Each figure is the weaker of two runs, so the
-// page never claims more than the slowest measurement supports. Re-run it after a renderer release.
+// examples/react-compiler-js-framework-benchmark: the official js-framework-benchmark harness,
+// Farm hybrid against the harness's React Hooks and Solid entries. Each figure is the weakest of
+// the recorded runs (BENCHMARK_RESULTS*.md, FRAMEWORK_COMPARISON*.md), so the page never claims
+// more than the slowest measurement supports. Re-run them after a renderer release.
 const reactCompilerMetrics = [
   {
-    description: "Swapping two rows went from 3.8ms to 0.2ms with the compiler on.",
-    label: "Row swap latency",
-    value: "19× faster",
+    description:
+      "Swapping two of 1,000 rows was 4.9× faster than the benchmark's React Hooks entry in the weakest recorded run.",
+    label: "Row swap vs React",
+    value: "4.9× faster",
   },
   {
-    description: "The median state update went from 0.7ms to 0.2ms.",
-    label: "Median update latency",
-    value: "71% lower",
+    description:
+      "The official-weighted CPU score across all nine operations was 1.29× faster than React Hooks in the weakest recorded run.",
+    label: "Overall vs React",
+    value: "1.29× faster",
   },
   {
-    description: "Script, style and layout work per action cycle went from 17.3ms to 3.6ms.",
-    label: "CPU per action cycle",
-    value: "4.7× less",
+    description:
+      "The official-weighted CPU score was 1.081 for Farm and 1.072 for Solid in the same run (1.00 = fastest).",
+    label: "CPU vs Solid",
+    value: "Within 1%",
   },
 ] as const;
 
@@ -1201,10 +1206,10 @@ function DeveloperExperienceGrid() {
       <FeatureCell
         body={
           <>
-            Farm prepares safe state updates at build time. In our benchmark a row swap was{" "}
-            <span className="font-mono font-bold text-white">19× faster</span> and the whole action
-            cycle did <span className="font-mono font-bold text-white">4.7× less</span> CPU work.
-            React handles anything the compiler cannot safely optimize.
+            Farm prepares safe state updates at build time. On js-framework-benchmark it was{" "}
+            <span className="font-mono font-bold text-white">1.29× faster</span> than React Hooks
+            overall and <span className="font-mono font-bold text-white">within 1%</span> of Solid
+            on CPU. React handles anything the compiler cannot safely optimize.
           </>
         }
         className="border-t border-white/12 lg:border-l"
