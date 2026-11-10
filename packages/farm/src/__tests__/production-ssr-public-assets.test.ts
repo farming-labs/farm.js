@@ -1,14 +1,15 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Rollup } from "vite";
 import { afterEach, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
-import { collectServerOnlySSRAssets } from "../nitro/ssr-public-assets";
+import { definePlugin } from "../plugin";
+import { collectServerOnlySSRAssets, collectServerReadSSRAssets } from "../nitro/ssr-public-assets";
 import { getAvailablePort } from "./dev-server-port";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -44,8 +45,11 @@ async function writeModule(
   await fs.writeFile(filePath, source);
 }
 
-/** An app whose API route imports a local WebAssembly module without the `@farm.js/wasm` plugin. */
-async function createServerWasmFixture(): Promise<string> {
+/**
+ * An app whose API route imports a local WebAssembly module without the `@farm.js/wasm` plugin.
+ * A `lazy` route imports it on request, so the code reading the binary sits in a nested chunk.
+ */
+async function createServerWasmFixture({ lazy = false } = {}): Promise<string> {
   // Inside the package so the page fixture resolves React through the workspace.
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-ssr-public-assets-"));
   temporaryRoots.add(root);
@@ -57,7 +61,13 @@ async function createServerWasmFixture(): Promise<string> {
   await writeModule(
     root,
     "src/app/api/add/route.ts",
-    `import { add } from "../../../wasm/math";
+    lazy
+      ? `export async function GET(request: Request) {
+  const { add } = await import("../../../wasm/math");
+  const url = new URL(request.url);
+  return Response.json({ sum: add(Number(url.searchParams.get("a")), Number(url.searchParams.get("b"))) });
+}`
+      : `import { add } from "../../../wasm/math";
 
 export function GET(request: Request) {
   const url = new URL(request.url);
@@ -87,10 +97,11 @@ async function listRelativeFiles(directory: string): Promise<string[]> {
 async function withProductionServer(
   serverDir: string,
   run: (origin: string) => Promise<void>,
+  command = process.execPath,
 ): Promise<void> {
   const port = await getAvailablePort();
   const processOutput: string[] = [];
-  const productionServer = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
+  const productionServer = spawn(command, [path.join(serverDir, "index.mjs")], {
     cwd: serverDir,
     env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
@@ -242,6 +253,133 @@ export default function Page() {
   }, 240_000);
 });
 
+// Bun is optional: without it the bun output's layout is still checked, but not run.
+const hasBun = spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0;
+
+/** Import a built serverless function in a fresh Node process and send it one request. */
+function requestFunctionModule(
+  modulePath: string,
+  url: string,
+): Promise<{ status: number; body: string }> {
+  const script = `
+const { default: handler } = await import(${JSON.stringify(pathToFileURL(modulePath).href)});
+const request = new Request(${JSON.stringify(url)});
+const context = { waitUntil() {} };
+const response =
+  typeof handler === "function" ? await handler(request, context) : await handler.fetch(request, context);
+process.stdout.write(JSON.stringify({ status: response.status, body: await response.text() }));
+process.exit(0);
+`;
+  return new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      ["--input-type=module", "--eval", script],
+      { cwd: path.dirname(modulePath) },
+      (error, stdout, stderr) => {
+        if (error) reject(new Error(`${error.message}\n${stderr}`));
+        else resolve(JSON.parse(stdout));
+      },
+    );
+  });
+}
+
+async function expectServerReadsWasm(serverDir: string): Promise<void> {
+  const serverFiles = await listRelativeFiles(serverDir);
+  expect(
+    serverFiles.filter((file) => file.endsWith(".wasm")),
+    serverFiles.join("\n"),
+  ).toEqual([expect.stringMatching(/^assets\/math-[\w-]+\.wasm$/)]);
+}
+
+describe("SSR assets server code reads, once Nitro rebundles the server", () => {
+  it.for([
+    { preset: "bun", serverDir: ".farm/.output/server", entry: "index.mjs" },
+    { preset: "vercel", serverDir: ".vercel/output/functions/__nitro.func", entry: "index.mjs" },
+    { preset: "netlify", serverDir: ".netlify/functions-internal/server", entry: "main.mjs" },
+  ])(
+    "deploys the binary with the $preset server code",
+    async ({ preset, serverDir, entry }) => {
+      const root = await createServerWasmFixture({ lazy: true });
+      const config = await resolveConfig({ root, renderer: false }, "production");
+      await build(config, { root, preset });
+
+      const serverOutput = path.join(root, serverDir);
+      await expectServerReadsWasm(serverOutput);
+      expect(
+        (await listRelativeFiles(path.join(root, ".farm", "client"))).filter((file) =>
+          file.endsWith(".wasm"),
+        ),
+      ).toEqual([]);
+
+      if (preset === "bun") {
+        if (!hasBun) return;
+        await withProductionServer(
+          serverOutput,
+          async (origin) => {
+            const sum = await fetch(`${origin}/api/add?a=20&b=22`);
+            expect(sum.status).toBe(200);
+            await expect(sum.json()).resolves.toEqual({ sum: 42 });
+          },
+          "bun",
+        );
+        return;
+      }
+      const response = await requestFunctionModule(
+        path.join(serverOutput, entry),
+        "http://localhost/api/add?a=20&b=22",
+      );
+      expect(response, response.body).toEqual({ status: 200, body: '{"sum":42}' });
+    },
+    180_000,
+  );
+
+  it("deploys the binary with a node-server build Nitro bundles", async () => {
+    const root = await createServerWasmFixture({ lazy: true });
+    const config = await resolveConfig(
+      {
+        root,
+        renderer: false,
+        plugins: [
+          definePlugin({
+            name: "custom-rollup-plugin",
+            build: {
+              // Any Rollup plugin keeps Nitro bundling the SSR output instead of reusing it.
+              configure: (nitroConfig) => ({
+                ...nitroConfig,
+                rollupConfig: {
+                  ...nitroConfig.rollupConfig,
+                  plugins: [{ name: "custom-rollup-plugin" }],
+                },
+              }),
+            },
+          }),
+        ],
+      },
+      "production",
+    );
+    await build(config, { root, preset: "node-server" });
+
+    const serverDir = path.join(root, ".farm", ".output", "server");
+    await expect(fs.access(path.join(serverDir, "farm-ssr"))).rejects.toThrow();
+    await expectServerReadsWasm(serverDir);
+    await withProductionServer(serverDir, async (origin) => {
+      const sum = await fetch(`${origin}/api/add?a=20&b=22`);
+      expect(sum.status).toBe(200);
+      await expect(sum.json()).resolves.toEqual({ sum: 42 });
+    });
+  }, 180_000);
+
+  it("fails a Cloudflare Workers build that would read the binary at runtime", async () => {
+    const root = await createServerWasmFixture();
+    const config = await resolveConfig({ root, renderer: false }, "production");
+
+    await expect(build(config, { root, preset: "cloudflare-module" })).rejects.toThrow(
+      /"cloudflare-module" preset cannot run server code that imports src\/wasm\/math\.wasm\..*@farm\.js\/wasm/,
+    );
+    await expect(fs.access(path.join(root, ".farm", ".output", "server"))).rejects.toThrow();
+  }, 180_000);
+});
+
 function chunk(fileName: string, code: string): Rollup.OutputChunk {
   return { type: "chunk", fileName, code } as Rollup.OutputChunk;
 }
@@ -286,6 +424,11 @@ const href = "/assets/linked-abc.wasm";`,
       asset("assets/url-mno.txt"),
     );
     expect(collectServerOnlySSRAssets(bundle).size).toBe(0);
+    // Server code still reads the public ones, so they also belong beside the server bundle.
+    expect([...collectServerReadSSRAssets(bundle)].sort()).toEqual([
+      "assets/linked-abc.wasm",
+      "assets/styled-def.png",
+    ]);
   });
 
   it("ignores file URLs that do not name an emitted asset", () => {
