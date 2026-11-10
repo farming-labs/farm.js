@@ -4377,6 +4377,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 })
               : undefined;
 
+          // As in production, a middleware throw inside a runtime session is the runtime's to
+          // report, once, as the "runtime" phase.
+          let middlewareFailed = false;
           try {
             if (middlewareManager?.hasMiddleware()) {
               const middlewareRequest = createRequestFromNodeRequest(req, new URL(fullUrl));
@@ -4386,7 +4389,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 req,
                 res,
                 () => middlewareManager!.execute(req, res),
-              );
+              ).catch((error: unknown) => {
+                middlewareFailed = true;
+                throw error;
+              });
               if (handled) {
                 if (!responseInterceptor?.isEnded()) {
                   const duration = Date.now() - startTime;
@@ -4431,15 +4437,22 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (pm && runtimeSession) {
               await pm.failRuntimeRequest(runtimeSession, error);
             }
-            await emitPluginError("render-page", error, { pathname });
+            if (!(middlewareFailed && runtimeSession)) {
+              await emitPluginError("render-page", error, { pathname });
+            }
             // With `renderer: false` no error page renders: answer the JSON 500 production
             // answers (a throwing middleware, say), not Vite's HTML error page.
             if (rendererDisabled && !res.headersSent) {
               sendFarmDevErrorJSON(res);
               return;
             }
-            // Vite's error page reports it, kept out of caches like production's error document.
-            if (!res.headersSent) res.setHeader("Cache-Control", "private, no-store");
+            // Vite's error page, with its overlay, reports it in place of production's error
+            // document. It is HTML kept out of caches like that document, and runtime.after
+            // sees it through the response interceptor, as it sees the document in production.
+            if (!res.headersSent) {
+              res.setHeader("Content-Type", "text/html; charset=utf-8");
+              res.setHeader("Cache-Control", "private, no-store");
+            }
             next(error);
           }
         }),

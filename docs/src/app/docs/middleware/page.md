@@ -56,8 +56,8 @@ for Markdown gets that document as Markdown. These responses are `private, no-st
 or stack to them. As for a throwing API route, the error reaches the `middleware.error` event,
 plugin `runtime.error` hooks, and `onError` hooks with `phase: "runtime"`, and every
 `runtime.after` hook then sees the `500`. Development answers the same `private, no-store` JSON
-`500`, with the same hooks under the API base path, and shows the error overlay for a page
-instead, also `private, no-store`.
+`500` under the API base path, and shows the error overlay for a page instead, also a
+`private, no-store` HTML `500`; the hooks run the same way for both.
 
 ## Route middleware
 
