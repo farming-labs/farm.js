@@ -66,12 +66,12 @@ release that introduced it, so skip anything at or below the version you are com
 
 At 0.1.0 these were off unless you opted in. An app with no `agent` block now answers all of them:
 
-| Surface                               | Since                                     | What it serves                                                                                                           |
-| ------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Markdown mirrors, `llms.txt`, JSON-LD | 0.1.28                                    | Every static page as Markdown, by `.md` or `Accept: text/markdown`, plus an index of them                                |
-| `/.well-known/farmjs.json`            | 0.1.32, sections configurable from 0.1.42 | Farm's version, the installed `@farm.js/*` packages, the renderer, base path, integrations by category, and plugin names |
-| `/sitemap.xml`                        | 0.1.36                                    | Your static pages, when the docs engine is not serving its own                                                           |
-| `/mcp`                                | 0.1.36                                    | A read-only MCP server that lists, searches and reads your public pages                                                  |
+| Surface                               | Since                                     | What it serves                                                                                                                                                   |
+| ------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Markdown mirrors, `llms.txt`, JSON-LD | 0.1.28                                    | Every static page as Markdown, by `.md` or `Accept: text/markdown`, plus an index of them                                                                        |
+| `/.well-known/farmjs.json`            | 0.1.32, sections configurable from 0.1.42 | Farm's version, the installed `@farm.js/*` packages, the renderer, base path, integrations by category, and plugin names. From 0.1.63, the app's public site URL |
+| `/sitemap.xml`                        | 0.1.36                                    | Your static pages, when the docs engine is not serving its own                                                                                                   |
+| `/mcp`                                | 0.1.36                                    | A read-only MCP server that lists, searches and reads your public pages                                                                                          |
 
 None of this serves content an anonymous visitor could not already reach. A page behind a guard
 answers the guard's own response to a Markdown request, and `llms-full.txt` keeps its entry without
@@ -101,6 +101,11 @@ To keep the surfaces but hide a route from the generated indexes, exclude it ins
 `agent: { llmsTxt: { exclude: ["/account"] } }`. See
 [agent readiness](/docs/configuration#agent-readiness).
 
+The site URL in `/.well-known/farmjs.json` is the one environment value the manifest serves. It is
+`FARM_SITE_URL` when set, otherwise the production address the host gives the server (Vercel,
+Render, Railway), and only ever a public https origin. On Vercel a preview deployment names the
+production site. `agent: { manifest: { site: false } }` serves `site: null` and keeps the rest.
+
 ### Configuration that is now rejected
 
 These were accepted and silently did nothing. They now fail when the config, an integration, or a
@@ -110,6 +115,37 @@ middleware file loads, so an app that carried one builds today and fails after t
   `/((?!api|_next).*)` compiled to a literal that matched no path, so the middleware never ran.
   Pass a `RegExp` instead. The error names the matcher.
 - **`createEndpoint`'s `use` option** (0.1.40). It was ignored. Pass `middleware` instead.
+
+### Requests and flags that are now refused
+
+These worked before and now refuse, because the old behavior could hand a credential or a
+scheduled task to someone else.
+
+- **`farm preview` with a gateway you run** (0.1.60). A Farm.js Infrastructure key
+  (`FARMJS_API_KEY`, or one `farm login` saved) only goes to the hosted gateway,
+  `https://preview.farmjs.dev`. A self-hosted gateway needs `--trust-gateway` on `farm preview`,
+  `farm login` and `farm whoami`, and its URL must be https unless it is on localhost. A key
+  already saved for a gateway is still reused there without the flag.
+- **`@farm.js/agent`'s cron route on Vercel** (`@farm.js/agent` 0.1.0-beta.2). `/_vercel/cron`
+  answers `401` without `Authorization: Bearer $CRON_SECRET`, and refuses every request while
+  `CRON_SECRET` is unset. Set it in the Vercel project; the build warns when it is missing.
+- **`@farm.js/agent`'s `basePath` outside `/api`** (`@farm.js/agent` 0.1.0-beta.1, with core
+  0.1.50). Agent routes are API routes now, so the app's middleware and guards run first. Any
+  other `basePath` throws when the config loads.
+
+### Development runs middleware for API routes
+
+From 0.1.50, `farm dev` runs app middleware for API routes, as production already did. A middleware
+that redirects or rewrites every path now reaches `/api/*` in development too. Scope it with its
+`config.matcher` or `exclude`.
+
+### Pages a middleware matcher cannot reach are prerendered
+
+Before 0.1.60, any middleware file above a static page kept that page rendered per request. Now a
+middleware file whose `export const config = { matcher }` is literal, and provably cannot match the
+page, no longer does, so the page is prerendered at build like any other static page. The runtime
+never ran that middleware there either. A matcher Farm cannot read at build (a function, a computed
+value) keeps the page rendered per request.
 
 ### `FARM_VITE_BUILDER=rollup`
 
