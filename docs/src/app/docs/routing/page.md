@@ -1450,7 +1450,7 @@ export async function GET(request: Request) {
 
 Outside development the response defaults to `cache-control: public, immutable, no-transform, max-age=31536000`. Pass a lowercase `cache-control` header when the image can change, for example `headers: { "cache-control": "public, max-age=300" }`.
 
-`@farm.js/core/og` is server-only. Importing it from a client component fails the build, and the development request, with an error that names the importing module. Importing it from server code without `@vercel/og` installed fails the same way and names the install command. On Node presets, including `node-server` and Vercel Functions, Farm copies `@vercel/og` and its wasm and font files into the server output whenever the server bundle imports it. Edge and Cloudflare Worker presets are not supported yet.
+`@farm.js/core/og` is server-only. Importing it from a client component fails the build, and the development request, with an error that names the importing module. Importing it from server code without `@vercel/og` installed fails the same way and names the install command. On Node presets, including `node-server` and Vercel Functions, Farm copies `@vercel/og` and its wasm and font files into the server output whenever the server bundle imports it. On the Cloudflare Worker presets, `cloudflare-pages` and `cloudflare-module`, Farm bundles the `@vercel/og` edge build into the Worker, loads its wasm files as precompiled modules, and inlines its default font. Other edge presets, such as `vercel-edge`, are not supported yet.
 
 ### Other meta tags
 
