@@ -82,7 +82,9 @@ export default {
           const pathname = traced(request);
           if (!pathname) return;
           trace.push("after " + pathname + " " + response.status);
-          if (pathname.endsWith("/after-fails")) throw new Error("after failed");
+          if (pathname.endsWith("/after-fails") || new URL(request.url).search === "?after-fails") {
+            throw new Error("after failed");
+          }
         },
         error({ request, error }) {
           const pathname = traced(request);
@@ -101,7 +103,10 @@ export function middleware(request: Request) {
   if (!pathname) return;
   trace.push("middleware " + pathname);
   if (pathname === "/api/mw-fails") throw new Error("middleware failed");
-  if (pathname === "/api/guarded" || pathname === "/.well-known/farmjs.json") {
+  if (
+    pathname === "/api/guarded" ||
+    (pathname === "/.well-known/farmjs.json" && !new URL(request.url).search)
+  ) {
     return new Response("guarded", { status: 401 });
   }
 }`,
@@ -303,6 +308,19 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
   });
 
   await expectPageHookFailures(origin);
+
+  // A built-in route on a page path whose runtime.after throws answers the page's plain-text
+  // 500, not the JSON an API path gets.
+  expect(await request(origin, "/.well-known/farmjs.json?after-fails")).toEqual({
+    ...PAGE_HOOK_FAILURE,
+    trace: [
+      "before page /.well-known/farmjs.json",
+      "middleware /.well-known/farmjs.json",
+      "after /.well-known/farmjs.json 200",
+      "error /.well-known/farmjs.json after failed",
+      "onError runtime after failed",
+    ],
+  });
 }
 
 const PAGE_HOOK_FAILURE = {

@@ -2738,6 +2738,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const discard = async () => {
               await computed?.body?.cancel().catch(() => {});
             };
+            // A runtime.after failure answers the runtime hook 500, plain text on a page path.
+            const sendRuntimeResponse = async (
+              runtimeSession: FarmPluginRuntimeSession,
+              response: Response,
+            ) => {
+              let runtimeResponse: Response;
+              try {
+                runtimeResponse = await pm!.endRuntimeRequest(runtimeSession, response);
+              } catch {
+                // The runtime reported the failure to runtime.error and onError.
+                sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                return;
+              }
+              await sendWebResponse(res, runtimeResponse);
+            };
             let runtimeSession: FarmPluginRuntimeSession | undefined;
             if (pm?.hasRuntimeRequestHooks()) {
               try {
@@ -2762,10 +2777,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               }
               if (runtimeSession.response) {
                 await discard();
-                await sendWebResponse(
-                  res,
-                  await pm.endRuntimeRequest(runtimeSession, runtimeSession.response),
-                );
+                await sendRuntimeResponse(runtimeSession, runtimeSession.response);
                 return;
               }
               pm.copyRequestContext(runtimeSession.request, req);
@@ -2785,10 +2797,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               throw error;
             }
             if (!response) return;
-            await sendWebResponse(
-              res,
-              runtimeSession ? await pm!.endRuntimeRequest(runtimeSession, response) : response,
-            );
+            if (runtimeSession) await sendRuntimeResponse(runtimeSession, response);
+            else await sendWebResponse(res, response);
           };
 
           // OpenAPI routes are app routes, so they live beneath the basePath.
