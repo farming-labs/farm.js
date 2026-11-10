@@ -841,7 +841,8 @@ function interceptFarmDevPageResponse(options: {
     if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
     delete res[FARM_NODE_RESPONSE_END_PENDING];
   };
-  // A runtime.after failure is the runtime's to report to runtime.error and onError, once.
+  // A runtime.after failure is the runtime's to report, once, and fails the response with the
+  // runtime hook 500 production answers instead of the response the hook never finished.
   let runtimeHookFailed = false;
   const endRuntimeRequest = (response: Response) =>
     pm.endRuntimeRequest(runtimeSession!, response).catch((error: unknown) => {
@@ -851,6 +852,16 @@ function interceptFarmDevPageResponse(options: {
   const reportFailure = (error: unknown) => {
     if (!runtimeHookFailed) void options.emitError(error);
     console.error("Error in afterResponse hook:", error);
+  };
+  const writeRuntimeHookFailure = () => {
+    res.statusCode = 500;
+    res.removeHeader("Content-Length");
+    res.setHeader(
+      "Content-Type",
+      options.jsonError ? "application/json" : "text/plain; charset=utf-8",
+    );
+    originalWriteHead(500);
+    originalWrite(options.jsonError ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error");
   };
   const htmlChunks: Buffer[] = [];
   const responseChunks: Buffer[] = [];
@@ -1009,18 +1020,7 @@ function interceptFarmDevPageResponse(options: {
         )
         .catch((error) => {
           reportFailure(error);
-          if (!res.headersSent) {
-            res.statusCode = 500;
-            res.removeHeader("Content-Length");
-            res.setHeader(
-              "Content-Type",
-              options.jsonError ? "application/json" : "text/plain; charset=utf-8",
-            );
-            originalWriteHead(500);
-            originalWrite(
-              options.jsonError ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error",
-            );
-          }
+          if (!res.headersSent) writeRuntimeHookFailure();
         })
         .finally(() => {
           restore();
@@ -1103,6 +1103,12 @@ function interceptFarmDevPageResponse(options: {
       })
       .catch((error) => {
         reportFailure(error);
+        if (runtimeHookFailed && !res.headersSent) {
+          restore();
+          writeRuntimeHookFailure();
+          originalEnd(callback);
+          return;
+        }
         const shouldBufferResponse = isHtmlResponse
           ? bufferPluginResponse
           : Boolean(runtimeSession && hasRuntimeAfterHook);

@@ -89,7 +89,7 @@ export default {
           if (pathname) trace.push("error " + pathname + " " + (error as Error).message);
         },
       },
-    }),
+    }),__HTML_TRANSFORM__
   ],
 };`,
   "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
@@ -111,7 +111,20 @@ export function middleware(request: Request) {
   "src/app/api/boom/route.ts": `export function GET(): Response { throw new Error("route failed"); }`,
 };
 
-async function createApp(prefix: string): Promise<string> {
+// A second plugin with an HTML transform hook, which makes farm dev buffer a page response
+// before runtime.after sees it.
+const HTML_TRANSFORM_PLUGIN = `
+    definePlugin({
+      name: "acme:html",
+      transformHTML(html: string) {
+        return html;
+      },
+    }),`;
+
+async function createApp(
+  prefix: string,
+  options: { htmlTransform?: boolean } = {},
+): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   temporaryRoots.add(root);
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
@@ -126,7 +139,10 @@ async function createApp(prefix: string): Promise<string> {
   await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
   for (const [relativePath, source] of Object.entries(FILES)) {
     await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
-    await fs.writeFile(path.join(root, relativePath), source);
+    await fs.writeFile(
+      path.join(root, relativePath),
+      source.replace("__HTML_TRANSFORM__", options.htmlTransform ? HTML_TRANSFORM_PLUGIN : ""),
+    );
   }
   return root;
 }
@@ -297,7 +313,8 @@ const PAGE_HOOK_FAILURE = {
 };
 
 // On a page, a throwing runtime hook answers a plain-text 500: runtime.error observes it, onError
-// gets it once as the "runtime" phase, and no later runtime.after runs.
+// gets it once as the "runtime" phase, and no later runtime.after runs. With an HTML transform
+// hook, farm dev buffers the page before runtime.after sees it; the answer is the same.
 async function expectPageHookFailures(origin: string): Promise<void> {
   const accept = { headers: { accept: "text/html" } };
   expect({
@@ -382,5 +399,17 @@ describe("plugin runtime hooks for API, integration, and built-in route requests
   it("in a node-server production build", async () => {
     const root = await createApp("farm-prod-plugin-runtime-api-");
     await withProduction(root, expectRuntimeHookContract);
+  }, 240_000);
+});
+
+describe("plugin runtime hook failures on a page with an HTML transform hook", () => {
+  it("in development", async () => {
+    const root = await createApp("farm-dev-plugin-runtime-html-", { htmlTransform: true });
+    await expectPageHookFailures(await startDevelopment(root));
+  }, 120_000);
+
+  it("in a node-server production build", async () => {
+    const root = await createApp("farm-prod-plugin-runtime-html-", { htmlTransform: true });
+    await withProduction(root, expectPageHookFailures);
   }, 240_000);
 });
