@@ -35,6 +35,7 @@ const TRACED = `const traced = (request: Request) => {
   const { pathname } = new URL(request.url);
   return /^\\/(api|integration)\\//.test(pathname) ||
     pathname === "/hello" ||
+    pathname.startsWith("/hello/") ||
     pathname === "/.well-known/farmjs.json"
     ? pathname
     : null;
@@ -75,12 +76,13 @@ export default {
           if (!pathname) return;
           trace.push("before " + kind + " " + pathname);
           if (pathname === "/api/blocked") return new Response("blocked", { status: 403 });
+          if (pathname.endsWith("/before-fails")) throw new Error("before failed");
         },
         after({ request, response }) {
           const pathname = traced(request);
           if (!pathname) return;
           trace.push("after " + pathname + " " + response.status);
-          if (pathname === "/api/after-fails") throw new Error("after failed");
+          if (pathname.endsWith("/after-fails")) throw new Error("after failed");
         },
         error({ request, error }) {
           const pathname = traced(request);
@@ -92,6 +94,7 @@ export default {
 };`,
   "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
   "src/app/hello/page.tsx": `export default function Page() { return <h1>hello</h1>; }`,
+  "src/app/hello/after-fails/page.tsx": `export default function Page() { return <h1>after</h1>; }`,
   "src/app/middleware.ts": `${TRACED}
 export function middleware(request: Request) {
   const pathname = traced(request);
@@ -135,6 +138,7 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
     "/api/guarded",
     "/api/missing",
     "/api/boom",
+    "/api/before-fails",
     "/api/after-fails",
     "/integration/boom",
     "/.well-known/farmjs.json",
@@ -142,7 +146,7 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
   ]) {
     const response = await fetch(`${origin}${pathname}`);
     const body = await response.text();
-    if (pathname.endsWith("/boom")) {
+    if (/\/(boom|before-fails|after-fails)$/.test(pathname)) {
       thrown[pathname] = { contentType: response.headers.get("content-type"), body };
     }
     const trace = await (await fetch(`${origin}/__trace`)).json();
@@ -183,6 +187,16 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
         "after /api/boom 500",
       ],
     },
+    // A runtime.before hook that throws: runtime.error observes it, onError gets it once, and
+    // neither app middleware nor runtime.after runs.
+    "/api/before-fails": {
+      status: 500,
+      trace: [
+        "before api /api/before-fails",
+        "error /api/before-fails before failed",
+        "onError runtime before failed",
+      ],
+    },
     // A runtime.after hook that throws: runtime.error observes it, and onError gets it once.
     "/api/after-fails": {
       status: 500,
@@ -221,14 +235,39 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
       trace: ["before page /hello", "middleware /hello", "after /hello 200"],
     },
   });
-  // A throwing API or integration route answers production's generic 500 body, in dev too.
+  // A throwing API or integration route, and a throwing runtime hook on an API path, answer
+  // Farm's generic 500 body in both modes, not the server's own error response.
   const internalServerError = {
     contentType: "application/json",
     body: '{"error":"Internal Server Error"}',
   };
   expect(thrown).toEqual({
     "/api/boom": internalServerError,
+    "/api/before-fails": internalServerError,
+    "/api/after-fails": internalServerError,
     "/integration/boom": internalServerError,
+  });
+
+  // On a page, a throwing runtime hook answers a plain-text 500.
+  const pageFailures: Record<string, { status: number; contentType: string | null; body: string }> =
+    {};
+  for (const pathname of ["/hello/before-fails", "/hello/after-fails"]) {
+    const response = await fetch(`${origin}${pathname}`, { headers: { accept: "text/html" } });
+    pageFailures[pathname] = {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      body: await response.text(),
+    };
+    await (await fetch(`${origin}/__trace`)).json();
+  }
+  const pageFailure = {
+    status: 500,
+    contentType: "text/plain; charset=utf-8",
+    body: "Internal Server Error",
+  };
+  expect(pageFailures).toEqual({
+    "/hello/before-fails": pageFailure,
+    "/hello/after-fails": pageFailure,
   });
 }
 

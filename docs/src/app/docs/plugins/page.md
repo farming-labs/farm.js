@@ -333,7 +333,9 @@ For each application request, Farm runs the runtime hooks in this order:
 6. `runtime.error` observes an error if any preceding phase throws. When an API or integration
    route throws, `runtime.error` observes the throw, Farm answers `500`, and every
    `runtime.after` still sees that response. A throw from `runtime.context`, `runtime.before`, or
-   `runtime.after` skips the remaining `runtime.after` hooks.
+   `runtime.after` skips the remaining `runtime.after` hooks and fails the request with a `500`:
+   the JSON body `{"error":"Internal Server Error"}` under the API base path or in a
+   `renderer: false` app, and a plain-text `Internal Server Error` for a page.
 
 This order is the same in `farm dev` and in a production build. A thrown route error reaches the
 flat `onError` hook once, with `phase: "runtime"` and `meta.kind` naming the request kind (such as

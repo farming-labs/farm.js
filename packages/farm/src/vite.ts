@@ -632,6 +632,28 @@ export function withFarmRequestTracing(
   };
 }
 
+/**
+ * The JSON 500 the production entry answers when app middleware throws on an API path or with
+ * `renderer: false`: the generic body, kept out of shared caches as production keeps a request
+ * middleware handled.
+ */
+function sendFarmDevErrorJSON(res: ServerResponse): void {
+  res.statusCode = 500;
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Cache-Control", "private, no-store");
+  res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+}
+
+/**
+ * The 500 a request answers when a plugin runtime hook throws, as in the production entry: the
+ * generic JSON body on an API path or with `renderer: false`, plain text for a page.
+ */
+function sendFarmDevRuntimeHookError(res: ServerResponse, json: boolean): void {
+  res.statusCode = 500;
+  res.setHeader("Content-Type", json ? "application/json" : "text/plain; charset=utf-8");
+  res.end(json ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error");
+}
+
 const FARM_CONFIG_ROUTE_PLUGIN_NAMES = new Set([
   FARM_CONFIG_HEADERS_PLUGIN_NAME,
   FARM_CONFIG_REDIRECTS_PLUGIN_NAME,
@@ -779,6 +801,8 @@ function interceptFarmDevPageResponse(options: {
   startTime: number;
   logResponse(method: string, path: string, status: number, durationMs: number, type: "PAGE"): void;
   emitError(error: unknown): Promise<void>;
+  /** A failure that has not sent the head answers the generic JSON 500, not plain text. */
+  jsonError?: boolean;
 }): {
   isEnded(): boolean;
   /** Stops intercepting a response nothing has ended yet, so the caller can send its own. */
@@ -974,9 +998,14 @@ function interceptFarmDevPageResponse(options: {
           if (!res.headersSent) {
             res.statusCode = 500;
             res.removeHeader("Content-Length");
-            res.setHeader("Content-Type", "text/plain; charset=utf-8");
+            res.setHeader(
+              "Content-Type",
+              options.jsonError ? "application/json" : "text/plain; charset=utf-8",
+            );
             originalWriteHead(500);
-            originalWrite("Internal Server Error");
+            originalWrite(
+              options.jsonError ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error",
+            );
           }
         })
         .finally(() => {
@@ -2600,6 +2629,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             }
           }
 
+          // A plugin runtime hook that throws fails the request with the generic JSON 500 on an
+          // API path or with `renderer: false`, and plain text on a page, as in production.
+          const runtimeHookErrorAnswersJSON =
+            rendererDisabled || isFarmAPIPathname(requestPathname, apiServerBasePath);
+
           // The OpenAPI spec and reference, docs, raw markdown-source, the
           // markdown mirror, the Markdown 404 fallback, and API routes expose
           // page content, data, or route-existence, so app middleware must pass
@@ -2643,6 +2677,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     logResponse: (_method, _path, status) => logResponse?.(status),
                     // The runtime reports a runtime.after failure itself.
                     emitError: async () => {},
+                    jsonError: runtimeHookErrorAnswersJSON,
                   })
                 : undefined;
             let handled: boolean;
@@ -2704,9 +2739,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               } catch (error) {
                 await discard();
                 await emitPluginError("runtime-before", error, { pathname: requestPathname });
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "text/plain; charset=utf-8");
-                res.end("Internal Server Error");
+                sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
                 return;
               }
               if (runtimeSession.response) {
@@ -3454,11 +3487,20 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // App middleware guards API routes, including plugin routes, as the
             // production entry does before it dispatches them. runtime.after sees a response
             // middleware answers with, as in production.
-            if (
-              await runAppMiddlewareInRuntimeSession(runtimeSession, (status) =>
-                logResponse(method, urlPath, status, Date.now() - startTime, "API"),
-              )
-            ) {
+            try {
+              if (
+                await runAppMiddlewareInRuntimeSession(runtimeSession, (status) =>
+                  logResponse(method, urlPath, status, Date.now() - startTime, "API"),
+                )
+              ) {
+                return;
+              }
+            } catch (error) {
+              if (res.headersSent) throw error;
+              // The runtime already reported the throw to runtime.error and onError.
+              logger.error(`Middleware error: ${error}`);
+              logResponse(method, urlPath, 500, Date.now() - startTime, "API");
+              sendFarmDevErrorJSON(res);
               return;
             }
 
@@ -4208,9 +4250,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               pathname = new URL(routedRequest.url).pathname;
             } catch (error) {
               await emitPluginError("runtime-before", error, { pathname: requestedPathname });
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "text/plain; charset=utf-8");
-              res.end("Internal Server Error");
+              sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
               return;
             }
           }
@@ -4268,6 +4308,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   startTime,
                   logResponse,
                   emitError: (error) => emitPluginError("response-end", error, { pathname }),
+                  jsonError: runtimeHookErrorAnswersJSON,
                 })
               : undefined;
 
@@ -4329,11 +4370,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // With `renderer: false` no error page renders: answer the JSON 500 production
             // answers (a throwing middleware, say), not Vite's HTML error page.
             if (rendererDisabled && !res.headersSent) {
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+              sendFarmDevErrorJSON(res);
               return;
             }
+            // Vite's error page reports it, kept out of caches like production's error document.
+            if (!res.headersSent) res.setHeader("Cache-Control", "private, no-store");
             next(error);
           }
         }),

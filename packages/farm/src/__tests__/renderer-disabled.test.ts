@@ -141,6 +141,10 @@ async function expectBackendResponses(origin: string): Promise<void> {
     expect(failed.headers.get("content-type"), pathname).toBe("application/json");
     await expect(failed.text(), pathname).resolves.toBe('{"error":"Internal Server Error"}');
   }
+  // A request middleware failed stays out of shared caches, as production keeps it.
+  const middlewareFailed = await fetch(`${origin}/middleware-failed`);
+  expect(middlewareFailed.headers.get("cache-control")).toBe("private, no-store");
+  await middlewareFailed.body?.cancel();
 
   const blocked = await fetch(`${origin}/blocked`);
   expect(blocked.status).toBe(403);
