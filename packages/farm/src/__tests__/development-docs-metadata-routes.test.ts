@@ -100,6 +100,29 @@ describe("development docs and app metadata routes", () => {
     expect(await sitemap.text()).toContain("/docs/guide");
   }, 30_000);
 
+  it("decides who owns an agent file on the route path, as production does", async () => {
+    const origin = await startDocsApp(
+      `{ enabled: true, entry: "/docs", contentDir: "docs", adapter: false }`,
+      {
+        "farm.config.ts": `export default {
+  basePath: "/console",
+  docs: { enabled: true, entry: "/docs", contentDir: "docs", adapter: false },
+  images: { provider: "none" },
+};`,
+        "src/app/llms.ts": `export default function llms() { return "app llms"; }`,
+      },
+    );
+
+    // The docs engine reads /llms.txt/ as /llms.txt; production gives both to the app's llms.ts.
+    for (const pathname of ["/llms.txt", "/llms.txt/", "/console/llms.txt", "/console/llms.txt/"]) {
+      const response = await fetch(`${origin}${pathname}`);
+      expect(response.status, pathname).toBe(200);
+      expect(await response.text(), pathname).toBe("app llms\n");
+    }
+    // The app has no robots.ts, so the docs engine keeps /robots.txt.
+    expect(await (await fetch(`${origin}/robots.txt`)).text()).toContain("@farming-labs/docs");
+  }, 30_000);
+
   it("serves docs config without provider credentials and diagnostics without them", async () => {
     const secrets = ["ALGOLIA_ADMIN_SECRET", "OPENAI_SECRET"];
     const origin = await startDocsApp(`{

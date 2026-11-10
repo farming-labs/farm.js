@@ -83,7 +83,6 @@ import type { FarmDocsAPIHandler } from "./docs";
 import {
   createMarkdownMirrorResponse,
   getFarmMarkdownAlternatePath,
-  getFarmMarkdownMirrorPath,
   resolveMarkdownMirrorTarget,
 } from "./markdown";
 import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
@@ -2905,14 +2904,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
           // Vite loading a `.md` file as a module is not a request for docs or Markdown.
           const viteModuleRequest = isViteModuleRequest(parsedRequestUrl, req.headers);
+          // The request's path as routes see it, without the basePath and locale prefix.
+          const toRoutePathname = (pathname: string) =>
+            farmApp.getRouteManager().toRoutePathname(pathname);
           // An app's own llms.txt, llms-full.txt, sitemap.xml, and robots.txt (agent.llmsTxt,
           // agent.crawlers, a root llms.ts, llms-full.ts, sitemap.ts, or robots.ts, or a public
-          // file) take those paths from the docs engine, as in production.
-          const appOwnsDocsEnginePath = farmAppOwnsDocsEnginePath(requestPathname, {
-            generatedPaths: farmAgentGeneratedPaths(farmConfig),
-            routeManager: farmApp.getRouteManager(),
-            publicDir: server.config.publicDir,
-          });
+          // file) take those paths from the docs engine. Production decides on the route path,
+          // so this does too.
+          const appOwnsDocsEnginePath = farmAppOwnsDocsEnginePath(
+            toRoutePathname(requestPathname),
+            {
+              generatedPaths: farmAgentGeneratedPaths(farmConfig),
+              routeManager: farmApp.getRouteManager(),
+              publicDir: server.config.publicDir,
+            },
+          );
           if (farmDocsHandler && !appOwnsDocsEnginePath && !viteModuleRequest) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,
@@ -2986,8 +2992,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
 
           const markdownRouteLabel = () =>
+            // On the route path, as production labels it: /fr/index.md is /index.md.
             resolveFarmMarkdownRouteLabel(
-              stripFarmBasePath(requestPathname, farmConfig.basePath),
+              toRoutePathname(requestPathname),
               (page) => farmApp.getRouteManager().matchRoute(page).route?.pattern,
             );
           const markdownSourceResponse = viteModuleRequest
@@ -2998,7 +3005,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   headers: docsHeaders,
                 }),
                 config: farmApp.getConfig().mdx,
-                basePath: farmApp.getConfig().basePath,
+                routePathname: toRoutePathname,
                 resolveSource: async (pathname) => {
                   const match = farmApp.getRouteManager().matchRoute(pathname);
                   const sourcePath =
@@ -3042,7 +3049,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   headers: docsHeaders,
                 }),
                 config: farmApp.getConfig().md,
-                basePath: farmApp.getConfig().basePath,
+                routePathname: toRoutePathname,
                 routeExists: (pathname) =>
                   Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
                 // The page is rendered by this server's own listener, never the host the
@@ -3080,7 +3087,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           if (!viteModuleRequest && farmRequestWantsMarkdown(requestPathname, req.headers.accept)) {
             const markdownRoute = farmApp
               .getRouteManager()
-              .matchRoute(normalizeFarmMarkdownRoutePath(requestPathname, farmConfig.basePath));
+              .matchRoute(normalizeFarmMarkdownRoutePath(requestPathname, toRoutePathname));
             if (!markdownRoute.route) {
               await serveBuiltInRoute(
                 () =>
@@ -3105,6 +3112,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             requestPathname,
             {
               accept: "text/markdown",
+              routePathname: toRoutePathname,
             },
           );
           if (
@@ -3119,8 +3127,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (!varyValues.some((value) => value.toLowerCase() === "accept")) {
               res.setHeader("Vary", [...varyValues, "Accept"].join(", "));
             }
-            const alternatePath = getFarmMarkdownMirrorPath(markdownPageTarget.pathname);
-            const alternateLink = `<${alternatePath}>; rel="alternate"; type="text/markdown"`;
+            const alternateLink = `<${markdownPageTarget.markdownPath}>; rel="alternate"; type="text/markdown"`;
             const currentLink = res.getHeader("Link");
             res.setHeader(
               "Link",
@@ -3971,7 +3978,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 mergedMetadata = await mergeModuleViewport(mergedMetadata, routeModule, routeProps);
                 mergedMetadata = addMetadataMarkdownAlternate(
                   mergedMetadata,
-                  getFarmMarkdownAlternatePath(farmApp.getConfig().md, targetRequestUrl.pathname),
+                  getFarmMarkdownAlternatePath(farmApp.getConfig().md, targetRequestUrl.pathname, {
+                    routePathname: (pathname) => routeManager.toRoutePathname(pathname),
+                  }),
                 );
 
                 const routeSlots = await Promise.all(

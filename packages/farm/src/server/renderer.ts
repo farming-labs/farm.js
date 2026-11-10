@@ -2510,7 +2510,9 @@ export class ServerRenderer {
     );
     metadata = addMetadataMarkdownAlternate(
       metadata,
-      getFarmMarkdownAlternatePath(resolveMarkdownConfig(this.config.md as any), publicPathname),
+      getFarmMarkdownAlternatePath(resolveMarkdownConfig(this.config.md as any), publicPathname, {
+        routePathname: (pathname) => this.routeManager.toRoutePathname(pathname),
+      }),
     );
 
     return metadata;

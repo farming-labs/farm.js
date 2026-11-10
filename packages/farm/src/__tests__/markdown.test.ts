@@ -4,6 +4,7 @@ import React, { createElement, Suspense } from "react";
 import { renderToReadableStream } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../config";
+import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import {
   applyMarkdownNegotiationHeaders,
   createMarkdownMirrorResponse,
@@ -360,6 +361,95 @@ describe("getFarmMarkdownAlternatePath", () => {
     expect(getFarmMarkdownAlternatePath(pricingOnly, "/pricing")).toBe("/pricing.md");
     expect(getFarmMarkdownAlternatePath(pricingOnly, "/account")).toBeNull();
     expect(getFarmMarkdownAlternatePath(resolveMarkdownConfig(false), "/pricing")).toBeNull();
+  });
+});
+
+describe("Markdown under a basePath and locale prefix", () => {
+  // Routes see /console/fr/about as /about, as the route manager and production strip it.
+  const routePathname = (pathname: string) =>
+    stripFarmLocaleFromPathname(pathname, {
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing: "prefix-except-default",
+      basePath: "/console",
+    });
+
+  it("advertises a home page's Markdown at <prefix>/index.md, as llms.txt links it", () => {
+    const everyPage = resolveMarkdownConfig(undefined);
+    const advertised = (pathname: string) =>
+      getFarmMarkdownAlternatePath(everyPage, pathname, { routePathname });
+
+    expect(advertised("/console")).toBe("/console/index.md");
+    expect(advertised("/console/fr")).toBe("/console/fr/index.md");
+    expect(advertised("/console/fr/about")).toBe("/console/fr/about.md");
+    expect(advertised("/console/about")).toBe("/console/about.md");
+    // Without a prefix, the home page keeps /index.md.
+    expect(getFarmMarkdownAlternatePath(everyPage, "/")).toBe("/index.md");
+  });
+
+  it("serves <prefix>/index.md and <prefix>.md as that prefix's home page", () => {
+    const everyPage = resolveMarkdownConfig(undefined);
+    const target = (pathname: string) =>
+      resolveMarkdownMirrorTarget(everyPage, pathname, { routePathname });
+
+    for (const pathname of ["/console/fr/index.md", "/console/fr.md"]) {
+      expect(target(pathname), pathname).toMatchObject({
+        pathname: "/console/fr",
+        markdownPath: "/console/fr/index.md",
+      });
+    }
+    for (const pathname of ["/console/index.md", "/console.md"]) {
+      expect(target(pathname), pathname).toMatchObject({
+        pathname: "/console",
+        markdownPath: "/console/index.md",
+      });
+    }
+    // Only a home page has an index alias.
+    expect(target("/console/about/index.md")).toMatchObject({
+      pathname: "/console/about/index",
+      markdownPath: "/console/about/index.md",
+    });
+  });
+
+  it("matches md.expose against route paths, as llms.txt does", () => {
+    const config = resolveMarkdownConfig({ expose: ["/", { route: "/about", title: "About" }] });
+    const target = (pathname: string) =>
+      resolveMarkdownMirrorTarget(config, pathname, { routePathname });
+
+    expect(target("/console/about.md")).toMatchObject({
+      pathname: "/console/about",
+      route: { route: "/about", title: "About" },
+    });
+    expect(target("/console/fr/about.md")).toMatchObject({ route: { route: "/about" } });
+    expect(target("/console/fr/index.md")).toMatchObject({
+      pathname: "/console/fr",
+      route: { route: "/" },
+    });
+    expect(target("/console/secret.md")).toBeNull();
+    expect(getFarmMarkdownAlternatePath(config, "/console/about", { routePathname })).toBe(
+      "/console/about.md",
+    );
+    expect(getFarmMarkdownAlternatePath(config, "/console/secret", { routePathname })).toBeNull();
+  });
+
+  it("names the home page itself in the actions view of <prefix>/index.md", async () => {
+    const response = await createMarkdownMirrorResponse({
+      request: new Request("http://farm.test/console/fr/index.md?actions"),
+      config: resolveMarkdownConfig(undefined),
+      routePathname,
+      renderPage: (request) => {
+        expect(new URL(request.url).pathname).toBe("/console/fr");
+        return new Response('<main><form method="post"><button>Go</button></form></main>', {
+          headers: { "content-type": "text/html" },
+        });
+      },
+    });
+
+    expect(response?.headers.get("content-location")).toBe("/console/fr/index.md");
+    expect(await response?.json()).toMatchObject({
+      page: "/console/fr",
+      markdown: "/console/fr/index.md",
+    });
   });
 });
 

@@ -124,6 +124,9 @@ describe("Vercel docs content", () => {
       const appLlms = await handler.fetch(new Request("https://farm.test/llms.txt"));
       expect(appLlms.status).toBe(200);
       expect((await appLlms.text()).startsWith("# App index\n")).toBe(true);
+      // Ownership is decided on the route path, so /llms.txt/ is the app's too, as in dev.
+      const appLlmsSlash = await handler.fetch(new Request("https://farm.test/llms.txt/"));
+      expect((await appLlmsSlash.text()).startsWith("# App index\n")).toBe(true);
       const docsLlms = await handler.fetch(new Request("https://farm.test/.well-known/llms.txt"));
       expect(docsLlms.status).toBe(200);
       const docsLlmsText = await docsLlms.text();
