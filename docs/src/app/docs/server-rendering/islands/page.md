@@ -100,7 +100,9 @@ Where islands mode does not win:
   interaction, so a visitor who navigates has downloaded more JavaScript in total than with
   `"rsc"`. The savings are in what a visit pays before the page can be used.
 - **A client component that hydrates at load** starts the runtime at once, so that page sends more
-  JavaScript than `"rsc"`, not less.
+  JavaScript than `"rsc"`, not less: about 77 to 80 KB against 69.5 KB on a small app. The
+  production build keeps navigation code in a separate 8 KB chunk, loaded on the first link hover,
+  focus, tap, or navigation.
 - **Navigations paint 2 to 4 ms later** on docs and shop pages. Blog posts are 2 ms faster.
 
 To measure it yourself, see the benchmark's

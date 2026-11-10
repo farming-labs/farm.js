@@ -828,6 +828,45 @@ test("a link followed before the client runtime loads is a client navigation", a
   expect(errors).toEqual([]);
 });
 
+test("a page that hydrates loads the router only when a navigation needs it", async ({ page }) => {
+  test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
+  const errors = collectErrors(page);
+  const routerRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("farm-client-router")) routerRequests.push(request.url());
+  });
+  await page.goto("/");
+  await hydrated(page);
+  expect(routerRequests).toEqual([]);
+  const increment = page.getByRole("button", { name: /Count: 5/ });
+  await increment.click();
+  await expect(page.getByRole("button", { name: /Count: 6/ })).toBeVisible();
+  expect(routerRequests).toEqual([]);
+
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  const link = page.getByRole("link", { name: "Stream", exact: true });
+  await link.hover();
+  await expect.poll(() => routerRequests.length).toBe(1);
+  await link.click();
+  await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(routerRequests).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test("a link still navigates when the router fails to load", async ({ page }) => {
+  test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
+  await page.route("**/farm-client-router-*", (route) => route.abort());
+  await page.goto("/");
+  await hydrated(page);
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  await page.getByRole("link", { name: "Stream", exact: true }).click();
+  await expect(page).toHaveURL(/\/stream$/);
+  await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
+  // A new document: the browser navigated itself, without the router.
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(false);
+});
+
 test("a link still navigates when the client runtime fails to load", async ({ page, request }) => {
   test.skip(mode !== "islands", "rsc hydrates every client component on load");
   const html = await (await request.get("/timing/later")).text();
