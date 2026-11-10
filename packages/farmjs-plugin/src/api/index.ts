@@ -33,6 +33,8 @@ import {
 } from "@farm.js/core/internal/production-runtime";
 import {
   API_ROUTE_METHODS,
+  createFarmInternalServerErrorResponse,
+  FARM_INTERNAL_SERVER_ERROR_BODY,
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   matchAPIRouteAtBasePath,
@@ -154,11 +156,10 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
 
         try {
           return await invokeAPIRouteEndpoint(endpoint, request, match.params);
-        } catch (error: any) {
-          return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
+        } catch (error) {
+          // As in core's dev server and production, the failure stays in the server log.
+          console.error(`[API Error] ${pathname}:`, error);
+          return createFarmInternalServerErrorResponse();
         }
       };
 
@@ -202,11 +203,9 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
-      } catch (error: any) {
-        return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
+      } catch (error) {
+        console.error(`[API Error] ${url.pathname}:`, error);
+        return createFarmInternalServerErrorResponse();
       }
     };
   };
@@ -442,7 +441,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             console.error("[FARM] API error:", error);
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "Internal server error" }));
+            res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
           }
         });
         server.middlewares.use((req, res, next) =>
