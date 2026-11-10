@@ -19,6 +19,8 @@ import {
   Plug,
   Rocket,
   Route,
+  Server,
+  Smartphone,
   Terminal,
 } from "../components/icons";
 import type { LucideIcon } from "lucide-react";
@@ -1463,6 +1465,26 @@ function MarkdownMirrorsVisual() {
   );
 }
 
+function BackendsVisual() {
+  return (
+    <div className="farm-feature-spotlight relative flex min-h-[340px] min-w-0 items-center overflow-hidden px-6 py-8 sm:px-10">
+      <div className="relative z-10 w-full">
+        <BlogFigure fit kind="landing-backends" />
+      </div>
+    </div>
+  );
+}
+
+function MobileVisual() {
+  return (
+    <div className="farm-feature-spotlight relative flex min-h-[340px] min-w-0 items-center overflow-hidden px-6 py-8 sm:px-10">
+      <div className="relative z-10 w-full">
+        <BlogFigure fit kind="landing-mobile" />
+      </div>
+    </div>
+  );
+}
+
 function AgentRuntimeVisual() {
   return (
     <div className="farm-feature-spotlight relative flex min-h-[328px] min-w-0 items-center overflow-hidden px-6 py-8 sm:px-10">
@@ -1579,6 +1601,32 @@ function FoundationGrid() {
         title="Every page, readable by agents"
       >
         <MarkdownMirrorsVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Mount a Hono, Elysia, Express, Koa, Fastify, or NestJS app on one API route. It runs in development and production beside your typed routes."
+        className="border-t border-white/12"
+        icon={Server}
+        index="02.9"
+        label="Bring your backend"
+        title="Keep the backend you already have"
+      >
+        <BackendsVisual />
+      </FeatureCell>
+      <FeatureCell
+        body={
+          <>
+            <code className="font-mono text-white">farm dev --mobile</code> puts your pages in a
+            native frame with tabs, stacks, sheets, and the back gesture. Draw a route with native
+            views or React Native when it needs more. In preview on emulators and simulators.
+          </>
+        }
+        className="border-t border-white/12 lg:border-l"
+        icon={Smartphone}
+        index="02.10"
+        label="Mobile"
+        title="The same pages, as a native app"
+      >
+        <MobileVisual />
       </FeatureCell>
     </section>
   );

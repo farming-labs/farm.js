@@ -2,6 +2,8 @@
 // the requests between them) rather than repeating the code blocks next to them. Each script is a
 // pure function of time: the server renders its final frame and the client player replays it.
 
+import { siExpress, siFastify, siHono, siKoa, siNestjs } from "simple-icons";
+
 export type FigureKind =
   | "integration"
   | "agents"
@@ -20,6 +22,8 @@ export type FigureKind =
   | "agents-observe"
   | "landing-markdown"
   | "landing-strata"
+  | "landing-backends"
+  | "landing-mobile"
   | "agent-layers"
   | "agent-authorize"
   | "ast-native"
@@ -1665,6 +1669,276 @@ const landingStrata: FigureSpec = {
   },
 };
 
+/* ---------- landing 02.9: one API route, the backend you already have behind it ---------- */
+
+/** A filled brand mark in the same tile as the line glyphs. */
+const markGlyph = (path: string) =>
+  `<span class="bf-item-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="${path}"/></svg></span>`;
+const BACKEND_MARKS = {
+  hono: markGlyph(siHono.path),
+  express: markGlyph(siExpress.path),
+  koa: markGlyph(siKoa.path),
+  fastify: markGlyph(siFastify.path),
+  nest: markGlyph(siNestjs.path),
+  // Elysia has no published mark in simple-icons; a code glyph stands in rather than a guess.
+  code: glyph("m16 18 6-6-6-6", "m8 6-6 6 6 6"),
+  swap: G.swap,
+};
+type BackendSide = "fetch" | "node";
+const BACKENDS: Record<BackendSide, [keyof typeof BACKEND_MARKS, string, string][]> = {
+  fetch: [
+    ["hono", "Hono", "app.fetch"],
+    ["code", "Elysia", "app.fetch"],
+    ["swap", "Your handler", "(request) =&gt; Response"],
+  ],
+  node: [
+    ["express", "Express", "app"],
+    ["koa", "Koa", "koa.callback()"],
+    ["fastify", "Fastify", "server.emit"],
+    ["nest", "NestJS", "getInstance()"],
+  ],
+};
+// Requests alternate between the two helpers until every mounted app has answered once.
+const BACKEND_REQUESTS: [BackendSide, number][] = [
+  ["fetch", 0],
+  ["node", 0],
+  ["fetch", 1],
+  ["node", 1],
+  ["node", 2],
+  ["fetch", 2],
+  ["node", 3],
+];
+const BACKEND_GAP = 0.62;
+const BACKEND_START = 0.9;
+const BACKEND_RUN = 0.5;
+const landingBackends: FigureSpec = {
+  duration:
+    BACKEND_START + (BACKEND_REQUESTS.length - 1) * BACKEND_GAP + PULSE + BACKEND_RUN + HOLD,
+  stage: { w: 440, h: 300 },
+  label:
+    "Requests to one Farm API route reach the app mounted behind it: Hono, Elysia, or a fetch handler through mountFetchHandler, and Express, Koa, Fastify, or NestJS through mountNodeHandler",
+  panels: [
+    {
+      id: "route",
+      x: 110,
+      y: 0,
+      w: 220,
+      h: 44,
+      flow: true,
+      icon: "farm",
+      kicker: "One API route",
+      label: "/api/[...path]",
+    },
+    { id: "fetch", x: 0, y: 76, w: 205, h: 224, title: "Fetch" },
+    { id: "node", x: 235, y: 76, w: 205, h: 224, title: "Node" },
+  ],
+  wires: {
+    fetch: [
+      [190, 44],
+      [190, 60],
+      [102, 60],
+      [102, 76],
+    ],
+    node: [
+      [250, 44],
+      [250, 60],
+      [337, 60],
+      [337, 76],
+    ],
+  },
+  frame(t) {
+    const sent = BACKEND_REQUESTS.map((_, i) => BACKEND_START + i * BACKEND_GAP);
+    const landed = sent.map((at) => at + PULSE);
+    const answered = landed.map((at) => at + BACKEND_RUN);
+    const side = (name: BackendSide) =>
+      BACKENDS[name]
+        .map(([mark, label, sub], index) => {
+          const request = BACKEND_REQUESTS.findIndex(([s, i]) => s === name && i === index);
+          const arrive = landed[request];
+          const done = answered[request];
+          const status = step(t, arrive, done);
+          const cls = t >= arrive && t < done ? "bf-von" : t < arrive ? "bf-item--wait" : "";
+          return `<span class="bf-item${cls ? ` ${cls}` : ""}">${BACKEND_MARKS[mark]}<span class="bf-item-text"><span class="bf-item-name">${label}</span><span class="bf-item-sub">${sub}</span></span>${t >= done ? '<span class="bf-item-meta">200</span>' : ""}<span class="bf-item-state">${status}</span></span>`;
+        })
+        .join("");
+    const pulses = (name: BackendSide) =>
+      sent.filter((_, i) => BACKEND_REQUESTS[i][0] === name).map((at): [number] => [at]);
+    const hot = (name: BackendSide) =>
+      BACKEND_REQUESTS.some(([s], i) => s === name && t >= landed[i] && t < answered[i])
+        ? ("hot" as const)
+        : undefined;
+    return {
+      slots: {
+        route: step(t, sent[0], answered[answered.length - 1]),
+        fetch: side("fetch"),
+        "fetch:meta": "mountFetchHandler",
+        node: side("node"),
+        "node:meta": "mountNodeHandler",
+      },
+      wires: {
+        fetch: wire(t, 0.1, pulses("fetch")),
+        node: wire(t, 0.2, pulses("node")),
+      },
+      states: {
+        route: busy(t, sent[0], landed[landed.length - 1]),
+        fetch: hot("fetch"),
+        node: hot("node"),
+      },
+    };
+  },
+};
+
+/* ---------- landing 02.10: the same pages, on the phone, in a native frame ---------- */
+
+type MobileScreen = {
+  id: string;
+  icon: IconKey;
+  kicker: string;
+  route: string;
+  kind: string;
+  tab: number;
+};
+const MOBILE_SCREENS: MobileScreen[] = [
+  { id: "web", icon: "browser", kicker: "Web screen", route: "/notes", kind: "WebView", tab: 0 },
+  {
+    id: "native",
+    icon: "phone",
+    kicker: "Native screen",
+    route: "/notes/[id]",
+    kind: "Native views",
+    tab: 0,
+  },
+  { id: "rn", icon: "page", kicker: "React Native", route: "/map", kind: "React Native", tab: 1 },
+  { id: "modal", icon: "page", kicker: "Modal sheet", route: "/notes/new", kind: "Sheet", tab: 0 },
+];
+const MOBILE_LANE = (i: number) => i * 84; // top of each route pill
+const MOBILE_HUB = 150; // where the four connectors meet the phone
+const MOBILE_START = 0.6;
+const MOBILE_STEP = 1.5;
+/** Rectangles (x, y, w, h in % of the screen) that sketch each screen's content. */
+const SCREEN_BLOCKS: Record<string, [number, number, number, number][]> = {
+  web: [
+    [6, 3, 88, 13],
+    [6, 19, 88, 13],
+    [6, 35, 88, 13],
+    [6, 51, 88, 13],
+  ],
+  native: [
+    [6, 3, 58, 7],
+    [6, 14, 88, 3],
+    [6, 20, 80, 3],
+    [6, 26, 86, 3],
+    [6, 32, 52, 3],
+    [6, 40, 88, 30],
+  ],
+  rn: [[0, 0, 100, 84]],
+  modal: [
+    [6, 3, 88, 13],
+    [6, 19, 88, 13],
+    [6, 35, 88, 13],
+    [6, 51, 88, 13],
+  ],
+};
+const block = ([x, y, w, h]: [number, number, number, number], opacity: number, cls = "") =>
+  `<span class="bf-vblock${cls ? ` ${cls}` : ""}" style="left:${x}%;top:${y}%;width:${w}%;height:${h}%;opacity:${opacity.toFixed(3)}"></span>`;
+const landingMobile: FigureSpec = {
+  duration: MOBILE_START + (MOBILE_SCREENS.length - 1) * MOBILE_STEP + PULSE + 0.9 + HOLD,
+  stage: { w: 440, h: 300 },
+  label:
+    "Four routes of one Farm app open on a phone inside a native frame with tabs: a web screen, a natively drawn screen, a React Native screen, and a modal sheet",
+  panels: [
+    ...MOBILE_SCREENS.map((screen, i) => ({
+      id: screen.id,
+      x: 0,
+      y: MOBILE_LANE(i) + 12,
+      w: 228,
+      h: 44,
+      flow: true,
+      icon: screen.icon,
+      kicker: screen.kicker,
+      label: screen.route,
+    })),
+    { id: "phone", x: 290, y: 0, w: 150, h: 300, title: "Phone" },
+  ],
+  wires: Object.fromEntries(
+    MOBILE_SCREENS.map((screen, i): [string, [number, number][]] => {
+      const y = MOBILE_LANE(i) + 34;
+      return [
+        `to-${screen.id}`,
+        [
+          [228, y],
+          [259, y],
+          [259, MOBILE_HUB],
+          [290, MOBILE_HUB],
+        ],
+      ];
+    }),
+  ),
+  frame(t) {
+    const tapped = MOBILE_SCREENS.map((_, i) => MOBILE_START + i * MOBILE_STEP);
+    const opened = tapped.map((at) => at + PULSE);
+    // The screen on the phone: the last one whose pulse has landed.
+    let current = -1;
+    opened.forEach((at, i) => {
+      if (t >= at) current = i;
+    });
+    const screen = MOBILE_SCREENS[current];
+    const since = current >= 0 ? t - opened[current] : 0;
+    let blocks = "";
+    if (screen) {
+      const content = SCREEN_BLOCKS[screen.id];
+      const under = screen.id === "modal";
+      blocks += content
+        .map((rect, i) => block(rect, (under ? 0.35 : 1) * ease(prog(since, i * 0.08, 0.3))))
+        .join("");
+      if (screen.id === "rn") {
+        // A pin drops onto the map once it has drawn.
+        blocks += `<span class="bf-vpin" style="left:50%;top:34%;opacity:${ease(prog(since, 0.35, 0.3)).toFixed(3)}"></span>`;
+      }
+      // The native frame: a tab bar with the screen's tab lit. A modal sheet covers it.
+      blocks += [0, 1]
+        .map((tab) =>
+          block(
+            [8 + tab * 46, 89, 38, 8],
+            under ? 0.35 : 1,
+            tab === screen.tab ? "bf-vblock--tab" : "",
+          ),
+        )
+        .join("");
+      if (under) {
+        // The sheet rises from the bottom edge over the screen it was opened from: a new-note
+        // form with a title, two fields, and a save button.
+        const top = 100 - 72 * ease(prog(since, 0.05, 0.55));
+        const form = (
+          [
+            [8, 13, 46, 6],
+            [8, 25, 84, 12],
+            [8, 42, 84, 30],
+          ] as [number, number, number, number][]
+        )
+          .map((rect, i) => block(rect, ease(prog(since, 0.45 + i * 0.08, 0.3))))
+          .join("");
+        const save = block([8, 79, 38, 10], ease(prog(since, 0.7, 0.3)), "bf-vblock--tab");
+        blocks += `<span class="bf-vblock bf-vsheet" style="left:0%;top:${top.toFixed(2)}%;width:100%;height:72%"><span class="bf-vgrip"></span>${form}${save}</span>`;
+      }
+    }
+    const slots: Record<string, string> = {
+      phone: `<span class="bf-vprev bf-vphone">${blocks}</span>`,
+      "phone:meta": screen ? screen.kind : "",
+    };
+    const states: Record<string, PanelState | undefined> = {
+      phone: current >= 0 && since < 0.6 ? "hot" : undefined,
+    };
+    const wires: Record<string, WireFrame> = {};
+    MOBILE_SCREENS.forEach((s, i) => {
+      slots[s.id] = step(t, tapped[i], opened[i] + 0.3);
+      states[s.id] = busy(t, tapped[i], opened[i] + 0.3);
+      wires[`to-${s.id}`] = wire(t, 0.1 + i * 0.08, [[tapped[i]]], current >= 0 && current !== i);
+    });
+    return { slots, wires, states };
+  },
+};
+
 /* ---------- phone layouts: the same panels and connectors in one column (post figures only) ---------- */
 // Stages are 360 units wide, so type renders near its desktop size on a phone instead of shrinking.
 
@@ -2226,6 +2500,8 @@ export const FIGURES: Record<FigureKind, FigureSpec> = {
   "agents-observe": agentsObserve,
   "landing-markdown": landingMarkdown,
   "landing-strata": landingStrata,
+  "landing-backends": landingBackends,
+  "landing-mobile": landingMobile,
   "agent-layers": agentLayers,
   "agent-authorize": agentAuthorize,
   "ast-native": astNative,
