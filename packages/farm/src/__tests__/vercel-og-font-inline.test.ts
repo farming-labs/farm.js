@@ -30,8 +30,8 @@ async function createVercelOgPackage(version: string): Promise<string> {
   return path.join(packageDir, "dist", "index.edge.js");
 }
 
-function runTransform(code: string, id: string) {
-  const plugin = createVercelOgFontInlinePlugin();
+function runTransform(code: string, id: string, runtime?: string) {
+  const plugin = createVercelOgFontInlinePlugin(runtime);
   const context = {
     error(message: string): never {
       throw new Error(message);
@@ -44,7 +44,7 @@ function runTransform(code: string, id: string) {
   );
 }
 
-describe("@vercel/og font inlining for Cloudflare Workers", () => {
+describe("@vercel/og font inlining for edge runtimes", () => {
   it("inlines the default font the edge build fetches from import.meta.url", async () => {
     const entry = await createVercelOgPackage("1.0.1");
     const result = runTransform(
@@ -62,6 +62,13 @@ describe("@vercel/og font inlining for Cloudflare Workers", () => {
     expect(() =>
       runTransform(`var font = loadFont("./Font.ttf").then((res) => res.arrayBuffer());`, entry),
     ).toThrow(/@vercel\/og 9\.9\.9 cannot be bundled for Cloudflare Workers/);
+    expect(() =>
+      runTransform(
+        `var font = loadFont("./Font.ttf").then((res) => res.arrayBuffer());`,
+        entry,
+        "Netlify Edge Functions",
+      ),
+    ).toThrow(/@vercel\/og 9\.9\.9 cannot be bundled for Netlify Edge Functions/);
   });
 
   it("leaves other modules and @vercel/og's wasm files alone", async () => {

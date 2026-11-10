@@ -722,6 +722,35 @@ function isCloudflareImagePreset(preset: string): boolean {
   return preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module";
 }
 
+interface EdgeMetadataImageRuntime {
+  /** The @vercel/og export condition that selects its edge build. */
+  condition: string;
+  /**
+   * How the edge build's `./*.wasm?module` imports load: left to Nitro, which
+   * imports each file as a precompiled module, or compiled from inlined bytes.
+   */
+  wasm: "module" | "bytes";
+  /** The runtime named in build errors. */
+  runtime: string;
+}
+
+/**
+ * How an edge preset bundles @vercel/og's edge build, or null when the server
+ * output loads @vercel/og from node_modules.
+ */
+function getEdgeMetadataImageRuntime(preset: string): EdgeMetadataImageRuntime | null {
+  if (isCloudflareImagePreset(preset)) {
+    // workerd refuses `new WebAssembly.Module(bytes)`.
+    return { condition: "workerd", wasm: "module", runtime: "Cloudflare Workers" };
+  }
+  if (preset === "netlify-edge") {
+    // Deno compiles wasm from bytes, and neither Nitro's netlify-edge preset
+    // nor Netlify's edge bundler loads a `?module` import.
+    return { condition: "edge", wasm: "bytes", runtime: "Netlify Edge Functions" };
+  }
+  return null;
+}
+
 /**
  * Whether the server output loads @vercel/og from node_modules. Its Node build
  * reads its wasm and default font from beside its own file, so Node presets
@@ -729,7 +758,7 @@ function isCloudflareImagePreset(preset: string): boolean {
  * server code imports it.
  */
 function shouldUseExternalMetadataImageRuntime(preset: string, usesImageRuntime: boolean): boolean {
-  return usesImageRuntime && preset !== "vercel-edge" && !isCloudflareImagePreset(preset);
+  return usesImageRuntime && preset !== "vercel-edge" && !getEdgeMetadataImageRuntime(preset);
 }
 
 /** @internal Exported for tests. */
@@ -837,32 +866,37 @@ function readVercelOgManifest(
   return null;
 }
 
-/** @vercel/og's `workerd` export, found from the entry Node conditions resolved. */
-function resolveVercelOgWorkerdEntry(resolvedId: string): string | null {
+/** @vercel/og's export for `condition`, found from the entry Node conditions resolved. */
+function resolveVercelOgConditionEntry(resolvedId: string, condition: string): string | null {
   const vercelOg = readVercelOgManifest(resolvedId);
-  const entry = vercelOg?.manifest.exports?.["."]?.workerd;
+  const entry = vercelOg?.manifest.exports?.["."]?.[condition];
   const file = typeof entry === "string" ? entry : entry?.default;
   return vercelOg && typeof file === "string" ? path.join(vercelOg.dir, file) : null;
 }
 
 /**
- * Cloudflare Workers run @vercel/og's edge build. Vite resolves the SSR graph
- * with Node conditions, which pick the Node build that reads its wasm and font
- * from disk. The edge build imports its wasm as `?module`; those imports are
- * left to Nitro, whose Cloudflare presets emit each file and import it as a
- * precompiled module. workerd refuses `new WebAssembly.Module(bytes)`.
+ * Edge runtimes run @vercel/og's edge build. Vite resolves the SSR graph with
+ * Node conditions, which pick the Node build that reads its wasm and font from
+ * disk. The edge build imports its wasm as `?module`. On Cloudflare those
+ * imports are left to Nitro, whose Cloudflare presets emit each file and
+ * import it as a precompiled module; on other edge presets
+ * createMetadataImageWasmPlugin inlines them.
  */
-function createCloudflareMetadataImageRuntimePlugin(): Rollup.Plugin {
+function createEdgeMetadataImageRuntimePlugin({
+  condition,
+  wasm,
+}: EdgeMetadataImageRuntime): Rollup.Plugin {
   return {
-    name: "farm-cloudflare-metadata-image-runtime",
+    name: "farm-edge-metadata-image-runtime",
     async resolveId(source, importer, options) {
       if (source === "@vercel/og") {
         const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
         if (!resolved || resolved.external) return resolved;
-        const workerdEntry = resolveVercelOgWorkerdEntry(resolved.id);
-        return workerdEntry ? { ...resolved, id: workerdEntry } : resolved;
+        const edgeEntry = resolveVercelOgConditionEntry(resolved.id, condition);
+        return edgeEntry ? { ...resolved, id: edgeEntry } : resolved;
       }
       if (
+        wasm !== "module" ||
         !source.endsWith(".wasm?module") ||
         !importer?.replace(/\\/g, "/").includes("/@vercel/og/")
       ) {
@@ -879,14 +913,15 @@ const VERCEL_OG_FONT_FETCH =
 
 /**
  * @vercel/og's edge build fetches its default font from `import.meta.url`,
- * which a Worker cannot fetch, and workerd evaluates modules where it cannot
- * create a Response either. Inline the font's bytes behind the `arrayBuffer()`
- * the build reads from that fetch. A @vercel/og module that loads its font
- * some other way fails the build, because every image request would fail.
+ * which a deployed edge function cannot fetch, and workerd evaluates modules
+ * where it cannot create a Response either. Inline the font's bytes behind the
+ * `arrayBuffer()` the build reads from that fetch. A @vercel/og module that
+ * loads its font some other way fails the build, because every image request
+ * would fail.
  *
  * @internal Exported for tests.
  */
-export function createVercelOgFontInlinePlugin(): Rollup.Plugin {
+export function createVercelOgFontInlinePlugin(runtime = "Cloudflare Workers"): Rollup.Plugin {
   return {
     name: "farm-vercel-og-font-inline",
     transform(code, id) {
@@ -901,7 +936,7 @@ export function createVercelOgFontInlinePlugin(): Rollup.Plugin {
       if (inlined !== code) return { code: inlined, map: null };
       const version = readVercelOgManifest(file)?.manifest.version ?? "(unknown version)";
       this.error(
-        `@vercel/og ${version} cannot be bundled for Cloudflare Workers: ${file} does not load its default font with fetch(new URL("./<font>.ttf", import.meta.url)), the pattern Farm inlines because a Worker cannot fetch it. Install a @vercel/og version whose edge build does, such as 1.0.1.`,
+        `@vercel/og ${version} cannot be bundled for ${runtime}: ${file} does not load its default font with fetch(new URL("./<font>.ttf", import.meta.url)), the pattern Farm inlines because an edge function cannot fetch it. Install a @vercel/og version whose edge build does, such as 1.0.1.`,
       );
     },
   };
@@ -5904,6 +5939,7 @@ async function buildSSRInMemory(
   // external costs nothing, and Nitro copies the package only when the bundle
   // imports it.
   const useExternalMetadataImageRuntime = shouldUseExternalMetadataImageRuntime(preset, true);
+  const edgeMetadataImageRuntime = getEdgeMetadataImageRuntime(preset);
   const omitCoreMetadataImageRuntime = !metadataImageRoutes.some(
     (image) => image.sourceType === "module",
   );
@@ -6025,10 +6061,14 @@ async function buildSSRInMemory(
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
         ...(rendererVitePlugins as any[]),
         ...(config.vite.plugins || []),
-        ...(!useExternalMetadataImageRuntime &&
-        !isCloudflareImagePreset(preset) &&
-        metadataImageRoutes.some((image) => image.sourceType === "module")
-          ? [createMetadataImageWasmPlugin()]
+        // On an edge preset any server module may import @vercel/og.
+        ...((
+          edgeMetadataImageRuntime
+            ? edgeMetadataImageRuntime.wasm === "bytes"
+            : !useExternalMetadataImageRuntime &&
+              metadataImageRoutes.some((image) => image.sourceType === "module")
+        )
+          ? [{ ...createMetadataImageWasmPlugin(), enforce: "pre" as const }]
           : []),
         ...(omitCoreMetadataImageRuntime
           ? [
@@ -6039,10 +6079,13 @@ async function buildSSRInMemory(
             ]
           : []),
         // After the stub above, which must take core's own import first.
-        ...(isCloudflareImagePreset(preset)
+        ...(edgeMetadataImageRuntime
           ? [
-              { ...createCloudflareMetadataImageRuntimePlugin(), enforce: "pre" as const },
-              createVercelOgFontInlinePlugin(),
+              {
+                ...createEdgeMetadataImageRuntimePlugin(edgeMetadataImageRuntime),
+                enforce: "pre" as const,
+              },
+              createVercelOgFontInlinePlugin(edgeMetadataImageRuntime.runtime),
             ]
           : []),
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
