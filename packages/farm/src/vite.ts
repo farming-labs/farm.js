@@ -7044,6 +7044,27 @@ function parseNavigationFragment(html) {
   return template.content;
 }
 
+// Suspense content streams, so a fresh response holds its fallback where the live DOM holds the
+// result. Compare without it.
+function removeSuspenseContent(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+  const comments = [];
+  while (walker.nextNode()) comments.push(walker.currentNode);
+  let depth = 0;
+  let start = null;
+  for (const comment of comments) {
+    if (comment.data === "$" || comment.data === "$?" || comment.data === "$!") {
+      if (depth++ === 0) start = comment;
+    } else if (comment.data === "/$" && depth > 0 && --depth === 0) {
+      const range = document.createRange();
+      range.setStartAfter(start);
+      range.setEndBefore(comment);
+      range.deleteContents();
+      start.data = "$";
+    }
+  }
+}
+
 // A layout's own server output, without what it wraps and without its islands, whose live DOM
 // always differs from fresh HTML.
 function getLayoutShell(root, patterns, index, find) {
@@ -7053,6 +7074,7 @@ function getLayoutShell(root, patterns, index, find) {
     ? find(shell, patterns[index + 1])
     : shell.querySelector('#__farm_page__');
   inner?.replaceChildren();
+  removeSuspenseContent(shell);
   shell.querySelectorAll('script').forEach((script) => script.remove());
   shell.querySelectorAll('f-island').forEach((island) => {
     island.replaceChildren();
