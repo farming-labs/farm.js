@@ -821,6 +821,92 @@ export class ImageResponse {
   };
 }
 
+/** The @vercel/og package.json above `file`, or null when `file` is not inside @vercel/og. */
+function readVercelOgManifest(
+  file: string,
+): { dir: string; manifest: { version?: string; exports?: any } } | null {
+  let dir = path.dirname(file.split("?", 1)[0]);
+  while (dir !== path.dirname(dir)) {
+    const manifestPath = path.join(dir, "package.json");
+    if (existsSync(manifestPath)) {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      return manifest.name === "@vercel/og" ? { dir, manifest } : null;
+    }
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+/** @vercel/og's `workerd` export, found from the entry Node conditions resolved. */
+function resolveVercelOgWorkerdEntry(resolvedId: string): string | null {
+  const vercelOg = readVercelOgManifest(resolvedId);
+  const entry = vercelOg?.manifest.exports?.["."]?.workerd;
+  const file = typeof entry === "string" ? entry : entry?.default;
+  return vercelOg && typeof file === "string" ? path.join(vercelOg.dir, file) : null;
+}
+
+/**
+ * Cloudflare Workers run @vercel/og's edge build. Vite resolves the SSR graph
+ * with Node conditions, which pick the Node build that reads its wasm and font
+ * from disk. The edge build imports its wasm as `?module`; those imports are
+ * left to Nitro, whose Cloudflare presets emit each file and import it as a
+ * precompiled module. workerd refuses `new WebAssembly.Module(bytes)`.
+ */
+function createCloudflareMetadataImageRuntimePlugin(): Rollup.Plugin {
+  return {
+    name: "farm-cloudflare-metadata-image-runtime",
+    async resolveId(source, importer, options) {
+      if (source === "@vercel/og") {
+        const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+        if (!resolved || resolved.external) return resolved;
+        const workerdEntry = resolveVercelOgWorkerdEntry(resolved.id);
+        return workerdEntry ? { ...resolved, id: workerdEntry } : resolved;
+      }
+      if (
+        !source.endsWith(".wasm?module") ||
+        !importer?.replace(/\\/g, "/").includes("/@vercel/og/")
+      ) {
+        return null;
+      }
+      const resolvedPath = path.resolve(path.dirname(importer.split("?", 1)[0]), source);
+      return { id: toPosixPath(resolvedPath), external: "absolute" };
+    },
+  };
+}
+
+const VERCEL_OG_FONT_FETCH =
+  /fetch\(\s*new URL\(\s*(["'`])(\.\/[^"'`]+\.ttf)\1\s*,\s*import\.meta\.url\s*\)\s*\)/g;
+
+/**
+ * @vercel/og's edge build fetches its default font from `import.meta.url`,
+ * which a Worker cannot fetch, and workerd evaluates modules where it cannot
+ * create a Response either. Inline the font's bytes behind the `arrayBuffer()`
+ * the build reads from that fetch. A @vercel/og module that loads its font
+ * some other way fails the build, because every image request would fail.
+ *
+ * @internal Exported for tests.
+ */
+export function createVercelOgFontInlinePlugin(): Rollup.Plugin {
+  return {
+    name: "farm-vercel-og-font-inline",
+    transform(code, id) {
+      const file = id.split("?", 1)[0];
+      if (!/\.[cm]?js$/.test(file) || !file.replace(/\\/g, "/").includes("/@vercel/og/")) {
+        return null;
+      }
+      const inlined = code.replace(VERCEL_OG_FONT_FETCH, (_match, _quote, request: string) => {
+        const encoded = readFileSync(path.resolve(path.dirname(file), request)).toString("base64");
+        return `Promise.resolve({ arrayBuffer: () => Uint8Array.from(atob(${JSON.stringify(encoded)}), (character) => character.charCodeAt(0)).buffer })`;
+      });
+      if (inlined !== code) return { code: inlined, map: null };
+      const version = readVercelOgManifest(file)?.manifest.version ?? "(unknown version)";
+      this.error(
+        `@vercel/og ${version} cannot be bundled for Cloudflare Workers: ${file} does not load its default font with fetch(new URL("./<font>.ttf", import.meta.url)), the pattern Farm inlines because a Worker cannot fetch it. Install a @vercel/og version whose edge build does, such as 1.0.1.`,
+      );
+    },
+  };
+}
+
 function createMetadataImageWasmPlugin(): Rollup.Plugin {
   return {
     name: "farm-metadata-image-wasm",
@@ -5721,6 +5807,7 @@ async function buildSSRInMemory(
         ...(rendererVitePlugins as any[]),
         ...(config.vite.plugins || []),
         ...(!useExternalMetadataImageRuntime &&
+        !isCloudflareImagePreset(preset) &&
         metadataImageRoutes.some((image) => image.sourceType === "module")
           ? [createMetadataImageWasmPlugin()]
           : []),
@@ -5730,6 +5817,13 @@ async function buildSSRInMemory(
                 ...createOmittedMetadataImageRuntimePlugin(useExternalMetadataImageRuntime),
                 enforce: "pre" as const,
               },
+            ]
+          : []),
+        // After the stub above, which must take core's own import first.
+        ...(isCloudflareImagePreset(preset)
+          ? [
+              { ...createCloudflareMetadataImageRuntimePlugin(), enforce: "pre" as const },
+              createVercelOgFontInlinePlugin(),
             ]
           : []),
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
@@ -12865,9 +12959,14 @@ function toFarmNodeResponse(request, response) {
     rollupConfig: {
       external: nitroRollupExternal,
       plugins: [
-        ...(hasGeneratedMetadataImages && !useExternalMetadataImageRuntime
-          ? [createMetadataImageWasmPlugin()]
-          : []),
+        // On Cloudflare, Nitro imports @vercel/og's `?module` wasm files as
+        // precompiled modules, and bundles @vercel/og itself when the SSR
+        // graph kept it external.
+        ...(isCloudflareImagePreset(preset)
+          ? [createVercelOgFontInlinePlugin()]
+          : hasGeneratedMetadataImages && !useExternalMetadataImageRuntime
+            ? [createMetadataImageWasmPlugin()]
+            : []),
         // Workers bundle React here rather than loading it from node_modules.
         // Unenv rewrites `process` before Nitro's own replacements run, so
         // React's development builds would otherwise ship next to production.
