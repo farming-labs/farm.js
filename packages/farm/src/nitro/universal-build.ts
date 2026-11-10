@@ -8087,9 +8087,7 @@ function createFarmFlushToken() {
   return token;
 }
 
-${
-  farmIslandsMode
-    ? `async function farmKeptLayoutsRender(ReactDOMServer, layouts, keptCount, params) {
+async function farmKeptLayoutsRender(ReactDOMServer, layouts, keptCount, params) {
   let element = null;
   for (let index = keptCount - 1; index >= 0; index--) {
     const Layout = layouts[index].module.default;
@@ -8110,9 +8108,7 @@ ${
   }
 }
 
-`
-    : ""
-}async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken = "") {
+async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken = "") {
   // Written after each React flush in a streamed navigation (flushToken): the browser swaps in
   // the shell, then adds each Suspense boundary as soon as the flush that completed it ends.
   // The token is random per response and reaches the browser in the F-Flush header, so page
@@ -10683,7 +10679,7 @@ ${
           : countFarmKeptLayouts(request, farmSegmentLayouts, params);
       // The root layout always renders, so keeping one layout keeps nothing.
       let farmKeptLayouts = farmKeptLayoutCount > 1 ? farmKeptLayoutCount : 0;`
-          : `const farmKeptLayouts = 0;`
+          : `let farmKeptLayouts = 0;`
       }
       ${
         farmMobileShells
@@ -10999,9 +10995,7 @@ ${
         const farmPayloadOnlyNavigation = false;
         const farmFlushToken = "";`
         }
-        const renderPageElement = async () => {${
-          farmIslandsMode
-            ? `
+        const renderPageElement = async () => {
             // The browser chooses which layouts it says it keeps, so a kept layout still runs: a
             // guard in it decides this request. Only its markup is left out. A layout that fails
             // here renders whole, so notFound() and redirect() answer as on any other request.
@@ -11011,9 +11005,8 @@ ${
             ) {
               farmKeptLayouts = 0;
               pprCanCache = false;
-            }`
-            : ""
-        }
+            }
+
             // First, render the page content
             let pageElement;
 
