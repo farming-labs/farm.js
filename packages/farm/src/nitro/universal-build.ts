@@ -2146,6 +2146,20 @@ async function buildClient(
     }
   }
 
+  // A server route slot's client components are islands of the pages its layout wraps.
+  const serverSlotPlans = islandsMode
+    ? routeSlots.flatMap((slot) => {
+        const plan = getCachedClientModuleHydrationPlan(
+          slot.modulePath,
+          root,
+          isolatedMode,
+          hydrationPlanCache,
+          { ...pagePlanOptions, serverOwners: true },
+        );
+        return plan.isClientComponent ? [] : [{ slot, plan }];
+      })
+    : [];
+
   for (const { route, metadata } of routePlans) {
     // The adapter imports and hydrates its compiled MDX modules itself. Keeping
     // the same files in Farm's generic route table duplicates the docs runtime
@@ -2163,10 +2177,16 @@ async function buildClient(
           `⚠️  ${describeSuppressedAsyncHydration(route.pattern, metadata.fallbackReason)}`,
         );
       }
+      const slotBoundaries = serverSlotPlans
+        .filter(({ slot }) =>
+          layoutAppliesToRoute(slot.ownerDirectory ?? slot.ownerPattern, routeDirectory(route)),
+        )
+        .flatMap(({ plan }) => plan.isolatedBoundaries);
       if (
         metadata.shouldHydrate ||
         metadata.hasIsolatedClientBoundaries ||
-        applicableClientLayouts.length > 0
+        applicableClientLayouts.length > 0 ||
+        slotBoundaries.length > 0
       ) {
         const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
         const islandStrategy = resolveFarmRouteRootStrategy(
@@ -2183,9 +2203,11 @@ async function buildClient(
           islandStrategy,
           hasIsolatedClientBoundaries:
             metadata.hasIsolatedClientBoundaries ||
-            applicableClientLayouts.some((layout) => layout.hasIsolatedClientBoundaries),
+            applicableClientLayouts.some((layout) => layout.hasIsolatedClientBoundaries) ||
+            slotBoundaries.length > 0,
           isolatedBoundaries: [
             ...(metadata.hasIsolatedClientBoundaries ? metadata.isolatedBoundaries : []),
+            ...slotBoundaries,
             ...applicableClientLayouts
               // A server-tree layout's client components load from its tree.
               .filter((layout) => layout.hasIsolatedClientBoundaries || layout.serverTreeLayout)
@@ -2243,7 +2265,9 @@ async function buildClient(
 
   const clientRouteSlots = routeSlots.filter((slot) => {
     try {
-      return getClientModuleMetadata(slot.modulePath, root).shouldHydrate;
+      const metadata = getClientModuleMetadata(slot.modulePath, root);
+      // In islands mode a server slot stays on the server; its client components are islands.
+      return metadata.shouldHydrate && (!islandsMode || metadata.isClientComponent);
     } catch (error) {
       logger.warn(`⚠️  Could not inspect route slot ${slot.modulePath}: ${error}`);
       return false;
@@ -7134,6 +7158,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
     containerId: ${JSON.stringify(slot.containerId)},
     interception: ${JSON.stringify(slot.interception)},
     fallback: ${JSON.stringify(slot.fallback)},
+    hydrates: ${!farmIslandsMode || getClientModuleMetadata(slot.modulePath, config.root).isClientComponent},
     module: ${varName},
   }`);
   });
@@ -11354,9 +11379,11 @@ ${
                       "data-farm-route-slot": slot.name,
                       "data-farm-slot-owner": slot.ownerPattern,
                     },
-                    wrapFarmRouteClientGraph(
-                      React.createElement(slot.module.default, slot.props),
-                    ),
+                    slot.hydrates
+                      ? wrapFarmRouteClientGraph(
+                          React.createElement(slot.module.default, slot.props),
+                        )
+                      : React.createElement(slot.module.default, slot.props),
                   );
                 }
                 // Islands mode: a layout around a client provider, and the server layouts on its
