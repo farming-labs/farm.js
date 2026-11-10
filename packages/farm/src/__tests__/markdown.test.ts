@@ -411,6 +411,27 @@ describe("Markdown under a basePath and locale prefix", () => {
     });
   });
 
+  it("matches md.expose against route paths, as llms.txt does", () => {
+    const config = resolveMarkdownConfig({ expose: ["/", { route: "/about", title: "About" }] });
+    const target = (pathname: string) =>
+      resolveMarkdownMirrorTarget(config, pathname, { routePathname });
+
+    expect(target("/console/about.md")).toMatchObject({
+      pathname: "/console/about",
+      route: { route: "/about", title: "About" },
+    });
+    expect(target("/console/fr/about.md")).toMatchObject({ route: { route: "/about" } });
+    expect(target("/console/fr/index.md")).toMatchObject({
+      pathname: "/console/fr",
+      route: { route: "/" },
+    });
+    expect(target("/console/secret.md")).toBeNull();
+    expect(getFarmMarkdownAlternatePath(config, "/console/about", { routePathname })).toBe(
+      "/console/about.md",
+    );
+    expect(getFarmMarkdownAlternatePath(config, "/console/secret", { routePathname })).toBeNull();
+  });
+
   it("names the home page itself in the actions view of <prefix>/index.md", async () => {
     const response = await createMarkdownMirrorResponse({
       request: new Request("http://farm.test/console/fr/index.md?actions"),

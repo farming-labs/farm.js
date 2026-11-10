@@ -168,7 +168,9 @@ Under a [`basePath`](/docs/configuration#application-base-path) or an i18n local
 URLs keep the prefix, and a home page's mirror is `<prefix>/index.md`: `/console/index.md` and
 `/console/fr/index.md` for `basePath: "/console"` with a `fr` locale. The page's `Link` header,
 head alternate, and `Content-Location` name that URL, as `llms.txt` and the default MCP server do;
-`/console.md` and `/console/fr.md` also serve it.
+`/console.md` and `/console/fr.md` also serve it. `md.expose` entries are route
+paths without the prefix, as in the example above, so `"/pricing"` exposes `/console/pricing.md` and
+`/console/fr/pricing.md`.
 
 ## Use cases
 

@@ -107,6 +107,7 @@ export interface ResolveMarkdownMirrorTargetOptions {
   /**
    * Strips the app's `basePath` and locale prefix, so `<prefix>/index.md` names that prefix's
    * home page as `/index.md` does, and that is the `.md` URL the home page advertises.
+   * `md.expose` is matched against the stripped path, as llms.txt reads it.
    */
   routePathname?: FarmMarkdownRoutePathname;
 }
@@ -184,7 +185,9 @@ export function resolveMarkdownMirrorTarget(
     ),
     options.routePathname,
   );
-  const route = findExposedMarkdownRoute(config, targetPathname);
+  // `md.expose` lists route paths, as llms.txt and the default MCP server read them.
+  const routePathname = options.routePathname?.(targetPathname) ?? targetPathname;
+  const route = findExposedMarkdownRoute(config, routePathname);
   if (!route && config.expose !== true) {
     return null;
   }
@@ -192,10 +195,7 @@ export function resolveMarkdownMirrorTarget(
   return {
     pathname: targetPathname,
     route,
-    markdownPath: _getFarmMarkdownPath(
-      targetPathname,
-      options.routePathname?.(targetPathname) ?? targetPathname,
-    ),
+    markdownPath: _getFarmMarkdownPath(targetPathname, routePathname),
   };
 }
 

@@ -262,6 +262,31 @@ export default function Page() { return <main>home {getLocale()}</main>; }`,
     120_000,
   );
 
+  it("matches an md.expose list against route paths under basePath, as llms.txt does", async () => {
+    const origin = await startApp(
+      'basePath: "/console", md: { expose: ["/", "/about"] }, agent: { llmsTxt: true }',
+    );
+    const get = (pathname: string) => fetch(`${origin}${pathname}`);
+
+    // llms.txt links the listed pages to their mirrors, and those mirrors answer.
+    const llms = await (await get("/console/llms.txt")).text();
+    expect(llms).toContain("[Home](https://acme.test/console/index.md)");
+    expect(llms).toContain("[About](https://acme.test/console/about.md)");
+    expect(llms).toContain("[Team](https://acme.test/console/team)");
+    for (const pathname of ["/console/index.md", "/console/about.md"]) {
+      const markdown = await get(pathname);
+      expect(markdown.status, pathname).toBe(200);
+      expect(markdown.headers.get("content-type"), pathname).toBe("text/markdown; charset=utf-8");
+    }
+    expect((await get("/console/about")).headers.get("link")).toContain(
+      '</console/about.md>; rel="alternate"; type="text/markdown"',
+    );
+
+    // A page left off the list has no mirror and advertises none.
+    expect((await get("/console/team.md")).status).toBe(404);
+    expect((await get("/console/team")).headers.get("link")).toBeNull();
+  }, 120_000);
+
   it("names the sitemap in the robots.txt agent.crawlers serves", async () => {
     const origin = await startApp("agent: { crawlers: true }");
     expect(await (await fetch(`${origin}/robots.txt`)).text()).toContain(

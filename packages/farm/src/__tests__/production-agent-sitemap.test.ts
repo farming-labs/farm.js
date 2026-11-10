@@ -249,4 +249,44 @@ describe("production default sitemap", () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+
+  it("matches an md.expose list against route paths under basePath, as llms.txt does", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-md-expose-"));
+    try {
+      await writeApp(root, {
+        "src/app/layout.tsx": [
+          'export const metadata = { title: "Console", metadataBase: new URL("https://acme.test") };',
+          "export default function Layout({ children }) { return <main>{children}</main>; }",
+        ].join("\n"),
+        "src/app/page.tsx": "export default function Page() { return <p>home body</p>; }",
+        "src/app/about/page.tsx": "export default function Page() { return <p>about body</p>; }",
+        "src/app/team/page.tsx": "export default function Page() { return <p>team body</p>; }",
+      });
+      const handler = await buildApp(root, {
+        basePath: "/console",
+        md: { expose: ["/", "/about"] },
+      });
+      const get = (pathname: string) => handler.fetch(new Request(`https://acme.test${pathname}`));
+
+      // llms.txt links the listed pages to their mirrors, and those mirrors answer.
+      const llms = await (await get("/console/llms.txt")).text();
+      expect(llms).toContain("[Home](https://acme.test/console/index.md)");
+      expect(llms).toContain("[About](https://acme.test/console/about.md)");
+      expect(llms).toContain("[Team](https://acme.test/console/team)");
+      for (const pathname of ["/console/index.md", "/console/about.md"]) {
+        const markdown = await get(pathname);
+        expect(markdown.status, pathname).toBe(200);
+        expect(await markdown.text(), pathname).toContain("body");
+      }
+      expect((await get("/console/about")).headers.get("link")).toContain(
+        '</console/about.md>; rel="alternate"; type="text/markdown"',
+      );
+
+      // A page left off the list has no mirror and advertises none.
+      expect((await get("/console/team.md")).status).toBe(404);
+      expect((await get("/console/team")).headers.get("link")).toBeNull();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
 });
