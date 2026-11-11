@@ -86,11 +86,12 @@ export interface RouterOptions {
   /**
    * Islands mode in `farm dev`: navigates as the production client does, by fetching the page
    * itself. Resolves the page's data once its shell arrives, or null for a navigation the page-data
-   * endpoint answers instead.
+   * endpoint answers instead. A prefetch (`prefetch: true`) reads the page whole, so the router
+   * caches it like page data and the navigation that follows uses it.
    */
   fetchNavigationDocument?: (
     path: string,
-    context: { signal: AbortSignal; refresh: boolean },
+    context: { signal?: AbortSignal; refresh: boolean; prefetch: boolean },
   ) => Promise<PageData | null>;
 }
 
@@ -429,12 +430,14 @@ export class SPARouter {
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
       // Fetch page data (from cache or server). Islands mode in dev fetches the page itself.
-      const pageData =
-        (await this.options.fetchNavigationDocument?.(fullPath, {
-          signal: navigation.controller.signal,
-          refresh,
-        })) ??
-        (await this.fetchPageData(fullPath, true, from, refresh, navigation.controller.signal));
+      const pageData = await this.fetchPageData(
+        fullPath,
+        true,
+        from,
+        refresh,
+        navigation.controller.signal,
+        true,
+      );
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
@@ -552,7 +555,7 @@ export class SPARouter {
     this.prefetchingUrls.add(fullPath);
 
     try {
-      await this.fetchPageData(fullPath, false, interceptFrom);
+      await this.fetchPageData(fullPath, false, interceptFrom, false, undefined, true);
     } catch (error) {
       // A redirect is not page data: the navigation that follows it fetches the target.
       if (!(error instanceof FarmPageDataRedirectSignal)) {
@@ -829,6 +832,7 @@ export class SPARouter {
     interceptFrom?: string,
     fresh = false,
     signal?: AbortSignal,
+    readDocument = false,
   ): Promise<PageData> {
     const cacheKey = getPageDataCacheKey(path, interceptFrom);
     // Check cache first
@@ -879,6 +883,20 @@ export class SPARouter {
       }
     };
     try {
+      const documentData =
+        readDocument && this.options.fetchNavigationDocument
+          ? await this.options.fetchNavigationDocument(path, {
+              signal,
+              refresh: fresh,
+              prefetch: !recover,
+            })
+          : null;
+      if (documentData) {
+        // A navigation's document streams in after its shell; only a prefetched one is whole.
+        if (!recover) cacheData(documentData);
+        prefetch?.resolve(documentData);
+        return documentData;
+      }
       return await this.requestPageData(
         path,
         recover,
