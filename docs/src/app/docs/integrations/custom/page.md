@@ -186,6 +186,12 @@ export async function startCheckoutOnServer() {
 
 Both calls have typed input, typed `data`, and typed `error`. The Zod body schema also validates the
 incoming request at runtime.
+A route with a body schema reads JSON unless it sets `bodyFormat: "form"`. A browser on another
+origin that sends such a route a body declared as anything other than `application/json` or
+`application/*+json` gets `415`, and a body it sends with no `Content-Type` is not read as JSON;
+the same rules as [API routes](/docs/api-routes). Same-origin requests and callers that send no
+`Origin` or `Referer`, such as webhooks, keep every content type. Set `bodyFormat: "form"` on a
+route that takes form posts from another origin.
 Integration clients decode both `application/json` and structured JSON media types such as
 `application/problem+json`, so structured success and error payloads remain available to callers.
 
