@@ -12739,6 +12739,44 @@ const COMPILED_ROOT_CAMEL_ATTRIBUTES = new Set([
 class CompiledRootUnsupported extends Error {}
 
 /**
+ * Renders a function component outside React. A hook call reaches React's current dispatcher,
+ * which is set here to one that rejects every hook, so the root goes to React DOM without React
+ * reporting an invalid hook call. React 19 and 18 keep that dispatcher in different internals;
+ * when neither is found, a hook call still fails and the root still goes to React DOM.
+ */
+function renderWithoutHooks(name: string, render: () => unknown): unknown {
+  const internals = React as unknown as {
+    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: unknown };
+    __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?: {
+      ReactCurrentDispatcher?: { current?: unknown };
+    };
+  };
+  const react19 = internals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const react18 =
+    internals.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?.ReactCurrentDispatcher;
+  const rejectHooks = new Proxy(
+    {},
+    {
+      get() {
+        throw new CompiledRootUnsupported(`${name}, which calls hooks`);
+      },
+    },
+  );
+  const previous = react19 ? react19.H : react18?.current;
+  if (react19) react19.H = rejectHooks;
+  else if (react18) react18.current = rejectHooks;
+  try {
+    return render();
+  } catch (error) {
+    if (error instanceof CompiledRootUnsupported) throw error;
+    throw new CompiledRootUnsupported(`${name}: ${error}`);
+  } finally {
+    if (react19) react19.H = previous;
+    else if (react18) react18.current = previous;
+  }
+}
+
+/**
  * The compiler runtime's own components: their updates patch the DOM directly, and their React
  * re-render paths (fallback, error, refresh) hand the root over to React DOM. Every runtime
  * class carries a FarmCompiled displayName, so this check adds nothing to bundles that do not
@@ -12956,14 +12994,10 @@ function mountCompiledRootNode(
     return;
   }
   if (typeof type === "function" && !type.prototype?.isReactComponent) {
-    // Hook-free function components render once; one that calls a hook throws here (React's
-    // dispatcher is not set), and the root goes to React DOM.
-    let rendered: unknown;
-    try {
-      rendered = (type as (props: unknown) => unknown)(props);
-    } catch (error) {
-      throw new CompiledRootUnsupported(`${type.name || "a function component"}: ${error}`);
-    }
+    // Hook-free function components render once; one that calls a hook goes to React DOM.
+    const rendered = renderWithoutHooks(type.name || "a function component", () =>
+      (type as (props: unknown) => unknown)(props),
+    );
     return mountCompiledRootNode(rendered, parent, namespace, mount, updater);
   }
   const typeTag = (type as { $$typeof?: unknown } | null)?.$$typeof;
@@ -12978,15 +13012,12 @@ function mountCompiledRootNode(
     );
   }
   if (typeTag === REACT_FORWARD_REF_TYPE) {
-    let rendered: unknown;
-    try {
-      rendered = (type as unknown as { render(props: unknown, ref: unknown): unknown }).render(
+    const rendered = renderWithoutHooks("a forwardRef component", () =>
+      (type as unknown as { render(props: unknown, ref: unknown): unknown }).render(
         props,
         props.ref ?? null,
-      );
-    } catch (error) {
-      throw new CompiledRootUnsupported(`a forwardRef component: ${error}`);
-    }
+      ),
+    );
     return mountCompiledRootNode(rendered, parent, namespace, mount, updater);
   }
   throw new CompiledRootUnsupported("a component React DOM must render");
@@ -13020,7 +13051,8 @@ interface CompiledRootReactDOM {
  * props React renames) loads React DOM on demand and lets it render the root instead, before
  * anything is shown. If a mounted compiler component later needs a React re-render (its
  * fallback, error and refresh paths), React DOM takes over and renders the root again: that
- * root's compiled state starts over.
+ * root's compiled state starts over. Pages with Fast Refresh installed use React DOM, which is
+ * the only renderer Fast Refresh updates.
  */
 export function createCompiledRoot(
   container: Element,
@@ -13047,9 +13079,9 @@ export function createCompiledRoot(
     instances = [];
   };
 
-  const handOff = (reason: string) => {
+  const handOff = (reason?: string) => {
     if (mode === "pending" || mode === "react") return;
-    report(reason);
+    if (reason) report(reason);
     stopCompiled();
     mode = "pending";
     void loadReactDOM().then((client) => {
@@ -13074,6 +13106,11 @@ export function createCompiledRoot(
       if (mode === "react") return reactRoot!.render(next);
       if (mode === "pending") return;
       if (mode === "compiled") return handOff("render() was called again");
+      // Fast Refresh applies edits only to React DOM roots, so a page that installed it (a
+      // development server) uses React DOM, as it would without the compiled root.
+      if (typeof (globalThis as { $RefreshReg$?: unknown }).$RefreshReg$ === "function") {
+        return handOff();
+      }
       const mount: CompiledRootMount = {
         fragment: document.createDocumentFragment(),
         effects: [],

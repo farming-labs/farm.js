@@ -280,6 +280,10 @@ after a list update produces duplicate keys), React DOM takes over and renders t
 root's compiled state starts over, and a console warning says why. React DOM becomes a separate
 chunk that only these roots request.
 
+Fast Refresh applies edits only to React DOM roots, so on a development server with Fast Refresh
+installed the root uses React DOM, and edits keep their usual state-preserving behaviour. Without
+Fast Refresh, an edit reloads the page.
+
 Imports that also name `hydrateRoot`, default or namespace imports, dependencies, and server
 modules keep React DOM. Pages that Farm renders and hydrates are not affected. Set
 `compiledRoot: false` to keep React DOM for every root. To pass options such as `onFallback`, call

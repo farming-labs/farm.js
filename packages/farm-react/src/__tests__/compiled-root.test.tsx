@@ -29,6 +29,37 @@ function normalized(node: Node): string {
   return `<${node.localName}${attributes ? ` ${attributes}` : ""}>${children}</${node.localName}>`;
 }
 
+/** Clears the hook dispatcher React DOM leaves behind, as on a page that never loaded React DOM. */
+function withoutReactDispatcher(run: () => void) {
+  const internals = React as unknown as {
+    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H: unknown };
+    __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?: {
+      ReactCurrentDispatcher: { current: unknown };
+    };
+  };
+  const holder = internals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+    ? {
+        get: () => internals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE!.H,
+        set: (value: unknown) =>
+          (internals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE!.H = value),
+      }
+    : {
+        get: () =>
+          internals.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED!.ReactCurrentDispatcher
+            .current,
+        set: (value: unknown) =>
+          (internals.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED!.ReactCurrentDispatcher.current =
+            value),
+      };
+  const previous = holder.get();
+  holder.set(null);
+  try {
+    run();
+  } finally {
+    holder.set(previous);
+  }
+}
+
 function container(): HTMLElement {
   const element = document.createElement("div");
   document.body.append(element);
@@ -97,13 +128,49 @@ describe("createCompiledRoot", () => {
     const reference = await renderWithReact(original.Tasks);
     const host = container();
     const onFallback = vi.fn();
+    const error = vi.spyOn(console, "error");
     const root = createCompiledRoot(host, { onFallback });
-    root.render(<original.Tasks />);
-    expect(onFallback).toHaveBeenCalledWith(expect.stringContaining("Tasks"));
+    try {
+      // As on a page that has not loaded React DOM: the hook call is rejected before React can
+      // report an invalid hook call.
+      withoutReactDispatcher(() => root.render(<original.Tasks />));
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+    expect(onFallback).toHaveBeenCalledWith(expect.stringContaining("Tasks, which calls hooks"));
     await vi.waitFor(() => expect(host.querySelectorAll("li")).toHaveLength(2));
     expect(normalized(host)).toBe(normalized(reference));
     await act(async () => root.unmount());
     expect(host.childNodes).toHaveLength(0);
+  });
+
+  it("restores React's dispatcher after rejecting a hook", async () => {
+    const { original } = await loadCompiledAndOriginal(TASKS);
+    createCompiledRoot(container(), { onFallback: vi.fn() }).render(<original.Tasks />);
+    // Hooks still work in components React renders afterwards.
+    const reference = await renderWithReact(original.Tasks);
+    expect(reference.querySelectorAll("li")).toHaveLength(2);
+  });
+
+  it("uses React DOM on pages with Fast Refresh, which updates only React DOM roots", async () => {
+    const { compiled } = await loadCompiledAndOriginal(TASKS);
+    const refresh = globalThis as { $RefreshReg$?: unknown };
+    refresh.$RefreshReg$ = () => {};
+    try {
+      const host = container();
+      const onFallback = vi.fn();
+      const root = createCompiledRoot(host, { onFallback });
+      root.render(<compiled.Tasks />);
+      expect(host.childNodes).toHaveLength(0);
+      await vi.waitFor(() => expect(host.querySelectorAll("li")).toHaveLength(2));
+      expect(Object.keys(host).some((key) => key.startsWith("__reactContainer"))).toBe(true);
+      // Development behaviour, not a problem with the tree: nothing to report.
+      expect(onFallback).not.toHaveBeenCalled();
+      await act(async () => root.unmount());
+    } finally {
+      delete refresh.$RefreshReg$;
+    }
   });
 
   it("leaves props React renames to React DOM before showing anything", async () => {
