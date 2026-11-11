@@ -181,6 +181,60 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(await mobileClient({}, "serve", "mobile")).toBeUndefined();
   });
 
+  it("hands the RSC browser entry the client hooks of the app's plugins and its src/client.ts", async () => {
+    const root = createApp();
+    const previous = process.env.FARM_PLATFORM;
+    const clientPlugins = async (userConfig: Record<string, unknown>) => {
+      const config = (await createFarmRscViteConfig(
+        { experimental: { serverComponents: { mode: "rsc" as const } }, ...userConfig },
+        { root, command: "build", preset: "node-server" },
+      )) as Record<string, any>;
+      return config.farm.clientPlugins;
+    };
+    const serverOnly = { name: "server-only", runtime: {} };
+
+    // Nothing to start: the browser entry stays as it was.
+    expect(await clientPlugins({ plugins: [serverOnly] })).toEqual({
+      empty: true,
+      imports: "",
+      registrations: "[\n\n]",
+    });
+
+    mkdirSync(path.join(root, "src"));
+    writeFileSync(path.join(root, "src", "client.ts"), "export default {};");
+    const recorder = {
+      name: "recorder",
+      enforce: "pre" as const,
+      client: {
+        public: { label: "rsc" },
+        setup() {
+          return "recorded";
+        },
+      },
+    };
+    // A mobile shell gets navigations from the RSC entry itself, not from a registration.
+    process.env.FARM_PLATFORM = "mobile";
+    let entry: Record<string, any>;
+    try {
+      entry = await clientPlugins({ plugins: [serverOnly, recorder] });
+    } finally {
+      if (previous === undefined) delete process.env.FARM_PLATFORM;
+      else process.env.FARM_PLATFORM = previous;
+    }
+    expect(entry.empty).toBe(false);
+    expect(entry.imports).toBe(
+      `import farmAppClientDefinition from ${JSON.stringify(
+        path.join(root, "src", "client.ts").replace(/\\/g, "/"),
+      )};`,
+    );
+    expect(entry.registrations).toContain('name: "recorder"');
+    expect(entry.registrations).toContain('return "recorded";');
+    expect(entry.registrations).toContain('JSON.parse("{\\"label\\":\\"rsc\\"}")');
+    expect(entry.registrations).toContain('name: "farm:app-client"');
+    expect(entry.registrations).not.toContain("server-only");
+    expect(entry.registrations).not.toContain("farm:mobile-shell");
+  });
+
   it("gives development Fast Refresh with core's plugin-react when the app has none", async () => {
     // The RSC client bootstrap imports /@react-refresh in development.
     const config = (await createFarmRscViteConfig(
@@ -259,7 +313,21 @@ describe("experimental.serverComponents from farm.config", () => {
       ),
     ).toBe(true);
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn.mock.calls[0]![0]).toContain("does not run `plugins` yet. It is ignored.");
+    // Of a plugin, RSC runs the browser half.
+    expect(warn.mock.calls[0]![0]).toContain(
+      "which runs only the browser `client` hooks of `plugins` and ignores their other hooks.",
+    );
+    farmAppUsesRscPipeline(
+      {
+        plugins: [{ name: "devtools" }],
+        cron: { cleanup: { schedule: "0 0 * * *", path: "/api/cleanup" } },
+        experimental: { serverComponents: { mode: "rsc" as const } },
+      },
+      root,
+    );
+    expect(warn.mock.calls[1]![0]).toContain(
+      "which does not run `cron` yet. It is ignored. It also runs only the browser `client` hooks of `plugins` and ignores their other hooks.",
+    );
   });
 
   it("refuses a Content Security Policy it would not send", () => {

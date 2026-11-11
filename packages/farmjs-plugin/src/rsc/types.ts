@@ -63,10 +63,26 @@ export interface FarmRscPluginOptions {
    * navigations to the shell (`farm dev --mobile`).
    */
   mobileClient?: FarmRscMobileClient;
+
+  /**
+   * @internal Set by `farm dev` and `farm build`: the browser half of the app's Farm `plugins`
+   * and its `src/client.ts`, as core generates it for every entry.
+   */
+  clientPlugins?: FarmRscClientPlugins;
 }
 
 /** @internal See `FarmRscPluginOptions.mobileClient`. */
 export type FarmRscMobileClient = "entry" | "inline";
+
+/**
+ * @internal Core's `generateFarmClientPluginEntryCode` output: the imports and registrations the
+ * browser entry starts the client plugin manager with. `empty` leaves the manager out.
+ */
+export interface FarmRscClientPlugins {
+  empty: boolean;
+  imports: string;
+  registrations: string;
+}
 
 /**
  * Internal context passed to entry generators.
@@ -170,6 +186,9 @@ export interface EntryContext {
 
   /** The mobile client of an app with a `mobile` block (see `FarmRscPluginOptions`). */
   mobileClient?: FarmRscMobileClient;
+
+  /** Client plugin registrations (see `FarmRscPluginOptions`). Absent or empty: none. */
+  clientPlugins?: FarmRscClientPlugins;
 }
 
 /**
