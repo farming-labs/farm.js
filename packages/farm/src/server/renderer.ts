@@ -70,6 +70,10 @@ import {
   isFarmRedirectError,
 } from "../navigation-errors";
 import {
+  getFarmPageDataRedirect,
+  type FarmPageDataRedirect,
+} from "../navigation/page-data-redirect";
+import {
   addMetadataImageReference,
   addMetadataMarkdownAlternate,
   mergeMetadata,
@@ -906,7 +910,11 @@ export class ServerRenderer {
 
   private async renderElementToCompleteHTML(
     element: unknown,
-    options: { rejectLateNavigation?: boolean; rejectLateErrors?: boolean } = {},
+    options: {
+      rejectLateRedirects?: boolean;
+      rejectLateNavigation?: boolean;
+      rejectLateErrors?: boolean;
+    } = {},
   ): Promise<string> {
     const streaming = getFarmRendererStreamingCapabilitiesForRuntime(this.config.renderer, "node");
     const renderToPipeableStream = streaming.node
@@ -914,9 +922,17 @@ export class ServerRenderer {
       : undefined;
 
     if (renderToPipeableStream) {
+      // React streams a Suspense boundary as its fallback plus a script that reveals
+      // the content later whenever the boundary is pending when output starts or is
+      // bigger than the progressive chunk size (12.8 KB). Since React 19.2 that
+      // reveal waits for a later frame. This HTML is buffered and then inserted into
+      // a page already on screen (a navigation fragment), so the fallback would
+      // paint. Start output once every boundary is done and keep them all inline:
+      // the buffer resolves no later than it did when piping at shell ready.
+      const inlineBoundaries = isReactRenderer(this.config.renderer);
       return await new Promise<string>((resolve, reject) => {
         const chunks: Buffer[] = [];
-        let started = false;
+        let shellReady = false;
         let lateNavigation: unknown;
         const writable = new Writable({
           write(chunk, _encoding, callback) {
@@ -933,20 +949,30 @@ export class ServerRenderer {
 
         const stream = renderToPipeableStream(element, {
           nonce: _resolveCurrentCspNonce(),
+          ...(inlineBoundaries
+            ? {
+                progressiveChunkSize: Number.MAX_SAFE_INTEGER,
+                onAllReady() {
+                  stream.pipe(writable);
+                },
+              }
+            : {}),
           onShellReady() {
-            started = true;
-            stream.pipe(writable);
+            shellReady = true;
+            if (!inlineBoundaries) stream.pipe(writable);
           },
           onShellError(error) {
             reject(error);
           },
           onError(error) {
-            if (!started) reject(error);
-            // A redirect() or notFound() under a loading boundary decides the status
-            // when the caller needs one, as production's buffered render does.
+            if (!shellReady) reject(error);
+            // After the shell, a failed boundary is rendered by the client instead,
+            // unless it is a redirect() or notFound() that decides the status when
+            // the caller needs one, as production's buffered render does.
             else if (
               lateNavigation === undefined &&
               (options.rejectLateErrors ||
+                (options.rejectLateRedirects && isFarmRedirectError(error)) ||
                 (options.rejectLateNavigation &&
                   (isFarmRedirectError(error) || isFarmNotFoundError(error))))
             ) {
@@ -1073,7 +1099,9 @@ export class ServerRenderer {
       element = this.wrapClientGraph(element);
     }
 
-    return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element));
+    return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element), {
+      rejectLateRedirects: true,
+    });
   }
 
   async runWithRequestContext<T>(request: Request, fn: () => T | Promise<T>): Promise<T> {
@@ -4127,6 +4155,25 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       return true;
     }
     return false;
+  }
+
+  /**
+   * The redirect a page-data request for `request` ended with. A `redirect()`
+   * target is localized as a document render localizes it; a thrown 3xx
+   * Response keeps its Location as written, as a document render sends it.
+   */
+  async resolvePageDataRedirect(
+    request: Request,
+    error: unknown,
+  ): Promise<FarmPageDataRedirect | null> {
+    const redirect = getFarmPageDataRedirect(error);
+    if (!redirect || !isFarmRedirectError(error)) return redirect;
+    return {
+      status: redirect.status,
+      location: await this.runWithRequestContext(request, () =>
+        this.localizeRedirectUrl(redirect.location),
+      ),
+    };
   }
 
   private localizeRedirectUrl(url: string): string {

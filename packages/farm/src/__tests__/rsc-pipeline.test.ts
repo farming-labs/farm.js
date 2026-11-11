@@ -53,8 +53,14 @@ afterEach(() => {
 });
 
 describe("experimental.serverComponents from farm.config", () => {
-  it("is on only when the flag is true", () => {
-    expect(farmConfigUsesServerComponents({ experimental: { serverComponents: true } })).toBe(true);
+  it("is on only for an explicit rsc mode", () => {
+    expect(
+      farmConfigUsesServerComponents({ experimental: { serverComponents: { mode: "rsc" } } }),
+    ).toBe(true);
+    // `true` is islands mode, on Farm's own pipeline.
+    expect(farmConfigUsesServerComponents({ experimental: { serverComponents: true } })).toBe(
+      false,
+    );
     expect(farmConfigUsesServerComponents({ experimental: { serverComponents: false } })).toBe(
       false,
     );
@@ -62,18 +68,12 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(farmConfigUsesServerComponents(undefined)).toBe(false);
   });
 
-  it("keeps apps without the RSC packages on the normal pipeline, with one warning", () => {
+  it("runs `true` in islands mode without the RSC packages and without a warning", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const flag = { experimental: { serverComponents: true } };
-    // Starters set the flag before it loaded the RSC pipeline; they must keep working.
     expect(farmAppUsesRscPipeline(flag, createApp({ plugin: false, rsc: false }))).toBe(false);
-    expect(farmAppUsesRscPipeline(flag, createApp({ plugin: false, rsc: false }))).toBe(false);
-    expect(warn).toHaveBeenCalledOnce();
-    expect(warn.mock.calls[0]![0]).toContain(
-      "@farm.js/plugin, @vitejs/plugin-rsc are not installed, so the app runs without React Server Components. `farm dev` and `farm build` install them",
-    );
-    expect(farmAppUsesRscPipeline(flag, createApp())).toBe(true);
-    expect(farmAppUsesRscPipeline({}, createApp())).toBe(false);
+    expect(farmAppUsesRscPipeline(flag, createApp())).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("keeps islands mode off the rsc pipeline, and takes it for an explicit rsc mode without packages", () => {
@@ -105,7 +105,7 @@ describe("experimental.serverComponents from farm.config", () => {
         images: { provider: "none" },
         md: false,
         i18n: { locales: ["en"], defaultLocale: "en" },
-        experimental: { serverComponents: true, serverActions: true },
+        experimental: { serverComponents: { mode: "rsc" }, serverActions: true },
         vite: {
           plugins: [appPlugin, { name: "@tailwindcss/vite:scan" }],
           resolve: { alias: { "#app": "/web" } },
@@ -123,7 +123,7 @@ describe("experimental.serverComponents from farm.config", () => {
       middleware,
       images: { provider: "none" },
       md: false,
-      experimental: { serverComponents: true, serverActions: true },
+      experimental: { serverComponents: { mode: "rsc" }, serverActions: true },
     });
     // Read by the pipeline's own config hook rather than defineConfig.
     expect(config.i18n).toEqual({ locales: ["en"], defaultLocale: "en" });
@@ -161,7 +161,7 @@ describe("experimental.serverComponents from farm.config", () => {
       else process.env.FARM_PLATFORM = platform;
       try {
         const config = (await createFarmRscViteConfig(
-          { experimental: { serverComponents: true }, ...userConfig },
+          { experimental: { serverComponents: { mode: "rsc" as const } }, ...userConfig },
           { root, command, preset: "node-server" },
         )) as Record<string, any>;
         return config.farm.mobileClient;
@@ -184,7 +184,7 @@ describe("experimental.serverComponents from farm.config", () => {
   it("gives development Fast Refresh with core's plugin-react when the app has none", async () => {
     // The RSC client bootstrap imports /@react-refresh in development.
     const config = (await createFarmRscViteConfig(
-      { experimental: { serverComponents: true } },
+      { experimental: { serverComponents: { mode: "rsc" as const } } },
       { root: createApp(), command: "serve" },
     )) as Record<string, any>;
     const names = (config.plugins.flat(Infinity) as Array<{ name: string }>).map(
@@ -196,7 +196,7 @@ describe("experimental.serverComponents from farm.config", () => {
   it("keeps the app's own plugin-react instead of adding core's", async () => {
     const config = (await createFarmRscViteConfig(
       {
-        experimental: { serverComponents: true },
+        experimental: { serverComponents: { mode: "rsc" as const } },
         vite: { plugins: [{ name: "vite:react-refresh" }, { name: "@tailwindcss/vite:scan" }] },
       },
       { root: createApp(), command: "serve" },
@@ -211,7 +211,7 @@ describe("experimental.serverComponents from farm.config", () => {
     for (const missing of [{ plugin: false }, { rsc: false }, { flight: false }]) {
       await expect(
         createFarmRscViteConfig(
-          { experimental: { serverComponents: true } },
+          { experimental: { serverComponents: { mode: "rsc" as const } } },
           { root: createApp(missing), command: "serve" },
         ),
       ).rejects.toThrow(
@@ -223,7 +223,7 @@ describe("experimental.serverComponents from farm.config", () => {
   it("rejects other renderers", async () => {
     await expect(
       createFarmRscViteConfig(
-        { renderer: { name: "vue" }, experimental: { serverComponents: true } },
+        { renderer: { name: "vue" }, experimental: { serverComponents: { mode: "rsc" as const } } },
         { root: createApp(), command: "serve" },
       ),
     ).rejects.toThrow('needs the React renderer; this app uses "vue"');
@@ -234,7 +234,11 @@ describe("experimental.serverComponents from farm.config", () => {
     // auth would silently stop protecting pages, so this is an error, not a warning.
     expect(() =>
       farmAppUsesRscPipeline(
-        { auth: true, integrations: { stripe: {} }, experimental: { serverComponents: true } },
+        {
+          auth: true,
+          integrations: { stripe: {} },
+          experimental: { serverComponents: { mode: "rsc" as const } },
+        },
         root,
       ),
     ).toThrow(
@@ -249,7 +253,7 @@ describe("experimental.serverComponents from farm.config", () => {
           storage: {},
           cron: false,
           integrations: {},
-          experimental: { serverComponents: true },
+          experimental: { serverComponents: { mode: "rsc" as const } },
         },
         root,
       ),
@@ -262,14 +266,17 @@ describe("experimental.serverComponents from farm.config", () => {
     const root = createApp();
     expect(() =>
       farmAppUsesRscPipeline(
-        { security: { csp: "default-src 'self'" }, experimental: { serverComponents: true } },
+        {
+          security: { csp: "default-src 'self'" },
+          experimental: { serverComponents: { mode: "rsc" as const } },
+        },
         root,
       ),
     ).toThrow("does not run `security.csp` yet");
     // `csp: false` is no policy at all.
     expect(
       farmAppUsesRscPipeline(
-        { security: { csp: false }, experimental: { serverComponents: true } },
+        { security: { csp: false }, experimental: { serverComponents: { mode: "rsc" as const } } },
         root,
       ),
     ).toBe(true);

@@ -234,7 +234,9 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
   return {
     // Core Farm RSC settings
     experimental: {
-      serverComponents: config.experimental?.serverComponents ?? true,
+      // This plugin runs the "rsc" engine: core reads a bare `true` as islands.
+      serverComponents:
+        config.experimental?.serverComponents === false ? false : { mode: "rsc" as const },
       serverActions: config.experimental?.serverActions ?? false,
       optimizedBoundary: config.experimental?.optimizedBoundary ?? false,
     },

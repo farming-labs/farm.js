@@ -734,6 +734,27 @@ test("navigation keeps the document title in sync, and back restores it", async 
   await expect(page).toHaveTitle("Server components contract");
 });
 
+test("a client navigation is announced to screen readers, and the first load is not", async ({
+  page,
+  request,
+}) => {
+  expect(await (await request.get("/")).text()).not.toContain("farm-route-announcer");
+  const errors = collectErrors(page);
+  await page.goto("/");
+  await hydrated(page);
+  const announcer = page.locator("#farm-route-announcer");
+  await expect(announcer).toHaveCount(0);
+  await page.getByRole("link", { name: "Meta", exact: true }).click();
+  await expect(announcer).toHaveText("Contract meta 42");
+  await expect(announcer).toHaveAttribute("aria-live", "assertive");
+  await expect(announcer).toHaveAttribute("aria-atomic", "true");
+  await page.goBack();
+  await expect(page).toHaveTitle("Server components contract");
+  await expect(announcer).toHaveText("Server components contract");
+  await expect(announcer).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
 test("the app's stylesheet loads", async ({ page }) => {
   await page.goto("/");
   const href = await page.locator('link[rel="stylesheet"]').first().getAttribute("href");

@@ -184,6 +184,7 @@ Task defaults map like this:
 - In one process a run never executes twice at the same time. Storage has no atomic claim, so instances sharing storage can occasionally both start the same due run. Use a provider runtime for work that must run once across instances.
 - The runs one tick starts go one after another, so a slow task delays the rest of that tick. Runs started by `after()` don't wait for each other.
 - There is no queue or concurrency limit.
+- On Cloudflare Workers, a run still starts after its response through `after()`, but nothing looks for due runs between requests, so delayed runs, scheduled runs, and retries wait for the tick route. Schedule it as above: `deploy.preset: "cloudflare-module"` installs it as a Cron Trigger, and Pages output installs none, so call the route from an external scheduler there (see [Cron production output](/docs/cron#production-output)). Mount `jobs` on a KV namespace with `{ driver: "cloudflare-kv-binding", binding: "JOBS_KV" }`; a worker refuses the in-memory default as a production build does.
 
 ## Create callers
 
