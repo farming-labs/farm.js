@@ -501,6 +501,14 @@ test("reports whether experimental.serverComponents runs React Server Components
       "pass",
     );
 
+    // RSC runs the client hooks of plugins, and the check says so.
+    await writeConfig(['  plugins: [{ name: "app:recorder", client: { setup() {} } }],']);
+    const withPlugins = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      withPlugins.checks.find((entry) => entry.code === "SERVER_COMPONENTS_READY")?.message,
+      "farm dev and farm build run the RSC pipeline; it ignores plugins (except their client hooks).",
+    );
+
     // `true` and `{ mode: "islands" }` both run islands mode.
     for (const value of ["true", '{ mode: "islands" }']) {
       await writeFile(

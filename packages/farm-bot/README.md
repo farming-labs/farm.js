@@ -232,7 +232,7 @@ It returns every problem as a sentence: a secret in the browser config, a `verif
 
 ## Limits
 
-- **Server components in `rsc` mode.** Farm doesn't run plugins there yet, so the widget never starts by itself and `verifyBot` throws a `BotError` that says so. `islands` mode works.
+- **Server components in `rsc` mode.** Farm runs only a plugin's browser hooks there, not its `configure`, so the build has no widget for `<BotCheck>` and the page logs a `BotError` that says so. A production server doesn't load farm.config.ts either, so `verifyBot` throws a `BotError`, although `farm dev` finds the plugin. To check forms on the server, create the plugin in a module your routes import, such as `src/bot.ts`, and add that instance to `plugins`. `islands` mode works.
 - **Cloudflare Pages with `@farm.js/core` 0.1.66 or earlier.** That output exposes no bindings at runtime, so secrets aren't found and every check fails with a `BotError`. Upgrade core, or use compatibility date `2025-04-01` or later, the `cloudflare-module` preset, or pass `secretKey`.
 - **reCAPTCHA** means the v2 checkbox. v3 has no widget, so it needs its own provider.
 - **One checker per app.** The plugin can be added once, so two forms can't use two different checkers.

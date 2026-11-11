@@ -180,6 +180,11 @@ export interface FarmClientPluginManagerOptions {
   isProd?: boolean;
   deploymentId?: string;
   window?: Window;
+  /**
+   * Whether a rendered navigation is announced to screen readers. Defaults to `true`. An entry
+   * that announces its own navigations passes `false`, so each one is announced once.
+   */
+  announceRoutes?: boolean;
 }
 
 interface FarmClientPluginInstance {
@@ -250,7 +255,8 @@ export class FarmClientPluginManager {
       isProd: options.isProd ?? !options.isDev,
       window: options.window ?? (typeof window !== "undefined" ? window : undefined),
     };
-    this.announceRoute = createFarmRouteAnnouncer(this.options.window);
+    this.announceRoute =
+      options.announceRoutes === false ? () => {} : createFarmRouteAnnouncer(this.options.window);
   }
 
   start(): Promise<void> {

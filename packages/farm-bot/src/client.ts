@@ -1,3 +1,4 @@
+import { BotError } from "./errors.js";
 import type { BotClientState } from "./provider.js";
 
 export type { BotClientState } from "./provider.js";
@@ -158,6 +159,13 @@ export async function startBotWidget(
   create: unknown,
   start: BotWidgetStart,
 ): Promise<BotClientState> {
+  // The placeholder `@farm.js/bot/provider-widget` exports, in place of the provider's widget.
+  if (create === Symbol.for("@farm.js/bot/no-widget")) {
+    throw new BotError(
+      "missing_plugin",
+      `This build has no widget for "${start.widget}". The bot plugin's \`configure\` hook adds it, and \`experimental.serverComponents\` in \`rsc\` mode doesn't run that hook yet. Use \`islands\` mode.`,
+    );
+  }
   if (typeof create !== "function") {
     throw new TypeError(
       `"${start.widget}" must have \`defineBotWidget(...)\` as its default export.`,

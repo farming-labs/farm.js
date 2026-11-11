@@ -186,3 +186,19 @@ describe.each([
     expect(region()).toBeNull();
   });
 });
+
+describe("a plugin manager whose entry announces its own navigations", () => {
+  it("runs navigation.rendered without announcing", async () => {
+    const rendered = vi.fn();
+    const runtime = createClientPluginManager(
+      [{ name: "recorder", definition: { navigation: { rendered } } }],
+      { router: {} as never, window, announceRoutes: false },
+    );
+    const session = await runtime.beginNavigation({ to: "http://localhost/next", action: "push" });
+    visit("/next", "Next page", "<h1>Next</h1>");
+    await runtime.scheduleNavigationRendered(session);
+    expect(rendered).toHaveBeenCalledOnce();
+    await new Promise((resolve) => setTimeout(resolve, FARM_ROUTE_ANNOUNCEMENT_DELAY_MS * 2));
+    expect(region()).toBeNull();
+  });
+});

@@ -1,10 +1,56 @@
-import { defineConfig } from "@farm.js/core";
+import { defineConfig, definePlugin } from "@farm.js/core";
 
 // One app, either server components engine. The contract suite builds it once per mode
 // (tests/e2e-server-components) and runs the same browser tests against both.
 const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" : "rsc";
 // A deploy target to build for instead of the Node server the contract runs by default.
 const target = process.env.FARM_SERVER_COMPONENTS_TARGET;
+
+// Records the client plugin hooks the browser entry runs (client-plugins.spec.ts). Only the rsc
+// build has it: in islands mode a client plugin loads the client runtime on every page, and the
+// contract checks that pages without islands load none.
+const clientLifecycle = definePlugin({
+  name: "contract:client-lifecycle",
+  client: {
+    public: { label: "contract" },
+    setup({ public: config, isDev, router }) {
+      const events: string[] = [];
+      const record = (event: string) => {
+        events.push(event);
+        Object.assign(window, { __FARM_CLIENT_PLUGIN_EVENTS__: [...events] });
+      };
+      Object.assign(window, { __FARM_CLIENT_PLUGIN_ROUTER__: router });
+      record(`setup:${config.label}:${isDev ? "dev" : "prod"}`);
+      return { record };
+    },
+    hydration: {
+      before({ state, mode }) {
+        state.record(`hydration:before:${mode}`);
+      },
+      after({ state }) {
+        state.record("hydration:after");
+      },
+    },
+    navigation: {
+      before({ state, action, to }) {
+        state.record(`navigation:before:${action}:${to.pathname}`);
+      },
+      loaded({ state, to }) {
+        state.record(`navigation:loaded:${to.pathname}`);
+      },
+      // The page on screen when the hook runs: React has committed the navigation.
+      resolved({ state, to }) {
+        state.record(`navigation:resolved:${to.pathname}:${document.querySelector("h1")?.textContent}`);
+      },
+      rendered({ state, to }) {
+        state.record(`navigation:rendered:${to.pathname}`);
+      },
+      error({ state, to }) {
+        state.record(`navigation:error:${to.pathname}`);
+      },
+    },
+  },
+});
 
 export default defineConfig({
   // The mobile contract (RFC 0004): `farm build --mobile` adds native-tier screens, such as
@@ -18,6 +64,7 @@ export default defineConfig({
     serverComponents: { mode },
     serverActions: true,
   },
+  plugins: mode === "rsc" ? [clientLifecycle] : [],
   deploy: {
     ...(target ? { target } : {}),
     outputDir: `.farm/.output-${mode}${target ? `-${target}` : ""}`,
