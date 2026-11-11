@@ -68,8 +68,15 @@ description: "Install Farm and create your first application."
 
 Every Markdown docs page also gets a page-specific 1200 by 630 social preview automatically. Farm
 uses the title, description, section, and route to emit Open Graph and X metadata, then selects a
-technical illustration suited to the page topic. The generated SVG is accessible, resolution
-independent, content-fingerprinted, and served with immutable caching.
+technical illustration suited to the page topic. The image is content-fingerprinted and served
+with immutable caching.
+
+X, LinkedIn, Facebook, and Slack do not render SVG previews, so when the optional `sharp` package
+is installed (`pnpm add sharp`), `og:image` points at a PNG
+(`/docs/_social/<page>/opengraph-image.png`) rendered from the same design. Without `sharp`, the
+SVG is the preview. The SVG stays available at `opengraph-image.svg` either way. The PNG uses system
+fonts, because `socialImage.fonts` can only be embedded in the SVG. Edge targets render the PNGs at
+build time into the server bundle, which adds roughly 25-35 KB per page.
 
 Use frontmatter only when a page needs to override the automatic result:
 
