@@ -24,6 +24,7 @@ export function getSiteSitemap(): MetadataRoute.Sitemap {
     { url: `${SITE_URL}/about` },
     { url: `${SITE_URL}/contact` },
     { url: `${SITE_URL}/privacy` },
+    { url: `${SITE_URL}/terms` },
     // Every post in the collection, so a new one is listed without touching this file.
     ...posts.map(({ post }) => ({ url: `${SITE_URL}${post.href}`, lastModified: post.dateTime })),
   ];
