@@ -496,6 +496,30 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([]);
   });
 
+  it("a keyed list between static siblings with bindings and events", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Ranked() {
+        const [items, setItems] = useState([{ id: "b", n: 2 }, { id: "a", n: 1 }]);
+        const [nextId, setNextId] = useState(3);
+        return (
+          <section>
+            <button id="add" onClick={() => { setItems([...items, { id: "x" + nextId, n: nextId }]); setNextId(nextId + 1); }}>Add</button>
+            <button id="sort" onClick={() => setItems([...items].sort((left, right) => left.n - right.n))}>Sort</button>
+            <ul>
+              <li className="head" data-count={items.length}>{items.length} items</li>
+              {items.map((item) => <li key={item.id} data-n={item.n}>{item.id}</li>)}
+              <li className="tail"><button id="clear" onClick={() => setItems([])}>Clear</button></li>
+            </ul>
+          </section>
+        );
+      }`,
+      "Ranked",
+      [click("#add"), click("#sort"), click("#add"), click("#clear"), click("#add")],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
   it("svg with viewBox and className", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";
