@@ -483,6 +483,34 @@ test("a client component calls a server action it received as a prop, and the pa
   expect(errors).toEqual([]);
 });
 
+test("a server action that removes an item keeps each client component's state with its key", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto(`/action-keyed?list=${test.info().workerIndex}-${Date.now()}`);
+  await hydrated(page);
+  for (const label of ["Component Grace", "Parent Grace"]) {
+    const button = page.getByRole("button", { name: new RegExp(`^${label}:`) });
+    await button.click();
+    await expect(button).toHaveText(`${label}: 1`);
+    await button.click();
+    await expect(button).toHaveText(`${label}: 2`);
+  }
+
+  await page.getByRole("button", { name: "Remove first" }).click();
+  await expect(page.getByRole("button", { name: /^Component Ada:/ })).toHaveCount(0);
+  // React keeps state by key: Grace keeps her count, and Linus, now in Grace's place, does not take it.
+  for (const kind of ["Component", "Parent"]) {
+    await expect(page.getByRole("button", { name: new RegExp(`^${kind} Grace:`) })).toHaveText(
+      `${kind} Grace: 2`,
+    );
+    await expect(page.getByRole("button", { name: new RegExp(`^${kind} Linus:`) })).toHaveText(
+      `${kind} Linus: 0`,
+    );
+  }
+  expect(errors).toEqual([]);
+});
+
 test("a server action reads what route middleware put in its context", async ({ page }) => {
   await page.goto("/action-middleware");
   await hydrated(page);
