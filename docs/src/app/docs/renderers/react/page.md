@@ -603,8 +603,10 @@ Derived values are expanded into the generated bindings, so they do not create a
 force a component rerender. They may use literals, props, state, operators, optional/member access,
 conditionals, templates, earlier derived values, and a small call whitelist. The whitelist contains
 `Boolean`, `Number`, `String`, and `Math.abs`, `ceil`, `floor`, `max`, `min`, `round`, `sign`, and
-`trunc`. Safe keyed collections additionally accept the non-mutating pipeline described below. A
-name is not treated as built-in when the component shadows it. Outside that pipeline, application
+`trunc`. Safe keyed collections additionally accept the non-mutating pipeline described below,
+and the `length` of such a pipeline is a derived number, so a count such as
+`const open = todos.filter((todo) => !todo.done).length` can feed text, attributes, and other derived
+values. A name is not treated as built-in when the component shadows it. Outside that pipeline, application
 helpers, prototype methods, `Math.random`, optional calls, assignments, identity-bearing object or
 array literals, functions, JSX, constructors, and other unproven expressions still fall back to
 React.
