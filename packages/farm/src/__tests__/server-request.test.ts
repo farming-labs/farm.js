@@ -6,6 +6,8 @@ import {
   _runWithCurrentRequest,
   createWebRequestFromFarmRequest,
   getCurrentRequest,
+  parseFarmRequestTarget,
+  resolveFarmRequestURL,
 } from "../server/request";
 import type { FarmRequest } from "../types";
 
@@ -94,6 +96,30 @@ describe("createWebRequestFromFarmRequest", () => {
     );
 
     expect(result.url).toBe("https://app.example.com/account?tab=profile");
+  });
+
+  it("keeps a target that starts with two slashes as the path, never the host", () => {
+    for (const [target, pathname] of [
+      ["//about/", "//about/"],
+      ["//evil.example/x?y=1", "//evil.example/x"],
+      ["/\\evil.example", "//evil.example"],
+      ["//", "//"],
+    ]) {
+      const direct = resolveFarmRequestURL(request({ host: "farm.test" }, target));
+      expect(direct.host, target).toBe("farm.test");
+      expect(direct.pathname, target).toBe(pathname);
+      const trusted = resolveFarmRequestURL(request({}, target), {
+        origin: "https://app.example.com/base/",
+      });
+      expect(trusted.origin, target).toBe("https://app.example.com");
+      expect(trusted.pathname, target).toBe(pathname);
+    }
+    expect(resolveFarmRequestURL(request({ host: "farm.test" }, "/a?b=1")).href).toBe(
+      "http://farm.test/a?b=1",
+    );
+    expect(parseFarmRequestTarget("https://other.example/x", "http://farm.test").href).toBe(
+      "https://other.example/x",
+    );
   });
 });
 

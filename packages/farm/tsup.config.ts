@@ -22,6 +22,7 @@ const entry = {
   "api/client": "src/api-client.ts",
   "api/client.native": "src/api-client.native.ts",
   "api/runtime": "src/api/runtime.ts",
+  "api/node": "src/api/node.ts",
   "api/route-manager": "src/api/route-manager.ts",
   router: "src/router.ts",
   routes: "src/routes.ts",

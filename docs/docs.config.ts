@@ -377,6 +377,7 @@ const sidebar = [
         children: [
           { label: "Analyzer", slug: "plugins/analyzer", icon: "gauge" },
           { label: "API MCP", slug: "plugins/mcp", icon: "sparkles" },
+          { label: "Bot Protection", slug: "plugins/bot", icon: "shield" },
           { label: "Content", slug: "plugins/content", icon: "file" },
           { label: "DevTools", slug: "plugins/devtools", icon: "monitor" },
           { label: "Federation", slug: "plugins/federation", icon: "network" },

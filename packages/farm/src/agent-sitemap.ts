@@ -5,7 +5,7 @@
  * server both build it here, so the two serve the same file.
  */
 import { applyFarmBasePath } from "./base-path";
-import { isFarmMetadataNoIndex } from "./llms-txt";
+import { isFarmMetadataNoIndex, resolveFarmAgentOrigin } from "./llms-txt";
 import { matchesFarmMarkdownRoutePattern } from "./markdown";
 import type { MetadataRoute } from "./metadata-route";
 
@@ -80,7 +80,7 @@ export function createFarmDefaultSitemap(
   },
 ): MetadataRoute.Sitemap {
   const { include, exclude } = options.config;
-  const base = toAbsoluteHttpOrigin(options.metadataBase) ?? options.origin;
+  const base = resolveFarmAgentOrigin(options.metadataBase, options.origin);
   const entries = new Map<string, MetadataRoute.SitemapEntry>();
 
   for (const source of sources) {
@@ -107,16 +107,6 @@ export function createFarmDefaultSitemap(
   return [...entries.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([, entry]) => entry);
-}
-
-function toAbsoluteHttpOrigin(value: unknown): string | undefined {
-  if (typeof value !== "string" && !(value instanceof URL)) return undefined;
-  try {
-    const url = new URL(String(value));
-    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

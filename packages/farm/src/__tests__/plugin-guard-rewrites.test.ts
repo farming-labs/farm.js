@@ -107,10 +107,9 @@ describe("plugin runtime.before guards run on config rewrite destinations", () =
     if (!address || typeof address === "string") throw new Error("Missing dev server address");
     const origin = `http://localhost:${address.port}`;
 
-    // Development does not apply rewrites to unmatched API paths yet.
     await expectGuardedRewrites(
       (pathname, init) => fetch(`${origin}${pathname}`, init),
-      ["/admin/page", "/alias/page", "/api/admin/data"],
+      ["/admin/page", "/alias/page", "/api/admin/data", "/api/alias/data"],
     );
   }, 120_000);
 

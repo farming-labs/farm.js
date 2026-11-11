@@ -68,8 +68,15 @@ description: "Install Farm and create your first application."
 
 Every Markdown docs page also gets a page-specific 1200 by 630 social preview automatically. Farm
 uses the title, description, section, and route to emit Open Graph and X metadata, then selects a
-technical illustration suited to the page topic. The generated SVG is accessible, resolution
-independent, content-fingerprinted, and served with immutable caching.
+technical illustration suited to the page topic. The image is content-fingerprinted and served
+with immutable caching.
+
+X, LinkedIn, Facebook, and Slack do not render SVG previews, so when the optional `sharp` package
+is installed (`pnpm add sharp`), `og:image` points at a PNG
+(`/docs/_social/<page>/opengraph-image.png`) rendered from the same design. Without `sharp`, the
+SVG is the preview. The SVG stays available at `opengraph-image.svg` either way. The PNG uses system
+fonts, because `socialImage.fonts` can only be embedded in the SVG. Edge targets render the PNGs at
+build time into the server bundle, which adds roughly 25-35 KB per page.
 
 Use frontmatter only when a page needs to override the automatic result:
 
@@ -98,6 +105,21 @@ automatically. Route wrappers are only needed when you want to override the defa
 - /api/docs?format=llms
 - /api/docs?format=sitemap-xml
 - /api/docs/agent/spec
+
+### Base path
+
+With an [application `basePath`](/docs/configuration#application-base-path) such as `/console`, the
+docs answer below it: `/console/docs`, `/console/docs/getting-started.md`, `/console/llms.txt`,
+`/console/sitemap.xml`, `/console/robots.txt`, and the other docs files. Every link the docs runtime
+generates includes the base path: the navigation, breadcrumbs, canonical and social image URLs, the
+URLs in a page's Markdown, `llms.txt`, `llms-full.txt`, the sitemaps, and search results. As app
+pages do, the docs also keep answering at the origin root.
+
+The `/api/docs` endpoints stay at `/api/docs`, as the app's API routes do. Links you write in a
+docs page are rendered as written. The routes `@farming-labs/docs` lists in `AGENTS.md`, `SKILL.md`,
+the agent manifest, and a page's `LLM index` line are root-relative, and answer at the origin root.
+An external docs adapter such as `@farming-labs/farmjs` routes and links its pages itself, and does
+not apply the base path.
 
 `/api/docs?format=config` is public, so it returns only the documented docs config fields with
 credentials replaced by `"[redacted]"`: values under `apiKey`, `token`, `secret`, `password`,
@@ -292,6 +314,13 @@ lastModified: "2026-07-16"
 
 Explicit frontmatter wins over generated Git metadata. When Git history is unavailable, local docs
 fall back to the source file timestamp and copied production docs fall back to the build date.
+
+A shallow clone holds only recent history, and Git lists its oldest commit as adding every file. A
+page last changed before that commit therefore shows no date, instead of the oldest commit's date
+or the build date, and `farm build` warns how many pages it left undated. Build from a full clone
+(`git fetch --unshallow`) to date every page. Vercel clones 10 commits deep; the
+`VERCEL_DEEP_CLONE=true` environment variable is widely reported to give a full clone, but Vercel
+does not document it, so check a deployment's dates after setting it.
 
 ## Override behavior
 

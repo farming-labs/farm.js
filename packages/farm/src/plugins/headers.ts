@@ -5,6 +5,8 @@ import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { resolveFarmRequestURL } from "../server/request";
 import { compileConfigRoutePattern, resolveConfigRoutePathname } from "./route-pattern";
 
+export const FARM_CONFIG_HEADERS_PLUGIN_NAME = "farm:headers";
+
 const FARM_CONFIG_HEADERS_FINALIZER = Symbol.for("farm.configHeadersFinalizer");
 
 function appendConfiguredLinkHeader(res: FarmResponse, value: string): void {
@@ -83,6 +85,7 @@ export function createHeadersPlugin(
     beforeRequest: overrideBeforeRequest,
     afterResponse: overrideAfterResponse,
     i18n,
+    basePath,
   }: {
     beforeRequest?: (
       req: FarmRequest,
@@ -95,6 +98,8 @@ export function createHeadersPlugin(
       context: FarmPluginContext,
     ) => void | Promise<void>;
     i18n?: ResolvedFarmI18nConfig;
+    /** Sources match the app-relative path, as in production. */
+    basePath?: string;
   } = {},
 ): FarmPlugin {
   const compiledHeaders = headers.map((config) => ({
@@ -103,7 +108,7 @@ export function createHeadersPlugin(
   }));
 
   return {
-    name: "farm:headers",
+    name: FARM_CONFIG_HEADERS_PLUGIN_NAME,
     enforce: "pre",
 
     async beforeRequest(req, res, context) {
@@ -111,7 +116,7 @@ export function createHeadersPlugin(
         await overrideBeforeRequest(req, res, context);
       }
       const url = resolveFarmRequestURL(req);
-      const pathname = resolveConfigRoutePathname(url.pathname, i18n).pathname;
+      const pathname = resolveConfigRoutePathname(url.pathname, i18n, basePath).pathname;
       const matchedHeaders = compiledHeaders
         .filter(({ pattern }) => pattern.regex.test(pathname))
         .map(({ config }) => config.headers);

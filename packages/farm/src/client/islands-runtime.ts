@@ -4,7 +4,12 @@
  * runtime uses, so the rest of Farm's runtime stays the same; apps on isolated hydration without
  * islands mode never load islx.
  */
-import { enhanceForms, setActionInterceptor, setActionNavigator } from "@farm.js/islx/client";
+import {
+  enhanceForms,
+  hookEventName,
+  setActionInterceptor,
+  setActionNavigator,
+} from "@farm.js/islx/client";
 import { farmIslandsActionInterceptor } from "../islands-action-client";
 import * as React from "react";
 import {
@@ -22,7 +27,7 @@ import {
   endStreamedContent,
 } from "@farm.js/islx/react/client";
 import type { FarmIslandStrategy } from "../island";
-import { getFarmIslandValuesServer } from "./island-value-protocol";
+import { FARM_ISLAND_ELEMENT, getFarmIslandValuesServer } from "./island-value-protocol";
 
 export interface FarmIslandsRuntimeOptions {
   load(reference: string): Promise<Record<string, unknown>>;
@@ -39,6 +44,9 @@ export interface FarmIslandsRuntimeOptions {
 // The return types below name islx's functions instead of the React types they infer to: those are
 // islx's copy of the React types, which Farm's declarations cannot always name (TS2742 when the
 // hoisted @types/react differs from Farm's own).
+
+const HYDRATED_ATTRIBUTE = "data-farm-hydrated";
+const HYDRATED_ISLAND_SELECTOR = `${FARM_ISLAND_ELEMENT}[${HYDRATED_ATTRIBUTE}]`;
 
 type Router = {
   refresh?(options?: { scroll?: boolean }): Promise<void>;
@@ -69,11 +77,34 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIslandsRuntimeOp
   // A form written in a server component posts its action without a page load once this runs,
   // and the page refreshes keeping island state; before, it posts natively.
   enhanceForms();
+  // Islands carry the marker isolated hydration sets: on once React commits the island, off when
+  // it fails or is disposed.
+  document.addEventListener(hookEventName("hydrate"), (event) => {
+    (event as CustomEvent<{ element?: Element }>).detail?.element?.setAttribute(
+      HYDRATED_ATTRIBUTE,
+      "true",
+    );
+  });
+  document.addEventListener(hookEventName("islandError"), (event) => {
+    (event as CustomEvent<{ element?: Element }>).detail?.element?.removeAttribute(
+      HYDRATED_ATTRIBUTE,
+    );
+  });
   return {
     hydrate: runtime.hydrate,
     carryOver: runtime.carryOver,
     updateModule: runtime.update,
-    dispose: runtime.dispose,
+    dispose(scope: Node) {
+      runtime.dispose(scope);
+      if (scope instanceof Element && scope.matches(HYDRATED_ISLAND_SELECTOR)) {
+        scope.removeAttribute(HYDRATED_ATTRIBUTE);
+      }
+      if ("querySelectorAll" in scope) {
+        for (const island of (scope as ParentNode).querySelectorAll(HYDRATED_ISLAND_SELECTOR)) {
+          island.removeAttribute(HYDRATED_ATTRIBUTE);
+        }
+      }
+    },
     rootCount: runtime.rootCount,
     // A streamed navigation ended: boundaries it never completed render in the browser.
     endStream: endStreamedContent,

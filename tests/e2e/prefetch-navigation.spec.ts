@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("dev navigation reuses an in-flight JSON page-data prefetch", async ({ page }) => {
+// Classic dev prefetches JSON page data; islands mode in dev prefetches the page's HTML, as the
+// production router does. Either way the navigation reuses the request in flight.
+test("dev navigation reuses an in-flight page prefetch", async ({ page }) => {
   const target = "/about?prefetch-overlap=1";
   let release!: () => void;
   const responseGate = new Promise<void>((resolve) => {
@@ -11,10 +13,13 @@ test("dev navigation reuses an in-flight JSON page-data prefetch", async ({ page
     started = resolve;
   });
   let requests = 0;
-  await page.route("**/__farm/page-data?**", async (route) => {
-    if (new URL(route.request().url()).searchParams.get("path") !== target) {
-      return route.continue();
-    }
+  const isTargetRequest = (url: URL) =>
+    url.pathname === "/__farm/page-data"
+      ? url.searchParams.get("path") === target
+      : url.pathname + url.search === target;
+  await page.route(isTargetRequest, async (route) => {
+    // The document load of the target is not the prefetch.
+    if (route.request().resourceType() === "document") return route.continue();
     requests++;
     started();
     await responseGate;

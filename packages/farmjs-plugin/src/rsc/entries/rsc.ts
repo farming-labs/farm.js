@@ -149,6 +149,7 @@ import {
   createMarkdownMirrorResponse,
   farmRequestWantsMarkdown,
 } from '@farm.js/core/markdown';
+import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';
 
 ${
   ctx.images && ctx.images.runtime !== "none"
@@ -185,6 +186,18 @@ globalThis.__FARM_IMAGE_CONFIG__ = ${JSON.stringify(ctx.images.public)};`
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 const farmApiBasePath = ${JSON.stringify(ctx.apiBasePath ?? "/api")};
 const farmMarkdownConfig = ${JSON.stringify(ctx.markdown ?? { enabled: false, expose: [], cache: false, includeMetadata: true })};
+const farmRouteI18n = ${JSON.stringify(ctx.i18n ?? { enabled: false, basePath: ctx.basePath })};
+
+/**
+ * A request path without the app's basePath and locale prefix, as core's servers and the
+ * middleware runner read it: '/console/fr/about' is '/about'. Markdown names a home page
+ * '<prefix>/index.md' and matches md.expose on it. Pages still match the path as received.
+ */
+function getFarmRoutePathname(pathname) {
+  return farmRouteI18n.enabled
+    ? stripFarmLocaleFromPathname(pathname, farmRouteI18n)
+    : stripFarmBasePath(pathname, farmRouteI18n.basePath);
+}
 `;
   if (ctx.llmsTxt?.enabled) {
     code += `import {
@@ -1490,6 +1503,8 @@ async function handleFarmPageOrMarkdown(request, context) {
   const markdown = await createMarkdownMirrorResponse({
     request,
     config: farmMarkdownConfig,
+    routePathname: getFarmRoutePathname,
+    // matchRoute() reads the path as received, as the page render below does.
     routeExists: (pathname) => Boolean(matchRoute(pathname)),
     renderPage: (pageRequest) => handleFarmRequest(pageRequest, context),
     apiServerBasePath: farmApiBasePath,
@@ -1499,6 +1514,7 @@ async function handleFarmPageOrMarkdown(request, context) {
   return applyMarkdownNegotiationHeaders(response, {
     config: farmMarkdownConfig,
     pathname: new URL(request.url).pathname,
+    routePathname: getFarmRoutePathname,
   });
 }
 

@@ -97,7 +97,10 @@ export {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
+  isFarmPageNoIndex,
+  readFarmLlmsMarkdownFrom,
   renderFarmLlmsFullTxt,
+  resolveFarmAgentOrigin,
   createFarmLlmsFullRenderer,
   resolveFarmLlmsTxtConfig,
   type FarmLlmsTxtUserConfig,
@@ -153,6 +156,7 @@ export {
 } from "../trailing-slash";
 export { applyFarmBasePath, setFarmBasePath, stripFarmBasePath } from "../base-path";
 export { appendFarmRedirectQuery } from "../redirect-query";
+export { isDeferred, prepareDeferredData, snapshotDeferredData } from "../deferred";
 export {
   applyFarmCspNonceToResponse,
   createFarmCspNonce,

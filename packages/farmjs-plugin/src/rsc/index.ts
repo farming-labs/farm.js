@@ -31,7 +31,12 @@ import {
   type UserConfig,
 } from "vite";
 import { init as initModuleLexer, parse as parseModuleImports } from "es-module-lexer";
-import type { FarmRscPluginOptions, EntryContext, FarmRscMobileClient } from "./types.js";
+import type {
+  FarmRscPluginOptions,
+  EntryContext,
+  FarmRscClientPlugins,
+  FarmRscMobileClient,
+} from "./types.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
 import type { FarmAPIConfig } from "@farm.js/core/api";
 import type { FarmMiddlewareConfig } from "@farm.js/core/middleware";
@@ -221,6 +226,8 @@ export interface FarmRscConfig {
   mcp?: FarmMCPUserConfig;
   /** @internal See `FarmRscPluginOptions.mobileClient`; set by `farm dev` and `farm build`. */
   mobileClient?: FarmRscMobileClient;
+  /** @internal See `FarmRscPluginOptions.clientPlugins`; set by `farm dev` and `farm build`. */
+  clientPlugins?: FarmRscClientPlugins;
 }
 
 /**
@@ -234,7 +241,9 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
   return {
     // Core Farm RSC settings
     experimental: {
-      serverComponents: config.experimental?.serverComponents ?? true,
+      // This plugin runs the "rsc" engine: core reads a bare `true` as islands.
+      serverComponents:
+        config.experimental?.serverComponents === false ? false : { mode: "rsc" as const },
       serverActions: config.experimental?.serverActions ?? false,
       optimizedBoundary: config.experimental?.optimizedBoundary ?? false,
     },
@@ -297,6 +306,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
         routesDir: config.routesDir,
         entries: config.entries,
         mobileClient: config.mobileClient,
+        clientPlugins: config.clientPlugins,
       }),
       ...(Array.isArray(config.plugins) ? config.plugins : []),
     ],
@@ -1207,6 +1217,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             resolveFarmClientCacheAdapterEntry(root, c.cache),
           ),
           mobileClient,
+          clientPlugins: options.clientPlugins,
         };
 
         logInfo(`srcDir: ${entryContext.srcDir}, outDir: ${entryContext.outDir}`);

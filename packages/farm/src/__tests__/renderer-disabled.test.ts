@@ -56,6 +56,8 @@ async function createBackendFixture(): Promise<string> {
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
   await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
   await writeModule(root, "public/robots-notes.txt", "served from public");
+  await writeModule(root, "public/landing.html", "<p>public landing</p>");
+  await writeModule(root, "public/guide/index.html", "<p>public guide</p>");
   await writeModule(
     root,
     "src/app/api/route.ts",
@@ -81,9 +83,11 @@ async function createBackendFixture(): Promise<string> {
     root,
     "src/app/middleware.ts",
     `export function middleware(request: Request, context: { headers: Headers }) {
-  if (new URL(request.url).pathname === "/blocked") {
+  const { pathname } = new URL(request.url);
+  if (pathname === "/blocked") {
     return Response.json({ error: "Blocked" }, { status: 403 });
   }
+  if (pathname === "/middleware-failed") throw new Error("middleware failed");
   context.headers.set("x-backend", "farm");
 }`,
   );
@@ -111,6 +115,17 @@ async function expectBackendResponses(origin: string): Promise<void> {
   const asset = await fetch(`${origin}/robots-notes.txt`);
   expect(asset.status).toBe(200);
   await expect(asset.text()).resolves.toBe("served from public");
+  // Public HTML and a public directory's index.html too, before middleware.
+  for (const [pathname, body] of [
+    ["/landing.html", "<p>public landing</p>"],
+    ["/guide/", "<p>public guide</p>"],
+    ["/guide", "<p>public guide</p>"],
+  ]) {
+    const page = await fetch(`${origin}${pathname}`, { redirect: "manual" });
+    expect(page.status, pathname).toBe(200);
+    expect(page.headers.get("x-backend"), pathname).toBeNull();
+    await expect(page.text()).resolves.toBe(body);
+  }
 
   for (const pathname of ["/missing", "/missing/deeper", "/missing.json"]) {
     const miss = await fetch(`${origin}${pathname}`);
@@ -119,9 +134,17 @@ async function expectBackendResponses(origin: string): Promise<void> {
     await expect(miss.json()).resolves.toEqual({ error: "Not found", pathname });
   }
 
-  const failed = await fetch(`${origin}/boom`);
-  expect(failed.status).toBe(500);
-  expect(failed.headers.get("content-type")).toMatch(/^application\/json/);
+  // A throwing route and throwing middleware answer production's generic 500, in dev too.
+  for (const pathname of ["/boom", "/middleware-failed"]) {
+    const failed = await fetch(`${origin}${pathname}`);
+    expect(failed.status, pathname).toBe(500);
+    expect(failed.headers.get("content-type"), pathname).toBe("application/json");
+    await expect(failed.text(), pathname).resolves.toBe('{"error":"Internal Server Error"}');
+  }
+  // A request middleware failed stays out of shared caches, as production keeps it.
+  const middlewareFailed = await fetch(`${origin}/middleware-failed`);
+  expect(middlewareFailed.headers.get("cache-control")).toBe("private, no-store");
+  await middlewareFailed.body?.cancel();
 
   const blocked = await fetch(`${origin}/blocked`);
   expect(blocked.status).toBe(403);
@@ -218,10 +241,10 @@ describe("renderer: false", () => {
 
     const output = path.join(root, ".farm", ".output");
     const publicFiles = await listFiles(path.join(output, "public"));
-    // Only the app's own public file: no browser client, manifest, or SSR assets.
+    // Only the app's own public files: no browser client, manifest, or SSR assets.
     expect(
-      publicFiles.map((file) => path.relative(output, file).split(path.sep).join("/")),
-    ).toEqual(["public/robots-notes.txt"]);
+      publicFiles.map((file) => path.relative(output, file).split(path.sep).join("/")).sort(),
+    ).toEqual(["public/guide/index.html", "public/landing.html", "public/robots-notes.txt"]);
     const serverFiles = await listFiles(path.join(output, "server"));
     expect(serverFiles.some((file) => file.split(path.sep).includes("react"))).toBe(false);
     for (const file of serverFiles.filter((name) => /\.m?js$/.test(name))) {

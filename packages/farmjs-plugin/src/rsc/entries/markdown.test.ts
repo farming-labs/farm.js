@@ -7,6 +7,11 @@ import {
   farmRequestWantsMarkdown,
   resolveMarkdownConfig,
 } from "@farm.js/core/markdown";
+import {
+  resolveFarmI18nConfig,
+  stripFarmBasePath,
+  stripFarmLocaleFromPathname,
+} from "@farm.js/core/internal/production-runtime";
 import type { EntryContext } from "../types.js";
 import {
   createProductionMiddlewareRunner,
@@ -26,18 +31,36 @@ const context: EntryContext = {
   markdown: resolveMarkdownConfig(undefined),
 };
 
-/** Runs the generated outer handler with the real core Markdown helpers. */
-function createHandler(markdownConfig = resolveMarkdownConfig(undefined)) {
-  const entry = generateRscEntry({ ...context, markdown: markdownConfig });
+/** The generated route-pathname helper, or nothing for an entry without one. */
+function extractRoutePathname(entry: string): string {
+  const start = entry.indexOf("const farmRouteI18n = ");
+  if (start === -1) return "";
+  const fn = entry.indexOf("function getFarmRoutePathname(pathname)", start);
+  return entry.slice(start, entry.indexOf("\n}\n", fn) + 2);
+}
+
+/**
+ * Runs the generated outer handler with the real core Markdown helpers. `pages` are the request
+ * paths RSC's matchRoute() matches; each renders a page titled after its path.
+ */
+function createHandler(
+  markdownConfig = resolveMarkdownConfig(undefined),
+  options: Partial<Pick<EntryContext, "basePath" | "i18n" | "development">> & {
+    pages?: string[];
+  } = {},
+) {
+  const { pages = ["/pricing"], ...entryOptions } = options;
+  const entry = generateRscEntry({ ...context, ...entryOptions, markdown: markdownConfig });
   const start = entry.indexOf("async function handleFarmPageOrMarkdown(request, context)");
   const end = entry.indexOf("async function handler(request, context)", start);
   const rendered: Request[] = [];
   const handleFarmRequest = vi.fn(async (request: Request) => {
     rendered.push(request);
     const { pathname } = new URL(request.url);
-    if (pathname !== "/pricing") return new Response("Not Found", { status: 404 });
+    if (!pages.includes(pathname)) return new Response("Not Found", { status: 404 });
+    const title = pathname === "/pricing" ? "Pricing" : `Page ${pathname}`;
     return new Response(
-      "<html><head><title>Pricing</title></head><body><main><h1>Pricing</h1><p>Plans.</p></main></body></html>",
+      `<html><head><title>${title}</title></head><body><main><h1>${title}</h1><p>Plans.</p></main></body></html>`,
       { headers: { "content-type": "text/html" } },
     );
   });
@@ -45,15 +68,19 @@ function createHandler(markdownConfig = resolveMarkdownConfig(undefined)) {
     "farmMarkdownConfig",
     "createMarkdownMirrorResponse",
     "applyMarkdownNegotiationHeaders",
+    "stripFarmBasePath",
+    "stripFarmLocaleFromPathname",
     "matchRoute",
     "handleFarmRequest",
     "farmApiBasePath",
-    `${entry.slice(start, end)}; return handleFarmPageOrMarkdown;`,
+    `${extractRoutePathname(entry)}\n${entry.slice(start, end)}; return handleFarmPageOrMarkdown;`,
   )(
     markdownConfig,
     createMarkdownMirrorResponse,
     applyMarkdownNegotiationHeaders,
-    (pathname: string) => (pathname === "/pricing" ? { pattern: "/pricing" } : null),
+    stripFarmBasePath,
+    stripFarmLocaleFromPathname,
+    (pathname: string) => (pages.includes(pathname) ? { pattern: pathname } : null),
     handleFarmRequest,
     "/api",
   ) as (request: Request, context?: unknown) => Promise<Response>;
@@ -358,5 +385,101 @@ describe("RSC Markdown mirrors", () => {
       );
     }
     void [FARM_MARKDOWN_CONTENT_TYPE, createFarmMarkdownErrorBody, farmRequestWantsMarkdown];
+  });
+});
+
+// RSC's matchRoute() reads the request path as received, so under a basePath the pages live in
+// app/<basePath>/ (and app/<basePath>/[lang]/ with i18n). Markdown still reads the route path
+// core's servers read: <prefix>/index.md is that prefix's home page, which is what every
+// advertised URL names, and md.expose lists route paths.
+describe.each([
+  ["development", true],
+  ["production", false],
+])("RSC Markdown under a basePath and locale (%s entry)", (_mode, development) => {
+  const resolveI18n = (i18n: Parameters<typeof resolveFarmI18nConfig>[0]) =>
+    resolveFarmI18nConfig(i18n, {
+      root: "/tmp",
+      mode: development ? "development" : "production",
+      basePath: "/console",
+    });
+  const basePath = {
+    basePath: "/console",
+    i18n: resolveI18n(false),
+    development,
+    pages: ["/console", "/console/about"],
+  };
+  const localized = {
+    basePath: "/console",
+    i18n: resolveI18n({ locales: ["en", "fr"], defaultLocale: "en", routing: "prefix" }),
+    development,
+    pages: ["/console/fr", "/console/fr/about"],
+  };
+
+  it("strips the prefix with core's helpers", () => {
+    expect(generateRscEntry({ ...context, ...basePath })).toContain(
+      "import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';",
+    );
+  });
+
+  it("serves <basePath>/index.md as the home page and advertises it", async () => {
+    const { run, rendered } = createHandler(resolveMarkdownConfig(undefined), basePath);
+    const markdown = await run(new Request("https://farm.test/console/index.md"));
+    expect(markdown.status).toBe(200);
+    expect(markdown.headers.get("content-location")).toBe("/console/index.md");
+    expect(await markdown.text()).toContain("# Page /console");
+    expect(rendered.map((request) => new URL(request.url).pathname)).toEqual(["/console"]);
+
+    const page = await run(new Request("https://farm.test/console"));
+    expect(page.headers.get("link")).toBe(
+      '</console/index.md>; rel="alternate"; type="text/markdown"',
+    );
+    // <basePath>.md still serves the page, under its canonical URL.
+    const legacy = await run(new Request("https://farm.test/console.md"));
+    expect(legacy.status).toBe(200);
+    expect(legacy.headers.get("content-location")).toBe("/console/index.md");
+
+    const about = await run(new Request("https://farm.test/console/about.md"));
+    expect(about.status).toBe(200);
+    expect(about.headers.get("content-location")).toBe("/console/about.md");
+  });
+
+  it("matches md.expose against route paths under a basePath", async () => {
+    const { run } = createHandler(resolveMarkdownConfig({ expose: ["/", "/about"] }), basePath);
+    for (const [pathname, location] of [
+      ["/console/about.md", "/console/about.md"],
+      ["/console/index.md", "/console/index.md"],
+    ]) {
+      const response = await run(new Request(`https://farm.test${pathname}`));
+      expect(response.status, pathname).toBe(200);
+      expect(response.headers.get("content-location")).toBe(location);
+    }
+    const page = await run(new Request("https://farm.test/console/about"));
+    expect(page.headers.get("link")).toBe(
+      '</console/about.md>; rel="alternate"; type="text/markdown"',
+    );
+  });
+
+  it("serves <basePath>/<locale>/index.md as the localized home page and advertises it", async () => {
+    const { run, rendered } = createHandler(resolveMarkdownConfig(undefined), localized);
+    const markdown = await run(new Request("https://farm.test/console/fr/index.md"));
+    expect(markdown.status).toBe(200);
+    expect(markdown.headers.get("content-location")).toBe("/console/fr/index.md");
+    expect(await markdown.text()).toContain("# Page /console/fr");
+    expect(rendered.map((request) => new URL(request.url).pathname)).toEqual(["/console/fr"]);
+
+    const page = await run(new Request("https://farm.test/console/fr"));
+    expect(page.headers.get("link")).toBe(
+      '</console/fr/index.md>; rel="alternate"; type="text/markdown"',
+    );
+  });
+
+  it("matches md.expose against locale-stripped route paths", async () => {
+    const { run } = createHandler(resolveMarkdownConfig({ expose: ["/about"] }), localized);
+    const response = await run(new Request("https://farm.test/console/fr/about.md"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-location")).toBe("/console/fr/about.md");
+    // The home page is not in the list.
+    const home = await run(new Request("https://farm.test/console/fr/index.md"));
+    expect(home.status).toBe(404);
   });
 });

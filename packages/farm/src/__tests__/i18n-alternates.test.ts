@@ -286,6 +286,7 @@ function createDevRenderer(
     getRoutes: () => new Map(),
     getLayouts: () => new Map(),
     getIsolatedClientBoundaryModules: () => new Set(),
+    toRoutePathname: (pathname: string) => pathname,
     matchMetadataRoute: () => null,
     matchMetadataImage: () => null,
     matchRoute: () => ({

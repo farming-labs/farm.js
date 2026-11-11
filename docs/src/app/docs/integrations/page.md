@@ -115,6 +115,7 @@ still require an adapter update.
 | Supabase SSR                                 | `instance`: a request-scoped factory that receives Farm's cookie-aware client options. Never share one SSR auth client between requests. |
 | AI                                           | `model` plus optional AI SDK function overrides. The model is already the injected provider object.                                      |
 | Trigger.dev and Inngest jobs                 | `runtime: trigger(...)` or `runtime: inngest(...)`. Farm talks to the selected external runtime and does not construct its SDK.          |
+| Jobs that run in the app                     | `runtime: local()`, or your own `defineJobsRuntime(...)`. `local()` runs tasks in the app and keeps runs in Farm storage.                |
 | Eve and Cloudflare Agents                    | `origin` for an external runtime, or Farm's managed development process. Agent SDKs remain application-owned.                            |
 
 Provider pages show the exact constructor and any integration-owned options that are still required.

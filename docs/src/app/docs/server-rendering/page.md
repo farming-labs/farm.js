@@ -303,9 +303,8 @@ isolated roots.
 
 ## React Server Components
 
-Turn on React Server Components in `farm.config.ts`. `farm dev`, `farm build`, and `farm start`
-then run Farm's RSC pipeline on the official `@vitejs/plugin-rsc`: pages and layouts are server
-components, and `"use client"` marks client components.
+Turn on server components in `farm.config.ts`. Pages and layouts are then server components, and
+`"use client"` marks client components.
 
 ```ts
 import { defineConfig } from "@farm.js/core";
@@ -317,17 +316,24 @@ export default defineConfig({
 });
 ```
 
-That is the whole setup. When the RSC packages are missing, `farm dev` and `farm build` install
-them with the app's package manager: `@farm.js/plugin` at the installed `@farm.js/core` version, and
-`@vitejs/plugin-rsc`, `react`, `react-dom` and `react-server-dom-webpack` at the exact versions the
-plugin requires. Commit the updated `package.json` and lockfile. In CI (`CI` is set) nothing is
-installed: `serverComponents: true` runs without RSC and warns, and an explicit `mode` fails with the
+`serverComponents: true` is the same as `serverComponents: { mode: "islands" }`, Farm's own engine.
+It needs no extra packages. To run React's own engine instead, opt out with
+`serverComponents: { mode: "rsc" }`: `farm dev`, `farm build`, and `farm start` then run Farm's RSC
+pipeline on the official `@vitejs/plugin-rsc`. When its packages are missing, `farm dev` and
+`farm build` install them with the app's package manager: `@farm.js/plugin` at the installed
+`@farm.js/core` version, and `@vitejs/plugin-rsc`, `react`, `react-dom` and
+`react-server-dom-webpack` at the exact versions the plugin requires. Commit the updated
+`package.json` and lockfile. In CI (`CI` is set) nothing is installed, and the build fails with the
 command to run. Set `FARM_SKIP_RSC_INSTALL=1` anywhere else the build must not change dependencies.
 Fast Refresh works in development without more setup; an app that installs `@vitejs/plugin-react`
 gets its own copy instead of Farm's.
 
-`serverComponents: true` is the same as `serverComponents: { mode: "rsc" }`, React's own server
-components engine. `{ mode: "islands" }` is Farm's own engine
+Earlier releases read `serverComponents: true` as `{ mode: "rsc" }`, and an app without the RSC
+packages ran without server components. Such an app now runs in islands mode: a component that
+uses state, effects, or event handlers needs `"use client"` (or a parent client component) to
+hydrate. Set `{ mode: "rsc" }` to keep React's engine.
+
+Islands mode is Farm's own engine
 ([RFC 0003](https://github.com/farming-labs/farm.js/blob/main/rfcs/0003-islands-server-components.md)),
 built on [islx](https://github.com/farming-labs/islx), its renderer-agnostic wire format:
 it renders on Farm's normal pipeline, sends static output once as HTML, and hydrates only client
@@ -410,15 +416,17 @@ The app's `vite` options and plugins apply as in other Farm apps, and so does bu
 The build goes to the deploy target's
 output directory, so `farm start` and platform deploys work unchanged.
 
-The RSC pipeline (`serverComponents: true` or `{ mode: "rsc" }`) does not run every Farm feature
+The RSC pipeline (`serverComponents: { mode: "rsc" }`) does not run every Farm feature
 yet:
 
 - `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, `context`, and
   `security.csp` decide what a request may see or receive. Running the app without them could
   expose what they protect, so `farm dev` and `farm build` stop with an error that names them,
   including when a layer (`extends`) sets them.
-- Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, and `observability`
-  are ignored, with a warning.
+- Farm `plugins` run only their [`client` hooks](/docs/plugins/client), in the browser, next to
+  the app's `src/client.ts`. The rest of a plugin, from `configure` to its `runtime` hooks and
+  routes, is ignored, and so are `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, and
+  `observability`, with a warning.
 
 Islands mode renders on Farm's own pipeline, so it runs all of these.
 
@@ -465,7 +473,7 @@ import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   experimental: {
-    serverComponents: true,
+    serverComponents: { mode: "rsc" },
     optimizedBoundary: true,
   },
 });

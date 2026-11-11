@@ -1,6 +1,7 @@
 export { installChunkErrorRecovery } from "./chunk-recovery";
 export { replayFarmQueuedInteraction, scheduleFarmIslandHydration } from "./island-runtime";
 export { createClientPluginManager } from "./plugin";
+export { createPluginlessClientRuntime } from "./pluginless-runtime";
 export { createFarmSearchParams, searchParamsToObject } from "../search-params";
 export { setFarmTrailingSlashPreference } from "../trailing-slash";
 export { setFarmBasePath, stripFarmBasePath } from "../base-path";
@@ -11,4 +12,5 @@ export { getFarmIslandValueHeaders } from "./island-value-protocol";
 export { createClientCancellation } from "../client-cancellation";
 export { applyFarmCacheInvalidations } from "../cache-invalidation";
 export { runFarmNavigationDelegates } from "./navigation-delegate";
+export { createFarmRouteAnnouncer } from "./route-announcer";
 export { farmMobileShellClient } from "../mobile/client";

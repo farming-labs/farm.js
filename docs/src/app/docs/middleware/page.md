@@ -12,9 +12,9 @@ Run request behavior before routes, pass request-scoped data to pages, and short
 
 Farm runs middleware in development and production builds. For every request, Farm finds matching `farm.config.ts` middleware entries first, then matching `src/app/**/middleware.ts` files from the root segment down to the route segment.
 
-Files in `public/` are served as static assets before any middleware or plugin runtime hook runs, so a guard never sees them. Serve a file that needs protection from an API route or page instead.
+Files in `public/` are served as static assets before any middleware or plugin runtime hook runs, so a guard never sees them. Serve a file that needs protection from an API route or page instead. A `GET` or `HEAD` for a public directory gets its `index.html` (`public/guide/index.html` answers `/guide` and `/guide/`); other methods reach middleware and routing like any path.
 
-Apps with `experimental.serverComponents` run both middleware forms through the same request
+Apps on the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`) run both middleware forms through the same request
 pipeline. Farm extracts an explicit `middleware` property, from `farm.config.ts` or from
 `defineConfig` from `@farm.js/plugin/rsc` in `vite.config.ts`, and the imports and local bindings it
 references into a server-only RSC module. This preserves handler closures, regular-expression
@@ -46,6 +46,18 @@ Data and headers written during middleware are request-scoped:
 Cookies set by multiple matching middleware handlers are accumulated into separate `Set-Cookie`
 headers. They are also preserved when the short-circuiting `Response` supplies its own cookies, so
 a returned response does not replace cookies already written through `ctx.cookies`.
+
+A middleware handler that throws (other than `redirect()` or `notFound()`) fails the request. In a
+production build outside the RSC pipeline, a request under the API base path, or
+any request in a `renderer: false` app, gets the JSON `500` a throwing API route gets. A page request gets the root `error.*` boundary
+inside the root layouts, or Farm's default error page, as a page that throws does, and a request
+for Markdown gets that document as Markdown. These responses are `private, no-store`, carry your
+`headers()` config but not headers the failed middleware run set, and Farm adds no error message
+or stack to them. As for a throwing API route, the error reaches the `middleware.error` event,
+plugin `runtime.error` hooks, and `onError` hooks with `phase: "runtime"`, and every
+`runtime.after` hook then sees the `500`. Development answers the same `private, no-store` JSON
+`500` under the API base path, and shows the error overlay for a page instead, also a
+`private, no-store` HTML `500`; the hooks run the same way for both.
 
 ## Route middleware
 
@@ -193,6 +205,10 @@ Multiple config middleware entries can match the same request. They run in array
 path has run, the config and file middleware matching the rewritten path runs too, as it would for a
 direct request. Integration guards, such as an auth integration's `protectedRoutes`, run for the
 rewritten path too. Each middleware runs at most once per request, so repeated rewrites cannot loop.
+
+A configured [`rewrites()`](/docs/configuration#route-rules) entry is applied before middleware, so
+only the middleware matching its destination runs, in development and production. Configured
+`redirects()` answer before middleware runs.
 
 ```ts
 import { defineConfig } from "@farm.js/core";

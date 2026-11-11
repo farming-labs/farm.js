@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 // The server components contract. Every test runs against the same app built with
 // { mode: "rsc" } and with { mode: "islands" } (playwright.server-components.config.ts).
@@ -151,19 +151,28 @@ test("a Suspense boundary streams its fallback first, then the content", async (
   await expect(page.getByTestId("slow-content")).toBeVisible();
 });
 
-test("client components before and inside slow Suspense content both hydrate", async ({ page }) => {
-  await page.goto("/stream", { waitUntil: "commit" });
+test("client components before and inside slow Suspense content both hydrate", async ({
+  page,
+  request,
+}) => {
+  // The slow content waits for this release instead of a timer, so the body streams until then.
+  const token = randomUUID();
+  const release = async () =>
+    expect((await request.get(`/stream?release=${token}`)).ok()).toBe(true);
+  await page.goto(`/stream?hold=${token}`, { waitUntil: "commit" });
   const early = page.getByRole("button", { name: /^Early: / });
-  // Click until the Early counter responds, and note whether the slow content had arrived then.
-  let slowArrivedFirst = true;
+  // Islands mode starts the client while the body streams, in development too: the Early counter
+  // works before the slow content is released. The RSC client starts once the stream ends.
+  if (mode !== "islands") await release();
   await expect(async () => {
     await early.click({ timeout: 100 });
     await expect(early).toHaveText(/^Early: [1-9]/, { timeout: 50 });
-    slowArrivedFirst = (await page.getByTestId("slow-content").count()) > 0;
   }).toPass({ intervals: [20], timeout: 10_000 });
-  // Islands mode starts the client while the body streams, in development too. The RSC client
-  // starts once the stream ends.
-  if (mode === "islands") expect(slowArrivedFirst).toBe(false);
+  if (mode === "islands") {
+    expect(await page.evaluate(() => document.readyState)).toBe("loading");
+    expect(await page.getByTestId("slow-content").count()).toBe(0);
+    await release();
+  }
 
   const late = page.getByRole("button", { name: /^Late: / });
   await expect(page.getByTestId("slow-content")).toBeVisible();
@@ -227,6 +236,32 @@ test("a navigation request gets the layouts it keeps as boundaries, and flush ma
   ).text();
   expect(hydrating).toContain('data-farm-layout-pattern="/context"');
   expect(hydrating).not.toContain("data-farm-layout-key");
+
+  // The header is the browser's word, so a layout that guards its pages still runs.
+  const keptGuard = JSON.stringify(["/", "/guarded"]);
+  for (const headers of [
+    { Accept: "text/html" },
+    { Accept: "text/html", "F-Layouts": keptGuard },
+  ]) {
+    const denied = await request.get("/guarded", { headers });
+    expect(denied.status()).toBe(404);
+    expect(await denied.text()).not.toContain("Guarded page");
+  }
+  const allowed = await request.get("/guarded", {
+    headers: { Accept: "text/html", "F-Layouts": keptGuard, "X-Guard": "allow" },
+  });
+  expect(allowed.status()).toBe(200);
+  const allowedHtml = await allowed.text();
+  expect(allowedHtml).toContain("Guarded page");
+  expect(allowedHtml).toContain('data-farm-layout-key="/guarded" data-farm-layout-kept="true"');
+  expect(allowedHtml).not.toContain("Guarded layout");
+  // Running a layout with a client island in it does not cost the segment.
+  const island = await (
+    await request.get("/action-layout", {
+      headers: { Accept: "text/html", "F-Layouts": JSON.stringify(["/", "/action-layout"]) },
+    })
+  ).text();
+  expect(island).toContain('data-farm-layout-key="/action-layout" data-farm-layout-kept="true"');
 
   // F-Stream: flush marks where each React flush ends, with the token from F-Flush.
   const streamed = await fetch(`${baseURL}/stream`, {
@@ -448,6 +483,73 @@ test("a client component calls a server action it received as a prop, and the pa
   expect(errors).toEqual([]);
 });
 
+test("a server action reads what route middleware put in its context", async ({ page }) => {
+  await page.goto("/action-middleware");
+  await hydrated(page);
+  await page.getByRole("button", { name: "Record user" }).click();
+  await expect(page.getByTestId("action-user")).toHaveText("Ada");
+});
+
+test("a server action updates the server layout around its page and keeps the layout's client state", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-layout");
+  await hydrated(page);
+  const count = async (id: string) =>
+    Number((await page.getByTestId(id).textContent())?.replace(/\D/g, ""));
+  const layout = await count("layout-count");
+  const button = page.getByRole("button", { name: /^Layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Layout clicks: 1");
+  await page.getByRole("button", { name: "Bump layout" }).click();
+  await expect(page.getByTestId("layout-count")).toHaveText(`Layout count: ${layout + 1}`);
+  await expect(button).toHaveText("Layout clicks: 1");
+  expect(errors).toEqual([]);
+});
+
+test("a server action that leaves its layout unchanged keeps what was typed there", async ({
+  page,
+}) => {
+  await page.goto("/action-layout");
+  await hydrated(page);
+  const pageCount = Number(
+    (await page.getByTestId("page-count").textContent())?.replace(/\D/g, ""),
+  );
+  // A form posts natively until the client runtime runs, and this click loads it.
+  const button = page.getByRole("button", { name: /^Layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Layout clicks: 1");
+  await expect(page.getByTestId("layout-streamed")).toBeVisible();
+  await page.getByLabel("Layout note").fill("still here");
+  await page.getByRole("button", { name: "Bump page" }).click();
+  await expect(page.getByTestId("page-count")).toHaveText(`Page count: ${pageCount + 1}`);
+  await expect(page.getByLabel("Layout note")).toHaveValue("still here");
+});
+
+test("a server route slot stays on the server, and its client component hydrates", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "the rsc pipeline does not render route slots");
+  const errors = collectErrors(page);
+  const scripts: Promise<string>[] = [];
+  page.on("response", (response) => {
+    if (response.request().resourceType() === "script")
+      scripts.push(response.text().catch(() => ""));
+  });
+  await page.goto("/slots");
+  await hydrated(page);
+  await expect(page.getByTestId("slot-note")).toHaveText("SERVER_SLOT_MARKER_6f1c");
+  const button = page.getByRole("button", { name: /^Slot clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Slot clicks: 1");
+  await page.waitForLoadState("networkidle");
+  expect(
+    (await Promise.all(scripts)).filter((text) => text.includes("SERVER_SLOT_MARKER")),
+  ).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test("a server action passed as a prop works before JavaScript loads", async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
@@ -632,6 +734,27 @@ test("navigation keeps the document title in sync, and back restores it", async 
   await expect(page).toHaveTitle("Server components contract");
 });
 
+test("a client navigation is announced to screen readers, and the first load is not", async ({
+  page,
+  request,
+}) => {
+  expect(await (await request.get("/")).text()).not.toContain("farm-route-announcer");
+  const errors = collectErrors(page);
+  await page.goto("/");
+  await hydrated(page);
+  const announcer = page.locator("#farm-route-announcer");
+  await expect(announcer).toHaveCount(0);
+  await page.getByRole("link", { name: "Meta", exact: true }).click();
+  await expect(announcer).toHaveText("Contract meta 42");
+  await expect(announcer).toHaveAttribute("aria-live", "assertive");
+  await expect(announcer).toHaveAttribute("aria-atomic", "true");
+  await page.goBack();
+  await expect(page).toHaveTitle("Server components contract");
+  await expect(announcer).toHaveText("Server components contract");
+  await expect(announcer).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
 test("the app's stylesheet loads", async ({ page }) => {
   await page.goto("/");
   const href = await page.locator('link[rel="stylesheet"]').first().getAttribute("href");
@@ -783,6 +906,58 @@ test("a link followed before the client runtime loads is a client navigation", a
   await expect(page.getByRole("heading", { name: "Timing", exact: true })).toBeVisible();
   expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test("a page that hydrates loads the router only when a navigation needs it", async ({ page }) => {
+  test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
+  const errors = collectErrors(page);
+  const routerRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("farm-client-router")) routerRequests.push(request.url());
+  });
+  await page.goto("/");
+  await hydrated(page);
+  expect(routerRequests).toEqual([]);
+  const increment = page.getByRole("button", { name: /Count: 5/ });
+  await increment.click();
+  await expect(page.getByRole("button", { name: /Count: 6/ })).toBeVisible();
+  expect(routerRequests).toEqual([]);
+
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  const link = page.getByRole("link", { name: "Stream", exact: true });
+  await link.hover();
+  await expect.poll(() => routerRequests.length).toBe(1);
+  await link.click();
+  await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(routerRequests).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test("a link still navigates when the router fails to load", async ({ page }) => {
+  test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
+  let aborted = 0;
+  await page.route("**/farm-client-router-*", (route) => {
+    aborted += 1;
+    return route.abort();
+  });
+  await page.goto("/");
+  await hydrated(page);
+  // The counter's click starts the client entry, which watches for link intent.
+  await page.getByRole("button", { name: /Count: 5/ }).click();
+  await expect(page.getByRole("button", { name: /Count: 6/ })).toBeVisible();
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  const link = page.getByRole("link", { name: "Stream", exact: true });
+  // A hover that fails leaves the page alone: it must not reload what the visitor is reading.
+  await link.hover();
+  await expect.poll(() => aborted).toBeGreaterThan(0);
+  await page.waitForLoadState("networkidle");
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  await link.click();
+  await expect(page).toHaveURL(/\/stream$/);
+  await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
+  // A new document: the browser navigated itself, without the router.
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(false);
 });
 
 test("a link still navigates when the client runtime fails to load", async ({ page, request }) => {

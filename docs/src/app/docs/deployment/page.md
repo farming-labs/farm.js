@@ -300,6 +300,14 @@ Nitro's official deploy docs list these runtime and provider families. Farm's fi
 
 Common preset names include `node-server`, `bun`, `deno-server`, `deno-deploy`, `aws-lambda`, `aws-amplify`, `azure-swa`, `cloudflare-pages`, `cloudflare-module`, `firebase-app-hosting`, `github-pages`, `gitlab-pages`, `netlify`, `netlify-edge`, `vercel`, `zeabur`, and `zerops`. Nitro can add or rename presets over time, so check Nitro's deploy docs when targeting a provider directly.
 
+Farm's Nitro version has no `vercel-edge` preset: Nitro replaced it with `vercel` on Fluid compute. Farm rejects `vercel-edge` as a `deploy.target`, `deploy.preset`, or `--preset` value when it resolves the config, before the build starts. Use the `vercel` target instead.
+
+## Files server code reads
+
+Server code can import a local file that it reads at runtime, such as a `.wasm` binary an API route imports without `@farm.js/wasm`. Farm deploys that file with the server code and keeps it out of the public assets: in `server/` for `node-server` and `bun`, in the function directory for `vercel` and `netlify`, and in the server output of other Nitro presets that run on Node.
+
+Edge presets (`cloudflare-pages`, `cloudflare-module`, `netlify-edge`) deploy no file to read, and Cloudflare Workers also refuse to compile WebAssembly from bytes. On those presets `farm build` fails and names the file. Load the module in the browser instead, with `@farm.js/wasm` or a `?url` import, or deploy that server code to a Node target.
+
 ## Build
 
 **Terminal**
@@ -382,12 +390,20 @@ Keep environment variables in the platform's environment manager or local `.env`
 Server values declared under `env.server` are validated when the app builds, but they are not
 stored in the build output. The production server reads them from its own environment when code
 calls `getEnv` or `serverEnv`, so set them wherever the server runs, and a restart picks up a
-rotated secret. On Cloudflare Workers, Farm also reads the worker's bindings and secrets. A value
-read at runtime keeps the type its parser produced at build time, such as a number or boolean. When a
-parser does more than convert the raw string to a string, number, boolean, or JSON value, such as
-splitting a list or scaling a number, Farm cannot repeat it at runtime, so that parsed value stays in
-the build output. Values declared under `env.public` are part of the client bundle, so never put a
-secret there.
+rotated secret. A value read at runtime keeps the type its parser produced at build time, such as a
+number or boolean. When a parser does more than convert the raw string to a string, number, boolean,
+or JSON value, such as splitting a list or scaling a number, Farm cannot repeat it at runtime, so that
+parsed value stays in the build output. Values declared under `env.public` are part of the client
+bundle, so never put a secret there.
+
+On Cloudflare Pages and Workers, server code reads the worker's vars and secrets through `getEnv`,
+`serverEnv`, and `process.env`, at module scope too, and storage mounts on a binding driver such as
+`cloudflare-kv-binding` read their binding. The Wrangler config Farm generates
+(`_worker.js/wrangler.json` for Pages, `server/wrangler.json` for Workers) has a compatibility date
+from before Cloudflare filled `process.env` by default, so Farm adds the
+`nodejs_compat_populate_process_env` flag to it. It leaves the flags alone when your own Wrangler
+config sets a date from `2025-04-01` on, which fills `process.env` already, or opts out with
+`nodejs_compat_do_not_populate_process_env`.
 
 ```ts
 export default defineConfig({

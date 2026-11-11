@@ -90,7 +90,7 @@ import {
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
-import { stripFarmBasePath } from "../base-path";
+import { applyFarmBasePath, stripFarmBasePath } from "../base-path";
 import { appendFarmRedirectQuery } from "../redirect-query";
 import { encodeConfigRouteSegment } from "../plugins/route-pattern";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
@@ -399,11 +399,20 @@ export class RouteManager {
     const routePathname = this.toRoutePathname(pathname);
     const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
     const pathParts = splitRoutePath(normalizedPath);
+    // Production looks a static route up by its exact path, so a path with an empty segment
+    // (`//about`, `/console//about`, `//`) reaches no static route; only dynamic routes,
+    // matched segment by segment, skip the empty segment.
+    const trimmedPathname = routePathname.replace(/\/+$/, "");
+    const hasEmptySegment =
+      trimmedPathname.includes("//") || (trimmedPathname === "" && routePathname.length > 1);
     // Find matching page route
     let matchedRoute: RouteEntry | null = null;
     let params: Record<string, string> = {};
 
     for (const routeEntry of this.routes.values()) {
+      if (hasEmptySegment && !routeEntry.route.segments.some((segment) => segment.isDynamic)) {
+        continue;
+      }
       const match = matchRouteParts(pathParts, routeEntry.route.segments);
       if (match.matches) {
         matchedRoute = routeEntry;
@@ -440,6 +449,12 @@ export class RouteManager {
 
   getRouteSlots(): Map<string, RouteSlotEntry> {
     return new Map(this.routeSlots);
+  }
+
+  /** The layouts that wrap a registered page, root first. */
+  getRouteLayouts(pattern: string): RouteEntry[] {
+    const routeEntry = this.routes.get(pattern);
+    return routeEntry ? this.findMatchingLayouts(splitRoutePath(pattern), routeEntry) : [];
   }
 
   /** Resolve route rules, inherited layouts, and the page export in precedence order. */
@@ -512,7 +527,7 @@ export class RouteManager {
   } | null {
     const i18n = this.getI18nConfig();
     const localeMatch = i18n ? resolveFarmLocalePath(pathname, i18n) : undefined;
-    const routePathname = localeMatch?.pathname || pathname;
+    const routePathname = localeMatch?.pathname || this.toRoutePathname(pathname);
     const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
     const urlParts = splitRoutePath(normalizedPath);
 
@@ -913,14 +928,26 @@ export class RouteManager {
         containerId: entry.containerId,
         interception: entry.interception,
         fallback: entry.fallback,
-        shouldHydrate: metadata.shouldHydrate,
+        // In islands mode a server slot stays on the server; its client components are islands.
+        shouldHydrate: metadata.shouldHydrate && (!islandsMode || metadata.isClientComponent),
         isClientComponent: metadata.isClientComponent,
         segments: entry.route.segments,
       };
     });
 
+    // A server slot's client components are islands, as a server page's are.
+    const slotPlans = islandsMode
+      ? Array.from(this.routeSlots.values()).map((entry) => ({
+          metadata: getClientModuleHydrationPlan(
+            entry.modulePath,
+            normalizedProjectRoot,
+            isolatedMode,
+            { ...planOptions, serverOwners: true },
+          ),
+        }))
+      : [];
     const isolatedClientBoundaryModules = new Set<string>();
-    for (const { metadata } of [...layoutEntries, ...routeEntries]) {
+    for (const { metadata } of [...layoutEntries, ...routeEntries, ...slotPlans]) {
       // A server-tree layout's client components load from its tree, as islands do.
       if (!metadata.hasIsolatedClientBoundaries && !metadata.serverTreeLayout) continue;
       for (const boundary of metadata.isolatedBoundaries) {
@@ -1630,7 +1657,8 @@ export class RouteManager {
     };
   }
 
-  private toRoutePathname(pathname: string): string {
+  /** A request pathname as routes see it: without the basePath and, with i18n, the locale. */
+  toRoutePathname(pathname: string): string {
     const i18n = this.getI18nConfig();
     // Locale stripping removes the basePath too; production strips it the same way.
     return i18n
@@ -1639,11 +1667,16 @@ export class RouteManager {
   }
 
   private localizeRedirectDestination(destination: string, locale?: string): string {
-    if (!locale || !destination.startsWith("/") || destination.startsWith("//")) {
+    if (!destination.startsWith("/") || destination.startsWith("//")) {
       return destination;
     }
     const i18n = this.getI18nConfig();
-    return i18n ? localizeFarmHref(destination, locale, i18n) : destination;
+    // Like the production entry: an app-relative destination stays inside the basePath.
+    return locale && i18n
+      ? localizeFarmHref(destination, locale, i18n)
+      : this.config.basePath
+        ? applyFarmBasePath(destination, this.config.basePath)
+        : destination;
   }
 
   private getI18nConfig(): ResolvedFarmI18nConfig | undefined {

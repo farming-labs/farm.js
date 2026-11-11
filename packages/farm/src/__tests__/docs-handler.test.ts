@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { resolveDocsConfig } from "../config";
 import {
@@ -18,6 +19,7 @@ import type { FarmDocsAPIOptions } from "../docs/api";
 import {
   createFarmDocsLastModifiedManifest,
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
+  resolveFarmDocsPageLastModified,
 } from "../docs/last-modified";
 import { resolveFarmDocsFontAssets } from "../docs/fonts";
 import { applyFarmCspHashesToPolicy, createFarmCspScriptHashes } from "../security";
@@ -320,8 +322,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('<meta property="og:description" content="Local docs">');
     expect(html).toContain('<meta property="og:url" content="http://farm.test/docs">');
     expect(html).toMatch(
-      /<meta property="og:image" content="http:\/\/farm\.test\/docs\/_social\/index\/opengraph-image\.svg\?v=[a-f0-9]{16}">/,
+      /<meta property="og:image" content="http:\/\/farm\.test\/docs\/_social\/index\/opengraph-image\.png\?v=[a-f0-9]{16}">/,
     );
+    expect(html).toContain('<meta property="og:image:type" content="image/png">');
     expect(html).toContain('<meta property="og:image:width" content="1200">');
     expect(html).toContain('<meta property="og:image:height" content="630">');
     expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
@@ -435,28 +438,29 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="toc-empty"');
   });
 
-  it("renders versioned page-specific docs social images with cache validators", async () => {
+  it("renders versioned page-specific docs social images as PNG with cache validators", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
     const pageResponse = await handler(new Request("http://farm.test/docs/guide"));
     const html = (await pageResponse?.text()) || "";
     const imageUrl = html.match(/property="og:image" content="([^"]+)"/)?.[1];
 
+    // X, LinkedIn, Facebook and Slack ignore an SVG og:image.
     expect(imageUrl).toMatch(
-      /^http:\/\/farm\.test\/docs\/_social\/guide\/opengraph-image\.svg\?v=[a-f0-9]{16}$/,
+      /^http:\/\/farm\.test\/docs\/_social\/guide\/opengraph-image\.png\?v=[a-f0-9]{16}$/,
     );
+    expect(html).toContain('<meta property="og:image:type" content="image/png">');
+    expect(html).toContain(`<meta name="twitter:image" content="${imageUrl}">`);
 
     const imageResponse = await handler(new Request(imageUrl!));
     expect(imageResponse?.status).toBe(200);
-    expect(imageResponse?.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+    expect(imageResponse?.headers.get("content-type")).toBe("image/png");
     expect(imageResponse?.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(imageResponse?.headers.get("x-content-type-options")).toBe("nosniff");
-    const image = await imageResponse?.text();
-    expect(image).toContain('<?xml version="1.0" encoding="UTF-8"?>');
-    expect(image).toContain('<svg xmlns="http://www.w3.org/2000/svg"');
-    expect(image).toContain('role="img"');
-    expect(image).toContain("Guide — Farm.js documentation");
-    expect(image).toContain("PRODUCT ARCHITECTURE");
+    const png = new Uint8Array(await imageResponse!.arrayBuffer());
+    expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const view = new DataView(png.buffer, png.byteOffset);
+    expect([view.getUint32(16), view.getUint32(20)]).toEqual([1200, 630]);
 
     const etag = imageResponse?.headers.get("etag");
     const notModified = await handler(
@@ -467,8 +471,21 @@ describe("createFarmDocsHandler", () => {
 
     const head = await handler(new Request(imageUrl!, { method: "HEAD" }));
     expect(head?.status).toBe(200);
-    expect(head?.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+    expect(head?.headers.get("content-type")).toBe("image/png");
     expect(await head?.text()).toBe("");
+
+    // The SVG source stays available, with its own validator.
+    const svgUrl = imageUrl!.replace("opengraph-image.png", "opengraph-image.svg");
+    const svgResponse = await handler(new Request(svgUrl));
+    expect(svgResponse?.status).toBe(200);
+    expect(svgResponse?.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+    expect(svgResponse?.headers.get("etag")).not.toBe(etag);
+    const image = await svgResponse?.text();
+    expect(image).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+    expect(image).toContain('<svg xmlns="http://www.w3.org/2000/svg"');
+    expect(image).toContain('role="img"');
+    expect(image).toContain("Guide — Farm.js documentation");
+    expect(image).toContain("PRODUCT ARCHITECTURE");
   });
 
   it("supports docs-wide opt-out and page-level social image overrides", async () => {
@@ -506,6 +523,9 @@ describe("createFarmDocsHandler", () => {
     expect(disabledHtml).not.toContain('name="twitter:card"');
     expect(
       await disabledHandler(new Request("http://farm.test/docs/_social/index/opengraph-image.svg")),
+    ).toBeNull();
+    expect(
+      await disabledHandler(new Request("http://farm.test/docs/_social/index/opengraph-image.png")),
     ).toBeNull();
   });
 
@@ -719,6 +739,79 @@ describe("createFarmDocsHandler", () => {
     expect(new Date(manifest.pages["page.md"]).toISOString()).toBe(commitDate);
     // Eight synchronous git spawns, which are slow enough on Windows to pass the
     // default timeout.
+  }, 30_000);
+
+  it("dates no page with the commit a shallow clone's history stops at", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-shallow-dates-"));
+    const origin = path.join(root, "origin");
+    const git = (cwd: string, args: string[], date?: string) =>
+      execFileSync("git", args, {
+        cwd,
+        stdio: "ignore",
+        env: date ? { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : undefined,
+      });
+    const commit = async (files: Record<string, string>, date: string) => {
+      for (const [file, contents] of Object.entries(files)) {
+        await fs.mkdir(path.dirname(path.join(origin, file)), { recursive: true });
+        await fs.writeFile(path.join(origin, file), contents);
+      }
+      git(origin, ["add", "."]);
+      git(origin, ["commit", "-m", `change at ${date}`], date);
+    };
+
+    try {
+      await fs.mkdir(origin, { recursive: true });
+      git(origin, ["init"]);
+      git(origin, ["config", "user.email", "farm@example.com"]);
+      git(origin, ["config", "user.name", "Farm Docs"]);
+      await commit(
+        { "docs/old.md": "# Old", "docs/edited.md": "# Edited" },
+        "2026-01-05T10:00:00.000Z",
+      );
+      // The clone's history stops here: Git lists every file as added by this commit.
+      await commit({ "README.md": "readme" }, "2026-03-05T10:00:00.000Z");
+      const editedDate = "2026-05-05T10:00:00.000Z";
+      await commit({ "docs/edited.md": "# Edited again" }, editedDate);
+
+      const clone = path.join(root, "clone");
+      execFileSync("git", ["clone", "--quiet", "--depth", "2", pathToFileURL(origin).href, clone], {
+        stdio: "ignore",
+      });
+      const docsDir = path.join(clone, "docs");
+
+      const manifest = createFarmDocsLastModifiedManifest(docsDir, { fallback: "now" });
+      expect(Object.keys(manifest.pages)).toEqual(["edited.md"]);
+      expect(new Date(manifest.pages["edited.md"]).toISOString()).toBe(editedDate);
+      expect(manifest.unknown).toEqual(["old.md"]);
+
+      // Read from Git at runtime, as a self-hosted server does.
+      expect(resolveFarmDocsPageLastModified(docsDir, path.join(docsDir, "old.md"), {})).toBe(
+        undefined,
+      );
+      // Read from the manifest bundled with copied content, where file times are the copy's.
+      const bundledDir = path.join(root, "bundled");
+      await fs.cp(docsDir, bundledDir, { recursive: true });
+      await fs.writeFile(
+        path.join(bundledDir, FARM_DOCS_LAST_MODIFIED_MANIFEST),
+        JSON.stringify(manifest),
+      );
+      expect(resolveFarmDocsPageLastModified(bundledDir, path.join(bundledDir, "old.md"), {})).toBe(
+        undefined,
+      );
+      expect(
+        new Date(
+          resolveFarmDocsPageLastModified(bundledDir, path.join(bundledDir, "edited.md"), {})!,
+        ).toISOString(),
+      ).toBe(editedDate);
+      // A frontmatter date still applies.
+      expect(
+        resolveFarmDocsPageLastModified(bundledDir, path.join(bundledDir, "old.md"), {
+          lastModified: "2025-12-01",
+        }),
+      ).toBe("2025-12-01");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   }, 30_000);
 
   it("renders docs-style breadcrumbs only for nested docs pages", async () => {

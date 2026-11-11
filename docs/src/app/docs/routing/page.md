@@ -246,6 +246,8 @@ schemes such as `customapp:open` are validated from their URI grammar and work w
 Viewport prefetch uses a short scroll guard and is cancelled if its link unmounts before the guard
 expires. Intent prefetches are deduplicated while active; after an attempt settles, a later hover,
 focus, or touch can retry while successful route data remains deduplicated by the router cache.
+In a production islands build, the client router loads when a viewport-prefetch link first nears
+the viewport, or on the first link hover, focus, tap, or navigation, and then prefetches.
 The development page-data router reuses a successfully decoded JSON prefetch response when
 navigation overlaps it with the same URL, interception origin, and active layout chain.
 Refreshes and different contexts fetch independently, and failed prefetches are retried by
@@ -260,6 +262,12 @@ repopulating it. Cancelling navigation does not abort a shared background prefet
 When a production HTML request redirects, Farm hands the original URL to a full document
 navigation so the browser preserves the redirect destination, fragments, and push/replace history.
 Prefetching a redirect never navigates the page or caches destination HTML under the original URL.
+When development page data redirects (a `redirect()` or thrown 3xx `Response` from the page, its
+layouts, metadata, or route data, or route middleware that redirects), the router continues the
+navigation at the target instead of reloading the document. The target takes the history entry
+the redirecting URL would have had and inherits its fragment unless the target has its own; a
+cross-origin target, or a chain of more than 20 redirects, becomes a document navigation.
+Prefetching such a link neither caches nor reports the redirect.
 A same-origin link whose response is not HTML, such as an RSS feed, JSON, or a file served by an API
 route, is handed to the browser the same way, so it opens as its own document. Prefetching such a
 link never caches it as page HTML.
@@ -432,7 +440,7 @@ refresh after a server action, same-page hash links, and document navigations (o
 locale switches, routes that need a full page load), which a WebView's own navigation callback
 sees. A delegate that throws is logged and treated as declining. `delegateNavigation` returns a
 function that removes the delegate, and it is also exported from `@farm.js/core/client`. Apps
-on the RSC pipeline (`experimental.serverComponents`) run the RSC router, which offers link clicks,
+on the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`) run the RSC router, which offers link clicks,
 router `push` and `replace`, and redirects after a server action; it has no client entry, so
 register the delegate from a client component.
 
@@ -479,6 +487,31 @@ export function DocsSidebar() {
 ```
 
 Use stable keys per scroll container. If two elements share a key, the latest mounted element owns that stored position.
+
+## Route announcements
+
+A client navigation does not load a new document, so a screen reader has nothing to read on its
+own. Farm announces the page instead. After a navigation renders, Farm puts the page's title into a
+visually hidden live region (`aria-live="assertive"`, `aria-atomic="true"`) at the end of `<body>`.
+When the title is empty it reads the first `h1`, then the pathname.
+
+- The first load is not announced: the screen reader reads that document itself.
+- A navigation is announced when its pathname or title changed. Back and forward are announced.
+  A hash change, or a `router.refresh()` or search-param change that keeps the title, is not.
+- The region is created on the first client navigation, never in server HTML, so SSR output and
+  hydration are unchanged.
+- It works the same in every renderer, in islands mode, and with the RSC pipeline. There is no
+  option to configure.
+- Focus stays where it was. Farm does not move focus after a navigation.
+- Pages of the built-in docs engine navigate with their own runtime and are not announced yet.
+
+Give each page its own `metadata.title` so the announcement says where the user landed:
+
+```tsx
+export const metadata = { title: "Billing | Acme" };
+```
+
+End-to-end tests can read the announcement from `#farm-route-announcer`.
 
 ## Route data cache
 
@@ -1450,7 +1483,7 @@ export async function GET(request: Request) {
 
 Outside development the response defaults to `cache-control: public, immutable, no-transform, max-age=31536000`. Pass a lowercase `cache-control` header when the image can change, for example `headers: { "cache-control": "public, max-age=300" }`.
 
-`@farm.js/core/og` is server-only. Importing it from a client component fails the build, and the development request, with an error that names the importing module. Importing it from server code without `@vercel/og` installed fails the same way and names the install command. On Node presets, including `node-server` and Vercel Functions, Farm copies `@vercel/og` and its wasm and font files into the server output whenever the server bundle imports it. Edge and Cloudflare Worker presets are not supported yet.
+`@farm.js/core/og` is server-only. Importing it from a client component fails the build, and the development request, with an error that names the importing module. Importing it from server code without `@vercel/og` installed fails the same way and names the install command. On Node presets, including `node-server` and Vercel Functions, Farm copies `@vercel/og` and its wasm and font files into the server output whenever the server bundle imports it. On the Cloudflare Worker presets, `cloudflare-pages` and `cloudflare-module`, Farm bundles the `@vercel/og` edge build into the Worker, loads its wasm files as precompiled modules, and inlines its default font. On `netlify-edge`, Farm bundles the same edge build into the edge function and inlines its wasm files and default font, so Netlify does not bundle `@vercel/og` from `node_modules`. Other edge presets are not supported. Farm's Nitro version has no `vercel-edge` preset, so deploy to Vercel with the `vercel` preset, which runs Node functions.
 
 ### Other meta tags
 

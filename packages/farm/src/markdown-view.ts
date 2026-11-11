@@ -222,11 +222,12 @@ function markdownCodeSpan(value: string): string {
 /** The page's forms as JSON, linked back to the page and its Markdown. */
 function selectFarmPageActionsView(
   markdownPath: string,
+  pagePath: string | undefined,
   actions: readonly FarmPageFormAction[],
   headers: Headers,
 ): FarmMarkdownView {
   headers.set("Content-Type", "application/json; charset=utf-8");
-  const page = markdownPath === "/index.md" ? "/" : markdownPath.replace(/\.md$/, "");
+  const page = pagePath ?? (markdownPath === "/index.md" ? "/" : markdownPath.replace(/\.md$/, ""));
   return {
     status: 200,
     body: `${JSON.stringify({ page, markdown: markdownPath, actions }, null, 2)}\n`,
@@ -393,6 +394,8 @@ export function createFarmMarkdownViewResponse(options: {
   status: number;
   headers: Headers;
   markdownPath: string;
+  /** The page `markdownPath` mirrors; `<prefix>/index.md` mirrors `<prefix>`. */
+  pagePath?: string;
   actions?: readonly FarmPageFormAction[];
 }): Response {
   const url = options.requestUrl ?? new URL(options.request.url);
@@ -400,7 +403,12 @@ export function createFarmMarkdownViewResponse(options: {
     options.status >= 400
       ? { status: options.status, body: options.markdown }
       : url.searchParams.has("actions")
-        ? selectFarmPageActionsView(options.markdownPath, options.actions ?? [], options.headers)
+        ? selectFarmPageActionsView(
+            options.markdownPath,
+            options.pagePath,
+            options.actions ?? [],
+            options.headers,
+          )
         : selectFarmMarkdownView(options.markdown, url.searchParams, options.markdownPath);
   let status = view.status === 200 ? options.status : view.status;
   // Our ETags are always weak, so no entity-tag can satisfy If-Match's strong

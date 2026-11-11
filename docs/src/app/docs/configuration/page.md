@@ -512,7 +512,8 @@ with each page's metadata title and description, linking to its [Markdown mirror
 when one is exposed. An options object sets the `title` and `summary` (the root layout's metadata by
 default), adds `details` Markdown, and narrows the list with `include` and `exclude` route patterns,
 which use the same syntax as `md.expose`. Dynamic routes are left out because they have no single
-URL, and so are pages a path-specific guard covers, as for the [sitemap](#sitemap).
+URL, and so are pages a path-specific guard covers, as for the [sitemap](#sitemap). Links use the
+root layout's `metadataBase`, or the request's origin when it has none, as for the sitemap.
 
 It also serves `/llms-full.txt`: the same header, then a block per listed page with its title, URL,
 and description, separated by `---`. Pages with an exposed Markdown mirror get it inlined; a page
@@ -592,7 +593,8 @@ properties the builder does not model, for example `{ ...jsonLd.product(input), 
 
 Left unset, `sitemap` serves `/sitemap.xml` listing every static page with a `<lastmod>`: the time
 the page's file last changed, read when the server builds. Dynamic routes, pages whose metadata
-says `robots: { index: false }`, pages behind a route [`guard`](/docs/routing#route-guards), and
+says `robots: { index: false }` (their own, or a layout's when the page sets no `robots`), pages
+behind a route [`guard`](/docs/routing#route-guards), and
 pages a guard written for their path covers are left out: a `middleware.ts` in the page's folder or
 a parent below the root, a config middleware `matcher` that names the path, or an integration's
 `protectedRoutes`. Guards that cover every path (a root `middleware.ts`, middleware without a
@@ -628,7 +630,7 @@ Left unset, `mcp` serves a read-only [MCP](https://modelcontextprotocol.io) serv
 | `read_page`    | One page as Markdown, from its [Markdown mirror](/docs/markdown), by path or URL. |
 
 The pages are the static pages `llms.txt` and the sitemap list that have a Markdown mirror: dynamic
-routes, pages whose metadata says `robots: { index: false }`, and pages a path-specific guard
+routes, pages whose metadata says `robots: { index: false }` (or inherits it from a layout), and pages a path-specific guard
 covers (see [Sitemap](#sitemap)) are left out, and `read_page` answers only for a listed page; `md.expose`
 leaves out more. Pages are read the way `llms-full.txt` reads them, as a fresh request without the
 caller's cookies or credentials, so a page a root middleware or plugin `runtime.before` hook keeps
@@ -650,8 +652,8 @@ The app's own MCP always wins, in development and in production alike. The defau
   [docs engine](/docs/docs-engine) does for its own MCP endpoint.
 
 With the docs engine enabled, `mcp` is off by default, since the docs engine serves `/mcp`
-itself. `mcp: false` turns it off. React Server Components apps (`experimental.serverComponents`)
-don't serve it yet.
+itself. `mcp: false` turns it off. Apps on the RSC pipeline
+(`experimental.serverComponents: { mode: "rsc" }`) don't serve it yet.
 
 ### AI crawlers
 
@@ -882,8 +884,8 @@ the boundaries introduced by the incoming fragment. Superseded navigation work i
 can hydrate stale HTML.
 
 This flag does not enable RSC, change the meaning of `"use client"`, or make Server Components part
-of the wire format. When `experimental.serverComponents` is enabled, the RSC transport remains the
-owner and Farm ignores isolated client hydration. Treat `"enabled"` as an experimental performance
+of the wire format. On the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`), the RSC
+transport remains the owner and Farm ignores isolated client hydration. Treat `"enabled"` as an experimental performance
 option and measure the route's client JavaScript and interaction cost before adopting it broadly.
 The maintained benchmark includes equivalent RSC controls rather than assuming the non-RSC path is
 faster.
@@ -1138,8 +1140,8 @@ Customize both paths through `server.health`, or set `health: false` when an ada
 
 Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.
 
-Server actions run on the React Server Components pipeline, which `experimental.serverComponents`
-turns on (see [React Server Components](/docs/server-rendering#react-server-components)).
+Server actions run with server components, which `experimental.serverComponents` turns on (see
+[React Server Components](/docs/server-rendering#react-server-components)).
 `experimental.serverActions` without `serverComponents` does not make server functions callable
 from the browser, and Farm keeps rejecting client imports of server-function modules.
 
@@ -1237,8 +1239,16 @@ Rewrites use after-files semantics in development and production: an existing Fa
 integration, docs, image, or metadata route wins, and the rewrite is considered only as a fallback.
 A rewrite destination on another origin is proxied: Farm forwards the request there and returns the
 upstream response, in development and production.
+Both modes handle a request in the same order: redirects first, before any route or middleware;
+then rewrites; then app middleware; then the route. An internal rewrite is routed as a direct
+request for its destination would be, so the destination's middleware and its page or API route
+answer it, and middleware for the requested path does not run.
+With a `basePath`, sources match the path below it, as routes do: `/old` matches a request for
+`/console/old`. An internal redirect destination is sent with the `basePath`, so `/new` redirects to
+`/console/new`; a destination that already starts with it is kept.
 Configured response headers are applied after route handlers in both modes, so they win when the
-same header is returned by a handler. `Link` is additive: handler and configured link values are
+same header is returned by a handler. They match the requested path and also apply to redirects
+and middleware responses. `Link` is additive: handler and configured link values are
 merged instead of replacing one another. `Set-Cookie` is also additive, and each handler or
 configured cookie remains a separate response header.
 
@@ -1288,6 +1298,8 @@ on either, is cached on the CDN. The rest are sent `Cache-Control: private, no-s
 set their own.
 
 API routes remain same-origin by default in development and production. Add `cors` only to route patterns that intentionally form a cross-origin browser API.
+
+A `cors` rule admits JSON from another origin, not form or `text/plain` bodies: an endpoint whose body schema is JSON answers those with `415` when they come from another origin. See [Body and query input](/docs/api-routes#body-and-query-input).
 
 A `cors` rule answers a browser preflight (`OPTIONS` with `Origin` and `Access-Control-Request-Method`) with `204` before middleware and routes run. Every other `OPTIONS` request reaches app middleware and the route: an API route's `OPTIONS` export, or `405` with an `Allow` header when it has none. `farm dev` behaves the same way. Vite's own development requests (modules, `/@vite/client`, `/@fs/`) keep Vite's default CORS for `localhost` origins. An app that sets `vite.server.cors` hands CORS for every development request back to Vite.
 

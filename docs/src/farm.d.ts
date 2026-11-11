@@ -92,6 +92,7 @@ export type RoutePath =
   | "/docs/plugins"
   | "/docs/plugins/analyzer"
   | "/docs/plugins/blyp"
+  | "/docs/plugins/bot"
   | "/docs/plugins/client"
   | "/docs/plugins/content"
   | "/docs/plugins/create-plugin"
@@ -134,7 +135,8 @@ export type RoutePath =
   | "/docs/themes"
   | "/docs/upgrading"
   | "/privacy"
-  | "/telemetry";
+  | "/telemetry"
+  | "/terms";
 export type RoutePattern =
   | "/"
   | "/about"
@@ -215,6 +217,7 @@ export type RoutePattern =
   | "/docs/plugins"
   | "/docs/plugins/analyzer"
   | "/docs/plugins/blyp"
+  | "/docs/plugins/bot"
   | "/docs/plugins/client"
   | "/docs/plugins/content"
   | "/docs/plugins/create-plugin"
@@ -257,7 +260,8 @@ export type RoutePattern =
   | "/docs/themes"
   | "/docs/upgrading"
   | "/privacy"
-  | "/telemetry";
+  | "/telemetry"
+  | "/terms";
 export type RouteModulePattern =
   | "/"
   | "/about"
@@ -338,6 +342,7 @@ export type RouteModulePattern =
   | "/docs/plugins"
   | "/docs/plugins/analyzer"
   | "/docs/plugins/blyp"
+  | "/docs/plugins/bot"
   | "/docs/plugins/client"
   | "/docs/plugins/content"
   | "/docs/plugins/create-plugin"
@@ -380,7 +385,8 @@ export type RouteModulePattern =
   | "/docs/themes"
   | "/docs/upgrading"
   | "/privacy"
-  | "/telemetry";
+  | "/telemetry"
+  | "/terms";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;

@@ -1191,10 +1191,42 @@ describe("resolveDeployConfig", () => {
   });
 
   it("keeps a same-platform configured preset under a CLI target override", () => {
-    const deploy = resolveDeployConfig({ deploy: { preset: "vercel-edge" } }, { target: "vercel" });
+    const deploy = resolveDeployConfig(
+      { deploy: { preset: "netlify-edge" } },
+      { target: "netlify" },
+    );
 
-    expect(deploy.target).toBe("vercel");
-    expect(deploy.preset).toBe("vercel-edge");
+    expect(deploy.target).toBe("netlify");
+    expect(deploy.preset).toBe("netlify-edge");
+  });
+
+  it.each([
+    ["deploy.preset", { deploy: { preset: "vercel-edge" } }, {}],
+    ["top-level preset", { preset: "vercel-edge" }, {}],
+    ["preset override", {}, { preset: "vercel-edge" }],
+  ] as const)("rejects the vercel-edge preset from %s", (_source, config, overrides) => {
+    // Farm's Nitro has no vercel-edge preset: the build used to fail deep in Nitro with
+    // "Nitro entry is missing! Is "vercel-edge" preset correct?".
+    expect(() => resolveDeployConfig(config, overrides)).toThrow(
+      'Deploy preset "vercel-edge" is not supported: Farm\'s Nitro version has no vercel-edge preset. Use the "vercel" preset instead',
+    );
+  });
+
+  it.each([
+    ["deploy.target", { deploy: { target: "vercel-edge" } }, {}],
+    ["target override", {}, { target: "vercel-edge" }],
+  ] as const)("rejects the vercel-edge target from %s", (_source, config, overrides) => {
+    // An unmapped target fell back to a node-server build in .farm/.output, so a Vercel Edge
+    // deployment silently shipped a Node server.
+    expect(() => resolveDeployConfig(config, overrides)).toThrow(
+      'Deploy target "vercel-edge" is not supported: Farm\'s Nitro version has no vercel-edge preset. Use the "vercel" target instead',
+    );
+  });
+
+  it("rejects a vercel-edge preset while resolving the app config", async () => {
+    await expect(
+      resolveConfig({ deploy: { preset: "vercel-edge" } }, "production"),
+    ).rejects.toThrow('Deploy preset "vercel-edge" is not supported');
   });
 
   it("respects an explicitly configured output directory under a preset override", () => {

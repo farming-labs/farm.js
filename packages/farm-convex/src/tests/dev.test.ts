@@ -1,8 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
+import { spawnSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 
 import {
@@ -11,24 +12,38 @@ import {
   resolveDevOptions,
   startConvexDev,
   stopConvexDev,
+  stopConvexProcess,
 } from "../dev.js";
 
 import type { ConvexDevState } from "../types.js";
 
-const FAKE_CONVEX = `#!/bin/sh
-echo "$@" > "$(dirname "$0")/../../arguments.txt"
-echo "Convex functions ready!"
-echo "function failed" >&2
-trap 'echo stopped > "$(dirname "$0")/../../stopped.txt"; exit 0' INT
-while true; do sleep 0.05; done
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  spawnSync: vi.fn(),
+}));
+
+// Runs in the app's directory, like convex dev.
+const FAKE_CONVEX = `const { writeFileSync } = require("node:fs");
+process.on("SIGINT", () => {
+  writeFileSync("stopped.txt", "stopped\\n");
+  process.exit(0);
+});
+writeFileSync("arguments.txt", process.argv.slice(2).join(" ") + "\\n");
+console.log("Convex functions ready!");
+console.error("function failed");
+setInterval(() => {}, 1000);
 `;
 
+// The directory name has a space, which a Windows cmd.exe shim would split apart.
 function createAppWithFakeConvex(): string {
-  const root = mkdtempSync(path.join(tmpdir(), "farm-convex-dev-"));
-  const binaryDirectory = path.join(root, "node_modules", ".bin");
-  mkdirSync(binaryDirectory, { recursive: true });
-  writeFileSync(path.join(binaryDirectory, "convex"), FAKE_CONVEX);
-  chmodSync(path.join(binaryDirectory, "convex"), 0o755);
+  const root = mkdtempSync(path.join(tmpdir(), "farm convex dev "));
+  const packageDirectory = path.join(root, "node_modules", "convex");
+  mkdirSync(path.join(packageDirectory, "bin"), { recursive: true });
+  writeFileSync(
+    path.join(packageDirectory, "package.json"),
+    JSON.stringify({ name: "convex", bin: { convex: "bin/main.js" } }),
+  );
+  writeFileSync(path.join(packageDirectory, "bin", "main.js"), FAKE_CONVEX);
   return root;
 }
 
@@ -71,6 +86,42 @@ describe("isDeploymentChosen", () => {
   it("treats a deployment from the environment as chosen", () => {
     vi.stubEnv("CONVEX_AGENT_MODE", "anonymous");
     expect(isDeploymentChosen(mkdtempSync(path.join(tmpdir(), "farm-convex-env-")))).toBe(true);
+  });
+});
+
+describe("stopConvexProcess", () => {
+  afterEach(() => vi.mocked(spawnSync).mockReset());
+
+  function fakeChild() {
+    return { pid: 4321, kill: vi.fn() } as unknown as ChildProcess & { kill: Mock };
+  }
+
+  it("ends the whole process tree with taskkill on Windows", () => {
+    vi.mocked(spawnSync).mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
+    const child = fakeChild();
+    stopConvexProcess(child, "win32");
+    expect(spawnSync).toHaveBeenCalledWith("taskkill", ["/pid", "4321", "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("still ends convex itself when taskkill cannot run", () => {
+    vi.mocked(spawnSync).mockReturnValue({
+      status: null,
+      error: new Error("spawnSync taskkill ENOENT"),
+    } as unknown as ReturnType<typeof spawnSync>);
+    const child = fakeChild();
+    stopConvexProcess(child, "win32");
+    expect(child.kill).toHaveBeenCalledWith("SIGINT");
+  });
+
+  it("interrupts convex dev on macOS and Linux", () => {
+    const child = fakeChild();
+    stopConvexProcess(child, "linux");
+    expect(spawnSync).not.toHaveBeenCalled();
+    expect(child.kill).toHaveBeenCalledWith("SIGINT");
   });
 });
 

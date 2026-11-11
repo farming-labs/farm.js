@@ -2,6 +2,8 @@
 import { createElement as h } from "react";
 
 export { KitProvider, KitValue } from "./provider.js";
+export * from "./hooks.js";
+export * from "./card.js";
 
 export async function KitQuote({ topic }) {
   await Promise.resolve();

@@ -1,5 +1,5 @@
 /**
- * React Server Components from farm.config: with `experimental.serverComponents: true`, `farm dev`
+ * React Server Components from farm.config: with `experimental.serverComponents: { mode: "rsc" }`, `farm dev`
  * and `farm build` run the RSC pipeline of `@farm.js/plugin/rsc` on the official
  * `@vitejs/plugin-rsc`, configured from the Farm config, instead of Farm's own renderer. Pages and
  * layouts are server components by default and `"use client"` marks client components.
@@ -12,11 +12,16 @@ import { pathToFileURL } from "node:url";
 import type { InlineConfig, ViteDevServer } from "vite";
 import { createFarmDevLoopbackPlugin } from "./server/dev-loopback";
 import { loadTailwindVitePlugin } from "./build/tailwind";
+import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
 import { resolveFarmPlatform } from "./desktop/config";
 import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
 import { loadFarmReactPlugin } from "./react-refresh";
 import { resolveDeployOutputPath } from "./config";
-import { FARM_RSC_INSTALL_HINT, findFarmAppPackageDir } from "./server-components-status";
+import {
+  FARM_RSC_INSTALL_HINT,
+  findFarmAppPackageDir,
+  resolveFarmRscCheckConfig,
+} from "./server-components-status";
 
 export {
   FARM_RSC_PACKAGES,
@@ -167,10 +172,30 @@ export async function createFarmRscViteConfig(
         : platform === "mobile"
           ? "inline"
           : undefined;
+  // The browser half of the app's plugins (a layer's come first) and its src/client.ts, which
+  // the browser entry starts as Farm's other entries do. RSC runs no other plugin hook yet.
+  const layered = await resolveFarmRscCheckConfig(
+    userConfig,
+    root,
+    options.command === "build" ? "production" : "development",
+  );
+  const clientPluginEntry = generateFarmClientPluginEntryCode(
+    layered?.plugins,
+    root,
+    typeof userConfig.srcDir === "string" ? userConfig.srcDir : "src",
+    layered?.publicRuntimeConfig ?? {},
+    // The RSC entry hands navigations to a mobile shell itself.
+    "web",
+  );
   const farmConfig = pluginRsc.defineConfig({
     ...rscConfig,
     ...(mobileClient ? { mobileClient } : {}),
-    experimental: { ...userConfig.experimental, serverComponents: true },
+    clientPlugins: {
+      empty: clientPluginEntry.empty,
+      imports: clientPluginEntry.imports,
+      registrations: clientPluginEntry.registrations,
+    },
+    experimental: { ...userConfig.experimental, serverComponents: { mode: "rsc" } },
     port: options.port ?? userConfig.server?.port,
     plugins: [
       ...(options.command === "serve" && platform === "desktop"

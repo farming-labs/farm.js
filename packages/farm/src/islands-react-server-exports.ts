@@ -221,25 +221,28 @@ function resolveSource(file: string, source: string): string | null {
   return resolveFarmPackageDefaultEntry(file, source);
 }
 
-/**
- * Where `name`, as `file` exports it, comes from: `"client"` for a `"use client"` module,
- * `"server"` for any other module that defines it, undefined when that cannot be told (not found,
- * CommonJS, too deep). Follows re-exports (`export { x } from`, `export * from`) and local names
- * bound by imports (`import { x } from "./x.js"; export { x }`), through relative files and
- * packages.
- */
-export function traceFarmExport(
-  file: string,
-  name: string,
-  depth = 0,
-): "client" | "server" | undefined {
+interface TracedExport {
+  kind: "client" | "server";
+  /** The module that defines the name (the `"use client"` module for a client name). */
+  file: string;
+}
+
+function traceExport(file: string, name: string, depth: number): TracedExport | undefined {
   if (depth > 8) return undefined;
   const program = readModule(file);
   if (!program) return undefined;
-  if (isClientModule(program)) return "client";
+  const client = isClientModule(program);
+  const here = (kind: "client" | "server"): TracedExport => ({ kind, file });
+  // A CommonJS client module has no export statements to read, so it answers for every name.
+  if (
+    client &&
+    !(program.body ?? []).some((node: AstNode) => (node.type ?? "").startsWith("Export"))
+  ) {
+    return here("client");
+  }
   const follow = (source: string, imported: string) => {
     const target = resolveSource(file, source);
-    return target ? traceFarmExport(target, imported, depth + 1) : undefined;
+    return target ? traceExport(target, imported, depth + 1) : undefined;
   };
   const imports = new Map<string, { source: string; imported: string }>();
   for (const node of program.body ?? []) {
@@ -255,37 +258,54 @@ export function traceFarmExport(
   }
   const local = (localName: string) => {
     const binding = imports.get(localName);
-    return binding ? follow(binding.source, binding.imported) : "server";
+    return binding ? follow(binding.source, binding.imported) : here("server");
   };
+  // A `"use client"` module's own exports are client components, wherever their code comes from.
+  const own = (traced: () => TracedExport | undefined) => (client ? here("client") : traced());
   const stars: string[] = [];
   for (const node of program.body ?? []) {
     if (node.type === "ExportNamedDeclaration" && node.source) {
       for (const specifier of node.specifiers ?? []) {
         if (exportedName(specifier.exported) !== name) continue;
-        return follow(node.source.value, exportedName(specifier.local) ?? name);
+        return own(() => follow(node.source.value, exportedName(specifier.local) ?? name));
       }
     } else if (node.type === "ExportAllDeclaration" && node.source && !node.exported) {
       stars.push(node.source.value);
     } else if (node.type === "ExportNamedDeclaration" && !node.source) {
       for (const specifier of node.specifiers ?? []) {
         if (exportedName(specifier.exported) === name) {
-          return local(exportedName(specifier.local) ?? name);
+          return own(() => local(exportedName(specifier.local) ?? name));
         }
       }
       const declared = [
         ...(node.declaration?.id ? [node.declaration.id.name] : []),
         ...(node.declaration?.declarations ?? []).map((declarator: AstNode) => declarator.id?.name),
       ];
-      if (declared.includes(name)) return "server";
+      if (declared.includes(name)) return here(client ? "client" : "server");
     } else if (node.type === "ExportDefaultDeclaration" && name === "default") {
-      return node.declaration?.type === "Identifier" ? local(node.declaration.name) : "server";
+      return own(() =>
+        node.declaration?.type === "Identifier" ? local(node.declaration.name) : here("server"),
+      );
     }
   }
+  // `export *` passes on only the names its module exports, so a `"use client"` module it reaches
+  // claims those names and no others.
   for (const source of stars) {
     const traced = follow(source, name);
-    if (traced) return traced;
+    if (traced) return own(() => traced);
   }
   return undefined;
+}
+
+/**
+ * Where `name`, as `file` exports it, comes from: `"client"` for a `"use client"` module,
+ * `"server"` for any other module that defines it, undefined when that cannot be told (not found,
+ * CommonJS, too deep). Follows re-exports (`export { x } from`, `export * from`) and local names
+ * bound by imports (`import { x } from "./x.js"; export { x }`), through relative files and
+ * packages.
+ */
+export function traceFarmExport(file: string, name: string): "client" | "server" | undefined {
+  return traceExport(file, name, 0)?.kind;
 }
 
 /**
@@ -420,6 +440,107 @@ export function findFarmReactServerClientNames(
     for (const name of wanted) if (isFarmClientExport(target, name)) names.add(name);
   }
   return [...names];
+}
+
+/**
+ * Whether a module statement loads `"use client"` code that a server module renders: an import, or
+ * a named re-export (a barrel's `export { Video } from "./video.js"`). `export *` is left out: it
+ * passes a client module's names on (react-tweet's hooks) rather than rendering them.
+ */
+function clientModuleSource(node: AstNode): string | null {
+  if (node.importKind === "type" || node.exportKind === "type") return null;
+  const source =
+    (node.type === "ImportDeclaration" ||
+      (node.type === "ExportNamedDeclaration" && node.source)) &&
+    node.source?.value;
+  return typeof source === "string" && source.startsWith(".") ? source : null;
+}
+
+function isClientModuleFile(file: string): boolean {
+  const program = readModule(file);
+  return program !== null && isClientModule(program);
+}
+
+/**
+ * The `"use client"` modules inside a package that its `react-server` build renders for the names
+ * a server module imports from `specifier` (react-tweet's server `Tweet` renders its video and copy
+ * button from `"use client"` files). React Server Components send each as a client reference;
+ * islands render them through one (`ensureFarmInternalClientReference`). Null when the package
+ * has no `react-server` build.
+ */
+export function findFarmReactServerClientModules(
+  code: string,
+  file: string,
+  specifier: string,
+): string[] | null {
+  const target = resolveFarmReactServerExport(file, specifier);
+  if (!target) return null;
+  const program = parseCode(code, file);
+  if (!program) return null;
+  const found = new Set<string>();
+  const seen = new Set<string>();
+  const walk = (current: string, depth: number) => {
+    if (depth > 8 || seen.has(current)) return;
+    seen.add(current);
+    const module = readModule(current);
+    if (!module || isClientModule(module)) return;
+    for (const node of module.body ?? []) {
+      const source =
+        clientModuleSource(node) ??
+        (node.type === "ExportAllDeclaration" && typeof node.source?.value === "string"
+          ? node.source.value
+          : null);
+      if (!source?.startsWith(".")) continue;
+      const child = resolveRelative(current, source);
+      if (!child) continue;
+      if (isClientModuleFile(child)) {
+        if (clientModuleSource(node)) found.add(child);
+      } else walk(child, depth + 1);
+    }
+  };
+  for (const entry of findPackageImports(program, (candidate) => candidate === specifier)) {
+    const wanted = [
+      ...(entry.defaultLocal ? ["default"] : []),
+      ...entry.named.map((binding) => binding.imported),
+      ...(entry.namespace?.members ?? []),
+    ];
+    for (const name of wanted) {
+      const traced = traceExport(target, name, 0);
+      if (traced?.kind === "server") walk(traced.file, 0);
+    }
+  }
+  return [...found].sort();
+}
+
+/**
+ * A file of a package's `react-server` build with its imports of the package's own `"use client"`
+ * modules pointed at their client references (`reference(file)`), or null when it has none.
+ */
+export function rewriteFarmReactServerClientModuleImports(options: {
+  code: string;
+  file: string;
+  /** The client reference for a `"use client"` file, or null to keep its import as it is. */
+  reference(clientFile: string): string | null;
+}): string | null {
+  if (!options.code.includes("import") && !options.code.includes("export")) return null;
+  const program = parseCode(options.code, options.file);
+  if (!program) return null;
+  const sources: Array<{ start: number; end: number; reference: string }> = [];
+  for (const node of program.body ?? []) {
+    const source = clientModuleSource(node);
+    if (!source) continue;
+    const child = resolveRelative(options.file, source);
+    if (!child || !isClientModuleFile(child)) continue;
+    const reference = options.reference(child);
+    if (reference) sources.push({ start: node.source.start, end: node.source.end, reference });
+  }
+  if (sources.length === 0) return null;
+  let output = options.code;
+  for (const entry of sources.sort((left, right) => right.start - left.start)) {
+    output =
+      output.slice(0, entry.start) + JSON.stringify(entry.reference) + output.slice(entry.end);
+  }
+  return output;
 }
 
 /**
@@ -732,7 +853,14 @@ export function findFarmPackageManifest(
  */
 export function listFarmPackageExports(importer: string, specifier: string): string[] | null {
   const entry = resolveFarmPackageDefaultEntry(importer, specifier);
-  if (!entry) return null;
+  return entry ? listFarmModuleExports(entry) : null;
+}
+
+/**
+ * Every name the ES module `entry` exports, following `export *` and named re-exports through
+ * relative files; null when it cannot be read as an ES module.
+ */
+export function listFarmModuleExports(entry: string): string[] | null {
   const names = new Set<string>();
   const seen = new Set<string>();
   const collect = (file: string, depth: number): boolean => {

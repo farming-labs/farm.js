@@ -73,8 +73,9 @@ export interface FarmAgentUserConfig {
    * Serve `/llms.txt` (https://llmstxt.org): a Markdown index of the app's static
    * pages, linking to their Markdown mirrors. `true` builds it from page metadata
    * and also serves `/llms-full.txt`; an object sets the title, summary, details,
-   * and which routes to list. A `src/app/llms.ts` metadata route or a
-   * `public/llms.txt` replaces the generated file. Left unset, `/llms.txt` is served
+   * and which routes to list. Links use the root layout's `metadataBase`, or the
+   * request's origin without one, as for the sitemap. A `src/app/llms.ts` metadata
+   * route or a `public/llms.txt` replaces the generated file. Left unset, `/llms.txt` is served
    * (without `/llms-full.txt`) unless the docs engine is enabled, which serves its own.
    *
    * @default { full: false } without docs, false with docs
@@ -83,7 +84,8 @@ export interface FarmAgentUserConfig {
   /**
    * Serve `/sitemap.xml` listing the app's static pages, the same pages the generated
    * llms.txt lists, each with the time its page file last changed. Dynamic routes,
-   * pages whose metadata says noindex, pages behind a route `guard`, and pages a
+   * pages whose metadata says noindex (their own, or a layout's when the page sets no
+   * `robots`), pages behind a route `guard`, and pages a
    * path-specific guard covers (non-root middleware.ts, a config or integration
    * middleware matcher naming the path) are left out.
    * URLs use the root layout's `metadataBase`, or the request's origin without one. An

@@ -4,7 +4,10 @@ import type { Metadata, RouteModule } from "./types";
 import {
   FARM_MARKDOWN_PAGE_CHECK_HEADER,
   _getFarmMarkdownPageCheckToken,
+  _getFarmMarkdownPath,
+  _resolveFarmMarkdownIndexAlias,
   requestAcceptsMarkdown,
+  type FarmMarkdownRoutePathname,
 } from "./markdown";
 import { createFarmMarkdownViewResponse } from "./markdown-view";
 import { FARM_ANONYMOUS_CLIENT_ADDRESS } from "./anonymous-client-address";
@@ -32,10 +35,17 @@ export function isFarmMarkdownPageFile(filePath: string): boolean {
   return /(^|[/\\])page\.mdx?$/i.test(filePath);
 }
 
-export function normalizeFarmMarkdownRoutePath(pathname: string): string {
+/**
+ * The page a Markdown request names. With `routePathname`, `<prefix>/index.md` names the home
+ * page under a `basePath` or locale prefix as `/index.md` does at the root.
+ */
+export function normalizeFarmMarkdownRoutePath(
+  pathname: string,
+  routePathname?: FarmMarkdownRoutePathname,
+): string {
   const withoutExtension = pathname.replace(/\.md$/i, "");
   const normalized = withoutExtension.startsWith("/") ? withoutExtension : `/${withoutExtension}`;
-  return normalized === "/index" ? "/" : normalized.replace(/\/+$/g, "") || "/";
+  return _resolveFarmMarkdownIndexAlias(normalized.replace(/\/+$/g, "") || "/", routePathname);
 }
 
 export function parseMarkdownFrontmatter(source: string): {
@@ -291,6 +301,11 @@ export async function createFarmMarkdownSourceResponse(options: {
     pathname: string,
   ) => Promise<FarmMarkdownPageSource | null> | FarmMarkdownPageSource | null;
   /**
+   * A request pathname as routes see it, without the `basePath` and locale prefix, so
+   * `<prefix>/index.md` names that prefix's home page as `/index.md` does.
+   */
+  routePathname?: FarmMarkdownRoutePathname;
+  /**
    * Runs a request through the app's full pipeline, guards and page rendering
    * included, without following redirects. With it, a page's source is only
    * served when an anonymous visitor's request for the page's HTML succeeds.
@@ -318,7 +333,7 @@ export async function createFarmMarkdownSourceResponse(options: {
     return null;
   }
 
-  const targetPathname = normalizeFarmMarkdownRoutePath(url.pathname);
+  const targetPathname = normalizeFarmMarkdownRoutePath(url.pathname, options.routePathname);
   const source = await options.resolveSource(targetPathname);
   if (!source) {
     return null;
@@ -395,7 +410,10 @@ export async function createFarmMarkdownSourceResponse(options: {
 
   const headers = new Headers({
     "Content-Type": "text/markdown; charset=utf-8",
-    "Content-Location": targetPathname === "/" ? "/index.md" : `${targetPathname}.md`,
+    "Content-Location": _getFarmMarkdownPath(
+      targetPathname,
+      options.routePathname?.(targetPathname),
+    ),
     "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
     "X-Farm-Markdown-Route": targetPathname,
     "X-Farm-Markdown-Source": source.filePath,

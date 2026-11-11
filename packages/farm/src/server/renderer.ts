@@ -70,6 +70,10 @@ import {
   isFarmRedirectError,
 } from "../navigation-errors";
 import {
+  getFarmPageDataRedirect,
+  type FarmPageDataRedirect,
+} from "../navigation/page-data-redirect";
+import {
   addMetadataImageReference,
   addMetadataMarkdownAlternate,
   mergeMetadata,
@@ -116,7 +120,10 @@ import {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
+  isFarmPageNoIndex,
+  readFarmLlmsMarkdownFrom,
   renderFarmLlmsFullTxt,
+  resolveFarmAgentOrigin,
   resolveFarmLlmsTxtConfig,
 } from "../llms-txt";
 import {
@@ -333,6 +340,7 @@ export interface FarmNavigationFragmentSlot {
   containerId: string;
   module: { default?: any };
   props: Record<string, unknown>;
+  shouldHydrate?: boolean;
 }
 
 export interface FarmNavigationFragmentInput {
@@ -902,7 +910,11 @@ export class ServerRenderer {
 
   private async renderElementToCompleteHTML(
     element: unknown,
-    options: { rejectLateNavigation?: boolean } = {},
+    options: {
+      rejectLateRedirects?: boolean;
+      rejectLateNavigation?: boolean;
+      rejectLateErrors?: boolean;
+    } = {},
   ): Promise<string> {
     const streaming = getFarmRendererStreamingCapabilitiesForRuntime(this.config.renderer, "node");
     const renderToPipeableStream = streaming.node
@@ -910,9 +922,17 @@ export class ServerRenderer {
       : undefined;
 
     if (renderToPipeableStream) {
+      // React streams a Suspense boundary as its fallback plus a script that reveals
+      // the content later whenever the boundary is pending when output starts or is
+      // bigger than the progressive chunk size (12.8 KB). Since React 19.2 that
+      // reveal waits for a later frame. This HTML is buffered and then inserted into
+      // a page already on screen (a navigation fragment), so the fallback would
+      // paint. Start output once every boundary is done and keep them all inline:
+      // the buffer resolves no later than it did when piping at shell ready.
+      const inlineBoundaries = isReactRenderer(this.config.renderer);
       return await new Promise<string>((resolve, reject) => {
         const chunks: Buffer[] = [];
-        let started = false;
+        let shellReady = false;
         let lateNavigation: unknown;
         const writable = new Writable({
           write(chunk, _encoding, callback) {
@@ -929,21 +949,32 @@ export class ServerRenderer {
 
         const stream = renderToPipeableStream(element, {
           nonce: _resolveCurrentCspNonce(),
+          ...(inlineBoundaries
+            ? {
+                progressiveChunkSize: Number.MAX_SAFE_INTEGER,
+                onAllReady() {
+                  stream.pipe(writable);
+                },
+              }
+            : {}),
           onShellReady() {
-            started = true;
-            stream.pipe(writable);
+            shellReady = true;
+            if (!inlineBoundaries) stream.pipe(writable);
           },
           onShellError(error) {
             reject(error);
           },
           onError(error) {
-            if (!started) reject(error);
-            // A redirect() or notFound() under a loading boundary decides the status
-            // when the caller needs one, as production's buffered render does.
+            if (!shellReady) reject(error);
+            // After the shell, a failed boundary is rendered by the client instead,
+            // unless it is a redirect() or notFound() that decides the status when
+            // the caller needs one, as production's buffered render does.
             else if (
-              options.rejectLateNavigation &&
               lateNavigation === undefined &&
-              (isFarmRedirectError(error) || isFarmNotFoundError(error))
+              (options.rejectLateErrors ||
+                (options.rejectLateRedirects && isFarmRedirectError(error)) ||
+                (options.rejectLateNavigation &&
+                  (isFarmRedirectError(error) || isFarmNotFoundError(error))))
             ) {
               lateNavigation = error;
             }
@@ -1045,7 +1076,7 @@ export class ServerRenderer {
           continue;
         }
         let slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
-        slotElement = this.wrapClientGraph(slotElement);
+        if (slot.shouldHydrate !== false) slotElement = this.wrapClientGraph(slotElement);
         slotProps[slot.name] = this.rendererRuntime.createElement(
           "div",
           {
@@ -1068,7 +1099,9 @@ export class ServerRenderer {
       element = this.wrapClientGraph(element);
     }
 
-    return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element));
+    return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element), {
+      rejectLateRedirects: true,
+    });
   }
 
   async runWithRequestContext<T>(request: Request, fn: () => T | Promise<T>): Promise<T> {
@@ -1488,20 +1521,23 @@ export class ServerRenderer {
         return;
       }
 
-      const generatedLlmsKind = this.getGeneratedLlmsKind(pathname);
+      // Generated agent files answer at the path routes see, as root llms.ts, robots.ts, and
+      // sitemap.ts do and as production serves them: /console/llms.txt under basePath "/console".
+      const routePathname = this.routeManager.toRoutePathname(pathname);
+      const generatedLlmsKind = this.getGeneratedLlmsKind(routePathname);
       if (generatedLlmsKind) {
         await this.renderGeneratedLlmsTxt(req, res, generatedLlmsKind);
         completeRender(res.statusCode || 200, pathname);
         return;
       }
 
-      if (pathname === "/robots.txt" && this.getAgentCrawlers().enabled) {
+      if (routePathname === "/robots.txt" && this.getAgentCrawlers().enabled) {
         await this.renderGeneratedRobotsTxt(req, res);
         completeRender(res.statusCode || 200, pathname);
         return;
       }
 
-      if (pathname === "/sitemap.xml" && this.getAgentSitemap().enabled) {
+      if (routePathname === "/sitemap.xml" && this.getAgentSitemap().enabled) {
         await this.renderGeneratedSitemap(req, res);
         completeRender(res.statusCode || 200, pathname);
         return;
@@ -1589,9 +1625,19 @@ export class ServerRenderer {
         actionRequest = createWebRequestFromFarmRequest(req, {
           trustProxy: this.config.server?.trustProxy,
         });
-        const actionResponse = await handleFarmFormActionRequest(
-          actionRequest,
-          resolveServerActionsConfig(this.config.serverActions),
+        const formActionRequest = actionRequest;
+        // Route middleware has run by now: an action reads its context as the page does.
+        const actionResponse = await _runWithMiddlewareData(
+          toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__),
+          () =>
+            _runWithMiddlewareContext(
+              toMiddlewareMap((req as any).__FARM_MIDDLEWARE_CONTEXT__),
+              () =>
+                handleFarmFormActionRequest(
+                  formActionRequest,
+                  resolveServerActionsConfig(this.config.serverActions),
+                ),
+            ),
         );
         if (actionResponse) {
           await sendWebResponse(res, actionResponse);
@@ -2031,7 +2077,9 @@ export class ServerRenderer {
           await _runWithCurrentRequest(currentRequest, async () => {
             let pageElement: any = this.rendererRuntime.createElement(PageComponent, pageProps);
 
-            if (LoadingFallbackComponent) {
+            // An islands navigation is swapped into a page already on screen, where a fallback
+            // would paint, so it arrives without loading.tsx, as on the production server.
+            if (LoadingFallbackComponent && !islandsNavigationRequest) {
               const loadingFallback = this.rendererRuntime.createElement(LoadingFallbackComponent, {
                 ...createRouteStateProps({
                   params,
@@ -2089,7 +2137,30 @@ export class ServerRenderer {
               renderedRouteSlots.length === 0
                 ? countFarmKeptLayouts(requestHeader(req, "f-layouts"), layouts, params)
                 : 0;
-            const keptLayouts = keptLayoutCount > 1 ? keptLayoutCount : 0;
+            let keptLayouts = keptLayoutCount > 1 ? keptLayoutCount : 0;
+            // The browser chooses which layouts it says it keeps, so a kept layout still runs: a
+            // guard in it decides this request. Only its markup is left out. A layout that fails
+            // here renders whole, so notFound() and redirect() answer as on any other request.
+            if (keptLayouts > 0) {
+              let keptElement: unknown = null;
+              for (let i = keptLayouts - 1; i >= 0; i--) {
+                const KeptLayout = layoutModules[i]?.default;
+                if (KeptLayout) {
+                  keptElement = this.rendererRuntime.createElement(KeptLayout, {
+                    children: keptElement,
+                    params,
+                  });
+                }
+              }
+              try {
+                await this.renderElementToCompleteHTML(
+                  await this.wrapWithIntegrationProviders(keptElement),
+                  { rejectLateErrors: true },
+                );
+              } catch {
+                keptLayouts = 0;
+              }
+            }
             let wrappedElement: any = pageElement;
             for (let i = layoutModules.length - 1; i >= 0; i--) {
               const layoutModule = layoutModules[i];
@@ -2117,7 +2188,7 @@ export class ServerRenderer {
                   slot.module.default,
                   slot.props,
                 );
-                slotElement = this.wrapClientGraph(slotElement);
+                if (slot.shouldHydrate) slotElement = this.wrapClientGraph(slotElement);
                 slotElement = this.rendererRuntime.createElement(
                   "div",
                   {
@@ -2494,7 +2565,9 @@ export class ServerRenderer {
     );
     metadata = addMetadataMarkdownAlternate(
       metadata,
-      getFarmMarkdownAlternatePath(resolveMarkdownConfig(this.config.md as any), publicPathname),
+      getFarmMarkdownAlternatePath(resolveMarkdownConfig(this.config.md as any), publicPathname, {
+        routePathname: (pathname) => this.routeManager.toRoutePathname(pathname),
+      }),
     );
 
     return metadata;
@@ -2592,7 +2665,7 @@ export class ServerRenderer {
       const body =
         match.metadata.kind === "llms-full" && !(value instanceof Response)
           ? await renderFarmLlmsFullTxt(value, {
-              origin: url.origin,
+              origin: await this.getAgentOrigin(request),
               readMarkdown: llmsContext.markdown!,
             })
           : value;
@@ -2635,7 +2708,7 @@ export class ServerRenderer {
       const body =
         kind === "llms-full"
           ? await renderFarmLlmsFullTxt(context.defaults, {
-              origin: new URL(request.url).origin,
+              origin: await this.getAgentOrigin(request),
               readMarkdown: context.markdown!,
             })
           : context.defaults;
@@ -2719,6 +2792,7 @@ export class ServerRenderer {
             }),
             fs.promises.stat(route.modulePath).catch(() => undefined),
           ]);
+          if (await this.isAgentPageNoIndex(pattern, module?.metadata)) return null;
           return { pattern, module, lastModified: stat?.mtime.toISOString() };
         }),
       );
@@ -2726,12 +2800,15 @@ export class ServerRenderer {
       const rootMetadata = rootLayout
         ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
         : undefined;
-      const sitemap = createFarmDefaultSitemap(sources, {
-        origin: new URL(request.url).origin,
-        config: this.getAgentSitemap(),
-        metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
-        basePath: this.config.basePath,
-      });
+      const sitemap = createFarmDefaultSitemap(
+        sources.filter((source) => source !== null),
+        {
+          origin: new URL(request.url).origin,
+          config: this.getAgentSitemap(),
+          metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
+          basePath: this.config.basePath,
+        },
+      );
       await sendWebResponse(
         res as any,
         createFarmMetadataRouteResponse("sitemap", sitemap, {}, { method: req.method }),
@@ -2771,6 +2848,22 @@ export class ServerRenderer {
   }
 
   /**
+   * Whether a listed page renders noindex: its own `robots`, else its nearest layout's, as
+   * the production server decides. A layout that fails to load is surfaced by the page.
+   */
+  private async isAgentPageNoIndex(pattern: string, metadata: unknown): Promise<boolean> {
+    const layoutMetadata = await Promise.all(
+      this.routeManager.getRouteLayouts(pattern).map((layout) =>
+        this.routeManager.loadLayoutModule(layout.modulePath).then(
+          (module) => module.metadata as unknown,
+          () => undefined,
+        ),
+      ),
+    );
+    return isFarmPageNoIndex(metadata, layoutMetadata);
+  }
+
+  /**
    * The default read-only MCP server (`agent.mcp`), or undefined when the app has an MCP
    * server of its own: a route that answers /mcp, an API route at /api/mcp, `@farm.js/mcp`,
    * or a registered server such as the docs engine's. Production applies the same rules.
@@ -2800,20 +2893,26 @@ export class ServerRenderer {
         basePath: this.config.basePath,
         listPages: async () => {
           const sources = await Promise.all(
-            this.getAgentListedRoutes().map(async ([pattern, route]) => ({
-              pattern,
+            this.getAgentListedRoutes().map(async ([pattern, route]) => {
               // The page itself surfaces a load error. Without its module a guard cannot
               // be ruled out, so the page is left out.
-              module: await this.routeManager
+              const module = await this.routeManager
                 .loadRouteModule(route.modulePath)
-                .catch(() => ({ __farmRouteGuard: true })),
-            })),
+                .catch(() => ({ __farmRouteGuard: true }) as const);
+              const metadata = (module as { metadata?: unknown }).metadata;
+              return (await this.isAgentPageNoIndex(pattern, metadata))
+                ? null
+                : { pattern, module };
+            }),
           );
-          return collectFarmDefaultMCPPages(sources, {
-            origin,
-            basePath: this.config.basePath,
-            markdown: resolveMarkdownConfig(this.config.md as any),
-          });
+          return collectFarmDefaultMCPPages(
+            sources.filter((source) => source !== null),
+            {
+              origin,
+              basePath: this.config.basePath,
+              markdown: resolveMarkdownConfig(this.config.md as any),
+            },
+          );
         },
         // Pages are read through this server's own socket, with no cookies, as llms-full.txt does.
         readMarkdown: this.createDevMarkdownReader(req),
@@ -2845,13 +2944,14 @@ export class ServerRenderer {
     markdown?: (url: string) => Promise<string | null>;
   }> {
     const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
-    const origin = new URL(request.url).origin;
+    const origin = await this.getAgentOrigin(request);
     const sources = await Promise.all(
       this.getAgentListedRoutes().map(async ([pattern, route]) => {
         try {
           const module = await this.routeManager.loadRouteModule(route.modulePath);
           // A route guard decides per request who may see the page, as for the sitemap.
           if ((module as { __farmRouteGuard?: unknown }).__farmRouteGuard) return null;
+          if (await this.isAgentPageNoIndex(pattern, module.metadata)) return null;
           return { pattern, metadata: module.metadata as unknown };
         } catch (error) {
           // The page itself will surface this error; list it with its fallback title.
@@ -2895,8 +2995,31 @@ export class ServerRenderer {
                 defaultMCP: () => this.getDefaultMCPServer(),
               }),
       }),
-      ...(options.full ? { markdown: this.createDevMarkdownReader(options.req) } : {}),
+      ...(options.full
+        ? {
+            markdown: readFarmLlmsMarkdownFrom(
+              new URL(request.url).origin,
+              origin,
+              this.createDevMarkdownReader(options.req),
+            ),
+          }
+        : {}),
     };
+  }
+
+  /**
+   * The origin llms.txt and llms-full.txt link to: the root layout's `metadataBase`, else the
+   * request's origin, as for the sitemap and the production server.
+   */
+  private async getAgentOrigin(request: Request): Promise<string> {
+    const rootLayout = this.routeManager.getLayouts().get("/");
+    const rootMetadata = rootLayout
+      ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
+      : undefined;
+    return resolveFarmAgentOrigin(
+      (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
+      new URL(request.url).origin,
+    );
   }
 
   /**
@@ -4034,6 +4157,25 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       return true;
     }
     return false;
+  }
+
+  /**
+   * The redirect a page-data request for `request` ended with. A `redirect()`
+   * target is localized as a document render localizes it; a thrown 3xx
+   * Response keeps its Location as written, as a document render sends it.
+   */
+  async resolvePageDataRedirect(
+    request: Request,
+    error: unknown,
+  ): Promise<FarmPageDataRedirect | null> {
+    const redirect = getFarmPageDataRedirect(error);
+    if (!redirect || !isFarmRedirectError(error)) return redirect;
+    return {
+      status: redirect.status,
+      location: await this.runWithRequestContext(request, () =>
+        this.localizeRedirectUrl(redirect.location),
+      ),
+    };
   }
 
   private localizeRedirectUrl(url: string): string {

@@ -1876,6 +1876,12 @@ export function Chart() {}
     expect(release).toBeGreaterThan(isolatedHydrate);
     expect(isolatedBranch.indexOf("return;", release)).toBeGreaterThan(release);
     expect(isolatedBranch).not.toContain("replayPreHydrationClicks(");
+    // Client plugins see an islands-only page hydrate, as they see any other page.
+    const begin = isolatedBranch.indexOf("farmClientRuntime.beginHydration(");
+    const complete = isolatedBranch.indexOf("farmClientRuntime.completeHydration(");
+    expect(begin).toBeGreaterThan(-1);
+    expect(begin).toBeLessThan(isolatedHydrate);
+    expect(complete).toBeGreaterThan(isolatedHydrate);
     expect(productionSource).toContain("await hydrateFarmIsolatedClientBoundaries(document);");
   });
 
@@ -1927,6 +1933,20 @@ export function Chart() {}
     // intercept identity would both miss every real navigation and send the
     // shared-cache bypass header.
     expect(source).toContain("this.fetchPage(pathname, undefined, false, false)");
+  });
+
+  it("hands an islands dev navigation that redirects to page data, which follows it", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const start = source.indexOf("async function fetchFarmNavigationDocument(");
+    const body = source.slice(start, source.indexOf("\nasync function ", start + 1));
+    expect(start).toBeGreaterThan(-1);
+    // fetch's manual redirect hides the target; returning null routes the navigation through
+    // page data, whose redirect signal keeps the document and the history entry.
+    expect(body).toContain("redirect: 'manual'");
+    const opaque = body.indexOf("if (response.type === 'opaqueredirect') return null;");
+    expect(opaque).toBeGreaterThan(-1);
+    expect(opaque).toBeLessThan(body.indexOf("throw new Error('Failed to fetch the page: '"));
+    expect(body).toContain("if (!result) return null;");
   });
 
   it("refreshes hydratable production routes from uncached server HTML", () => {

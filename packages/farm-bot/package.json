@@ -1,0 +1,125 @@
+{
+  "name": "@farm.js/bot",
+  "version": "0.1.0-beta.1",
+  "description": "Stop bots at your forms, with any checker",
+  "keywords": [
+    "bot-protection",
+    "captcha",
+    "farm.js",
+    "hcaptcha",
+    "recaptcha",
+    "turnstile"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-bot"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./captcha": {
+      "types": "./dist/captcha/index.d.ts",
+      "import": "./dist/captcha/index.js"
+    },
+    "./captcha/widget": {
+      "types": "./dist/captcha/widget.d.ts",
+      "import": "./dist/captcha/widget.js"
+    },
+    "./provider-widget": {
+      "types": "./dist/provider-widget.d.ts",
+      "import": "./dist/provider-widget.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    },
+    "./preact": {
+      "types": "./dist/preact.d.ts",
+      "import": "./dist/preact.js"
+    },
+    "./vue": {
+      "types": "./dist/vue.d.ts",
+      "import": "./dist/vue.js"
+    },
+    "./solid": {
+      "types": "./dist/solid.d.ts",
+      "import": "./dist/solid.js"
+    },
+    "./svelte": {
+      "types": "./dist/svelte.d.ts",
+      "import": "./dist/svelte.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.0.0",
+    "jsdom": "^25.0.0",
+    "preact": "10.29.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "solid-js": "1.9.18",
+    "typescript": "^5.3.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5",
+    "vue": "3.5.44"
+  },
+  "peerDependencies": {
+    "preact": "^10.0.0",
+    "react": "^18.3.0 || ^19.0.0",
+    "solid-js": "^1.9.0",
+    "vue": "^3.5.0"
+  },
+  "peerDependenciesMeta": {
+    "preact": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

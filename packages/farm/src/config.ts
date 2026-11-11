@@ -608,7 +608,7 @@ export function getPresetForDeployTarget(
 
 export function getDeployTargetForPreset(preset?: string): FarmDeployTarget | undefined {
   if (!preset) return undefined;
-  if (preset === "vercel" || preset === "vercel-edge") return "vercel";
+  if (preset === "vercel") return "vercel";
   if (preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module") {
     return "cloudflare";
   }
@@ -660,6 +660,19 @@ export function detectPlatformDeployTarget(
 }
 
 const warnedPlatformMismatches = new Set<string>();
+
+/**
+ * Nitro 3 has no `vercel-edge` preset; its migration guide replaces it with `vercel` on Fluid
+ * compute. Rejecting the name here, as a preset or a target, replaces a build that either fails
+ * deep inside Nitro ("Nitro entry is missing!") or silently falls back to `node-server`.
+ */
+function assertFarmDeployNameSupported(kind: "preset" | "target", name: string | undefined): void {
+  if (name !== "vercel-edge") return;
+  throw new Error(
+    `Deploy ${kind} "vercel-edge" is not supported: Farm's Nitro version has no vercel-edge ` +
+      `preset. Use the "vercel" ${kind} instead, which deploys Vercel Functions on Fluid compute.`,
+  );
+}
 
 export function resolveDeployConfig(
   config: Pick<FarmUserConfig, "deploy" | "preset" | "distDir">,
@@ -721,6 +734,8 @@ export function resolveDeployConfig(
     getPresetForDeployTarget(target) ||
     "node-server";
   const resolvedTarget = target || getDeployTargetForPreset(preset);
+  assertFarmDeployNameSupported("preset", preset);
+  assertFarmDeployNameSupported("target", resolvedTarget);
   if (detectedTarget && resolvedTarget !== detectedTarget) {
     const mismatchKey = `mismatch:${resolvedTarget}:${detectedTarget}`;
     if (!warnedPlatformMismatches.has(mismatchKey)) {

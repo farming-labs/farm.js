@@ -165,6 +165,37 @@ describe("built-in Farm Infra analytics in development", () => {
     expect(received.map(({ body }) => body).join("")).not.toContain("private");
   }, 30_000);
 
+  it("reports a localized home page's Markdown by the home page's template, as production does", async () => {
+    const port = await listen(receiver);
+    const root = await createFixture(
+      `FARMJS_API_KEY=fti_${"l".repeat(43)}\nFARMJS_API_URL=http://127.0.0.1:${port}\n`,
+      `export default { i18n: { locales: ["en", "fr"], defaultLocale: "en" } };`,
+    );
+    for (const [file, source] of Object.entries({
+      "src/app/page.tsx": `import React from "react";
+export default function Home() { return <main>home</main>; }`,
+      "src/messages/en.json": "{}",
+      "src/messages/fr.json": "{}",
+    })) {
+      await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+      await fs.writeFile(path.join(root, file), source);
+    }
+
+    const response = await request(root, "/fr/index.md");
+    expect(response.status).toBe(200);
+    await response.arrayBuffer();
+    await Promise.all([...servers].map((value) => value.close()));
+    servers.clear();
+
+    const routes = received
+      .flatMap(({ body }) => JSON.parse(body).events)
+      .filter(({ kind }) => kind === "request")
+      .map(({ route }) => route);
+    // The page render the mirror reads is reported as "/" too.
+    expect(routes).toContain("/index.md");
+    expect(routes.filter((route) => route !== "/")).toEqual(["/index.md"]);
+  }, 30_000);
+
   it("sends nothing when the config sets analytics to false", async () => {
     const port = await listen(receiver);
     const root = await createFixture(

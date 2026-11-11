@@ -89,12 +89,27 @@ export interface FarmMarkdownResolvedConfig {
 }
 
 export interface FarmMarkdownMirrorTarget {
+  /** The page's public pathname, with the app's `basePath` and locale prefix. */
   pathname: string;
   route: FarmMarkdownResolvedRoute | null;
+  /** The page's canonical `.md` URL: `<prefix>/index.md` for a home page. */
+  markdownPath: string;
 }
+
+/**
+ * A request pathname as routes see it: without the app's `basePath` and, with i18n, the locale
+ * prefix. `/console/fr/about` is `/about` under basePath "/console" with a `fr` locale.
+ */
+export type FarmMarkdownRoutePathname = (pathname: string) => string;
 
 export interface ResolveMarkdownMirrorTargetOptions {
   accept?: string | null;
+  /**
+   * Strips the app's `basePath` and locale prefix, so `<prefix>/index.md` names that prefix's
+   * home page as `/index.md` does, and that is the `.md` URL the home page advertises.
+   * `md.expose` is matched against the stripped path, as llms.txt reads it.
+   */
+  routePathname?: FarmMarkdownRoutePathname;
 }
 
 export interface CreateMarkdownMirrorResponseOptions {
@@ -106,11 +121,15 @@ export interface CreateMarkdownMirrorResponseOptions {
   renderPage: (request: Request) => Response | Promise<Response>;
   /** The app's public API path, so a form posting to an API route can be matched to its MCP tool. */
   apiServerBasePath?: string;
+  /** See {@link ResolveMarkdownMirrorTargetOptions.routePathname}. */
+  routePathname?: FarmMarkdownRoutePathname;
 }
 
 export interface ApplyMarkdownNegotiationHeadersOptions {
   config?: FarmMarkdownResolvedConfig;
   pathname: string;
+  /** See {@link ResolveMarkdownMirrorTargetOptions.routePathname}. */
+  routePathname?: FarmMarkdownRoutePathname;
 }
 
 export function resolveMarkdownConfig(
@@ -160,10 +179,15 @@ export function resolveMarkdownMirrorTarget(
     return null;
   }
 
-  const targetPathname = normalizeMarkdownRoute(
-    hasMarkdownExtension ? pathname.slice(0, -".md".length) || "/" : pathname,
+  const targetPathname = _resolveFarmMarkdownIndexAlias(
+    normalizeMarkdownRoute(
+      hasMarkdownExtension ? pathname.slice(0, -".md".length) || "/" : pathname,
+    ),
+    options.routePathname,
   );
-  const route = findExposedMarkdownRoute(config, targetPathname);
+  // `md.expose` lists route paths, as llms.txt and the default MCP server read them.
+  const routePathname = options.routePathname?.(targetPathname) ?? targetPathname;
+  const route = findExposedMarkdownRoute(config, routePathname);
   if (!route && config.expose !== true) {
     return null;
   }
@@ -171,6 +195,7 @@ export function resolveMarkdownMirrorTarget(
   return {
     pathname: targetPathname,
     route,
+    markdownPath: _getFarmMarkdownPath(targetPathname, routePathname),
   };
 }
 
@@ -188,6 +213,7 @@ export async function createMarkdownMirrorResponse(
   const hasMarkdownExtension = requestUrl.pathname.toLowerCase().endsWith(".md");
   const target = resolveMarkdownMirrorTarget(options.config, requestUrl.pathname, {
     accept: options.request.headers.get("accept"),
+    routePathname: options.routePathname,
   });
   if (!target) {
     return null;
@@ -259,7 +285,7 @@ export async function createMarkdownMirrorResponse(
   }
 
   const html = await pageResponse.text();
-  const markdownPath = target.pathname === "/" ? "/index.md" : `${target.pathname}.md`;
+  const markdownPath = target.markdownPath;
   // Forms and Markdown read the same prepared content. Keep it request-local,
   // and keep the no-form actions view free of content preparation altogether.
   // Error responses are read in full, not as action/partial views.
@@ -344,6 +370,7 @@ export async function createMarkdownMirrorResponse(
     status: pageResponse.status,
     headers: headersOut,
     markdownPath,
+    pagePath: target.pathname,
     actions,
   });
 }
@@ -417,7 +444,9 @@ export function applyMarkdownNegotiationHeaders(
     return response;
   }
 
-  const alternatePath = getFarmMarkdownAlternatePath(options.config, options.pathname);
+  const alternatePath = getFarmMarkdownAlternatePath(options.config, options.pathname, {
+    routePathname: options.routePathname,
+  });
   if (!alternatePath) {
     return response;
   }
@@ -671,6 +700,31 @@ function normalizeMarkdownRouteInput(input: FarmMarkdownRouteInput): FarmMarkdow
   };
 }
 
+/**
+ * @internal `<prefix>/index` names the page at `<prefix>` when that is a home page: `/index` at
+ * the app's root, `/console/index` under basePath "/console", `/fr/index` for the `fr` locale,
+ * and `/console/fr/index` for both. Request paths still carry the prefix at this point.
+ */
+export function _resolveFarmMarkdownIndexAlias(
+  pathname: string,
+  routePathname?: FarmMarkdownRoutePathname,
+): string {
+  if (pathname === "/index") return "/";
+  if (!routePathname || !pathname.endsWith("/index")) return pathname;
+  const prefix = pathname.slice(0, -"/index".length);
+  return routePathname(prefix) === "/" ? prefix : pathname;
+}
+
+/**
+ * @internal A page's canonical `.md` URL. A home page's is `<prefix>/index.md`, as llms.txt, the
+ * default MCP server, and other pages' `<prefix>/<page>.md` URLs name it; `<prefix>.md` still
+ * serves it. `routePathname` is `pathname` as routes see it.
+ */
+export function _getFarmMarkdownPath(pathname: string, routePathname = pathname): string {
+  if (routePathname !== "/") return `${pathname}.md`;
+  return pathname === "/" ? "/index.md" : `${pathname.replace(/\/+$/, "")}/index.md`;
+}
+
 function normalizeMarkdownRoute(route: string): string {
   const withoutMarkdownExtension = route.toLowerCase().endsWith(".md") ? route.slice(0, -3) : route;
   const withSlash = withoutMarkdownExtension.startsWith("/")
@@ -759,9 +813,13 @@ export function getFarmMarkdownMirrorPath(pathname: string): string {
 export function getFarmMarkdownAlternatePath(
   config: FarmMarkdownResolvedConfig | undefined,
   pathname: string,
+  options: Pick<ResolveMarkdownMirrorTargetOptions, "routePathname"> = {},
 ): string | null {
-  const target = resolveMarkdownMirrorTarget(config, pathname, { accept: "text/markdown" });
-  return target ? getMarkdownAlternatePath(target.pathname) : null;
+  const target = resolveMarkdownMirrorTarget(config, pathname, {
+    accept: "text/markdown",
+    routePathname: options.routePathname,
+  });
+  return target ? target.markdownPath : null;
 }
 
 /** @internal Whether `pathname` has a Markdown mirror under `config`. */

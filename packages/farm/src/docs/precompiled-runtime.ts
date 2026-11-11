@@ -3,6 +3,7 @@ import {
   type DocsSearchSourcePage,
   type PerformDocsSearchOptions,
 } from "@farming-labs/docs";
+import { stripFarmBasePath } from "../base-path";
 import { replaceFarmCspNonceMarker } from "../security";
 
 export interface FarmDocsCompiledResponse {
@@ -10,6 +11,8 @@ export interface FarmDocsCompiledResponse {
   statusText: string;
   headers: Array<[string, string]>;
   body: string;
+  /** Binary bodies (raster social images) are stored as base64. */
+  bodyEncoding?: "base64";
 }
 
 export interface FarmDocsCompiledSearch {
@@ -28,6 +31,11 @@ export interface FarmDocsCompiledManifest {
    */
   cspNonceMarker?: string;
   entry: string;
+  /**
+   * The app's `basePath`. Routes are keyed by route path, and the docs answer below the base
+   * path as well as at the origin root.
+   */
+  basePath?: string;
   /** Public docs API route. Older manifests default to `/api/docs`. */
   apiPath?: string;
   routes: Record<string, FarmDocsCompiledResponse>;
@@ -72,9 +80,18 @@ function createResponse(
       replaceOrigin(value, manifest, request),
     ]),
   );
-  let body = replaceOrigin(compiled.body, manifest, request);
-  if (manifest.cspNonceMarker && headers.get("content-type")?.toLowerCase().includes("text/html")) {
-    body = replaceFarmCspNonceMarker(body, manifest.cspNonceMarker);
+  let body: BodyInit;
+  if (compiled.bodyEncoding === "base64") {
+    body = Uint8Array.from(atob(compiled.body), (character) => character.charCodeAt(0));
+  } else {
+    let text = replaceOrigin(compiled.body, manifest, request);
+    if (
+      manifest.cspNonceMarker &&
+      headers.get("content-type")?.toLowerCase().includes("text/html")
+    ) {
+      text = replaceFarmCspNonceMarker(text, manifest.cspNonceMarker);
+    }
+    body = text;
   }
   return new Response(request.method === "HEAD" ? null : body, {
     status: compiled.status,
@@ -194,7 +211,9 @@ export function createFarmDocsPrecompiledRuntime(
   return {
     async handleDocsRequest(request) {
       if (request.method !== "GET" && request.method !== "HEAD") return null;
-      const pathname = normalizePathname(new URL(request.url).pathname);
+      const pathname = normalizePathname(
+        stripFarmBasePath(new URL(request.url).pathname, manifest.basePath ?? ""),
+      );
       const compiled =
         request.headers.get("x-farm-docs-navigation") === "1"
           ? manifest.navigation?.[pathname]

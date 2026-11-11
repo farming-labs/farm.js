@@ -339,7 +339,7 @@ Dynamic API segments bind through `params`: `src/app/api/todos/[id]/route.ts` ex
 
 #### Option B: server functions as actions
 
-The only supported way to make server functions callable from the browser is Farm's React Server Components pipeline. Turn it on in `farm.config.ts` with `experimental.serverComponents: true`: `farm dev`, `farm build`, and `farm start` then run it on the official `@vitejs/plugin-rsc`, and pages and layouts are server components, as in Next.js. `experimental.serverActions: true` without `serverComponents` does not load that pipeline and turns off the build check that stops a client component from bundling a `createServerFn` module, so server code and its imports reach the browser. Never set it alone.
+The only supported way to make server functions callable from the browser is Farm's React Server Components pipeline. Turn it on in `farm.config.ts` with `experimental.serverComponents: { mode: "rsc" }` (`true` is Farm's islands engine): `farm dev`, `farm build`, and `farm start` then run it on the official `@vitejs/plugin-rsc`, and pages and layouts are server components, as in Next.js. `experimental.serverActions: true` without `serverComponents` does not load that pipeline and turns off the build check that stops a client component from bundling a `createServerFn` module, so server code and its imports reach the browser. Never set it alone.
 
 Install (the RSC pipeline refuses to start unless these exact versions resolve; pin React to them even if the Next.js app used another 19.x release):
 
@@ -355,7 +355,7 @@ import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   experimental: {
-    serverComponents: true,
+    serverComponents: { mode: "rsc" },
     serverActions: true,
   },
   serverActions: {
@@ -587,17 +587,17 @@ export async function middleware(request: Request, context: RequestMiddlewareCon
 
 ### Built-in components and modules
 
-| Next.js                          | Farm                                                                                                                | Status      | Docs                                                      |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------------------------------- |
-| `next/image`                     | `import Image from "@farm.js/core/image"`                                                                           | `rename`    | [/docs/images](/docs/images)                              |
-| `next/font/local`                | `localFont` from `@farm.js/core/font`                                                                               | `rename`    | [/docs/fonts](/docs/fonts)                                |
-| `next/font/google`               | `localFont` with a font package, `remoteFont` with a direct font-file URL, or `@fontsource*` CSS imports            | `different` | [/docs/fonts](/docs/fonts)                                |
-| `next/script`                    | `defineScript` from `@farm.js/scripts/client` plus the `scripts()` plugin, or a plain `<script>` in the root layout | `different` | [/docs/plugins/scripts](/docs/plugins/scripts)            |
-| `next/dynamic`                   | `React.lazy` plus `<Suspense>`                                                                                      | `different` |                                                           |
-| `next/og` `ImageResponse`        | `ImageResponse` from `@farm.js/core/og`; install `@vercel/og`                                                       | `rename`    | Node presets only; not edge or Cloudflare Worker presets. |
-| `next/headers`                   | `@farm.js/core/headers`                                                                                             | `rename`    |                                                           |
-| `next/cache`                     | `@farm.js/core/cache`                                                                                               | `rename`    |                                                           |
-| `next/config`, `next/web-vitals` | None                                                                                                                | `none`      | Use typed env; use the `web-vitals` package directly.     |
+| Next.js                          | Farm                                                                                                                | Status      | Docs                                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------- |
+| `next/image`                     | `import Image from "@farm.js/core/image"`                                                                           | `rename`    | [/docs/images](/docs/images)                                                 |
+| `next/font/local`                | `localFont` from `@farm.js/core/font`                                                                               | `rename`    | [/docs/fonts](/docs/fonts)                                                   |
+| `next/font/google`               | `localFont` with a font package, `remoteFont` with a direct font-file URL, or `@fontsource*` CSS imports            | `different` | [/docs/fonts](/docs/fonts)                                                   |
+| `next/script`                    | `defineScript` from `@farm.js/scripts/client` plus the `scripts()` plugin, or a plain `<script>` in the root layout | `different` | [/docs/plugins/scripts](/docs/plugins/scripts)                               |
+| `next/dynamic`                   | `React.lazy` plus `<Suspense>`                                                                                      | `different` |                                                                              |
+| `next/og` `ImageResponse`        | `ImageResponse` from `@farm.js/core/og`; install `@vercel/og`                                                       | `rename`    | Node, Cloudflare Worker, and `netlify-edge` presets; not other edge presets. |
+| `next/headers`                   | `@farm.js/core/headers`                                                                                             | `rename`    |                                                                              |
+| `next/cache`                     | `@farm.js/core/cache`                                                                                               | `rename`    |                                                                              |
+| `next/config`, `next/web-vitals` | None                                                                                                                | `none`      | Use typed env; use the `web-vitals` package directly.                        |
 
 `next/image`: props `src`, `alt`, `width`, `height`, `fill`, `sizes`, `quality`, `placeholder="blur"`, `blurDataURL`, `unoptimized`, `loader` carry over. Rename `priority` to `preload`. Static imports carry dimensions and blur data. SVG sources skip optimization. Remote hosts need `images.remotePatterns` in `farm.config.ts`.
 

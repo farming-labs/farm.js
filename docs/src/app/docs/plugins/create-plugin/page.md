@@ -56,14 +56,18 @@ Each runtime hook receives one event with `request`, `req` (the shared request s
 | `error`     | When the request throws (also gets `error`, `durationMs`) | Nothing                                                                 |
 | `close`     | Once, when the runtime shuts down (gets `reason`)         | Nothing                                                                 |
 
-API requests follow the same contract in `farm dev` and in a production build:
+API and integration requests follow the same contract in `farm dev` and in a production build:
 
+- `before` runs before app middleware, and `after` also sees a response middleware answers with.
+  Integration routes answer before app middleware.
 - A path under the API base path that no route matches still runs `context` and `before`, so a
   guard can answer it, and `after` sees Farm's JSON 404 or the guard's early answer.
-- When an API route throws, Farm answers `500`. `error` runs first with the thrown value, then
-  `after` runs with that `500` response.
-- A throw from a `context`, `before`, or `after` hook runs `error` and skips the remaining `after`
-  hooks.
+- When an API or integration route throws, Farm answers `500`. `error` runs first with the thrown
+  value, then `after` runs with that `500` response. The flat `onError` hook gets the throw once,
+  with `phase: "runtime"`.
+- A throw from a `context`, `before`, or `after` hook runs `error`, skips the remaining `after`
+  hooks, and answers `500` with Farm's JSON body `{"error":"Internal Server Error"}`. A page
+  request gets a plain-text `Internal Server Error` instead, unless the app sets `renderer: false`.
 
 ### Router, render, build, and dev hooks
 
