@@ -28,9 +28,13 @@ describe("React renderer Vite integration", () => {
       rendererOptions: react({ compiler: true }).options,
     });
 
-    expect(plugins).toHaveLength(1);
-    expect(plugins[0]?.name).toBe("farm:react-aot-compiler");
+    expect(plugins.map((plugin) => plugin.name)).toEqual([
+      "farm:react-aot-compiler",
+      "farm:react-compiled-root",
+    ]);
     expect(plugins[0]?.enforce).toBe("pre");
+    // The compiled-root import rewrite runs after TypeScript and JSX are compiled.
+    expect(plugins[1]?.enforce).toBeUndefined();
   });
 
   it("still accepts renderer options in the deprecated experimental shape", () => {
@@ -38,7 +42,10 @@ describe("React renderer Vite integration", () => {
     const plugins = createFarmRendererPlugin({
       rendererOptions: { experimental: { compiler: true } },
     });
-    expect(plugins.map((plugin) => plugin.name)).toEqual(["farm:react-aot-compiler"]);
+    expect(plugins.map((plugin) => plugin.name)).toEqual([
+      "farm:react-aot-compiler",
+      "farm:react-compiled-root",
+    ]);
     expect(createFarmRendererPlugin({ rendererOptions: { compiler: false } })).toEqual([]);
   });
 

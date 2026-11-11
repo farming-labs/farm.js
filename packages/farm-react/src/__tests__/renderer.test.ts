@@ -41,6 +41,7 @@ describe("React renderer compiler options", () => {
         reactivity: "hybrid",
         report: false,
         reportFile: DEFAULT_COMPILER_REPORT_FILE,
+        compiledRoot: true,
       },
     });
   });
@@ -56,6 +57,7 @@ describe("React renderer compiler options", () => {
         reactivity: "hybrid",
         report: false,
         reportFile: DEFAULT_COMPILER_REPORT_FILE,
+        compiledRoot: true,
       },
     });
   });
@@ -116,6 +118,7 @@ describe("React renderer compiler options", () => {
       reactivity: "hybrid",
       report: true,
       reportFile: "reports/react-compiler.json",
+      compiledRoot: true,
     });
     expect(normalizeReactCompilerOptions({ reportFile: "coverage/compiler.json" }).report).toBe(
       true,
@@ -126,6 +129,14 @@ describe("React renderer compiler options", () => {
     expect(normalizeReactCompilerOptions({ reactivity: "static" }).reactivity).toBe("static");
     expect(() => normalizeReactCompilerOptions({ reactivity: "signals" as "hybrid" })).toThrow(
       /reactivity mode/i,
+    );
+  });
+
+  it("mounts compiled roots without React DOM unless disabled", () => {
+    expect(normalizeReactCompilerOptions(true).compiledRoot).toBe(true);
+    expect(normalizeReactCompilerOptions({ compiledRoot: false }).compiledRoot).toBe(false);
+    expect(() => normalizeReactCompilerOptions({ compiledRoot: "yes" as never })).toThrow(
+      /compiledRoot/,
     );
   });
 

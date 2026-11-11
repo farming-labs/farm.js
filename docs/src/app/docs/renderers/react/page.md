@@ -243,22 +243,52 @@ interface ReactCompilerOptions {
   reactivity?: ReactCompilerReactivity;
   report?: boolean;
   reportFile?: string;
+  compiledRoot?: boolean;
 }
 ```
 
-| Option          | Values                                | Default                     | Purpose                                                                  |
-| --------------- | ------------------------------------- | --------------------------- | ------------------------------------------------------------------------ |
-| `compiler`      | `false`, `true`, or an options object | `false`                     | Disables, enables with defaults, or configures the React-only transform. |
-| `mode`          | `"infer"`, `"annotation"`             | `"infer"`                   | Selects components automatically or only through an explicit directive.  |
-| `directive`     | non-empty string                      | `"use compiler"`            | Names the module/function directive used by annotation mode.             |
-| `onUnsupported` | `"fallback"`, `"warn"`, `"error"`     | `"fallback"`                | Controls what happens outside the current supported subset.              |
-| `reactivity`    | `"static"`, `"hybrid"`                | `"hybrid"`                  | Selects complete static dependencies or runtime-narrowed subscriptions.  |
-| `report`        | boolean                               | `false`                     | Writes a compiler coverage report after a successful production build.   |
-| `reportFile`    | project-relative path                 | `.farm/react-compiler.json` | Changes the report path and enables reporting when provided.             |
+| Option          | Values                                | Default                     | Purpose                                                                   |
+| --------------- | ------------------------------------- | --------------------------- | ------------------------------------------------------------------------- |
+| `compiler`      | `false`, `true`, or an options object | `false`                     | Disables, enables with defaults, or configures the React-only transform.  |
+| `mode`          | `"infer"`, `"annotation"`             | `"infer"`                   | Selects components automatically or only through an explicit directive.   |
+| `directive`     | non-empty string                      | `"use compiler"`            | Names the module/function directive used by annotation mode.              |
+| `onUnsupported` | `"fallback"`, `"warn"`, `"error"`     | `"fallback"`                | Controls what happens outside the current supported subset.               |
+| `reactivity`    | `"static"`, `"hybrid"`                | `"hybrid"`                  | Selects complete static dependencies or runtime-narrowed subscriptions.   |
+| `report`        | boolean                               | `false`                     | Writes a compiler coverage report after a successful production build.    |
+| `reportFile`    | project-relative path                 | `.farm/react-compiler.json` | Changes the report path and enables reporting when provided.              |
+| `compiledRoot`  | boolean                               | `true`                      | Mounts the app's own fully compiled `createRoot` roots without React DOM. |
 
 `directive` is valid only when `mode` is `"annotation"`. Invalid compiler, reactivity, or
 unsupported-component modes and directives configured in inference mode throw a configuration
 error instead of silently changing behavior.
+
+### Roots without React DOM
+
+Compiled components update the DOM themselves, so a tree that is compiled throughout needs React
+DOM only to mount. With the compiler on, an app module's `import { createRoot } from
+"react-dom/client"` resolves to `@farm.js/react/compiled-root` in the browser build. Its
+`createRoot` takes the same arguments and mounts host elements, the compiler's components and
+hook-free function components itself, so a fully compiled root never downloads React DOM.
+
+Today that covers compiled components and keyed lists whose rows hold no React-owned content.
+Compiled parts that still re-render through React, such as conditional sections, child component
+islands and rows with conditional content, keep the whole root on React DOM, as does anything else
+in the tree, such as hooks, context, Suspense, portals, or props React DOM handles specially like
+`autoFocus` and `defaultValue`. React DOM then loads on demand, and React renders the root before
+anything is shown. If a mounted compiled component later needs React (for example
+after a list update produces duplicate keys), React DOM takes over and renders the root again; that
+root's compiled state starts over. React DOM becomes a separate chunk that only these roots
+request. Falling back is silent; the compiler report lists the components it did not compile, and
+`onFallback` receives the reason for each root.
+
+Fast Refresh applies edits only to React DOM roots, so on a development server with Fast Refresh
+installed the root uses React DOM, and edits keep their usual state-preserving behaviour. Without
+Fast Refresh, an edit reloads the page.
+
+Imports that also name `hydrateRoot`, default or namespace imports, dependencies, and server
+modules keep React DOM. Pages that Farm renders and hydrates are not affected. Set
+`compiledRoot: false` to keep React DOM for every root. To pass options such as `onFallback`, call
+`createCompiledRoot(container, options)` from `@farm.js/react/compiled-root`.
 
 ### Static and hybrid reactivity
 

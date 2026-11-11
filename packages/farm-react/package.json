@@ -42,6 +42,11 @@
       "import": "./dist/compiler-runtime.mjs",
       "require": "./dist/compiler-runtime.cjs"
     },
+    "./compiled-root": {
+      "types": "./dist/compiled-root.d.ts",
+      "import": "./dist/compiled-root.mjs",
+      "require": "./dist/compiled-root.cjs"
+    },
     "./list": {
       "types": "./dist/list.d.ts",
       "import": "./dist/list.mjs",

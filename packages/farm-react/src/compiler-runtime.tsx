@@ -3321,10 +3321,12 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
     if (element.value !== nextValue) element.value = nextValue;
     // React synchronizes controlled input values with the native reset baseline.
     // Focused number inputs defer this to blur to preserve in-progress editing.
+    // React keeps a textarea's default value (its text content) in step with its value too.
     if (
       value != null &&
-      isInputElement(element) &&
-      (element.type !== "number" || element.ownerDocument.activeElement !== element) &&
+      (isTextAreaElement(element) ||
+        (isInputElement(element) &&
+          (element.type !== "number" || element.ownerDocument.activeElement !== element))) &&
       element.defaultValue !== nextValue
     ) {
       element.defaultValue = nextValue;
@@ -12679,4 +12681,458 @@ export function createCompiledComponent<Props>(
   definition: CompiledComponentDefinition<Props>,
 ): React.ComponentType<Props> {
   return createCompiledComponentWithFeatures(definition, COMPLETE_RUNTIME_FEATURES);
+}
+
+// ---------------------------------------------------------------------------------------------
+// createCompiledRoot(): mount a fully compiled tree without loading React DOM.
+// ---------------------------------------------------------------------------------------------
+
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+const REACT_PORTAL_TYPE = Symbol.for("react.portal");
+const REACT_MEMO_TYPE = Symbol.for("react.memo");
+const REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref");
+
+/** React event props the compiled mount attaches natively, by the native event they listen to. */
+const COMPILED_ROOT_EVENTS: Readonly<Record<string, string>> = {
+  onClick: "click",
+  onDoubleClick: "dblclick",
+  onContextMenu: "contextmenu",
+  onMouseDown: "mousedown",
+  onMouseUp: "mouseup",
+  onMouseMove: "mousemove",
+  onMouseOver: "mouseover",
+  onMouseOut: "mouseout",
+  onMouseEnter: "mouseenter",
+  onMouseLeave: "mouseleave",
+  onPointerDown: "pointerdown",
+  onPointerUp: "pointerup",
+  onPointerMove: "pointermove",
+  onPointerOver: "pointerover",
+  onPointerOut: "pointerout",
+  onPointerEnter: "pointerenter",
+  onPointerLeave: "pointerleave",
+  onPointerCancel: "pointercancel",
+  onKeyDown: "keydown",
+  onKeyUp: "keyup",
+  onInput: "input",
+  onSubmit: "submit",
+  onReset: "reset",
+  // React's onFocus and onBlur bubble, like focusin and focusout.
+  onFocus: "focusin",
+  onBlur: "focusout",
+};
+/** Camel-cased HTML props whose React output is the plain lower-cased attribute. */
+const COMPILED_ROOT_CAMEL_ATTRIBUTES = new Set([
+  "className",
+  "htmlFor",
+  "tabIndex",
+  "readOnly",
+  "maxLength",
+  "minLength",
+  "colSpan",
+  "rowSpan",
+  "autoComplete",
+  "inputMode",
+  "enterKeyHint",
+]);
+
+class CompiledRootUnsupported extends Error {}
+
+/**
+ * Renders a function component outside React. A hook call reaches React's current dispatcher,
+ * which is set here to one that rejects every hook, so the root goes to React DOM without React
+ * reporting an invalid hook call. React 19 and 18 keep that dispatcher in different internals;
+ * when neither is found, a hook call still fails and the root still goes to React DOM.
+ */
+function renderWithoutHooks(name: string, render: () => unknown): unknown {
+  const internals = React as unknown as {
+    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: unknown };
+    __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?: {
+      ReactCurrentDispatcher?: { current?: unknown };
+    };
+  };
+  const react19 = internals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const react18 =
+    internals.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?.ReactCurrentDispatcher;
+  const rejectHooks = new Proxy(
+    {},
+    {
+      get() {
+        throw new CompiledRootUnsupported(`${name}, which calls hooks`);
+      },
+    },
+  );
+  const previous = react19 ? react19.H : react18?.current;
+  if (react19) react19.H = rejectHooks;
+  else if (react18) react18.current = rejectHooks;
+  try {
+    return render();
+  } catch (error) {
+    if (error instanceof CompiledRootUnsupported) throw error;
+    throw new CompiledRootUnsupported(`${name}: ${error}`);
+  } finally {
+    if (react19) react19.H = previous;
+    else if (react18) react18.current = previous;
+  }
+}
+
+/**
+ * The compiler runtime's own components: their updates patch the DOM directly, and their React
+ * re-render paths (fallback, error, refresh) hand the root over to React DOM. Every runtime
+ * class carries a FarmCompiled displayName, so this check adds nothing to bundles that do not
+ * use createCompiledRoot().
+ */
+function isFarmCompilerClass(type: unknown): boolean {
+  if (typeof type !== "function" || !type.prototype?.isReactComponent) return false;
+  const displayName = (type as { displayName?: unknown }).displayName;
+  return typeof displayName === "string" && displayName.startsWith("FarmCompiled");
+}
+
+/**
+ * Runtime components whose normal updates patch the DOM without React: compiled components, and
+ * keyed rows without React-owned rows (the rule FarmKeyedRowsBlock.hasReactOwnedRows applies).
+ * Other runtime blocks re-render through React (forceUpdate) as part of normal updates, so a
+ * tree containing them is left to React DOM from the start rather than handed over later.
+ */
+function compiledRootUpdatesWithoutReact(displayName: string, props: unknown): boolean {
+  if (displayName.startsWith("FarmCompiled(")) return true;
+  if (displayName !== "FarmCompiledKeyedRows") return false;
+  const rows = props as {
+    conditionals?: readonly unknown[];
+    events?: ReadonlyArray<{ path?: unknown }>;
+    delegateEvents?: boolean;
+  };
+  const delegated = Boolean(
+    rows.delegateEvents &&
+    rows.events?.length &&
+    rows.events.every((event) => event.path !== undefined),
+  );
+  return !rows.conditionals?.length && (!rows.events?.length || delegated);
+}
+
+interface CompiledRootMount {
+  fragment: DocumentFragment;
+  /** Refs and componentDidMount, in React's commit order (children before parents). */
+  effects: Array<() => void>;
+  /** Mounted compiler components, children before parents. */
+  instances: React.Component[];
+}
+
+function toCompiledRootEvent(nativeEvent: Event, currentTarget: Element, type: string): unknown {
+  let propagationStopped = false;
+  const own: Record<PropertyKey, unknown> = {
+    nativeEvent,
+    currentTarget,
+    type,
+    stopPropagation() {
+      propagationStopped = true;
+      nativeEvent.stopPropagation();
+    },
+    isPropagationStopped: () => propagationStopped,
+    isDefaultPrevented: () => nativeEvent.defaultPrevented,
+    persist() {},
+  };
+  return new Proxy(own, {
+    get(target, key) {
+      if (key in target) return target[key];
+      const value = (nativeEvent as unknown as Record<PropertyKey, unknown>)[key];
+      return typeof value === "function" ? (value as Function).bind(nativeEvent) : value;
+    },
+  });
+}
+
+function compiledRootChangeEvent(element: Element): string {
+  if (element instanceof HTMLSelectElement) return "change";
+  if (element instanceof HTMLInputElement) {
+    return element.type === "checkbox" || element.type === "radio" || element.type === "file"
+      ? "change"
+      : "input";
+  }
+  return element instanceof HTMLTextAreaElement ? "input" : "";
+}
+
+function setCompiledRootEvent(element: Element, name: string, handler: unknown): void {
+  if (handler === null || handler === undefined) return;
+  if (typeof handler !== "function") throw new CompiledRootUnsupported(`${name} value`);
+  const capture = name.endsWith("Capture");
+  const reactName = capture ? name.slice(0, -"Capture".length) : name;
+  const nativeType =
+    reactName === "onChange" ? compiledRootChangeEvent(element) : COMPILED_ROOT_EVENTS[reactName];
+  if (!nativeType) throw new CompiledRootUnsupported(`the ${name} event`);
+  const reactType =
+    reactName === "onFocus"
+      ? "focus"
+      : reactName === "onBlur"
+        ? "blur"
+        : reactName === "onChange"
+          ? "change"
+          : nativeType;
+  element.addEventListener(
+    nativeType,
+    (event) =>
+      (handler as (event: unknown) => void)(toCompiledRootEvent(event, element, reactType)),
+    capture,
+  );
+}
+
+function setCompiledRootProp(element: Element, name: string, value: unknown): void {
+  if (name === "children" || name === "key" || name === "ref") return;
+  if (name === "suppressHydrationWarning" || name === "suppressContentEditableWarning") return;
+  if (/^on[A-Z]/.test(name)) return setCompiledRootEvent(element, name, value);
+  if (name === "style") {
+    if (value === null || value === undefined) return;
+    if (typeof value !== "object") throw new CompiledRootUnsupported("a non-object style");
+    for (const [property, styleValue] of Object.entries(value as Record<string, unknown>)) {
+      updateStyle(element, property, styleValue);
+    }
+    return;
+  }
+  if (name === "dangerouslySetInnerHTML") {
+    const html = (value as { __html?: unknown } | null | undefined)?.__html;
+    if (html !== null && html !== undefined) element.innerHTML = String(html);
+    return;
+  }
+  if (value !== null && value !== undefined && typeof value === "object") {
+    throw new CompiledRootUnsupported(`an object ${name} value`);
+  }
+  if (typeof value === "function" || typeof value === "symbol") {
+    throw new CompiledRootUnsupported(`a ${typeof value} ${name} value`);
+  }
+  const svg = element.namespaceURI === SVG_NAMESPACE;
+  if (/[A-Z]/.test(name) && (svg || !COMPILED_ROOT_CAMEL_ATTRIBUTES.has(name))) {
+    // React renames or special-cases these (autoFocus, defaultValue, spellCheck, SVG
+    // presentation attributes, ...): leave them to React DOM.
+    if (!(svg && (name === "className" || name === "viewBox"))) {
+      throw new CompiledRootUnsupported(`the ${name} prop`);
+    }
+  }
+  updateAttribute(element, name, value);
+}
+
+function mountCompiledRootNode(
+  node: unknown,
+  parent: ParentNode,
+  namespace: string | null,
+  mount: CompiledRootMount,
+  updater: object,
+): void {
+  if (node === null || node === undefined || typeof node === "boolean") return;
+  if (typeof node === "string" || typeof node === "number" || typeof node === "bigint") {
+    parent.appendChild(document.createTextNode(String(node)));
+    return;
+  }
+  if (Array.isArray(node) || (typeof node === "object" && Symbol.iterator in node)) {
+    for (const child of node as Iterable<unknown>) {
+      mountCompiledRootNode(child, parent, namespace, mount, updater);
+    }
+    return;
+  }
+  if (!React.isValidElement(node)) {
+    throw new CompiledRootUnsupported(
+      (node as { $$typeof?: unknown })?.$$typeof === REACT_PORTAL_TYPE ? "a portal" : "a child",
+    );
+  }
+  const { type } = node;
+  const props = node.props as Record<string, unknown>;
+  if (type === React.Fragment || type === React.StrictMode) {
+    return mountCompiledRootNode(props.children, parent, namespace, mount, updater);
+  }
+  if (typeof type === "string") {
+    const elementNamespace = type === "svg" ? SVG_NAMESPACE : namespace;
+    const element = elementNamespace
+      ? document.createElementNS(elementNamespace, type)
+      : document.createElement(type);
+    // React applies type before value, and a <select> value after its options exist.
+    if (props.type !== undefined) setCompiledRootProp(element, "type", props.type);
+    for (const name in props) {
+      if (name === "type" || (name === "value" && type === "select")) continue;
+      setCompiledRootProp(element, name, props[name]);
+    }
+    if (props.dangerouslySetInnerHTML === undefined) {
+      mountCompiledRootNode(
+        props.children,
+        element,
+        type === "foreignObject" ? null : elementNamespace,
+        mount,
+        updater,
+      );
+    }
+    if (type === "select" && props.value !== undefined) {
+      setCompiledRootProp(element, "value", props.value);
+    }
+    parent.appendChild(element);
+    const ref = props.ref ?? (node as { ref?: unknown }).ref;
+    if (typeof ref === "function") mount.effects.push(() => ref(element));
+    else if (ref && typeof ref === "object") {
+      mount.effects.push(() => {
+        (ref as { current: unknown }).current = element;
+      });
+    }
+    return;
+  }
+  if (isFarmCompilerClass(type)) {
+    const displayName = (type as unknown as { displayName: string }).displayName;
+    if (!compiledRootUpdatesWithoutReact(displayName, props)) {
+      throw new CompiledRootUnsupported(`${displayName}, which updates through React`);
+    }
+    const Component = type as unknown as new (props: unknown) => React.Component & {
+      componentDidMount?(): void;
+    };
+    const instance = new Component(props);
+    (instance as unknown as { props: unknown }).props = props;
+    (instance as unknown as { updater: object }).updater = updater;
+    const derived = (
+      type as { getDerivedStateFromProps?: (props: unknown, state: unknown) => unknown }
+    ).getDerivedStateFromProps;
+    if (derived) {
+      const next = derived(props, instance.state);
+      if (next) (instance as { state: unknown }).state = { ...instance.state, ...next };
+    }
+    mountCompiledRootNode(instance.render(), parent, namespace, mount, updater);
+    mount.instances.push(instance);
+    if (instance.componentDidMount) mount.effects.push(() => instance.componentDidMount!());
+    return;
+  }
+  if (typeof type === "function" && !type.prototype?.isReactComponent) {
+    // Hook-free function components render once; one that calls a hook goes to React DOM.
+    const rendered = renderWithoutHooks(type.name || "a function component", () =>
+      (type as (props: unknown) => unknown)(props),
+    );
+    return mountCompiledRootNode(rendered, parent, namespace, mount, updater);
+  }
+  const typeTag = (type as { $$typeof?: unknown } | null)?.$$typeof;
+  if (typeTag === REACT_MEMO_TYPE) {
+    const inner = (type as unknown as { type: unknown }).type;
+    return mountCompiledRootNode(
+      React.createElement(inner as React.ElementType, props),
+      parent,
+      namespace,
+      mount,
+      updater,
+    );
+  }
+  if (typeTag === REACT_FORWARD_REF_TYPE) {
+    const rendered = renderWithoutHooks("a forwardRef component", () =>
+      (type as unknown as { render(props: unknown, ref: unknown): unknown }).render(
+        props,
+        props.ref ?? null,
+      ),
+    );
+    return mountCompiledRootNode(rendered, parent, namespace, mount, updater);
+  }
+  throw new CompiledRootUnsupported("a component React DOM must render");
+}
+
+export interface CompiledRoot {
+  render(element: React.ReactNode): void;
+  unmount(): void;
+}
+
+export interface CompiledRootOptions {
+  /** Passed to React DOM's createRoot() if the root falls back to React DOM. */
+  reactRootOptions?: unknown;
+  /**
+   * Called with the reason when the root uses React DOM instead. The default is silent, so an
+   * app's visitors see nothing in their console; the compiler report lists uncompiled components.
+   */
+  onFallback?(reason: string): void;
+}
+
+interface CompiledRootReactDOM {
+  createRoot(
+    container: Element,
+    options?: never,
+  ): { render(element: React.ReactNode): void; unmount(): void };
+}
+
+/**
+ * Experimental: a createRoot() that mounts a fully compiled tree without loading React DOM.
+ *
+ * It renders host elements, fragments, the compiler runtime's components and hook-free function
+ * components into a detached fragment, then commits it, runs refs and componentDidMount, and
+ * leaves updates to the compiled runtime. Anything else (hooks, context, Suspense, portals,
+ * props React renames) loads React DOM on demand and lets it render the root instead, before
+ * anything is shown. If a mounted compiler component later needs a React re-render (its
+ * fallback, error and refresh paths), React DOM takes over and renders the root again: that
+ * root's compiled state starts over. Pages with Fast Refresh installed use React DOM, which is
+ * the only renderer Fast Refresh updates.
+ */
+export function createCompiledRoot(
+  container: Element,
+  options: CompiledRootOptions,
+  // Supplied by @farm.js/react/compiled-root, so the runtime itself holds no dynamic import of
+  // React DOM: apps that import React DOM statically see no ineffective-dynamic-import warning.
+  loadReactDOM: () => Promise<CompiledRootReactDOM>,
+): CompiledRoot {
+  let mode: "idle" | "compiled" | "pending" | "react" = "idle";
+  let element: React.ReactNode = null;
+  let instances: React.Component[] = [];
+  let reactRoot: { render(element: React.ReactNode): void; unmount(): void } | undefined;
+  let unmounted = false;
+
+  const stopCompiled = () => {
+    // React unmounts parents before children.
+    for (const instance of instances.slice().reverse()) {
+      (instance as { componentWillUnmount?(): void }).componentWillUnmount?.();
+    }
+    instances = [];
+  };
+
+  const handOff = (reason?: string) => {
+    if (mode === "pending" || mode === "react") return;
+    if (reason) options.onFallback?.(reason);
+    stopCompiled();
+    mode = "pending";
+    void loadReactDOM().then((client) => {
+      if (unmounted) return;
+      reactRoot = client.createRoot(container, options.reactRootOptions as never);
+      mode = "react";
+      reactRoot.render(element);
+    });
+  };
+
+  const updater = {
+    isMounted: () => mode === "compiled",
+    enqueueSetState: () => handOff("a compiled component needs a React update"),
+    enqueueReplaceState: () => handOff("a compiled component needs a React update"),
+    enqueueForceUpdate: () => handOff("a compiled component needs a React update"),
+  };
+
+  return {
+    render(next) {
+      element = next;
+      if (unmounted) return;
+      if (mode === "react") return reactRoot!.render(next);
+      if (mode === "pending") return;
+      if (mode === "compiled") return handOff("render() was called again");
+      // Fast Refresh applies edits only to React DOM roots, so a page that installed it (a
+      // development server) uses React DOM, as it would without the compiled root.
+      if (typeof (globalThis as { $RefreshReg$?: unknown }).$RefreshReg$ === "function") {
+        return handOff();
+      }
+      const mount: CompiledRootMount = {
+        fragment: document.createDocumentFragment(),
+        effects: [],
+        instances: [],
+      };
+      try {
+        mountCompiledRootNode(next, mount.fragment, null, mount, updater);
+      } catch (error) {
+        if (!(error instanceof CompiledRootUnsupported)) throw error;
+        return handOff(`it contains ${error.message}`);
+      }
+      container.replaceChildren(mount.fragment);
+      instances = mount.instances;
+      mode = "compiled";
+      for (const effect of mount.effects) effect();
+    },
+    unmount() {
+      unmounted = true;
+      if (mode === "react") reactRoot!.unmount();
+      else {
+        stopCompiled();
+        container.replaceChildren();
+      }
+    },
+  };
 }
