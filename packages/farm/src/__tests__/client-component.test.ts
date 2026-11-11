@@ -1876,6 +1876,12 @@ export function Chart() {}
     expect(release).toBeGreaterThan(isolatedHydrate);
     expect(isolatedBranch.indexOf("return;", release)).toBeGreaterThan(release);
     expect(isolatedBranch).not.toContain("replayPreHydrationClicks(");
+    // Client plugins see an islands-only page hydrate, as they see any other page.
+    const begin = isolatedBranch.indexOf("farmClientRuntime.beginHydration(");
+    const complete = isolatedBranch.indexOf("farmClientRuntime.completeHydration(");
+    expect(begin).toBeGreaterThan(-1);
+    expect(begin).toBeLessThan(isolatedHydrate);
+    expect(complete).toBeGreaterThan(isolatedHydrate);
     expect(productionSource).toContain("await hydrateFarmIsolatedClientBoundaries(document);");
   });
 
