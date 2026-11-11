@@ -68,8 +68,15 @@ description: "Install Farm and create your first application."
 
 Every Markdown docs page also gets a page-specific 1200 by 630 social preview automatically. Farm
 uses the title, description, section, and route to emit Open Graph and X metadata, then selects a
-technical illustration suited to the page topic. The generated SVG is accessible, resolution
-independent, content-fingerprinted, and served with immutable caching.
+technical illustration suited to the page topic. The image is content-fingerprinted and served
+with immutable caching.
+
+X, LinkedIn, Facebook, and Slack do not render SVG previews, so when the optional `sharp` package
+is installed (`pnpm add sharp`), `og:image` points at a PNG
+(`/docs/_social/<page>/opengraph-image.png`) rendered from the same design. Without `sharp`, the
+SVG is the preview. The SVG stays available at `opengraph-image.svg` either way. The PNG uses system
+fonts, because `socialImage.fonts` can only be embedded in the SVG. Edge targets render the PNGs at
+build time into the server bundle, which adds roughly 25-35 KB per page.
 
 Use frontmatter only when a page needs to override the automatic result:
 
@@ -307,6 +314,13 @@ lastModified: "2026-07-16"
 
 Explicit frontmatter wins over generated Git metadata. When Git history is unavailable, local docs
 fall back to the source file timestamp and copied production docs fall back to the build date.
+
+A shallow clone holds only recent history, and Git lists its oldest commit as adding every file. A
+page last changed before that commit therefore shows no date, instead of the oldest commit's date
+or the build date, and `farm build` warns how many pages it left undated. Build from a full clone
+(`git fetch --unshallow`) to date every page. Vercel clones 10 commits deep; the
+`VERCEL_DEEP_CLONE=true` environment variable is widely reported to give a full clone, but Vercel
+does not document it, so check a deployment's dates after setting it.
 
 ## Override behavior
 

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createFarmDocsAPIHandler, createFarmDocsHandler } from "../docs";
-import { compileFarmDocsManifest } from "../docs/compiler";
+import { compileFarmDocsManifest, FARM_DOCS_COMPILED_ORIGIN } from "../docs/compiler";
 import { createFarmDocsPrecompiledRuntime } from "../docs/precompiled-runtime";
 import type { FarmDocsResolvedConfig } from "../docs/types";
 import { applyFarmCspNonceToResponse, resolveFarmSecurityConfig } from "../security";
@@ -93,6 +93,54 @@ describe("precompiled docs runtime", () => {
     }
   });
 
+  it("serves the PNG social image bytes unchanged", async () => {
+    const fixture = await createFixture();
+    const { root } = fixture;
+    const docs = {
+      ...fixture.docs,
+      config: { ...fixture.docs.config, socialImage: { baseUrl: "https://edge.test" } },
+    };
+    const options = {
+      root,
+      srcDir: "src",
+      clientEntry: "/farm-client.js",
+      fontAssets: [],
+      fontStylesheetHref: "/farm-fonts.css",
+      globalStylesheetHref: "/assets/globals.css",
+    };
+    const manifest = await compileFarmDocsManifest(docs, options);
+    const compiled = createFarmDocsPrecompiledRuntime(manifest);
+    const filesystem = createFarmDocsHandler(docs, options);
+
+    const html = await (await compiled.handleDocsRequest(
+      new Request("https://edge.test/docs/guide"),
+    ))!.text();
+    const imageUrl = html.match(/property="og:image" content="([^"]+)"/)?.[1];
+    expect(imageUrl).toMatch(
+      /^https:\/\/edge\.test\/docs\/_social\/guide\/opengraph-image\.png\?v=/,
+    );
+
+    const image = await compiled.handleDocsRequest(new Request(imageUrl!));
+    const expected = await filesystem(new Request(imageUrl!));
+    expect(image?.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await image!.arrayBuffer())).toEqual(
+      new Uint8Array(await expected!.arrayBuffer()),
+    );
+    const head = await compiled.handleDocsRequest(new Request(imageUrl!, { method: "HEAD" }));
+    expect(head?.headers.get("content-type")).toBe("image/png");
+    expect(await head?.text()).toBe("");
+
+    // Without a configured baseUrl the build origin is a placeholder, which the
+    // rasterized image must not draw.
+    const placeholderSvg = await createFarmDocsHandler(
+      fixture.docs,
+      options,
+    )(new Request(`${FARM_DOCS_COMPILED_ORIGIN}/docs/_social/guide/opengraph-image.svg`));
+    const svg = await placeholderSvg!.text();
+    expect(svg).toContain(">/docs/guide</text>");
+    expect(svg).not.toMatch(/<text[^>]*>[^<]*\.invalid/);
+  });
+
   it("serves markdown and search through the precompiled API", async () => {
     const { root, docs } = await createFixture();
     const manifest = await compileFarmDocsManifest(docs, {
@@ -167,10 +215,13 @@ describe("precompiled docs runtime", () => {
     expect(html).toContain('href="/console/docs/guide"');
     expect(html).toContain('const docsEntry="/console/docs"');
     expect(html).not.toMatch(/href="\/(docs|llms\.txt)/);
-    // The page's social image answers at the URL the page gives it.
+    // The page's social image answers at the URL the page gives it. sharp is
+    // installed here, so the image is the PNG.
     const image = html.match(/property="og:image" content="([^"]+)"/)?.[1] || "";
-    expect(new URL(image).pathname).toBe("/console/docs/_social/guide/opengraph-image.svg");
-    expect((await get(new URL(image).pathname))?.status).toBe(200);
+    expect(new URL(image).pathname).toBe("/console/docs/_social/guide/opengraph-image.png");
+    const imageResponse = await get(new URL(image).pathname);
+    expect(imageResponse?.status).toBe(200);
+    expect(imageResponse?.headers.get("content-type")).toBe("image/png");
 
     expect(await (await get("/console/docs/guide.md"))?.text()).toContain(
       "URL: /console/docs/guide",

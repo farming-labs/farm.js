@@ -178,7 +178,7 @@ test("keeps an explicit CLI preset ahead of configure", async () => {
   assert.equal(await observeBuildPreset("vercel"), "vercel");
 });
 
-test("keeps building an app that sets experimental.serverComponents without the RSC packages", async () => {
+test("builds `serverComponents: true` in islands mode on Farm's own pipeline, without the RSC packages", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-build-rsc-"));
 
   try {
@@ -197,15 +197,14 @@ test("keeps building an app that sets experimental.serverComponents without the 
       "utf8",
     );
 
-    // With installs skipped and no RSC packages, the build warns and takes the normal pipeline;
-    // the probe stops it there.
+    // `true` is islands mode: Farm's own pipeline, which the probe stops, with nothing to install.
     await assert.rejects(
       execFileAsync(process.execPath, [cliBin, "build", "--root", root], {
         env: { ...process.env, FARM_SKIP_RSC_INSTALL: "1" },
       }),
       (error) => {
         const output = `${error.stdout || ""}\n${error.stderr || ""}`;
-        assert.match(output, /so the app runs without React Server Components/);
+        assert.doesNotMatch(output, /React Server Components/);
         assert.match(output, /normal-pipeline-reached/);
         return true;
       },

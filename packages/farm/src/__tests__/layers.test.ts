@@ -40,7 +40,10 @@ describe("Farm layers", () => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name }));
     }
-    const config = { extends: ["./layers/admin"], experimental: { serverComponents: true } };
+    const config = {
+      extends: ["./layers/admin"],
+      experimental: { serverComponents: { mode: "rsc" as const } },
+    };
     // The project config alone sets neither.
     expect(farmAppUsesRscPipeline(config, root)).toBe(true);
     const merged = await resolveFarmRscCheckConfig(config, root, "production");
@@ -48,7 +51,7 @@ describe("Farm layers", () => {
       "does not run `auth`, `headers` yet",
     );
     // Without layers it reads the config as it is.
-    const plain = { experimental: { serverComponents: true } };
+    const plain = { experimental: { serverComponents: { mode: "rsc" as const } } };
     expect(await resolveFarmRscCheckConfig(plain, root, "development")).toBe(plain);
   });
 

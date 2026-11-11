@@ -172,6 +172,27 @@ endpoint declares no body. Malformed `multipart/form-data` also returns `400` in
 absent body; an empty `application/x-www-form-urlencoded` body is a valid empty form and parses as an
 empty object. Callers that omit `Content-Type` retain the permissive JSON parsing path for
 compatibility.
+
+An endpoint whose `body` schema is JSON (any schema not wrapped in `multipart()`) answers `415`
+before middleware or handler code runs when a browser on another origin sends a body declared as
+anything other than `application/json` or `application/*+json`. `text/plain`,
+`application/x-www-form-urlencoded`, and `multipart/form-data` are the types a page on another
+site can post with the visitor's cookies and no CORS preflight, so this keeps such a page from
+submitting a form that the schema would accept. A request counts as cross-origin when its `Origin`
+(or, without one, its `Referer`) differs from the app's, or when the browser sends
+`Sec-Fetch-Site: cross-site`; `Origin: null` is refused too. Unchanged:
+
+- The app's own pages can still post forms to the endpoint, which is how a `<fetcher.Form>` submits
+  before hydration.
+- Callers that send no `Origin` or `Referer`, such as servers and webhooks, keep every content type.
+- Another origin can still send JSON, which the browser sends only after a CORS preflight that a
+  [`routeRules` `cors` rule](/docs/configuration) allows. A `cors` rule does not admit form bodies.
+- Endpoints without a `body` schema and plain method exports read the request as before.
+
+To accept form posts from another origin, such as an OAuth `response_mode=form_post` callback,
+wrap the body schema in `multipart()`. That endpoint then reads urlencoded and multipart bodies
+from any origin, and its generated caller takes `toFormData(...)`.
+
 If an upload is aborted while Farm is buffering its body, Farm rejects it before invoking the
 endpoint. This does not roll back work in a handler that has already started.
 On Node, finishing an upload is not an abort: only an interrupted upload or an early response
