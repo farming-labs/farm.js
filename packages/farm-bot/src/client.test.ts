@@ -153,6 +153,18 @@ describe("startBotWidget", () => {
     }));
   }
 
+  it("says the plugin's build half is missing when the widget module wasn't pointed at the widget", async () => {
+    const { default: placeholder } = await import("./provider-widget");
+    await expect(startBotWidget(placeholder, { widget: "/w.ts" })).rejects.toMatchObject({
+      name: "BotError",
+      code: "missing_plugin",
+      message: expect.stringMatching(/no widget for "\/w\.ts".*`configure`.*`rsc` mode/),
+    });
+    await expect(startBotWidget(undefined, { widget: "/w.ts" })).rejects.toThrow(
+      '"/w.ts" must have `defineBotWidget(...)` as its default export.',
+    );
+  });
+
   it("gives the widget the provider's public data", async () => {
     const create = vi.fn(() => ({ mount: () => ({ reset() {}, remove() {} }) }));
     runtime = await startBotWidget(create, { widget: "/w.ts", config: { siteKey: "k" } });
