@@ -11,8 +11,8 @@ A Farm plugin can own server and browser behavior through one `definePlugin()` c
 Application code does not mount a provider, initialize a second registry, or forward router events.
 
 Client hooks run with both [server components](/docs/server-rendering) engines. In `rsc` mode
-(`serverComponents: { mode: "rsc" }`) they are the only part of a plugin Farm runs yet: its
-`configure`, server, build, and dev hooks don't run there.
+(`serverComponents: { mode: "rsc" }`) they and `configure` are the only parts of a plugin Farm
+runs yet: its server, build, and dev hooks don't run there.
 
 ## Define both sides
 

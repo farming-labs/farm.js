@@ -211,12 +211,11 @@ For a typed `check.data`, keep the plugin in a variable, add it to `plugins`, an
 
 ## Limits
 
-- **`rsc` mode.** Farm runs only a plugin's [browser hooks](/docs/plugins/client) there, not its
-  `configure`, so the build has no widget for `<BotCheck>` and the page logs a `BotError` that
-  says so. A production server doesn't load farm.config.ts either, so `verifyBot` throws a
+- **`rsc` mode.** A production server there doesn't load farm.config.ts, so `verifyBot` throws a
   `BotError`, although `farm dev` finds the plugin. To check forms on the server, create the
   plugin in a module your routes import, such as `src/bot.ts`, and add that instance to
-  `plugins`. `islands` mode works.
+  `plugins`. With `@farm.js/core` 0.1.67 or earlier, `rsc` mode also skips the plugin's
+  `configure`, so the build has no widget for `<BotCheck>`. `islands` mode works.
 - **Cloudflare Pages with `@farm.js/core` 0.1.66 or earlier.** That output exposes no bindings
   at runtime, so secrets aren't found and every check fails with a `BotError`. Upgrade core, or
   use compatibility date `2025-04-01` or later, the `cloudflare-module` preset, or pass
