@@ -92,6 +92,7 @@ const companyLinks = [
   ["About", "/about"],
   ["Contact", "/contact"],
   ["Privacy", "/privacy"],
+  ["Terms", "/terms"],
 ] as const;
 
 function cx(...classes: Array<string | false | null | undefined>) {

@@ -135,7 +135,8 @@ export type RoutePath =
   | "/docs/themes"
   | "/docs/upgrading"
   | "/privacy"
-  | "/telemetry";
+  | "/telemetry"
+  | "/terms";
 export type RoutePattern =
   | "/"
   | "/about"
@@ -259,7 +260,8 @@ export type RoutePattern =
   | "/docs/themes"
   | "/docs/upgrading"
   | "/privacy"
-  | "/telemetry";
+  | "/telemetry"
+  | "/terms";
 export type RouteModulePattern =
   | "/"
   | "/about"
@@ -383,7 +385,8 @@ export type RouteModulePattern =
   | "/docs/themes"
   | "/docs/upgrading"
   | "/privacy"
-  | "/telemetry";
+  | "/telemetry"
+  | "/terms";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;
