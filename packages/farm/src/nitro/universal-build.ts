@@ -3002,7 +3002,8 @@ ${
       this.activeViewportPrefetches += 1;
       let prefetchResult;
       try {
-        prefetchResult = this.prefetch(task.href);
+        // Through the installed router, so the lazy router's stand-in sees viewport prefetches too.
+        prefetchResult = (window.__FARM_SPA_ROUTER__ || this).prefetch(task.href);
       } catch {
         prefetchResult = undefined;
       }
@@ -3429,7 +3430,11 @@ const farmRouterObserved = new Set();
 function loadFarmRouter() {
   return farmRouterLoading || (farmRouterLoading = import("./farm-client-router").then(function(module) {
     farmLoadedRouter = module.spaRouter;
+    // The router module installs itself as the global; this object stays it, so a reference taken
+    // before the router loaded, or a method wrapped on it, keeps working afterwards.
+    window.__FARM_SPA_ROUTER__ = spaRouter;
     for (const ready of farmRouterReady.splice(0)) ready(farmLoadedRouter);
+    if (farmRouterViewport) farmRouterViewport.disconnect();
     for (const element of farmRouterObserved) farmLoadedRouter.observeForPrefetch(element);
     farmRouterObserved.clear();
     return farmLoadedRouter;
@@ -3437,6 +3442,15 @@ function loadFarmRouter() {
     farmRouterLoading = null;
     throw error;
   }));
+}
+
+let farmRouterViewport = null;
+function farmRouterViewportObserver() {
+  return farmRouterViewport || (farmRouterViewport = new IntersectionObserver(function(entries) {
+    if (!entries.some(function(entry) { return entry.isIntersecting; })) return;
+    farmRouterViewport.disconnect();
+    void loadFarmRouter().catch(function() {});
+  }, { rootMargin: "50px" }));
 }
 
 function farmRouterCall(name, beforeLoad) {
@@ -3465,7 +3479,10 @@ function farmRouterSubscribe(name, loadNow) {
   };
 }
 
-const spaRouter = {
+const farmRouterStandIn = {
+  get currentPath() {
+    return farmLoadedRouter ? farmLoadedRouter.currentPath : window.location.pathname + window.location.search;
+  },
   navigate: function(href, options) {
     if (farmLoadedRouter) return farmLoadedRouter.navigate(href, options);
     return loadFarmRouter().then(function(router) {
@@ -3477,12 +3494,15 @@ const spaRouter = {
   },
   refresh: farmRouterCall("refresh"),
   prefetch: farmRouterCall("prefetch"),
-  // Watching links for viewport prefetch waits for the router: alone it never justifies loading it.
+  // A watched link loads the router once it nears the viewport, which then prefetches it.
   observeForPrefetch: farmRouterCall("observeForPrefetch", function(element) {
+    if (!("IntersectionObserver" in window)) return;
     farmRouterObserved.add(element);
+    farmRouterViewportObserver().observe(element);
   }),
   unobserveForPrefetch: farmRouterCall("unobserveForPrefetch", function(element) {
     farmRouterObserved.delete(element);
+    if (farmRouterViewport) farmRouterViewport.unobserve(element);
   }),
   pushState: farmRouterCall("pushState"),
   replaceState: farmRouterCall("replaceState"),
@@ -3494,6 +3514,21 @@ const spaRouter = {
   addBlocker: farmRouterSubscribe("addBlocker", true),
   registerScrollElement: farmRouterSubscribe("registerScrollElement", true),
 };
+// Members only the router has, such as its fetch helpers, read and write through to it once loaded.
+const spaRouter = new Proxy(farmRouterStandIn, {
+  get: function(target, key) {
+    if (key in target || !farmLoadedRouter) return target[key];
+    return farmLoadedRouter[key];
+  },
+  set: function(target, key, value) {
+    if (key in target || !farmLoadedRouter) target[key] = value;
+    else farmLoadedRouter[key] = value;
+    return true;
+  },
+  has: function(target, key) {
+    return key in target || (farmLoadedRouter !== null && key in farmLoadedRouter);
+  },
+});
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
 // Links in server components have no handlers of their own, so intent is read from the document.
