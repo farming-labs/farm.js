@@ -186,6 +186,23 @@ describe("createCompiledRoot", () => {
     await vi.waitFor(() => expect(host.querySelector("input")?.value).toBe("x"));
   });
 
+  it("falls back silently unless onFallback is given", async () => {
+    const warn = vi.spyOn(console, "warn");
+    const error = vi.spyOn(console, "error");
+    try {
+      const host = container();
+      const root = createCompiledRoot(host, {});
+      await act(async () => root.render(<input autoFocus defaultValue="x" />));
+      await vi.waitFor(() => expect(host.querySelector("input")?.value).toBe("x"));
+      await act(async () => root.unmount());
+      expect(warn).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
+
   it("hands a mounted root to React DOM when a compiled component needs React", async () => {
     const { compiled, original } = await loadCompiledAndOriginal(`
       import { useState } from "react";

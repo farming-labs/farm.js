@@ -13031,7 +13031,10 @@ export interface CompiledRoot {
 export interface CompiledRootOptions {
   /** Passed to React DOM's createRoot() if the root falls back to React DOM. */
   reactRootOptions?: unknown;
-  /** Called with the reason when the root uses React DOM instead. Defaults to console.warn. */
+  /**
+   * Called with the reason when the root uses React DOM instead. The default is silent, so an
+   * app's visitors see nothing in their console; the compiler report lists uncompiled components.
+   */
   onFallback?(reason: string): void;
 }
 
@@ -13067,10 +13070,6 @@ export function createCompiledRoot(
   let reactRoot: { render(element: React.ReactNode): void; unmount(): void } | undefined;
   let unmounted = false;
 
-  const report =
-    options.onFallback ??
-    ((reason: string) => console.warn(`[farm] Compiled root uses React DOM: ${reason}`));
-
   const stopCompiled = () => {
     // React unmounts parents before children.
     for (const instance of instances.slice().reverse()) {
@@ -13081,7 +13080,7 @@ export function createCompiledRoot(
 
   const handOff = (reason?: string) => {
     if (mode === "pending" || mode === "react") return;
-    if (reason) report(reason);
+    if (reason) options.onFallback?.(reason);
     stopCompiled();
     mode = "pending";
     void loadReactDOM().then((client) => {

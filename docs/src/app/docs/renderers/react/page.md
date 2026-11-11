@@ -277,8 +277,9 @@ in the tree, such as hooks, context, Suspense, portals, or props React DOM handl
 `autoFocus` and `defaultValue`. React DOM then loads on demand, and React renders the root before
 anything is shown. If a mounted compiled component later needs React (for example
 after a list update produces duplicate keys), React DOM takes over and renders the root again; that
-root's compiled state starts over, and a console warning says why. React DOM becomes a separate
-chunk that only these roots request.
+root's compiled state starts over. React DOM becomes a separate chunk that only these roots
+request. Falling back is silent; the compiler report lists the components it did not compile, and
+`onFallback` receives the reason for each root.
 
 Fast Refresh applies edits only to React DOM roots, so on a development server with Fast Refresh
 installed the root uses React DOM, and edits keep their usual state-preserving behaviour. Without
