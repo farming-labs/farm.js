@@ -213,9 +213,10 @@ For a typed `check.data`, keep the plugin in a variable, add it to `plugins`, an
 
 - **`rsc` mode.** Farm doesn't run plugins there yet, so the widget never starts by itself and
   `verifyBot` throws a `BotError` that says so. `islands` mode works.
-- **Cloudflare Pages.** Farm's default compatibility date exposes no bindings at runtime, so
-  secrets aren't found and every check fails with a `BotError`. Use compatibility date
-  `2025-04-01` or later, the `cloudflare-module` preset, or pass `secretKey`.
+- **Cloudflare Pages with `@farm.js/core` 0.1.66 or earlier.** That output exposes no bindings
+  at runtime, so secrets aren't found and every check fails with a `BotError`. Upgrade core, or
+  use compatibility date `2025-04-01` or later, the `cloudflare-module` preset, or pass
+  `secretKey`.
 - **reCAPTCHA** means the v2 checkbox. v3 has no widget, so it needs its own provider.
 - **One checker per app.** The plugin can be added once, so two forms can't use two different
   checkers.
