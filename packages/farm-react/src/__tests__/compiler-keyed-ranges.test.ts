@@ -227,9 +227,7 @@ describe("React AOT keyed-range compiler", () => {
   it("keeps a component sibling in the root outside the range-owned contract", async () => {
     const result = await compile(`
       import { useState } from "react";
-      function Heading() {
-        return <li>Tasks</li>;
-      }
+      import { Heading } from "./heading";
       export function Tasks() {
         const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
         return (

@@ -255,7 +255,7 @@ describe("React AOT keyed list compiler", () => {
   it("treats a locally named List as an ordinary static component island", async () => {
     const result = await compile(`
       import { useState } from "react";
-      function List() { return <li>Local</li>; }
+      function List() { const [label] = useState("Local"); return <li>{label}</li>; }
       export function LocalList() {
         const [active, setActive] = useState(false);
         return <ul onClick={() => setActive(!active)}><List /></ul>;

@@ -272,7 +272,8 @@ hook-free function components itself, so a fully compiled root never downloads R
 
 Today that covers compiled components and keyed lists whose rows hold no React-owned content.
 Compiled parts that still re-render through React, such as conditional sections, child component
-islands and rows with conditional content, keep the whole root on React DOM, as does anything else
+islands (hook-free children in the same module are inlined instead, as described below) and rows
+with conditional content, keep the whole root on React DOM, as does anything else
 in the tree, such as hooks, context, Suspense, portals, or props React DOM handles specially like
 `autoFocus` and `defaultValue`. React DOM then loads on demand, and React renders the root before
 anything is shown. If a mounted compiled component later needs React (for example
@@ -2417,6 +2418,39 @@ The first supported shape is intentionally conservative:
 - The child may internally return `null`, fragments, multiple elements, or other components.
 - JSX children, spreads, `ref`, `key`, member expressions such as `UI.Chart`, prop-selected dynamic
   component types, render props, and inline object/array/JSX values fall back to normal React.
+
+#### Hook-free children in the same module
+
+A child defined in the same module that calls no Hooks and returns one JSX element does not need an
+island:
+
+```tsx
+function Footer({ remaining, onClear }) {
+  return (
+    <footer>
+      <span>{remaining} left</span>
+      <button onClick={onClear}>Clear</button>
+    </footer>
+  );
+}
+```
+
+`<Footer remaining={open} onClear={() => setTodos([])} />` is replaced by Footer's JSX with the props
+substituted, so the parent compiles as one template and Footer's text and attributes update directly.
+The child's definition stays in the module for any other caller. The compiler inlines a child only
+when doing so cannot change what React would render:
+
+- the child is a module-level function or `const` arrow with at most one destructured props
+  parameter, no Hooks, no `this` or `arguments`, and a single returned JSX element;
+- the child is referenced only as a JSX tag, so `Child.defaultProps` and similar uses keep it a
+  component;
+- the usage passes no JSX children, spread, `key`, or `ref`, and no prop is used as a JSX tag;
+- names the child reads resolve to the same bindings at the use site, and the child's own callbacks
+  do not rebind a name a prop reads; and
+- a prop read more than once, or not read at all, is compiler-safe, so inlining never repeats or
+  drops an effect.
+
+Imported children, and children that do not meet these conditions, keep the island behaviour above.
 
 Direct DOM bindings now use generated private callback refs instead of depending only on sibling
 indexes. This matters when an earlier React-owned child changes its number of DOM nodes: the

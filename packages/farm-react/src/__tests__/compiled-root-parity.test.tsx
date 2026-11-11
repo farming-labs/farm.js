@@ -282,8 +282,9 @@ describe("compiled root parity with React DOM", () => {
       "Parent",
       [click("#inc"), click("#inc"), click("#inc")],
     );
-    // Child components with props are component islands, which re-render through React.
-    expect(fallbacks).toEqual([expect.stringContaining("FarmCompiledComponentIsland")]);
+    // Badge is a module-local child with no hooks: the compiler inlines its JSX, so the
+    // parent compiles as one template and the root needs no React DOM.
+    expect(fallbacks).toEqual([]);
   });
 
   it("filter buttons rendered from an array literal", async () => {
@@ -417,6 +418,39 @@ describe("compiled root parity with React DOM", () => {
         click("#toggle-done"),
         click('li[data-id="1"] .finish'),
       ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("a page of hook-free child components with props", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      function Header({ title, count }) {
+        return <header><h1>{title}</h1><small data-count={count}>{count} total</small></header>;
+      }
+      const Stat = ({ label, value }) => <p className="stat"><b>{label}</b><span>{value}</span></p>;
+      function Footer({ remaining, onClear }) {
+        return (
+          <footer>
+            <span>{remaining === 1 ? "1 item left" : remaining + " items left"}</span>
+            <button id="clear" onClick={onClear}>Clear</button>
+          </footer>
+        );
+      }
+      export function Page() {
+        const [items, setItems] = useState(3);
+        const [cleared, setCleared] = useState(0);
+        return (
+          <section>
+            <Header title="Inventory" count={items} />
+            <button id="add" onClick={() => setItems(items + 1)}>Add</button>
+            <Stat label="Cleared" value={cleared} />
+            <Footer remaining={items} onClear={() => { setItems(0); setCleared(cleared + 1); }} />
+          </section>
+        );
+      }`,
+      "Page",
+      [click("#add"), click("#add"), click("#clear"), click("#add")],
     );
     expect(fallbacks).toEqual([]);
   });
