@@ -482,6 +482,31 @@ export function DocsSidebar() {
 
 Use stable keys per scroll container. If two elements share a key, the latest mounted element owns that stored position.
 
+## Route announcements
+
+A client navigation does not load a new document, so a screen reader has nothing to read on its
+own. Farm announces the page instead. After a navigation renders, Farm puts the page's title into a
+visually hidden live region (`aria-live="assertive"`, `aria-atomic="true"`) at the end of `<body>`.
+When the title is empty it reads the first `h1`, then the pathname.
+
+- The first load is not announced: the screen reader reads that document itself.
+- A navigation is announced when its pathname or title changed. Back and forward are announced.
+  A hash change, or a `router.refresh()` or search-param change that keeps the title, is not.
+- The region is created on the first client navigation, never in server HTML, so SSR output and
+  hydration are unchanged.
+- It works the same in every renderer, in islands mode, and with the RSC pipeline. There is no
+  option to configure.
+- Focus stays where it was. Farm does not move focus after a navigation.
+- Pages of the built-in docs engine navigate with their own runtime and are not announced yet.
+
+Give each page its own `metadata.title` so the announcement says where the user landed:
+
+```tsx
+export const metadata = { title: "Billing | Acme" };
+```
+
+End-to-end tests can read the announcement from `#farm-route-announcer`.
+
 ## Route data cache
 
 Programmatic routes can cache the value returned from `data.main`. This is useful for product pages, docs pages, dashboards, and other route data that should be reused during server rendering or prefetching.

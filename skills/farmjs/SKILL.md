@@ -219,6 +219,9 @@ Read `docs/src/app/docs/configuration/page.md` before adding an unfamiliar optio
 - Metadata route files `sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, and `llms-full.ts`
   serve `/sitemap.xml`, `/robots.txt`, `/manifest.webmanifest`, `/llms.txt`, and `/llms-full.txt`
 - Route exports or route rules select dynamic, static, ISR, PPR, runtime, and cache behavior
+- Client navigations announce the new page's title (else its first `h1`, else the pathname) to
+  screen readers in a live region created on the first navigation (`#farm-route-announcer`); give
+  each page a distinct `metadata.title`; focus is not moved
 
 Page shape:
 
