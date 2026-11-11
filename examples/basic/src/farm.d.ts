@@ -40,6 +40,8 @@ export type RoutePath =
   | `/feature-lab/static/${string}`
   | "/hmr-e2e"
   | "/markdown"
+  | "/navigation-loading/first"
+  | "/navigation-loading/second"
   | "/optional-catchall"
   | `/optional-catchall/${string}`
   | "/ppr-demo"
@@ -87,6 +89,8 @@ export type RoutePattern =
   | "/feature-lab/static/[slug]"
   | "/hmr-e2e"
   | "/markdown"
+  | "/navigation-loading/first"
+  | "/navigation-loading/second"
   | "/optional-catchall/[[...slug]]"
   | "/ppr-demo"
   | "/prefetch-e2e"
@@ -133,6 +137,8 @@ export type RouteModulePattern =
   | "/feature-lab/static/[slug]"
   | "/hmr-e2e"
   | "/markdown"
+  | "/navigation-loading/first"
+  | "/navigation-loading/second"
   | "/optional-catchall/[[...slug]]"
   | "/ppr-demo"
   | "/prefetch-e2e"
