@@ -14,6 +14,7 @@ import {
   existsSync,
   readdirSync,
   lstatSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -79,10 +80,14 @@ export function rewriteRscEntryImports(serverDir: string, serverDistDir: string)
   for (const chunksDir of ["chunks", "_chunks", "_build"]) {
     findEntryChunks(path.join(serverDir, chunksDir));
   }
+  // Node resolves a relative import from the importer's real location, so both ends are real paths:
+  // a server dir reached through a link (macOS's /var -> /private/var) would otherwise climb too far.
+  const realServerDistDir = realpathSync(serverDistDir);
   for (const entryChunkPath of entryChunkPaths) {
     let code = readFileSync(entryChunkPath, "utf-8");
+    const entryDir = realpathSync(path.dirname(entryChunkPath));
     const relativeImport = (target: string) => {
-      const relative = path.relative(path.dirname(entryChunkPath), target).replace(/\\/g, "/");
+      const relative = path.relative(entryDir, target).replace(/\\/g, "/");
       return relative.startsWith(".") ? relative : `./${relative}`;
     };
     // Match any path that ends with dist/rsc/index.js, dist/ssr/index.js or the NODE_ENV module
@@ -98,7 +103,7 @@ export function rewriteRscEntryImports(serverDir: string, serverDistDir: string)
       );
       code = code.replace(
         pattern,
-        JSON.stringify(relativeImport(path.join(serverDistDir, environment, file))),
+        JSON.stringify(relativeImport(path.join(realServerDistDir, environment, file))),
       );
     }
     writeFileSync(entryChunkPath, code, "utf-8");
