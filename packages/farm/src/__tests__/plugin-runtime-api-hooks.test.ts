@@ -27,18 +27,26 @@ afterEach(async () => {
   temporaryRoots.clear();
 });
 
+type Variant = { label: string; renderer: "react" | false };
+
+// The same app with the default React renderer and as a backend-only `renderer: false` app: the
+// API request path is renderer-neutral, so both must see the same hooks.
+const VARIANTS: Variant[] = [
+  { label: "with the React renderer", renderer: "react" },
+  { label: "with renderer: false", renderer: false },
+];
+
 // The plugin records every runtime hook it sees and serves the record from its own endpoint,
 // which runs outside the request hooks, so a dev server and a production server can be
 // asked the same questions.
-const FILES: Record<string, string> = {
-  "farm.config.ts": `import { definePlugin } from "@farm.js/core";
+const farmConfig = ({ renderer }: Variant) => `import { definePlugin } from "@farm.js/core";
 const trace: string[] = [];
 const traced = (request: Request) => {
   const { pathname } = new URL(request.url);
   return pathname.startsWith("/api/") || pathname === "/hello" ? pathname : null;
 };
 export default {
-  images: { provider: "none" },
+  images: { provider: "none" },${renderer === false ? "\n  renderer: false," : ""}
   telemetry: false,
   plugins: [
     definePlugin({
@@ -62,19 +70,25 @@ export default {
       },
     }),
   ],
-};`,
-  "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
-  "src/app/hello/page.tsx": `export default function Page() { return <h1>hello</h1>; }`,
+};`;
+
+const API_FILES: Record<string, string> = {
   "src/app/api/ok/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
   "src/app/api/boom/route.ts": `export function GET(): Response { throw new Error("route failed"); }`,
 };
 
-async function createApp(prefix: string): Promise<string> {
+const PAGE_FILES: Record<string, string> = {
+  "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
+  "src/app/hello/page.tsx": `export default function Page() { return <h1>hello</h1>; }`,
+};
+
+async function createApp(prefix: string, variant: Variant): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   temporaryRoots.add(root);
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
-  for (const name of ["react", "react-dom"]) {
+  // A backend-only app links only `@farm.js/core`, as in an app that never installed React.
+  for (const name of variant.renderer === false ? [] : ["react", "react-dom"]) {
     await fs.symlink(
       await fs.realpath(path.join(packageRoot, "node_modules", name)),
       path.join(root, "node_modules", name),
@@ -82,16 +96,24 @@ async function createApp(prefix: string): Promise<string> {
     );
   }
   await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
-  for (const [relativePath, source] of Object.entries(FILES)) {
+  const files = {
+    "farm.config.ts": farmConfig(variant),
+    ...API_FILES,
+    ...(variant.renderer === false ? {} : PAGE_FILES),
+  };
+  for (const [relativePath, source] of Object.entries(files)) {
     await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
     await fs.writeFile(path.join(root, relativePath), source);
   }
   return root;
 }
 
-async function expectRuntimeHookContract(origin: string): Promise<void> {
+async function expectRuntimeHookContract(origin: string, variant: Variant): Promise<void> {
+  const hasPages = variant.renderer !== false;
   const results: Record<string, { status: number; trace: string[] }> = {};
-  for (const pathname of ["/api/ok", "/api/blocked", "/api/missing", "/api/boom", "/hello"]) {
+  const pathnames = ["/api/ok", "/api/blocked", "/api/missing", "/api/boom"];
+  if (hasPages) pathnames.push("/hello");
+  for (const pathname of pathnames) {
     const response = await fetch(`${origin}${pathname}`);
     await response.arrayBuffer();
     const trace = await (await fetch(`${origin}/__trace`)).json();
@@ -119,24 +141,26 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
       trace: ["before api /api/boom", "error /api/boom route failed", "after /api/boom 500"],
     },
     // Page requests are unchanged.
-    "/hello": { status: 200, trace: ["before page /hello", "after /hello 200"] },
+    ...(hasPages
+      ? { "/hello": { status: 200, trace: ["before page /hello", "after /hello 200"] } }
+      : {}),
   });
 }
 
-describe("plugin runtime hooks for API requests", () => {
+describe.each(VARIANTS)("plugin runtime hooks for API requests $label", (variant) => {
   it("in development", async () => {
-    const root = await createApp("farm-dev-plugin-runtime-api-");
+    const root = await createApp("farm-dev-plugin-runtime-api-", variant);
     const server = await createServer({ root });
     devServers.add(server);
     await server.listen(await getAvailablePort());
     const address = server.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("Missing dev server address");
 
-    await expectRuntimeHookContract(`http://localhost:${address.port}`);
+    await expectRuntimeHookContract(`http://localhost:${address.port}`, variant);
   }, 120_000);
 
   it("in a node-server production build", async () => {
-    const root = await createApp("farm-prod-plugin-runtime-api-");
+    const root = await createApp("farm-prod-plugin-runtime-api-", variant);
     const config = await resolveConfig(
       { ...(await loadConfig(root, undefined, "production")), root, srcDir: "src" },
       "production",
@@ -168,7 +192,7 @@ describe("plugin runtime hooks for API requests", () => {
       }
       expect(ready, processOutput.join("")).toBe(true);
 
-      await expectRuntimeHookContract(origin);
+      await expectRuntimeHookContract(origin, variant);
     } finally {
       if (productionServer.exitCode === null) productionServer.kill();
       await exited;
