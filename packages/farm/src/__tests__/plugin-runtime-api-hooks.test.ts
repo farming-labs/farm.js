@@ -156,13 +156,21 @@ export default function Layout({ children }) {
 
 async function createApp(
   prefix: string,
-  options: { htmlTransform?: boolean; docs?: boolean } = {},
+  options: { htmlTransform?: boolean; docs?: boolean; renderer?: false } = {},
 ): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   temporaryRoots.add(root);
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
-  for (const name of ["react", "react-dom"]) {
+  // A backend-only `renderer: false` app has no pages or layouts and links only `@farm.js/core`,
+  // as an app that never installed React.
+  const backendOnly = options.renderer === false;
+  const config = [
+    "telemetry: false,",
+    ...(options.docs ? ["docs: { enabled: true },"] : []),
+    ...(backendOnly ? ["renderer: false,"] : []),
+  ].join("\n  ");
+  for (const name of backendOnly ? [] : ["react", "react-dom"]) {
     await fs.symlink(
       await fs.realpath(path.join(packageRoot, "node_modules", name)),
       path.join(root, "node_modules", name),
@@ -174,15 +182,13 @@ async function createApp(
     ...FILES,
     ...(options.docs ? DOCS_FILES : {}),
   })) {
+    if (backendOnly && /\/(page|layout)\.tsx$/.test(relativePath)) continue;
     await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
     await fs.writeFile(
       path.join(root, relativePath),
       source
         .replace("__HTML_TRANSFORM__", options.htmlTransform ? HTML_TRANSFORM_PLUGIN : "")
-        .replace(
-          "telemetry: false,",
-          options.docs ? "telemetry: false,\n  docs: { enabled: true }," : "telemetry: false,",
-        ),
+        .replace("telemetry: false,", config),
     );
   }
   return root;
@@ -210,10 +216,13 @@ async function request(origin: string, pathname: string, init?: RequestInit) {
   return result;
 }
 
-async function expectRuntimeHookContract(origin: string): Promise<void> {
+async function expectRuntimeHookContract(
+  origin: string,
+  { pages = true }: { pages?: boolean } = {},
+): Promise<void> {
   const results: Record<string, { status: number; trace: string[] }> = {};
   const thrown: Record<string, Partial<Omit<TracedResponse, "status" | "trace">>> = {};
-  for (const pathname of [
+  const pathnames = [
     "/api/ok",
     "/api/blocked",
     "/api/guarded",
@@ -224,8 +233,9 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
     "/api/mw-fails",
     "/integration/boom",
     "/.well-known/farmjs.json",
-    "/hello",
-  ]) {
+    ...(pages ? ["/hello"] : []),
+  ];
+  for (const pathname of pathnames) {
     const { status, trace, ...response } = await request(origin, pathname);
     if (/\/(boom|before-fails|after-fails|mw-fails)$/.test(pathname)) thrown[pathname] = response;
     // Only production keeps a response a runtime.before guard let through out of shared
@@ -323,10 +333,14 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
       ],
     },
     // Page requests are unchanged.
-    "/hello": {
-      status: 200,
-      trace: ["before page /hello", "middleware /hello", "after /hello 200"],
-    },
+    ...(pages
+      ? {
+          "/hello": {
+            status: 200,
+            trace: ["before page /hello", "middleware /hello", "after /hello 200"],
+          },
+        }
+      : {}),
   });
   // A throwing API or integration route, and a throwing runtime hook on an API path, answer
   // Farm's generic 500 body in both modes, not the server's own error response. A middleware
@@ -343,13 +357,15 @@ async function expectRuntimeHookContract(origin: string): Promise<void> {
     "/integration/boom": internalServerError,
   });
 
-  await expectPageHookFailures(origin);
-  await expectConfigRouteHookFailures(origin);
+  if (pages) {
+    await expectPageHookFailures(origin);
+    await expectConfigRouteHookFailures(origin);
+  }
 
   // A built-in route on a page path whose runtime.after throws answers the page's plain-text
-  // 500, not the JSON an API path gets.
+  // 500, not the JSON an API path gets. A `renderer: false` app has no pages, so it answers JSON.
   expect(await request(origin, "/.well-known/farmjs.json?after-fails")).toEqual({
-    ...PAGE_HOOK_FAILURE,
+    ...(pages ? PAGE_HOOK_FAILURE : API_HOOK_FAILURE),
     trace: [
       "before page /.well-known/farmjs.json",
       "middleware /.well-known/farmjs.json",
@@ -365,6 +381,13 @@ const PAGE_HOOK_FAILURE = {
   contentType: "text/plain; charset=utf-8",
   cacheControl: null,
   body: "Internal Server Error",
+};
+
+const API_HOOK_FAILURE = {
+  status: 500,
+  contentType: "application/json",
+  cacheControl: null,
+  body: '{"error":"Internal Server Error"}',
 };
 
 // On a page, a throwing runtime hook answers a plain-text 500: runtime.error observes it, onError
@@ -577,6 +600,20 @@ describe("plugin runtime hooks for API, integration, and built-in route requests
   it("in a node-server production build", async () => {
     const root = await createApp("farm-prod-plugin-runtime-api-");
     await withProduction(root, expectRuntimeHookContract);
+  }, 240_000);
+});
+
+// The API request path is renderer-neutral, so a backend-only app must see the same hooks. This
+// is where the dev and production divergence #2633 fixed was first seen.
+describe("plugin runtime hooks for API, integration, and built-in route requests with renderer: false", () => {
+  it("in development", async () => {
+    const root = await createApp("farm-dev-plugin-runtime-api-bare-", { renderer: false });
+    await expectRuntimeHookContract(await startDevelopment(root), { pages: false });
+  }, 120_000);
+
+  it("in a node-server production build", async () => {
+    const root = await createApp("farm-prod-plugin-runtime-api-bare-", { renderer: false });
+    await withProduction(root, (origin) => expectRuntimeHookContract(origin, { pages: false }));
   }, 240_000);
 });
 
