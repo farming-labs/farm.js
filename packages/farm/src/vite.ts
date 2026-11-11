@@ -7452,7 +7452,8 @@ function farmDocumentNavigationRoute(pathname) {
 }
 
 async function fetchFarmNavigationDocument(path, context) {
-  farmNavigationStreamGeneration++;
+  // A prefetch reads the page whole for the router's cache, and leaves a page that streams alone.
+  if (!context.prefetch) farmNavigationStreamGeneration++;
   const url = new URL(path, window.location.href);
   const match = farmDocumentNavigationRoute(url.pathname);
   const container = document.getElementById('root');
@@ -7470,9 +7471,11 @@ async function fetchFarmNavigationDocument(path, context) {
       redirect: 'manual',
       headers: createFarmDeploymentRequestHeaders(deploymentId, {
         Accept: 'text/html',
-        'F-Stream': 'flush',
+        ...(context.prefetch ? {} : { 'F-Stream': 'flush' }),
         ...getFarmIslandValueHeaders(),
-        ...(identities.length ? { 'F-Layouts': JSON.stringify(identities) } : {}),
+        // A prefetch names its layouts even when it keeps none: that marks it as a navigation,
+        // which the server answers without loading.tsx.
+        ...(identities.length || context.prefetch ? { 'F-Layouts': JSON.stringify(identities) } : {}),
       }),
     });
     if (isFarmDeploymentMismatchResponse(response, deploymentId)) {
