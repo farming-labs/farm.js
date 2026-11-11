@@ -311,6 +311,116 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([]);
   });
 
+  it("a todo list with filters and counts of filtered rows", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([
+          { id: 1, text: "Write", done: true },
+          { id: 2, text: "Ship", done: false },
+        ]);
+        const [draft, setDraft] = useState("");
+        const [nextId, setNextId] = useState(3);
+        const [filter, setFilter] = useState("all");
+        const visible = todos.filter((todo) => filter === "all" || (filter === "done") === todo.done);
+        const remaining = todos.filter((todo) => !todo.done).length;
+        return (
+          <section>
+            <form id="new" onSubmit={(event) => {
+              event.preventDefault();
+              if (!draft.trim()) return;
+              setTodos([...todos, { id: nextId, text: draft.trim(), done: false }]);
+              setNextId(nextId + 1);
+              setDraft("");
+            }}>
+              <input id="draft" value={draft} onChange={(event) => setDraft(event.target.value)} />
+            </form>
+            <ul>
+              {visible.map((todo) => (
+                <li key={todo.id} data-id={todo.id} className={todo.done ? "completed" : ""}>
+                  <input className="toggle" type="checkbox" checked={todo.done}
+                    onChange={() => setTodos(todos.map((item) => item.id === todo.id ? { ...item, done: !item.done } : item))} />
+                  <label>{todo.text}</label>
+                  <button className="destroy" onClick={() => setTodos(todos.filter((item) => item.id !== todo.id))}>x</button>
+                </li>
+              ))}
+            </ul>
+            <button id="all" onClick={() => setFilter("all")}>All</button>
+            <button id="active" onClick={() => setFilter("active")}>Active</button>
+            <button id="done" onClick={() => setFilter("done")}>Done</button>
+            <button id="clear" onClick={() => setTodos(todos.filter((todo) => !todo.done))}>Clear</button>
+            <footer data-left={remaining}>{remaining === 1 ? "1 item left" : remaining + " items left"}</footer>
+            <p id="done-count">{todos.filter((todo) => todo.done).length} done</p>
+          </section>
+        );
+      }`,
+      "Todos",
+      [
+        type("#draft", "Test"),
+        submit("#new"),
+        type("#draft", "   "),
+        submit("#new"),
+        click('li[data-id="2"] .toggle'),
+        click("#active"),
+        click('li[data-id="3"] .toggle'),
+        click("#done"),
+        click('li[data-id="1"] .destroy'),
+        click("#all"),
+        click("#clear"),
+        type("#draft", "Again"),
+        submit("#new"),
+      ],
+    );
+    // Row onChange handlers keep their rows React-owned, so this root uses React DOM.
+    expect(fallbacks).toEqual([expect.stringContaining("updates through React")]);
+  });
+
+  it("filtered rows and their counts update without React DOM", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Board() {
+        const [cards, setCards] = useState([
+          { id: 1, title: "Plan", done: true },
+          { id: 2, title: "Build", done: false },
+        ]);
+        const [nextId, setNextId] = useState(3);
+        const [showDone, setShowDone] = useState(true);
+        const shown = cards.filter((card) => showDone || !card.done);
+        const open = cards.filter((card) => !card.done).length;
+        return (
+          <section>
+            <button id="add" onClick={() => {
+              setCards([...cards, { id: nextId, title: "Card " + nextId, done: false }]);
+              setNextId(nextId + 1);
+            }}>Add</button>
+            <button id="toggle-done" onClick={() => setShowDone(!showDone)}>{showDone ? "Hide done" : "Show done"}</button>
+            <ul>
+              {shown.map((card) => (
+                <li key={card.id} data-id={card.id} className={card.done ? "done" : "open"}>
+                  <span>{card.title}</span>
+                  <button className="finish" onClick={() => setCards(cards.map((item) => item.id === card.id ? { ...item, done: !item.done } : item))}>Finish</button>
+                </li>
+              ))}
+            </ul>
+            <p id="open" data-open={open}>{open === 1 ? "1 open card" : open + " open cards"}</p>
+            <p id="total">{cards.filter((card) => card.done).length} of {cards.length} done</p>
+          </section>
+        );
+      }`,
+      "Board",
+      [
+        click("#add"),
+        click('li[data-id="3"] .finish'),
+        click("#toggle-done"),
+        click('li[data-id="2"] .finish'),
+        click("#add"),
+        click("#toggle-done"),
+        click('li[data-id="1"] .finish'),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
   it("svg with viewBox and className", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";

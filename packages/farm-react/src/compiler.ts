@@ -1310,9 +1310,16 @@ function validateDerivedExpression(
     AssignmentExpression: (path) => reject("assignments", path),
     AwaitExpression: (path) => reject("await expressions", path),
     CallExpression(path) {
-      if (!isSafeCompilerCall(path.node, safeGlobals) && !additionalSafeCall?.(path.node)) {
-        reject("function calls", path);
+      if (isSafeCompilerCall(path.node, safeGlobals) || additionalSafeCall?.(path.node)) return;
+      // The length of a safe collection pipeline (`items.filter((item) => item.done).length`) is a
+      // pure number: the pipeline and its callbacks pass the same checks as a derived collection.
+      if (isCollectionPipelineLength(path)) {
+        const unsupported = validateCollectionPipeline(path.node, safeGlobals);
+        if (unsupported) reject(unsupported, path);
+        else path.skip();
+        return;
       }
+      reject("function calls", path);
     },
     ClassExpression: (path) => reject("class expressions", path),
     Function: (path) => reject("function expressions", path),
@@ -4999,6 +5006,17 @@ function hoistConstantListCollections(component: NodePath, programPath: NodePath
     .at(-1);
   if (lastImport) lastImport.insertAfter(hoisted);
   else programPath.unshiftContainer("body", hoisted);
+}
+
+function isCollectionPipelineLength(path: NodePath<t.CallExpression>): boolean {
+  const parent = path.parent;
+  return (
+    t.isMemberExpression(parent) &&
+    parent.object === path.node &&
+    !parent.computed &&
+    t.isIdentifier(parent.property, { name: "length" }) &&
+    collectionPipelineMethod(path.node) !== undefined
+  );
 }
 
 function validateCollectionPipeline(
