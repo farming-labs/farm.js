@@ -3,7 +3,10 @@
 import { describe, expect, it } from "vitest";
 import { loadOptions } from "nitro/builder";
 import path from "node:path";
-import { resolveFarmNitroOutputConfig } from "../nitro/universal-build";
+import {
+  resolveCloudflareProcessEnvFlags,
+  resolveFarmNitroOutputConfig,
+} from "../nitro/universal-build";
 
 describe("Farm Nitro output layout", () => {
   it("keeps Farm's server/public layout for node-server", () => {
@@ -63,5 +66,31 @@ describe("Farm Nitro output layout", () => {
     expect(path.resolve(farm.output?.serverDir ?? "")).toBe(
       path.join(rootDir, ".netlify", "functions-internal", "server"),
     );
+  });
+});
+
+describe("Cloudflare process.env flag", () => {
+  it("populates process.env for a compatibility date before it became the default", () => {
+    expect(
+      resolveCloudflareProcessEnvFlags({
+        compatibility_date: "2024-12-01",
+        compatibility_flags: ["nodejs_compat"],
+      }),
+    ).toEqual(["nodejs_compat", "nodejs_compat_populate_process_env"]);
+  });
+
+  it.each([
+    ["a date that already populates it", "2025-04-01", ["nodejs_compat"]],
+    ["the flag already set", "2024-12-01", ["nodejs_compat", "nodejs_compat_populate_process_env"]],
+    [
+      "an explicit opt-out",
+      "2024-12-01",
+      ["nodejs_compat", "nodejs_compat_do_not_populate_process_env"],
+    ],
+    ["no Node.js compatibility", "2024-12-01", []],
+  ])("leaves a config with %s unchanged", (_label, date, flags) => {
+    expect(
+      resolveCloudflareProcessEnvFlags({ compatibility_date: date, compatibility_flags: flags }),
+    ).toBeUndefined();
   });
 });

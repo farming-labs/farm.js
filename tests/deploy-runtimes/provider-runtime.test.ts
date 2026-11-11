@@ -370,6 +370,111 @@ async function createImageFixture(
 }
 
 /**
+ * Builds an app whose API route reports what server code reads from the
+ * worker's environment: Farm's typed env, `process.env` in the handler and at
+ * module scope, the `CRON_SECRET` check, and a storage mount on the `FARM_CACHE`
+ * KV binding. `FARM_RUNTIME_SECRET` is set while building, so Farm leaves it out
+ * of the bundle and reads it where the server runs.
+ */
+async function createCloudflareEnvFixture(
+  preset: CloudflareWorkerPreset,
+): Promise<{ outputDir: string }> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), `farm-${preset}-env-`));
+  fixtureRoots.push(root);
+
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(
+    corePackageRoot,
+    path.join(root, "node_modules", "@farm.js", "core"),
+    "junction",
+  );
+  for (const name of ["react", "react-dom"]) {
+    await fs.symlink(
+      await fs.realpath(path.join(corePackageRoot, "node_modules", name)),
+      path.join(root, "node_modules", name),
+      "junction",
+    );
+  }
+  await fs.mkdir(path.join(root, "src", "app", "api", "runtime-env"), { recursive: true });
+  await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({ private: true, type: "module" }, null, 2),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "layout.tsx"),
+    `export default function Layout({ children }) { return <html><body>{children}</body></html>; }`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "page.tsx"),
+    `export default function Page() { return <main>Cloudflare env runtime</main>; }`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "lib", "module-env.ts"),
+    `export const moduleScopeSecret = process.env.FARM_RUNTIME_SECRET ?? null;\n`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "api", "runtime-env", "route.ts"),
+    `
+import { authorizeCronRequest } from "@farm.js/core/cron";
+import { getEnv } from "@farm.js/core/env";
+import { getStorage } from "@farm.js/core/storage";
+import { moduleScopeSecret } from "../../../lib/module-env";
+
+export async function GET(request: Request) {
+  let storage: unknown;
+  try {
+    await getStorage("cache").setItem("probe", "stored");
+    storage = await getStorage("cache").getItem("probe");
+  } catch (error) {
+    storage = { error: error instanceof Error ? error.message : String(error) };
+  }
+  return Response.json({
+    getEnv: getEnv("FARM_RUNTIME_SECRET") ?? null,
+    processEnv: process.env.FARM_RUNTIME_SECRET ?? null,
+    moduleScope: moduleScopeSecret,
+    cronAuthorized: await authorizeCronRequest(request),
+    storage,
+  });
+}
+`.trim(),
+  );
+  // The built server reads `storage` from farm.config.ts.
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    `
+export default {
+  env: { server: { FARM_RUNTIME_SECRET: (value: string | undefined) => value } },
+  storage: { mounts: { cache: { driver: "cloudflare-kv-binding", binding: "FARM_CACHE" } } },
+};
+`.trim(),
+  );
+
+  const buildValue = process.env.FARM_RUNTIME_SECRET;
+  process.env.FARM_RUNTIME_SECRET = "build-value";
+  try {
+    const userConfig = await loadConfig(root, undefined, "production");
+    const config = await resolveConfig(
+      {
+        ...userConfig,
+        root,
+        srcDir: "src",
+        images: { provider: "none" },
+        telemetry: false,
+        generateBuildId: () => `${preset}-env-test`,
+        deploy: { target: "cloudflare", preset },
+      },
+      "production",
+    );
+    await build(config, { root, preset });
+    return { outputDir: path.resolve(root, config.deploy.outputDir) };
+  } finally {
+    if (buildValue === undefined) delete process.env.FARM_RUNTIME_SECRET;
+    else process.env.FARM_RUNTIME_SECRET = buildValue;
+  }
+}
+
+/**
  * Calls the netlify-edge function the way Netlify Edge Functions do, from a copy
  * outside the app. Netlify bundles a bare import in an edge function from the
  * app's node_modules with Node conditions, which load @vercel/og's Node build
@@ -723,6 +828,54 @@ describe("first-class provider runtime output", () => {
             await runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test")),
           );
         }
+      } finally {
+        await runtime.dispose();
+      }
+    }, 180_000);
+  }
+
+  for (const preset of ["cloudflare-pages", "cloudflare-module"] as CloudflareWorkerPreset[]) {
+    it(`reads the worker's bindings in the ${preset} worker at the generated compatibility settings`, async () => {
+      const { outputDir } = await createCloudflareEnvFixture(preset);
+      const workerDirectory = path.join(
+        outputDir,
+        preset === "cloudflare-pages" ? "_worker.js" : "server",
+      );
+      const entry = preset === "cloudflare-pages" ? "index.js" : "index.mjs";
+      // Wrangler deploys with the settings Nitro writes here, not with the
+      // newer date the other runtime tests boot at.
+      const wrangler = JSON.parse(
+        await fs.readFile(path.join(workerDirectory, "wrangler.json"), "utf8"),
+      ) as { compatibility_date: string; compatibility_flags: string[] };
+      // Every module, as Wrangler uploads them: storage drivers load through a
+      // dynamic import that Miniflare cannot follow from the entry.
+      const modules = (await fs.readdir(workerDirectory, { recursive: true }))
+        .filter((file) => /\.m?js$/.test(file))
+        .sort((a, b) => Number(b === entry) - Number(a === entry))
+        .map((file) => ({ type: "ESModule" as const, path: path.join(workerDirectory, file) }));
+      const runtime = new Miniflare({
+        compatibilityDate: wrangler.compatibility_date,
+        compatibilityFlags: wrangler.compatibility_flags,
+        modulesRoot: workerDirectory,
+        modules,
+        bindings: { FARM_RUNTIME_SECRET: "runtime-value", CRON_SECRET: "cron-value" },
+        kvNamespaces: ["FARM_CACHE"],
+      });
+
+      try {
+        const response = await runtime.dispatchFetch("https://farm-runtime.test/api/runtime-env", {
+          headers: { authorization: "Bearer cron-value", "accept-encoding": "identity" },
+        });
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(await response.json()).toEqual({
+          getEnv: "runtime-value",
+          processEnv: "runtime-value",
+          moduleScope: "runtime-value",
+          cronAuthorized: true,
+          storage: "stored",
+        });
+        const cache = await runtime.getKVNamespace("FARM_CACHE");
+        expect(await cache.get("probe")).toBe("stored");
       } finally {
         await runtime.dispose();
       }
