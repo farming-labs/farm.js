@@ -4851,7 +4851,13 @@ async function hydrate() {
   ) {
     // Not cancelled by a navigation: an island it removes is disposed with its DOM, and one in a
     // layout it keeps still waits for its trigger, with any click it already holds.
+    const hydrationSession = await farmClientRuntime.beginHydration({
+      container: document.getElementById("root") || document.body,
+      mode: "hydrate",
+    });
+    // Each island reports and recovers its own failure, so this resolves once they are live.
     await hydrateFarmIsolatedClientBoundaries(document);
+    await farmClientRuntime.completeHydration(hydrationSession);
     return;
   }`
       : ""

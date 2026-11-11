@@ -7896,7 +7896,13 @@ function farmIslandsOnlyDocument() {
       // Islands mode hydrates the document, as production does, so islx also watches the islands
       // that stream in after this runs. Not cancelled by a navigation: an island it removes is
       // disposed with its DOM, and one in a layout it keeps still waits for its trigger.
+      const hydrationSession = await farmClientRuntime.beginHydration({
+        container: rootContainer || document.body,
+        mode: 'hydrate',
+      });
+      // Each island reports and recovers its own failure, so this resolves once they are live.
       await hydrateFarmIsolatedClientBoundaries(${islandValues ? "document" : "rootContainer"});
+      await farmClientRuntime.completeHydration(hydrationSession);
       // The rest of the document is static server HTML with nothing to hydrate, so
       // stop holding its clicks and submits once the load-strategy islands are live.
       // Deferred islands capture their own interactions, and held targets outside an
