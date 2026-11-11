@@ -652,8 +652,8 @@ The app's own MCP always wins, in development and in production alike. The defau
   [docs engine](/docs/docs-engine) does for its own MCP endpoint.
 
 With the docs engine enabled, `mcp` is off by default, since the docs engine serves `/mcp`
-itself. `mcp: false` turns it off. React Server Components apps (`experimental.serverComponents`)
-don't serve it yet.
+itself. `mcp: false` turns it off. Apps on the RSC pipeline
+(`experimental.serverComponents: { mode: "rsc" }`) don't serve it yet.
 
 ### AI crawlers
 
@@ -884,8 +884,8 @@ the boundaries introduced by the incoming fragment. Superseded navigation work i
 can hydrate stale HTML.
 
 This flag does not enable RSC, change the meaning of `"use client"`, or make Server Components part
-of the wire format. When `experimental.serverComponents` is enabled, the RSC transport remains the
-owner and Farm ignores isolated client hydration. Treat `"enabled"` as an experimental performance
+of the wire format. On the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`), the RSC
+transport remains the owner and Farm ignores isolated client hydration. Treat `"enabled"` as an experimental performance
 option and measure the route's client JavaScript and interaction cost before adopting it broadly.
 The maintained benchmark includes equivalent RSC controls rather than assuming the non-RSC path is
 faster.
@@ -1140,8 +1140,8 @@ Customize both paths through `server.health`, or set `health: false` when an ada
 
 Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.
 
-Server actions run on the React Server Components pipeline, which `experimental.serverComponents`
-turns on (see [React Server Components](/docs/server-rendering#react-server-components)).
+Server actions run with server components, which `experimental.serverComponents` turns on (see
+[React Server Components](/docs/server-rendering#react-server-components)).
 `experimental.serverActions` without `serverComponents` does not make server functions callable
 from the browser, and Farm keeps rejecting client imports of server-function modules.
 

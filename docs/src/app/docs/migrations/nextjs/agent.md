@@ -339,7 +339,7 @@ Dynamic API segments bind through `params`: `src/app/api/todos/[id]/route.ts` ex
 
 #### Option B: server functions as actions
 
-The only supported way to make server functions callable from the browser is Farm's React Server Components pipeline. Turn it on in `farm.config.ts` with `experimental.serverComponents: true`: `farm dev`, `farm build`, and `farm start` then run it on the official `@vitejs/plugin-rsc`, and pages and layouts are server components, as in Next.js. `experimental.serverActions: true` without `serverComponents` does not load that pipeline and turns off the build check that stops a client component from bundling a `createServerFn` module, so server code and its imports reach the browser. Never set it alone.
+The only supported way to make server functions callable from the browser is Farm's React Server Components pipeline. Turn it on in `farm.config.ts` with `experimental.serverComponents: { mode: "rsc" }` (`true` is Farm's islands engine): `farm dev`, `farm build`, and `farm start` then run it on the official `@vitejs/plugin-rsc`, and pages and layouts are server components, as in Next.js. `experimental.serverActions: true` without `serverComponents` does not load that pipeline and turns off the build check that stops a client component from bundling a `createServerFn` module, so server code and its imports reach the browser. Never set it alone.
 
 Install (the RSC pipeline refuses to start unless these exact versions resolve; pin React to them even if the Next.js app used another 19.x release):
 
@@ -355,7 +355,7 @@ import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   experimental: {
-    serverComponents: true,
+    serverComponents: { mode: "rsc" },
     serverActions: true,
   },
   serverActions: {
