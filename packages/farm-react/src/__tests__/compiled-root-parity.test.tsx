@@ -372,8 +372,9 @@ describe("compiled root parity with React DOM", () => {
         submit("#new"),
       ],
     );
-    // Row onChange handlers keep their rows React-owned, so this root uses React DOM.
-    expect(fallbacks).toEqual([expect.stringContaining("updates through React")]);
+    // Row onChange handlers keep rows React-owned under React DOM; this root maps them to
+    // native events itself, so the whole todo list runs without React DOM.
+    expect(fallbacks).toEqual([]);
   });
 
   it("filtered rows and their counts update without React DOM", async () => {
@@ -451,6 +452,46 @@ describe("compiled root parity with React DOM", () => {
       }`,
       "Page",
       [click("#add"), click("#add"), click("#clear"), click("#add")],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("onChange on rows added after mount: text, checkbox and select", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Editor() {
+        const [rows, setRows] = useState([{ id: 1, label: "One", done: false, size: "s" }]);
+        const update = (id, patch) =>
+          setRows(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+        return (
+          <section>
+            <button id="add" onClick={() => setRows([...rows, { id: rows.length + 1, label: "", done: false, size: "s" }])}>Add</button>
+            <ul>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  <input className="label" value={row.label} onChange={(event) => update(row.id, { label: event.target.value })} />
+                  <input className="done" type="checkbox" checked={row.done} onChange={(event) => update(row.id, { done: event.target.checked })} />
+                  <select className="size" value={row.size} onChange={(event) => update(row.id, { size: event.target.value })}>
+                    <option value="s">S</option>
+                    <option value="l">L</option>
+                  </select>
+                </li>
+              ))}
+            </ul>
+            <output>{rows.filter((row) => row.done).length} done</output>
+          </section>
+        );
+      }`,
+      "Editor",
+      [
+        click("#add"),
+        type('li[data-id="2"] .label', "Two"),
+        click('li[data-id="2"] .done'),
+        choose('li[data-id="2"] .size', "l"),
+        click('li[data-id="1"] .done'),
+        click("#add"),
+        type('li[data-id="3"] .label', "Three"),
+      ],
     );
     expect(fallbacks).toEqual([]);
   });
