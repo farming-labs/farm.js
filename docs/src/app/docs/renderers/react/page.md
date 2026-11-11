@@ -2197,6 +2197,12 @@ The initial pipeline contract supports:
 - `toReversed` without arguments; and
 - any sequence of those methods followed by one keyed `.map(...)` or used as `List each`.
 
+The collection may also be an inline array literal of strings, numbers, booleans, or `null`, such as
+`["all", "active", "done"].map((name) => ...)`. When every callback in the chain is inline and
+takes at most an item and an index, nothing can observe or mutate that array, so the compiler moves
+it to a module constant and compiles the list like one over any other constant. Literals with
+objects, spreads, or holes, and callbacks that receive the array, keep the original component.
+
 Callback bodies must contain one compiler-safe returned expression. Assignments, Hooks, async
 callbacks, spread arguments, calls to unproven helpers or prototype methods, external callbacks,
 and mutating methods such as `sort`, `reverse`, and `splice` keep the original React component. The

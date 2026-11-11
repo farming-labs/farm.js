@@ -286,6 +286,31 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([expect.stringContaining("FarmCompiledComponentIsland")]);
   });
 
+  it("filter buttons rendered from an array literal", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Filters() {
+        const [filter, setFilter] = useState("all");
+        return (
+          <section>
+            <nav>
+              {["all", "active", "done"].map((name) => (
+                <button key={name} id={name} className={filter === name ? "selected" : ""}
+                  aria-pressed={filter === name} onClick={() => setFilter(name)}>
+                  {name}
+                </button>
+              ))}
+            </nav>
+            <p id="current">{filter}</p>
+          </section>
+        );
+      }`,
+      "Filters",
+      [click("#active"), click("#done"), click("#done"), click("#all")],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
   it("svg with viewBox and className", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";
