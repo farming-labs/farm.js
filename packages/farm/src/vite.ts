@@ -7480,7 +7480,9 @@ async function fetchFarmNavigationDocument(path, context) {
       window.dispatchEvent(new CustomEvent('farm:deployment-mismatch', { detail: error }));
       throw error;
     }
-    // A redirect, an error or anything but HTML: the router loads the document instead.
+    // A manual redirect hides its target, so page data answers this navigation and follows it.
+    if (response.type === 'opaqueredirect') return null;
+    // An error or anything but HTML: the router loads the document instead.
     if (
       !response.ok ||
       !response.body ||
@@ -7493,10 +7495,11 @@ async function fetchFarmNavigationDocument(path, context) {
     return { stream, doc, nextRoot: doc.getElementById('root') };
   };
   let result = await request(true);
-  if (result.nextRoot && !fitsFarmSegment(container, result.nextRoot)) {
+  if (result && result.nextRoot && !fitsFarmSegment(container, result.nextRoot)) {
     result.stream.cancel?.();
     result = await request(false);
   }
+  if (!result) return null;
   if (!result.nextRoot) {
     result.stream.cancel?.();
     throw new Error('The page has no #root');

@@ -1935,6 +1935,20 @@ export function Chart() {}
     expect(source).toContain("this.fetchPage(pathname, undefined, false, false)");
   });
 
+  it("hands an islands dev navigation that redirects to page data, which follows it", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const start = source.indexOf("async function fetchFarmNavigationDocument(");
+    const body = source.slice(start, source.indexOf("\nasync function ", start + 1));
+    expect(start).toBeGreaterThan(-1);
+    // fetch's manual redirect hides the target; returning null routes the navigation through
+    // page data, whose redirect signal keeps the document and the history entry.
+    expect(body).toContain("redirect: 'manual'");
+    const opaque = body.indexOf("if (response.type === 'opaqueredirect') return null;");
+    expect(opaque).toBeGreaterThan(-1);
+    expect(opaque).toBeLessThan(body.indexOf("throw new Error('Failed to fetch the page: '"));
+    expect(body).toContain("if (!result) return null;");
+  });
+
   it("refreshes hydratable production routes from uncached server HTML", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
