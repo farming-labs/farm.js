@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BotError } from "./errors";
 import type { BotProvider, BotVerdict, BotVerifyInput } from "./provider";
 import { verifyBotCheck, type BotCheckVerifySettings } from "./verify";
@@ -39,6 +39,10 @@ function form(token: string | undefined, field = "acme-token"): FormData {
 
 beforeEach(() => {
   currentRequest.value = undefined;
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("verifyBotCheck", () => {
@@ -176,6 +180,22 @@ describe("verifyBotCheck", () => {
       "token",
     );
     expect(result.success).toBe(true);
+  });
+
+  it("trusts the request's host only in development", async () => {
+    const provider = fakeProvider({ success: true, hostname: "shop.example.com" });
+    // An empty NODE_ENV is a server that doesn't say what it is, as on many deployed workers.
+    for (const mode of ["production", ""]) {
+      vi.stubEnv("NODE_ENV", mode);
+      await expect(verifyBotCheck(settings(provider), "token", { request })).rejects.toMatchObject({
+        name: "BotError",
+        code: "missing_hostnames",
+      });
+    }
+    expect(provider.verify).not.toHaveBeenCalled();
+
+    const listed = settings(provider, { hostnames: ["shop.example.com"] });
+    expect((await verifyBotCheck(listed, "token", { request })).success).toBe(true);
   });
 
   it("reads the current request when none is passed", async () => {

@@ -10,7 +10,7 @@ import {
   type BotProviderClient,
 } from "./provider.js";
 import { setBotVerifier, type BotVerifier } from "./runtime.js";
-import { verifyBotCheck } from "./verify.js";
+import { missingHostnamesError, verifyBotCheck } from "./verify.js";
 
 export { BotError, type BotErrorCode } from "./errors.js";
 export { createBotKeys, type BotKeys, type BotKeysConfig, type BotProviderKeys } from "./keys.js";
@@ -82,7 +82,10 @@ function withVitePlugin(vite: ViteConfigInput, plugin: unknown): ViteConfigInput
 export interface BotOptions<TData = unknown> {
   /** The checker to use: one from `@farm.js/bot/captcha`, another package, or your own. */
   provider: BotProvider<TData>;
-  /** Hostnames a check may come from. Defaults to the hostname of the request being verified. */
+  /**
+   * Hostnames a check may come from. Required outside development, so `farm build` fails
+   * without it. In development it defaults to the hostname of the request being verified.
+   */
   hostnames?: readonly string[];
   /** How long to wait for the provider. Defaults to 5000. */
   timeoutMs?: number;
@@ -166,8 +169,9 @@ export function bot<TData = unknown>(options: BotOptions<TData>): BotPlugin<TDat
     // Empty on purpose. Having it makes the server load farm.config.ts, so `bot()` runs there.
     // `setup`, `close`, or a request hook would send every prerendered page through the server.
     runtime: {},
-    configure(appConfig) {
+    configure(appConfig, context) {
       if (clientError) throw clientError;
+      if (hostnames === undefined && context?.isProd) throw missingHostnamesError();
       const instances = (appConfig.plugins ?? []).filter(
         (candidate) => candidate?.name === PLUGIN_NAME,
       );
