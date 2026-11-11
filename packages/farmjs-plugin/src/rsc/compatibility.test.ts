@@ -60,7 +60,7 @@ describe("RSC package compatibility", () => {
   it("keeps Server Actions disabled until an RSC application opts in", () => {
     const config = defineConfig();
     expect(config.experimental).toEqual({
-      serverComponents: true,
+      serverComponents: { mode: "rsc" },
       serverActions: false,
       optimizedBoundary: false,
     });

@@ -91,7 +91,7 @@ These are off by default and outside the stability promise:
 
 | Feature                   | How to enable                                                                                     |
 | ------------------------- | ------------------------------------------------------------------------------------------------- |
-| React Server Components   | `experimental.serverComponents` (`true` or `{ mode: "rsc" }`), or the `@farm.js/plugin/rsc` setup |
+| Server components         | `experimental.serverComponents`: `true` (islands), `{ mode: "rsc" }` or `@farm.js/plugin/rsc` RSC |
 | Server Actions under RSC  | `experimental.serverActions`                                                                      |
 | Partial Prerendering      | `experimental.ppr`, then opt routes in                                                            |
 | Isolated client hydration | `experimental.isolatedClientHydration: "analyze" \| "enabled"`                                    |

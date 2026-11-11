@@ -45,7 +45,9 @@ function fakeInstaller(root, commands) {
   };
 }
 
-const flag = { experimental: { serverComponents: true } };
+const flag = { experimental: { serverComponents: { mode: "rsc" } } };
+// `true` is islands mode, which needs none of the RSC packages.
+const islands = { experimental: { serverComponents: true } };
 
 test("installs the RSC packages with the app's package manager at the plugin's pins", async () => {
   const root = await createApp({
@@ -78,8 +80,8 @@ test("installs nothing when RSC is off, already installed, or would be blocked",
   try {
     await ensureFarmRscPackages({}, empty, run, {});
     await ensureFarmRscPackages(flag, ready, run, {});
-    // An app that set the flag before it ran RSC and uses auth keeps working as it was.
-    await ensureFarmRscPackages({ ...flag, auth: true }, empty, run, {});
+    await ensureFarmRscPackages(islands, empty, run, {});
+    await ensureFarmRscPackages({ ...islands, auth: true }, empty, run, {});
     assert.equal(commands.length, 0);
 
     // An explicit { mode: "rsc" } is a deliberate choice, so it installs.
@@ -97,12 +99,12 @@ test("installs nothing when RSC is off, already installed, or would be blocked",
   }
 });
 
-test("CI never installs: true keeps its fallback, an explicit mode fails with the command", async () => {
+test("CI never installs: islands needs nothing, an rsc mode fails with the command", async () => {
   const root = await createApp({ "@farm.js/core": { version: "0.1.40" } });
   try {
     const commands = [];
     const run = async (command) => commands.push(command);
-    assert.deepEqual(await ensureFarmRscPackages(flag, root, run, { CI: "true" }), []);
+    assert.deepEqual(await ensureFarmRscPackages(islands, root, run, { CI: "true" }), []);
     await assert.rejects(
       ensureFarmRscPackages({ experimental: { serverComponents: { mode: "rsc" } } }, root, run, {
         GITHUB_ACTIONS: "true",

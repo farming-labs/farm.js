@@ -138,8 +138,9 @@ export default defineConfig({
     },
   },
   experimental: {
-    // Route-level loading.tsx/error.tsx in this example rely on streamed server rendering.
-    serverComponents: true,
+    // This example is the framework suite's fixture for Farm's classic pipeline (no server
+    // components); examples/server-components covers islands and RSC.
+    serverComponents: false,
     // Required for the /ppr-demo static-shell route; per-route ppr exports are inert without it.
     ppr: true,
   },

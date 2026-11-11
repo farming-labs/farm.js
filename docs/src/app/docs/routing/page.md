@@ -434,7 +434,7 @@ refresh after a server action, same-page hash links, and document navigations (o
 locale switches, routes that need a full page load), which a WebView's own navigation callback
 sees. A delegate that throws is logged and treated as declining. `delegateNavigation` returns a
 function that removes the delegate, and it is also exported from `@farm.js/core/client`. Apps
-on the RSC pipeline (`experimental.serverComponents`) run the RSC router, which offers link clicks,
+on the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`) run the RSC router, which offers link clicks,
 router `push` and `replace`, and redirects after a server action; it has no client entry, so
 register the delegate from a client component.
 

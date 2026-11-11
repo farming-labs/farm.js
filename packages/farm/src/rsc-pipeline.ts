@@ -1,5 +1,5 @@
 /**
- * React Server Components from farm.config: with `experimental.serverComponents: true`, `farm dev`
+ * React Server Components from farm.config: with `experimental.serverComponents: { mode: "rsc" }`, `farm dev`
  * and `farm build` run the RSC pipeline of `@farm.js/plugin/rsc` on the official
  * `@vitejs/plugin-rsc`, configured from the Farm config, instead of Farm's own renderer. Pages and
  * layouts are server components by default and `"use client"` marks client components.
@@ -170,7 +170,7 @@ export async function createFarmRscViteConfig(
   const farmConfig = pluginRsc.defineConfig({
     ...rscConfig,
     ...(mobileClient ? { mobileClient } : {}),
-    experimental: { ...userConfig.experimental, serverComponents: true },
+    experimental: { ...userConfig.experimental, serverComponents: { mode: "rsc" } },
     port: options.port ?? userConfig.server?.port,
     plugins: [
       ...(options.command === "serve" && platform === "desktop"
