@@ -308,6 +308,13 @@ lastModified: "2026-07-16"
 Explicit frontmatter wins over generated Git metadata. When Git history is unavailable, local docs
 fall back to the source file timestamp and copied production docs fall back to the build date.
 
+A shallow clone holds only recent history, and Git lists its oldest commit as adding every file. A
+page last changed before that commit therefore shows no date, instead of the oldest commit's date
+or the build date, and `farm build` warns how many pages it left undated. Build from a full clone
+(`git fetch --unshallow`) to date every page. Vercel clones 10 commits deep; the
+`VERCEL_DEEP_CLONE=true` environment variable is widely reported to give a full clone, but Vercel
+does not document it, so check a deployment's dates after setting it.
+
 ## Override behavior
 
 When `docs.entry` is enabled in `farm.config.ts`, Farm can mount docs pages and docs API routes automatically. Add explicit route wrappers only when the app wants to override default rendering, authentication, or response behavior.

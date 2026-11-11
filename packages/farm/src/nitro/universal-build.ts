@@ -13958,6 +13958,12 @@ async function copyFarmDocsRootContent(
   const lastModifiedManifest = createFarmDocsLastModifiedManifest(docsContentDir, {
     fallback: "now",
   });
+  const undatedPages = lastModifiedManifest.unknown?.length ?? 0;
+  if (undatedPages > 0) {
+    logger.warn(
+      `${undatedPages} docs page(s) were last changed before this shallow clone's Git history, so they show no "Last updated" date. Build from a full clone (git fetch --unshallow) or set lastModified in the page's frontmatter.`,
+    );
+  }
   await fs.rm(bundledContentDir, { recursive: true, force: true });
   await fs.mkdir(path.dirname(bundledContentDir), { recursive: true });
   await fs.cp(docsContentDir, bundledContentDir, {
