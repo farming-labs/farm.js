@@ -122,7 +122,7 @@ For a bug fix, add a regression test and confirm it fails for the reported mecha
 - Start every branch from the latest `main` (`git fetch origin main && git switch -c <branch> origin/main`). Use one branch per concern, and never reuse a branch after its PR merges: follow-up work starts a new branch from `main`.
 - Write commit subjects in the same `<type>(<scope>): <observable outcome>` form, imperative and at most 72 characters, with a body that explains why and how the change was verified. Make each commit a coherent step; fold fixups into the commit they fix before review instead of pushing `wip` or `fix typo` commits.
 - Never rewrite history someone else may have pulled. Rewrite only your own unmerged branch, push it with `--force-with-lease` rather than `--force`, and never push directly to `main` or to another person's branch.
-- Do not add tool attribution to commits or pull requests (`Co-Authored-By` trailers for tools, session links, "Generated with" footers) unless a maintainer asks for it.
+- Do not add tool attribution to commits or pull requests (`Co-Authored-By` trailers for tools, session links, "Generated with" footers) unless a maintainer asks for it. A squash merge also credits a tool that authored a commit, so commit as yourself. CI's Commit Attribution job fails a pull request with either.
 
 ## Pull requests
 
