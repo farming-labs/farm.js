@@ -27,6 +27,7 @@ import { loadFarmProductionVite, type FarmProductionViteRuntime } from "./produc
 import { withProductionNodeEnv } from "./production-node-env";
 import { createFarmProjectModuleSsrEnvironment } from "./project-module-runner";
 import {
+  resolvePackageClientBoundaryCacheFile,
   usePackageClientBoundaryCacheFile,
   withPackageClientBoundaryCache,
 } from "../utils/package-client-boundary-cache";
@@ -150,9 +151,7 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
     if (config.docs?.enabled) await loadFarmDocsEngine();
     pluginManager.updateContext({ config });
     const { root, preset, srcDir, distDir, deployOutputDir } = targets;
-    usePackageClientBoundaryCacheFile(
-      path.resolve(root, distDir, "cache", "client-boundaries.json"),
-    );
+    usePackageClientBoundaryCacheFile(resolvePackageClientBoundaryCacheFile(root, distDir));
 
     logger.info(`🚜 Building Farm.js application with preset: ${preset}...`);
 

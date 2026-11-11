@@ -7,7 +7,10 @@ import {
   getClientModuleMetadata,
   getMarkdownPageHydrationPlan,
 } from "../utils/client-component";
+import { resolveConfig } from "../config";
+import { RouteManager } from "../routing/route-manager";
 import {
+  runWithPackageClientBoundaryCacheFile,
   usePackageClientBoundaryCacheFile,
   withPackageClientBoundaryCache,
 } from "../utils/package-client-boundary-cache";
@@ -277,5 +280,73 @@ describe("package client-boundary cache", () => {
     );
     expect(getClientModuleMetadata(modules[0], root).shouldHydrate).toBe(false);
     expect(fs.existsSync(cacheFile)).toBe(false);
+  });
+
+  it("shares inspections across a dev plan and reads no package again on restart", async () => {
+    const { root, cacheFile, modules } = createProject();
+    const uncached = countPackageReads();
+    const expected = planProject(root, modules);
+    vi.restoreAllMocks();
+
+    const cold = countPackageReads();
+    expect(
+      runWithPackageClientBoundaryCacheFile(cacheFile, () => planProject(root, modules)),
+    ).toEqual(expected);
+    // Written before the plan returns, so a dev server stopped right after startup keeps it.
+    expect(fs.existsSync(cacheFile)).toBe(true);
+    expect(cold.reads.length).toBeLessThan(uncached.reads.length / 3);
+    vi.restoreAllMocks();
+
+    const warm = countPackageReads();
+    expect(
+      runWithPackageClientBoundaryCacheFile(cacheFile, () => planProject(root, modules)),
+    ).toEqual(expected);
+    expect(warm.reads).toEqual([]);
+  });
+
+  it("reads a package again when it changes between dev plans", () => {
+    const { root, cacheFile, modules } = createProject();
+    const plan = () =>
+      runWithPackageClientBoundaryCacheFile(cacheFile, () => planProject(root, modules));
+    expect(plan().metadata[0].shouldHydrate).toBe(true);
+
+    // A dependency reinstalled while the dev server runs.
+    fs.writeFileSync(
+      path.join(root, "node_modules", "ui-kit", "dist", "button.js"),
+      "export function Button() { return null; }\n",
+    );
+    const replanned = plan();
+    expect(replanned).toEqual(planProject(root, modules));
+    expect(replanned.metadata[0].shouldHydrate).toBe(false);
+  });
+
+  it("uses the build's cache inside a build scope", async () => {
+    const { root, cacheFile, modules } = createProject();
+    const devCacheFile = path.join(root, ".farm", "cache", "dev.json");
+    const plan = await withPackageClientBoundaryCache(async () => {
+      usePackageClientBoundaryCacheFile(cacheFile);
+      return runWithPackageClientBoundaryCacheFile(devCacheFile, () => planProject(root, modules));
+    });
+    expect(plan).toEqual(planProject(root, modules));
+    expect(fs.existsSync(cacheFile)).toBe(true);
+    expect(fs.existsSync(devCacheFile)).toBe(false);
+  });
+
+  it("keeps a route manager's plans in the dev cache file", async () => {
+    const { root, cacheFile } = createProject();
+    const config = await resolveConfig({ root, srcDir: "src" }, "development");
+    const routeManager = new RouteManager(config);
+    await routeManager.discoverRoutes();
+    const uncached = routeManager.generateClientManifest(root);
+    expect(fs.existsSync(cacheFile)).toBe(false);
+
+    routeManager.usePackageClientBoundaryCacheFile(cacheFile);
+    expect(routeManager.regenerateClientManifest(root)).toEqual(uncached);
+    expect(fs.existsSync(cacheFile)).toBe(true);
+
+    // A replan after a source edit, as the dev server makes, reads no package again.
+    const { reads } = countPackageReads();
+    expect(routeManager.regenerateClientManifest(root)).toEqual(uncached);
+    expect(reads).toEqual([]);
   });
 });

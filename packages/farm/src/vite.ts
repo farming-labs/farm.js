@@ -146,6 +146,7 @@ import {
   resolveFarmIsolatedClientHydrationMode,
   stripUseClientDirective,
 } from "./utils/client-component";
+import { resolvePackageClientBoundaryCacheFile } from "./utils/package-client-boundary-cache";
 import {
   dispatchIntegrationRequest,
   getFarmIntegrationPluginOwner,
@@ -318,6 +319,7 @@ interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
   publicDir?: FarmUserConfig["publicDir"];
+  distDir?: FarmUserConfig["distDir"];
   /** @internal Modules selected by the compiled isolated-hydration ownership plan. */
   isolatedClientBoundaryModules?: ReadonlySet<string>;
   /** @internal Component modules of programmatic routes, read from the evaluated routes files. */
@@ -1739,6 +1741,16 @@ export function farmPlugin(
         },
         server,
       );
+      // Reuse the package inspections a build or an earlier dev start saved; startup's plan and
+      // each replan after a source edit then read only packages that changed.
+      farmApp
+        .getRouteManager()
+        .usePackageClientBoundaryCacheFile(
+          resolvePackageClientBoundaryCacheFile(
+            farmApp.getConfig().root,
+            options.distDir || ".farm",
+          ),
+        );
 
       await farmApp.initialize();
 
