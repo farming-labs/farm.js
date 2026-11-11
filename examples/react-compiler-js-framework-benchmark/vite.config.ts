@@ -3,6 +3,9 @@ import { defineConfig } from "vite";
 
 const compilerEnabled = process.env.FARM_REACT_COMPILER !== "false";
 const reactivity = process.env.FARM_REACTIVITY === "static" ? "static" : "hybrid";
+// The compiler mounts this app's createRoot root without React DOM by default;
+// FARM_REACT_ROOT=react-dom keeps React DOM for comparison.
+const compiledRoot = process.env.FARM_REACT_ROOT !== "react-dom";
 
 export default defineConfig({
   base: "./",
@@ -19,6 +22,7 @@ export default defineConfig({
             onUnsupported: "error",
             reactivity,
             report: true,
+            compiledRoot,
           }
         : false,
     },

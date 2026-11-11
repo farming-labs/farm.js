@@ -21,6 +21,13 @@ export interface ReactCompilerOptions {
   report?: boolean;
   /** Project-relative report location. Providing it also enables reporting. */
   reportFile?: string;
+  /**
+   * Mount the app's own `createRoot` roots without React DOM when their tree is fully compiled.
+   * The build points `import { createRoot } from "react-dom/client"` in app modules at
+   * `@farm.js/react/compiled-root`, which loads React DOM on demand for anything else.
+   * Defaults to `true`.
+   */
+  compiledRoot?: boolean;
 }
 
 export interface ReactRendererOptions {
@@ -42,6 +49,7 @@ export interface NormalizedReactCompilerOptions {
   reactivity: ReactCompilerReactivity;
   report: boolean;
   reportFile: string;
+  compiledRoot: boolean;
 }
 
 export const DEFAULT_COMPILER_DIRECTIVE = "use compiler";
@@ -98,8 +106,12 @@ export function normalizeReactCompilerOptions(
   }
   const reportFile = normalizeCompilerReportFile(options.reportFile);
   const report = options.report === true || options.reportFile !== undefined;
+  if (options.compiledRoot !== undefined && typeof options.compiledRoot !== "boolean") {
+    throw new TypeError("The React compiler compiledRoot option must be a boolean.");
+  }
+  const compiledRoot = options.compiledRoot !== false;
 
-  return { mode, directive, onUnsupported, reactivity, report, reportFile };
+  return { mode, directive, onUnsupported, reactivity, report, reportFile, compiledRoot };
 }
 
 const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
