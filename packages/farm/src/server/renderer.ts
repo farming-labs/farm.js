@@ -2077,7 +2077,9 @@ export class ServerRenderer {
           await _runWithCurrentRequest(currentRequest, async () => {
             let pageElement: any = this.rendererRuntime.createElement(PageComponent, pageProps);
 
-            if (LoadingFallbackComponent) {
+            // An islands navigation is swapped into a page already on screen, where a fallback
+            // would paint, so it arrives without loading.tsx, as on the production server.
+            if (LoadingFallbackComponent && !islandsNavigationRequest) {
               const loadingFallback = this.rendererRuntime.createElement(LoadingFallbackComponent, {
                 ...createRouteStateProps({
                   params,

@@ -222,6 +222,37 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("/src/app/dashboard/loading.tsx");
   });
 
+  it("answers an islands navigation without its loading.tsx fallback, as production does", async () => {
+    const renderer = createRenderer({
+      [routeModulePath]: {
+        default: async function DashboardPage() {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return React.createElement("main", null, "Dashboard ready");
+        },
+      },
+      [loadingModulePath]: {
+        default: function DashboardLoading() {
+          return React.createElement("p", null, "Loading dashboard");
+        },
+      },
+    });
+    (renderer as any).config.experimental.serverComponents = { mode: "islands" };
+    const render = async (headers: Record<string, string>) => {
+      const response = createMockResponse();
+      const request = createMockRequest("/dashboard");
+      Object.assign(request.headers, headers);
+      await renderer.renderPage(request, response);
+      return response.body;
+    };
+
+    // The browser swaps a navigation into a page on screen, so a fallback in it would paint.
+    const navigation = await render({ "f-stream": "flush" });
+    expect(navigation).toContain("Dashboard ready");
+    expect(navigation).not.toContain("Loading dashboard");
+    // A document load still streams loading.tsx while the page suspends.
+    expect(await render({})).toContain("Loading dashboard");
+  });
+
   it("renders the nearest error.tsx for file route render failures", async () => {
     vi.spyOn(logger, "error").mockImplementation(() => {});
     const response = createMockResponse();
