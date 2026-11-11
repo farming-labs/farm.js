@@ -203,10 +203,12 @@ interface KeyedRowsPlan {
   syntax: "map" | "list";
 }
 
+// onChange is not delegated: React derives it from the target's own fiber (its value tracker
+// and element type), so it never fires for a row the compiled runtime created after mount, such
+// as an appended todo. Rows with onChange stay React-owned, so React creates every row.
 const DELEGATABLE_KEYED_ROW_EVENTS = new Set([
   "onBeforeInput",
   "onBlur",
-  "onChange",
   "onClick",
   "onCompositionEnd",
   "onCompositionStart",
