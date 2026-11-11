@@ -4941,6 +4941,64 @@ function validateCollectionCallback(
   return unsupported ? `${method} callbacks cannot use ${unsupported}` : undefined;
 }
 
+function isPrimitiveLiteral(node: t.Node | null): boolean {
+  return (
+    t.isStringLiteral(node) ||
+    t.isNumericLiteral(node) ||
+    t.isBooleanLiteral(node) ||
+    t.isNullLiteral(node)
+  );
+}
+
+/**
+ * A JSX list over an array literal of primitives (`["all", "done"].map(...)`) builds a new array
+ * on every render, which the compiler cannot track as a collection. When every callback in the
+ * pipeline is inline and takes at most an item and an index, nothing can observe or mutate that
+ * array, so it moves to a module constant and the list compiles like one over any constant.
+ */
+function hoistConstantListCollections(component: NodePath, programPath: NodePath<t.Program>): void {
+  const hoisted: t.VariableDeclaration[] = [];
+  component.traverse({
+    CallExpression(path) {
+      if (!isMapCall(path.node) || !path.findParent((parent) => parent.isJSXExpressionContainer()))
+        return;
+      const calls: t.CallExpression[] = [path.node];
+      let source = (path.node.callee as t.MemberExpression).object as t.Expression;
+      while (collectionPipelineMethod(source)) {
+        calls.push(source as t.CallExpression);
+        source = ((source as t.CallExpression).callee as t.MemberExpression).object as t.Expression;
+      }
+      if (!t.isArrayExpression(source) || !source.elements.every(isPrimitiveLiteral)) return;
+      const callbacksReachOnlyItems = calls.every(
+        (call) =>
+          call.arguments.every(
+            (argument) =>
+              !t.isFunction(argument) ||
+              ((t.isArrowFunctionExpression(argument) || t.isFunctionExpression(argument)) &&
+                argument.params.length <= 2),
+          ) &&
+          call.arguments.every(
+            (argument) => t.isFunction(argument) || isPrimitiveLiteral(argument),
+          ),
+      );
+      if (!callbacksReachOnlyItems) return;
+      const identifier = programPath.scope.generateUidIdentifier("farmListItems");
+      hoisted.push(
+        t.variableDeclaration("const", [t.variableDeclarator(identifier, t.cloneNode(source))]),
+      );
+      const owner = calls[calls.length - 1].callee as t.MemberExpression;
+      owner.object = t.cloneNode(identifier);
+    },
+  });
+  if (hoisted.length === 0) return;
+  const lastImport = programPath
+    .get("body")
+    .filter((statement) => statement.isImportDeclaration())
+    .at(-1);
+  if (lastImport) lastImport.insertAfter(hoisted);
+  else programPath.unshiftContainer("body", hoisted);
+}
+
 function validateCollectionPipeline(
   expression: t.Expression,
   safeGlobals: ReadonlySet<string>,
@@ -10757,6 +10815,7 @@ export async function compileReactModule(
         const runtimeFeatureIdentifiers = new Map<CompilerRuntimeFeatureName, t.Identifier>();
         const usedRuntimeFeatures = new Set<CompilerRuntimeFeatureName>();
         for (const candidate of candidates) {
+          hoistConstantListCollections(candidate.path, programPath);
           const reason = compileCandidate(
             candidate,
             createComponentIdentifier,
