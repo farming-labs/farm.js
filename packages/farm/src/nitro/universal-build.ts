@@ -13195,6 +13195,21 @@ function toFarmNodeResponse(request, response) {
       }),
     );
   }
+  // Nitro's Workers entry exposes the worker's bindings on `globalThis.__env__`
+  // for each request; its Pages entry does not. Farm's env reader and unstorage's
+  // Cloudflare drivers look for them there, so set it before any route runs.
+  const farmCloudflareEnvPath =
+    preset === "cloudflare-pages" ? path.join(ssrOutputDir, "farm-cloudflare-env.mjs") : null;
+  if (farmCloudflareEnvPath) {
+    await fs.writeFile(
+      farmCloudflareEnvPath,
+      `export default function farmCloudflareEnv(event) {
+  const env = event.req.runtime?.cloudflare?.env
+  if (env) globalThis.__env__ = env
+}
+`,
+    );
+  }
   const prebuiltSSRPlugin = createExternalSSRBundlePlugin(
     nitroEntryPath,
     ssrOutputDir,
@@ -13288,6 +13303,9 @@ function toFarmNodeResponse(request, response) {
       : {}),
     // Use serverHandlers to define our workflow handler first, then the catch-all handler.
     handlers: [
+      ...(farmCloudflareEnvPath
+        ? [{ route: "/**", middleware: true, handler: toPosixPath(farmCloudflareEnvPath) }]
+        : []),
       ...(farmWorkflows.handlerPath
         ? [
             {
@@ -13664,6 +13682,10 @@ function toFarmNodeResponse(request, response) {
     await installFarmCompileCacheLauncher(path.join(outputDir, "server"), fs);
   }
 
+  if (preset.startsWith("cloudflare")) {
+    await populateCloudflareProcessEnv(nitroInstance.options.output.serverDir, fs);
+  }
+
   if (pluginManager) {
     await pluginManager.runHookParallel("afterNitroBuild", {
       root,
@@ -13717,6 +13739,61 @@ export function resolveFarmNitroOutputConfig(
           }
         : {}),
   };
+}
+
+const CLOUDFLARE_POPULATE_PROCESS_ENV_FLAG = "nodejs_compat_populate_process_env";
+const CLOUDFLARE_DO_NOT_POPULATE_PROCESS_ENV_FLAG = "nodejs_compat_do_not_populate_process_env";
+/** The compatibility date from which Workers populate `process.env` by default. */
+const CLOUDFLARE_POPULATE_PROCESS_ENV_DATE = "2025-04-01";
+
+/**
+ * The compatibility flags a generated Wrangler config needs so the worker's vars
+ * and secrets reach `process.env`, or undefined when it needs no change.
+ *
+ * Farm builds Workers at a compatibility date before `process.env` was populated
+ * by default, so server code reading it, such as an integration falling back to
+ * `process.env.STRIPE_SECRET_KEY`, saw none of them. A config whose date already
+ * populates `process.env`, or that opts out, is left as it is, since workerd
+ * refuses to start with both flags.
+ */
+export function resolveCloudflareProcessEnvFlags(wrangler: {
+  compatibility_date?: unknown;
+  compatibility_flags?: unknown;
+}): string[] | undefined {
+  const date = wrangler.compatibility_date;
+  const flags = wrangler.compatibility_flags;
+  if (typeof date !== "string" || date >= CLOUDFLARE_POPULATE_PROCESS_ENV_DATE) return undefined;
+  if (!Array.isArray(flags) || !flags.includes("nodejs_compat")) return undefined;
+  if (
+    flags.includes(CLOUDFLARE_POPULATE_PROCESS_ENV_FLAG) ||
+    flags.includes(CLOUDFLARE_DO_NOT_POPULATE_PROCESS_ENV_FLAG)
+  ) {
+    return undefined;
+  }
+  return [...flags, CLOUDFLARE_POPULATE_PROCESS_ENV_FLAG];
+}
+
+/** Apply {@link resolveCloudflareProcessEnvFlags} to the Wrangler config Nitro wrote. */
+async function populateCloudflareProcessEnv(
+  serverDir: string,
+  fs: typeof import("fs/promises"),
+): Promise<void> {
+  const wranglerPath = path.join(serverDir, "wrangler.json");
+  let source: string;
+  try {
+    source = await fs.readFile(wranglerPath, "utf8");
+  } catch (error) {
+    // `cloudflare.deployConfig: false` writes no Wrangler config.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const wrangler = JSON.parse(source) as Record<string, unknown>;
+  const flags = resolveCloudflareProcessEnvFlags(wrangler);
+  if (!flags) return;
+  await fs.writeFile(
+    wranglerPath,
+    JSON.stringify({ ...wrangler, compatibility_flags: flags }, null, 2),
+  );
 }
 
 interface PreparedSSRBundleFile {
@@ -13958,6 +14035,12 @@ async function copyFarmDocsRootContent(
   const lastModifiedManifest = createFarmDocsLastModifiedManifest(docsContentDir, {
     fallback: "now",
   });
+  const undatedPages = lastModifiedManifest.unknown?.length ?? 0;
+  if (undatedPages > 0) {
+    logger.warn(
+      `${undatedPages} docs page(s) were last changed before this shallow clone's Git history, so they show no "Last updated" date. Build from a full clone (git fetch --unshallow) or set lastModified in the page's frontmatter.`,
+    );
+  }
   await fs.rm(bundledContentDir, { recursive: true, force: true });
   await fs.mkdir(path.dirname(bundledContentDir), { recursive: true });
   await fs.cp(docsContentDir, bundledContentDir, {

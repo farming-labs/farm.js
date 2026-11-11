@@ -29,8 +29,11 @@ import {
   getFarmDocsCustomSocialImage,
   getFarmDocsSocialImageSlug,
   isFarmDocsSocialImageEnabled,
+  renderFarmDocsSocialImagePng,
   renderFarmDocsSocialImageSvg,
   renderFarmDocsSocialMetadata,
+  resolveFarmDocsSocialImageFormat,
+  type FarmDocsSocialImageFormat,
 } from "./social-image";
 import type { FarmDocsResolvedConfig } from "./types";
 
@@ -1901,6 +1904,7 @@ function renderPixelDocsHtml(
   basePath: string,
   fontStylesheetHref?: string,
   globalStylesheetHref?: string,
+  socialImageFormat: FarmDocsSocialImageFormat = "svg",
 ): string {
   const navTitle =
     typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
@@ -1917,7 +1921,7 @@ function renderPixelDocsHtml(
   const searchEnabled = isFarmDocsSearchEnabled(docs);
   const socialMetadata = isFarmDocsSocialImageEnabled(page, docs)
     ? renderFarmDocsSocialMetadata(
-        createFarmDocsSocialImageDescriptor(page, docs, requestUrl, basePath),
+        createFarmDocsSocialImageDescriptor(page, docs, requestUrl, socialImageFormat, basePath),
         getFarmDocsCustomSocialImage(page),
       )
     : "";
@@ -2011,9 +2015,9 @@ export function createFarmDocsHandler(
       return null;
     }
     const contentDir = resolveFarmDocsContentDir(docs, options);
-    const socialImageSlug = getFarmDocsSocialImageSlug(docs, requestUrl);
-    if (socialImageSlug !== null) {
-      const socialImagePage = loadFarmDocsPage(contentDir, docs, socialImageSlug);
+    const socialImageTarget = getFarmDocsSocialImageSlug(docs, requestUrl);
+    if (socialImageTarget !== null) {
+      const socialImagePage = loadFarmDocsPage(contentDir, docs, socialImageTarget.slug);
       if (
         !socialImagePage ||
         // The image sits outside the page's URL, where its guard does not reach, and
@@ -2029,14 +2033,17 @@ export function createFarmDocsHandler(
         socialImagePage,
         docs,
         requestUrl,
+        socialImageTarget.format,
         basePath,
       );
       if (requestUrl.pathname !== descriptor.imagePath) return null;
+      const png = descriptor.format === "png";
+      if (png && (await resolveFarmDocsSocialImageFormat()) !== "png") return null;
 
-      const etag = `"${descriptor.hash}"`;
+      const etag = `"${descriptor.hash}${png ? "-png" : ""}"`;
       const immutable = requestUrl.searchParams.get("v") === descriptor.hash;
       const headers = new Headers({
-        "Content-Type": "image/svg+xml; charset=utf-8",
+        "Content-Type": png ? "image/png" : "image/svg+xml; charset=utf-8",
         "Cache-Control": immutable
           ? "public, max-age=31536000, immutable"
           : "public, max-age=0, must-revalidate",
@@ -2048,6 +2055,10 @@ export function createFarmDocsHandler(
       }
       if (request.method === "HEAD") return new Response(null, { status: 200, headers });
 
+      if (png) {
+        const image = await renderFarmDocsSocialImagePng(descriptor);
+        return image ? new Response(image, { status: 200, headers }) : null;
+      }
       return new Response(renderFarmDocsSocialImageSvg(descriptor), { status: 200, headers });
     }
 
@@ -2100,6 +2111,10 @@ export function createFarmDocsHandler(
     }
 
     const pathname = new URL(request.url).pathname;
+    const socialImageFormat =
+      isFarmDocsSocialImageEnabled(page, docs) && !getFarmDocsCustomSocialImage(page)
+        ? await resolveFarmDocsSocialImageFormat()
+        : "svg";
     const layoutFonts = await options.resolveLayoutFonts?.(pathname);
     const usesLayoutFonts = Boolean(layoutFonts?.body || layoutFonts?.code);
     const activeFontAssets = usesLayoutFonts ? [] : fontAssets;
@@ -2121,6 +2136,7 @@ export function createFarmDocsHandler(
           basePath,
           usesLayoutFonts ? options.fontStylesheetHref : undefined,
           options.globalStylesheetHref,
+          socialImageFormat,
         ),
         {
           status: 200,

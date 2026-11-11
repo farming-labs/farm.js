@@ -14,7 +14,7 @@ Farm runs middleware in development and production builds. For every request, Fa
 
 Files in `public/` are served as static assets before any middleware or plugin runtime hook runs, so a guard never sees them. Serve a file that needs protection from an API route or page instead. A `GET` or `HEAD` for a public directory gets its `index.html` (`public/guide/index.html` answers `/guide` and `/guide/`); other methods reach middleware and routing like any path.
 
-Apps with `experimental.serverComponents` run both middleware forms through the same request
+Apps on the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`) run both middleware forms through the same request
 pipeline. Farm extracts an explicit `middleware` property, from `farm.config.ts` or from
 `defineConfig` from `@farm.js/plugin/rsc` in `vite.config.ts`, and the imports and local bindings it
 references into a server-only RSC module. This preserves handler closures, regular-expression
@@ -48,7 +48,7 @@ headers. They are also preserved when the short-circuiting `Response` supplies i
 a returned response does not replace cookies already written through `ctx.cookies`.
 
 A middleware handler that throws (other than `redirect()` or `notFound()`) fails the request. In a
-production build without `experimental.serverComponents`, a request under the API base path, or
+production build outside the RSC pipeline, a request under the API base path, or
 any request in a `renderer: false` app, gets the JSON `500` a throwing API route gets. A page request gets the root `error.*` boundary
 inside the root layouts, or Farm's default error page, as a page that throws does, and a request
 for Markdown gets that document as Markdown. These responses are `private, no-store`, carry your

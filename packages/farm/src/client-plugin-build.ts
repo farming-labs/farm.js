@@ -243,14 +243,21 @@ function functionSource(value: unknown, pluginName: string, location: string): s
     return `(${source})`;
   }
 
-  const method = source.match(/^(async\s+)?(\*\s*)?[$A-Z_a-z][$\w]*\s*(\([\s\S]*)$/);
-  if (method) {
-    const asyncPrefix = method[1] ?? "";
-    const generator = method[2] ? "*" : "";
-    return `(${asyncPrefix}function${generator}${method[3]})`;
-  }
+  if (!/^class\b/.test(source)) {
+    // `async (x) => {}` and a method named `async` share a prefix. A method is
+    // named after its key, so only the method has this source and that name.
+    // This runs per request in production too, so it must not compile code.
+    if (/^async\s*\(/.test(source) && value.name !== "async") return `(${source})`;
 
-  if (source.includes("=>")) return `(${source})`;
+    const method = source.match(/^(async\s+)?(\*\s*)?[$A-Z_a-z][$\w]*\s*(\([\s\S]*)$/);
+    if (method) {
+      const asyncPrefix = method[1] ?? "";
+      const generator = method[2] ? "*" : "";
+      return `(${asyncPrefix}function${generator}${method[3]})`;
+    }
+
+    if (source.includes("=>")) return `(${source})`;
+  }
 
   throw new TypeError(
     `Client plugin "${pluginName}" ${location} must use a function, method, or arrow function`,

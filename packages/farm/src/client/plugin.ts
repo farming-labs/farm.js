@@ -1,5 +1,6 @@
 "use client";
 
+import { createFarmRouteAnnouncer } from "./route-announcer";
 import type { FarmRuntimeErrorOverlay } from "./runtime-error-overlay";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -212,6 +213,7 @@ export class FarmClientPluginManager {
   private closed = false;
   private readonly reportedErrors = new WeakSet<object>();
   private runtimeErrorOverlay?: FarmRuntimeErrorOverlay;
+  private readonly announceRoute: () => void;
 
   private readonly handleWindowError = (event: ErrorEvent) => {
     const error = event.error ?? new Error(event.message || "Unknown browser error");
@@ -248,6 +250,7 @@ export class FarmClientPluginManager {
       isProd: options.isProd ?? !options.isDev,
       window: options.window ?? (typeof window !== "undefined" ? window : undefined),
     };
+    this.announceRoute = createFarmRouteAnnouncer(this.options.window);
   }
 
   start(): Promise<void> {
@@ -374,6 +377,7 @@ export class FarmClientPluginManager {
           resolve();
           return;
         }
+        this.announceRoute();
         void this.runHook("navigation.rendered", (instance) =>
           instance.plugin.navigation?.rendered?.({
             ...this.createStateEvent(instance),
