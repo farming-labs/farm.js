@@ -1378,6 +1378,9 @@ importers:
       '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
+      '@farm.js/preact':
+        specifier: workspace:*
+        version: link:../../packages/farm-preact
       '@playwright/test':
         specifier: ^1.52.0
         version: 1.58.2
@@ -1387,6 +1390,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.3(@types/react@19.2.13)
+      preact:
+        specifier: 10.29.8
+        version: 10.29.8(preact-render-to-string@6.7.0)
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
@@ -3222,6 +3228,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
+      '@farm.js/react':
+        specifier: workspace:*
+        version: link:../farm-react
       '@farm.js/renderer-tests':
         specifier: workspace:*
         version: link:../farm-renderer-tests

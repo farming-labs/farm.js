@@ -653,6 +653,7 @@ jobs:
           pnpm --filter @farm.js/core build
           pnpm --filter @farm.js/cli build
           pnpm --filter @farm.js/react build
+          pnpm --filter @farm.js/preact build
         env:
           NODE_OPTIONS: --max-old-space-size=12288
       - name: Verify native input reset parity in development and production
@@ -664,6 +665,12 @@ jobs:
         env:
           FARM_VITE_BUILDER: ${{ matrix.builder }}
           FARM_EXPERIMENT_SCREENSHOT: ${{ runner.temp }}/react-compiler/aot-edge-lab.png
+      # The same app and checks with preact({ compiler }), on preact/compat instead of React DOM.
+      - name: Verify compiled output on Preact in the browser
+        run: pnpm --dir examples/react-compiler experiment:preact
+        env:
+          FARM_VITE_BUILDER: ${{ matrix.builder }}
+          FARM_EXPERIMENT_SCREENSHOT: ${{ runner.temp }}/react-compiler/aot-edge-lab-preact.png
       - name: Build the compiler starter's generator and devtools
         if: matrix.builder == 'rolldown'
         run: |

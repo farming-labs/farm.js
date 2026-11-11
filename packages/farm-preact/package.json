@@ -64,6 +64,7 @@
   },
   "devDependencies": {
     "@farm.js/core": "workspace:*",
+    "@farm.js/react": "workspace:*",
     "@farm.js/renderer-tests": "workspace:*",
     "@types/node": "^22.20.5",
     "jsdom": "^25.0.0",
@@ -75,7 +76,13 @@
   },
   "peerDependencies": {
     "@farm.js/core": ">=0.1.0 <0.2.0",
+    "@farm.js/react": ">=0.1.0-beta.39 <0.2.0",
     "preact": "^10.29.8"
+  },
+  "peerDependenciesMeta": {
+    "@farm.js/react": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=22.13.0"
