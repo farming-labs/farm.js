@@ -38,4 +38,42 @@ describe("server renderer", () => {
     ]);
     expect(stdout).toBe("function");
   }, 60_000);
+
+  it("checks client plugin hooks where code generation from strings is disallowed", async () => {
+    // The renderer resolves client plugins per islands request, so their hook
+    // checks run in production servers that forbid eval (Cloudflare Workers).
+    const dir = await mkdtemp(path.join(packageRoot, ".tmp-client-hooks-codegen-"));
+    dirs.push(dir);
+    const bundle = await rolldown({
+      input: path.join(packageRoot, "src/client-plugin-build.ts"),
+      external: (id) => !id.startsWith(".") && !path.isAbsolute(id),
+      logLevel: "silent",
+    });
+    await bundle.write({ dir, format: "esm", entryFileNames: "client-plugin-build.mjs" });
+    await bundle.close();
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      "--disallow-code-generation-from-strings",
+      "--input-type=module",
+      "--eval",
+      [
+        "const build = await import(process.argv[1]);",
+        "const named = { async(value) { return value; } };",
+        "const plugins = [{ name: 'hooks', client: {",
+        "  setup: async (event) => event,",
+        "  error: named.async,",
+        "  navigation: { before: async (event) => { void event; } },",
+        "} }];",
+        "const resolved = build.resolveFarmClientPlugins(plugins);",
+        "const { registrations } = build.generateFarmClientPluginEntryCode(plugins);",
+        "process.stdout.write(JSON.stringify({",
+        "  resolved: resolved.length,",
+        "  arrow: registrations.includes('async (event) => event'),",
+        "  method: registrations.includes('(function(value) { return value; })'),",
+        "}));",
+      ].join("\n"),
+      pathToFileURL(path.join(dir, "client-plugin-build.mjs")).href,
+    ]);
+    expect(JSON.parse(stdout)).toEqual({ resolved: 1, arrow: true, method: true });
+  }, 60_000);
 });
