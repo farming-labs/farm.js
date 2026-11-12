@@ -23,6 +23,12 @@ interface FarmDocsAdapterRuntimeHandlerOptions {
   ) => FarmLayoutFonts | undefined | Promise<FarmLayoutFonts | undefined>;
   loadReactModule?: () => Promise<any>;
   registerMCPServer?: (server: FarmMCPServerRegistration) => () => void;
+  /**
+   * Builds a complete HTML page's response. The production server passes it: a response built
+   * with it keeps its HTML string, so Farm scans and writes the page without reading and
+   * re-encoding its body. Adapters fall back to `new Response(html, init)` without it.
+   */
+  createHtmlResponse?: (html: string, init: ResponseInit) => Response;
 }
 
 interface FarmDocsAdapterServerModule {

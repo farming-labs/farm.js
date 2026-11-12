@@ -8179,6 +8179,9 @@ const farmDocsHandler = ${
   loadReactModule: async () => FarmDocsAdapterReact,
   // Lists the docs MCP endpoint in /.well-known/ai-catalog.json for the server's lifetime.
   registerMCPServer: registerFarmMCPServer,
+  // A page built with this keeps its HTML string, so the preload budget and the response
+  // writer use it instead of reading and re-encoding the body. Older adapters ignore it.
+  createHtmlResponse: farmOwnedHtmlResponse,
 })`
           : `createFarmDocsHandler(farmDocsResolvedConfig, {
   root: farmDocsRuntimeRoot,
@@ -9197,12 +9200,8 @@ function withFarmDocsRequestCache(response, request, farmLocaleResolution, middl
   ) {
     return response;
   }
-  const headers = new Headers(response.headers);
-  headers.set("Cache-Control", "private, no-store");
-  return farmOwnedResponse(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
+  return farmPreloadHeadersResponse(response, (headers) => {
+    headers.set("Cache-Control", "private, no-store");
   });
 }
 
@@ -10647,13 +10646,11 @@ ${
         middlewareData,
         middlewareContext,
       );
-      const docsHeaders = new Headers(wrappedDocsResponse.headers);
-      docsHeaders.set("x-farm-preload-buffered", "1");
-      return applyProductionMiddlewareHeaders(farmOwnedResponse(wrappedDocsResponse.body, {
-        status: wrappedDocsResponse.status,
-        statusText: wrappedDocsResponse.statusText,
-        headers: docsHeaders,
-      }), middlewareHeaders);
+      // In place for a page the adapter built with createHtmlResponse, so its HTML string stays.
+      const bufferedDocsResponse = farmPreloadHeadersResponse(wrappedDocsResponse, (headers) => {
+        headers.set("x-farm-preload-buffered", "1");
+      });
+      return applyProductionMiddlewareHeaders(bufferedDocsResponse, middlewareHeaders);
     }
   }
   `
