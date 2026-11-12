@@ -64,6 +64,8 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   and a navigation keeps the provider's state.
 - **Actions.** `"use server"` functions compile to islx action references. A form posts its action
   without a page load, or without JavaScript, and the page refreshes with its islands' state kept.
+  An action called from a client component can return elements, as under RSC: they render on the
+  server, and the client components in them hydrate.
 - **Navigation.** A navigation fetches the page's HTML, streamed, with only the layouts the
   browser does not keep, and hydrates the islands it brings.
 
