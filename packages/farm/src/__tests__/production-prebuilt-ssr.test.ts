@@ -4793,6 +4793,54 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("stubs API route modules but keeps a client page whose path holds api and route", async () => {
+    // Only an API route module (a route file under api/) is server-only. The client entry imports
+    // pages by absolute path, so a page such as /docs/api/router has both strings in its path.
+    const root = await createProductionFixture("api-route-page");
+
+    try {
+      const routeDir = path.join(root, "src", "app", "api", "secret");
+      await fs.mkdir(routeDir, { recursive: true });
+      await fs.writeFile(
+        path.join(routeDir, "route.ts"),
+        `export function GET() { return new Response("server-only-api-route-sentinel"); }`,
+      );
+      const pageDir = path.join(root, "src", "app", "docs", "api", "router");
+      await fs.mkdir(pageDir, { recursive: true });
+      await fs.writeFile(
+        path.join(pageDir, "page.tsx"),
+        `"use client";
+
+import { useState } from "react";
+import { GET } from "../../../api/secret/route";
+
+export default function RouterDocs() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>router docs page {typeof GET} {count}</button>;
+}`,
+      );
+      const config = await resolveConfig(
+        { root, srcDir: "src", images: { provider: "none" }, telemetry: false },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const clientDir = path.join(root, ".farm", "client");
+      const clientFiles = await fs.readdir(clientDir, { recursive: true });
+      const clientCode = (
+        await Promise.all(
+          clientFiles
+            .filter((name) => name.endsWith(".js"))
+            .map((name) => fs.readFile(path.join(clientDir, name), "utf8")),
+        )
+      ).join("\n");
+      expect(clientCode).toContain("router docs page");
+      expect(clientCode).not.toContain("server-only-api-route-sentinel");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("includes package client boundaries imported by a server layout in route hydration", async () => {
     const root = await createProductionFixture();
 
