@@ -335,8 +335,10 @@ async function createProjectModuleServer(
         }),
         farmEnvironmentFunctionsPlugin(),
         // Route modules load here at build time (rendering config, prerendering): `server-only`
-        // resolves as it does in the server build.
-        farmServerOnlyEntriesPlugin(),
+        // resolves as it does in the server build. Module-entry packages load pre-bundled, as in
+        // `farm dev`: unbundled, lucide-react alone is ~1,750 modules through the module runner,
+        // which a docs build waited on after its bundles.
+        farmServerOnlyEntriesPlugin({ prebundleServerPackages: true }),
       ],
       server: {
         middlewareMode: true,
@@ -357,6 +359,12 @@ async function createProjectModuleServer(
   return createViteServer({
     ...viteConfig,
     root,
+    // Vite keys its pre-bundled dependencies on the config, mode included, so this server and
+    // `farm dev` sharing one cache would each rebuild it after the other ran.
+    cacheDir: path.join(
+      path.resolve(root, viteConfig.cacheDir ?? path.join("node_modules", ".vite")),
+      "farm-build",
+    ),
     configFile: false,
     appType: "custom",
     mode: "production",
