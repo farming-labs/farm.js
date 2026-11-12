@@ -3567,6 +3567,8 @@ function isCompilerHostElement(value: unknown): value is CompilerHostElement {
  * attributes match and a form reset returns to the initial value. Later updates leave
  * defaultChecked alone, as React does.
  */
+// Runs after updateAttribute, as React sets a new field's value before its default: assigning a
+// changed value moves the caret to the end, which an earlier default would leave at the start.
 function initializeFieldDefault(element: Element, name: string, value: unknown): void {
   if (
     name === "value" &&
@@ -3582,8 +3584,8 @@ function initializeFieldDefault(element: Element, name: string, value: unknown):
 function createCompilerHostElement(document: Document, descriptor: CompilerHostElement): Element {
   const element = document.createElement(descriptor.tag);
   for (const attribute of descriptor.attributes) {
-    initializeFieldDefault(element, attribute.name, attribute.value);
     updateAttribute(element, attribute.name, attribute.value);
+    initializeFieldDefault(element, attribute.name, attribute.value);
   }
   for (const style of descriptor.styles) updateStyle(element, style.name, style.value);
   const appendChild = (child: unknown): void => {
@@ -13040,8 +13042,8 @@ function setCompiledRootProp(element: Element, name: string, value: unknown): vo
       throw new CompiledRootUnsupported(`the ${name} prop`);
     }
   }
-  initializeFieldDefault(element, name, value);
   updateAttribute(element, name, value);
+  initializeFieldDefault(element, name, value);
 }
 
 function mountCompiledRootNode(
