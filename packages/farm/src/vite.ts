@@ -137,6 +137,7 @@ import {
 } from "./document-layout-client";
 import { FARM_NAVIGATION_SCRIPT_SOURCE } from "./client/navigation-scripts";
 import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "./client/navigation-stream-client";
+import { FARM_REFRESH_FIELDS_SOURCE } from "./client/refresh-fields";
 import {
   getClientModuleMetadata,
   resolveModuleSourcePath,
@@ -7509,7 +7510,7 @@ function getLayoutShell(root, patterns, index, find) {
   return shell.innerHTML;
 }
 
-function replaceNavigationBoundary(
+${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceNavigationBoundary(
   container,
   fragment,
   currentPatterns,
@@ -7546,7 +7547,13 @@ function replaceNavigationBoundary(
     activateFragmentScripts(container);
     return container;
   }
-
+${
+    islandValues
+      ? `
+  // A refresh renders the same layouts again: their fields keep what was typed, and the focus.
+  const fields = refresh ? captureFarmServerFields(currentTarget) : null;`
+      : ""
+  }
   ${
     isolatedHydrationEnabled
       ? `${
@@ -7558,7 +7565,7 @@ function replaceNavigationBoundary(
         }disposeFarmIsolatedClientBoundaries(currentTarget);`
       : ""
   }
-  currentTarget.replaceWith(nextTarget);
+  currentTarget.replaceWith(nextTarget);${islandValues ? "\n  if (fields) restoreFarmServerFields(fields, nextTarget);" : ""}
   activateFragmentScripts(nextTarget);
   if (fragmentTreeRoot && fragmentTreeRoot !== nextTarget) fragmentTreeRoot.remove();
 
