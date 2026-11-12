@@ -830,7 +830,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farm.js/islx": "0.0.10",
+    "@farm.js/islx": "0.0.13",
     "@farming-labs/orm": "0.0.66",
     "@farming-labs/orm-runtime": "0.0.66",
     "@formatjs/icu-messageformat-parser": "3.5.15",

@@ -15,6 +15,7 @@ import "@farm.js/core/css";
 export type RoutePath =
   | "/"
   | "/action"
+  | "/action-element"
   | "/action-island-props"
   | "/action-keyed"
   | "/action-layout"
@@ -102,6 +103,7 @@ export type RoutePath =
 export type RoutePattern =
   | "/"
   | "/action"
+  | "/action-element"
   | "/action-island-props"
   | "/action-keyed"
   | "/action-layout"
@@ -189,6 +191,7 @@ export type RoutePattern =
 export type RouteModulePattern =
   | "/"
   | "/action"
+  | "/action-element"
   | "/action-island-props"
   | "/action-keyed"
   | "/action-layout"
