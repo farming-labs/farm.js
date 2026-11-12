@@ -641,7 +641,14 @@ test("an island hydrates with the useActionState result of a form posted before 
   // And the form keeps going from that state (the response rendered the field's default again).
   await page.getByRole("button", { name: "Vote", exact: true }).click();
   await expect(page.getByTestId("vote-result")).toHaveText("votes: 2, last: tea");
-  expect(errors.filter((error) => !error.includes("net::ERR_FAILED"))).toEqual([]);
+  // The first load's blocked scripts may report late. The checks above prove the second load ran.
+  expect(
+    errors.filter(
+      (error) =>
+        !error.includes("net::ERR_FAILED") &&
+        !error.includes("Failed to fetch dynamically imported module"),
+    ),
+  ).toEqual([]);
 });
 
 test("a server action passed as a prop works before JavaScript loads", async ({ browser }) => {
