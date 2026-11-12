@@ -161,6 +161,20 @@ describe("bot", () => {
     );
   });
 
+  it("fails a production build without `hostnames`, but not development", () => {
+    const production = { isDev: false, isProd: true } as never;
+    const development = { isDev: true, isProd: false } as never;
+
+    const plugin = bot({ provider: acme() });
+    expect(() => plugin.configure?.({ plugins: [plugin] }, production)).toThrowError(
+      expect.objectContaining({ name: "BotError", code: "missing_hostnames" }),
+    );
+    expect(() => plugin.configure?.({ plugins: [plugin] }, development)).not.toThrow();
+
+    const listed = bot({ provider: acme(), hostnames: ["shop.example.com"] });
+    expect(() => listed.configure?.({ plugins: [listed] }, production)).not.toThrow();
+  });
+
   it("rejects a second instance of the plugin", () => {
     const plugins = [bot({ provider: acme() }), bot({ provider: acme() })];
     expect(() => plugins[0]!.configure?.({ plugins }, {} as never)).toThrow(/once/);

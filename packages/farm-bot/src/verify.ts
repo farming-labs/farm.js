@@ -1,5 +1,6 @@
 import { getCurrentRequest } from "@farm.js/core/request";
 import { BotError } from "./errors.js";
+import { isDevelopment } from "./keys.js";
 import {
   BOT_FAILURE_CODES,
   type BotFailureCode,
@@ -64,6 +65,9 @@ export async function verifyBotCheck<TData>(
   const { provider } = settings;
   const fail = (code: BotFailureCode, providerCodes: readonly string[] = []) =>
     failure(provider.name, code, providerCodes);
+
+  // `farm build` reports this from `configure`; this covers a server that skipped that check.
+  if (settings.hostnames === undefined && !isDevelopment()) throw missingHostnamesError();
 
   const form = isForm(input) ? input : undefined;
   const token = typeof input === "string" ? input : readToken(form, provider.tokenField);
@@ -154,6 +158,14 @@ function currentRequest(): Request | undefined {
     // Outside a request, the hostname check reports what to pass instead.
     return undefined;
   }
+}
+
+/** Outside development the request's host can't be trusted, so the app must list its own. */
+export function missingHostnamesError(): BotError {
+  return new BotError(
+    "missing_hostnames",
+    '`bot()` needs `hostnames` outside development, for example `hostnames: ["example.com"]`. A request can claim any host, so a production check only trusts the hostnames you list.',
+  );
 }
 
 function requestHostname(request: Request | undefined): string {
