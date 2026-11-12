@@ -494,8 +494,9 @@ export function middleware(request: Request) {
 
 With `deploy.target: "vercel"`, `farm build` then:
 
-- prerenders each static page that only `runtime: "edge"` middleware guards, without running that
-  middleware for the build's own request;
+- prerenders each static page, and each [`docs.prerender`](/docs/docs-engine#prerender-docs-pages)
+  page, that only `runtime: "edge"` middleware guards, without running that middleware for the
+  build's own request;
 - bundles the middleware that guards those pages into an Edge function, and adds a route that runs
   it before Vercel serves each page's file (`/docs/guide`, `/docs/guide/`, `/docs/guide/index.html`,
   and the same paths under a `basePath`);

@@ -532,8 +532,10 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
 - Use `docs` for human docs, shared search, markdown, `llms.txt`, sitemap, robots, and agent APIs.
   A root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` (or the same file in `public/`)
   takes its path from the docs engine.
-- Docs pages render on request. `docs.prerender: true` writes the pages a docs adapter lists as
-  static files on Node and serverless targets; a docs `page.mdx` takes no `force-static` export.
+- Docs pages render on request. `docs.prerender: true` writes them as static files on Node and
+  serverless targets: every built-in renderer page (pages with social images need
+  `socialImage.baseUrl`) or the pages a docs adapter lists. A docs `page.mdx` takes no
+  `force-static` export.
 - Use `agent.llmsTxt` for an app's own `/llms.txt` and `/llms-full.txt` (`full: false` skips the
   second). A static `public/llms.txt` or `public/llms-full.txt` overrides each, and so do
   `src/app/llms.ts` and `src/app/llms-full.ts`, which return the whole file as a string or the

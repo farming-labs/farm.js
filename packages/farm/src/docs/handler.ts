@@ -26,6 +26,7 @@ import { resolveFarmDocsPageLastModified } from "./last-modified";
 import { generateFarmDocsSearchBootstrapRuntime, isFarmDocsSearchEnabled } from "./search-client";
 import {
   createFarmDocsSocialImageDescriptor,
+  farmDocsPageUsesRequestOrigin,
   getFarmDocsCustomSocialImage,
   getFarmDocsSocialImageSlug,
   isFarmDocsSocialImageEnabled,
@@ -514,6 +515,31 @@ export function discoverFarmDocsPages(
 
   visit(contentDir);
   return pages.sort((a, b) => a.href.localeCompare(b.href));
+}
+
+/**
+ * The built-in renderer's pages, for `docs.prerender`: every page discovery lists, which is
+ * exactly the set the runtime answers. A page whose HTML carries the request's origin
+ * ({@link farmDocsPageUsesRequestOrigin}) is listed apart, since a static copy would keep the
+ * build's.
+ *
+ * @internal
+ */
+export function listFarmDocsBuiltInPrerenderPages(
+  docs: FarmDocsResolvedConfig,
+  options: { root: string; srcDir?: string },
+): { pages: string[]; originDependent: string[] } {
+  const pages: string[] = [];
+  const originDependent: string[] = [];
+  for (const root of getFarmDocsRoots(docs)) {
+    const contentDir = resolveFarmDocsContentDir(root, options);
+    for (const page of discoverFarmDocsPages(contentDir, root)) {
+      const loaded = loadFarmDocsPage(contentDir, root, page.slug);
+      if (!loaded) continue;
+      (farmDocsPageUsesRequestOrigin(loaded, root) ? originDependent : pages).push(loaded.href);
+    }
+  }
+  return { pages: [...new Set(pages)], originDependent: [...new Set(originDependent)] };
 }
 
 /** The page as the docs engine links it. `basePath` puts its URL below the app's base path. */

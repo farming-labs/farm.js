@@ -163,6 +163,7 @@ import {
   discoverFarmDocsPages,
   getFarmDocsMarkdownPath,
   getFarmDocsRoots,
+  listFarmDocsBuiltInPrerenderPages,
   resolveFarmDocsContentDir,
 } from "../docs/handler";
 import {
@@ -12725,8 +12726,9 @@ function getPhysicalPrerenderBypassReason(options: {
 }
 
 /**
- * The docs pages `docs.prerender` asks the build to write as static files. Only a docs adapter
- * on a Node or serverless target lists them; anything else keeps rendering them on request.
+ * The docs pages `docs.prerender` asks the build to write as static files on a Node or serverless
+ * target: the pages a docs adapter lists, or every page of Farm's built-in renderer whose HTML does
+ * not depend on the request. Anything else keeps rendering them on request.
  */
 async function getFarmDocsPrerenderPages(
   config: ResolvedFarmConfig,
@@ -12734,15 +12736,28 @@ async function getFarmDocsPrerenderPages(
   preset: string,
 ): Promise<string[]> {
   if (!config.docs?.enabled || !config.docs.prerender) return [];
-  if (!isReactRenderer(config.renderer) || !hasFarmDocsRuntimeAdapter(config.docs)) {
-    logger.warn(
-      "docs.prerender needs a docs adapter such as @farming-labs/farmjs; Farm's built-in docs renderer keeps rendering docs pages on request.",
-    );
-    return [];
-  }
   if (getFarmPresetRuntime(preset) === "edge") {
     logger.info(
       `↪ Keeping docs pages in the edge docs snapshot: docs.prerender writes static files on Node and serverless targets, not "${preset}".`,
+    );
+    return [];
+  }
+  if (!hasFarmDocsRuntimeAdapter(config.docs)) {
+    // The built-in renderer lists its pages from the same discovery it answers them with.
+    const { pages, originDependent } = listFarmDocsBuiltInPrerenderPages(config.docs, {
+      root,
+      srcDir: config.srcDir,
+    });
+    if (originDependent.length > 0) {
+      logger.info(
+        `↪ Keeping ${originDependent.length} docs page(s) rendering on request: their social image metadata is an absolute URL built from the request's origin. Set docs.socialImage.baseUrl to prerender them.`,
+      );
+    }
+    return pages;
+  }
+  if (!isReactRenderer(config.renderer)) {
+    logger.warn(
+      `The docs adapter ${JSON.stringify(config.docs.adapter.id)} renders with React; docs.prerender keeps its pages rendering on request with the "${config.renderer.name}" renderer.`,
     );
     return [];
   }
