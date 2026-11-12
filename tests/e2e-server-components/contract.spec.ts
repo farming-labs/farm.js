@@ -571,6 +571,25 @@ test("a server action that leaves its layout unchanged keeps what was typed ther
   await expect(page.getByLabel("Layout note")).toHaveValue("still here");
 });
 
+test("a server action that changes only a layout island's props gives the island its new props", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-island-props");
+  await hydrated(page);
+  const pageCount = Number(
+    (await page.getByTestId("page-count").textContent())?.replace(/\D/g, ""),
+  );
+  const counter = page.getByRole("button", { name: /^Layout sees page/ });
+  await counter.click();
+  await expect(counter).toHaveText(`Layout sees page ${pageCount}: 1`);
+  await page.getByRole("button", { name: "Bump page" }).click();
+  await expect(page.getByTestId("page-count")).toHaveText(`Page count: ${pageCount + 1}`);
+  // The new label, with the state the island had.
+  await expect(counter).toHaveText(`Layout sees page ${pageCount + 1}: 1`);
+  expect(errors).toEqual([]);
+});
+
 test("a server action that changes its layout keeps what was typed there, and the focus", async ({
   page,
 }) => {
