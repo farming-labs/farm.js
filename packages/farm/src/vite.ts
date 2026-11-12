@@ -22,6 +22,7 @@ import type {
   Connect,
 } from "vite";
 import type { FarmConfig, FarmRequest } from "./types";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { FarmApp } from "./app";
 import { logger, toPosixPath, toViteModuleId } from "./utils";
@@ -210,6 +211,11 @@ import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config
 import { farmImageImportsPlugin } from "./image-vite";
 import { farmFontImportsPlugin } from "./font-vite";
 import type { FarmServerBundledPackage } from "./islands-react-server-exports";
+import {
+  createFarmDeferredMiddleware,
+  type FarmDeferredDevSetup,
+  type FarmDevMiddlewareTarget,
+} from "./dev/deferred-setup";
 import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
@@ -1630,6 +1636,7 @@ function hasViteAlias(alias: AliasOptions | undefined, find: string): boolean {
 export function farmPlugin(
   options: FarmVitePluginOptions = {},
   initialPluginManager?: PluginManager,
+  deferredSetup?: FarmDeferredDevSetup,
 ): Plugin {
   const rendererDisabled = isFarmRendererDisabled(options.renderer);
   const imageImports = farmImageImportsPlugin();
@@ -1650,6 +1657,21 @@ export function farmPlugin(
   };
   let reactRefreshActive = false;
   let server: ViteDevServer;
+  // Where configureServer registers Farm's middleware: Vite's stack, or the stacks a deferred
+  // setup's gates run once it finishes.
+  let deferredGates:
+    | {
+        pre: ReturnType<typeof createFarmDeferredMiddleware>;
+        post: ReturnType<typeof createFarmDeferredMiddleware>;
+      }
+    | undefined;
+  // While a deferred setup runs, browser-side load and transform calls wait for it: the routes,
+  // config and plans they read are still being built (Vite's dependency scan, for one, would
+  // otherwise cache a plan made mid-discovery). Calls the setup makes itself run in
+  // `farmSetupContext` and never wait. resolveId never waits: Vite resolves the client entries
+  // before it listens, and resolving reads none of that state.
+  let pendingClientSetup: Promise<void> | null = null;
+  const farmSetupContext = new AsyncLocalStorage<true>();
   let apiRouteManager: APIRouteManager;
   let openAPIManager: OpenAPIManager | null = null;
   let middlewareManager: MiddlewareManager;
@@ -1678,7 +1700,7 @@ export function farmPlugin(
   const getProgrammaticClientRoutes = () =>
     options.programmaticClientRoutes ?? farmApp?.getRouteManager().getProgrammaticClientRoutes();
 
-  return {
+  const plugin: Plugin = {
     name: "farm",
     api: { getProgrammaticClientRoutes } satisfies FarmProgrammaticRoutesPluginApi,
 
@@ -1752,6 +1774,10 @@ export function farmPlugin(
         await fontImports.configureServer.call(this, viteServer);
       }
       server = viteServer;
+      const farmMiddlewares: FarmDevMiddlewareTarget =
+        deferredGates?.pre.target ?? viteServer.middlewares;
+      const farmPostMiddlewares: FarmDevMiddlewareTarget =
+        deferredGates?.post.target ?? viteServer.middlewares;
 
       // Store the plugin manager passed during creation
       const pm = initialPluginManager;
@@ -1803,7 +1829,7 @@ export function farmPlugin(
       // agent.noindexPreviews marks every dev response, Vite's own included, when
       // the environment says this is a preview (`FARM_PREVIEW=1 farm dev`).
       if (farmConfig.agent?.noindexPreviews) {
-        server.middlewares.use((_req, res, next) => {
+        farmMiddlewares.use((_req, res, next) => {
           if (isFarmPreviewDeploymentEnvironment(process.env)) {
             res.setHeader("X-Robots-Tag", FARM_PREVIEW_ROBOTS_TAG);
           }
@@ -2493,7 +2519,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       const deferredDottedRequests = new WeakMap<Connect.IncomingMessage, string>();
       // A configured rewrite re-enters this handler with the destination URL, as the production
       // entry re-enters its request handler, so every route and guard sees the destination.
-      server.middlewares.use(
+      farmMiddlewares.use(
         withAPIRequestTracing(async function handleFarmDevRequest(req, res, next) {
           const requestUrl = req.url || "/";
           const requestMethod = req.method || "GET";
@@ -4577,13 +4603,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         }),
       );
       // The handler just registered, so the post hook below can route a deferred dotted path.
-      const farmRequestMiddleware = server.middlewares.stack.at(-1)
+      const farmRequestMiddleware = farmMiddlewares.stack.at(-1)
         ?.handle as Connect.NextHandleFunction;
 
       // What Farm passed on is Vite's (modules, /@vite/*, /@fs/*, public files): give it the CORS
       // policy Vite would have, unless a later plugin turned Vite's own back on.
       if (farmOwnsDevCors && viteServer.config.server.cors === false) {
-        viteServer.middlewares.use(createFarmDevViteCorsMiddleware());
+        farmMiddlewares.use(createFarmDevViteCorsMiddleware());
       }
 
       // A dotted path that no route or file answered falls through to Vite, whose 404 has an
@@ -4591,7 +4617,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       // true misses reach it: route them as production does, where middleware runs and the
       // not-found page (or, with `renderer: false`, the JSON miss) answers.
       return () => {
-        viteServer.middlewares.use((req, res, next) => {
+        farmPostMiddlewares.use((req, res, next) => {
           if (res.headersSent || res.writableEnded) return next();
           // Vite's SPA fallback may have rewritten req.url to /index.html by now.
           const deferredUrl = deferredDottedRequests.get(req);
@@ -4639,6 +4665,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
     },
 
     async load(id, loadOptions) {
+      if (pendingClientSetup && !loadOptions?.ssr && !farmSetupContext.getStore()) {
+        await pendingClientSetup;
+      }
       if (isFarmServerFnBoundaryId(id) && islandsServerFns()) {
         // The "use server" boundary of a module whose server functions were found without a
         // directive. Its exports come from the source on disk, never from the request.
@@ -4842,6 +4871,9 @@ export const manifest = getManifest();
     },
 
     async transform(code, id, transformOptions) {
+      if (pendingClientSetup && !transformOptions?.ssr && !farmSetupContext.getStore()) {
+        await pendingClientSetup;
+      }
       // Islands mode: `"use server"` modules register as actions on the server and become stubs in
       // the browser (RFC 0003). The RSC engine has its own transform.
       const actionConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
@@ -5314,6 +5346,8 @@ if (import.meta.hot) {
       invalidateFarmClientOnlyScan();
     },
     async handleHotUpdate(ctx: HmrContext) {
+      // A file changed while a deferred setup still discovers routes: handle it against the result.
+      if (pendingClientSetup && !farmSetupContext.getStore()) await pendingClientSetup;
       const { file, server, modules } = ctx;
       if (initialPluginManager) {
         try {
@@ -5524,6 +5558,51 @@ if (import.meta.hot) {
       return modules;
     },
   };
+  if (!deferredSetup) return plugin;
+
+  // startDevServer opens the port before Farm's setup finishes. Vite awaits configureServer, so
+  // this hook returns as soon as the setup has started, leaving gates where Farm's middleware
+  // goes; requests wait there until the setup is done.
+  const setUpDevServer = plugin.configureServer as (
+    this: unknown,
+    server: ViteDevServer,
+  ) => Promise<() => void>;
+  let deferred = false;
+  plugin.configureServer = function (viteServer: ViteDevServer) {
+    // Only the first start is deferred: a server Vite restarts finishes setup before it listens.
+    if (deferred) {
+      deferredGates = undefined;
+      return setUpDevServer.call(this, viteServer);
+    }
+    deferred = true;
+    const ready = () => deferredSetup.ready;
+    deferredGates = {
+      pre: createFarmDeferredMiddleware(ready),
+      post: createFarmDeferredMiddleware(ready),
+    };
+    // Registers the preview guard and font middleware synchronously, ahead of the gate below.
+    const setup = farmSetupContext
+      .run(true, () => setUpDevServer.call(this, viteServer))
+      .then((registerPostMiddleware) => {
+        registerPostMiddleware();
+      });
+    viteServer.middlewares.use(deferredGates.pre.handle);
+    deferredSetup.setup = setup;
+    deferredSetup.ready = setup;
+    pendingClientSetup = setup.then(
+      () => {
+        pendingClientSetup = null;
+      },
+      () => {
+        pendingClientSetup = null;
+      },
+    );
+    const post = deferredGates.post.handle;
+    return () => {
+      viteServer.middlewares.use(post);
+    };
+  };
+  return plugin;
 }
 
 /**
