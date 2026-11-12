@@ -277,9 +277,11 @@ from each row's own Fiber; this root instead listens on the list container for t
 React's `onChange` follows for each control (`input` for text fields, `change` for checkboxes,
 radios, selects, and file inputs), so those lists need no React DOM either. Fields it creates get
 the same `value` and `checked` defaults React sets, so a form reset behaves the same.
+Rows with conditional content mount here too when their events can be delegated, as described in
+[Compiler-owned host conditionals inside keyed rows](#compiler-owned-host-conditionals-inside-keyed-rows).
 Compiled parts that still re-render through React, such as conditional sections, child component
 islands (hook-free children in the same module are inlined instead, as described below) and rows
-with conditional content, keep the whole root on React DOM, as does anything else
+whose conditional content needs React-owned events, keep the whole root on React DOM, as does anything else
 in the tree, such as hooks, context, Suspense, portals, or props React DOM handles specially like
 `autoFocus` and `defaultValue`. React DOM then loads on demand, and React renders the root before
 anything is shown. If a mounted compiled component later needs React (for example
@@ -2069,17 +2071,40 @@ committed from the same latest collection. Block IDs remain unique in the compon
 the runtime scopes repeated row descriptors by their stable key. No marker nodes or extra wrappers
 are added to SSR output.
 
-This compiler-owned tier requires a lowercase host row with no events. Branches may use logical or
-ternary expressions, multiple known locations, static siblings, nested lowercase host conditions,
-and safe text, attribute, or inline-style expressions. It applies to automatic keyed `.map(...)`
-syntax and inline host rows rendered by `List`.
+This compiler-owned tier requires a lowercase host row. Branches may use logical or ternary
+expressions, multiple known locations, static siblings, nested lowercase host conditions, and safe
+text, attribute, or inline-style expressions. It applies to automatic keyed `.map(...)` syntax and
+inline host rows rendered by `List`.
+
+The row may also hold inline synchronous events on its static elements, such as a toggle button
+beside the conditional:
+
+```tsx
+<ul>
+  {todos.map((todo) => (
+    <li key={todo.id}>
+      <button onClick={() => toggle(todo.id)}>Toggle</button>
+      {todo.done ? <s>{todo.title}</s> : <span>{todo.title}</span>}
+    </li>
+  ))}
+</ul>
+```
+
+The list container receives each event and runs the handler of every row element that contains the
+target, innermost first, with the row's current item and index and with `currentTarget` set to that
+element; `stopPropagation()` stops the remaining row handlers. The container finds the element by its
+position among the row's static elements, so the element must not follow a conditional or a nested
+list at any level of its path (those change how many elements come before it). Events the
+container cannot receive the way React does keep the row React-owned: `onChange`, which React
+derives from each row's own Fiber; events that do not bubble, such as `onMouseEnter`; a handler on
+an element that follows a conditional or a list; and a handler inside a branch.
 
 Hooks, custom components, events inside a compiler-owned branch, refs, SVG, fragments, JSX spreads,
 dangerous HTML, controlled inputs inside a conditional, and any unproven shape stay on React.
-Existing interactive keyed rows keep their React-owned conditional-slot behavior: Farm compares row
-snapshots and asks React to refresh a changed slot, while React retains event, Fiber, hydration, and
-structural-list ownership. Duplicate runtime keys or an invalid adopted shape also switch the
-complete mounted list to React.
+Interactive rows outside that event contract keep their React-owned conditional-slot behavior: Farm
+compares row snapshots and asks React to refresh a changed slot, while React retains event, Fiber,
+hydration, and structural-list ownership. Duplicate runtime keys or an invalid adopted shape also
+switch the complete mounted list to React.
 
 #### Nested keyed lists inside keyed rows
 

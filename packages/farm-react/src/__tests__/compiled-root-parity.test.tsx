@@ -2,7 +2,11 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createCompiledRoot } from "../compiled-root";
-import { loadCompiledAndOriginal, removeCompiledModules } from "./compiled-module-harness";
+import {
+  loadCompiledAndOriginal,
+  normalizedDom as normalized,
+  removeCompiledModules,
+} from "./compiled-module-harness";
 
 // Differential tests: the same source, compiled and mounted by the compiled root, must match the
 // original mounted by React DOM after every interaction, whether or not the root falls back.
@@ -19,24 +23,6 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 afterAll(removeCompiledModules);
-
-function normalized(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
-  if (node.nodeType === Node.COMMENT_NODE) return "";
-  if (!(node instanceof Element)) return "";
-  const attributes = [...node.attributes]
-    .map((attribute) => `${attribute.name}="${attribute.value}"`)
-    .sort()
-    .join(" ");
-  const state =
-    node instanceof HTMLInputElement
-      ? ` [value=${node.value} checked=${node.checked}]`
-      : node instanceof HTMLSelectElement || node instanceof HTMLTextAreaElement
-        ? ` [value=${node.value}]`
-        : "";
-  const children = [...node.childNodes].map(normalized).join("");
-  return `<${node.localName}${attributes ? ` ${attributes}` : ""}${state}>${children}</${node.localName}>`;
-}
 
 type Step = (root: HTMLElement) => void;
 
@@ -108,7 +94,7 @@ async function expectParity(source: string, name: string, steps: readonly Step[]
 }
 
 describe("compiled root parity with React DOM", () => {
-  it("keyed rows with row-local conditionals keep state by using React DOM", async () => {
+  it("keyed rows with row-local conditionals and row events update without React DOM", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";
       export function Todos() {
@@ -127,12 +113,14 @@ describe("compiled root parity with React DOM", () => {
             <p id="count">{count}</p>
             <ul>
               {items.map((item) => (
-                <li key={item.id}>
-                  <button className="toggle" onClick={() => toggle(item.id)}>{item.label}</button>
+                <li key={item.id} onClick={() => setCount(count + 10)}>
+                  <button className="toggle" onClick={(event) => { event.stopPropagation(); toggle(item.id); }}>{item.label}</button>
                   {item.done ? <span className="done">done</span> : <em>open</em>}
                 </li>
               ))}
             </ul>
+            <button id="add" onClick={() => setItems([...items, { id: items.length + 1, label: "New", done: false }])}>Add</button>
+            <button id="reverse" onClick={() => setItems([...items].reverse())}>Reverse</button>
           </main>
         );
       }`,
@@ -140,12 +128,17 @@ describe("compiled root parity with React DOM", () => {
       [
         click("li:nth-child(1) .toggle"),
         click("li:nth-child(2) .toggle"),
+        click("li:nth-child(2) em"),
+        click("#add"),
+        click("li:nth-child(4) .toggle"),
+        click("#reverse"),
         click("li:nth-child(1) .toggle"),
+        click("li:nth-child(4) .done, li:nth-child(4) em"),
       ],
     );
-    // Row-local conditionals are React-owned: the root uses React DOM from the start, so no
-    // state is lost when a row toggles.
-    expect(fallbacks).toEqual([expect.stringContaining("updates through React")]);
+    // Row events beside row-local conditionals are delegated to the rows container, so the
+    // whole tree stays on the compiled root.
+    expect(fallbacks).toEqual([]);
   });
 
   it("conditional blocks open and close through React DOM", async () => {
