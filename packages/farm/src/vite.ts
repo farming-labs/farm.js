@@ -29,12 +29,14 @@ import { logger, toPosixPath, toViteModuleId } from "./utils";
 import { loadTailwindVitePlugin } from "./build/tailwind";
 import { resolveFarmImageProviderForRuntime } from "./image-runtime";
 import { isOptionalPeerInstalled, VERCEL_OG_INSTALL_HINT } from "./optional-peer";
-import { isBuiltin } from "node:module";
+import { builtinModules, isBuiltin } from "node:module";
 import {
+  FARM_BROWSER_BUILTIN_PREFIX,
   farmBrowserBuiltinsOptimizerPlugin,
   loadFarmBrowserBuiltin,
   resolveFarmBrowserBuiltin,
 } from "./browser-builtins";
+import { exactIdPattern } from "./utils/hook-filters";
 import {
   FARM_NODE_RESPONSE_END_PENDING,
   type FarmPlugin,
@@ -432,6 +434,21 @@ const FARM_SERVER_ONLY_PACKAGE_ID = "\0farm:server-only";
 const FARM_PLATFORM_ENTRY = "@farm.js/core/platform";
 const FARM_PLATFORM_CLIENT_ID = "\0farm:platform-client";
 
+/** The specifiers `farm:server-only-entries` resolves: its own entries and Node builtins. */
+const FARM_SERVER_ONLY_ENTRIES_RESOLVE_FILTER = [
+  exactIdPattern([FARM_PLATFORM_ENTRY, SERVER_ONLY_PACKAGE, ...FARM_SERVER_ONLY_ENTRIES]),
+  // What isBuiltin() accepts: `node:` ids and the builtin names, subpaths such as fs/promises
+  // included.
+  /^node:/,
+  exactIdPattern(builtinModules),
+];
+
+/** The ids `farm:server-only-entries` loads. */
+const FARM_SERVER_ONLY_ENTRIES_LOAD_FILTER = [
+  exactIdPattern([FARM_SERVER_ONLY_PACKAGE_ID, FARM_PLATFORM_CLIENT_ID]),
+  new RegExp(`^${FARM_BROWSER_BUILTIN_PREFIX}`),
+];
+
 /**
  * `@farm.js/core/platform` in browser code: `platform()` returns this build's platform as a
  * literal, so `platform() === "desktop"` branches fold away, and nothing reaches for node:fs.
@@ -521,41 +538,47 @@ export function farmServerOnlyEntriesPlugin(
     configResolved(config) {
       root = config.root;
     },
-    resolveId(id, importer, options) {
-      if (id === FARM_PLATFORM_ENTRY) return options?.ssr ? null : FARM_PLATFORM_CLIENT_ID;
-      if (id === SERVER_ONLY_PACKAGE) {
-        // Vite's dependency scan walks every route file as if it were browser code.
-        if (options?.ssr || (options as { scan?: boolean } | undefined)?.scan) {
-          return FARM_SERVER_ONLY_PACKAGE_ID;
+    resolveId: {
+      filter: { id: FARM_SERVER_ONLY_ENTRIES_RESOLVE_FILTER },
+      handler(id, importer, options) {
+        if (id === FARM_PLATFORM_ENTRY) return options?.ssr ? null : FARM_PLATFORM_CLIENT_ID;
+        if (id === SERVER_ONLY_PACKAGE) {
+          // Vite's dependency scan walks every route file as if it were browser code.
+          if (options?.ssr || (options as { scan?: boolean } | undefined)?.scan) {
+            return FARM_SERVER_ONLY_PACKAGE_ID;
+          }
+          this.error(
+            `${importer ?? "A module"} imports "server-only", so it must not reach the browser, but client code imports it. Move what the client needs out of that module, or call it from a server component, server function or API route.`,
+          );
         }
-        this.error(
-          `${importer ?? "A module"} imports "server-only", so it must not reach the browser, but client code imports it. Move what the client needs out of that module, or call it from a server component, server function or API route.`,
-        );
-      }
-      if (!options?.ssr && isBuiltin(id)) {
-        return resolveFarmBrowserBuiltin(this, id, importer, options);
-      }
-      if (!FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
-      const importedBy = importer ? ` (imported by ${importer})` : "";
-      if (!options?.ssr) {
-        this.error(
-          `${id} is server-only and cannot be imported into client code${importedBy}. Use it from an API route or another server module.`,
-        );
-      }
-      vercelOgInstalled ||= isOptionalPeerInstalled(root, "@vercel/og");
-      if (!vercelOgInstalled) {
-        this.error(
-          `${id} needs @vercel/og, which is not installed${importedBy}. ${VERCEL_OG_INSTALL_HINT}`,
-        );
-      }
-      return null;
+        if (!options?.ssr && isBuiltin(id)) {
+          return resolveFarmBrowserBuiltin(this, id, importer, options);
+        }
+        if (!FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
+        const importedBy = importer ? ` (imported by ${importer})` : "";
+        if (!options?.ssr) {
+          this.error(
+            `${id} is server-only and cannot be imported into client code${importedBy}. Use it from an API route or another server module.`,
+          );
+        }
+        vercelOgInstalled ||= isOptionalPeerInstalled(root, "@vercel/og");
+        if (!vercelOgInstalled) {
+          this.error(
+            `${id} needs @vercel/og, which is not installed${importedBy}. ${VERCEL_OG_INSTALL_HINT}`,
+          );
+        }
+        return null;
+      },
     },
-    load(id) {
-      if (id === FARM_SERVER_ONLY_PACKAGE_ID) return "export {};";
-      if (id === FARM_PLATFORM_CLIENT_ID) {
-        return createFarmPlatformClientModule(options.platform ?? resolveFarmPlatform());
-      }
-      return loadFarmBrowserBuiltin(id) ?? null;
+    load: {
+      filter: { id: FARM_SERVER_ONLY_ENTRIES_LOAD_FILTER },
+      handler(id) {
+        if (id === FARM_SERVER_ONLY_PACKAGE_ID) return "export {};";
+        if (id === FARM_PLATFORM_CLIENT_ID) {
+          return createFarmPlatformClientModule(options.platform ?? resolveFarmPlatform());
+        }
+        return loadFarmBrowserBuiltin(id) ?? null;
+      },
     },
   };
 }
