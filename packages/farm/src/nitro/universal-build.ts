@@ -171,6 +171,7 @@ import {
 import {
   assertFarmDocsAdapterServesNoGuardedPages,
   compileFarmDocsAdapterEdgeManifest,
+  farmDocsAdapterServesGuardedPages,
   hasFarmDocsRuntimeAdapter,
   listFarmDocsAdapterPages,
 } from "../docs/adapter";
@@ -4966,10 +4967,12 @@ async function hydrate() {
     });
     ${
       isolatedHydrationEnabled
-        ? `const isolatedHydration =
+        ? `// Not cancelled with the page: a navigation disposes the islands it removes, and one in a
+    // layout it keeps still waits for its trigger, as on a page of islands only.
+    const isolatedHydration =
       !hasHydratableLayout(pathname) &&
       document.querySelector('f-island[src]')
-        ? hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal)
+        ? hydrateFarmIsolatedClientBoundaries(document)
         : Promise.resolve();
     await Promise.all([pageHydration, isolatedHydration]);`
         : "await pageHydration;"
@@ -5107,8 +5110,8 @@ function removeSuspenseContent(root) {
   }
 }
 
-// A layout's own server output, without what it wraps and without its islands, whose live DOM
-// always differs from fresh HTML.
+// A layout's own server output, without what it wraps and without its islands' DOM, which live
+// always differs from fresh HTML. It keeps each island's props, so new props count as a change.
 function getLayoutShell(root, patterns, index) {
   const shell = findLayoutBoundary(root, patterns[index])?.cloneNode(true);
   if (!shell) return null;
@@ -5117,7 +5120,12 @@ function getLayoutShell(root, patterns, index) {
     : shell.querySelector("#__farm_page__");
   inner?.replaceChildren();
   removeSuspenseContent(shell);
-  shell.querySelectorAll("script").forEach(function(script) { script.remove(); });
+  shell.querySelectorAll("script").forEach(function(script) {
+    if (script.type !== "f/props") return script.remove();
+    Array.from(script.attributes).forEach(function(attribute) {
+      if (attribute.name !== "type") script.removeAttribute(attribute.name);
+    });
+  });
   shell.querySelectorAll("f-island").forEach(function(island) {
     island.replaceChildren();
     Array.from(island.attributes).forEach(function(attribute) {
@@ -5975,6 +5983,7 @@ async function buildSSRInMemory(
       config.docs,
       { root, srcDir: config.srcDir },
       (pathname) => adapterGuardedPaths.has(pathname),
+      getFarmPresetRuntime(preset) === "edge" ? "edge" : "node",
     );
   }
   // Precompiled docs pages are served again on every request, so in nonce mode
@@ -7410,6 +7419,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   createFarmApiCatalogResponse,
   createFarmAppManifestResponse,
   farmPathGuardCoversEndpoint,
+  farmPathGuardCoversPage,
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
@@ -8213,7 +8223,21 @@ const farmDocsHandler = ${
   registerMCPServer: registerFarmMCPServer,
   // A page built with this keeps its HTML string, so the preload budget and the response
   // writer use it instead of reading and re-encoding the body. Older adapters ignore it.
-  createHtmlResponse: farmOwnedHtmlResponse,
+  createHtmlResponse: farmOwnedHtmlResponse,${
+    farmDocsAdapterServesGuardedPages(config.docs)
+      ? `
+  // The adapter keeps pages a path guard covers off search, llms.txt, the sitemap and MCP. It
+  // asks about any path its own content lists, so the guards decide here, not a page list.
+  isPathGuarded: (pathname) =>
+    farmPathGuardCoversPage(
+      {
+        config: { middleware: farmMiddlewareConfig, integrations: serverRuntimeIntegrations },
+        middlewareRoutes: fileMiddlewareModules,
+      },
+      pathname,
+    ),`
+      : ""
+  }
 })`
           : `createFarmDocsHandler(farmDocsResolvedConfig, {
   root: farmDocsRuntimeRoot,

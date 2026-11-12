@@ -383,6 +383,22 @@ test("client navigation keeps a layout's client state and does not reload the do
   expect(errors).toEqual([]);
 });
 
+test("a layout's island waiting below a client page still hydrates after a navigation", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/nav-client/a");
+  await expect(page.getByRole("heading", { name: "Client page A" })).toBeVisible();
+  // Neither the page nor the layout's counter has hydrated: nothing has touched them.
+  await page.getByRole("link", { name: "Server page" }).click();
+  await expect(page.getByRole("heading", { name: "Server page B" })).toBeVisible();
+  await hydrated(page);
+  const button = page.getByRole("button", { name: /^Client layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Client layout clicks: 1");
+  expect(errors).toEqual([]);
+});
+
 test("browser-only code runs after hydration without a mismatch", async ({ page, request }) => {
   expect(await (await request.get("/window")).text()).toContain("Measuring");
   const errors = collectErrors(page);
@@ -553,6 +569,25 @@ test("a server action that leaves its layout unchanged keeps what was typed ther
   await page.getByRole("button", { name: "Bump page" }).click();
   await expect(page.getByTestId("page-count")).toHaveText(`Page count: ${pageCount + 1}`);
   await expect(page.getByLabel("Layout note")).toHaveValue("still here");
+});
+
+test("a server action that changes only a layout island's props gives the island its new props", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-island-props");
+  await hydrated(page);
+  const pageCount = Number(
+    (await page.getByTestId("page-count").textContent())?.replace(/\D/g, ""),
+  );
+  const counter = page.getByRole("button", { name: /^Layout sees page/ });
+  await counter.click();
+  await expect(counter).toHaveText(`Layout sees page ${pageCount}: 1`);
+  await page.getByRole("button", { name: "Bump page" }).click();
+  await expect(page.getByTestId("page-count")).toHaveText(`Page count: ${pageCount + 1}`);
+  // The new label, with the state the island had.
+  await expect(counter).toHaveText(`Layout sees page ${pageCount + 1}: 1`);
+  expect(errors).toEqual([]);
 });
 
 test("a server action that changes its layout keeps what was typed there, and the focus", async ({

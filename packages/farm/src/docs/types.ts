@@ -11,6 +11,13 @@ export interface FarmDocsAdapterDescriptor {
    * serializable edge manifest. Older Farm releases safely ignore it.
    */
   edgeCompiler?: string;
+  /**
+   * What the adapter does beyond the protocol; Farm ignores names it does not know.
+   * `guarded-pages`: the runtime handler takes `isPathGuarded` and keeps a page a path guard
+   * covers off every surface that answers without running the guard, so Farm serves docs pages
+   * behind a guard with it on Node and serverless targets.
+   */
+  capabilities?: readonly string[];
 }
 
 export interface FarmDocsSidebarItem {
