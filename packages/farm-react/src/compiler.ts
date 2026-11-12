@@ -5675,6 +5675,64 @@ function reactOwnedAttribute(name: string, attribute: t.JSXAttribute): boolean {
   );
 }
 
+/** The inline handler a keyed row event can run from its rows block, or why it cannot. */
+function keyedRowEventHandler(
+  attribute: t.JSXAttribute,
+): t.ArrowFunctionExpression | t.FunctionExpression | string {
+  if (
+    !t.isJSXExpressionContainer(attribute.value) ||
+    (!t.isArrowFunctionExpression(attribute.value.expression) &&
+      !t.isFunctionExpression(attribute.value.expression))
+  ) {
+    return "interactive compiled keyed rows require inline synchronous event handlers";
+  }
+  const handler = attribute.value.expression;
+  if (handler.async || handler.generator) {
+    return "interactive compiled keyed row handlers must be synchronous";
+  }
+  if (containsDirectHookCall(handler)) {
+    return "Hooks cannot be called inside compiled keyed row handlers";
+  }
+  const unsupported = validateKeyedRowEventHandler(handler);
+  if (unsupported) return `interactive compiled keyed row handlers cannot use ${unsupported}`;
+  return handler;
+}
+
+/**
+ * Events on a row's static elements, in the order the keyed-row analysis assigns ids. Rows whose
+ * conditional content recursive host blocks own need them collected apart from that analysis,
+ * which stops at the conditional's container. Handlers inside branches are not static and stay out.
+ */
+function staticKeyedRowEvents(
+  row: t.JSXElement,
+  compilerSetters: ReadonlySet<string>,
+): PendingKeyedRowEvent[] | undefined {
+  const events: PendingKeyedRowEvent[] = [];
+  const visit = (element: t.JSXElement, path: number[]): boolean => {
+    for (const attribute of element.openingElement.attributes) {
+      if (!t.isJSXAttribute(attribute)) continue;
+      const name = jsxAttributeName(attribute);
+      if (!name || !/^on[A-Z]/.test(name)) continue;
+      const handler = keyedRowEventHandler(attribute);
+      if (typeof handler === "string") return false;
+      events.push({
+        id: events.length,
+        path: [...path],
+        name,
+        value: stabilizeDeferredEventCurrentTarget(handler, compilerSetters),
+      });
+    }
+    let elementIndex = 0;
+    for (const child of element.children) {
+      if (!t.isJSXElement(child)) continue;
+      if (!visit(child, [...path, elementIndex])) return false;
+      elementIndex += 1;
+    }
+    return true;
+  };
+  return visit(row, []) ? events : undefined;
+}
+
 function analyzeKeyedRowTree(
   row: t.JSXElement,
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression,
@@ -5767,24 +5825,8 @@ function analyzeKeyedRowTree(
       }
       if (name === "key") continue;
       if (/^on[A-Z]/.test(name)) {
-        if (
-          !t.isJSXExpressionContainer(attribute.value) ||
-          (!t.isArrowFunctionExpression(attribute.value.expression) &&
-            !t.isFunctionExpression(attribute.value.expression))
-        ) {
-          return "interactive compiled keyed rows require inline synchronous event handlers";
-        }
-        const handler = attribute.value.expression;
-        if (handler.async || handler.generator) {
-          return "interactive compiled keyed row handlers must be synchronous";
-        }
-        if (containsDirectHookCall(handler)) {
-          return "Hooks cannot be called inside compiled keyed row handlers";
-        }
-        const unsupported = validateKeyedRowEventHandler(handler);
-        if (unsupported) {
-          return `interactive compiled keyed row handlers cannot use ${unsupported}`;
-        }
+        const handler = keyedRowEventHandler(attribute);
+        if (typeof handler === "string") return handler;
         events.push({
           id: events.length,
           path: [...path],
@@ -6420,6 +6462,8 @@ function analyzeRecursiveHostTree(
   listNames: ReadonlySet<string>,
   parent: number,
   allocateId: () => number,
+  /** Event attributes on static row elements that the enclosing keyed rows block delegates. */
+  delegatedEvents: ReadonlySet<t.JSXAttribute> = new Set(),
 ): RecursiveHostTreeAnalysis {
   const bindings: PendingKeyedRowBinding[] = [];
   const plans: HostDescriptorBlockPlan[] = [];
@@ -6453,6 +6497,7 @@ function analyzeRecursiveHostTree(
         return `recursive compiler-owned block ${name} requires React ownership`;
       }
       if (/^on[A-Z]/.test(name)) {
+        if (delegatedEvents.has(attribute as t.JSXAttribute)) continue;
         return "recursive compiler-owned block events require React ownership";
       }
       if (
@@ -6530,6 +6575,7 @@ function analyzeRecursiveHostTree(
         listNames,
         id,
         allocateId,
+        delegatedEvents,
       );
       if (mixed) {
         plans.push(...mixed.nestedPlans);
@@ -6585,6 +6631,7 @@ function analyzeRecursiveHostTree(
             listNames,
             owner,
             allocateId,
+            delegatedEvents,
           );
           if (nested.reason) return nested.reason;
           plans.push(...nested.plans);
@@ -6749,6 +6796,7 @@ function analyzeRecursiveHostTree(
           listNames,
           owner,
           allocateId,
+          delegatedEvents,
         );
         if (nested.reason) return nested.reason;
         plans.push(...nested.plans);
@@ -6823,8 +6871,59 @@ function analyzeRecursiveHostTree(
   return { bindings, plans, blocks, reason };
 }
 
+function jsxCanRenderElements(expression: t.Expression): boolean {
+  let found = false;
+  traverse(expressionFile(cloneExpression(expression)), {
+    JSXElement(path) {
+      found = true;
+      path.stop();
+    },
+    JSXFragment(path) {
+      found = true;
+      path.stop();
+    },
+  });
+  return found;
+}
+
+/**
+ * True when, at every level of the path, only host elements precede the next element: no
+ * conditional, list or component that renders a varying number of elements. Counting static
+ * elements then finds the same DOM element.
+ */
+function keyedRowEventPathIsStable(row: t.JSXElement, path: readonly number[]): boolean {
+  let element = row;
+  for (const index of path) {
+    let seen = 0;
+    let next: t.JSXElement | undefined;
+    for (const child of element.children) {
+      if (t.isJSXElement(child)) {
+        if (!isHostElement(child)) return false;
+        if (seen === index) {
+          next = child;
+          break;
+        }
+        seen += 1;
+        continue;
+      }
+      if (t.isJSXFragment(child)) return false;
+      if (
+        t.isJSXExpressionContainer(child) &&
+        !t.isJSXEmptyExpression(child.expression) &&
+        jsxCanRenderElements(child.expression)
+      ) {
+        return false;
+      }
+    }
+    if (!next) return false;
+    element = next;
+  }
+  return true;
+}
+
 function analyzeCompilerOwnedKeyedRowHostBlocks(
   shape: KeyedRowsShape,
+  container: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
   safeGlobals: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
@@ -6836,14 +6935,42 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
       bindings: PendingKeyedRowBinding[];
       descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
       nestedPlans: HostDescriptorBlockPlan[];
+      events: PendingKeyedRowEvent[];
     }
   | undefined {
-  if (shape.events.length > 0) return undefined;
+  const events = shape.rowReason
+    ? staticKeyedRowEvents(
+        shape.row,
+        new Set([...statesByValue.values()].map((state) => state.setterName)),
+      )
+    : shape.events;
+  // The rows container dispatches each event by its element's static path, so that path must
+  // also be its DOM path: no child that can render elements may come before the element.
+  if (
+    !events ||
+    (events.length > 0 &&
+      (!canDelegateKeyedRowEvents({ events, conditionals: [], source: container }) ||
+        !events.every((event) => keyedRowEventPathIsStable(shape.row, event.path))))
+  ) {
+    return undefined;
+  }
 
   const row = t.cloneNode(shape.row, true);
   row.openingElement.attributes = row.openingElement.attributes.filter(
     (attribute) => !t.isJSXAttribute(attribute) || jsxAttributeName(attribute) !== "key",
   );
+  const delegatedEvents = new Set<t.JSXAttribute>();
+  for (const event of events) {
+    let element = row;
+    for (const index of event.path) {
+      element = element.children.filter((child) => t.isJSXElement(child))[index] as t.JSXElement;
+    }
+    for (const attribute of element.openingElement.attributes) {
+      if (t.isJSXAttribute(attribute) && jsxAttributeName(attribute) === event.name) {
+        delegatedEvents.add(attribute);
+      }
+    }
+  }
   const analysis = analyzeRecursiveHostTree(
     row,
     statesByValue,
@@ -6851,6 +6978,7 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
     listNames,
     parent,
     allocateId,
+    delegatedEvents,
   );
   if (analysis.reason || analysis.plans.length === 0) {
     return undefined;
@@ -6860,6 +6988,7 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
     bindings: analysis.bindings,
     descriptorBlocks: analysis.blocks,
     nestedPlans: analysis.plans,
+    events,
   };
 }
 
@@ -7101,6 +7230,7 @@ function analyzeMixedRangesContainer(
   listNames: ReadonlySet<string>,
   parent: number,
   allocateId: () => number,
+  delegatedEvents: ReadonlySet<t.JSXAttribute> = new Set(),
 ):
   | {
       ranges: MixedRangePlan[];
@@ -7244,6 +7374,7 @@ function analyzeMixedRangesContainer(
       listNames,
       parent,
       allocateId,
+      delegatedEvents,
     );
     if (staticAnalysis.reason) return undefined;
     for (const binding of staticAnalysis.bindings) {
@@ -8786,6 +8917,7 @@ function analyzeComposableBlocks(
             const nestedStart = nextId;
             const hostBlocks = analyzeCompilerOwnedKeyedRowHostBlocks(
               keyedRows,
+              child,
               statesByValue,
               safeGlobals,
               listNames,
@@ -8813,7 +8945,7 @@ function analyzeComposableBlocks(
               renderCallback: keyedRows.renderCallback,
               row: hostBlocks?.row || keyedRows.row,
               bindings: hostBlocks?.bindings || keyedRows.bindings,
-              events: keyedRows.events,
+              events: hostBlocks?.events || keyedRows.events,
               conditionals: hostBlocks ? [] : keyedRows.conditionals,
               descriptorBlocks: hostBlocks?.descriptorBlocks,
               syntax: keyedRows.syntax,
