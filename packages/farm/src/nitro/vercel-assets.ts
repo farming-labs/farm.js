@@ -44,6 +44,9 @@ export interface FarmVercelRoute {
   headers?: Record<string, string>;
   continue?: boolean;
   caseSensitive?: boolean;
+  /** The Edge function Vercel runs as routing middleware for a matching request. */
+  middlewarePath?: string;
+  middlewareRawSrc?: string[];
 }
 
 /**
@@ -65,12 +68,17 @@ export interface FarmVercelRoute {
  * the preset's own `/__fallback` catch-all) are intentionally not carried over:
  * Farm keeps ISR routes server-handled, and the preset's catch-all targets a
  * function name Farm does not emit.
+ *
+ * Routing middleware (`runtime: "edge"` middleware in front of the pages it
+ * guards) goes after the redirect and header routes and before `filesystem`,
+ * so it decides a request before Vercel serves a static file.
  */
 export function buildFarmVercelRoutes(options: {
   presetRoutes: FarmVercelRoute[];
   runtimeRoutes: FarmVercelRoute[];
+  middlewareRoutes?: FarmVercelRoute[];
 }): FarmVercelRoute[] {
-  const { presetRoutes, runtimeRoutes } = options;
+  const { presetRoutes, runtimeRoutes, middlewareRoutes = [] } = options;
   const filesystemIndex = presetRoutes.findIndex((route) => route.handle === "filesystem");
   const sourceRoutes = filesystemIndex >= 0 ? presetRoutes.slice(0, filesystemIndex) : [];
   // Drop the preset's blanket immutable public-asset routes (the only
@@ -81,6 +89,7 @@ export function buildFarmVercelRoutes(options: {
 
   return [
     ...preservedSourceRoutes,
+    ...middlewareRoutes,
     createFarmVercelImmutableAssetRoute(),
     { handle: "filesystem" },
     ...runtimeRoutes,

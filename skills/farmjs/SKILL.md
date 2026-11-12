@@ -568,6 +568,10 @@ false }` trims it (a hidden section is `null`); `agent.manifest: false` turns it
 sandbox development servers with `farm dev --host 0.0.0.0 --port <port>`. For deployment,
 prefer `deploy.target` for first-class targets and `deploy.preset` only for Nitro pass-through. A
 preset overrides a target. Use `farm deploy --plan` before shipping and run the exact target build.
+A static page any middleware guards renders on request. On Vercel, a middleware file with
+`export const config = { runtime: "edge" }` runs in front of the pages it guards, so they prerender;
+it may import only web APIs and the Edge runtime's Node modules (`async_hooks`, `events`, `buffer`,
+`assert`, `util`), and the build stops on any other Node import.
 
 Current diagnostic and migration commands include:
 
