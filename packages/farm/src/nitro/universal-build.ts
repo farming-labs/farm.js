@@ -12825,9 +12825,10 @@ async function buildNitroUniversal(
   // Nitro normally rebundles the Vite SSR graph so its bare dependencies are
   // deployable. Skip that duplicate pass only when Farm already knows how to
   // package every remaining external; otherwise retain Nitro's proven path.
-  const isPrebuiltSSRCandidate =
-    preset === "node-server" &&
-    [...ssrExternalPackages].every((packageName) => copiedRuntimePackages.has(packageName));
+  const ssrExternalsArePackaged = [...ssrExternalPackages].every((packageName) =>
+    copiedRuntimePackages.has(packageName),
+  );
+  const isPrebuiltSSRCandidate = preset === "node-server" && ssrExternalsArePackaged;
 
   logger.info(`📦 Nitro output directory: ${outputDir}`);
   logger.info(`📦 SSR entry file: ${ssrEntryFile}`);
@@ -13502,9 +13503,8 @@ function toFarmNodeResponse(request, response) {
     snapshotSSRRebundleOptions(nitroConfig),
   );
   const requestedBuilder = nitroConfig.builder ?? process.env.NITRO_BUILDER;
-  const canReusePrebuiltSSR =
-    isPrebuiltSSRCandidate &&
-    nitroConfig.preset === "node-server" &&
+  // Nitro's build is the one Farm configured: nothing else changes how it bundles the SSR graph.
+  const nitroBuildIsFarms =
     (requestedBuilder === undefined ||
       requestedBuilder === "rollup" ||
       requestedBuilder === "rolldown") &&
@@ -13515,12 +13515,20 @@ function toFarmNodeResponse(request, response) {
     nitroConfig.rollupConfig?.external === nitroRollupExternal &&
     !hasRollupPlugins(nitroConfig.rollupConfig?.plugins) &&
     customRollupKeys.length === 0 &&
-    path.resolve(nitroConfig.output?.serverDir || "") === path.resolve(expectedServerDir) &&
     Boolean(
       nitroConfig.handlers?.some(
         (handler) => path.resolve(handler?.handler || "") === nitroEntryPath,
       ),
     );
+  const canReusePrebuiltSSR =
+    isPrebuiltSSRCandidate &&
+    nitroConfig.preset === "node-server" &&
+    nitroBuildIsFarms &&
+    path.resolve(nitroConfig.output?.serverDir || "") === path.resolve(expectedServerDir);
+  // The prerenderer's temporary server always runs in Node, here, whatever the deploy target, so
+  // it can import the prebuilt SSR bundle instead of Nitro bundling the SSR graph again for it.
+  const prerenderReusesPrebuiltSSR =
+    prerenderRoutes.length > 0 && ssrExternalsArePackaged && nitroBuildIsFarms;
   const selectRolldownBuilder =
     canReusePrebuiltSSR && requestedBuilder === undefined && (await canUseRolldownBuilder());
   if (selectRolldownBuilder) nitroConfig.builder = "rolldown";
@@ -13664,9 +13672,33 @@ function toFarmNodeResponse(request, response) {
   });
   await nitroBuilder.prepare(nitroInstance);
   await nitroBuilder.copyPublicAssets(nitroInstance);
-  if (prerenderRoutes.length > 0 && canReusePrebuiltSSR) {
+  if (prerenderReusesPrebuiltSSR && !canReusePrebuiltSSR) {
+    // The final build bundles the SSR graph for its target; only the temporary server imports
+    // the prebuilt bundle. Build that server in Nitro's own prerender directory rather than the
+    // target's server directory, which the final build does not empty, so none of it ships.
+    nitroInstance.hooks.hook("prerender:config", (prerendererConfig) => {
+      const configuredPlugins = prerendererConfig.rollupConfig?.plugins;
+      const plugins = Array.isArray(configuredPlugins)
+        ? configuredPlugins
+        : configuredPlugins
+          ? [configuredPlugins]
+          : [];
+      prerendererConfig.rollupConfig = {
+        ...prerendererConfig.rollupConfig,
+        plugins: [...plugins.filter((plugin) => plugin !== ssrRollupPlugin), prebuiltSSRPlugin],
+      };
+      prerendererConfig.output = {
+        ...prerendererConfig.output,
+        serverDir: path.join(
+          prerendererConfig.buildDir ?? path.join(root, distDir, ".nitro"),
+          "prerender",
+        ),
+      };
+    });
+  }
+  if (prerenderReusesPrebuiltSSR) {
     // The prerenderer builds and immediately imports a temporary server before
-    // the final Node adapter exists. Materialize the same prebuilt SSR package
+    // the final adapter exists. Materialize the same prebuilt SSR package
     // import for that temporary server so it can render the static routes.
     nitroInstance.hooks.hook("prerender:init", (prerenderer) => {
       if (useRolldownBuilder) {
@@ -13680,7 +13712,7 @@ function toFarmNodeResponse(request, response) {
         });
       }
       prerenderer.hooks.hook("compiled", async () => {
-        const prerenderServerDir = path.join(outputDir, "server");
+        const prerenderServerDir = prerenderer.options.output.serverDir;
         await copyPrebuiltSSRBundle(
           ssrBundle,
           path.join(prerenderServerDir, FARM_SSR_OUTPUT_DIR),
