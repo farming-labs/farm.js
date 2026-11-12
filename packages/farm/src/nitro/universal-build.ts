@@ -104,6 +104,7 @@ import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
 import { logger, toPosixPath, toViteModuleId } from "../utils";
+import { exactIdPattern } from "../utils/hook-filters";
 import {
   collectFarmServerStylesheets,
   describeSuppressedAsyncHydration,
@@ -787,13 +788,19 @@ function createReactProductionModePlugin() {
   const nodeEnvExpression = ["process", "env", "NODE_ENV"].join(".");
   return {
     name: "farm-react-production-mode",
-    transform(code: string, id: string) {
-      const normalizedId = id.replace(/\\/g, "/");
-      const isReactRuntime =
-        normalizedId.includes("/node_modules/react/") ||
-        normalizedId.includes("/node_modules/react-dom/");
-      if (!isReactRuntime || !code.includes(nodeEnvExpression)) return null;
-      return { code: code.split(nodeEnvExpression).join('"production"'), map: null };
+    transform: {
+      filter: {
+        id: /\/node_modules\/react(?:-dom)?\//,
+        code: new RegExp(nodeEnvExpression.replace(/\./g, "\\.")),
+      },
+      handler(code: string, id: string) {
+        const normalizedId = id.replace(/\\/g, "/");
+        const isReactRuntime =
+          normalizedId.includes("/node_modules/react/") ||
+          normalizedId.includes("/node_modules/react-dom/");
+        if (!isReactRuntime || !code.includes(nodeEnvExpression)) return null;
+        return { code: code.split(nodeEnvExpression).join('"production"'), map: null };
+      },
     },
   };
 }
@@ -827,26 +834,32 @@ function isFarmCoreModule(file: string): boolean {
 function createOmittedMetadataImageRuntimePlugin(externalizeOtherImports: boolean): Rollup.Plugin {
   return {
     name: "farm-omitted-metadata-image-runtime",
-    resolveId(source, importer) {
-      if (source !== "@vercel/og") return null;
-      const fromCoreRuntime =
-        importer !== undefined &&
-        isFarmCoreModule(importer) &&
-        !/^og\.[cm]?[jt]sx?$/.test(path.basename(importer.split("?", 1)[0]));
-      if (fromCoreRuntime) return FARM_OMITTED_METADATA_IMAGE_RUNTIME_ID;
-      // Rollup checks the externals list before this hook, so @vercel/og is
-      // left off that list and other importers are kept external here.
-      return externalizeOtherImports ? { id: source, external: true } : null;
+    resolveId: {
+      filter: { id: exactIdPattern(["@vercel/og"]) },
+      handler(source, importer) {
+        if (source !== "@vercel/og") return null;
+        const fromCoreRuntime =
+          importer !== undefined &&
+          isFarmCoreModule(importer) &&
+          !/^og\.[cm]?[jt]sx?$/.test(path.basename(importer.split("?", 1)[0]));
+        if (fromCoreRuntime) return FARM_OMITTED_METADATA_IMAGE_RUNTIME_ID;
+        // Rollup checks the externals list before this hook, so @vercel/og is
+        // left off that list and other importers are kept external here.
+        return externalizeOtherImports ? { id: source, external: true } : null;
+      },
     },
-    load(id) {
-      if (id !== FARM_OMITTED_METADATA_IMAGE_RUNTIME_ID) return null;
-      return `
+    load: {
+      filter: { id: exactIdPattern([FARM_OMITTED_METADATA_IMAGE_RUNTIME_ID]) },
+      handler(id) {
+        if (id !== FARM_OMITTED_METADATA_IMAGE_RUNTIME_ID) return null;
+        return `
 export class ImageResponse {
   constructor() {
     throw new Error("@vercel/og is not in this server build because the app has no generated metadata image route.");
   }
 }
 `;
+      },
     },
   };
 }
@@ -2440,75 +2453,91 @@ async function buildClient(
           {
             name: "farm-client-only-imports",
             enforce: "pre" as const,
-            resolveId(id) {
-              // Redirect @farm.js/core to just export client-safe parts
-              // Don't redirect @farm.js/core/client - that's already client-safe
-              if (id === "@farm.js/core") {
-                return { id: "\0farm-client-exports", external: false };
-              }
-              if (id === "@farm.js/core/i18n/server") {
-                return { id: "\0farm-i18n-client-bridge", external: false };
-              }
-              // Block server-only imports completely
-              if (
-                id === "@farm.js/core/server" ||
-                id === "@farm.js/core/api" ||
-                id === "@farm.js/core/middleware" ||
-                id === "@farm.js/core/headers" ||
-                id === "@farm.js/core/config" ||
-                id.includes("@farm.js/core/middleware") ||
-                id.includes("@farm.js/core/query/server")
-              ) {
-                return { id: "\0empty-module", external: false };
-              }
-              // Block API route imports (they come from type-only imports in api.generated.ts)
-              if (id.includes("/api/") && id.includes("/route")) {
-                return { id: "\0empty-api-route", external: false };
-              }
-              // Block problematic node modules
-              if (
-                id === "fsevents" ||
-                id.includes("fsevents") ||
-                id.endsWith(".node") ||
-                id === "nitro" ||
-                id === "vite" ||
-                id === "esbuild" ||
-                id === "rolldown" ||
-                id.startsWith("rolldown/") ||
-                id === "rollup" ||
-                id.startsWith("nitro/") ||
-                id.includes("node-pre-gyp") ||
-                id.includes("nf3")
-              ) {
-                return { id: "\0empty-module", external: false };
-              }
-              return null;
+            resolveId: {
+              // Every specifier the handler redirects, as a superset of its checks.
+              filter: {
+                id: /@farm\.js\/core|\/api\/|fsevents|\.node$|node-pre-gyp|nf3|^(?:nitro|vite|esbuild|rolldown|rollup)(?:\/|$)/,
+              },
+              handler(id: string) {
+                // Redirect @farm.js/core to just export client-safe parts
+                // Don't redirect @farm.js/core/client - that's already client-safe
+                if (id === "@farm.js/core") {
+                  return { id: "\0farm-client-exports", external: false };
+                }
+                if (id === "@farm.js/core/i18n/server") {
+                  return { id: "\0farm-i18n-client-bridge", external: false };
+                }
+                // Block server-only imports completely
+                if (
+                  id === "@farm.js/core/server" ||
+                  id === "@farm.js/core/api" ||
+                  id === "@farm.js/core/middleware" ||
+                  id === "@farm.js/core/headers" ||
+                  id === "@farm.js/core/config" ||
+                  id.includes("@farm.js/core/middleware") ||
+                  id.includes("@farm.js/core/query/server")
+                ) {
+                  return { id: "\0empty-module", external: false };
+                }
+                // Block API route imports (they come from type-only imports in api.generated.ts)
+                if (id.includes("/api/") && id.includes("/route")) {
+                  return { id: "\0empty-api-route", external: false };
+                }
+                // Block problematic node modules
+                if (
+                  id === "fsevents" ||
+                  id.includes("fsevents") ||
+                  id.endsWith(".node") ||
+                  id === "nitro" ||
+                  id === "vite" ||
+                  id === "esbuild" ||
+                  id === "rolldown" ||
+                  id.startsWith("rolldown/") ||
+                  id === "rollup" ||
+                  id.startsWith("nitro/") ||
+                  id.includes("node-pre-gyp") ||
+                  id.includes("nf3")
+                ) {
+                  return { id: "\0empty-module", external: false };
+                }
+                return null;
+              },
             },
-            load(id) {
-              if (id === "\0empty-module") {
-                return "const emptyMiddlewareStore = new Map(); export default {}; export const getMiddlewareContext = () => emptyMiddlewareStore; export const getMiddlewareData = () => emptyMiddlewareStore; export const getMiddlewareValue = () => undefined; export const middleware = () => ({});";
-              }
-              if (id === "\0empty-api-route") {
-                // Stub for API routes - only used in type context, provide empty exports
-                return "export const GET = () => {}; export const HEAD = () => {}; export const QUERY = () => {}; export const POST = () => {}; export const PUT = () => {}; export const DELETE = () => {}; export const PATCH = () => {}; export const OPTIONS = () => {}; export default {};";
-              }
-              if (id === "\0farm-i18n-client-bridge") {
-                return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farm.js/core/i18n/client";';
-              }
-              if (id === "\0farm-client-exports") {
-                // Only export client-safe parts (no type exports - they're erased at compile time)
-                return [
-                  "// Farm.js Client Exports - Safe for browser bundling",
-                  'export { Link } from "@farm.js/core/client";',
-                  'export { useRouter } from "@farm.js/core/client";',
-                  'export { usePathname, useSearchParams } from "@farm.js/core/navigation";',
-                  // A page that hydrates ships to the browser with its notFound()/redirect() calls.
-                  'export { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError, notFound, permanentRedirect, redirect } from "@farm.js/core/navigation";',
-                  'export { createAPIClient } from "@farm.js/core/client";',
-                  'export { localFont, remoteFont } from "@farm.js/core/font";',
-                ].join("\n");
-              }
-              return null;
+            load: {
+              filter: {
+                id: exactIdPattern([
+                  "\0empty-module",
+                  "\0empty-api-route",
+                  "\0farm-i18n-client-bridge",
+                  "\0farm-client-exports",
+                ]),
+              },
+              handler(id: string) {
+                if (id === "\0empty-module") {
+                  return "const emptyMiddlewareStore = new Map(); export default {}; export const getMiddlewareContext = () => emptyMiddlewareStore; export const getMiddlewareData = () => emptyMiddlewareStore; export const getMiddlewareValue = () => undefined; export const middleware = () => ({});";
+                }
+                if (id === "\0empty-api-route") {
+                  // Stub for API routes - only used in type context, provide empty exports
+                  return "export const GET = () => {}; export const HEAD = () => {}; export const QUERY = () => {}; export const POST = () => {}; export const PUT = () => {}; export const DELETE = () => {}; export const PATCH = () => {}; export const OPTIONS = () => {}; export default {};";
+                }
+                if (id === "\0farm-i18n-client-bridge") {
+                  return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farm.js/core/i18n/client";';
+                }
+                if (id === "\0farm-client-exports") {
+                  // Only export client-safe parts (no type exports - they're erased at compile time)
+                  return [
+                    "// Farm.js Client Exports - Safe for browser bundling",
+                    'export { Link } from "@farm.js/core/client";',
+                    'export { useRouter } from "@farm.js/core/client";',
+                    'export { usePathname, useSearchParams } from "@farm.js/core/navigation";',
+                    // A page that hydrates ships to the browser with its notFound()/redirect() calls.
+                    'export { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError, notFound, permanentRedirect, redirect } from "@farm.js/core/navigation";',
+                    'export { createAPIClient } from "@farm.js/core/client";',
+                    'export { localFont, remoteFont } from "@farm.js/core/font";',
+                  ].join("\n");
+                }
+                return null;
+              },
             },
           },
           farmPlugin(
@@ -6149,17 +6178,23 @@ async function buildSSRInMemory(
           : []),
         {
           name: "farm-virtual-ssr-entry",
-          resolveId(id) {
-            if (id === virtualEntryId || id === "\0virtual:farm-ssr-entry") {
-              return virtualEntryId;
-            }
-            return null;
+          resolveId: {
+            filter: { id: exactIdPattern([virtualEntryId, "\0virtual:farm-ssr-entry"]) },
+            handler(id) {
+              if (id === virtualEntryId || id === "\0virtual:farm-ssr-entry") {
+                return virtualEntryId;
+              }
+              return null;
+            },
           },
-          load(id) {
-            if (id === virtualEntryId) {
-              return virtualEntryCode;
-            }
-            return null;
+          load: {
+            filter: { id: exactIdPattern([virtualEntryId]) },
+            handler(id) {
+              if (id === virtualEntryId) {
+                return virtualEntryCode;
+              }
+              return null;
+            },
           },
         },
         {
