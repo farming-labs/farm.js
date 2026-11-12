@@ -427,10 +427,11 @@ yet:
   [`client` hooks](/docs/plugins/client), in the browser, next to the app's `src/client.ts`. The
   rest of a plugin, from its `runtime` hooks to its routes, is ignored, and so are `storage`,
   `schema`, `cron`, `workflows`, `docs`, `theme`, and `observability`, with a warning.
-  When a plugin has server hooks, the production server still loads `plugins` from
-  `farm.config.ts`, as `farm dev` does, so what a plugin does when it's created runs there:
-  `bot()` keeps its settings for `verifyBot()`, for example. The build reads `plugins` and only
-  the bindings it uses, so declare it directly in `defineConfig({ plugins: [...] })`.
+  The production server still loads the plugins that have server hooks, as `farm dev` does, so
+  what such a plugin does when it's created runs there: `bot()` keeps its settings for
+  `verifyBot()`, for example. The build takes those entries, and only the bindings they use, from
+  the `plugins` array in `farm.config.ts`, so declare it directly in
+  `defineConfig({ plugins: [...] })`.
 
 Islands mode renders on Farm's own pipeline, so it runs all of these.
 

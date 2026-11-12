@@ -30,11 +30,15 @@ afterEach(async () => {
 
 const FILES: Record<string, string> = {
   "package.json": '{"name":"signup","version":"1.0.0","type":"module","private":true}',
-  "farm.config.ts": `import { recorder } from "./recorder";
+  // `definePlugin` can't run in the standalone RSC server, so only the plugin with server hooks
+  // may reach it.
+  "farm.config.ts": `import { definePlugin } from "@farm.js/core";
+import { recorder } from "./recorder";
+const browserOnly = definePlugin({ name: "browser-only", client: { setup() {} } });
 export default {
   deploymentId: "fixed",
   experimental: { serverComponents: { mode: "rsc" } },
-  plugins: [recorder("from farm.config.ts")],
+  plugins: [browserOnly, recorder("from farm.config.ts")],
 };`,
   // An empty `runtime` is how a plugin asks the server to load it, as `bot()` does.
   "recorder.ts": `export function recorder(label: string) {

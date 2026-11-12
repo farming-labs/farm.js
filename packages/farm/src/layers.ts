@@ -468,7 +468,7 @@ function findNearestPackageRoot(entryPath: string): string | null {
   }
 }
 
-function findFarmConfigFile(root: string, explicitPath?: string): string | undefined {
+export function findFarmConfigFile(root: string, explicitPath?: string): string | undefined {
   if (explicitPath) return explicitPath;
   for (const fileName of CONFIG_FILENAMES) {
     const candidate = path.join(root, fileName);

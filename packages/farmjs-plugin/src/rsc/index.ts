@@ -35,6 +35,7 @@ import type {
   FarmRscPluginOptions,
   EntryContext,
   FarmRscClientPlugins,
+  FarmRscServerPlugins,
   FarmRscMobileClient,
 } from "./types.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
@@ -229,7 +230,7 @@ export interface FarmRscConfig {
   /** @internal See `FarmRscPluginOptions.clientPlugins`; set by `farm dev` and `farm build`. */
   clientPlugins?: FarmRscClientPlugins;
   /** @internal See `FarmRscPluginOptions.serverPlugins`; set by `farm build`. */
-  serverPlugins?: boolean;
+  serverPlugins?: FarmRscServerPlugins;
 }
 
 /**
@@ -1081,27 +1082,31 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           }
         }
 
-        // Loading the config's `plugins` runs their factories in the server, which is how a
-        // plugin such as `bot()` registers what its server functions use. Only the bindings
-        // `plugins` reads are bundled, as for middleware.
+        // Loading a plugin runs its factory in the server, which is how a plugin such as `bot()`
+        // registers what its server functions use. Only the entries with server hooks and the
+        // bindings they read are bundled, as for middleware.
         const pluginsConfigPaths: string[] = [];
         if (options.serverPlugins && env.command === "build") {
           for (const configPath of await resolveMiddlewareConfigPaths(root, c.layers)) {
-            const extracted = await loadRscConfigPropertyModule(configPath, "plugins");
-            if (extracted.kind === "unsupported") {
+            const selection = options.serverPlugins[path.resolve(configPath)];
+            if (!selection) continue;
+            const extracted = await loadRscConfigPropertyModule(configPath, "plugins", selection);
+            if (extracted.kind !== "module") {
               throw new Error(
-                `[Farm.js] Cannot read plugins for the RSC server from ${configPath}: ${extracted.reason}. ` +
-                  "Declare plugins directly in defineConfig({ plugins: [...] }).",
+                `[Farm.js] Cannot read plugins for the RSC server from ${configPath}: ${
+                  extracted.kind === "absent"
+                    ? "the config has no plugins property"
+                    : extracted.reason
+                }. Declare plugins directly in defineConfig({ plugins: [...] }).`,
               );
             }
-            if (extracted.kind === "absent") continue;
             const moduleId = `${configPath.replace(/\\/g, "/")}${RSC_PLUGINS_CONFIG_QUERY}`;
             middlewareConfigModules.set(moduleId, extracted.code);
             pluginsConfigPaths.push(moduleId);
           }
-          if (pluginsConfigPaths.length === 0) {
+          if (pluginsConfigPaths.length < Object.keys(options.serverPlugins).length) {
             throw new Error(
-              "[Farm.js] The RSC server could not find the plugins config. " +
+              "[Farm.js] The RSC server could not find every config file with plugins to load. " +
                 "Declare plugins directly in defineConfig({ plugins: [...] }) in farm.config.ts.",
             );
           }

@@ -21,7 +21,12 @@ type ConfigHook = (
  */
 async function generateEntry(
   userConfig: Record<string, unknown>,
-  options: { command?: "serve" | "build"; configSource?: string; serverPlugins?: boolean } = {},
+  options: {
+    command?: "serve" | "build";
+    configSource?: string;
+    /** The entries of farm.config.ts's `plugins` for the server to load. */
+    serverPlugins?: { indexes: number[]; count: number };
+  } = {},
 ): Promise<string> {
   const root = mkdtempSync(path.join(tmpdir(), "farm-rsc-middleware-"));
   try {
@@ -29,7 +34,10 @@ async function generateEntry(
     if (options.configSource) {
       writeFileSync(path.join(root, "farm.config.ts"), options.configSource);
     }
-    const plugin = farmRsc({ serverPlugins: options.serverPlugins }).find(
+    const serverPlugins = options.serverPlugins && {
+      [path.join(root, "farm.config.ts")]: options.serverPlugins,
+    };
+    const plugin = farmRsc({ serverPlugins }).find(
       (candidate) => candidate.name === "@farm.js/plugin/rsc:config",
     );
     await (plugin!.config as ConfigHook)(
@@ -122,15 +130,16 @@ export default defineConfig({
 describe("plugins reach the production RSC entry", () => {
   const configSource = `import { recorder } from "./recorder";
 export default { plugins: [recorder()] };`;
+  const serverPlugins = { indexes: [0], count: 1 };
 
   it("imports the config's plugins when `farm build` asks for them", async () => {
-    const entry = await generateEntry({}, { configSource, serverPlugins: true });
+    const entry = await generateEntry({}, { configSource, serverPlugins });
     expect(entry).toMatch(/^import ".*farm\.config\.ts\?farm-rsc-plugins";$/m);
   });
 
   it("leaves them out of development and of builds that don't ask", async () => {
     for (const options of [
-      { configSource, serverPlugins: true, command: "serve" as const },
+      { configSource, serverPlugins, command: "serve" as const },
       { configSource },
     ]) {
       expect(await generateEntry({}, options)).not.toContain("farm-rsc-plugins");
@@ -143,7 +152,7 @@ export default { plugins: [recorder()] };`;
         {},
         {
           configSource: `const shared = { plugins: [] };\nexport default { ...shared };`,
-          serverPlugins: true,
+          serverPlugins,
         },
       ),
     ).rejects.toThrow(

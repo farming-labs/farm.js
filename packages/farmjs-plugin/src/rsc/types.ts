@@ -71,11 +71,15 @@ export interface FarmRscPluginOptions {
   clientPlugins?: FarmRscClientPlugins;
 
   /**
-   * @internal Set by `farm build` when one of the app's Farm `plugins` has server hooks. The
-   * server then loads `plugins` from the app's config files, so their factories run there.
+   * @internal Set by `farm build` when some of the app's Farm `plugins` have server hooks: for
+   * each config file, by absolute path, where those entries sit in its `plugins` array. The
+   * server loads them, so their factories run there.
    */
-  serverPlugins?: boolean;
+  serverPlugins?: FarmRscServerPlugins;
 }
+
+/** @internal See `FarmRscPluginOptions.serverPlugins`. */
+export type FarmRscServerPlugins = Record<string, { indexes: number[]; count: number }>;
 
 /** @internal See `FarmRscPluginOptions.mobileClient`. */
 export type FarmRscMobileClient = "entry" | "inline";

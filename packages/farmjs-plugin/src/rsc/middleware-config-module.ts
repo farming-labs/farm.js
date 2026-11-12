@@ -25,6 +25,12 @@ type ExtractionResult =
   | { kind: "absent" }
   | { kind: "unsupported"; reason: string };
 
+/**
+ * Entries to keep from a `plugins` array literal: their positions, and the array's length the
+ * evaluated config had, which must match the literal for the positions to mean the same entries.
+ */
+export type RscConfigArraySelection = { indexes: readonly number[]; count: number };
+
 function isNode(value: unknown): value is AstNode {
   return Boolean(
     value &&
@@ -286,11 +292,16 @@ export function extractRscMiddlewareConfigModule(
   return extractRscConfigPropertyModule(source, program, "middleware");
 }
 
-/** Extracts `key` from the default-exported config, as a module that exports `{ [key] }`. */
+/**
+ * Extracts `key` from the default-exported config, as a module that exports `{ [key] }`. With
+ * `selection`, an array literal keeps only the selected entries and the bindings they read. Any
+ * other value is kept whole.
+ */
 export function extractRscConfigPropertyModule(
   source: string,
   program: AstNode,
   key: "middleware" | "mcp" | "plugins",
+  selection?: RscConfigArraySelection,
 ): ExtractionResult {
   const body = (program.body as AstNode[]) ?? [];
   const bindings = new Map<string, Binding>();
@@ -411,9 +422,20 @@ export function extractRscConfigPropertyModule(
   }
 
   const keyValue = keyProperty.value as AstNode;
+  const elements = keyValue.type === "ArrayExpression" ? (keyValue.elements as unknown[]) : null;
+  const selectedElements =
+    selection &&
+    elements &&
+    elements.length === selection.count &&
+    elements.every((element) => isNode(element) && element.type !== "SpreadElement")
+      ? selection.indexes.map((index) => elements[index] as AstNode)
+      : null;
+  const keptValues = selectedElements ?? [keyValue];
   const candidateNames = new Set(bindings.keys());
   const selectedBindings = new Set<Binding>();
-  const pending = [...referencedTopLevelNames(keyValue, candidateNames)];
+  const pending = keptValues.flatMap((value) => [
+    ...referencedTopLevelNames(value, candidateNames),
+  ]);
   while (pending.length > 0) {
     const name = pending.pop()!;
     const binding = bindings.get(name);
@@ -429,7 +451,9 @@ export function extractRscConfigPropertyModule(
   const declarations = [...selectedBindings]
     .sort((a, b) => a.order - b.order)
     .map((binding) => binding.render());
-  const valueSource = source.slice(keyValue.start, keyValue.end);
+  const valueSource = selectedElements
+    ? `[${selectedElements.map((element) => source.slice(element.start, element.end)).join(", ")}]`
+    : source.slice(keyValue.start, keyValue.end);
   return {
     kind: "module",
     code: `${declarations.join("\n")}${declarations.length ? "\n" : ""}export default { ${key}: ${valueSource} };\n`,
@@ -458,6 +482,7 @@ export async function loadRscMiddlewareConfigModule(configPath: string): Promise
 export async function loadRscConfigPropertyModule(
   configPath: string,
   key: "middleware" | "mcp" | "plugins",
+  selection?: RscConfigArraySelection,
 ): Promise<ExtractionResult> {
   const [{ readFile }, vite] = await Promise.all([import("node:fs/promises"), import("vite")]);
   const source = await readFile(configPath, "utf8");
@@ -480,5 +505,6 @@ export async function loadRscConfigPropertyModule(
     transformed.code,
     vite.parseAst(transformed.code) as unknown as AstNode,
     key,
+    selection,
   );
 }
