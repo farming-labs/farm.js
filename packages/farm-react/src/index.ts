@@ -25,7 +25,9 @@ export interface ReactCompilerOptions {
    * Mount the app's own `createRoot` roots without React DOM when their tree is fully compiled.
    * The build points `import { createRoot } from "react-dom/client"` in app modules at
    * `@farm.js/react/compiled-root`, which loads React DOM on demand for anything else.
-   * Defaults to `true`.
+   * While on, `onChange` rows beside conditional content or in a list between static siblings
+   * compile to blocks such roots run themselves and React DOM renders through React; `false`
+   * keeps them on the smaller React-owned list. Defaults to `true`.
    */
   compiledRoot?: boolean;
 }

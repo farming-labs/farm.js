@@ -489,6 +489,81 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([]);
   });
 
+  it("onChange rows beside row conditionals, including rows added after mount", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Todos() {
+        const [rows, setRows] = useState([{ id: 1, label: "One", done: false }]);
+        const update = (id, patch) =>
+          setRows(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+        return (
+          <section>
+            <button id="add" onClick={() => setRows([...rows, { id: rows.length + 1, label: "", done: false }])}>Add</button>
+            <ul>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  <input className="done" type="checkbox" checked={row.done} onChange={(event) => update(row.id, { done: event.target.checked })} />
+                  <input className="label" value={row.label} onChange={(event) => update(row.id, { label: event.target.value })} />
+                  {row.done ? <s>{row.label}</s> : <span>{row.label}</span>}
+                </li>
+              ))}
+            </ul>
+            <output>{rows.filter((row) => row.done).length} done</output>
+          </section>
+        );
+      }`,
+      "Todos",
+      [
+        click('li[data-id="1"] .done'),
+        click("#add"),
+        type('li[data-id="2"] .label', "Two"),
+        click('li[data-id="2"] .done'),
+        click('li[data-id="1"] .done'),
+        type('li[data-id="2"] .label', "Two!"),
+        click("#add"),
+        type('li[data-id="3"] .label', "Three"),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("onChange rows in a list between static siblings", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Checklist() {
+        const [rows, setRows] = useState([{ id: 1, label: "One", done: false }]);
+        const update = (id, patch) =>
+          setRows(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+        return (
+          <section>
+            <ul>
+              <li className="head">{rows.filter((row) => row.done).length} of {rows.length} done</li>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  <input className="done" type="checkbox" checked={row.done} onChange={(event) => update(row.id, { done: event.target.checked })} />
+                  <input className="label" value={row.label} onChange={(event) => update(row.id, { label: event.target.value })} />
+                </li>
+              ))}
+              <li className="foot"><button id="add" onClick={() => setRows([...rows, { id: rows.length + 1, label: "", done: false }])}>Add</button></li>
+            </ul>
+          </section>
+        );
+      }`,
+      "Checklist",
+      [
+        click('li[data-id="1"] .done'),
+        click("#add"),
+        type('li[data-id="2"] .label', "Two"),
+        click('li[data-id="2"] .done'),
+        click('li[data-id="1"] .done'),
+        click("#add"),
+        type('li[data-id="3"] .label', "Three"),
+        click('li[data-id="3"] .done'),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
   it("a keyed list between static siblings with bindings and events", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";
