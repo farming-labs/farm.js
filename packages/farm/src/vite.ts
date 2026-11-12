@@ -7548,12 +7548,12 @@ ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceNavigationBound
     return container;
   }
 ${
-    islandValues
-      ? `
+  islandValues
+    ? `
   // A refresh renders the same layouts again: their fields keep what was typed, and the focus.
   const fields = refresh ? captureFarmServerFields(currentTarget) : null;`
-      : ""
-  }
+    : ""
+}
   ${
     isolatedHydrationEnabled
       ? `${

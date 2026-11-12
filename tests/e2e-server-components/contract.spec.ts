@@ -560,9 +560,7 @@ test("a server action that changes its layout keeps what was typed there, and th
 }) => {
   await page.goto("/action-layout");
   await hydrated(page);
-  const layout = Number(
-    (await page.getByTestId("layout-count").textContent())?.replace(/\D/g, ""),
-  );
+  const layout = Number((await page.getByTestId("layout-count").textContent())?.replace(/\D/g, ""));
   const button = page.getByRole("button", { name: /^Layout clicks/ });
   await button.click();
   await expect(button).toHaveText("Layout clicks: 1");
@@ -571,9 +569,9 @@ test("a server action that changes its layout keeps what was typed there, and th
   await note.fill("still here");
   await note.evaluate((input: HTMLInputElement) => input.setSelectionRange(2, 5));
   // Clicked from script, so the note keeps the focus while the layout around it renders again.
-  await page.getByRole("button", { name: "Bump layout" }).evaluate((bump: HTMLElement) =>
-    bump.click(),
-  );
+  await page
+    .getByRole("button", { name: "Bump layout" })
+    .evaluate((bump: HTMLElement) => bump.click());
   await expect(page.getByTestId("layout-count")).toHaveText(`Layout count: ${layout + 1}`);
   await expect(note).toHaveValue("still here");
   await expect(note).toBeFocused();
