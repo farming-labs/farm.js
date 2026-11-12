@@ -81,6 +81,25 @@ describe("islands-mode server actions (run by islx)", () => {
     expect((await handleFarmFormActionRequest(formPost("missing", {}), config))?.status).toBe(303);
   });
 
+  it("sends a form post back to the URL the browser posted to when a rewrite served it", async () => {
+    registerFarmFormAction(async () => {}, "form-rewritten");
+    const response = await handleFarmFormActionRequest(
+      formPost("form-rewritten", {}),
+      config,
+      "https://app.test/alias?view=all",
+    );
+    expect(response?.status).toBe(303);
+    expect(response?.headers.get("location")).toBe("/alias?view=all");
+    // A redirect() the action chose stays where it points.
+    registerFarmFormAction(async () => redirect("/todos?view=all"), "form-rewritten-redirect");
+    const redirected = await handleFarmFormActionRequest(
+      formPost("form-rewritten-redirect", {}),
+      config,
+      "https://app.test/alias?view=all",
+    );
+    expect(redirected?.headers.get("location")).toBe("/todos?view=all");
+  });
+
   it("rejects a cross-origin form post before running anything", async () => {
     const action = vi.fn();
     registerFarmFormAction(action, "form-csrf");

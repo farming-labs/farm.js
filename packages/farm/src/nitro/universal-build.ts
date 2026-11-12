@@ -9691,13 +9691,18 @@ function matchRewriteRoute(pathname, locale) {
   return null;
 }
 
+// The URL the browser asked for, for a request a configured rewrite replaced.
+const farmRequestedUrls = new WeakMap();
+
 function createRewrittenRequest(request, destination) {
   const sourceUrl = new URL(request.url);
   const destinationUrl = new URL(destination, sourceUrl);
   if (!destinationUrl.search && sourceUrl.search) {
     destinationUrl.search = sourceUrl.search;
   }
-  return new Request(destinationUrl, request);
+  const rewritten = new Request(destinationUrl, request);
+  farmRequestedUrls.set(rewritten, farmRequestedUrls.get(request) || request.url);
+  return rewritten;
 }
 
 ${generateConfiguredResponseHeadersRuntimeSource()}
@@ -10369,6 +10374,8 @@ async function resolveFarmRequestInContext(
   let url = requestUrl;
   let pathname = url.pathname;
   let routePathname = getFarmRoutePathname(pathname);
+  // Before middleware: a ctx.rewrite() replaces the request below.
+  const farmRequestedUrl = farmRequestedUrls.get(request) || request.url;
 
   // Redirects have precedence over local routes. Configured rewrites use
   // after-files semantics so emitted page, API, integration, docs, image, and
@@ -10969,7 +10976,7 @@ ${
   if (matchedRoute && request.method === "POST") {
     const actionResponse = await _runWithMiddlewareData(middlewareData || {}, () =>
       _runWithMiddlewareContext(middlewareContext || {}, () =>
-        handleFarmFormActionRequest(request, farmFormActionsConfig)
+        handleFarmFormActionRequest(request, farmFormActionsConfig, farmRequestedUrl)
       )
     );
     if (actionResponse) return applyProductionMiddlewareHeaders(actionResponse, middlewareHeaders);
