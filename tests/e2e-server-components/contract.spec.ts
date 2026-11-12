@@ -392,6 +392,7 @@ test("a layout's island waiting below a client page still hydrates after a navig
   // Neither the page nor the layout's counter has hydrated: nothing has touched them.
   await page.getByRole("link", { name: "Server page" }).click();
   await expect(page.getByRole("heading", { name: "Server page B" })).toBeVisible();
+  await hydrated(page);
   const button = page.getByRole("button", { name: /^Client layout clicks/ });
   await button.click();
   await expect(button).toHaveText("Client layout clicks: 1");
