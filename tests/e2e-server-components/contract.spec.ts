@@ -630,6 +630,52 @@ test("a form posted before JavaScript loads returns to the URL it was posted to,
   await context.close();
 });
 
+test("useActionState shows the action's result after a form posted before JavaScript loads", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-state");
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 0, last: none");
+  await page.getByLabel("Choice").fill("coffee");
+  await page.getByRole("button", { name: "Vote", exact: true }).click();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 1, last: coffee");
+  await context.close();
+});
+
+test("an island hydrates with the useActionState result of a form posted before it loaded", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  // The first page loads without its scripts, so the form posts as HTML; the response loads them.
+  let blocked = true;
+  await page.route(
+    (url) => url.pathname.endsWith(".js"),
+    (route) => (blocked ? route.abort() : route.continue()),
+  );
+  await page.goto("/action-state");
+  await page.getByLabel("Choice").fill("coffee");
+  blocked = false;
+  await page.getByRole("button", { name: "Vote", exact: true }).click();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 1, last: coffee");
+  await page.waitForLoadState("networkidle");
+  // Hydrated: the island's own state works, and it kept the action's result.
+  await page.getByRole("button", { name: "Vote form clicks: 0" }).click();
+  await expect(page.getByRole("button", { name: "Vote form clicks: 1" })).toBeVisible();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 1, last: coffee");
+  // And the form keeps going from that state (the response rendered the field's default again).
+  await page.getByRole("button", { name: "Vote", exact: true }).click();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 2, last: tea");
+  // The first load's blocked scripts may report late. The checks above prove the second load ran.
+  expect(
+    errors.filter(
+      (error) =>
+        !error.includes("net::ERR_FAILED") &&
+        !error.includes("Failed to fetch dynamically imported module"),
+    ),
+  ).toEqual([]);
+});
+
 test("a server action returns elements, with a server component's output and a live client component", async ({
   page,
 }) => {

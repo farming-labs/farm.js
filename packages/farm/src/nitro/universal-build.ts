@@ -7523,8 +7523,8 @@ function resolveFarmMobileShellRender(request, route, routePathname) {
       : ""
   }${
     farmIslandsMode
-      ? `\nimport { getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
-      : ""
+      ? `\nimport { getFarmFormState as farmFormState, getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader, renderFarmFormStateScript as farmFormStateScript } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
+      : `\nfunction farmFormState() { return undefined; }\nfunction farmFormStateScript() { return ""; }`
   }`;
   const productionSiteTelemetryImport = config.telemetry
     ? `import { createFarmProductionSiteReporter } from "@farm.js/core/internal/product-telemetry-runtime";`
@@ -8399,7 +8399,7 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
   }
   return '<script id="__farm_route_slots_data__" type="application/json">' +
     serializedRouteSlots +
-    '</script>' + stampFarmCspNonce('<script>' + source + '</script>');
+    '</script>' + stampFarmCspNonce('<script>' + source + '</script>') + farmFormStateScript();
 }
 
 // The settled defer() values the bootstrap script's props refer to, as development writes them.
@@ -8542,6 +8542,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken =
       typeof ReactDOMServer.renderToReadableStream === "function") {
     const stream = await ReactDOMServer.renderToReadableStream(element, {
       nonce: _resolveCurrentCspNonce(),
+      formState: farmFormState(),
       onError(error) {
         // redirect()/notFound() are control flow, not render failures: the
         // request handler must still receive them to map the response status,
@@ -8704,6 +8705,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken =
     };
     pipeableStream = ReactDOMServer.renderToPipeableStream(element, {
       nonce: _resolveCurrentCspNonce(),
+      formState: farmFormState(),
       onShellReady() {
         try {
           pipeableStream.pipe(destination);
@@ -8819,6 +8821,8 @@ function rememberFarmSyncRender(routeKey, streamedHtml) {
 
 function renderFarmElementSync(ReactDOMServer, element, routeKey) {
   if (!farmReactSyncRender) return undefined;
+  // renderToString takes no form state: the page a useActionState form posted to streams.
+  if (farmFormState() !== undefined) return undefined;
   // renderToString takes no nonce, so the scripts React adds itself (the form replay script of a
   // form with a function action) would go out without one, and a nonce policy blocks them. A
   // response with a nonce renders with the stream, which gives them the nonce.
@@ -14628,19 +14632,46 @@ export function resolvePackageJson(
   return null;
 }
 
-async function copyPrismaClientForVercel(
+/**
+ * The real directory of a package the project installed, found as Node's `node_modules` lookup
+ * finds it from the project root (the root's own `node_modules`, then each parent's, so a hoisted
+ * workspace install counts). Unlike `require.resolve`, it never searches `NODE_PATH`: pnpm points
+ * that at its store (`node_modules/.pnpm/node_modules`) for every script it runs, which made a
+ * Prisma client another workspace package installed look like the app's own.
+ */
+async function resolveProjectInstalledPackageDir(
+  root: string,
+  packageName: string,
+  fs: typeof import("fs/promises"),
+): Promise<string | null> {
+  let directory = path.resolve(root);
+  while (true) {
+    const candidate = path.join(directory, "node_modules", ...packageName.split("/"));
+    try {
+      const packageDir = await fs.realpath(candidate);
+      if ((await fs.stat(path.join(packageDir, "package.json"))).isFile()) return packageDir;
+    } catch {
+      // Not installed here; Node's lookup moves to the parent directory.
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return null;
+    directory = parent;
+  }
+}
+
+/**
+ * Copy the app's own Prisma client, and the client `prisma generate` wrote beside it, into the
+ * Vercel function, where Nitro leaves `@prisma/client` external.
+ *
+ * @internal
+ */
+export async function copyPrismaClientForVercel(
   root: string,
   nitroFuncDir: string,
   fs: typeof import("fs/promises"),
 ) {
-  const projectRequire = createRequire(path.join(root, "package.json"));
-
-  let prismaClientDir: string;
-  try {
-    prismaClientDir = path.dirname(projectRequire.resolve("@prisma/client/default.js"));
-  } catch {
-    return;
-  }
+  const prismaClientDir = await resolveProjectInstalledPackageDir(root, "@prisma/client", fs);
+  if (!prismaClientDir) return;
 
   const generatedClientDir = path.join(prismaClientDir, "..", "..", ".prisma", "client");
 
