@@ -920,6 +920,33 @@ test("a click on an island before the client runtime loads is replayed once it h
   expect(errors).toEqual([]);
 });
 
+test("every click on an island while its code loads is replayed once it hydrates", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  // The runtime is held until both clicks are in, so neither lands after hydration.
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => isClientRuntime(url.pathname),
+    async (route) => {
+      await released;
+      await route.continue();
+    },
+  );
+  await page.goto("/timing/later");
+  await hydrated(page);
+  const island = page.getByTestId("interaction");
+  await island.click();
+  await island.click();
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  release();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await expect(island).toHaveText("Interaction: 2");
+  expect(errors).toEqual([]);
+});
+
 test("a link followed before the client runtime loads is a client navigation", async ({ page }) => {
   test.skip(mode !== "islands", "rsc hydrates every client component on load");
   const errors = collectErrors(page);

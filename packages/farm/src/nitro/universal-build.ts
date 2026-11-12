@@ -3241,7 +3241,7 @@ ${
         ...partialHeaders,
         ...(streamShell ? { "F-Stream": "flush" } : {}),
       }, recover, signal);
-      if (!response.ok) throw new Error("Failed to fetch page");
+      if (!response.ok) throw new Error("Failed to fetch page: " + response.status);
       const store = (html) => {
         if (cacheResult && !signal?.aborted && generation === this.prefetchGeneration &&
             deploymentId === window.__FARM_DEPLOYMENT_ID__ && (!record || record.valid)) {
