@@ -41,6 +41,10 @@ export function handleFarmFormActionRequest(
       const redirect = getFarmRedirectError(error);
       if (redirect) return { redirect: redirect.url };
       if (isFarmNotFoundError(error)) return { status: 404 };
+      // A declared failure (`ServerFnFailure`, invalid input) answers with its own status, as the
+      // RSC engine does; it is not logged as a crash.
+      const failure = serializeServerFnFailure(error);
+      if (failure) return { status: failure.status };
       return undefined;
     },
     onError: (error) => console.error("[Farm.js] Server action failed:", error),
