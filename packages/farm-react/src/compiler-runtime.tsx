@@ -3034,6 +3034,12 @@ export interface CompilerKeyedRowsBlockProps {
   events?: readonly CompilerKeyedRowEvent[];
   /** Route compiler-proven bubbling row events through the stable React container. */
   delegateEvents?: boolean;
+  /**
+   * Rows whose only non-delegatable event is onChange. React derives onChange from each row's
+   * own fiber, so these rows stay React-owned under React DOM; a compiled root, which maps
+   * onChange to native events itself, delegates them.
+   */
+  delegateEventsWithoutReact?: boolean;
   conditionals?: readonly CompilerKeyedRowConditional[];
   /** Row descriptors contain compiler-owned nested host scopes. */
   hostBlocks?: boolean;
@@ -3544,9 +3550,27 @@ function isCompilerHostElement(value: unknown): value is CompilerHostElement {
   );
 }
 
+/**
+ * When React creates a controlled field it also sets its defaults, so the value and checked
+ * attributes match and a form reset returns to the initial value. Later updates leave
+ * defaultChecked alone, as React does.
+ */
+function initializeFieldDefault(element: Element, name: string, value: unknown): void {
+  if (
+    name === "value" &&
+    value != null &&
+    (isInputElement(element) || isTextAreaElement(element))
+  ) {
+    element.defaultValue = String(value);
+  } else if (name === "checked" && isInputElement(element)) {
+    element.defaultChecked = Boolean(value);
+  }
+}
+
 function createCompilerHostElement(document: Document, descriptor: CompilerHostElement): Element {
   const element = document.createElement(descriptor.tag);
   for (const attribute of descriptor.attributes) {
+    initializeFieldDefault(element, attribute.name, attribute.value);
     updateAttribute(element, attribute.name, attribute.value);
   }
   for (const style of descriptor.styles) updateStyle(element, style.name, style.value);
@@ -12801,9 +12825,10 @@ function compiledRootUpdatesWithoutReact(displayName: string, props: unknown): b
     conditionals?: readonly unknown[];
     events?: ReadonlyArray<{ path?: unknown }>;
     delegateEvents?: boolean;
+    delegateEventsWithoutReact?: boolean;
   };
   const delegated = Boolean(
-    rows.delegateEvents &&
+    (rows.delegateEvents || rows.delegateEventsWithoutReact) &&
     rows.events?.length &&
     rows.events.every((event) => event.path !== undefined),
   );
@@ -12856,6 +12881,23 @@ function setCompiledRootEvent(element: Element, name: string, handler: unknown):
   if (typeof handler !== "function") throw new CompiledRootUnsupported(`${name} value`);
   const capture = name.endsWith("Capture");
   const reactName = capture ? name.slice(0, -"Capture".length) : name;
+  if (reactName === "onChange" && !compiledRootChangeEvent(element)) {
+    // A container's onChange (delegated keyed rows) runs for the controls inside it, on the
+    // native event React's onChange follows for each kind of control.
+    for (const type of ["input", "change"]) {
+      element.addEventListener(
+        type,
+        (event) => {
+          const target = event.target;
+          if (target instanceof Element && compiledRootChangeEvent(target) === type) {
+            (handler as (event: unknown) => void)(toCompiledRootEvent(event, element, "change"));
+          }
+        },
+        capture,
+      );
+    }
+    return;
+  }
   const nativeType =
     reactName === "onChange" ? compiledRootChangeEvent(element) : COMPILED_ROOT_EVENTS[reactName];
   if (!nativeType) throw new CompiledRootUnsupported(`the ${name} event`);
@@ -12906,6 +12948,7 @@ function setCompiledRootProp(element: Element, name: string, value: unknown): vo
       throw new CompiledRootUnsupported(`the ${name} prop`);
     }
   }
+  initializeFieldDefault(element, name, value);
   updateAttribute(element, name, value);
 }
 
@@ -12978,8 +13021,14 @@ function mountCompiledRootNode(
     const Component = type as unknown as new (props: unknown) => React.Component & {
       componentDidMount?(): void;
     };
-    const instance = new Component(props);
-    (instance as unknown as { props: unknown }).props = props;
+    // This root maps onChange to native events itself (setCompiledRootEvent), so rows that are
+    // React-owned only for onChange can use the delegated row path here.
+    const instanceProps = (props as { delegateEventsWithoutReact?: boolean })
+      .delegateEventsWithoutReact
+      ? { ...props, delegateEvents: true }
+      : props;
+    const instance = new Component(instanceProps);
+    (instance as unknown as { props: unknown }).props = instanceProps;
     (instance as unknown as { updater: object }).updater = updater;
     const derived = (
       type as { getDerivedStateFromProps?: (props: unknown, state: unknown) => unknown }

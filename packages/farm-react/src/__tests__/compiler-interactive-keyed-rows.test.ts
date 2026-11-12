@@ -234,8 +234,10 @@ describe("React AOT interactive keyed-row compiler", () => {
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("farmBlocks.KeyedRows");
-    // React derives onChange from the target's fiber, so these rows keep React-owned events.
-    expect(result.code).not.toContain("delegateEvents");
+    // React derives onChange from the target's fiber, so these rows keep React-owned events
+    // under React DOM; only a root without React DOM delegates them.
+    expect(result.code).not.toContain("delegateEvents={true}");
+    expect(result.code).toContain("delegateEventsWithoutReact={true}");
     expect(result.code).toContain("_farmRowEvent(item, 0, 0)");
   });
 
@@ -262,7 +264,8 @@ describe("React AOT interactive keyed-row compiler", () => {
       expect(result.code).toContain("farmBlocks.KeyedRows");
     }
     expect(clicks.code).toContain("delegateEvents={true}");
-    expect(changes.code).not.toContain("delegateEvents");
+    expect(changes.code).not.toContain("delegateEvents={true}");
+    expect(changes.code).toContain("delegateEventsWithoutReact={true}");
   });
 
   it("keeps non-bubbling enter events on the React-owned row path", async () => {

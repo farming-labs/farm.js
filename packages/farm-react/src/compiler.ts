@@ -253,6 +253,9 @@ const DELEGATABLE_KEYED_ROW_EVENTS = new Set([
 
 function canDelegateKeyedRowEvents(
   plan: Pick<KeyedRowsPlan, "events" | "conditionals" | "source">,
+  // React derives onChange from the row's own fiber, so only a root without React DOM, which
+  // maps onChange to native events itself, can delegate it.
+  withoutReact = false,
 ): boolean {
   if (plan.events.length === 0 || plan.conditionals.length > 0) return false;
   if (
@@ -265,9 +268,10 @@ function canDelegateKeyedRowEvents(
   ) {
     return false;
   }
-  return plan.events.every((event) =>
-    DELEGATABLE_KEYED_ROW_EVENTS.has(event.name.replace(/Capture$/, "")),
-  );
+  return plan.events.every((event) => {
+    const name = event.name.replace(/Capture$/, "");
+    return DELEGATABLE_KEYED_ROW_EVENTS.has(name) || (withoutReact && name === "onChange");
+  });
 }
 
 interface KeyedRangePlan {
@@ -7849,6 +7853,7 @@ function keyedRowsBoundary(
     ...plan.conditionals.map((conditional) => conditional.test),
   ]);
   const delegatedEvents = canDelegateKeyedRowEvents(plan);
+  const delegatedWithoutReact = !delegatedEvents && canDelegateKeyedRowEvents(plan, true);
   const bindingTargets = keyedRowBindingTargets(plan);
   const renderSource = keyedRowsRenderSource(plan, eventFactory, conditionalFactory);
   const renderFactoryParameters =
@@ -7967,10 +7972,12 @@ function keyedRowsBoundary(
                   ),
                 ),
               ),
-              ...(delegatedEvents
+              ...(delegatedEvents || delegatedWithoutReact
                 ? [
                     t.jsxAttribute(
-                      t.jsxIdentifier("delegateEvents"),
+                      t.jsxIdentifier(
+                        delegatedEvents ? "delegateEvents" : "delegateEventsWithoutReact",
+                      ),
                       t.jsxExpressionContainer(t.booleanLiteral(true)),
                     ),
                   ]
