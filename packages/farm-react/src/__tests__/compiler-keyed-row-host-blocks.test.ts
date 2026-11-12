@@ -177,7 +177,7 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     {
       name: "a custom component branch",
       branch: "<Status value={item.label} />",
-      declaration: "function Status({ value }) { return <strong>{value}</strong>; }",
+      declaration: 'import { Status } from "./status";',
     },
     {
       name: "a ref in a branch",

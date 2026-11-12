@@ -108,7 +108,7 @@ describe("React AOT keyed-row conditional compiler", () => {
     {
       name: "a component inside the conditional branch",
       content: "{item.done && <Status value={item.label} />}",
-      declaration: "function Status({ value }) { return <strong>{value}</strong>; }",
+      declaration: 'import { Status } from "./status";',
     },
     {
       name: "a fragment conditional branch",

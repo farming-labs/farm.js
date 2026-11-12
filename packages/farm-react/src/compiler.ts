@@ -4965,6 +4965,213 @@ function isPrimitiveLiteral(node: t.Node | null): boolean {
  * pipeline is inline and takes at most an item and an index, nothing can observe or mutate that
  * array, so it moves to a module constant and the list compiles like one over any constant.
  */
+interface InlinableChild {
+  props: Map<string, string>;
+  root: t.JSXElement;
+  scope: NodePath["scope"];
+  localNames: Set<string>;
+  freeNames: Set<string>;
+}
+
+/**
+ * A module-local child such as `function Footer({ remaining }) { return <footer>...</footer>; }`
+ * that calls no hooks and returns one JSX element renders the same output wherever it is used.
+ * Returns what inlining it needs, or undefined when inlining could change what React would do.
+ */
+function inlinableChild(
+  name: string,
+  programPath: NodePath<t.Program>,
+): InlinableChild | undefined {
+  const binding = programPath.scope.getBinding(name);
+  if (!binding?.constant || (binding.kind !== "hoisted" && binding.kind !== "const")) return;
+  // Every reference must be a JSX tag (or an export): `Child.defaultProps = ...` and other uses
+  // of the function itself can change what React renders.
+  const referencedOnlyAsTag = binding.referencePaths.every(
+    (reference) =>
+      reference.isJSXIdentifier() ||
+      reference.parentPath?.isExportSpecifier() ||
+      reference.parentPath?.isExportDefaultDeclaration(),
+  );
+  if (!referencedOnlyAsTag) return;
+  const functionPath = binding.path.isFunctionDeclaration()
+    ? binding.path
+    : binding.path.isVariableDeclarator()
+      ? binding.path.get("init")
+      : undefined;
+  if (
+    !functionPath ||
+    Array.isArray(functionPath) ||
+    !(
+      functionPath.isFunctionDeclaration() ||
+      functionPath.isArrowFunctionExpression() ||
+      functionPath.isFunctionExpression()
+    )
+  ) {
+    return;
+  }
+  const fn = functionPath.node as t.Function;
+  if (fn.async || fn.generator || fn.params.length > 1) return;
+  const props = new Map<string, string>();
+  const param = fn.params[0];
+  if (param) {
+    if (!t.isObjectPattern(param)) return;
+    for (const property of param.properties) {
+      if (
+        !t.isObjectProperty(property) ||
+        property.computed ||
+        !t.isIdentifier(property.key) ||
+        !t.isIdentifier(property.value) ||
+        property.key.name === "children"
+      ) {
+        return;
+      }
+      props.set(property.key.name, property.value.name);
+    }
+  }
+  const body = fn.body;
+  const returned = t.isJSXElement(body)
+    ? body
+    : t.isBlockStatement(body) &&
+        body.body.length === 1 &&
+        t.isReturnStatement(body.body[0]) &&
+        t.isJSXElement(body.body[0].argument)
+      ? body.body[0].argument
+      : undefined;
+  if (!returned) return;
+  let unsafe = false;
+  const localNames = new Set<string>();
+  const freeNames = new Set<string>();
+  functionPath.traverse({
+    CallExpression(path) {
+      const callee = path.node.callee;
+      const calleeName = t.isIdentifier(callee)
+        ? callee.name
+        : t.isMemberExpression(callee) && !callee.computed && t.isIdentifier(callee.property)
+          ? callee.property.name
+          : "";
+      if (/^use([A-Z0-9]|$)/.test(calleeName)) unsafe = true;
+    },
+    ThisExpression() {
+      unsafe = true;
+    },
+    Identifier(path) {
+      if (path.node.name === "arguments") unsafe = true;
+    },
+    JSXIdentifier(path) {
+      // A tag naming the child itself would inline forever.
+      if (path.node.name === name) unsafe = true;
+    },
+    Scopable(path) {
+      for (const local of Object.keys(path.scope.bindings)) localNames.add(local);
+    },
+    ReferencedIdentifier(path) {
+      const reference = path.node.name;
+      const owner = path.scope.getBinding(reference);
+      if (!owner || owner.scope === programPath.scope) freeNames.add(reference);
+    },
+  });
+  if (unsafe) return;
+  for (const local of props.values()) localNames.delete(local);
+  return { props, root: returned, scope: functionPath.scope, localNames, freeNames };
+}
+
+function isDuplicableProp(expression: t.Expression, safeGlobals: ReadonlySet<string>): boolean {
+  return (
+    t.isArrowFunctionExpression(expression) ||
+    t.isFunctionExpression(expression) ||
+    validateDerivedExpression(expression, safeGlobals) === undefined
+  );
+}
+
+/**
+ * Replaces `<Child prop={value} />` in a compiler candidate with the child's own JSX, props
+ * substituted, so the parent compiles as one template instead of keeping the child as an island
+ * that re-renders through React. Only children `inlinableChild` accepts are inlined, and only
+ * when the move cannot change which binding a name refers to or how often a prop is evaluated.
+ */
+function inlineStatelessChildren(
+  component: NodePath,
+  programPath: NodePath<t.Program>,
+  safeGlobals: ReadonlySet<string>,
+): void {
+  let budget = 64;
+  component.traverse({
+    JSXElement(path) {
+      const tag = path.node.openingElement.name;
+      if (!t.isJSXIdentifier(tag) || !isComponentName(tag.name) || budget <= 0) return;
+      if (path.scope.getBinding(tag.name) !== programPath.scope.getBinding(tag.name)) return;
+      const child = inlinableChild(tag.name, programPath);
+      if (!child || meaningfulJsxChildren(path.node).length > 0) return;
+      const values = new Map<string, t.Expression>();
+      for (const attribute of path.node.openingElement.attributes) {
+        if (!t.isJSXAttribute(attribute) || !t.isJSXIdentifier(attribute.name)) return;
+        const prop = attribute.name.name;
+        if (prop === "key" || prop === "ref" || prop === "children") return;
+        const value = attribute.value;
+        const expression =
+          value === null || value === undefined
+            ? t.booleanLiteral(true)
+            : t.isStringLiteral(value)
+              ? t.stringLiteral(value.value)
+              : t.isJSXExpressionContainer(value) && t.isExpression(value.expression)
+                ? value.expression
+                : undefined;
+        if (!expression) return;
+        values.set(prop, expression);
+      }
+      // A prop the child never reads is dropped, so it must have no effects.
+      for (const [prop, expression] of values) {
+        if (!child.props.has(prop) && !isDuplicableProp(expression, safeGlobals)) return;
+      }
+      // The child's free names must mean the same thing at the use site.
+      for (const name of child.freeNames) {
+        if (child.props.has(name) || [...child.props.values()].includes(name)) continue;
+        if (path.scope.getBinding(name) !== child.scope.getBinding(name)) return;
+      }
+      const root = t.cloneNode(child.root, true);
+      const file = expressionFile(root);
+      const counts = new Map<string, number>();
+      const localToProp = new Map([...child.props].map(([prop, local]) => [local, prop]));
+      let rejected = false;
+      traverse(file, {
+        ReferencedIdentifier(reference) {
+          const prop = localToProp.get(reference.node.name);
+          if (!prop || reference.scope.hasBinding(reference.node.name, { noGlobals: true })) return;
+          // A prop used as a tag (`<Icon />`) cannot take an expression's place.
+          if (t.isJSXIdentifier(reference.node)) rejected = true;
+          counts.set(prop, (counts.get(prop) ?? 0) + 1);
+        },
+      });
+      for (const [prop, count] of counts) {
+        const value = values.get(prop);
+        if (!value) continue;
+        if (count > 1 && !isDuplicableProp(value, safeGlobals)) rejected = true;
+        // A name the prop reads must not be rebound by the child's own callbacks.
+        traverse(expressionFile(t.cloneNode(value, true)), {
+          ReferencedIdentifier(reference) {
+            if (child.localNames.has(reference.node.name)) rejected = true;
+          },
+        });
+      }
+      if (rejected) return;
+      traverse(file, {
+        ReferencedIdentifier(reference) {
+          const prop = localToProp.get(reference.node.name);
+          if (!prop || reference.scope.hasBinding(reference.node.name, { noGlobals: true })) return;
+          const value = values.get(prop);
+          const replacement = value
+            ? t.cloneNode(value, true)
+            : t.unaryExpression("void", t.numericLiteral(0));
+          reference.replaceWith(replacement);
+          reference.skip();
+        },
+      });
+      budget -= 1;
+      path.replaceWith((file.program.body[0] as t.ExpressionStatement).expression);
+    },
+  });
+}
+
 function hoistConstantListCollections(component: NodePath, programPath: NodePath<t.Program>): void {
   const hoisted: t.VariableDeclaration[] = [];
   component.traverse({
@@ -10836,6 +11043,15 @@ export async function compileReactModule(
         const usedRuntimeFeatures = new Set<CompilerRuntimeFeatureName>();
         for (const candidate of candidates) {
           hoistConstantListCollections(candidate.path, programPath);
+          inlineStatelessChildren(
+            candidate.path,
+            programPath,
+            new Set(
+              [...SAFE_GLOBAL_CALLS, "Math"].filter(
+                (name) => !candidate.path.scope.getBinding(name),
+              ),
+            ),
+          );
           const reason = compileCandidate(
             candidate,
             createComponentIdentifier,
