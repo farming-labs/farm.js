@@ -1845,6 +1845,16 @@ function importsFarmClientBlockedPackage(id: string, packageName: string): boole
   return id === packageName || id.startsWith(`${packageName}/`);
 }
 
+/**
+ * Whether a client import names an API route module (a `route` file under `api/`), which
+ * `api.generated.ts` imports for its types. The client entry imports pages by absolute path, so a page such as
+ * `app/docs/api/router/page.tsx` holds both `/api/` and `/route` without being one.
+ */
+function importsFarmApiRouteModule(id: string): boolean {
+  const specifier = id.replace(/\\/g, "/").split("?", 1)[0]!;
+  return /(?:^|\/)api\/(?:.*\/)?route(?:\.[cm]?[jt]sx?)?$/.test(specifier);
+}
+
 class IncompleteClientBuildOutputError extends Error {
   constructor(detail: string) {
     super(`Farm client build produced incomplete output: ${detail}`);
@@ -2497,7 +2507,7 @@ async function buildClient(
                   return { id: "\0empty-module", external: false };
                 }
                 // Block API route imports (they come from type-only imports in api.generated.ts)
-                if (id.includes("/api/") && id.includes("/route")) {
+                if (importsFarmApiRouteModule(id)) {
                   return { id: "\0empty-api-route", external: false };
                 }
                 // Block problematic node modules
