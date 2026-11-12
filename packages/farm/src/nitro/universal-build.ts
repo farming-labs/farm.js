@@ -14628,19 +14628,46 @@ export function resolvePackageJson(
   return null;
 }
 
-async function copyPrismaClientForVercel(
+/**
+ * The real directory of a package the project installed, found as Node's `node_modules` lookup
+ * finds it from the project root (the root's own `node_modules`, then each parent's, so a hoisted
+ * workspace install counts). Unlike `require.resolve`, it never searches `NODE_PATH`: pnpm points
+ * that at its store (`node_modules/.pnpm/node_modules`) for every script it runs, which made a
+ * Prisma client another workspace package installed look like the app's own.
+ */
+async function resolveProjectInstalledPackageDir(
+  root: string,
+  packageName: string,
+  fs: typeof import("fs/promises"),
+): Promise<string | null> {
+  let directory = path.resolve(root);
+  while (true) {
+    const candidate = path.join(directory, "node_modules", ...packageName.split("/"));
+    try {
+      const packageDir = await fs.realpath(candidate);
+      if ((await fs.stat(path.join(packageDir, "package.json"))).isFile()) return packageDir;
+    } catch {
+      // Not installed here; Node's lookup moves to the parent directory.
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return null;
+    directory = parent;
+  }
+}
+
+/**
+ * Copy the app's own Prisma client, and the client `prisma generate` wrote beside it, into the
+ * Vercel function, where Nitro leaves `@prisma/client` external.
+ *
+ * @internal
+ */
+export async function copyPrismaClientForVercel(
   root: string,
   nitroFuncDir: string,
   fs: typeof import("fs/promises"),
 ) {
-  const projectRequire = createRequire(path.join(root, "package.json"));
-
-  let prismaClientDir: string;
-  try {
-    prismaClientDir = path.dirname(projectRequire.resolve("@prisma/client/default.js"));
-  } catch {
-    return;
-  }
+  const prismaClientDir = await resolveProjectInstalledPackageDir(root, "@prisma/client", fs);
+  if (!prismaClientDir) return;
 
   const generatedClientDir = path.join(prismaClientDir, "..", "..", ".prisma", "client");
 
