@@ -227,6 +227,8 @@ import {
   ensureFarmPackageClientReference,
   FARM_CLIENT_REFERENCE_DIRECTORY,
   FARM_CLIENT_REFERENCE_PRAGMA,
+  FARM_RESOLVE_FROM_PREFIX,
+  parseFarmResolveFrom,
   rewriteFarmPackageClientImports,
 } from "./islands-package-references";
 import {
@@ -437,6 +439,7 @@ const FARM_PLATFORM_CLIENT_ID = "\0farm:platform-client";
 /** The specifiers `farm:server-only-entries` resolves: its own entries and Node builtins. */
 const FARM_SERVER_ONLY_ENTRIES_RESOLVE_FILTER = [
   exactIdPattern([FARM_PLATFORM_ENTRY, SERVER_ONLY_PACKAGE, ...FARM_SERVER_ONLY_ENTRIES]),
+  new RegExp(`^${FARM_RESOLVE_FROM_PREFIX}`),
   // What isBuiltin() accepts: `node:` ids and the builtin names, subpaths such as fs/promises
   // included.
   /^node:/,
@@ -554,6 +557,22 @@ export function farmServerOnlyEntriesPlugin(
         }
         if (!options?.ssr && isBuiltin(id)) {
           return resolveFarmBrowserBuiltin(this, id, importer, options);
+        }
+        // A client reference for a package the app root does not resolve to the importer's copy
+        // (a workspace package's dependency in a pnpm monorepo) resolves it from the importer's
+        // side, as React Server Components resolve a client reference.
+        const resolveFrom = importer ? parseFarmResolveFrom(id, importer.split("?", 1)[0]!) : null;
+        if (resolveFrom) {
+          const directory = path.dirname(resolveFrom.importer);
+          return this.resolve(resolveFrom.specifier, resolveFrom.importer, {
+            ...options,
+            skipSelf: true,
+          }).then((resolved) => {
+            if (resolved) return resolved;
+            return this.error(
+              `Could not resolve "${resolveFrom.specifier}" from ${directory}, the package whose server component renders it. Install it in that package, or run your package manager's install again.`,
+            );
+          });
         }
         if (!FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
         const importedBy = importer ? ` (imported by ${importer})` : "";
@@ -4936,7 +4955,7 @@ export const manifest = getManifest();
                 code,
                 file,
                 reference: (specifier, exportName) =>
-                  ensureFarmPackageClientReference(projectRoot, specifier, exportName),
+                  ensureFarmPackageClientReference(projectRoot, specifier, exportName, file),
                 onServerFile: (serverFile) => farmReactServerFiles.add(serverFile),
               });
           if (reactServer !== null) {

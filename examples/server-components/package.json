@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@farm-fixtures/rsc-kit": "link:./fixtures/rsc-kit",
+    "@farm-fixtures/workspace-ui": "workspace:*",
     "@farm.js/core": "workspace:*",
     "@radix-ui/react-dialog": "1.1.18",
     "@tanstack/react-query": "^5.107.1",

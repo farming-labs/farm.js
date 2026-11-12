@@ -180,23 +180,127 @@ export const FARM_CLIENT_REFERENCE_PRAGMA = "// @farm-client-reference";
 /** The module path segment of generated client references. */
 export const FARM_CLIENT_REFERENCE_DIRECTORY = "/.farm/client-references/";
 
+/**
+ * The prefix of an import a client reference resolves from another directory than its own:
+ * `farm:resolve-from:<directory>:<specifier>`, the directory URI-encoded and relative to the
+ * reference. `farm:server-only-entries` resolves it, as the importer of the package would.
+ */
+export const FARM_RESOLVE_FROM_PREFIX = "farm:resolve-from:";
+
+/**
+ * The specifier and stand-in importer (a file in the directory it names) of a
+ * `farm:resolve-from:` import in `importer`, or null for any other import.
+ */
+export function parseFarmResolveFrom(
+  id: string,
+  importer: string,
+): { specifier: string; importer: string } | null {
+  if (!id.startsWith(FARM_RESOLVE_FROM_PREFIX)) return null;
+  const rest = id.slice(FARM_RESOLVE_FROM_PREFIX.length);
+  const separator = rest.indexOf(":");
+  if (separator <= 0) return null;
+  const directory = path.resolve(
+    path.dirname(importer),
+    decodeURIComponent(rest.slice(0, separator)),
+  );
+  return {
+    specifier: rest.slice(separator + 1),
+    importer: path.join(directory, "__farm_client_reference__.js"),
+  };
+}
+
 /** Where the client reference for `specifier`'s `exportName` lives. */
 export function farmPackageClientReferencePath(
   root: string,
   specifier: string,
   exportName: string,
+  scope?: string,
 ): string {
   const directory = specifier.replace(/^@/, "").replace(/[^A-Za-z0-9._-]/g, "+");
-  return path.join(root, ".farm", "client-references", directory, `${exportName}.tsx`);
+  return path.join(
+    root,
+    ".farm",
+    "client-references",
+    directory,
+    ...(scope ? [scope] : []),
+    `${exportName}.tsx`,
+  );
 }
 
-/** Writes the client reference for `specifier`'s `exportName` (unchanged files stay as they are). */
+/** The package a bare specifier names: `@scope/name` or `name`. */
+function specifierPackage(specifier: string): string {
+  const parts = specifier.split("/");
+  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
+}
+
+/**
+ * The directory whose `node_modules` holds `packageName` for code in `directory`, and the package's
+ * real path, as Node resolves it; null when no `node_modules` above holds it.
+ */
+function packageLookup(
+  directory: string,
+  packageName: string,
+): { from: string; real: string } | null {
+  for (let current = directory; ; current = path.dirname(current)) {
+    if (path.basename(current) !== "node_modules") {
+      const candidate = path.join(current, "node_modules", packageName);
+      try {
+        return { from: current, real: fs.realpathSync(candidate) };
+      } catch {
+        // Not installed here.
+      }
+    }
+    if (path.dirname(current) === current) return null;
+  }
+}
+
+/**
+ * Where a client reference written for `importer` resolves `specifier` from: null when the app root
+ * resolves it to the same package as the importer, as in a single app; otherwise the directory
+ * whose `node_modules` holds the importer's copy, as in a pnpm monorepo, where a workspace package's
+ * dependency is not the app's.
+ */
+function referenceResolveFrom(root: string, specifier: string, importer: string): string | null {
+  const packageName = specifierPackage(specifier);
+  const own = packageLookup(path.dirname(importer), packageName);
+  if (!own) return null;
+  const app = packageLookup(path.join(root, ".farm", "client-references"), packageName);
+  if (app?.real === own.real) return null;
+  // The importer's real directory, so a module reached through a link and through its own path
+  // gets one reference.
+  try {
+    return fs.realpathSync(own.from);
+  } catch {
+    return own.from;
+  }
+}
+
+/**
+ * Writes the client reference for `specifier`'s `exportName` (unchanged files stay as they are).
+ * `importer`, the module that imports it, decides which installed copy of the package the reference
+ * imports: the one the importer resolves.
+ */
 export function ensureFarmPackageClientReference(
   root: string,
   specifier: string,
   exportName: string,
+  importer?: string,
 ): string {
-  const file = farmPackageClientReferencePath(root, specifier, exportName);
+  const resolveFrom = importer ? referenceResolveFrom(root, specifier, importer) : null;
+  const scope = resolveFrom
+    ? `__from__${createHash("sha256")
+        .update(path.relative(root, resolveFrom).split(path.sep).join("/"))
+        .digest("hex")
+        .slice(0, 8)}`
+    : undefined;
+  const file = farmPackageClientReferencePath(root, specifier, exportName, scope);
+  const target = JSON.stringify(
+    resolveFrom
+      ? `${FARM_RESOLVE_FROM_PREFIX}${encodeURIComponent(
+          path.relative(path.dirname(file), resolveFrom).split(path.sep).join("/"),
+        )}:${specifier}`
+      : specifier,
+  );
   const source = [
     `// Generated by Farm: ${specifier}'s ${exportName} export, as a client reference for server components.`,
     FARM_CLIENT_REFERENCE_PRAGMA,
@@ -204,8 +308,8 @@ export function ensureFarmPackageClientReference(
     // An import, not `export { name } from`: a server graph applies CommonJS interop to imports
     // (react-wrap-balancer's `main` is CommonJS), not to re-exports.
     exportName === "default"
-      ? `import __farm_reference__ from ${JSON.stringify(specifier)};`
-      : `import { ${exportName} as __farm_reference__ } from ${JSON.stringify(specifier)};`,
+      ? `import __farm_reference__ from ${target};`
+      : `import { ${exportName} as __farm_reference__ } from ${target};`,
     `export { __farm_reference__ as ${exportName} };`,
     "",
   ].join("\n");
@@ -308,7 +412,9 @@ export function rewriteFarmPackageClientImports(options: {
   const imports = findFarmPackageClientImports(options.code, options.file, options.isClientPackage);
   if (imports.length === 0) return null;
   const reference = (specifier: string, exportName: string) =>
-    JSON.stringify(ensureFarmPackageClientReference(options.root, specifier, exportName));
+    JSON.stringify(
+      ensureFarmPackageClientReference(options.root, specifier, exportName, options.file),
+    );
   let output = options.code;
   let next = 0;
   let changed = false;
