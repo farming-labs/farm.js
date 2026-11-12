@@ -4966,10 +4966,12 @@ async function hydrate() {
     });
     ${
       isolatedHydrationEnabled
-        ? `const isolatedHydration =
+        ? `// Not cancelled with the page: a navigation disposes the islands it removes, and one in a
+    // layout it keeps still waits for its trigger, as on a page of islands only.
+    const isolatedHydration =
       !hasHydratableLayout(pathname) &&
       document.querySelector('f-island[src]')
-        ? hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal)
+        ? hydrateFarmIsolatedClientBoundaries(document)
         : Promise.resolve();
     await Promise.all([pageHydration, isolatedHydration]);`
         : "await pageHydration;"
