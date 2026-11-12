@@ -6211,6 +6211,7 @@ function analyzeKeyedRangesContainer(
   safeGlobals: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
   allowSingleRange = false,
+  delegateWithoutReact = false,
 ):
   | {
       ranges: KeyedRangePlan[];
@@ -6242,10 +6243,14 @@ function analyzeKeyedRangesContainer(
     if (range) {
       if (range.conditionals.length > 0) return undefined;
       // Row events run through the ranges container, as for keyed rows, so they must be ones
-      // React dispatches without the row's own fiber.
+      // React dispatches without the row's own fiber, or (onChange) ones a root without React
+      // DOM dispatches; React DOM then renders those rows itself.
       if (
         range.events.length > 0 &&
-        !canDelegateKeyedRowEvents({ events: range.events, conditionals: [], source: container })
+        !canDelegateKeyedRowEvents(
+          { events: range.events, conditionals: [], source: container },
+          delegateWithoutReact,
+        )
       ) {
         return undefined;
       }
@@ -6929,6 +6934,7 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
   listNames: ReadonlySet<string>,
   parent: number,
   allocateId: () => number,
+  delegateWithoutReact = false,
 ):
   | {
       row: t.JSXElement;
@@ -6949,7 +6955,10 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
   if (
     !events ||
     (events.length > 0 &&
-      (!canDelegateKeyedRowEvents({ events, conditionals: [], source: container }) ||
+      (!canDelegateKeyedRowEvents(
+        { events, conditionals: [], source: container },
+        delegateWithoutReact,
+      ) ||
         !events.every((event) => keyedRowEventPathIsStable(shape.row, event.path))))
   ) {
     return undefined;
@@ -8269,6 +8278,12 @@ function keyedRangesBoundary(blockRuntime: t.Identifier, plan: KeyedRangesPlan):
   );
   const source = t.cloneNode(plan.source, true);
   const hasEvents = plan.ranges.some((range) => range.events?.length);
+  // onChange rows are delegated only on a root without React DOM; React DOM renders them.
+  const delegatedEvents = plan.ranges.every(
+    (range) =>
+      !range.events?.length ||
+      canDelegateKeyedRowEvents({ events: range.events, conditionals: [], source: plan.source }),
+  );
   const eventFactory = uniqueLocalIdentifier("_farmRowEvent", [
     plan.source,
     ...plan.ranges.flatMap((range) => (range.events || []).map((event) => event.value)),
@@ -8301,7 +8316,7 @@ function keyedRangesBoundary(blockRuntime: t.Identifier, plan: KeyedRangesPlan):
         ...(hasEvents
           ? [
               t.jsxAttribute(
-                t.jsxIdentifier("delegateEvents"),
+                t.jsxIdentifier(delegatedEvents ? "delegateEvents" : "delegateEventsWithoutReact"),
                 t.jsxExpressionContainer(t.booleanLiteral(true)),
               ),
             ]
@@ -8681,6 +8696,7 @@ function analyzeComposableBlocks(
   safeGlobals: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
   allowedComponentNames: ReadonlySet<string>,
+  delegateWithoutReact: boolean,
 ): ComposableBlockAnalysis {
   const plans: ComposableBlockPlan[] = [];
   const componentElements = new Set<t.JSXElement>();
@@ -8837,7 +8853,14 @@ function analyzeComposableBlocks(
           nextId = mixedRangeStart;
           const keyedRanges = insideConditional
             ? undefined
-            : analyzeKeyedRangesContainer(child, statesByValue, safeGlobals, listNames);
+            : analyzeKeyedRangesContainer(
+                child,
+                statesByValue,
+                safeGlobals,
+                listNames,
+                false,
+                delegateWithoutReact,
+              );
           if (keyedRanges) {
             plans.push({
               kind: "keyed-ranges",
@@ -8923,6 +8946,7 @@ function analyzeComposableBlocks(
               listNames,
               keyedRowsId,
               () => nextId++,
+              delegateWithoutReact,
             );
             if (!hostBlocks) nextId = nestedStart;
             if (keyedRows.rowReason && !hostBlocks) {
@@ -9100,7 +9124,14 @@ function analyzeComposableBlocks(
   }
   nextId = rootMixedRangeStart;
 
-  const rootRanges = analyzeKeyedRangesContainer(root, statesByValue, safeGlobals, listNames, true);
+  const rootRanges = analyzeKeyedRangesContainer(
+    root,
+    statesByValue,
+    safeGlobals,
+    listNames,
+    true,
+    delegateWithoutReact,
+  );
   if (rootRanges) {
     plans.push({
       kind: "keyed-ranges",
@@ -9761,6 +9792,9 @@ function compileCandidate(
   listNames: ReadonlySet<string>,
   moduleId: string,
   reactivity: NormalizedReactCompilerOptions["reactivity"],
+  // Rows whose events only a root without React DOM can delegate (onChange) may stay
+  // compiler-owned; React DOM renders them through the block's React fallback.
+  delegateWithoutReact: boolean,
 ): string | undefined {
   const { path, name, statementPath } = candidate;
   if (path.node.async || path.node.generator)
@@ -9987,6 +10021,7 @@ function compileCandidate(
     safeGlobals,
     listNames,
     allowedComponentNames,
+    delegateWithoutReact,
   );
   let analysis = analyzeHostTree(
     expandedReactiveRoot,
@@ -10010,6 +10045,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     analysis = analyzeHostTree(
       expandedReactiveRoot,
@@ -10046,6 +10082,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       hintedRoot.root,
@@ -10092,6 +10129,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       appendHintedRoot.root,
@@ -10141,6 +10179,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       prependHintedRoot.root,
@@ -10177,6 +10216,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       rollingWindowHintedRoot.root,
@@ -10216,6 +10256,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       positionHintedRoot.root,
@@ -10278,6 +10319,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       reorderPipelineHintedRoot.root,
@@ -10331,6 +10373,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       reorderHintedRoot.root,
@@ -10369,6 +10412,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       sortHintedRoot.root,
@@ -10408,6 +10452,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       sliceHintedRoot.root,
@@ -10447,6 +10492,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       filterHintedRoot.root,
@@ -10490,6 +10536,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedMappedStructuralHintedRoot.root,
@@ -10543,6 +10590,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedStructuralMapHintedRoot.root,
@@ -10597,6 +10645,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedStructuralPrependMapHintedRoot.root,
@@ -10644,6 +10693,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedRollingWindowMapHintedRoot.root,
@@ -10722,6 +10772,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedReorderMapHintedRoot.root,
@@ -10769,6 +10820,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedStructuralReorderHintedRoot.root,
@@ -10829,6 +10881,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       keyedCollectionHintedRoot.root,
@@ -11319,6 +11372,7 @@ export async function compileReactModule(
             listNames,
             id,
             options.reactivity,
+            options.compiledRoot !== false,
           );
           if (reason) {
             diagnostics.push({

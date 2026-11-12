@@ -3087,6 +3087,11 @@ export interface CompilerKeyedRangesBlockProps {
   render(rowEvent?: CompilerKeyedRangeRowEvent): React.ReactElement;
   /** Route row events of every range through the stable container. */
   delegateEvents?: boolean;
+  /**
+   * Route row events through the container only on a root without React DOM, which maps
+   * onChange to native events itself. Under React DOM, React renders the rows.
+   */
+  delegateEventsWithoutReact?: boolean;
   rootRef?: React.RefCallback<Element>;
   ranges: readonly CompilerKeyedRange[];
   /** Number of static direct host siblings after the final keyed range. */
@@ -9482,7 +9487,17 @@ function createKeyedRowsBlockComponentCore(
   class FarmKeyedRowsBlock extends React.Component<CompilerKeyedRowsBlockProps, State> {
     static displayName = "FarmCompiledKeyedRows";
 
-    state: State = { fallback: false };
+    // Host-block rows have no React-owned mode, so rows whose events the container cannot run
+    // here (onChange under React DOM) are rendered by React from the start.
+    state: State = {
+      fallback: Boolean(
+        this.props.hostBlocks &&
+        this.props.events?.length &&
+        !(
+          this.props.delegateEvents && this.props.events.every((event) => event.path !== undefined)
+        ),
+      ),
+    };
     private root: Element | null = null;
     private mounted = false;
     private fallbackRequested = false;
@@ -10648,7 +10663,7 @@ function createKeyedRowsBlockComponentCore(
     componentDidMount(): void {
       this.mounted = true;
       this.listen();
-      if (!this.adopt()) this.activateFallback();
+      if (!this.state.fallback && !this.adopt()) this.activateFallback();
     }
 
     componentWillUnmount(): void {
@@ -10752,7 +10767,11 @@ function createKeyedRangesBlockComponent(
   class FarmKeyedRangesBlock extends React.Component<CompilerKeyedRangesBlockProps, State> {
     static displayName = "FarmCompiledKeyedRanges";
 
-    state: State = { fallback: false };
+    // Rows whose events the container runs only without React DOM (onChange) are rendered by
+    // React here, from the start, with their own handlers.
+    state: State = {
+      fallback: Boolean(this.props.delegateEventsWithoutReact && !this.props.delegateEvents),
+    };
     private root: Element | null = null;
     private mounted = false;
     private fallbackRequested = false;
@@ -11003,7 +11022,7 @@ function createKeyedRangesBlockComponent(
     componentDidMount(): void {
       this.mounted = true;
       this.listen();
-      if (!this.adopt()) this.activateFallback();
+      if (!this.state.fallback && !this.adopt()) this.activateFallback();
     }
 
     componentDidUpdate(): void {
