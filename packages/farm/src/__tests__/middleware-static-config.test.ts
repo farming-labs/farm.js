@@ -22,6 +22,19 @@ describe("a middleware file's literal config", () => {
     expect(read(`export default function middleware() {}`)).toBeNull();
   });
 
+  it("reads a literal runtime, and leaves any other value on the server", () => {
+    expect(read(`export const config = { runtime: "edge" };`)).toEqual({ runtime: "edge" });
+    expect(read(`export const config = { matcher: "/docs/:path*", runtime: "nodejs" };`)).toEqual({
+      matcher: ["/docs/:path*"],
+      runtime: "nodejs",
+    });
+    // Not a literal "edge": the file runs in the server, and its matcher still counts.
+    expect(read(`const r = "edge"; export const config = { matcher: "/a", runtime: r };`)).toEqual({
+      matcher: ["/a"],
+    });
+    expect(read(`export const config = { runtime: "experimental-edge" };`)).toEqual({});
+  });
+
   it("reads anything it cannot prove as unknown", () => {
     expect(read(`const m = "/api"; export const config = { matcher: m };`)).toBe("unknown");
     expect(read(`export const config = { matcher: [(ctx) => true] };`)).toBe("unknown");

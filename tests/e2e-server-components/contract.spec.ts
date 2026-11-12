@@ -578,6 +578,33 @@ test("a server route slot stays on the server, and its client component hydrates
   expect(errors).toEqual([]);
 });
 
+test("a declared failure from a form posted before JavaScript loads keeps its status", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-nojs");
+  const response = page.waitForResponse((candidate) => candidate.request().method() === "POST");
+  await page.getByRole("button", { name: "Reserve" }).click();
+  expect((await response).status()).toBe(409);
+  await context.close();
+});
+
+test("a form posted before JavaScript loads returns to the URL it was posted to, not a rewrite's target", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-rewrite/alias");
+  await expect(page.getByRole("heading", { name: "Action rewrite" })).toBeVisible();
+  const title = `rewritten no-js item ${Date.now()}`;
+  await page.getByLabel("Title").fill(title);
+  await page.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByTestId("todos")).toContainText(title);
+  expect(new URL(page.url()).pathname).toBe("/action-rewrite/alias");
+  await context.close();
+});
+
 test("a server action passed as a prop works before JavaScript loads", async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();

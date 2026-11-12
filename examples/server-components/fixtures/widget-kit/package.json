@@ -1,0 +1,16 @@
+{
+  "name": "@farm-fixtures/widget-kit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A client component package that only @farm-fixtures/workspace-ui depends on, for the contract suite: the app cannot resolve it from its own root, as in a pnpm monorepo.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "peerDependencies": {
+    "react": "*"
+  }
+}

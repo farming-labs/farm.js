@@ -70,7 +70,16 @@ try {
       2,
     )}\n`,
   );
-  fs.writeFileSync(path.join(temporaryRoot, "pnpm-workspace.yaml"), `packages:\n  - ${fixture}\n`);
+  // The fixture and the workspace packages it depends on (`workspace:*`), as the repository lists them.
+  const fixtureProjects = fs
+    .readFileSync(path.join(repositoryRoot, "pnpm-workspace.yaml"), "utf8")
+    .split("\n")
+    .map((line) => /^\s*-\s*"?([^"#\s]+)"?\s*$/.exec(line)?.[1])
+    .filter((entry) => entry && entry.startsWith(`${fixture}/`));
+  fs.writeFileSync(
+    path.join(temporaryRoot, "pnpm-workspace.yaml"),
+    `packages:\n${[fixture, ...fixtureProjects].map((entry) => `  - ${entry}\n`).join("")}`,
+  );
 
   console.log("Installing the islands fixture from packed artifacts...");
   run(["install", "--no-frozen-lockfile"]);

@@ -6,6 +6,7 @@ import {
   farmPackageClientImportExports,
   farmPackageClientReferencePath,
   findFarmPackageClientImports,
+  parseFarmResolveFrom,
   rewriteFarmPackageClientImports,
 } from "../islands-package-references";
 
@@ -177,6 +178,51 @@ describe("package client references", () => {
       isClientPackage,
     });
     expect(statSync(theme).mtimeMs).toBe(written);
+  });
+
+  it("resolves a package from the importer's side when the app root has another copy or none", () => {
+    // A pnpm monorepo: packages/ui depends on sonner, the app does not.
+    const workspace = tempRoot();
+    const root = path.join(workspace, "apps/web");
+    const ui = path.join(workspace, "packages/ui");
+    const writePackage = (directory: string) => {
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(path.join(directory, "package.json"), '{"name":"sonner"}');
+    };
+    writePackage(path.join(ui, "node_modules/sonner"));
+    fs.mkdirSync(root, { recursive: true });
+    const code = 'import { Toaster } from "sonner";\nexport default () => <Toaster />;\n';
+    const rewrite = (file: string) =>
+      rewriteFarmPackageClientImports({ code, file, root, isClientPackage })!;
+
+    const output = rewrite(path.join(ui, "src/toaster.tsx"));
+    const reference = /from ("[^"]+Toaster\.tsx")/.exec(output)![1]!;
+    const file = JSON.parse(reference) as string;
+    expect(path.relative(root, file)).toMatch(
+      /^\.farm[\\/]client-references[\\/]sonner[\\/]__from__[0-9a-f]{8}[\\/]Toaster\.tsx$/,
+    );
+    const target = /from "(farm:resolve-from:[^"]+)"/.exec(readFileSync(file, "utf8"))![1]!;
+    const resolved = parseFarmResolveFrom(target, file)!;
+    expect(resolved.specifier).toBe("sonner");
+    expect(path.dirname(resolved.importer)).toBe(fs.realpathSync(ui));
+
+    // The app's own copy of another version: the importer still gets its own.
+    writePackage(path.join(root, "node_modules/sonner"));
+    expect(rewrite(path.join(ui, "src/toaster.tsx"))).toContain(reference);
+
+    // The same copy from both sides: the plain reference, which imports the package by name.
+    const plain = rewrite(path.join(root, "src/page.tsx"));
+    expect(plain).toContain(
+      JSON.stringify(farmPackageClientReferencePath(root, "sonner", "Toaster")),
+    );
+    expect(
+      readFileSync(farmPackageClientReferencePath(root, "sonner", "Toaster"), "utf8"),
+    ).toContain('from "sonner";');
+  });
+
+  it("reads only farm:resolve-from imports", () => {
+    expect(parseFarmResolveFrom("sonner", "/app/.farm/client-references/sonner/x.tsx")).toBeNull();
+    expect(parseFarmResolveFrom("farm:resolve-from:", "/app/x.tsx")).toBeNull();
   });
 
   it("returns null for a module without package client imports", () => {

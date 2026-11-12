@@ -912,8 +912,8 @@ export function applyProductionMiddlewareHeaders(
 }
 
 const PRIVATE_CACHE_DIRECTIVE = /(?:^|,)\s*(?:private|no-store)\s*(?:[,=]|$)/i;
-// Directives a CDN reads in place of Cache-Control (RFC 9213 and the platform names).
-const CDN_CACHE_CONTROL_HEADERS = [
+/** @internal Directives a CDN reads in place of Cache-Control (RFC 9213 and the platform names). */
+export const CDN_CACHE_CONTROL_HEADERS = [
   "cdn-cache-control",
   "vercel-cdn-cache-control",
   "netlify-cdn-cache-control",

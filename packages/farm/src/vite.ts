@@ -135,6 +135,7 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "./document-layout-client";
+import { FARM_NAVIGATION_SCRIPT_SOURCE } from "./client/navigation-scripts";
 import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "./client/navigation-stream-client";
 import {
   getClientModuleMetadata,
@@ -227,6 +228,8 @@ import {
   ensureFarmPackageClientReference,
   FARM_CLIENT_REFERENCE_DIRECTORY,
   FARM_CLIENT_REFERENCE_PRAGMA,
+  FARM_RESOLVE_FROM_PREFIX,
+  parseFarmResolveFrom,
   rewriteFarmPackageClientImports,
 } from "./islands-package-references";
 import {
@@ -437,6 +440,7 @@ const FARM_PLATFORM_CLIENT_ID = "\0farm:platform-client";
 /** The specifiers `farm:server-only-entries` resolves: its own entries and Node builtins. */
 const FARM_SERVER_ONLY_ENTRIES_RESOLVE_FILTER = [
   exactIdPattern([FARM_PLATFORM_ENTRY, SERVER_ONLY_PACKAGE, ...FARM_SERVER_ONLY_ENTRIES]),
+  new RegExp(`^${FARM_RESOLVE_FROM_PREFIX}`),
   // What isBuiltin() accepts: `node:` ids and the builtin names, subpaths such as fs/promises
   // included.
   /^node:/,
@@ -462,7 +466,8 @@ export function appDataDir() {
 }
 
 /**
- * In development, pre-bundle each server-bundled package whose only ES module build is `module`
+ * In a Vite server that loads the app's modules (`farm dev`, and the server a build loads route
+ * modules with), pre-bundle each server-bundled package whose only ES module build is `module`
  * into one file, with Vite's SSR dependency optimizer. Served unbundled, such a package is loaded
  * one module at a time through the SSR module runner: a barrel like lucide-react's is thousands of
  * modules on the first page that imports one icon. The bundle is cached in Vite's `deps_ssr`
@@ -505,8 +510,8 @@ export function farmServerOnlyEntriesPlugin(
     /** The browser graph's platform; a web build's mobile client passes `"mobile"`. */
     platform?: FarmPlatform;
     /**
-     * Pre-bundle module-entry packages for SSR (`createFarmServerPrebundleConfig`). Only the dev
-     * server sets it: a build's own Vite server, which loads the project's modules, does not.
+     * Pre-bundle module-entry packages for SSR (`createFarmServerPrebundleConfig`). The dev server
+     * and a build's own Vite server, which load the project's modules, set it; bundling does not.
      */
     prebundleServerPackages?: boolean;
   } = {},
@@ -553,6 +558,22 @@ export function farmServerOnlyEntriesPlugin(
         }
         if (!options?.ssr && isBuiltin(id)) {
           return resolveFarmBrowserBuiltin(this, id, importer, options);
+        }
+        // A client reference for a package the app root does not resolve to the importer's copy
+        // (a workspace package's dependency in a pnpm monorepo) resolves it from the importer's
+        // side, as React Server Components resolve a client reference.
+        const resolveFrom = importer ? parseFarmResolveFrom(id, importer.split("?", 1)[0]!) : null;
+        if (resolveFrom) {
+          const directory = path.dirname(resolveFrom.importer);
+          return this.resolve(resolveFrom.specifier, resolveFrom.importer, {
+            ...options,
+            skipSelf: true,
+          }).then((resolved) => {
+            if (resolved) return resolved;
+            return this.error(
+              `Could not resolve "${resolveFrom.specifier}" from ${directory}, the package whose server component renders it. Install it in that package, or run your package manager's install again.`,
+            );
+          });
         }
         if (!FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
         const importedBy = importer ? ` (imported by ${importer})` : "";
@@ -4935,7 +4956,7 @@ export const manifest = getManifest();
                 code,
                 file,
                 reference: (specifier, exportName) =>
-                  ensureFarmPackageClientReference(projectRoot, specifier, exportName),
+                  ensureFarmPackageClientReference(projectRoot, specifier, exportName, file),
                 onServerFile: (serverFile) => farmReactServerFiles.add(serverFile),
               });
           if (reactServer !== null) {
@@ -7435,14 +7456,11 @@ function readActiveLayoutPatterns() {
     .filter(Boolean);
 }
 
+${FARM_NAVIGATION_SCRIPT_SOURCE}
+
 function activateFragmentScripts(root) {
   for (const script of Array.from(root.querySelectorAll?.('script') || [])) {
-    const freshScript = document.createElement('script');
-    for (const attribute of Array.from(script.attributes)) {
-      freshScript.setAttribute(attribute.name, attribute.value);
-    }
-    freshScript.textContent = script.textContent || '';
-    script.replaceWith(freshScript);
+    script.replaceWith(createFarmNavigationScript(script));
   }
 }
 
