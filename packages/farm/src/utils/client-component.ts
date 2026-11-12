@@ -1804,8 +1804,8 @@ function inspectClientModuleMetadata(
 }
 
 /**
- * Within a production build, reuse an earlier inspection of the same package entry graph when it
- * would read exactly what it read before: none of its files are visited yet, and every file where
+ * Within a production build or a dev-server plan, reuse an earlier inspection of the same package
+ * entry graph when it would read exactly what it read before: none of its files are visited yet, and every file where
  * it stopped because an earlier inspection had visited it is visited again.
  */
 function realpathOrSelf(file: string): string {
