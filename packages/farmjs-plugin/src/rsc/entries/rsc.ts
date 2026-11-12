@@ -79,6 +79,10 @@ export function generateRscEntry(ctx: EntryContext): string {
         )};`,
     )
     .join("\n");
+  // Imported for their factories, which register what a plugin's server functions use.
+  const pluginsConfigImports = (ctx.pluginsConfigPaths ?? [])
+    .map((configPath) => `import ${JSON.stringify(configPath.replace(/\\/g, "/"))};`)
+    .join("\n");
   const mcpSource = ctx.mcpConfigPaths?.length ? generateMCPPluginSource() : null;
   const middlewareConfigValues = (ctx.middlewareConfigPaths ?? []).map(
     (_configPath, index) =>
@@ -89,6 +93,7 @@ import React from 'react';
 import ServerErrorFallback from '/.farm/rsc-entries/error-fallback.tsx';
 ${middlewareConfigImports}
 ${mcpConfigImports}
+${pluginsConfigImports}
 ${mcpSource ? `${mcpSource.importSource}\nimport { mergePluginAPIRoutes } from '@farm.js/core/api/runtime';` : ""}
 import { registerAPIRouteShape } from '@farm.js/core/api/runtime';
 import {

@@ -35,6 +35,7 @@ import type {
   FarmRscPluginOptions,
   EntryContext,
   FarmRscClientPlugins,
+  FarmRscServerPlugins,
   FarmRscMobileClient,
 } from "./types.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
@@ -228,6 +229,8 @@ export interface FarmRscConfig {
   mobileClient?: FarmRscMobileClient;
   /** @internal See `FarmRscPluginOptions.clientPlugins`; set by `farm dev` and `farm build`. */
   clientPlugins?: FarmRscClientPlugins;
+  /** @internal See `FarmRscPluginOptions.serverPlugins`; set by `farm build`. */
+  serverPlugins?: FarmRscServerPlugins;
 }
 
 /**
@@ -307,6 +310,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
         entries: config.entries,
         mobileClient: config.mobileClient,
         clientPlugins: config.clientPlugins,
+        serverPlugins: config.serverPlugins,
       }),
       ...(Array.isArray(config.plugins) ? config.plugins : []),
     ],
@@ -389,6 +393,7 @@ const OPTIMIZED_BOUNDARY_ADAPTER = "@farm.js/plugin/rsc/optimized-boundary";
 const STRATA_PACKAGE = "@farming-labs/strata";
 const RSC_MIDDLEWARE_CONFIG_QUERY = "?farm-rsc-middleware";
 const RSC_MCP_CONFIG_QUERY = "?farm-rsc-mcp";
+const RSC_PLUGINS_CONFIG_QUERY = "?farm-rsc-plugins";
 const FARM_CORE_PACKAGE_ROOT = path.resolve(path.dirname(require_.resolve("@farm.js/core")), "..");
 const FARM_CONFIG_FILENAMES = [
   "farm.config.ts",
@@ -883,7 +888,11 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       enforce: "pre",
 
       resolveId(id) {
-        if (!id.endsWith(RSC_MIDDLEWARE_CONFIG_QUERY) && !id.endsWith(RSC_MCP_CONFIG_QUERY)) {
+        if (
+          !id.endsWith(RSC_MIDDLEWARE_CONFIG_QUERY) &&
+          !id.endsWith(RSC_MCP_CONFIG_QUERY) &&
+          !id.endsWith(RSC_PLUGINS_CONFIG_QUERY)
+        ) {
           return null;
         }
         return id.replace(/\\/g, "/");
@@ -1073,6 +1082,36 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           }
         }
 
+        // Loading a plugin runs its factory in the server, which is how a plugin such as `bot()`
+        // registers what its server functions use. Only the entries with server hooks and the
+        // bindings they read are bundled, as for middleware.
+        const pluginsConfigPaths: string[] = [];
+        if (options.serverPlugins && env.command === "build") {
+          for (const configPath of await resolveMiddlewareConfigPaths(root, c.layers)) {
+            const selection = options.serverPlugins[path.resolve(configPath)];
+            if (!selection) continue;
+            const extracted = await loadRscConfigPropertyModule(configPath, "plugins", selection);
+            if (extracted.kind !== "module") {
+              throw new Error(
+                `[Farm.js] Cannot read plugins for the RSC server from ${configPath}: ${
+                  extracted.kind === "absent"
+                    ? "the config has no plugins property"
+                    : extracted.reason
+                }. Declare plugins directly in defineConfig({ plugins: [...] }).`,
+              );
+            }
+            const moduleId = `${configPath.replace(/\\/g, "/")}${RSC_PLUGINS_CONFIG_QUERY}`;
+            middlewareConfigModules.set(moduleId, extracted.code);
+            pluginsConfigPaths.push(moduleId);
+          }
+          if (pluginsConfigPaths.length < Object.keys(options.serverPlugins).length) {
+            throw new Error(
+              "[Farm.js] The RSC server could not find every config file with plugins to load. " +
+                "Declare plugins directly in defineConfig({ plugins: [...] }) in farm.config.ts.",
+            );
+          }
+        }
+
         // Read user's directory configuration
         const api = await resolveFarmAPIConfig(c.api, {
           root,
@@ -1211,6 +1250,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           }),
           server: { trustProxy: resolveFarmServerConfig(c.server).trustProxy },
           middlewareConfigPaths,
+          pluginsConfigPaths,
           debug,
           development: env.command === "serve",
           clientCachePersistence: generateClientCachePersistenceCode(

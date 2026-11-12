@@ -69,7 +69,17 @@ export interface FarmRscPluginOptions {
    * and its `src/client.ts`, as core generates it for every entry.
    */
   clientPlugins?: FarmRscClientPlugins;
+
+  /**
+   * @internal Set by `farm build` when some of the app's Farm `plugins` have server hooks: for
+   * each config file, by absolute path, where those entries sit in its `plugins` array. The
+   * server loads them, so their factories run there.
+   */
+  serverPlugins?: FarmRscServerPlugins;
 }
+
+/** @internal See `FarmRscPluginOptions.serverPlugins`. */
+export type FarmRscServerPlugins = Record<string, { indexes: number[]; count: number }>;
 
 /** @internal See `FarmRscPluginOptions.mobileClient`. */
 export type FarmRscMobileClient = "entry" | "inline";
@@ -168,6 +178,9 @@ export interface EntryContext {
 
   /** Modules that export `{ mcp }`, read from the app's config files, in layer order. */
   mcpConfigPaths?: string[];
+
+  /** Modules that export `{ plugins }`, read from the app's config files, in layer order. */
+  pluginsConfigPaths?: string[];
 
   /** Resolved Markdown mirror settings (core's `md`): `.md` pages and `Accept: text/markdown`. */
   markdown?: FarmMarkdownResolvedConfig;

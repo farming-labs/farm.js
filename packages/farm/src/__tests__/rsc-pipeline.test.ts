@@ -235,6 +235,36 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(entry.registrations).not.toContain("farm:mobile-shell");
   });
 
+  it("has the production server load only the plugins with server hooks", async () => {
+    const root = createApp();
+    writeFileSync(path.join(root, "farm.config.ts"), "export default {};");
+    const serverPlugins = async (plugins: unknown[], command: "serve" | "build") =>
+      (
+        (await createFarmRscViteConfig(
+          { experimental: { serverComponents: { mode: "rsc" as const } }, plugins },
+          { root, command, preset: "node-server" },
+        )) as Record<string, any>
+      ).farm.serverPlugins;
+    const withServerHooks = { name: "with-server-hooks", runtime: {} };
+    const clientOnly = { name: "client-only", client: { setup() {} } };
+    // Like devtools, a plugin with server hooks can leave a production build.
+    const devOnly: Record<string, any> = {
+      name: "dev-only",
+      runtime: {},
+      configure: (config: Record<string, any>, context: { isProd: boolean }) =>
+        context.isProd
+          ? { ...config, plugins: config.plugins.filter((plugin: unknown) => plugin !== devOnly) }
+          : undefined,
+    };
+
+    expect(await serverPlugins([clientOnly, withServerHooks, devOnly], "build")).toEqual({
+      [path.join(root, "farm.config.ts")]: { indexes: [1], count: 3 },
+    });
+    expect(await serverPlugins([clientOnly, devOnly], "build")).toBeUndefined();
+    // `farm dev` loaded the config in its own process, so the plugins have already run there.
+    expect(await serverPlugins([withServerHooks], "serve")).toBeUndefined();
+  });
+
   it("runs the app's plugin `configure` hooks first, as Farm's other pipelines do", async () => {
     const root = createApp();
     const contexts: Array<{ isDev: boolean; isProd: boolean }> = [];

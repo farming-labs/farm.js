@@ -214,6 +214,7 @@ import {
 } from "./node-server-entry";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
+import { hasFarmServerRuntimePlugins } from "../plugin-server-runtime";
 import type { FarmI18nCatalogs } from "../i18n/types";
 import {
   FARM_INTEGRATION_API_BASE_PATH_KEY,
@@ -1321,28 +1322,6 @@ async function findFarmConfigPath(root: string): Promise<string | null> {
   }
 
   return null;
-}
-
-function hasFarmServerRuntimePlugins(config: ResolvedFarmConfig): boolean {
-  return (config.plugins || []).some((plugin) => {
-    if (getFarmIntegrationPluginServerRuntime(plugin) === false) return false;
-
-    return Boolean(
-      plugin.setup ||
-      plugin.init ||
-      plugin.ready ||
-      plugin.shutdown ||
-      plugin.runtime ||
-      plugin.router ||
-      plugin.render ||
-      plugin.beforeRouteMatch ||
-      plugin.afterRouteMatch ||
-      plugin.beforeRender ||
-      plugin.afterRender ||
-      plugin.onError ||
-      plugin.transformHTML,
-    );
-  });
 }
 
 function hasFarmPluginRoutes(config: ResolvedFarmConfig): boolean {
@@ -5941,7 +5920,7 @@ async function buildSSRInMemory(
   const hasMdxComponentConfig = Boolean(config.mdx?.components);
   const hasMiddlewareConfig = hasFarmMiddlewareConfig(config.middleware);
   const hasRouteContextConfig = hasCustomFarmRouteContext(config);
-  const hasServerRuntimePlugins = hasFarmServerRuntimePlugins(config);
+  const hasServerRuntimePlugins = hasFarmServerRuntimePlugins(config.plugins);
   const hasPluginRoutes = hasFarmPluginRoutes(config);
   const hasServerCacheConfig = hasFarmServerCacheConfig(config.cache);
   const configModulePath =

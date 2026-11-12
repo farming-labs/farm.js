@@ -160,3 +160,73 @@ export default defineConfig({
     });
   });
 });
+
+describe("RSC plugins config extraction", () => {
+  it("keeps the plugins and the bindings they read, without the rest of the config", () => {
+    const source = `
+import { bot } from "@farm.js/bot";
+import { defineConfig } from "@farm.js/core";
+import tailwindcss from "@tailwindcss/vite";
+import { botProvider } from "./src/bot";
+const hostnames = process.env.BOT_HOSTNAMES?.split(",") ?? ["localhost"];
+const guard = { matcher: "/admin", handler() {} };
+export default defineConfig({
+  middleware: guard,
+  plugins: [bot({ provider: botProvider(), hostnames })],
+  vite: { plugins: [tailwindcss()] },
+});`;
+
+    const result = extractRscConfigPropertyModule(source, parseAst(source) as never, "plugins");
+    expect(result.kind).toBe("module");
+    if (result.kind !== "module") return;
+    expect(result.code).toContain('import { bot } from "@farm.js/bot";');
+    expect(result.code).toContain('import { botProvider } from "./src/bot";');
+    expect(result.code).toContain("const hostnames = process.env.BOT_HOSTNAMES");
+    expect(result.code).toContain(
+      "export default { plugins: [bot({ provider: botProvider(), hostnames })] };",
+    );
+    for (const dropped of ["defineConfig", "tailwindcss", "guard"]) {
+      expect(result.code).not.toContain(dropped);
+    }
+  });
+
+  it("keeps only the selected entries of a plugins array", () => {
+    const source = `
+import { bot } from "@farm.js/bot";
+import { defineConfig, definePlugin } from "@farm.js/core";
+const marker = definePlugin({ name: "marker", client: { setup() {} } });
+export default defineConfig({ plugins: [marker, bot({ hostnames: ["example.com"] })] });`;
+    const program = parseAst(source) as never;
+
+    const result = extractRscConfigPropertyModule(source, program, "plugins", {
+      indexes: [1],
+      count: 2,
+    });
+    expect(result).toEqual({
+      kind: "module",
+      code: 'import { bot } from "@farm.js/bot";\nexport default { plugins: [bot({ hostnames: ["example.com"] })] };\n',
+    });
+
+    // A length the evaluated config didn't have means the positions can't be trusted.
+    const mismatch = extractRscConfigPropertyModule(source, program, "plugins", {
+      indexes: [1],
+      count: 3,
+    });
+    expect(mismatch.kind === "module" && mismatch.code).toContain("definePlugin");
+  });
+
+  it("keeps a plugins value that isn't a plain array whole", () => {
+    const source = `
+import { bot } from "@farm.js/bot";
+import { shared } from "./shared";
+export default { plugins: [...shared, bot()] };`;
+
+    const result = extractRscConfigPropertyModule(source, parseAst(source) as never, "plugins", {
+      indexes: [1],
+      count: 2,
+    });
+    expect(result.kind === "module" && result.code).toContain(
+      "export default { plugins: [...shared, bot()] };",
+    );
+  });
+});
