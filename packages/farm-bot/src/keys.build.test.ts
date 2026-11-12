@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBotKeys, type BotKeysConfig } from "./keys";
+import { verifyBotCheck } from "./verify";
 
 vi.mock("./build-mode", () => ({ isProductionBuild: () => true }));
 
@@ -36,5 +37,14 @@ describe("a production build started with NODE_ENV=development", () => {
       value: "test-secret",
       isTest: true,
     });
+  });
+
+  it("doesn't trust the request's host for the hostname check", async () => {
+    const provider = { name: "acme", verify: vi.fn(async () => ({ success: true as const })) };
+    const settings = { provider, hostnames: undefined, timeoutMs: 5000 };
+    await expect(verifyBotCheck(settings, "token")).rejects.toMatchObject({
+      code: "missing_hostnames",
+    });
+    expect(provider.verify).not.toHaveBeenCalled();
   });
 });

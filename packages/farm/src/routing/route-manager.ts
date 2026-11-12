@@ -94,6 +94,7 @@ import { applyFarmBasePath, stripFarmBasePath } from "../base-path";
 import { appendFarmRedirectQuery } from "../redirect-query";
 import { encodeConfigRouteSegment } from "../plugins/route-pattern";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
+import { runWithPackageClientBoundaryCacheFile } from "../utils/package-client-boundary-cache";
 import {
   createRouteDirectoryPattern,
   formatRouteSegment,
@@ -288,6 +289,7 @@ export class RouteManager {
   private programmaticClientRoutes: ProgrammaticClientRoutes = mergeProgrammaticClientRoutes([]);
   private rendererRuntime?: FarmServerRendererRuntime;
   private viteServer?: ViteDevServer;
+  private packageClientBoundaryCacheFile?: string;
   private clientManifestCache?: {
     projectRoot: string;
     manifest: FarmClientRouteManifest;
@@ -718,7 +720,23 @@ export class RouteManager {
     if (this.clientManifestCache?.projectRoot === normalizedProjectRoot) {
       return this.clientManifestCache.manifest;
     }
+    const cacheFile = this.packageClientBoundaryCacheFile;
+    return cacheFile
+      ? runWithPackageClientBoundaryCacheFile(cacheFile, () =>
+          this.computeClientManifest(normalizedProjectRoot),
+        )
+      : this.computeClientManifest(normalizedProjectRoot);
+  }
 
+  /**
+   * @internal Keep package client-boundary inspections in `file` between plans, as the dev server
+   * does. Without it, each plan outside a production build reads every package's sources again.
+   */
+  usePackageClientBoundaryCacheFile(file: string): void {
+    this.packageClientBoundaryCacheFile = file;
+  }
+
+  private computeClientManifest(normalizedProjectRoot: string): FarmClientRouteManifest {
     const toUrlPath = (absolutePath: string) => {
       const rootRelative = toRootRelativeUrlPath(absolutePath, normalizedProjectRoot);
       if (rootRelative !== undefined) return rootRelative;

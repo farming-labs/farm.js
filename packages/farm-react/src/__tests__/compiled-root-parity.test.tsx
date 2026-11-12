@@ -2,7 +2,11 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createCompiledRoot } from "../compiled-root";
-import { loadCompiledAndOriginal, removeCompiledModules } from "./compiled-module-harness";
+import {
+  loadCompiledAndOriginal,
+  normalizedDom as normalized,
+  removeCompiledModules,
+} from "./compiled-module-harness";
 
 // Differential tests: the same source, compiled and mounted by the compiled root, must match the
 // original mounted by React DOM after every interaction, whether or not the root falls back.
@@ -19,24 +23,6 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 afterAll(removeCompiledModules);
-
-function normalized(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
-  if (node.nodeType === Node.COMMENT_NODE) return "";
-  if (!(node instanceof Element)) return "";
-  const attributes = [...node.attributes]
-    .map((attribute) => `${attribute.name}="${attribute.value}"`)
-    .sort()
-    .join(" ");
-  const state =
-    node instanceof HTMLInputElement
-      ? ` [value=${node.value} checked=${node.checked}]`
-      : node instanceof HTMLSelectElement || node instanceof HTMLTextAreaElement
-        ? ` [value=${node.value}]`
-        : "";
-  const children = [...node.childNodes].map(normalized).join("");
-  return `<${node.localName}${attributes ? ` ${attributes}` : ""}${state}>${children}</${node.localName}>`;
-}
 
 type Step = (root: HTMLElement) => void;
 
@@ -108,7 +94,7 @@ async function expectParity(source: string, name: string, steps: readonly Step[]
 }
 
 describe("compiled root parity with React DOM", () => {
-  it("keyed rows with row-local conditionals keep state by using React DOM", async () => {
+  it("keyed rows with row-local conditionals and row events update without React DOM", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";
       export function Todos() {
@@ -127,12 +113,14 @@ describe("compiled root parity with React DOM", () => {
             <p id="count">{count}</p>
             <ul>
               {items.map((item) => (
-                <li key={item.id}>
-                  <button className="toggle" onClick={() => toggle(item.id)}>{item.label}</button>
+                <li key={item.id} onClick={() => setCount(count + 10)}>
+                  <button className="toggle" onClick={(event) => { event.stopPropagation(); toggle(item.id); }}>{item.label}</button>
                   {item.done ? <span className="done">done</span> : <em>open</em>}
                 </li>
               ))}
             </ul>
+            <button id="add" onClick={() => setItems([...items, { id: items.length + 1, label: "New", done: false }])}>Add</button>
+            <button id="reverse" onClick={() => setItems([...items].reverse())}>Reverse</button>
           </main>
         );
       }`,
@@ -140,12 +128,17 @@ describe("compiled root parity with React DOM", () => {
       [
         click("li:nth-child(1) .toggle"),
         click("li:nth-child(2) .toggle"),
+        click("li:nth-child(2) em"),
+        click("#add"),
+        click("li:nth-child(4) .toggle"),
+        click("#reverse"),
         click("li:nth-child(1) .toggle"),
+        click("li:nth-child(4) .done, li:nth-child(4) em"),
       ],
     );
-    // Row-local conditionals are React-owned: the root uses React DOM from the start, so no
-    // state is lost when a row toggles.
-    expect(fallbacks).toEqual([expect.stringContaining("updates through React")]);
+    // Row events beside row-local conditionals are delegated to the rows container, so the
+    // whole tree stays on the compiled root.
+    expect(fallbacks).toEqual([]);
   });
 
   it("conditional blocks open and close through React DOM", async () => {
@@ -282,8 +275,9 @@ describe("compiled root parity with React DOM", () => {
       "Parent",
       [click("#inc"), click("#inc"), click("#inc")],
     );
-    // Child components with props are component islands, which re-render through React.
-    expect(fallbacks).toEqual([expect.stringContaining("FarmCompiledComponentIsland")]);
+    // Badge is a module-local child with no hooks: the compiler inlines its JSX, so the
+    // parent compiles as one template and the root needs no React DOM.
+    expect(fallbacks).toEqual([]);
   });
 
   it("filter buttons rendered from an array literal", async () => {
@@ -371,8 +365,9 @@ describe("compiled root parity with React DOM", () => {
         submit("#new"),
       ],
     );
-    // Row onChange handlers keep their rows React-owned, so this root uses React DOM.
-    expect(fallbacks).toEqual([expect.stringContaining("updates through React")]);
+    // Row onChange handlers keep rows React-owned under React DOM; this root maps them to
+    // native events itself, so the whole todo list runs without React DOM.
+    expect(fallbacks).toEqual([]);
   });
 
   it("filtered rows and their counts update without React DOM", async () => {
@@ -417,6 +412,202 @@ describe("compiled root parity with React DOM", () => {
         click("#toggle-done"),
         click('li[data-id="1"] .finish'),
       ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("a page of hook-free child components with props", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      function Header({ title, count }) {
+        return <header><h1>{title}</h1><small data-count={count}>{count} total</small></header>;
+      }
+      const Stat = ({ label, value }) => <p className="stat"><b>{label}</b><span>{value}</span></p>;
+      function Footer({ remaining, onClear }) {
+        return (
+          <footer>
+            <span>{remaining === 1 ? "1 item left" : remaining + " items left"}</span>
+            <button id="clear" onClick={onClear}>Clear</button>
+          </footer>
+        );
+      }
+      export function Page() {
+        const [items, setItems] = useState(3);
+        const [cleared, setCleared] = useState(0);
+        return (
+          <section>
+            <Header title="Inventory" count={items} />
+            <button id="add" onClick={() => setItems(items + 1)}>Add</button>
+            <Stat label="Cleared" value={cleared} />
+            <Footer remaining={items} onClear={() => { setItems(0); setCleared(cleared + 1); }} />
+          </section>
+        );
+      }`,
+      "Page",
+      [click("#add"), click("#add"), click("#clear"), click("#add")],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("onChange on rows added after mount: text, checkbox and select", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Editor() {
+        const [rows, setRows] = useState([{ id: 1, label: "One", done: false, size: "s" }]);
+        const update = (id, patch) =>
+          setRows(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+        return (
+          <section>
+            <button id="add" onClick={() => setRows([...rows, { id: rows.length + 1, label: "", done: false, size: "s" }])}>Add</button>
+            <ul>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  <input className="label" value={row.label} onChange={(event) => update(row.id, { label: event.target.value })} />
+                  <input className="done" type="checkbox" checked={row.done} onChange={(event) => update(row.id, { done: event.target.checked })} />
+                  <select className="size" value={row.size} onChange={(event) => update(row.id, { size: event.target.value })}>
+                    <option value="s">S</option>
+                    <option value="l">L</option>
+                  </select>
+                </li>
+              ))}
+            </ul>
+            <output>{rows.filter((row) => row.done).length} done</output>
+          </section>
+        );
+      }`,
+      "Editor",
+      [
+        click("#add"),
+        type('li[data-id="2"] .label', "Two"),
+        click('li[data-id="2"] .done'),
+        choose('li[data-id="2"] .size', "l"),
+        click('li[data-id="1"] .done'),
+        click("#add"),
+        type('li[data-id="3"] .label', "Three"),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("onChange rows beside row conditionals, including rows added after mount", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Todos() {
+        const [rows, setRows] = useState([{ id: 1, label: "One", done: false }]);
+        const update = (id, patch) =>
+          setRows(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+        return (
+          <section>
+            <button id="add" onClick={() => setRows([...rows, { id: rows.length + 1, label: "", done: false }])}>Add</button>
+            <ul>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  <input className="done" type="checkbox" checked={row.done} onChange={(event) => update(row.id, { done: event.target.checked })} />
+                  <input className="label" value={row.label} onChange={(event) => update(row.id, { label: event.target.value })} />
+                  {row.done ? <s>{row.label}</s> : <span>{row.label}</span>}
+                </li>
+              ))}
+            </ul>
+            <output>{rows.filter((row) => row.done).length} done</output>
+          </section>
+        );
+      }`,
+      "Todos",
+      [
+        click('li[data-id="1"] .done'),
+        click("#add"),
+        type('li[data-id="2"] .label', "Two"),
+        click('li[data-id="2"] .done'),
+        click('li[data-id="1"] .done'),
+        type('li[data-id="2"] .label', "Two!"),
+        click("#add"),
+        type('li[data-id="3"] .label', "Three"),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("onChange rows in a list between static siblings", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Checklist() {
+        const [rows, setRows] = useState([{ id: 1, label: "One", done: false }]);
+        const update = (id, patch) =>
+          setRows(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+        return (
+          <section>
+            <ul>
+              <li className="head">{rows.filter((row) => row.done).length} of {rows.length} done</li>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  <input className="done" type="checkbox" checked={row.done} onChange={(event) => update(row.id, { done: event.target.checked })} />
+                  <input className="label" value={row.label} onChange={(event) => update(row.id, { label: event.target.value })} />
+                </li>
+              ))}
+              <li className="foot"><button id="add" onClick={() => setRows([...rows, { id: rows.length + 1, label: "", done: false }])}>Add</button></li>
+            </ul>
+          </section>
+        );
+      }`,
+      "Checklist",
+      [
+        click('li[data-id="1"] .done'),
+        click("#add"),
+        type('li[data-id="2"] .label', "Two"),
+        click('li[data-id="2"] .done'),
+        click('li[data-id="1"] .done'),
+        click("#add"),
+        type('li[data-id="3"] .label', "Three"),
+        click('li[data-id="3"] .done'),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("a keyed list between static siblings with bindings and events", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Ranked() {
+        const [items, setItems] = useState([{ id: "b", n: 2 }, { id: "a", n: 1 }]);
+        const [nextId, setNextId] = useState(3);
+        return (
+          <section>
+            <button id="add" onClick={() => { setItems([...items, { id: "x" + nextId, n: nextId }]); setNextId(nextId + 1); }}>Add</button>
+            <button id="sort" onClick={() => setItems([...items].sort((left, right) => left.n - right.n))}>Sort</button>
+            <ul>
+              <li className="head" data-count={items.length}>{items.length} items</li>
+              {items.map((item) => <li key={item.id} data-n={item.n}>{item.id}</li>)}
+              <li className="tail"><button id="clear" onClick={() => setItems([])}>Clear</button></li>
+            </ul>
+          </section>
+        );
+      }`,
+      "Ranked",
+      [click("#add"), click("#sort"), click("#add"), click("#clear"), click("#add")],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("filter buttons with click handlers next to a sibling button", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Toolbar() {
+        const [todos, setTodos] = useState([{ id: 1, done: true }, { id: 2, done: false }]);
+        const [filter, setFilter] = useState("all");
+        return (
+          <section>
+            <nav>
+              {["all", "active", "done"].map((name) => (
+                <button key={name} id={name} className={filter === name ? "selected" : ""} onClick={() => setFilter(name)}>{name}</button>
+              ))}
+              <button id="clear" onClick={() => setTodos(todos.filter((todo) => !todo.done))}>Clear done</button>
+            </nav>
+            <p id="state">{filter}:{todos.length}</p>
+          </section>
+        );
+      }`,
+      "Toolbar",
+      [click("#active"), click("#done"), click("#clear"), click("#all")],
     );
     expect(fallbacks).toEqual([]);
   });

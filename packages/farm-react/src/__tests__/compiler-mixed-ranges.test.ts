@@ -110,7 +110,7 @@ describe("React AOT mixed conditional and keyed ranges", () => {
     },
     {
       name: "a custom component branch",
-      declaration: "function Status() { return <strong>Open</strong>; }",
+      declaration: 'import { Status } from "./status";',
       conditional: "<Status />",
       row: "<article key={item.id}>{item.label}</article>",
     },

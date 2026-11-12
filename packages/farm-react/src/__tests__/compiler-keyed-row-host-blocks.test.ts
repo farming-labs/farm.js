@@ -6,14 +6,17 @@ import { compileReactModule } from "../compiler";
 import { normalizeReactCompilerOptions } from "../index";
 
 const infer = normalizeReactCompilerOptions(true);
+// An app that opts out of compiled roots keeps rows React DOM must own on React-owned paths.
+const withoutCompiledRoot = normalizeReactCompilerOptions({ compiledRoot: false });
 
-async function compile(source: string) {
-  return compileReactModule(source, "/app/KeyedRowHostBlocks.tsx", infer);
+async function compile(source: string, options = infer) {
+  return compileReactModule(source, "/app/KeyedRowHostBlocks.tsx", options);
 }
 
 describe("React AOT compiler-owned keyed-row host blocks", () => {
   it("selects the complete keyed-row runtime when sibling lists need both extensions", async () => {
-    const result = await compile(`
+    const result = await compile(
+      `
       import { useState } from "react";
       export function MixedRows() {
         const [items, setItems] = useState([
@@ -31,7 +34,7 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
             <ol>
               {items.map((item) => (
                 <li key={item.id}>
-                  <button onClick={() => setItems((rows) => [...rows])}>Refresh</button>
+                  <input type="checkbox" checked={item.visible} onChange={() => setItems((rows) => [...rows])} />
                   <div>
                     {item.visible && <strong>{item.label}</strong>}
                   </div>
@@ -41,7 +44,9 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
           </main>
         );
       }
-    `);
+    `,
+      withoutCompiledRoot,
+    );
 
     expect(result.compiled).toEqual(["MixedRows"]);
     expect(result.diagnostics).toEqual([]);
@@ -177,7 +182,7 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     {
       name: "a custom component branch",
       branch: "<Status value={item.label} />",
-      declaration: "function Status({ value }) { return <strong>{value}</strong>; }",
+      declaration: 'import { Status } from "./status";',
     },
     {
       name: "a ref in a branch",
@@ -492,6 +497,114 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     expect(result.compiled).toEqual(["Projects"]);
     expect(result.code).not.toContain("hostBlocks={true}");
     expect(result.code).toContain("item.tasks.map");
+  });
+
+  it("delegates row events on static elements beside compiler-owned row conditionals", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: "a", done: false }]);
+        return (
+          <section>
+            <ul>
+              {todos.map((todo) => (
+                <li key={todo.id} onClick={() => setTodos([])}>
+                  <div><label><input type="checkbox" readOnly checked={todo.done} onClick={() => setTodos([])} /></label></div>
+                  <button onClick={() => setTodos(todos.map((item) => item.id === todo.id ? { ...item, done: !item.done } : item))}>Toggle</button>
+                  {todo.done ? <s>{todo.id}</s> : <i>{todo.id}</i>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Todos"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("hostBlocks={true}");
+    expect(result.code).toContain("delegateEvents={true}");
+    expect(result.code).not.toContain("conditionals={[");
+    // React renders the source row with the rows block's handlers while it owns the rows.
+    expect(result.code).toContain("onClick={_farmRowEvent(todo, 0, 0)}");
+    expect(result.code).toContain("onClick={_farmRowEvent(todo, 0, 1)}");
+    expect(result.code).toContain("onClick={_farmRowEvent(todo, 0, 2)}");
+    expect(result.code).toMatch(/name: "onClick",\s*path: \[\],/);
+    expect(result.code).toMatch(/name: "onClick",\s*path: \[0, 0, 0\],/);
+    expect(result.code).toMatch(/name: "onClick",\s*path: \[1\],/);
+  });
+
+  it.each([
+    {
+      name: "a handler after the conditional",
+      row: "<li key={todo.id}>{todo.done ? <s>done</s> : <i>open</i>}<button onClick={() => setTodos([])}>x</button></li>",
+    },
+    {
+      name: "a handler inside a conditional branch",
+      row: "<li key={todo.id}><b>x</b>{todo.done ? <button onClick={() => setTodos([])}>x</button> : <i>open</i>}</li>",
+    },
+    {
+      name: "a handler after a nested list",
+      row: "<li key={todo.id}><span>{todo.tags.map((tag) => <b key={tag}>{tag}</b>)}</span>{todo.tags.map((tag) => <i key={tag}>{tag}</i>)}<button onClick={() => setTodos([])}>x</button></li>",
+    },
+    {
+      name: "a handler after a public List",
+      row: "<li key={todo.id}><List each={todo.tags} by={(tag) => tag}>{(tag) => <b>{tag}</b>}</List><button onClick={() => setTodos([])}>x</button>{todo.done ? <s>done</s> : <i>open</i>}</li>",
+    },
+  ])("keeps $name on the React-owned keyed boundary", async ({ row }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      import { List } from "@farm.js/react/list";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: "a", done: false, tags: ["x"] }]);
+        return (
+          <section>
+            <ul>{todos.map((todo) => (${row}))}</ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Todos"]);
+    expect(result.code).not.toContain("hostBlocks={true}");
+    expect(result.code).not.toContain("delegateEvents={true}");
+  });
+
+  it("delegates row onChange beside conditional content only on roots without React DOM", async () => {
+    const source = `
+      import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: "a", done: false }]);
+        return (
+          <section>
+            <ul>
+              {todos.map((todo) => (
+                <li key={todo.id}>
+                  <input type="checkbox" checked={todo.done} onChange={() => setTodos([])} />
+                  {todo.done ? <s>done</s> : <i>open</i>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      }
+    `;
+    // React derives onChange from the row's own fiber, so React DOM renders these rows (the
+    // block's React fallback) and a compiled root delegates the event to the rows container.
+    const result = await compile(source);
+    expect(result.compiled).toEqual(["Todos"]);
+    expect(result.code).toContain("hostBlocks={true}");
+    expect(result.code).toContain("delegateEventsWithoutReact={true}");
+    expect(result.code).not.toContain("delegateEvents={true}");
+    expect(result.code).toContain("onChange={_farmRowEvent(todo, 0, 0)}");
+
+    const optedOut = await compile(source, withoutCompiledRoot);
+    expect(optedOut.compiled).toEqual(["Todos"]);
+    expect(optedOut.code).toContain("farmBlocks.KeyedList");
+    expect(optedOut.code).not.toContain("hostBlocks={true}");
+    expect(optedOut.code).not.toContain("delegateEventsWithoutReact");
   });
 
   it("keeps block ids unique across sibling lists and component-level blocks", async () => {

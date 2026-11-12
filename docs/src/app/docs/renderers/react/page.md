@@ -270,9 +270,20 @@ DOM only to mount. With the compiler on, an app module's `import { createRoot } 
 `createRoot` takes the same arguments and mounts host elements, the compiler's components and
 hook-free function components itself, so a fully compiled root never downloads React DOM.
 
-Today that covers compiled components and keyed lists whose rows hold no React-owned content.
+Today that covers compiled components and keyed lists whose rows hold no React-owned content,
+including lists that sit between static sibling elements (keyed ranges).
+Rows with `onChange` handlers stay React-owned under React DOM, because React derives `onChange`
+from each row's own Fiber; this root instead listens on the list container for the native event
+React's `onChange` follows for each control (`input` for text fields, `change` for checkboxes,
+radios, selects, and file inputs), so those lists need no React DOM either. The same holds for
+`onChange` rows beside conditional content and in lists between static siblings: under React DOM
+their blocks let React render the rows, and here they run the rows themselves. Fields it creates get
+the same `value` and `checked` defaults React sets, so a form reset behaves the same.
+Rows with conditional content mount here too when their events can be delegated, as described in
+[Compiler-owned host conditionals inside keyed rows](#compiler-owned-host-conditionals-inside-keyed-rows).
 Compiled parts that still re-render through React, such as conditional sections, child component
-islands and rows with conditional content, keep the whole root on React DOM, as does anything else
+islands (hook-free children in the same module are inlined instead, as described below) and rows
+whose conditional content needs React-owned events, keep the whole root on React DOM, as does anything else
 in the tree, such as hooks, context, Suspense, portals, or props React DOM handles specially like
 `autoFocus` and `defaultValue`. React DOM then loads on demand, and React renders the root before
 anything is shown. If a mounted compiled component later needs React (for example
@@ -287,8 +298,11 @@ Fast Refresh, an edit reloads the page.
 
 Imports that also name `hydrateRoot`, default or namespace imports, dependencies, and server
 modules keep React DOM. Pages that Farm renders and hydrates are not affected. Set
-`compiledRoot: false` to keep React DOM for every root. To pass options such as `onFallback`, call
-`createCompiledRoot(container, options)` from `@farm.js/react/compiled-root`.
+`compiledRoot: false` to keep React DOM for every root. That also compiles `onChange` rows beside
+conditional content or in a list between static siblings to the React-owned list, which ships less
+code when no root mounts without React DOM; with `compiledRoot` on, those rows compile to blocks
+that React renders under React DOM, as it would the React-owned list. To pass options such as
+`onFallback`, call `createCompiledRoot(container, options)` from `@farm.js/react/compiled-root`.
 
 ### Static and hybrid reactivity
 
@@ -2062,17 +2076,42 @@ committed from the same latest collection. Block IDs remain unique in the compon
 the runtime scopes repeated row descriptors by their stable key. No marker nodes or extra wrappers
 are added to SSR output.
 
-This compiler-owned tier requires a lowercase host row with no events. Branches may use logical or
-ternary expressions, multiple known locations, static siblings, nested lowercase host conditions,
-and safe text, attribute, or inline-style expressions. It applies to automatic keyed `.map(...)`
-syntax and inline host rows rendered by `List`.
+This compiler-owned tier requires a lowercase host row. Branches may use logical or ternary
+expressions, multiple known locations, static siblings, nested lowercase host conditions, and safe
+text, attribute, or inline-style expressions. It applies to automatic keyed `.map(...)` syntax and
+inline host rows rendered by `List`.
+
+The row may also hold inline synchronous events on its static elements, such as a toggle button
+beside the conditional:
+
+```tsx
+<ul>
+  {todos.map((todo) => (
+    <li key={todo.id}>
+      <button onClick={() => toggle(todo.id)}>Toggle</button>
+      {todo.done ? <s>{todo.title}</s> : <span>{todo.title}</span>}
+    </li>
+  ))}
+</ul>
+```
+
+The list container receives each event and runs the handler of every row element that contains the
+target, innermost first, with the row's current item and index and with `currentTarget` set to that
+element; `stopPropagation()` stops the remaining row handlers. The container finds the element by its
+position among the row's static elements, so the element must not follow a conditional or a nested
+list at any level of its path (those change how many elements come before it). Events the
+container cannot receive the way React does keep the row React-owned: events that do not bubble,
+such as `onMouseEnter`; a handler on an element that follows a conditional or a list; and a handler
+inside a branch. `onChange`, which React derives from each row's own Fiber, runs through the
+container only on a [root without React DOM](#roots-without-react-dom): under React DOM the block
+lets React render the rows, and with `compiledRoot: false` they keep the React-owned list.
 
 Hooks, custom components, events inside a compiler-owned branch, refs, SVG, fragments, JSX spreads,
 dangerous HTML, controlled inputs inside a conditional, and any unproven shape stay on React.
-Existing interactive keyed rows keep their React-owned conditional-slot behavior: Farm compares row
-snapshots and asks React to refresh a changed slot, while React retains event, Fiber, hydration, and
-structural-list ownership. Duplicate runtime keys or an invalid adopted shape also switch the
-complete mounted list to React.
+Interactive rows outside that event contract keep their React-owned conditional-slot behavior: Farm
+compares row snapshots and asks React to refresh a changed slot, while React retains event, Fiber,
+hydration, and structural-list ownership. Duplicate runtime keys or an invalid adopted shape also
+switch the complete mounted list to React.
 
 #### Nested keyed lists inside keyed rows
 
@@ -2301,11 +2340,17 @@ physical `ul` to the outer binding runtime, so stateful root attributes and styl
 same element. A root containing only one eligible map or `List` is supported as a range with no
 static segments. The compiler does not insert an extra parent merely to host the block.
 
-The first range-owned contract is deliberately non-interactive. Every meaningful direct child of
-the container must be either a lowercase host element or an eligible keyed map/`List`; every range
-must return a statically known host tree without events or row-local conditional slots. Fragments,
-components between ranges, interactive or controlled rows, and nested dynamic structures use the
-existing React-owned boundaries. Parent prop or compatible Fast Refresh changes remount this one
+Every meaningful direct child of the container must be either a lowercase host element or an
+eligible keyed map/`List`, and every range must return a statically known host tree without
+row-local conditional slots. Rows may carry the same inline event handlers keyed rows delegate,
+such as `onClick` on a filter button beside a static "Clear" button: React renders a row's
+handlers only while it owns the rows, and otherwise the container runs the handler for the row the
+event came from with that row's current item, innermost element first, stopping at
+`stopPropagation()`. Static siblings keep their own handlers. Row `onChange` handlers run through
+the container only on a [root without React DOM](#roots-without-react-dom); under React DOM, React
+renders those rows, and with `compiledRoot: false` they keep the React-owned list. A container with
+its own event handlers, fragments, components between ranges, controlled rows, and nested dynamic
+structures use the existing React-owned boundaries. Parent prop or compatible Fast Refresh changes remount this one
 range container through React so static markup cannot become stale. Duplicate keys or a
 mount/hydration shape that cannot be adopted also switch the complete container to React before
 later updates.
@@ -2417,6 +2462,39 @@ The first supported shape is intentionally conservative:
 - The child may internally return `null`, fragments, multiple elements, or other components.
 - JSX children, spreads, `ref`, `key`, member expressions such as `UI.Chart`, prop-selected dynamic
   component types, render props, and inline object/array/JSX values fall back to normal React.
+
+#### Hook-free children in the same module
+
+A child defined in the same module that calls no Hooks and returns one JSX element does not need an
+island:
+
+```tsx
+function Footer({ remaining, onClear }) {
+  return (
+    <footer>
+      <span>{remaining} left</span>
+      <button onClick={onClear}>Clear</button>
+    </footer>
+  );
+}
+```
+
+`<Footer remaining={open} onClear={() => setTodos([])} />` is replaced by Footer's JSX with the props
+substituted, so the parent compiles as one template and Footer's text and attributes update directly.
+The child's definition stays in the module for any other caller. The compiler inlines a child only
+when doing so cannot change what React would render:
+
+- the child is a module-level function or `const` arrow with at most one destructured props
+  parameter, no Hooks, no `this` or `arguments`, and a single returned JSX element;
+- the child is referenced only as a JSX tag, so `Child.defaultProps` and similar uses keep it a
+  component;
+- the usage passes no JSX children, spread, `key`, or `ref`, and no prop is used as a JSX tag;
+- names the child reads resolve to the same bindings at the use site, and the child's own callbacks
+  do not rebind a name a prop reads; and
+- a prop read more than once, or not read at all, is compiler-safe, so inlining never repeats or
+  drops an effect.
+
+Imported children, and children that do not meet these conditions, keep the island behaviour above.
 
 Direct DOM bindings now use generated private callback refs instead of depending only on sibling
 indexes. This matters when an earlier React-owned child changes its number of DOM nodes: the

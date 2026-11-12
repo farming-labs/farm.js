@@ -136,7 +136,11 @@ packages from a `"use client"` module.
 Packages that Node cannot load as a bundler does, because their files import stylesheets
 (react-tweet's CSS modules) or their ES module build is only a `module` field beside a CommonJS
 `main` (react-wrap-balancer), are bundled into the server graph (`ssr.noExternal`) in every mode,
-so development renders them as the production build does.
+so development renders them as the production build does. In development, Farm also pre-bundles
+the `module`-field packages that have no dependencies of their own with Vite's SSR dependency
+optimizer, so a barrel package such as lucide-react loads as one module instead of one per icon.
+The bundle is cached in `node_modules/.vite/deps_ssr` and rebuilt when the lockfile or config
+changes.
 
 `tests/e2e-server-components/compat.spec.ts` runs these against both engines, including TanStack
 Query, Motion, react-tweet, react-hook-form, react-wrap-balancer, lucide-react, react-markdown,

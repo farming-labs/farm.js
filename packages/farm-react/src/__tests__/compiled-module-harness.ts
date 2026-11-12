@@ -61,3 +61,25 @@ export async function removeCompiledModules(): Promise<void> {
   tmpDirectory = undefined;
   if (ownedDirectory) await rm(await ownedDirectory, { force: true, recursive: true });
 }
+
+/**
+ * Serializes a DOM tree with sorted attributes and live form state, so trees that React and the
+ * compiled runtime build compare by meaning rather than by attribute order.
+ */
+export function normalizedDom(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (node.nodeType === Node.COMMENT_NODE) return "";
+  if (!(node instanceof Element)) return "";
+  const attributes = [...node.attributes]
+    .map((attribute) => `${attribute.name}="${attribute.value}"`)
+    .sort()
+    .join(" ");
+  const state =
+    node instanceof HTMLInputElement
+      ? ` [value=${node.value} checked=${node.checked}]`
+      : node instanceof HTMLSelectElement || node instanceof HTMLTextAreaElement
+        ? ` [value=${node.value}]`
+        : "";
+  const children = [...node.childNodes].map(normalizedDom).join("");
+  return `<${node.localName}${attributes ? ` ${attributes}` : ""}${state}>${children}</${node.localName}>`;
+}

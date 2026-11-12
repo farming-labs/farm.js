@@ -3034,6 +3034,12 @@ export interface CompilerKeyedRowsBlockProps {
   events?: readonly CompilerKeyedRowEvent[];
   /** Route compiler-proven bubbling row events through the stable React container. */
   delegateEvents?: boolean;
+  /**
+   * Rows whose only non-delegatable event is onChange. React derives onChange from each row's
+   * own fiber, so these rows stay React-owned under React DOM; a compiled root, which maps
+   * onChange to native events itself, delegates them.
+   */
+  delegateEventsWithoutReact?: boolean;
   conditionals?: readonly CompilerKeyedRowConditional[];
   /** Row descriptors contain compiler-owned nested host scopes. */
   hostBlocks?: boolean;
@@ -3053,7 +3059,17 @@ export interface CompilerKeyedRange {
   rowKey(item: unknown, index: number): React.Key;
   create(item: unknown, index: number): CompilerKeyedRowElement;
   bindings: readonly CompilerKeyedRowBinding[];
+  /** Compiler-proven bubbling row events, delegated to the ranges container. */
+  events?: readonly CompilerKeyedRowEvent[];
 }
+
+/** Returns a row's React handler on React-owned paths, or nothing when the container delegates. */
+export type CompilerKeyedRangeRowEvent = (
+  item: unknown,
+  index: number,
+  eventId: number,
+  rangeIndex: number,
+) => React.EventHandler<React.SyntheticEvent> | undefined;
 
 export type CompilerMixedRange =
   | ({ kind: "conditional" } & CompilerConditionalRange)
@@ -3068,7 +3084,14 @@ export interface CompilerMixedRangesBlockProps {
 
 export interface CompilerKeyedRangesBlockProps {
   id: number;
-  render(): React.ReactElement;
+  render(rowEvent?: CompilerKeyedRangeRowEvent): React.ReactElement;
+  /** Route row events of every range through the stable container. */
+  delegateEvents?: boolean;
+  /**
+   * Route row events through the container only on a root without React DOM, which maps
+   * onChange to native events itself. Under React DOM, React renders the rows.
+   */
+  delegateEventsWithoutReact?: boolean;
   rootRef?: React.RefCallback<Element>;
   ranges: readonly CompilerKeyedRange[];
   /** Number of static direct host siblings after the final keyed range. */
@@ -3544,10 +3567,30 @@ function isCompilerHostElement(value: unknown): value is CompilerHostElement {
   );
 }
 
+/**
+ * When React creates a controlled field it also sets its defaults, so the value and checked
+ * attributes match and a form reset returns to the initial value. Later updates leave
+ * defaultChecked alone, as React does.
+ */
+// Runs after updateAttribute, as React sets a new field's value before its default: assigning a
+// changed value moves the caret to the end, which an earlier default would leave at the start.
+function initializeFieldDefault(element: Element, name: string, value: unknown): void {
+  if (
+    name === "value" &&
+    value != null &&
+    (isInputElement(element) || isTextAreaElement(element))
+  ) {
+    element.defaultValue = String(value);
+  } else if (name === "checked" && isInputElement(element)) {
+    element.defaultChecked = Boolean(value);
+  }
+}
+
 function createCompilerHostElement(document: Document, descriptor: CompilerHostElement): Element {
   const element = document.createElement(descriptor.tag);
   for (const attribute of descriptor.attributes) {
     updateAttribute(element, attribute.name, attribute.value);
+    initializeFieldDefault(element, attribute.name, attribute.value);
   }
   for (const style of descriptor.styles) updateStyle(element, style.name, style.value);
   const appendChild = (child: unknown): void => {
@@ -9446,7 +9489,17 @@ function createKeyedRowsBlockComponentCore(
   class FarmKeyedRowsBlock extends React.Component<CompilerKeyedRowsBlockProps, State> {
     static displayName = "FarmCompiledKeyedRows";
 
-    state: State = { fallback: false };
+    // Host-block rows have no React-owned mode, so rows whose events the container cannot run
+    // here (onChange under React DOM) are rendered by React from the start.
+    state: State = {
+      fallback: Boolean(
+        this.props.hostBlocks &&
+        this.props.events?.length &&
+        !(
+          this.props.delegateEvents && this.props.events.every((event) => event.path !== undefined)
+        ),
+      ),
+    };
     private root: Element | null = null;
     private mounted = false;
     private fallbackRequested = false;
@@ -10612,7 +10665,7 @@ function createKeyedRowsBlockComponentCore(
     componentDidMount(): void {
       this.mounted = true;
       this.listen();
-      if (!this.adopt()) this.activateFallback();
+      if (!this.state.fallback && !this.adopt()) this.activateFallback();
     }
 
     componentWillUnmount(): void {
@@ -10664,6 +10717,43 @@ function createKeyedRowsBlockComponent(
   });
 }
 
+/**
+ * Runs a delegated event on one keyed row: every descriptor whose element contains the target,
+ * innermost first (outermost first for capture), each seeing its own element as currentTarget,
+ * until a handler stops propagation.
+ */
+function dispatchKeyedRowEvent(
+  descriptors: readonly CompilerKeyedRowEvent[],
+  instance: CompilerKeyedRowInstance,
+  name: string,
+  event: React.SyntheticEvent,
+): void {
+  const target = event.target as Node;
+  const capture = name.endsWith("Capture");
+  const matches: { descriptor: CompilerKeyedRowEvent; host: Element }[] = [];
+  for (const descriptor of descriptors) {
+    if (descriptor.name !== name || descriptor.path === undefined) continue;
+    const host = findCompilerHostTarget(instance.element, descriptor.path);
+    if (host && (host === target || host.contains(target))) matches.push({ descriptor, host });
+  }
+  matches.sort((left, right) =>
+    capture
+      ? left.descriptor.path!.length - right.descriptor.path!.length
+      : right.descriptor.path!.length - left.descriptor.path!.length,
+  );
+  for (const { descriptor, host } of matches) {
+    const own = Object.getOwnPropertyDescriptor(event, "currentTarget");
+    try {
+      Object.defineProperty(event, "currentTarget", { configurable: true, value: host });
+      descriptor.invoke(instance.item, instance.index, event);
+    } finally {
+      if (own) Object.defineProperty(event, "currentTarget", own);
+      else Reflect.deleteProperty(event, "currentTarget");
+    }
+    if (event.isPropagationStopped()) break;
+  }
+}
+
 function createKeyedRangesBlockComponent(
   owner: Pick<CompilerRuntimeFeatureOwner, "subscribe" | "getDefinitionVersion">,
 ): React.ComponentType<CompilerKeyedRangesBlockProps> {
@@ -10679,7 +10769,11 @@ function createKeyedRangesBlockComponent(
   class FarmKeyedRangesBlock extends React.Component<CompilerKeyedRangesBlockProps, State> {
     static displayName = "FarmCompiledKeyedRanges";
 
-    state: State = { fallback: false };
+    // Rows whose events the container runs only without React DOM (onChange) are rendered by
+    // React here, from the start, with their own handlers.
+    state: State = {
+      fallback: Boolean(this.props.delegateEventsWithoutReact && !this.props.delegateEvents),
+    };
     private root: Element | null = null;
     private mounted = false;
     private fallbackRequested = false;
@@ -10930,7 +11024,7 @@ function createKeyedRangesBlockComponent(
     componentDidMount(): void {
       this.mounted = true;
       this.listen();
-      if (!this.adopt()) this.activateFallback();
+      if (!this.state.fallback && !this.adopt()) this.activateFallback();
     }
 
     componentDidUpdate(): void {
@@ -10952,14 +11046,53 @@ function createKeyedRangesBlockComponent(
       this.staticValues.length = 0;
     }
 
+    // React renders rows with their handlers only while it owns them (fallback). Otherwise the
+    // container dispatches each event to the row the runtime knows, with its current item.
+    private rowEvent: CompilerKeyedRangeRowEvent = (item, index, eventId, rangeIndex) =>
+      this.state.fallback || !this.currentProps.delegateEvents
+        ? (event) =>
+            this.currentProps.ranges[rangeIndex]?.events?.[eventId]?.invoke(item, index, event)
+        : undefined;
+
+    private dispatchRowEvent(name: string, event: React.SyntheticEvent): void {
+      const target = event.target as Node | null;
+      if (!this.root || !target) return;
+      let element = target.nodeType === 1 ? (target as Element) : target.parentElement;
+      while (element && element.parentElement !== this.root) element = element.parentElement;
+      if (!element) return;
+      for (let rangeIndex = 0; rangeIndex < this.rangeInstances.length; rangeIndex += 1) {
+        for (const instance of this.rangeInstances[rangeIndex].values()) {
+          if (instance.element !== element) continue;
+          dispatchKeyedRowEvent(
+            this.currentProps.ranges[rangeIndex].events || [],
+            instance,
+            name,
+            event,
+          );
+          return;
+        }
+      }
+    }
+
     render(): React.ReactNode {
-      const container = this.currentProps.render();
+      const container = this.currentProps.render(this.rowEvent);
       if (!React.isValidElement(container) || typeof container.type !== "string") {
         throw new TypeError(
           `Compiled keyed ranges ${this.currentProps.id} must own one host container.`,
         );
       }
+      const delegated: Record<string, React.EventHandler<React.SyntheticEvent>> = {};
+      if (this.currentProps.delegateEvents && !this.state.fallback) {
+        for (const range of this.currentProps.ranges) {
+          for (const { name } of range.events || []) {
+            delegated[name] = (event) => {
+              if (!event.isPropagationStopped()) this.dispatchRowEvent(name, event);
+            };
+          }
+        }
+      }
       return React.cloneElement(container, {
+        ...delegated,
         key: this.state.fallback ? `react-${this.fallbackVersion}` : "compiled",
         ref: this.captureRoot,
       } as React.Attributes);
@@ -12796,14 +12929,19 @@ function isFarmCompilerClass(type: unknown): boolean {
  */
 function compiledRootUpdatesWithoutReact(displayName: string, props: unknown): boolean {
   if (displayName.startsWith("FarmCompiled(")) return true;
+  // Keyed ranges own their rows and static-sibling bindings; React renders them again only on
+  // fallback paths (duplicate keys, failed adoption) or when a parent re-renders through React,
+  // which a compiled parent in this root never does. Their rows carry no React-owned events.
+  if (displayName === "FarmCompiledKeyedRanges") return true;
   if (displayName !== "FarmCompiledKeyedRows") return false;
   const rows = props as {
     conditionals?: readonly unknown[];
     events?: ReadonlyArray<{ path?: unknown }>;
     delegateEvents?: boolean;
+    delegateEventsWithoutReact?: boolean;
   };
   const delegated = Boolean(
-    rows.delegateEvents &&
+    (rows.delegateEvents || rows.delegateEventsWithoutReact) &&
     rows.events?.length &&
     rows.events.every((event) => event.path !== undefined),
   );
@@ -12856,6 +12994,23 @@ function setCompiledRootEvent(element: Element, name: string, handler: unknown):
   if (typeof handler !== "function") throw new CompiledRootUnsupported(`${name} value`);
   const capture = name.endsWith("Capture");
   const reactName = capture ? name.slice(0, -"Capture".length) : name;
+  if (reactName === "onChange" && !compiledRootChangeEvent(element)) {
+    // A container's onChange (delegated keyed rows) runs for the controls inside it, on the
+    // native event React's onChange follows for each kind of control.
+    for (const type of ["input", "change"]) {
+      element.addEventListener(
+        type,
+        (event) => {
+          const target = event.target;
+          if (target instanceof Element && compiledRootChangeEvent(target) === type) {
+            (handler as (event: unknown) => void)(toCompiledRootEvent(event, element, "change"));
+          }
+        },
+        capture,
+      );
+    }
+    return;
+  }
   const nativeType =
     reactName === "onChange" ? compiledRootChangeEvent(element) : COMPILED_ROOT_EVENTS[reactName];
   if (!nativeType) throw new CompiledRootUnsupported(`the ${name} event`);
@@ -12907,6 +13062,7 @@ function setCompiledRootProp(element: Element, name: string, value: unknown): vo
     }
   }
   updateAttribute(element, name, value);
+  initializeFieldDefault(element, name, value);
 }
 
 function mountCompiledRootNode(
@@ -12978,8 +13134,14 @@ function mountCompiledRootNode(
     const Component = type as unknown as new (props: unknown) => React.Component & {
       componentDidMount?(): void;
     };
-    const instance = new Component(props);
-    (instance as unknown as { props: unknown }).props = props;
+    // This root maps onChange to native events itself (setCompiledRootEvent), so rows that are
+    // React-owned only for onChange can use the delegated row path here.
+    const instanceProps = (props as { delegateEventsWithoutReact?: boolean })
+      .delegateEventsWithoutReact
+      ? { ...props, delegateEvents: true }
+      : props;
+    const instance = new Component(instanceProps);
+    (instance as unknown as { props: unknown }).props = instanceProps;
     (instance as unknown as { updater: object }).updater = updater;
     const derived = (
       type as { getDerivedStateFromProps?: (props: unknown, state: unknown) => unknown }

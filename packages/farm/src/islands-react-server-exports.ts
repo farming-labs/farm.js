@@ -793,7 +793,10 @@ function scanPackage(directory: string): PackageScan {
  * or one that ships an ES module build only through `module` beside a CommonJS `main`
  * (react-wrap-balancer), whose default export Node would read as the whole CommonJS exports object.
  */
-export function findFarmServerBundledPackage(importer: string, specifier: string): string | null {
+export function findFarmServerBundledPackage(
+  importer: string,
+  specifier: string,
+): FarmServerBundledPackage | null {
   const parsed = packageNameOf(specifier);
   // Farm's own packages stay external: bundling a second copy of the core would split its
   // module state (route definitions, request context) from the copy the server runtime loads.
@@ -811,12 +814,45 @@ export function findFarmServerBundledPackage(importer: string, specifier: string
       typeof manifest.main === "string" &&
       path.resolve(directory, manifest.main) !== path.resolve(directory, manifest.module)
     ) {
-      return parsed.name;
+      return { name: parsed.name, prebundle: isSelfContainedPackage(manifest, importer) };
     }
   } catch {
     return null;
   }
-  return scanPackage(directory).stylesheets ? parsed.name : null;
+  return scanPackage(directory).stylesheets ? { name: parsed.name, prebundle: false } : null;
+}
+
+/**
+ * Whether a package's bundle can hold only its own modules: it has no dependencies, and every
+ * peer it requires resolves from `importer`, as it will from the bundle Vite writes under the
+ * app's `node_modules/.vite`. Under pnpm a package's own dependencies resolve only from its
+ * directory, so a bundle that left them as imports could not load them.
+ */
+function isSelfContainedPackage(
+  manifest: {
+    dependencies?: Record<string, string>;
+    peerDependencies?: Record<string, string>;
+    peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+  },
+  importer: string,
+): boolean {
+  if (Object.keys(manifest.dependencies ?? {}).length > 0) return false;
+  return Object.keys(manifest.peerDependencies ?? {}).every(
+    (peer) =>
+      manifest.peerDependenciesMeta?.[peer]?.optional === true ||
+      findPackageDirectory(importer, peer) !== null,
+  );
+}
+
+/** A package the server graph bundles, and how development serves it. */
+export interface FarmServerBundledPackage {
+  name: string;
+  /**
+   * Development pre-bundles it for SSR: its ES module build is only a `module` field beside a
+   * CommonJS `main`, it has no dependencies, and the app resolves every peer it requires. A
+   * package bundled for its stylesheet imports is never pre-bundled.
+   */
+  prebundle: boolean;
 }
 
 /**

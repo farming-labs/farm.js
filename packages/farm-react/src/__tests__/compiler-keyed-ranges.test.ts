@@ -128,7 +128,7 @@ describe("React AOT keyed-range compiler", () => {
     expect(result.code).not.toContain("farmBlocks.KeyedList");
   });
 
-  it("keeps an interactive component-root range on the React-owned keyed boundary", async () => {
+  it("delegates row clicks in a component-root range to the ranges container", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Tasks() {
@@ -148,8 +148,50 @@ describe("React AOT keyed-range compiler", () => {
     `);
 
     expect(result.compiled).toEqual(["Tasks"]);
-    expect(result.code).toContain("farmBlocks.KeyedList");
-    expect(result.code).not.toContain("farmBlocks.KeyedRanges");
+    expect(result.code).toContain("farmBlocks.KeyedRanges");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("delegateEvents={true}");
+    // React renders the row handler only while it owns the rows (fallback).
+    expect(result.code).toContain("onClick={_farmRowEvent(item, 0, 0, 0)}");
+    expect(result.code).toMatch(/events: \[\{\s*name: "onClick",\s*path: \[0\]/);
+  });
+
+  it("delegates row onChange in a range only on roots without React DOM", async () => {
+    const source = `
+      import { useState } from "react";
+      export function Tasks() {
+        const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
+        return (
+          <ul>
+            <li data-static="header">Tasks</li>
+            {items.map((item) => (
+              <li key={item.id}>
+                <input value={item.label} onChange={() => setItems([])} />
+              </li>
+            ))}
+            <li data-static="footer">End</li>
+          </ul>
+        );
+      }
+    `;
+    // React derives onChange from the row's own fiber, so React DOM renders these rows (the
+    // block's React fallback) and a compiled root delegates the event to the container.
+    const result = await compile(source);
+    expect(result.compiled).toEqual(["Tasks"]);
+    expect(result.code).toContain("farmBlocks.KeyedRanges");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("delegateEventsWithoutReact={true}");
+    expect(result.code).not.toContain("delegateEvents={true}");
+    expect(result.code).toContain("onChange={_farmRowEvent(item, 0, 0, 0)}");
+
+    const optedOut = await compileReactModule(
+      source,
+      "/app/KeyedRanges.tsx",
+      normalizeReactCompilerOptions({ compiledRoot: false }),
+    );
+    expect(optedOut.compiled).toEqual(["Tasks"]);
+    expect(optedOut.code).toContain("farmBlocks.KeyedList");
+    expect(optedOut.code).not.toContain("farmBlocks.KeyedRanges");
   });
 
   it("compiles a keyed range directly in the component root", async () => {
@@ -227,9 +269,7 @@ describe("React AOT keyed-range compiler", () => {
   it("keeps a component sibling in the root outside the range-owned contract", async () => {
     const result = await compile(`
       import { useState } from "react";
-      function Heading() {
-        return <li>Tasks</li>;
-      }
+      import { Heading } from "./heading";
       export function Tasks() {
         const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
         return (

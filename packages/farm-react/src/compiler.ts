@@ -253,6 +253,9 @@ const DELEGATABLE_KEYED_ROW_EVENTS = new Set([
 
 function canDelegateKeyedRowEvents(
   plan: Pick<KeyedRowsPlan, "events" | "conditionals" | "source">,
+  // React derives onChange from the row's own fiber, so only a root without React DOM, which
+  // maps onChange to native events itself, can delegate it.
+  withoutReact = false,
 ): boolean {
   if (plan.events.length === 0 || plan.conditionals.length > 0) return false;
   if (
@@ -265,9 +268,10 @@ function canDelegateKeyedRowEvents(
   ) {
     return false;
   }
-  return plan.events.every((event) =>
-    DELEGATABLE_KEYED_ROW_EVENTS.has(event.name.replace(/Capture$/, "")),
-  );
+  return plan.events.every((event) => {
+    const name = event.name.replace(/Capture$/, "");
+    return DELEGATABLE_KEYED_ROW_EVENTS.has(name) || (withoutReact && name === "onChange");
+  });
 }
 
 interface KeyedRangePlan {
@@ -278,6 +282,8 @@ interface KeyedRangePlan {
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
   row: t.JSXElement;
   bindings: PendingKeyedRowBinding[];
+  /** Delegatable row events; only top-level keyed ranges carry them. */
+  events?: PendingKeyedRowEvent[];
   syntax: "map" | "list";
 }
 
@@ -4965,6 +4971,213 @@ function isPrimitiveLiteral(node: t.Node | null): boolean {
  * pipeline is inline and takes at most an item and an index, nothing can observe or mutate that
  * array, so it moves to a module constant and the list compiles like one over any constant.
  */
+interface InlinableChild {
+  props: Map<string, string>;
+  root: t.JSXElement;
+  scope: NodePath["scope"];
+  localNames: Set<string>;
+  freeNames: Set<string>;
+}
+
+/**
+ * A module-local child such as `function Footer({ remaining }) { return <footer>...</footer>; }`
+ * that calls no hooks and returns one JSX element renders the same output wherever it is used.
+ * Returns what inlining it needs, or undefined when inlining could change what React would do.
+ */
+function inlinableChild(
+  name: string,
+  programPath: NodePath<t.Program>,
+): InlinableChild | undefined {
+  const binding = programPath.scope.getBinding(name);
+  if (!binding?.constant || (binding.kind !== "hoisted" && binding.kind !== "const")) return;
+  // Every reference must be a JSX tag (or an export): `Child.defaultProps = ...` and other uses
+  // of the function itself can change what React renders.
+  const referencedOnlyAsTag = binding.referencePaths.every(
+    (reference) =>
+      reference.isJSXIdentifier() ||
+      reference.parentPath?.isExportSpecifier() ||
+      reference.parentPath?.isExportDefaultDeclaration(),
+  );
+  if (!referencedOnlyAsTag) return;
+  const functionPath = binding.path.isFunctionDeclaration()
+    ? binding.path
+    : binding.path.isVariableDeclarator()
+      ? binding.path.get("init")
+      : undefined;
+  if (
+    !functionPath ||
+    Array.isArray(functionPath) ||
+    !(
+      functionPath.isFunctionDeclaration() ||
+      functionPath.isArrowFunctionExpression() ||
+      functionPath.isFunctionExpression()
+    )
+  ) {
+    return;
+  }
+  const fn = functionPath.node as t.Function;
+  if (fn.async || fn.generator || fn.params.length > 1) return;
+  const props = new Map<string, string>();
+  const param = fn.params[0];
+  if (param) {
+    if (!t.isObjectPattern(param)) return;
+    for (const property of param.properties) {
+      if (
+        !t.isObjectProperty(property) ||
+        property.computed ||
+        !t.isIdentifier(property.key) ||
+        !t.isIdentifier(property.value) ||
+        property.key.name === "children"
+      ) {
+        return;
+      }
+      props.set(property.key.name, property.value.name);
+    }
+  }
+  const body = fn.body;
+  const returned = t.isJSXElement(body)
+    ? body
+    : t.isBlockStatement(body) &&
+        body.body.length === 1 &&
+        t.isReturnStatement(body.body[0]) &&
+        t.isJSXElement(body.body[0].argument)
+      ? body.body[0].argument
+      : undefined;
+  if (!returned) return;
+  let unsafe = false;
+  const localNames = new Set<string>();
+  const freeNames = new Set<string>();
+  functionPath.traverse({
+    CallExpression(path) {
+      const callee = path.node.callee;
+      const calleeName = t.isIdentifier(callee)
+        ? callee.name
+        : t.isMemberExpression(callee) && !callee.computed && t.isIdentifier(callee.property)
+          ? callee.property.name
+          : "";
+      if (/^use([A-Z0-9]|$)/.test(calleeName)) unsafe = true;
+    },
+    ThisExpression() {
+      unsafe = true;
+    },
+    Identifier(path) {
+      if (path.node.name === "arguments") unsafe = true;
+    },
+    JSXIdentifier(path) {
+      // A tag naming the child itself would inline forever.
+      if (path.node.name === name) unsafe = true;
+    },
+    Scopable(path) {
+      for (const local of Object.keys(path.scope.bindings)) localNames.add(local);
+    },
+    ReferencedIdentifier(path) {
+      const reference = path.node.name;
+      const owner = path.scope.getBinding(reference);
+      if (!owner || owner.scope === programPath.scope) freeNames.add(reference);
+    },
+  });
+  if (unsafe) return;
+  for (const local of props.values()) localNames.delete(local);
+  return { props, root: returned, scope: functionPath.scope, localNames, freeNames };
+}
+
+function isDuplicableProp(expression: t.Expression, safeGlobals: ReadonlySet<string>): boolean {
+  return (
+    t.isArrowFunctionExpression(expression) ||
+    t.isFunctionExpression(expression) ||
+    validateDerivedExpression(expression, safeGlobals) === undefined
+  );
+}
+
+/**
+ * Replaces `<Child prop={value} />` in a compiler candidate with the child's own JSX, props
+ * substituted, so the parent compiles as one template instead of keeping the child as an island
+ * that re-renders through React. Only children `inlinableChild` accepts are inlined, and only
+ * when the move cannot change which binding a name refers to or how often a prop is evaluated.
+ */
+function inlineStatelessChildren(
+  component: NodePath,
+  programPath: NodePath<t.Program>,
+  safeGlobals: ReadonlySet<string>,
+): void {
+  let budget = 64;
+  component.traverse({
+    JSXElement(path) {
+      const tag = path.node.openingElement.name;
+      if (!t.isJSXIdentifier(tag) || !isComponentName(tag.name) || budget <= 0) return;
+      if (path.scope.getBinding(tag.name) !== programPath.scope.getBinding(tag.name)) return;
+      const child = inlinableChild(tag.name, programPath);
+      if (!child || meaningfulJsxChildren(path.node).length > 0) return;
+      const values = new Map<string, t.Expression>();
+      for (const attribute of path.node.openingElement.attributes) {
+        if (!t.isJSXAttribute(attribute) || !t.isJSXIdentifier(attribute.name)) return;
+        const prop = attribute.name.name;
+        if (prop === "key" || prop === "ref" || prop === "children") return;
+        const value = attribute.value;
+        const expression =
+          value === null || value === undefined
+            ? t.booleanLiteral(true)
+            : t.isStringLiteral(value)
+              ? t.stringLiteral(value.value)
+              : t.isJSXExpressionContainer(value) && t.isExpression(value.expression)
+                ? value.expression
+                : undefined;
+        if (!expression) return;
+        values.set(prop, expression);
+      }
+      // A prop the child never reads is dropped, so it must have no effects.
+      for (const [prop, expression] of values) {
+        if (!child.props.has(prop) && !isDuplicableProp(expression, safeGlobals)) return;
+      }
+      // The child's free names must mean the same thing at the use site.
+      for (const name of child.freeNames) {
+        if (child.props.has(name) || [...child.props.values()].includes(name)) continue;
+        if (path.scope.getBinding(name) !== child.scope.getBinding(name)) return;
+      }
+      const root = t.cloneNode(child.root, true);
+      const file = expressionFile(root);
+      const counts = new Map<string, number>();
+      const localToProp = new Map([...child.props].map(([prop, local]) => [local, prop]));
+      let rejected = false;
+      traverse(file, {
+        ReferencedIdentifier(reference) {
+          const prop = localToProp.get(reference.node.name);
+          if (!prop || reference.scope.hasBinding(reference.node.name, { noGlobals: true })) return;
+          // A prop used as a tag (`<Icon />`) cannot take an expression's place.
+          if (t.isJSXIdentifier(reference.node)) rejected = true;
+          counts.set(prop, (counts.get(prop) ?? 0) + 1);
+        },
+      });
+      for (const [prop, count] of counts) {
+        const value = values.get(prop);
+        if (!value) continue;
+        if (count > 1 && !isDuplicableProp(value, safeGlobals)) rejected = true;
+        // A name the prop reads must not be rebound by the child's own callbacks.
+        traverse(expressionFile(t.cloneNode(value, true)), {
+          ReferencedIdentifier(reference) {
+            if (child.localNames.has(reference.node.name)) rejected = true;
+          },
+        });
+      }
+      if (rejected) return;
+      traverse(file, {
+        ReferencedIdentifier(reference) {
+          const prop = localToProp.get(reference.node.name);
+          if (!prop || reference.scope.hasBinding(reference.node.name, { noGlobals: true })) return;
+          const value = values.get(prop);
+          const replacement = value
+            ? t.cloneNode(value, true)
+            : t.unaryExpression("void", t.numericLiteral(0));
+          reference.replaceWith(replacement);
+          reference.skip();
+        },
+      });
+      budget -= 1;
+      path.replaceWith((file.program.body[0] as t.ExpressionStatement).expression);
+    },
+  });
+}
+
 function hoistConstantListCollections(component: NodePath, programPath: NodePath<t.Program>): void {
   const hoisted: t.VariableDeclaration[] = [];
   component.traverse({
@@ -5462,6 +5675,64 @@ function reactOwnedAttribute(name: string, attribute: t.JSXAttribute): boolean {
   );
 }
 
+/** The inline handler a keyed row event can run from its rows block, or why it cannot. */
+function keyedRowEventHandler(
+  attribute: t.JSXAttribute,
+): t.ArrowFunctionExpression | t.FunctionExpression | string {
+  if (
+    !t.isJSXExpressionContainer(attribute.value) ||
+    (!t.isArrowFunctionExpression(attribute.value.expression) &&
+      !t.isFunctionExpression(attribute.value.expression))
+  ) {
+    return "interactive compiled keyed rows require inline synchronous event handlers";
+  }
+  const handler = attribute.value.expression;
+  if (handler.async || handler.generator) {
+    return "interactive compiled keyed row handlers must be synchronous";
+  }
+  if (containsDirectHookCall(handler)) {
+    return "Hooks cannot be called inside compiled keyed row handlers";
+  }
+  const unsupported = validateKeyedRowEventHandler(handler);
+  if (unsupported) return `interactive compiled keyed row handlers cannot use ${unsupported}`;
+  return handler;
+}
+
+/**
+ * Events on a row's static elements, in the order the keyed-row analysis assigns ids. Rows whose
+ * conditional content recursive host blocks own need them collected apart from that analysis,
+ * which stops at the conditional's container. Handlers inside branches are not static and stay out.
+ */
+function staticKeyedRowEvents(
+  row: t.JSXElement,
+  compilerSetters: ReadonlySet<string>,
+): PendingKeyedRowEvent[] | undefined {
+  const events: PendingKeyedRowEvent[] = [];
+  const visit = (element: t.JSXElement, path: number[]): boolean => {
+    for (const attribute of element.openingElement.attributes) {
+      if (!t.isJSXAttribute(attribute)) continue;
+      const name = jsxAttributeName(attribute);
+      if (!name || !/^on[A-Z]/.test(name)) continue;
+      const handler = keyedRowEventHandler(attribute);
+      if (typeof handler === "string") return false;
+      events.push({
+        id: events.length,
+        path: [...path],
+        name,
+        value: stabilizeDeferredEventCurrentTarget(handler, compilerSetters),
+      });
+    }
+    let elementIndex = 0;
+    for (const child of element.children) {
+      if (!t.isJSXElement(child)) continue;
+      if (!visit(child, [...path, elementIndex])) return false;
+      elementIndex += 1;
+    }
+    return true;
+  };
+  return visit(row, []) ? events : undefined;
+}
+
 function analyzeKeyedRowTree(
   row: t.JSXElement,
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression,
@@ -5554,24 +5825,8 @@ function analyzeKeyedRowTree(
       }
       if (name === "key") continue;
       if (/^on[A-Z]/.test(name)) {
-        if (
-          !t.isJSXExpressionContainer(attribute.value) ||
-          (!t.isArrowFunctionExpression(attribute.value.expression) &&
-            !t.isFunctionExpression(attribute.value.expression))
-        ) {
-          return "interactive compiled keyed rows require inline synchronous event handlers";
-        }
-        const handler = attribute.value.expression;
-        if (handler.async || handler.generator) {
-          return "interactive compiled keyed row handlers must be synchronous";
-        }
-        if (containsDirectHookCall(handler)) {
-          return "Hooks cannot be called inside compiled keyed row handlers";
-        }
-        const unsupported = validateKeyedRowEventHandler(handler);
-        if (unsupported) {
-          return `interactive compiled keyed row handlers cannot use ${unsupported}`;
-        }
+        const handler = keyedRowEventHandler(attribute);
+        if (typeof handler === "string") return handler;
         events.push({
           id: events.length,
           path: [...path],
@@ -5956,6 +6211,7 @@ function analyzeKeyedRangesContainer(
   safeGlobals: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
   allowSingleRange = false,
+  delegateWithoutReact = false,
 ):
   | {
       ranges: KeyedRangePlan[];
@@ -5985,7 +6241,19 @@ function analyzeKeyedRangesContainer(
   for (const child of children) {
     const range = analyzeKeyedRowChild(child, statesByValue, safeGlobals, listNames);
     if (range) {
-      if (range.events.length > 0 || range.conditionals.length > 0) return undefined;
+      if (range.conditionals.length > 0) return undefined;
+      // Row events run through the ranges container, as for keyed rows, so they must be ones
+      // React dispatches without the row's own fiber, or (onChange) ones a root without React
+      // DOM dispatches; React DOM then renders those rows itself.
+      if (
+        range.events.length > 0 &&
+        !canDelegateKeyedRowEvents(
+          { events: range.events, conditionals: [], source: container },
+          delegateWithoutReact,
+        )
+      ) {
+        return undefined;
+      }
       ranges.push({
         before: staticBefore,
         source: range.source,
@@ -5994,6 +6262,7 @@ function analyzeKeyedRangesContainer(
         renderCallback: range.renderCallback,
         row: range.row,
         bindings: range.bindings,
+        ...(range.events.length > 0 ? { events: range.events } : {}),
         syntax: range.syntax,
       });
       for (const dependency of range.dependencies) dependencies.add(dependency);
@@ -6198,6 +6467,8 @@ function analyzeRecursiveHostTree(
   listNames: ReadonlySet<string>,
   parent: number,
   allocateId: () => number,
+  /** Event attributes on static row elements that the enclosing keyed rows block delegates. */
+  delegatedEvents: ReadonlySet<t.JSXAttribute> = new Set(),
 ): RecursiveHostTreeAnalysis {
   const bindings: PendingKeyedRowBinding[] = [];
   const plans: HostDescriptorBlockPlan[] = [];
@@ -6231,6 +6502,7 @@ function analyzeRecursiveHostTree(
         return `recursive compiler-owned block ${name} requires React ownership`;
       }
       if (/^on[A-Z]/.test(name)) {
+        if (delegatedEvents.has(attribute as t.JSXAttribute)) continue;
         return "recursive compiler-owned block events require React ownership";
       }
       if (
@@ -6308,6 +6580,7 @@ function analyzeRecursiveHostTree(
         listNames,
         id,
         allocateId,
+        delegatedEvents,
       );
       if (mixed) {
         plans.push(...mixed.nestedPlans);
@@ -6363,6 +6636,7 @@ function analyzeRecursiveHostTree(
             listNames,
             owner,
             allocateId,
+            delegatedEvents,
           );
           if (nested.reason) return nested.reason;
           plans.push(...nested.plans);
@@ -6527,6 +6801,7 @@ function analyzeRecursiveHostTree(
           listNames,
           owner,
           allocateId,
+          delegatedEvents,
         );
         if (nested.reason) return nested.reason;
         plans.push(...nested.plans);
@@ -6601,27 +6876,110 @@ function analyzeRecursiveHostTree(
   return { bindings, plans, blocks, reason };
 }
 
+function jsxCanRenderElements(expression: t.Expression): boolean {
+  let found = false;
+  traverse(expressionFile(cloneExpression(expression)), {
+    JSXElement(path) {
+      found = true;
+      path.stop();
+    },
+    JSXFragment(path) {
+      found = true;
+      path.stop();
+    },
+  });
+  return found;
+}
+
+/**
+ * True when, at every level of the path, only host elements precede the next element: no
+ * conditional, list or component that renders a varying number of elements. Counting static
+ * elements then finds the same DOM element.
+ */
+function keyedRowEventPathIsStable(row: t.JSXElement, path: readonly number[]): boolean {
+  let element = row;
+  for (const index of path) {
+    let seen = 0;
+    let next: t.JSXElement | undefined;
+    for (const child of element.children) {
+      if (t.isJSXElement(child)) {
+        if (!isHostElement(child)) return false;
+        if (seen === index) {
+          next = child;
+          break;
+        }
+        seen += 1;
+        continue;
+      }
+      if (t.isJSXFragment(child)) return false;
+      if (
+        t.isJSXExpressionContainer(child) &&
+        !t.isJSXEmptyExpression(child.expression) &&
+        jsxCanRenderElements(child.expression)
+      ) {
+        return false;
+      }
+    }
+    if (!next) return false;
+    element = next;
+  }
+  return true;
+}
+
 function analyzeCompilerOwnedKeyedRowHostBlocks(
   shape: KeyedRowsShape,
+  container: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
   safeGlobals: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
   parent: number,
   allocateId: () => number,
+  delegateWithoutReact = false,
 ):
   | {
       row: t.JSXElement;
       bindings: PendingKeyedRowBinding[];
       descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
       nestedPlans: HostDescriptorBlockPlan[];
+      events: PendingKeyedRowEvent[];
     }
   | undefined {
-  if (shape.events.length > 0) return undefined;
+  const events = shape.rowReason
+    ? staticKeyedRowEvents(
+        shape.row,
+        new Set([...statesByValue.values()].map((state) => state.setterName)),
+      )
+    : shape.events;
+  // The rows container dispatches each event by its element's static path, so that path must
+  // also be its DOM path: no child that can render elements may come before the element.
+  if (
+    !events ||
+    (events.length > 0 &&
+      (!canDelegateKeyedRowEvents(
+        { events, conditionals: [], source: container },
+        delegateWithoutReact,
+      ) ||
+        !events.every((event) => keyedRowEventPathIsStable(shape.row, event.path))))
+  ) {
+    return undefined;
+  }
 
   const row = t.cloneNode(shape.row, true);
   row.openingElement.attributes = row.openingElement.attributes.filter(
     (attribute) => !t.isJSXAttribute(attribute) || jsxAttributeName(attribute) !== "key",
   );
+  const delegatedEvents = new Set<t.JSXAttribute>();
+  for (const event of events) {
+    let element = row;
+    for (const index of event.path) {
+      element = element.children.filter((child) => t.isJSXElement(child))[index] as t.JSXElement;
+    }
+    for (const attribute of element.openingElement.attributes) {
+      if (t.isJSXAttribute(attribute) && jsxAttributeName(attribute) === event.name) {
+        delegatedEvents.add(attribute);
+      }
+    }
+  }
   const analysis = analyzeRecursiveHostTree(
     row,
     statesByValue,
@@ -6629,6 +6987,7 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
     listNames,
     parent,
     allocateId,
+    delegatedEvents,
   );
   if (analysis.reason || analysis.plans.length === 0) {
     return undefined;
@@ -6638,6 +6997,7 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
     bindings: analysis.bindings,
     descriptorBlocks: analysis.blocks,
     nestedPlans: analysis.plans,
+    events,
   };
 }
 
@@ -6879,6 +7239,7 @@ function analyzeMixedRangesContainer(
   listNames: ReadonlySet<string>,
   parent: number,
   allocateId: () => number,
+  delegatedEvents: ReadonlySet<t.JSXAttribute> = new Set(),
 ):
   | {
       ranges: MixedRangePlan[];
@@ -7022,6 +7383,7 @@ function analyzeMixedRangesContainer(
       listNames,
       parent,
       allocateId,
+      delegatedEvents,
     );
     if (staticAnalysis.reason) return undefined;
     for (const binding of staticAnalysis.bindings) {
@@ -7336,6 +7698,7 @@ function rewriteKeyedRowEventAttributes(
   eventFactory: t.Identifier,
   item: t.Identifier,
   index: t.Expression,
+  extraArguments: readonly t.Expression[] = [],
 ): void {
   const eventByLocation = new Map(
     events.map((event) => [`${event.path.join(".")}:${event.name}`, event] as const),
@@ -7352,6 +7715,7 @@ function rewriteKeyedRowEventAttributes(
           t.cloneNode(item),
           t.cloneNode(index),
           t.numericLiteral(event.id),
+          ...extraArguments.map((argument) => t.cloneNode(argument)),
         ]),
       );
     }
@@ -7642,6 +8006,7 @@ function keyedRowsBoundary(
     ...plan.conditionals.map((conditional) => conditional.test),
   ]);
   const delegatedEvents = canDelegateKeyedRowEvents(plan);
+  const delegatedWithoutReact = !delegatedEvents && canDelegateKeyedRowEvents(plan, true);
   const bindingTargets = keyedRowBindingTargets(plan);
   const renderSource = keyedRowsRenderSource(plan, eventFactory, conditionalFactory);
   const renderFactoryParameters =
@@ -7760,10 +8125,12 @@ function keyedRowsBoundary(
                   ),
                 ),
               ),
-              ...(delegatedEvents
+              ...(delegatedEvents || delegatedWithoutReact
                 ? [
                     t.jsxAttribute(
-                      t.jsxIdentifier("delegateEvents"),
+                      t.jsxIdentifier(
+                        delegatedEvents ? "delegateEvents" : "delegateEventsWithoutReact",
+                      ),
                       t.jsxExpressionContainer(t.booleanLiteral(true)),
                     ),
                   ]
@@ -7839,7 +8206,69 @@ function keyedRangeObject(
         range.bindings.map((binding) => keyedRowBindingObject(binding, parameters)),
       ),
     ),
+    ...(range.events?.length
+      ? [
+          t.objectProperty(
+            t.identifier("events"),
+            t.arrayExpression(range.events.map((event) => keyedRowEventObject(event, parameters))),
+          ),
+        ]
+      : []),
   ]);
+}
+
+/**
+ * Replaces each range's row event handlers in the rendered source with
+ * `eventFactory(item, index, eventId, rangeIndex)`, which yields the handler only while React
+ * owns the rows. Ranges are the container's non-host children, in order.
+ */
+function rewriteKeyedRangeEvents(
+  source: t.JSXElement,
+  plan: KeyedRangesPlan,
+  eventFactory: t.Identifier,
+): void {
+  let rangeIndex = 0;
+  for (const child of meaningfulJsxChildren(source)) {
+    if (t.isJSXElement(child) && isHostElement(child)) continue;
+    const range = plan.ranges[rangeIndex];
+    const currentRange = rangeIndex;
+    rangeIndex += 1;
+    if (!range?.events?.length) continue;
+    let callback: t.ArrowFunctionExpression | t.FunctionExpression | undefined;
+    if (
+      t.isJSXExpressionContainer(child) &&
+      !t.isJSXEmptyExpression(child.expression) &&
+      isMapCall(child.expression)
+    ) {
+      const candidate = child.expression.arguments[0];
+      if (t.isArrowFunctionExpression(candidate) || t.isFunctionExpression(candidate)) {
+        callback = candidate;
+      }
+    } else if (t.isJSXElement(child)) {
+      const renderChild = meaningfulJsxChildren(child)[0];
+      if (
+        t.isJSXExpressionContainer(renderChild) &&
+        (t.isArrowFunctionExpression(renderChild.expression) ||
+          t.isFunctionExpression(renderChild.expression))
+      ) {
+        callback = renderChild.expression;
+      }
+    }
+    const row = callback && returnedExpression(callback);
+    const item = callback?.params[0];
+    const index = callback?.params[1];
+    if (!t.isJSXElement(row) || !t.isIdentifier(item)) {
+      throw new Error("keyed range events must belong to an inline row callback");
+    }
+    rewriteKeyedRowEventAttributes(
+      row,
+      range.events,
+      eventFactory,
+      item,
+      t.isIdentifier(index) ? index : t.numericLiteral(0),
+      [t.numericLiteral(currentRange)],
+    );
+  }
 }
 
 function keyedRangesBoundary(blockRuntime: t.Identifier, plan: KeyedRangesPlan): t.JSXElement {
@@ -7848,6 +8277,18 @@ function keyedRangesBoundary(blockRuntime: t.Identifier, plan: KeyedRangesPlan):
     t.jsxIdentifier("KeyedRanges"),
   );
   const source = t.cloneNode(plan.source, true);
+  const hasEvents = plan.ranges.some((range) => range.events?.length);
+  // onChange rows are delegated only on a root without React DOM; React DOM renders them.
+  const delegatedEvents = plan.ranges.every(
+    (range) =>
+      !range.events?.length ||
+      canDelegateKeyedRowEvents({ events: range.events, conditionals: [], source: plan.source }),
+  );
+  const eventFactory = uniqueLocalIdentifier("_farmRowEvent", [
+    plan.source,
+    ...plan.ranges.flatMap((range) => (range.events || []).map((event) => event.value)),
+  ]);
+  if (hasEvents) rewriteKeyedRangeEvents(source, plan, eventFactory);
   let rootRef: t.Expression | undefined;
   source.openingElement.attributes = source.openingElement.attributes.filter((attribute) => {
     if (
@@ -7868,8 +8309,18 @@ function keyedRangesBoundary(blockRuntime: t.Identifier, plan: KeyedRangesPlan):
         t.jsxAttribute(t.jsxIdentifier("id"), t.jsxExpressionContainer(t.numericLiteral(plan.id))),
         t.jsxAttribute(
           t.jsxIdentifier("render"),
-          t.jsxExpressionContainer(t.arrowFunctionExpression([], source)),
+          t.jsxExpressionContainer(
+            t.arrowFunctionExpression(hasEvents ? [t.cloneNode(eventFactory)] : [], source),
+          ),
         ),
+        ...(hasEvents
+          ? [
+              t.jsxAttribute(
+                t.jsxIdentifier(delegatedEvents ? "delegateEvents" : "delegateEventsWithoutReact"),
+                t.jsxExpressionContainer(t.booleanLiteral(true)),
+              ),
+            ]
+          : []),
         ...(rootRef
           ? [t.jsxAttribute(t.jsxIdentifier("rootRef"), t.jsxExpressionContainer(rootRef))]
           : []),
@@ -8245,6 +8696,7 @@ function analyzeComposableBlocks(
   safeGlobals: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
   allowedComponentNames: ReadonlySet<string>,
+  delegateWithoutReact: boolean,
 ): ComposableBlockAnalysis {
   const plans: ComposableBlockPlan[] = [];
   const componentElements = new Set<t.JSXElement>();
@@ -8401,7 +8853,14 @@ function analyzeComposableBlocks(
           nextId = mixedRangeStart;
           const keyedRanges = insideConditional
             ? undefined
-            : analyzeKeyedRangesContainer(child, statesByValue, safeGlobals, listNames);
+            : analyzeKeyedRangesContainer(
+                child,
+                statesByValue,
+                safeGlobals,
+                listNames,
+                false,
+                delegateWithoutReact,
+              );
           if (keyedRanges) {
             plans.push({
               kind: "keyed-ranges",
@@ -8481,11 +8940,13 @@ function analyzeComposableBlocks(
             const nestedStart = nextId;
             const hostBlocks = analyzeCompilerOwnedKeyedRowHostBlocks(
               keyedRows,
+              child,
               statesByValue,
               safeGlobals,
               listNames,
               keyedRowsId,
               () => nextId++,
+              delegateWithoutReact,
             );
             if (!hostBlocks) nextId = nestedStart;
             if (keyedRows.rowReason && !hostBlocks) {
@@ -8508,7 +8969,7 @@ function analyzeComposableBlocks(
               renderCallback: keyedRows.renderCallback,
               row: hostBlocks?.row || keyedRows.row,
               bindings: hostBlocks?.bindings || keyedRows.bindings,
-              events: keyedRows.events,
+              events: hostBlocks?.events || keyedRows.events,
               conditionals: hostBlocks ? [] : keyedRows.conditionals,
               descriptorBlocks: hostBlocks?.descriptorBlocks,
               syntax: keyedRows.syntax,
@@ -8663,7 +9124,14 @@ function analyzeComposableBlocks(
   }
   nextId = rootMixedRangeStart;
 
-  const rootRanges = analyzeKeyedRangesContainer(root, statesByValue, safeGlobals, listNames, true);
+  const rootRanges = analyzeKeyedRangesContainer(
+    root,
+    statesByValue,
+    safeGlobals,
+    listNames,
+    true,
+    delegateWithoutReact,
+  );
   if (rootRanges) {
     plans.push({
       kind: "keyed-ranges",
@@ -9324,6 +9792,9 @@ function compileCandidate(
   listNames: ReadonlySet<string>,
   moduleId: string,
   reactivity: NormalizedReactCompilerOptions["reactivity"],
+  // Rows whose events only a root without React DOM can delegate (onChange) may stay
+  // compiler-owned; React DOM renders them through the block's React fallback.
+  delegateWithoutReact: boolean,
 ): string | undefined {
   const { path, name, statementPath } = candidate;
   if (path.node.async || path.node.generator)
@@ -9550,6 +10021,7 @@ function compileCandidate(
     safeGlobals,
     listNames,
     allowedComponentNames,
+    delegateWithoutReact,
   );
   let analysis = analyzeHostTree(
     expandedReactiveRoot,
@@ -9573,6 +10045,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     analysis = analyzeHostTree(
       expandedReactiveRoot,
@@ -9609,6 +10082,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       hintedRoot.root,
@@ -9655,6 +10129,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       appendHintedRoot.root,
@@ -9704,6 +10179,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       prependHintedRoot.root,
@@ -9740,6 +10216,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       rollingWindowHintedRoot.root,
@@ -9779,6 +10256,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       positionHintedRoot.root,
@@ -9841,6 +10319,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       reorderPipelineHintedRoot.root,
@@ -9894,6 +10373,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       reorderHintedRoot.root,
@@ -9932,6 +10412,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       sortHintedRoot.root,
@@ -9971,6 +10452,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       sliceHintedRoot.root,
@@ -10010,6 +10492,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       filterHintedRoot.root,
@@ -10053,6 +10536,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedMappedStructuralHintedRoot.root,
@@ -10106,6 +10590,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedStructuralMapHintedRoot.root,
@@ -10160,6 +10645,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedStructuralPrependMapHintedRoot.root,
@@ -10207,6 +10693,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedRollingWindowMapHintedRoot.root,
@@ -10285,6 +10772,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedReorderMapHintedRoot.root,
@@ -10332,6 +10820,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       queuedStructuralReorderHintedRoot.root,
@@ -10392,6 +10881,7 @@ function compileCandidate(
       safeGlobals,
       listNames,
       allowedComponentNames,
+      delegateWithoutReact,
     );
     const hintedAnalysis = analyzeHostTree(
       keyedCollectionHintedRoot.root,
@@ -10836,6 +11326,15 @@ export async function compileReactModule(
         const usedRuntimeFeatures = new Set<CompilerRuntimeFeatureName>();
         for (const candidate of candidates) {
           hoistConstantListCollections(candidate.path, programPath);
+          inlineStatelessChildren(
+            candidate.path,
+            programPath,
+            new Set(
+              [...SAFE_GLOBAL_CALLS, "Math"].filter(
+                (name) => !candidate.path.scope.getBinding(name),
+              ),
+            ),
+          );
           const reason = compileCandidate(
             candidate,
             createComponentIdentifier,
@@ -10873,6 +11372,7 @@ export async function compileReactModule(
             listNames,
             id,
             options.reactivity,
+            options.compiledRoot !== false,
           );
           if (reason) {
             diagnostics.push({

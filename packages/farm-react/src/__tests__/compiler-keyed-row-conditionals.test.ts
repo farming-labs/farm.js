@@ -6,9 +6,11 @@ import { compileReactModule } from "../compiler";
 import { normalizeReactCompilerOptions } from "../index";
 
 const infer = normalizeReactCompilerOptions(true);
+// An app that opts out of compiled roots keeps rows React DOM must own on React-owned paths.
+const withoutCompiledRoot = normalizeReactCompilerOptions({ compiledRoot: false });
 
-async function compile(source: string) {
-  return compileReactModule(source, "/app/RowConditionals.tsx", infer);
+async function compile(source: string, options = infer) {
+  return compileReactModule(source, "/app/RowConditionals.tsx", options);
 }
 
 describe("React AOT keyed-row conditional compiler", () => {
@@ -64,8 +66,11 @@ describe("React AOT keyed-row conditional compiler", () => {
     ).resolves.toMatchObject({ code: expect.stringContaining("farmBlocks.KeyedRows") });
   });
 
+  // React derives onChange from the row's own fiber, so these rows cannot delegate it and keep
+  // React-owned conditional rows; delegatable row events use compiler-owned host blocks instead.
   it("composes row events and conditionals through the public List boundary", async () => {
-    const result = await compile(`
+    const result = await compile(
+      `
       import { useState } from "react";
       import { List } from "@farm.js/react/list";
       export function Tasks() {
@@ -76,7 +81,7 @@ describe("React AOT keyed-row conditional compiler", () => {
               <List each={items} by={(item) => item.id}>
                 {(item) => (
                   <li>
-                    <button onClick={() => setItems([{ ...item, done: !item.done }])}>Toggle</button>
+                    <input type="checkbox" checked={item.done} onChange={() => setItems([{ ...item, done: !item.done }])} />
                     <div>{item.done ? <strong>{item.label}</strong> : <span>Open</span>}</div>
                   </li>
                 )}
@@ -85,7 +90,9 @@ describe("React AOT keyed-row conditional compiler", () => {
           </main>
         );
       }
-    `);
+    `,
+      withoutCompiledRoot,
+    );
 
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
@@ -95,7 +102,7 @@ describe("React AOT keyed-row conditional compiler", () => {
     expect(result.code).not.toContain("keyedRowsCompleteRuntimeFeature");
     expect(result.code).toContain("_farmRowEvent(item, 0, 0)");
     expect(result.code).toContain("_farmRowConditional(item, 0, 0");
-    expect(result.code).toContain('name: "onClick"');
+    expect(result.code).toContain('name: "onChange"');
     expect(result.code).toContain("conditionals={[");
     expect(result.code).not.toContain("cloneRows");
   });
@@ -108,7 +115,7 @@ describe("React AOT keyed-row conditional compiler", () => {
     {
       name: "a component inside the conditional branch",
       content: "{item.done && <Status value={item.label} />}",
-      declaration: "function Status({ value }) { return <strong>{value}</strong>; }",
+      declaration: 'import { Status } from "./status";',
     },
     {
       name: "a fragment conditional branch",

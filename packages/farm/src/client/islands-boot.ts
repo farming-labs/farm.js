@@ -26,6 +26,13 @@ interface FarmQueuedInteraction {
 const ISLAND = "f-island";
 const HYDRATED_ISLAND = '[data-farm-island-hydrated="true"]';
 
+/** Whether replaying `target` submits a form: a held submit, or a click on a submit button. */
+function submitsForm(target: Element, kind: FarmIslandReplayKind): boolean {
+  if (kind === "submit") return true;
+  const control = target as Element & { form?: HTMLFormElement | null; type?: string };
+  return !!control.form && control.type === "submit";
+}
+
 function isModified(event: MouseEvent): boolean {
   return event.metaKey || event.altKey || event.ctrlKey || event.shiftKey;
 }
@@ -123,7 +130,9 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   const hold = (event: Event, target: Element, kind: FarmIslandReplayKind) => {
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (!queue.some((item) => item.target === target)) {
+    // Every click is replayed, so two on a counter count two. A form is submitted once: a repeat
+    // is held so it never posts natively ahead of the replay, and not queued again.
+    if (!submitsForm(target, kind) || !queue.some((item) => item.target === target)) {
       queue.push({ target, kind, createdAt: Date.now() });
       // An interaction island's scheduler, when it already runs, starts on this.
       document.dispatchEvent(

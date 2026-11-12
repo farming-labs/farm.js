@@ -105,9 +105,9 @@ function stampPackagePath(target: string, kind: "file" | "directory"): PathStamp
 }
 
 /**
- * Package inspections shared by every hydration plan computed during one production build. Within
- * a build package sources are a snapshot, so a result computed once is reused by the route
- * manifest and by each bundle environment. Results that read only `node_modules` are also
+ * Package inspections shared by every hydration plan computed during one production build, or by
+ * one dev-server plan. Within that scope package sources are a snapshot, so a result computed once
+ * is reused by the route manifest and by each bundle environment. Results that read only `node_modules` are also
  * persisted, and reused by a later build only while every file and directory they read keeps its
  * size, mtime, and ctime.
  */
@@ -159,9 +159,44 @@ class PackageClientBoundaryCache {
   }
 
   async persist(): Promise<void> {
+    const pending = this.serialize();
+    if (!pending) return;
+    const { file, contents } = pending;
+    const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      await fs.promises.mkdir(path.dirname(file), { recursive: true });
+      await fs.promises.writeFile(temporary, contents);
+      await fs.promises.rename(temporary, file);
+    } catch {
+      // The cache only saves work; a build that cannot write it is still correct.
+      await fs.promises.rm(temporary, { force: true }).catch(() => {});
+    }
+  }
+
+  /** As `persist`, for a plan that runs synchronously (the dev server's). */
+  persistSync(): void {
+    const pending = this.serialize();
+    if (!pending) return;
+    const { file, contents } = pending;
+    const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(temporary, contents);
+      fs.renameSync(temporary, file);
+    } catch {
+      try {
+        fs.rmSync(temporary, { force: true });
+      } catch {
+        // Nothing to clean up.
+      }
+    }
+  }
+
+  /** The file and its new contents, or `null` when it already holds what this scope learned. */
+  private serialize(): { file: string; contents: string } | null {
     const file = this.file;
-    // Stored entries this build never reached are dropped, so the file tracks the current graph.
-    if (!file || (!this.dirty && this.stored.size === 0)) return;
+    // Stored entries this scope never reached are dropped, so the file tracks the current graph.
+    if (!file || (!this.dirty && this.stored.size === 0)) return null;
     const paths: PathStamp[] = [];
     const pathIndexes = new Map<string, number>();
     const indexOf = (stamp: PathStamp) => {
@@ -194,15 +229,7 @@ class PackageClientBoundaryCache {
       paths,
       entries,
     } satisfies StoredCache);
-    const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
-    try {
-      await fs.promises.mkdir(path.dirname(file), { recursive: true });
-      await fs.promises.writeFile(temporary, contents);
-      await fs.promises.rename(temporary, file);
-    } catch {
-      // The cache only saves work; a build that cannot write it is still correct.
-      await fs.promises.rm(temporary, { force: true }).catch(() => {});
-    }
+    return { file, contents };
   }
 
   private restore(entry: StoredEntry): CacheEntry | undefined {
@@ -318,7 +345,7 @@ export function getPackageClientBoundaryCache(): PackageClientBoundaryCache | un
 
 /**
  * @internal Share package client-boundary inspections across everything `operation` plans. Outside
- * such a scope, as in development, every inspection reads the package sources again.
+ * such a scope every inspection reads the package sources again.
  */
 export async function withPackageClientBoundaryCache<T>(operation: () => Promise<T>): Promise<T> {
   const cache = new PackageClientBoundaryCache();
@@ -332,4 +359,26 @@ export async function withPackageClientBoundaryCache<T>(operation: () => Promise
 /** @internal Persist the current build's package inspections to `file`, reusing those it holds. */
 export function usePackageClientBoundaryCacheFile(file: string): void {
   getPackageClientBoundaryCache()?.load(file);
+}
+
+/** @internal Where builds and the dev server keep package inspections between runs. */
+export function resolvePackageClientBoundaryCacheFile(root: string, distDir: string): string {
+  return path.resolve(root, distDir, "cache", "client-boundaries.json");
+}
+
+/**
+ * @internal Run `operation` with a package inspection cache backed by `file`, for one hydration
+ * plan outside a production build (the dev server, at startup and when a source edit replans).
+ * Inspections are shared across the plan's routes, and the persisted ones apply again only while
+ * every path they read is unchanged, so a dependency installed during development is read again.
+ * Inside a build's scope the build's cache is used as it is. The file is written before returning,
+ * and only when the plan learned something new, so a dev server stopped right away keeps it.
+ */
+export function runWithPackageClientBoundaryCacheFile<T>(file: string, operation: () => T): T {
+  if (getPackageClientBoundaryCache()) return operation();
+  const cache = new PackageClientBoundaryCache();
+  cache.load(file);
+  const result = getStorage().run(cache, operation);
+  cache.persistSync();
+  return result;
 }
