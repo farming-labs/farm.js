@@ -1106,7 +1106,9 @@ function collectServerComponentsChecks(
     message:
       status.ignoredKeys.length > 0
         ? `farm dev and farm build run the RSC pipeline; it ignores ${status.ignoredKeys
-            .map((key) => (key === "plugins" ? "plugins (except their client hooks)" : key))
+            .map((key) =>
+              key === "plugins" ? "plugins (except their configure and client hooks)" : key,
+            )
             .join(", ")}.`
         : "farm dev and farm build run the RSC pipeline.",
   });

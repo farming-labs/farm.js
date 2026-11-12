@@ -422,11 +422,11 @@ yet:
 - `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, `context`, and
   `security.csp` decide what a request may see or receive. Running the app without them could
   expose what they protect, so `farm dev` and `farm build` stop with an error that names them,
-  including when a layer (`extends`) sets them.
-- Farm `plugins` run only their [`client` hooks](/docs/plugins/client), in the browser, next to
-  the app's `src/client.ts`. The rest of a plugin, from `configure` to its `runtime` hooks and
-  routes, is ignored, and so are `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, and
-  `observability`, with a warning.
+  including when a layer (`extends`) or a plugin's `configure` sets them.
+- Farm `plugins` run only their `configure` hook, in `farm dev` and `farm build`, and their
+  [`client` hooks](/docs/plugins/client), in the browser, next to the app's `src/client.ts`. The
+  rest of a plugin, from its `runtime` hooks to its routes, is ignored, and so are `storage`,
+  `schema`, `cron`, `workflows`, `docs`, `theme`, and `observability`, with a warning.
 
 Islands mode renders on Farm's own pipeline, so it runs all of these.
 

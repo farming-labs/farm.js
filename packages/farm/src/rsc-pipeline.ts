@@ -20,6 +20,8 @@ import { resolveDeployOutputPath } from "./config";
 import {
   FARM_RSC_INSTALL_HINT,
   findFarmAppPackageDir,
+  formatFarmRscBlockingMessage,
+  inspectFarmServerComponents,
   resolveFarmRscCheckConfig,
 } from "./server-components-status";
 
@@ -142,13 +144,31 @@ export async function createFarmRscViteConfig(
     );
   }
 
-  const { plugins: vitePlugins = [], ...viteOptions } = (userConfig.vite ?? {}) as Record<
-    string,
-    any
-  >;
+  // The app's plugins (a layer's come first) get their `configure` hooks, as in Farm's other
+  // pipelines, so what those add, such as Vite plugins or client settings, reaches this one too.
+  const layered = await resolveFarmRscCheckConfig(
+    userConfig,
+    root,
+    options.command === "build" ? "production" : "development",
+  );
+  const config = await configureFarmRscPlugins(
+    {
+      ...userConfig,
+      vite: typeof userConfig.vite === "function" ? userConfig.vite({}) : userConfig.vite,
+      plugins: layered?.plugins ?? [],
+      publicRuntimeConfig: layered?.publicRuntimeConfig ?? {},
+    },
+    options.command,
+  );
+  const blockingKeys = inspectFarmServerComponents(config, root).blockingKeys;
+  if (blockingKeys.length > 0) {
+    throw new Error(`[Farm.js] ${formatFarmRscBlockingMessage(blockingKeys)}`);
+  }
+
+  const { plugins: vitePlugins = [], ...viteOptions } = (config.vite ?? {}) as Record<string, any>;
   const rscConfig: Record<string, unknown> = {};
   for (const key of FARM_RSC_CONFIG_KEYS) {
-    if (userConfig[key] !== undefined) rscConfig[key] = userConfig[key];
+    if (config[key] !== undefined) rscConfig[key] = config[key];
   }
   // Fast Refresh: the app's plugin-react, else core's in development, as for other Farm apps.
   // Without it the RSC client bootstrap's /@react-refresh import fails and nothing hydrates.
@@ -165,25 +185,20 @@ export async function createFarmRscViteConfig(
   // builds and web dev servers add nothing.
   const platform = resolveFarmPlatform();
   const mobileClient =
-    userConfig.mobile === undefined || platform === "desktop"
+    config.mobile === undefined || platform === "desktop"
       ? undefined
       : options.command === "build"
         ? "entry"
         : platform === "mobile"
           ? "inline"
           : undefined;
-  // The browser half of the app's plugins (a layer's come first) and its src/client.ts, which
-  // the browser entry starts as Farm's other entries do. RSC runs no other plugin hook yet.
-  const layered = await resolveFarmRscCheckConfig(
-    userConfig,
-    root,
-    options.command === "build" ? "production" : "development",
-  );
+  // The browser half of the app's plugins and its src/client.ts, which the browser entry starts
+  // as Farm's other entries do. Of the other plugin hooks, RSC runs only `configure` yet.
   const clientPluginEntry = generateFarmClientPluginEntryCode(
-    layered?.plugins,
+    config.plugins,
     root,
-    typeof userConfig.srcDir === "string" ? userConfig.srcDir : "src",
-    layered?.publicRuntimeConfig ?? {},
+    typeof config.srcDir === "string" ? config.srcDir : "src",
+    config.publicRuntimeConfig ?? {},
     // The RSC entry hands navigations to a mobile shell itself.
     "web",
   );
@@ -195,13 +210,13 @@ export async function createFarmRscViteConfig(
       imports: clientPluginEntry.imports,
       registrations: clientPluginEntry.registrations,
     },
-    experimental: { ...userConfig.experimental, serverComponents: { mode: "rsc" } },
-    port: options.port ?? userConfig.server?.port,
+    experimental: { ...config.experimental, serverComponents: { mode: "rsc" } },
+    port: options.port ?? config.server?.port,
     plugins: [
       ...(options.command === "serve" && platform === "desktop"
         ? [
             farmDesktopDevGuardPlugin(
-              typeof userConfig.basePath === "string" ? userConfig.basePath : undefined,
+              typeof config.basePath === "string" ? config.basePath : undefined,
             ),
           ]
         : []),
@@ -219,7 +234,7 @@ export async function createFarmRscViteConfig(
     ],
   });
   for (const key of FARM_RSC_PASSTHROUGH_KEYS) {
-    if (userConfig[key] !== undefined) farmConfig[key] = userConfig[key];
+    if (config[key] !== undefined) farmConfig[key] = config[key];
   }
 
   const { mergeConfig } = await import("vite");
@@ -230,6 +245,22 @@ export async function createFarmRscViteConfig(
     configFile: false,
     mode: options.command === "build" ? "production" : "development",
   };
+}
+
+/** Run the plugins' `configure` hooks the way `farm build` and Farm's dev server do. */
+async function configureFarmRscPlugins(
+  config: FarmConfigInput,
+  command: "serve" | "build",
+): Promise<FarmConfigInput> {
+  if (config.plugins.length === 0) return config;
+  const { PluginManager } = await import("./plugin");
+  const manager = new PluginManager({
+    config: config as never,
+    isDev: command === "serve",
+    isProd: command === "build",
+  });
+  manager.addPlugins(config.plugins);
+  return (await manager.runHookSerial("config", config)) as FarmConfigInput;
 }
 
 /** A Vite dev server for an app with `experimental.serverComponents`, not yet listening. */
