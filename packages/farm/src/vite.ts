@@ -135,6 +135,7 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "./document-layout-client";
+import { FARM_NAVIGATION_SCRIPT_SOURCE } from "./client/navigation-scripts";
 import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "./client/navigation-stream-client";
 import {
   getClientModuleMetadata,
@@ -7455,14 +7456,11 @@ function readActiveLayoutPatterns() {
     .filter(Boolean);
 }
 
+${FARM_NAVIGATION_SCRIPT_SOURCE}
+
 function activateFragmentScripts(root) {
   for (const script of Array.from(root.querySelectorAll?.('script') || [])) {
-    const freshScript = document.createElement('script');
-    for (const attribute of Array.from(script.attributes)) {
-      freshScript.setAttribute(attribute.name, attribute.value);
-    }
-    freshScript.textContent = script.textContent || '';
-    script.replaceWith(freshScript);
+    script.replaceWith(createFarmNavigationScript(script));
   }
 }
 

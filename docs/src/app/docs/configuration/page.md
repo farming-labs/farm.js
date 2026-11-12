@@ -1075,6 +1075,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 ```
 
+A client navigation fetches the next page as a new response, with a nonce of its own, while the
+page's policy still trusts the nonce of the response that loaded it. Farm runs the scripts the
+navigation response gave its nonce (such as React's streaming scripts) with the page's nonce, and
+leaves every other script without one, so the same rules hold after a navigation as on a full load.
+
+Libraries that render their own inline script take the nonce as a prop: pass `getCspNonce()` to
+next-themes' `ThemeProvider` (`nonce`) or react-wrap-balancer's `Balancer` and `Provider` (`nonce`).
+
 For fully prerendered HTML, the same option keeps the page static. Farm hashes the exact contents of
 the inline scripts that carry the nonce (its own and the ones you opted in) with SHA-256, removes the
 build-time nonce, and emits a route-specific policy with those hashes. Inline scripts that were not

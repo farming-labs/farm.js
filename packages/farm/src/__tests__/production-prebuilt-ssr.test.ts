@@ -3374,6 +3374,54 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("prerenders a serverless target from the prebuilt SSR bundle, outside its function", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `export const ssg = true;
+export default function Page() {
+  return <main data-prerendered="vercel">static</main>;
+}`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          deploy: { target: "vercel" },
+          generateBuildId: () => "vercel-prerender-prebuilt-ssr-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "vercel" });
+
+      const output = path.resolve(root, config.deploy.outputDir);
+      await expect(
+        fs.readFile(path.join(output, "static", "index.html"), "utf8"),
+      ).resolves.toContain('data-prerendered="vercel"');
+      // Nitro's temporary prerender server imported Farm's SSR bundle instead of bundling the
+      // SSR graph a second time, and was built in Nitro's prerender directory.
+      const prerenderServer = path.join(root, ".farm", ".nitro", "prerender");
+      const prerenderPackage = JSON.parse(
+        await fs.readFile(path.join(prerenderServer, "package.json"), "utf8"),
+      );
+      expect(prerenderPackage.imports?.["#farm-ssr-entry"]).toMatch(/^\.\/farm-ssr\//);
+      await expect(fs.stat(path.join(prerenderServer, "farm-ssr"))).resolves.toBeTruthy();
+      // The function the deploy ships bundles the SSR graph as before and holds none of that.
+      const functionDir = path.join(output, "functions", "__nitro.func");
+      await expect(fs.stat(path.join(functionDir, "farm-ssr"))).rejects.toThrow();
+      const functionPackage = await fs
+        .readFile(path.join(functionDir, "package.json"), "utf8")
+        .catch(() => "{}");
+      expect(functionPackage).not.toContain("#farm-ssr-entry");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("leaves Farm Infra analytics out of the server when analytics is false", async () => {
     const root = await createProductionFixture();
 
@@ -4788,6 +4836,54 @@ export default function Page() {
       await expect(fs.readFile(path.join(clientDir, entry!), "utf8")).resolves.toContain(
         "__farmPageState",
       );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("stubs API route modules but keeps a client page whose path holds api and route", async () => {
+    // Only an API route module (a route file under api/) is server-only. The client entry imports
+    // pages by absolute path, so a page such as /docs/api/router has both strings in its path.
+    const root = await createProductionFixture("api-route-page");
+
+    try {
+      const routeDir = path.join(root, "src", "app", "api", "secret");
+      await fs.mkdir(routeDir, { recursive: true });
+      await fs.writeFile(
+        path.join(routeDir, "route.ts"),
+        `export function GET() { return new Response("server-only-api-route-sentinel"); }`,
+      );
+      const pageDir = path.join(root, "src", "app", "docs", "api", "router");
+      await fs.mkdir(pageDir, { recursive: true });
+      await fs.writeFile(
+        path.join(pageDir, "page.tsx"),
+        `"use client";
+
+import { useState } from "react";
+import { GET } from "../../../api/secret/route";
+
+export default function RouterDocs() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>router docs page {typeof GET} {count}</button>;
+}`,
+      );
+      const config = await resolveConfig(
+        { root, srcDir: "src", images: { provider: "none" }, telemetry: false },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const clientDir = path.join(root, ".farm", "client");
+      const clientFiles = await fs.readdir(clientDir, { recursive: true });
+      const clientCode = (
+        await Promise.all(
+          clientFiles
+            .filter((name) => name.endsWith(".js"))
+            .map((name) => fs.readFile(path.join(clientDir, name), "utf8")),
+        )
+      ).join("\n");
+      expect(clientCode).toContain("router docs page");
+      expect(clientCode).not.toContain("server-only-api-route-sentinel");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

@@ -52,6 +52,10 @@ on:
         description: Compare configured header matching with same-code SSR controls
         type: boolean
         default: false
+      app-scale-benchmark:
+        description: Time dev startup and builds of a generated 120-route app
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -347,6 +351,35 @@ jobs:
           path: ${{ runner.temp }}/preload-response-*.json
           if-no-files-found: warn
           retention-days: 14
+
+  app-scale-benchmark:
+    name: App Scale Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.app-scale-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build the local framework and CLI
+        run: |
+          pnpm --filter @farm.js/core build:runtime
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Time dev startup and builds
+        run: node benchmarks/app-scale/run.mjs --rounds 5 > "${{ runner.temp }}/app-scale.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: app-scale-${{ github.sha }}
+          path: ${{ runner.temp }}/app-scale.json
+          if-no-files-found: warn
+          retention-days: 90
 
   layout-order-benchmark:
     name: Layout Order Diagnostic

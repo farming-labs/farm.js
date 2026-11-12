@@ -1902,7 +1902,7 @@ export function Chart() {}
     expect(source).toContain("swapDocument: function(doc)");
     expect(source).toContain("document.body.innerHTML = doc.body.innerHTML;");
     expect(source).toContain("delete window.__farmDocsRuntime;");
-    expect(source).toContain("script.replaceWith(freshScript);");
+    expect(source).toContain("script.replaceWith(createFarmNavigationScript(script));");
     expect(source).toContain('document.documentElement.dataset.farmDocsRuntime === "true"');
     expect(source).toContain("let swapped = await this.swapContent(");
     expect(source).toContain(

@@ -578,6 +578,18 @@ test("a server route slot stays on the server, and its client component hydrates
   expect(errors).toEqual([]);
 });
 
+test("a declared failure from a form posted before JavaScript loads keeps its status", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-nojs");
+  const response = page.waitForResponse((candidate) => candidate.request().method() === "POST");
+  await page.getByRole("button", { name: "Reserve" }).click();
+  expect((await response).status()).toBe(409);
+  await context.close();
+});
+
 test("useActionState shows the action's result after a form posted before JavaScript loads", async ({
   browser,
 }) => {
