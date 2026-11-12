@@ -367,6 +367,11 @@ export interface FarmServerRendererRuntime {
       progressiveChunkSize?: number;
       /** CSP nonce forwarded to renderer-owned inline streaming scripts. */
       nonce?: string;
+      /**
+       * React DOM option: the form state of a `useActionState` form posted without JavaScript,
+       * which the page renders with.
+       */
+      formState?: unknown;
     },
   ) => {
     pipe(destination: NodeJS.WritableStream): void;

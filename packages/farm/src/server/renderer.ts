@@ -179,7 +179,11 @@ import { pathToFileURL } from "node:url";
 import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
-import { handleFarmFormActionRequest } from "../form-actions";
+import {
+  getFarmFormState,
+  handleFarmFormActionRequest,
+  renderFarmFormStateScript,
+} from "../form-actions";
 import { installFarmIslandValues, uninstallFarmIslandValues } from "../client/island-values";
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmRouteRootStrategy } from "../island-inference";
@@ -951,6 +955,7 @@ export class ServerRenderer {
 
         const stream = renderToPipeableStream(element, {
           nonce: _resolveCurrentCspNonce(),
+          formState: getFarmFormState(),
           ...(inlineBoundaries
             ? {
                 progressiveChunkSize: Number.MAX_SAFE_INTEGER,
@@ -3733,7 +3738,7 @@ window.__FARM_LOADING_MODULE__ = ${JSON.stringify(
 window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
-</script>`;
+</script>${renderFarmFormStateScript()}`;
       // Islands mode: a page whose route hydrates nothing as a root hydrates only islands, which
       // hold their own clicks, so nothing else on it is held, as in production. It starts with the
       // boot entry, as in production, unless the app runs client code at load (RFC 0003, section 10).
@@ -3819,6 +3824,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         : FARM_DEV_EARLY_CLIENT_SCRIPT;
       const { pipe, abort } = renderToPipeableStream(streamRoot, {
         nonce: cspNonce,
+        formState: getFarmFormState(),
         onShellReady() {
           if (pendingNavigationError) {
             abort?.(pendingNavigationError);

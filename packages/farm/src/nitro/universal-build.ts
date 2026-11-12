@@ -7491,8 +7491,8 @@ function resolveFarmMobileShellRender(request, route, routePathname) {
       : ""
   }${
     farmIslandsMode
-      ? `\nimport { getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
-      : ""
+      ? `\nimport { getFarmFormState as farmFormState, getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader, renderFarmFormStateScript as farmFormStateScript } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
+      : `\nfunction farmFormState() { return undefined; }\nfunction farmFormStateScript() { return ""; }`
   }`;
   const productionSiteTelemetryImport = config.telemetry
     ? `import { createFarmProductionSiteReporter } from "@farm.js/core/internal/product-telemetry-runtime";`
@@ -8364,7 +8364,7 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
   }
   return '<script id="__farm_route_slots_data__" type="application/json">' +
     serializedRouteSlots +
-    '</script>' + stampFarmCspNonce('<script>' + source + '</script>');
+    '</script>' + stampFarmCspNonce('<script>' + source + '</script>') + farmFormStateScript();
 }
 
 // The settled defer() values the bootstrap script's props refer to, as development writes them.
@@ -8507,6 +8507,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken =
       typeof ReactDOMServer.renderToReadableStream === "function") {
     const stream = await ReactDOMServer.renderToReadableStream(element, {
       nonce: _resolveCurrentCspNonce(),
+      formState: farmFormState(),
       onError(error) {
         // redirect()/notFound() are control flow, not render failures: the
         // request handler must still receive them to map the response status,
@@ -8669,6 +8670,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken =
     };
     pipeableStream = ReactDOMServer.renderToPipeableStream(element, {
       nonce: _resolveCurrentCspNonce(),
+      formState: farmFormState(),
       onShellReady() {
         try {
           pipeableStream.pipe(destination);
@@ -8784,6 +8786,8 @@ function rememberFarmSyncRender(routeKey, streamedHtml) {
 
 function renderFarmElementSync(ReactDOMServer, element, routeKey) {
   if (!farmReactSyncRender) return undefined;
+  // renderToString takes no form state: the page a useActionState form posted to streams.
+  if (farmFormState() !== undefined) return undefined;
   const addsDoctype = routeKey === undefined ? undefined : farmSyncRenderRoutes.get(routeKey);
   if (addsDoctype === undefined) return undefined;
   if (typeof ReactDOMServer.renderToString !== "function") return undefined;
