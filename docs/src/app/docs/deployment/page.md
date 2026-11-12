@@ -52,6 +52,13 @@ The rule intentionally excludes HTML, unhashed public files, and stable entry UR
 revalidatable. The immutable header route runs before Vercel's filesystem handler, so matching files
 are still served directly from the CDN and never enter the Farm server function.
 
+### Guarded static pages on Vercel
+
+A page that middleware guards renders on request on every target. On Vercel, a middleware file with
+`export const config = { runtime: "edge" }` runs as routing middleware in front of the pages it
+guards, so those pages prerender and the CDN serves them after the middleware lets a request
+through. See [Edge middleware on Vercel](/docs/middleware#edge-middleware-on-vercel).
+
 ## Preset showcase
 
 Use `deploy.target` when you want one config file to control the platform output. Farm maps that target to the Nitro preset, default output directory, and deploy command shape.

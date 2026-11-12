@@ -338,26 +338,39 @@ path-style machine routes. Most applications do not need either wrapper.
 
 ## Prerender docs pages
 
-Docs pages render on request by default. With a docs adapter such as `@farming-labs/farmjs`, set
-`docs.prerender` to have `farm build` render every page the adapter lists into a static file on
-Node and serverless targets:
+Docs pages render on request by default. Set `docs.prerender` to have `farm build` render them into
+static files on Node and serverless targets:
 
 ```ts
 export default defineConfig({
   docs: {
     entry: "/docs",
     prerender: true,
+    socialImage: { baseUrl: "https://docs.example.com" },
   },
 });
 ```
+
+Farm's built-in renderer (`docs.adapter: false`) prerenders every page in the docs content
+directory. A docs adapter such as `@farming-labs/farmjs` prerenders the pages it lists; an adapter
+that does not list its pages keeps rendering them on request, with a build warning.
+
+A built-in page's social metadata (`og:url`, `og:image`) is an absolute URL. Without
+`socialImage.baseUrl` its origin is the request's, which a static file would freeze at the build's,
+so those pages keep rendering on request and the build says how many. Set `socialImage.baseUrl`, or
+`socialImage: false` in a page's frontmatter, to prerender them.
 
 A docs page is a static file once prerendered, so it does not negotiate `Accept: text/markdown`;
 agents use the `.md` URL the page links to. Markdown, search, `llms.txt`, and MCP keep rendering on
 request. A page that middleware, a redirect, a rewrite, i18n, or a dynamic or cached route rule
 covers keeps rendering on request, as for static app pages; `routeRules: { "/docs/changelog": {
 prerender: false } }` keeps one page dynamic. Edge targets already serve docs pages from the build's
-docs snapshot. Farm's built-in renderer (`docs.adapter: false`) and adapters that do not list their
-pages keep rendering on request, with a build warning.
+docs snapshot.
+
+On Vercel, docs a sign-in guard covers can prerender too: give the guard's `middleware.ts`
+`export const config = { runtime: "edge" }`, and it runs before Vercel serves each page's file. The
+built-in renderer already keeps guarded pages out of search, `llms.txt`, and the sitemaps. See
+[Edge middleware on Vercel](/docs/middleware#edge-middleware-on-vercel).
 
 ## Production notes
 

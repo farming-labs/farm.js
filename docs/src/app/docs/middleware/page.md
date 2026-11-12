@@ -474,6 +474,54 @@ The production middleware runtime is easiest to verify with a tiny app fixture t
 
 Farm's own test suite keeps this as a reusable helper at `packages/farm/src/__tests__/fixtures/middleware-production-fixture.ts`.
 
+## Edge middleware on Vercel
+
+A static page that middleware guards renders on request, because a platform serves static files
+before any middleware runs. On Vercel, a middleware file can run in front of the static files
+instead: set `runtime: "edge"` in its `config`.
+
+**src/app/docs/middleware.ts**
+
+```ts
+export const config = { runtime: "edge" };
+
+export function middleware(request: Request) {
+  if (!request.headers.get("cookie")?.includes("session=")) {
+    return Response.redirect(new URL("/sign-in", request.url), 307);
+  }
+}
+```
+
+With `deploy.target: "vercel"`, `farm build` then:
+
+- prerenders each static page, and each [`docs.prerender`](/docs/docs-engine#prerender-docs-pages)
+  page, that only `runtime: "edge"` middleware guards, without running that middleware for the
+  build's own request;
+- bundles the middleware that guards those pages into an Edge function, and adds a route that runs
+  it before Vercel serves each page's file (`/docs/guide`, `/docs/guide/`, `/docs/guide/index.html`,
+  and the same paths under a `basePath`);
+- sends those pages with `Cache-Control: private, no-store`.
+
+The middleware decides each request as it does in the server: a returned `Response`, `redirect()`,
+or `ctx.headers` work the same way, `ctx.rewrite()` routes to the new path, and `notFound()` answers
+with the app's not-found page. A middleware that throws answers `500` instead of the page. Dynamic
+routes, API routes, and pages any other middleware guards keep running the same middleware in the
+server function.
+
+Each guarded page view still runs the middleware, which Vercel bills as compute, but the page is
+served from the CDN instead of rendered by the server function.
+
+The literal value counts, as for `matcher`: `runtime: "edge"` must be written in the `config`
+object itself. Config middleware in `farm.config.ts` and integration guards such as
+`protectedRoutes` stay in the server, and pages they guard render on request. Other targets ignore
+`runtime: "edge"`: the middleware runs in the server and its pages render on request.
+
+Vercel's Edge runtime provides web APIs and only the `async_hooks`, `events`, `buffer`, `assert`, and
+`util` Node modules. The build stops and names the import when edge middleware, or code it imports,
+uses another Node module, so check a session with a cookie, a signed token, or `fetch` rather than a
+database driver. The gzipped function must fit Vercel's Edge size limit (1 MB on Hobby); the build
+warns when it does not.
+
 ## Caching
 
 A CDN serves its copy of a page without running middleware, so Farm treats every middleware that

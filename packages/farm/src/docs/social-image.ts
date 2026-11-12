@@ -90,6 +90,18 @@ export function isFarmDocsSocialImageEnabled(
   return !isFalse(page.frontmatter.socialImage);
 }
 
+/**
+ * Whether the page's HTML carries URLs built from the request's origin: its social metadata
+ * (`og:url`, `og:image`) is absolute, and without `socialImage.baseUrl` the origin is the request's.
+ * A prerendered copy would keep the build's origin, so such a page renders on request.
+ */
+export function farmDocsPageUsesRequestOrigin(
+  page: LoadedFarmDocsPage,
+  docs: FarmDocsResolvedConfig,
+): boolean {
+  return isFarmDocsSocialImageEnabled(page, docs) && !getSocialImageConfig(docs)?.baseUrl;
+}
+
 export function getFarmDocsCustomSocialImage(page: LoadedFarmDocsPage): string | undefined {
   const value =
     page.frontmatter.socialImage || page.frontmatter.openGraphImage || page.frontmatter.ogImage;

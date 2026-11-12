@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.67",
+  "version": "0.1.68",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -697,6 +697,11 @@
       "types": "./dist/internal/compression-runtime.d.ts",
       "import": "./dist/internal/compression-runtime.mjs",
       "require": "./dist/internal/compression-runtime.cjs"
+    },
+    "./internal/vercel-edge-middleware": {
+      "types": "./dist/internal/vercel-edge-middleware.d.ts",
+      "import": "./dist/internal/vercel-edge-middleware.mjs",
+      "require": "./dist/internal/vercel-edge-middleware.cjs"
     },
     "./internal/client-runtime": {
       "types": "./dist/internal/client-runtime.d.ts",

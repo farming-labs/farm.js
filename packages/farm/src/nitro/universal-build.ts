@@ -99,6 +99,7 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "../document-layout-client";
+import { FARM_NAVIGATION_SCRIPT_SOURCE } from "../client/navigation-scripts";
 import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "../client/navigation-stream-client";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
@@ -163,6 +164,7 @@ import {
   discoverFarmDocsPages,
   getFarmDocsMarkdownPath,
   getFarmDocsRoots,
+  listFarmDocsBuiltInPrerenderPages,
   resolveFarmDocsContentDir,
 } from "../docs/handler";
 import {
@@ -261,6 +263,13 @@ import {
   hasFarmMiddlewareConfig,
 } from "../middleware/may-handle";
 import { readMiddlewareFileConfig, type StaticMiddlewareConfig } from "../middleware/static-config";
+import { CDN_CACHE_CONTROL_HEADERS } from "../middleware/production-runtime";
+import {
+  createFarmVercelEdgeMiddlewareRoute,
+  farmTargetRunsEdgeMiddleware,
+  isFarmEdgeMiddlewareRoute,
+  writeFarmVercelEdgeMiddlewareFunction,
+} from "./vercel-edge-middleware";
 import {
   appendMiddlewareDirectory,
   appendMiddlewareRoutePath,
@@ -1837,6 +1846,16 @@ function importsFarmClientBlockedPackage(id: string, packageName: string): boole
   return id === packageName || id.startsWith(`${packageName}/`);
 }
 
+/**
+ * Whether a client import names an API route module (a `route` file under `api/`), which
+ * `api.generated.ts` imports for its types. The client entry imports pages by absolute path, so a page such as
+ * `app/docs/api/router/page.tsx` holds both `/api/` and `/route` without being one.
+ */
+function importsFarmApiRouteModule(id: string): boolean {
+  const specifier = id.replace(/\\/g, "/").split("?", 1)[0]!;
+  return /(?:^|\/)api\/(?:.*\/)?route(?:\.[cm]?[jt]sx?)?$/.test(specifier);
+}
+
 class IncompleteClientBuildOutputError extends Error {
   constructor(detail: string) {
     super(`Farm client build produced incomplete output: ${detail}`);
@@ -2489,7 +2508,7 @@ async function buildClient(
                   return { id: "\0empty-module", external: false };
                 }
                 // Block API route imports (they come from type-only imports in api.generated.ts)
-                if (id.includes("/api/") && id.includes("/route")) {
+                if (importsFarmApiRouteModule(id)) {
                   return { id: "\0empty-api-route", external: false };
                 }
                 // Block problematic node modules
@@ -3913,6 +3932,8 @@ mountFarmDocsSearch();
 
 ${generateUniversalRouterStateRuntime()}
 
+${FARM_NAVIGATION_SCRIPT_SOURCE}
+
 // SPA Router for server-rendered pages (HTML swap)
 const spaRouter = {
 ${generateUniversalRouterStateProperties()}
@@ -4083,12 +4104,7 @@ ${generateUniversalRouterStateProperties()}
 
     setTimeout(function() {
       Array.from(document.querySelectorAll("script")).forEach(function(script) {
-        const freshScript = document.createElement("script");
-        Array.from(script.attributes).forEach(function(attr) {
-          freshScript.setAttribute(attr.name, attr.value);
-        });
-        freshScript.textContent = script.textContent || "";
-        script.replaceWith(freshScript);
+        script.replaceWith(createFarmNavigationScript(script));
       });
     }, 0);
 
@@ -5001,14 +5017,11 @@ function fitsSegmentResponse(currentRoot, nextRoot) {
     : ""
 }
 
+${FARM_NAVIGATION_SCRIPT_SOURCE}
+
 function activateNavigationScripts(root) {
   for (const script of Array.from(root?.querySelectorAll?.("script") || [])) {
-    const freshScript = document.createElement("script");
-    for (const attribute of Array.from(script.attributes)) {
-      freshScript.setAttribute(attribute.name, attribute.value);
-    }
-    freshScript.textContent = script.textContent || "";
-    script.replaceWith(freshScript);
+    script.replaceWith(createFarmNavigationScript(script));
   }
 }
 
@@ -5595,12 +5608,7 @@ ${
 
     setTimeout(function() {
       Array.from(document.querySelectorAll("script")).forEach(function(script) {
-        const freshScript = document.createElement("script");
-        Array.from(script.attributes).forEach(function(attr) {
-          freshScript.setAttribute(attr.name, attr.value);
-        });
-        freshScript.textContent = script.textContent || "";
-        script.replaceWith(freshScript);
+        script.replaceWith(createFarmNavigationScript(script));
       });
     }, 0);
 
@@ -5882,7 +5890,17 @@ async function buildSSRInMemory(
       specRoute: config.openapi.specRoute || null,
     };
   }
-  const middlewareRoutes = await discoverMiddlewareRoutes(appDirs);
+  const discoveredMiddlewareRoutes = await discoverMiddlewareRoutes(appDirs);
+  // On a target that runs `runtime: "edge"` middleware in front of static files, the server
+  // learns which files those are, so the build's own prerender requests skip them.
+  const middlewareRoutes = farmTargetRunsEdgeMiddleware(preset)
+    ? await Promise.all(
+        discoveredMiddlewareRoutes.map(async (route) => ({
+          ...route,
+          config: await readMiddlewareFileConfig(route.filePath),
+        })),
+      )
+    : discoveredMiddlewareRoutes;
   const instrumentationPath = resolveFarmInstrumentationFile(root, config.srcDir || "src");
 
   // Check for custom not-found page
@@ -6952,6 +6970,10 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   const hasGeneratedMetadataImages = metadataImageRoutes.some(
     (image) => image.sourceType === "module",
   );
+  // `runtime: "edge"` middleware files, when this target runs them in front of static files.
+  const edgeMiddlewareFilePaths = farmTargetRunsEdgeMiddleware(preset)
+    ? middlewareRoutes.filter(isFarmEdgeMiddlewareRoute).map((route) => route.filePath)
+    : [];
   const hasMiddlewareRuntime =
     middlewareRoutes.length > 0 || hasFarmMiddlewareConfig(config.middleware);
   const farmDocsFontAssets = config.docs?.enabled
@@ -8179,6 +8201,9 @@ const farmDocsHandler = ${
   loadReactModule: async () => FarmDocsAdapterReact,
   // Lists the docs MCP endpoint in /.well-known/ai-catalog.json for the server's lifetime.
   registerMCPServer: registerFarmMCPServer,
+  // A page built with this keeps its HTML string, so the preload budget and the response
+  // writer use it instead of reading and re-encoding the body. Older adapters ignore it.
+  createHtmlResponse: farmOwnedHtmlResponse,
 })`
           : `createFarmDocsHandler(farmDocsResolvedConfig, {
   root: farmDocsRuntimeRoot,
@@ -9197,12 +9222,8 @@ function withFarmDocsRequestCache(response, request, farmLocaleResolution, middl
   ) {
     return response;
   }
-  const headers = new Headers(response.headers);
-  headers.set("Cache-Control", "private, no-store");
-  return farmOwnedResponse(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
+  return farmPreloadHeadersResponse(response, (headers) => {
+    headers.set("Cache-Control", "private, no-store");
   });
 }
 
@@ -9710,12 +9731,23 @@ ${generateConfiguredResponseHeadersRuntimeSource()}
 // App middleware files bundled at build time (sorted by depth, root first)
 const fileMiddlewareModules = [${middlewareRegistrations.join(",")}
 ];
-
+${
+  edgeMiddlewareFilePaths.length > 0
+    ? `
+// \`runtime: "edge"\` middleware runs as Vercel routing middleware in front of the pages the build
+// prerendered for it, so the build's own requests for those pages skip it. A page any other
+// middleware guards is never prerendered. Read once: Nitro's prerender worker sets the variable.
+const farmEdgeMiddlewareFiles = new Set(${JSON.stringify(edgeMiddlewareFilePaths)});
+const farmPrerendering =
+  typeof process !== "undefined" && process.env?.${FARM_PRERENDER_ENV} === "1";
+`
+    : ""
+}
 const farmMiddlewareRunner = ${
     hasMiddlewareRuntime
       ? `createProductionMiddlewareRunner({
   config: farmMiddlewareConfig,
-  modules: fileMiddlewareModules,
+  modules: ${edgeMiddlewareFilePaths.length > 0 ? "farmPrerendering ? fileMiddlewareModules.filter((entry) => !farmEdgeMiddlewareFiles.has(entry.filePath)) : fileMiddlewareModules" : "fileMiddlewareModules"},
   i18n: farmI18nConfig,
   server: farmServerConfig,
   apiBasePath: farmLocalAPIBasePath,
@@ -10654,13 +10686,11 @@ ${
         middlewareData,
         middlewareContext,
       );
-      const docsHeaders = new Headers(wrappedDocsResponse.headers);
-      docsHeaders.set("x-farm-preload-buffered", "1");
-      return applyProductionMiddlewareHeaders(farmOwnedResponse(wrappedDocsResponse.body, {
-        status: wrappedDocsResponse.status,
-        statusText: wrappedDocsResponse.statusText,
-        headers: docsHeaders,
-      }), middlewareHeaders);
+      // In place for a page the adapter built with createHtmlResponse, so its HTML string stays.
+      const bufferedDocsResponse = farmPreloadHeadersResponse(wrappedDocsResponse, (headers) => {
+        headers.set("x-farm-preload-buffered", "1");
+      });
+      return applyProductionMiddlewareHeaders(bufferedDocsResponse, middlewareHeaders);
     }
   }
   `
@@ -12631,6 +12661,24 @@ function getManifestPageEntry(
   );
 }
 
+/**
+ * A page edge middleware guards is a static file each visitor reaches only through the guard, so
+ * no shared cache (a browser's back-forward cache aside) may keep a copy for the next visitor.
+ */
+function withFarmEdgeGuardedPrerenderHeaders(
+  headers: Record<string, string>,
+  edgeGuarded: boolean,
+): Record<string, string> {
+  if (!edgeGuarded) return headers;
+  const cacheHeaders = new Set(["cache-control", ...CDN_CACHE_CONTROL_HEADERS]);
+  return {
+    ...Object.fromEntries(
+      Object.entries(headers).filter(([name]) => !cacheHeaders.has(name.toLowerCase())),
+    ),
+    "cache-control": "private, no-store",
+  };
+}
+
 function getPhysicalPrerenderBypassReason(options: {
   config: ResolvedFarmConfig;
   middlewareRoutes: readonly UniversalMiddlewareRoute[];
@@ -12685,8 +12733,9 @@ function getPhysicalPrerenderBypassReason(options: {
 }
 
 /**
- * The docs pages `docs.prerender` asks the build to write as static files. Only a docs adapter
- * on a Node or serverless target lists them; anything else keeps rendering them on request.
+ * The docs pages `docs.prerender` asks the build to write as static files on a Node or serverless
+ * target: the pages a docs adapter lists, or every page of Farm's built-in renderer whose HTML does
+ * not depend on the request. Anything else keeps rendering them on request.
  */
 async function getFarmDocsPrerenderPages(
   config: ResolvedFarmConfig,
@@ -12694,15 +12743,28 @@ async function getFarmDocsPrerenderPages(
   preset: string,
 ): Promise<string[]> {
   if (!config.docs?.enabled || !config.docs.prerender) return [];
-  if (!isReactRenderer(config.renderer) || !hasFarmDocsRuntimeAdapter(config.docs)) {
-    logger.warn(
-      "docs.prerender needs a docs adapter such as @farming-labs/farmjs; Farm's built-in docs renderer keeps rendering docs pages on request.",
-    );
-    return [];
-  }
   if (getFarmPresetRuntime(preset) === "edge") {
     logger.info(
       `↪ Keeping docs pages in the edge docs snapshot: docs.prerender writes static files on Node and serverless targets, not "${preset}".`,
+    );
+    return [];
+  }
+  if (!hasFarmDocsRuntimeAdapter(config.docs)) {
+    // The built-in renderer lists its pages from the same discovery it answers them with.
+    const { pages, originDependent } = listFarmDocsBuiltInPrerenderPages(config.docs, {
+      root,
+      srcDir: config.srcDir,
+    });
+    if (originDependent.length > 0) {
+      logger.info(
+        `↪ Keeping ${originDependent.length} docs page(s) rendering on request: their social image metadata is an absolute URL built from the request's origin. Set docs.socialImage.baseUrl to prerender them.`,
+      );
+    }
+    return pages;
+  }
+  if (!isReactRenderer(config.renderer)) {
+    logger.warn(
+      `The docs adapter ${JSON.stringify(config.docs.adapter.id)} renders with React; docs.prerender keeps its pages rendering on request with the "${config.renderer.name}" renderer.`,
     );
     return [];
   }
@@ -12830,6 +12892,24 @@ async function buildNitroUniversal(
           })),
         )
       : middlewareRoutes;
+  // On Vercel, `runtime: "edge"` middleware runs as routing middleware in front of static files,
+  // so a page only such middleware guards still prerenders; the guard decides before the CDN
+  // serves it. Every other target serves static files before any middleware and keeps the page
+  // server-handled.
+  const edgeMiddlewareRoutes = farmTargetRunsEdgeMiddleware(preset)
+    ? middlewareRoutesWithConfig.filter(isFarmEdgeMiddlewareRoute)
+    : [];
+  const serverMiddlewareRoutes =
+    edgeMiddlewareRoutes.length > 0
+      ? middlewareRoutesWithConfig.filter((route) => !isFarmEdgeMiddlewareRoute(route))
+      : middlewareRoutesWithConfig;
+  const edgeGuardedPrerenderRoutes: string[] = [];
+  const addPrerenderRoute = (pathname: string) => {
+    prerenderRoutes.push(pathname);
+    if (appMiddlewareMayHandlePath(edgeMiddlewareRoutes, pathname)) {
+      edgeGuardedPrerenderRoutes.push(pathname);
+    }
+  };
   for (const page of ssgPages) {
     // Revalidated pages keep their runtime/CDN stale-while-revalidate
     // behavior. Emitting them as public files would prevent the server from
@@ -12839,7 +12919,7 @@ async function buildNitroUniversal(
 
     const reason = getPhysicalPrerenderBypassReason({
       config,
-      middlewareRoutes: middlewareRoutesWithConfig,
+      middlewareRoutes: serverMiddlewareRoutes,
       routeRuntimeManifest,
       redirectSources,
       rewriteSources,
@@ -12849,7 +12929,7 @@ async function buildNitroUniversal(
       skippedPrerenderRoutes.push({ pathname: page.urlPath, reason });
       continue;
     }
-    prerenderRoutes.push(page.urlPath);
+    addPrerenderRoute(page.urlPath);
   }
   // The docs runtime answers its paths before any page route, so a page route's rendering
   // (a docs `page.mdx` is a dynamic page route) does not decide them.
@@ -12861,7 +12941,7 @@ async function buildNitroUniversal(
     if (prerenderRoutes.includes(pathname)) continue;
     const reason = getPhysicalPrerenderBypassReason({
       config,
-      middlewareRoutes: middlewareRoutesWithConfig,
+      middlewareRoutes: serverMiddlewareRoutes,
       routeRuntimeManifest: docsRouteRuntimeManifest,
       redirectSources,
       rewriteSources,
@@ -12871,7 +12951,7 @@ async function buildNitroUniversal(
       skippedPrerenderRoutes.push({ pathname, reason });
       continue;
     }
-    prerenderRoutes.push(pathname);
+    addPrerenderRoute(pathname);
   }
   for (const skipped of skippedPrerenderRoutes) {
     logger.info(`↪ Keeping SSG route ${skipped.pathname} server-handled (${skipped.reason})`);
@@ -13297,10 +13377,13 @@ function toFarmNodeResponse(request, response) {
         {
           ...configuredRule,
           prerender: true,
-          headers: {
-            ...getPrerenderRouteHeaders(route, configuredHeaderRoutes),
-            ...configuredRule.headers,
-          },
+          headers: withFarmEdgeGuardedPrerenderHeaders(
+            {
+              ...getPrerenderRouteHeaders(route, configuredHeaderRoutes),
+              ...configuredRule.headers,
+            },
+            edgeGuardedPrerenderRoutes.includes(route),
+          ),
         },
       ];
     }),
@@ -13777,6 +13860,11 @@ function toFarmNodeResponse(request, response) {
       farmWorkflows,
       routeRuntimeManifest,
       farmCron.provider === "host" ? farmCron.jobs : [],
+      {
+        buildDir: path.join(root, distDir),
+        middlewareRoutes: edgeMiddlewareRoutes,
+        guardedPages: edgeGuardedPrerenderRoutes,
+      },
     );
   }
 
@@ -14003,6 +14091,13 @@ async function postProcessVercelOutput(
   farmWorkflows: PreparedFarmWorkflows,
   routeRuntimeManifest: FarmRouteRuntimeManifest,
   cronJobs: FarmCronJob[],
+  edgeMiddleware: {
+    buildDir: string;
+    /** `runtime: "edge"` middleware files, root first. */
+    middlewareRoutes: readonly UniversalMiddlewareRoute[];
+    /** Prerendered pages that middleware guards. */
+    guardedPages: readonly string[];
+  },
 ) {
   const serverDir = path.join(outputDir, "server");
   const functionsDir = path.join(outputDir, "functions");
@@ -14046,12 +14141,32 @@ async function postProcessVercelOutput(
     config.basePath,
   );
 
+  // `runtime: "edge"` middleware guards the pages it covers before Vercel serves their static
+  // files. Only the middleware files that cover a prerendered page go in the Edge function.
+  const edgeMiddlewareRoutes = edgeMiddleware.middlewareRoutes.filter((route) =>
+    edgeMiddleware.guardedPages.some((pathname) => appMiddlewareMayHandlePath([route], pathname)),
+  );
+  if (edgeMiddlewareRoutes.length > 0) {
+    await writeFarmVercelEdgeMiddlewareFunction({
+      root,
+      outputDir,
+      buildDir: edgeMiddleware.buildDir,
+      config,
+      routes: edgeMiddlewareRoutes,
+      fs,
+    });
+  }
+
   // Rebuild the routes around Farm's `__nitro` function while preserving the
   // preset's redirect and header routes (previously discarded). See
   // buildFarmVercelRoutes for the full merge contract.
   vercelConfig.routes = buildFarmVercelRoutes({
     presetRoutes: Array.isArray(vercelConfig.routes) ? vercelConfig.routes : [],
     runtimeRoutes,
+    middlewareRoutes:
+      edgeMiddlewareRoutes.length > 0
+        ? [createFarmVercelEdgeMiddlewareRoute(edgeMiddleware.guardedPages, config.basePath)]
+        : [],
   });
 
   const vercelConfigWithWorkflowCrons = applyFarmWorkflowVercelCrons(
