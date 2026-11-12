@@ -698,6 +698,11 @@
       "import": "./dist/internal/compression-runtime.mjs",
       "require": "./dist/internal/compression-runtime.cjs"
     },
+    "./internal/vercel-edge-middleware": {
+      "types": "./dist/internal/vercel-edge-middleware.d.ts",
+      "import": "./dist/internal/vercel-edge-middleware.mjs",
+      "require": "./dist/internal/vercel-edge-middleware.cjs"
+    },
     "./internal/client-runtime": {
       "types": "./dist/internal/client-runtime.d.ts",
       "import": "./dist/internal/client-runtime.mjs",

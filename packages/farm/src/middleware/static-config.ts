@@ -2,13 +2,15 @@
  * The `config` a middleware file exports, read from its source at build time so prerendering
  * knows which paths the file's own `matcher` leaves alone. Only literal matchers count (strings,
  * regular expressions, arrays of them): anything computed, or a request-aware function, may match
- * any path, so it reads as unknown and the page stays server-handled.
+ * any path, so it reads as unknown and the page stays server-handled. `runtime` counts only as a
+ * literal `"edge"` or `"nodejs"`; any other value leaves the file on the server.
  */
 import type { MiddlewareMatcher } from "./types";
 
 export interface StaticMiddlewareConfig {
   matcher?: MiddlewareMatcher | MiddlewareMatcher[];
   exclude?: Array<string | RegExp>;
+  runtime?: "nodejs" | "edge";
 }
 
 interface Node {
@@ -51,7 +53,7 @@ function unwrap(node: Node): Node {
 }
 
 /**
- * The file's `export const config = { matcher, exclude }`: `null` when it exports no `config` (the
+ * The file's `export const config = { matcher, exclude, runtime }`: `null` when it exports no `config` (the
  * file covers its folder), `"unknown"` when `config` is not a literal one.
  */
 export function readStaticMiddlewareConfig(
@@ -77,6 +79,11 @@ export function readStaticMiddlewareConfig(
       for (const property of init.properties as Node[]) {
         if (property.type !== "Property" || property.computed) return "unknown";
         const key = property.key?.name ?? property.key?.value;
+        if (key === "runtime") {
+          const runtime = literalMatcher(unwrap(property.value));
+          if (runtime === "edge" || runtime === "nodejs") config.runtime = runtime;
+          continue;
+        }
         if (key !== "matcher" && key !== "exclude") continue;
         const matchers = literalMatchers(unwrap(property.value));
         if (!matchers) return "unknown";
