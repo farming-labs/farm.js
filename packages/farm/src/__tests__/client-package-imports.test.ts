@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   collectFarmClientPackageImports,
+  collectFarmServerBundledPackageInfo,
   collectFarmServerBundledPackages,
   resolveFarmClientOptimizeDeps,
 } from "../utils/client-component";
@@ -130,6 +131,40 @@ describe("packages the server graph bundles", () => {
         'import { icon } from "tweet-kit";\nimport { plain } from "plain-kit";\nimport legacy from "legacy-dual";\nimport modern from "modern-dual";\nimport { page } from "@farm.js/core";\n',
     });
     expect(collectFarmServerBundledPackages(root)).toEqual(["legacy-dual", "tweet-kit"]);
+    // Development pre-bundles the module-entry package; the stylesheet one stays unbundled.
+    expect(collectFarmServerBundledPackageInfo(root)).toEqual([
+      { name: "legacy-dual", prebundle: true },
+      { name: "tweet-kit", prebundle: false },
+    ]);
+  });
+});
+
+describe("server-bundled packages development pre-bundles", () => {
+  it("are module-entry packages without dependencies whose required peers the app has", () => {
+    const dual = (name: string, extra: Record<string, unknown> = {}) =>
+      JSON.stringify({ name, main: "dist/index.js", module: "dist/index.mjs", ...extra });
+    const root = project({
+      "node_modules/react/package.json": '{"name":"react","main":"index.js"}',
+      "node_modules/icons/package.json": dual("icons", { peerDependencies: { react: "*" } }),
+      "node_modules/charts/package.json": dual("charts", { dependencies: { clsx: "^2.0.0" } }),
+      "node_modules/native-lib/package.json": dual("native-lib", {
+        peerDependencies: { react: "*", "react-native": "*" },
+      }),
+      "node_modules/optional-peer/package.json": dual("optional-peer", {
+        peerDependencies: { "react-native": "*" },
+        peerDependenciesMeta: { "react-native": { optional: true } },
+      }),
+      "src/page.tsx":
+        'import "icons";\nimport "charts";\nimport "native-lib";\nimport "optional-peer";\n',
+    });
+    expect(collectFarmServerBundledPackageInfo(root)).toEqual([
+      // Under pnpm its own dependencies resolve only from its directory, not from a bundle.
+      { name: "charts", prebundle: false },
+      { name: "icons", prebundle: true },
+      // A required peer the app does not have.
+      { name: "native-lib", prebundle: false },
+      { name: "optional-peer", prebundle: true },
+    ]);
   });
 });
 
