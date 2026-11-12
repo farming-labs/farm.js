@@ -240,7 +240,7 @@ import {
   resolveFarmClientSourcemap,
 } from "./client-sourcemaps";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
-import { getFarmPresetRuntime } from "../deployment";
+import { getFarmPresetRuntime, resolveCloudflareProcessEnvFlags } from "../deployment";
 import { isFarmPreviewDeploymentEnvironment } from "../deployment-environment";
 import { resolveFarmInstrumentationRuntime } from "../instrumentation-runtime";
 import { FARM_PRERENDER_ENV } from "../plugins/infra-analytics";
@@ -13803,38 +13803,6 @@ export function resolveFarmNitroOutputConfig(
           }
         : {}),
   };
-}
-
-const CLOUDFLARE_POPULATE_PROCESS_ENV_FLAG = "nodejs_compat_populate_process_env";
-const CLOUDFLARE_DO_NOT_POPULATE_PROCESS_ENV_FLAG = "nodejs_compat_do_not_populate_process_env";
-/** The compatibility date from which Workers populate `process.env` by default. */
-const CLOUDFLARE_POPULATE_PROCESS_ENV_DATE = "2025-04-01";
-
-/**
- * The compatibility flags a generated Wrangler config needs so the worker's vars
- * and secrets reach `process.env`, or undefined when it needs no change.
- *
- * Farm builds Workers at a compatibility date before `process.env` was populated
- * by default, so server code reading it, such as an integration falling back to
- * `process.env.STRIPE_SECRET_KEY`, saw none of them. A config whose date already
- * populates `process.env`, or that opts out, is left as it is, since workerd
- * refuses to start with both flags.
- */
-export function resolveCloudflareProcessEnvFlags(wrangler: {
-  compatibility_date?: unknown;
-  compatibility_flags?: unknown;
-}): string[] | undefined {
-  const date = wrangler.compatibility_date;
-  const flags = wrangler.compatibility_flags;
-  if (typeof date !== "string" || date >= CLOUDFLARE_POPULATE_PROCESS_ENV_DATE) return undefined;
-  if (!Array.isArray(flags) || !flags.includes("nodejs_compat")) return undefined;
-  if (
-    flags.includes(CLOUDFLARE_POPULATE_PROCESS_ENV_FLAG) ||
-    flags.includes(CLOUDFLARE_DO_NOT_POPULATE_PROCESS_ENV_FLAG)
-  ) {
-    return undefined;
-  }
-  return [...flags, CLOUDFLARE_POPULATE_PROCESS_ENV_FLAG];
 }
 
 /** Apply {@link resolveCloudflareProcessEnvFlags} to the Wrangler config Nitro wrote. */

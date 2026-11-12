@@ -76,6 +76,12 @@ export interface FarmRscPluginOptions {
    * server loads them, so their factories run there.
    */
   serverPlugins?: FarmRscServerPlugins;
+
+  /**
+   * @internal Set by `farm build`: the Nitro preset it deploys with. A Cloudflare preset builds
+   * the RSC and SSR bundles with their packages included, since Workers have no node_modules.
+   */
+  preset?: string;
 }
 
 /** @internal See `FarmRscPluginOptions.serverPlugins`. */
@@ -135,6 +141,12 @@ export interface EntryContext {
    * page's source reads request state. The prerender pass merges these with module exports.
    */
   pageRenderingDirectives?: Record<string, unknown>;
+
+  /**
+   * Whether the server runs in Cloudflare Workers, where SSR renders to web streams because there
+   * are no Node streams.
+   */
+  workers?: boolean;
 
   /**
    * The resolved `images` config, its public half for `<Image>`, and the optimizer the server
