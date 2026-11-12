@@ -2308,11 +2308,15 @@ physical `ul` to the outer binding runtime, so stateful root attributes and styl
 same element. A root containing only one eligible map or `List` is supported as a range with no
 static segments. The compiler does not insert an extra parent merely to host the block.
 
-The first range-owned contract is deliberately non-interactive. Every meaningful direct child of
-the container must be either a lowercase host element or an eligible keyed map/`List`; every range
-must return a statically known host tree without events or row-local conditional slots. Fragments,
-components between ranges, interactive or controlled rows, and nested dynamic structures use the
-existing React-owned boundaries. Parent prop or compatible Fast Refresh changes remount this one
+Every meaningful direct child of the container must be either a lowercase host element or an
+eligible keyed map/`List`, and every range must return a statically known host tree without
+row-local conditional slots. Rows may carry the same inline event handlers keyed rows delegate,
+such as `onClick` on a filter button beside a static "Clear" button: React renders a row's
+handlers only while it owns the rows, and otherwise the container runs the handler for the row the
+event came from with that row's current item, innermost element first, stopping at
+`stopPropagation()`. Static siblings keep their own handlers. Rows with `onChange`, a container with
+its own event handlers, fragments, components between ranges, controlled rows, and nested dynamic
+structures use the existing React-owned boundaries. Parent prop or compatible Fast Refresh changes remount this one
 range container through React so static markup cannot become stale. Duplicate keys or a
 mount/hydration shape that cannot be adopted also switch the complete container to React before
 later updates.
