@@ -1661,9 +1661,12 @@ export async function buildUniversal(
         throw clientBuildResult.reason;
       }
 
-      // Rolldown can very rarely complete a parallel client build without
-      // traversing its entry graph. Preserve the fast parallel path, then
-      // recover only that invalid result once the SSR graph is fully drained.
+      // The empty bundles seen so far (2 modules, a zero-byte entry) match the
+      // client-only import guard rather than Rolldown: it stubbed the client
+      // entry whenever the entry's path contained a blocked package name such
+      // as "nf3". A random temp directory name could match, and a retry with
+      // a fresh directory then recovered. The guard now matches import names
+      // only; one sequential retry stays as a safety net for an invalid result.
       logger.warn("Client bundle was incomplete; retrying after the SSR build...");
       try {
         await buildClient(
@@ -1684,9 +1687,9 @@ export async function buildUniversal(
       } catch (retryError) {
         if (!(retryError instanceof IncompleteClientBuildOutputError)) throw retryError;
 
-        // A second incomplete pass means a renderer or build plugin left state
-        // behind that a rebuild in this process cannot clear. Stop rather than
-        // ship a missing browser entry.
+        // A second incomplete pass means the cause is not transient, for
+        // example a plugin that resolves the entry to an empty module. Stop
+        // rather than ship a missing browser entry.
         throw new IncompleteClientBuildOutputError(
           `${retryError.message.replace(/^Farm client build produced incomplete output: /, "")}. ` +
             "The client bundle was still incomplete after a sequential rebuild; run the build again in a fresh process.",
