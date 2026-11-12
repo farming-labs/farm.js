@@ -270,7 +270,8 @@ DOM only to mount. With the compiler on, an app module's `import { createRoot } 
 `createRoot` takes the same arguments and mounts host elements, the compiler's components and
 hook-free function components itself, so a fully compiled root never downloads React DOM.
 
-Today that covers compiled components and keyed lists whose rows hold no React-owned content.
+Today that covers compiled components and keyed lists whose rows hold no React-owned content,
+including lists that sit between static sibling elements (keyed ranges).
 Rows with `onChange` handlers stay React-owned under React DOM, because React derives `onChange`
 from each row's own Fiber; this root instead listens on the list container for the native event
 React's `onChange` follows for each control (`input` for text fields, `change` for checkboxes,

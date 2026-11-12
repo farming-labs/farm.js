@@ -12820,6 +12820,10 @@ function isFarmCompilerClass(type: unknown): boolean {
  */
 function compiledRootUpdatesWithoutReact(displayName: string, props: unknown): boolean {
   if (displayName.startsWith("FarmCompiled(")) return true;
+  // Keyed ranges own their rows and static-sibling bindings; React renders them again only on
+  // fallback paths (duplicate keys, failed adoption) or when a parent re-renders through React,
+  // which a compiled parent in this root never does. Their rows carry no React-owned events.
+  if (displayName === "FarmCompiledKeyedRanges") return true;
   if (displayName !== "FarmCompiledKeyedRows") return false;
   const rows = props as {
     conditionals?: readonly unknown[];
