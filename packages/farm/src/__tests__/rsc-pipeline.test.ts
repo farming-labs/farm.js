@@ -235,6 +235,24 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(entry.registrations).not.toContain("farm:mobile-shell");
   });
 
+  it("has the production server load the app's plugins only when one has server hooks", async () => {
+    const root = createApp();
+    const serverPlugins = async (plugins: unknown[], command: "serve" | "build") =>
+      (
+        (await createFarmRscViteConfig(
+          { experimental: { serverComponents: { mode: "rsc" as const } }, plugins },
+          { root, command, preset: "node-server" },
+        )) as Record<string, any>
+      ).farm.serverPlugins;
+    const withServerHooks = { name: "with-server-hooks", runtime: {} };
+    const clientOnly = { name: "client-only", client: { setup() {} } };
+
+    expect(await serverPlugins([clientOnly, withServerHooks], "build")).toBe(true);
+    expect(await serverPlugins([clientOnly], "build")).toBeUndefined();
+    // `farm dev` loaded the config in its own process, so the plugins have already run there.
+    expect(await serverPlugins([withServerHooks], "serve")).toBeUndefined();
+  });
+
   it("runs the app's plugin `configure` hooks first, as Farm's other pipelines do", async () => {
     const root = createApp();
     const contexts: Array<{ isDev: boolean; isProd: boolean }> = [];

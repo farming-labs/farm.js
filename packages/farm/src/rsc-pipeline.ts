@@ -13,6 +13,7 @@ import type { InlineConfig, ViteDevServer } from "vite";
 import { createFarmDevLoopbackPlugin } from "./server/dev-loopback";
 import { loadTailwindVitePlugin } from "./build/tailwind";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
+import { hasFarmServerRuntimePlugins } from "./plugin-server-runtime";
 import { resolveFarmPlatform } from "./desktop/config";
 import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
 import { loadFarmReactPlugin } from "./react-refresh";
@@ -210,6 +211,11 @@ export async function createFarmRscViteConfig(
       imports: clientPluginEntry.imports,
       registrations: clientPluginEntry.registrations,
     },
+    // A plugin with server hooks makes the production server load the config's `plugins`, as
+    // Farm's other servers do, so factories such as `bot()` run there. Dev already loaded them.
+    ...(options.command === "build" && hasFarmServerRuntimePlugins(config.plugins)
+      ? { serverPlugins: true }
+      : {}),
     experimental: { ...config.experimental, serverComponents: { mode: "rsc" } },
     port: options.port ?? config.server?.port,
     plugins: [

@@ -160,3 +160,33 @@ export default defineConfig({
     });
   });
 });
+
+describe("RSC plugins config extraction", () => {
+  it("keeps the plugins and the bindings they read, without the rest of the config", () => {
+    const source = `
+import { bot } from "@farm.js/bot";
+import { defineConfig } from "@farm.js/core";
+import tailwindcss from "@tailwindcss/vite";
+import { botProvider } from "./src/bot";
+const hostnames = process.env.BOT_HOSTNAMES?.split(",") ?? ["localhost"];
+const guard = { matcher: "/admin", handler() {} };
+export default defineConfig({
+  middleware: guard,
+  plugins: [bot({ provider: botProvider(), hostnames })],
+  vite: { plugins: [tailwindcss()] },
+});`;
+
+    const result = extractRscConfigPropertyModule(source, parseAst(source) as never, "plugins");
+    expect(result.kind).toBe("module");
+    if (result.kind !== "module") return;
+    expect(result.code).toContain('import { bot } from "@farm.js/bot";');
+    expect(result.code).toContain('import { botProvider } from "./src/bot";');
+    expect(result.code).toContain("const hostnames = process.env.BOT_HOSTNAMES");
+    expect(result.code).toContain(
+      "export default { plugins: [bot({ provider: botProvider(), hostnames })] };",
+    );
+    for (const dropped of ["defineConfig", "tailwindcss", "guard"]) {
+      expect(result.code).not.toContain(dropped);
+    }
+  });
+});

@@ -290,7 +290,7 @@ export function extractRscMiddlewareConfigModule(
 export function extractRscConfigPropertyModule(
   source: string,
   program: AstNode,
-  key: "middleware" | "mcp",
+  key: "middleware" | "mcp" | "plugins",
 ): ExtractionResult {
   const body = (program.body as AstNode[]) ?? [];
   const bindings = new Map<string, Binding>();
@@ -457,7 +457,7 @@ export async function loadRscMiddlewareConfigModule(configPath: string): Promise
 
 export async function loadRscConfigPropertyModule(
   configPath: string,
-  key: "middleware" | "mcp",
+  key: "middleware" | "mcp" | "plugins",
 ): Promise<ExtractionResult> {
   const [{ readFile }, vite] = await Promise.all([import("node:fs/promises"), import("vite")]);
   const source = await readFile(configPath, "utf8");

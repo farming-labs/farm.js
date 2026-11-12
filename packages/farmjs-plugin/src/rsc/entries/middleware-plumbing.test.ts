@@ -21,7 +21,7 @@ type ConfigHook = (
  */
 async function generateEntry(
   userConfig: Record<string, unknown>,
-  options: { command?: "serve" | "build"; configSource?: string } = {},
+  options: { command?: "serve" | "build"; configSource?: string; serverPlugins?: boolean } = {},
 ): Promise<string> {
   const root = mkdtempSync(path.join(tmpdir(), "farm-rsc-middleware-"));
   try {
@@ -29,7 +29,9 @@ async function generateEntry(
     if (options.configSource) {
       writeFileSync(path.join(root, "farm.config.ts"), options.configSource);
     }
-    const plugin = farmRsc().find((candidate) => candidate.name === "@farm.js/plugin/rsc:config");
+    const plugin = farmRsc({ serverPlugins: options.serverPlugins }).find(
+      (candidate) => candidate.name === "@farm.js/plugin/rsc:config",
+    );
     await (plugin!.config as ConfigHook)(
       { root, experimental: { serverComponents: true }, ...userConfig },
       {
@@ -114,6 +116,39 @@ export default defineConfig({
     await expect(
       generateEntry({ middleware: { matcher: "/private", handler() {} } }),
     ).rejects.toThrow(/requires an importable farm\.config or vite\.config file/);
+  });
+});
+
+describe("plugins reach the production RSC entry", () => {
+  const configSource = `import { recorder } from "./recorder";
+export default { plugins: [recorder()] };`;
+
+  it("imports the config's plugins when `farm build` asks for them", async () => {
+    const entry = await generateEntry({}, { configSource, serverPlugins: true });
+    expect(entry).toMatch(/^import ".*farm\.config\.ts\?farm-rsc-plugins";$/m);
+  });
+
+  it("leaves them out of development and of builds that don't ask", async () => {
+    for (const options of [
+      { configSource, serverPlugins: true, command: "serve" as const },
+      { configSource },
+    ]) {
+      expect(await generateEntry({}, options)).not.toContain("farm-rsc-plugins");
+    }
+  });
+
+  it("fails when the build can't read plugins from the config", async () => {
+    await expect(
+      generateEntry(
+        {},
+        {
+          configSource: `const shared = { plugins: [] };\nexport default { ...shared };`,
+          serverPlugins: true,
+        },
+      ),
+    ).rejects.toThrow(
+      /Cannot read plugins for the RSC server from .*farm\.config\.ts: plugins may be supplied through a config spread/,
+    );
   });
 });
 
