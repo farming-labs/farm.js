@@ -99,6 +99,7 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "../document-layout-client";
+import { FARM_NAVIGATION_SCRIPT_SOURCE } from "../client/navigation-scripts";
 import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "../client/navigation-stream-client";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
@@ -3931,6 +3932,8 @@ mountFarmDocsSearch();
 
 ${generateUniversalRouterStateRuntime()}
 
+${FARM_NAVIGATION_SCRIPT_SOURCE}
+
 // SPA Router for server-rendered pages (HTML swap)
 const spaRouter = {
 ${generateUniversalRouterStateProperties()}
@@ -4101,12 +4104,7 @@ ${generateUniversalRouterStateProperties()}
 
     setTimeout(function() {
       Array.from(document.querySelectorAll("script")).forEach(function(script) {
-        const freshScript = document.createElement("script");
-        Array.from(script.attributes).forEach(function(attr) {
-          freshScript.setAttribute(attr.name, attr.value);
-        });
-        freshScript.textContent = script.textContent || "";
-        script.replaceWith(freshScript);
+        script.replaceWith(createFarmNavigationScript(script));
       });
     }, 0);
 
@@ -5019,14 +5017,11 @@ function fitsSegmentResponse(currentRoot, nextRoot) {
     : ""
 }
 
+${FARM_NAVIGATION_SCRIPT_SOURCE}
+
 function activateNavigationScripts(root) {
   for (const script of Array.from(root?.querySelectorAll?.("script") || [])) {
-    const freshScript = document.createElement("script");
-    for (const attribute of Array.from(script.attributes)) {
-      freshScript.setAttribute(attribute.name, attribute.value);
-    }
-    freshScript.textContent = script.textContent || "";
-    script.replaceWith(freshScript);
+    script.replaceWith(createFarmNavigationScript(script));
   }
 }
 
@@ -5613,12 +5608,7 @@ ${
 
     setTimeout(function() {
       Array.from(document.querySelectorAll("script")).forEach(function(script) {
-        const freshScript = document.createElement("script");
-        Array.from(script.attributes).forEach(function(attr) {
-          freshScript.setAttribute(attr.name, attr.value);
-        });
-        freshScript.textContent = script.textContent || "";
-        script.replaceWith(freshScript);
+        script.replaceWith(createFarmNavigationScript(script));
       });
     }, 0);
 
