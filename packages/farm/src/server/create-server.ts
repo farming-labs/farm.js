@@ -397,7 +397,7 @@ export async function createServer(
             ...reactRefreshPlugins,
             createDevDependencyStubsPlugin(),
             farmI18nClientBridgePlugin(),
-            farmServerOnlyEntriesPlugin(),
+            farmServerOnlyEntriesPlugin({ prebundleServerPackages: true }),
             farmPlugin(finalConfig, pluginManager),
             farmEnvironmentFunctionsPlugin(finalConfig),
             createBrandingPlugin(),

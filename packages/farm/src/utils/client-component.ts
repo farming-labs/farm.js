@@ -14,6 +14,7 @@ import {
   findFarmReactServerClientModules,
   findFarmReactServerClientNames,
   findFarmServerBundledPackage,
+  type FarmServerBundledPackage,
 } from "../islands-react-server-exports";
 import { isFarmIslandStrategy, type FarmIslandStrategy } from "../island";
 import { isReactRenderer, type FarmRenderer } from "../renderer";
@@ -2510,7 +2511,12 @@ function scanFarmPackageImports(
  * development renders them as the production bundle does.
  */
 export function collectFarmServerBundledPackages(directory: string): string[] {
-  const found = new Set<string>();
+  return collectFarmServerBundledPackageInfo(directory).map(({ name }) => name);
+}
+
+/** As `collectFarmServerBundledPackages`, with why each package is bundled. */
+export function collectFarmServerBundledPackageInfo(directory: string): FarmServerBundledPackage[] {
+  const found = new Map<string, FarmServerBundledPackage>();
   const checked = new Set<string>();
   const walk = (current: string) => {
     let entries: fs.Dirent[];
@@ -2535,12 +2541,12 @@ export function collectFarmServerBundledPackages(directory: string): string[] {
         if (!name || checked.has(name)) continue;
         checked.add(name);
         const bundled = findFarmServerBundledPackage(file, name);
-        if (bundled) found.add(bundled);
+        if (bundled) found.set(bundled.name, bundled);
       }
     }
   };
   walk(directory);
-  return [...found].sort();
+  return [...found.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 const clientReachableModules = new Map<string, Set<string>>();

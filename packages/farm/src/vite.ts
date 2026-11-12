@@ -137,7 +137,7 @@ import {
   getClientModuleMetadata,
   resolveModuleSourcePath,
   getIslandStrategyExport,
-  collectFarmServerBundledPackages,
+  collectFarmServerBundledPackageInfo,
   getFarmClientReachableModules,
   hasUseClientDirective,
   invalidateFarmClientReachableModules,
@@ -208,6 +208,7 @@ import {
 import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
 import { farmImageImportsPlugin } from "./image-vite";
 import { farmFontImportsPlugin } from "./font-vite";
+import type { FarmServerBundledPackage } from "./islands-react-server-exports";
 import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
@@ -436,6 +437,38 @@ export function appDataDir() {
 }
 
 /**
+ * In development, pre-bundle each server-bundled package whose only ES module build is `module`
+ * into one file, with Vite's SSR dependency optimizer. Served unbundled, such a package is loaded
+ * one module at a time through the SSR module runner: a barrel like lucide-react's is thousands of
+ * modules on the first page that imports one icon. The bundle is cached in Vite's `deps_ssr`
+ * directory and rebuilt when the lockfile or config changes.
+ *
+ * A bundle holds only the package's own modules, so only self-contained packages qualify (see
+ * `FarmServerBundledPackage.prebundle`). Every other bare import stays an import of a peer the app
+ * provides: the renderer, which the app must share, or react-native under a React Native library,
+ * whose Flow source no bundler parses. CSS and asset imports stay imports too, which Vite's own
+ * pipeline serves. Every other server-bundled package keeps being served unbundled.
+ */
+function createFarmServerPrebundleConfig(bundledPackages: readonly FarmServerBundledPackage[]): {
+  optimizeDeps?: {
+    include: string[];
+    rolldownOptions: { external: (id: string) => boolean };
+  };
+} {
+  const include = bundledPackages.filter(({ prebundle }) => prebundle).map(({ name }) => name);
+  if (include.length === 0) return {};
+  const isBare = (id: string) => /^(?![a-zA-Z]:)[\w@]/.test(id) && !id.includes(":");
+  const isIncluded = (id: string) =>
+    include.some((name) => id === name || id.startsWith(`${name}/`));
+  return {
+    optimizeDeps: {
+      include,
+      rolldownOptions: { external: (id) => isBare(id) && !isIncluded(id) },
+    },
+  };
+}
+
+/**
  * Fail a browser graph that imports a server-only core entry, instead of
  * bundling its server runtime (for `@farm.js/core/og`, the `@vercel/og` wasm
  * renderer) into client code. A server graph that imports `@farm.js/core/og`
@@ -446,6 +479,11 @@ export function farmServerOnlyEntriesPlugin(
   options: {
     /** The browser graph's platform; a web build's mobile client passes `"mobile"`. */
     platform?: FarmPlatform;
+    /**
+     * Pre-bundle module-entry packages for SSR (`createFarmServerPrebundleConfig`). Only the dev
+     * server sets it: a build's own Vite server, which loads the project's modules, does not.
+     */
+    prebundleServerPackages?: boolean;
   } = {},
 ): Plugin {
   let root = process.cwd();
@@ -454,6 +492,9 @@ export function farmServerOnlyEntriesPlugin(
     name: "farm:server-only-entries",
     enforce: "pre",
     config(config) {
+      const bundledPackages = collectFarmServerBundledPackageInfo(
+        path.resolve(config.root ?? process.cwd()),
+      );
       return {
         optimizeDeps: { rolldownOptions: { plugins: [farmBrowserBuiltinsOptimizerPlugin()] } },
         ssr: {
@@ -461,8 +502,11 @@ export function farmServerOnlyEntriesPlugin(
             // Resolve `server-only` here rather than in Node, which would load its throwing build.
             SERVER_ONLY_PACKAGE,
             // Packages Node cannot load as a bundler does (stylesheet imports, `module`-only ESM).
-            ...collectFarmServerBundledPackages(path.resolve(config.root ?? process.cwd())),
+            ...bundledPackages.map(({ name }) => name),
           ],
+          ...(options.prebundleServerPackages
+            ? createFarmServerPrebundleConfig(bundledPackages)
+            : {}),
         },
       };
     },
@@ -2194,7 +2238,10 @@ export function farmPlugin(
               loadModule: async (specifier) => {
                 const resolved = await server.environments.ssr.pluginContainer.resolveId(specifier);
                 if (specifier === farmConfig.docs.adapter?.server && resolved?.id) {
-                  return import(/* @vite-ignore */ pathToFileURL(resolved.id).href);
+                  // Node loads the adapter itself. Drop the `?v=` version query Vite's SSR
+                  // optimizer adds to a dependency's id: Node would read it as part of the path.
+                  const file = resolved.id.split("?", 1)[0]!;
+                  return import(/* @vite-ignore */ pathToFileURL(file).href);
                 }
                 return loadFarmDevModule(server, resolved?.id ?? specifier);
               },
