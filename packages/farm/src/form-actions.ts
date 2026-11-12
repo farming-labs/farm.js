@@ -27,11 +27,15 @@ export function registerFarmFormAction<T>(action: T, id: string): T {
  * Runs a server action posted to a page: a form submission, or a call from a client component.
  * Returns `null` for any other request, which then renders as usual.
  */
-export function handleFarmFormActionRequest(
+export async function handleFarmFormActionRequest(
   request: Request,
   config: ResolvedFarmServerActionsConfig,
+  /** The URL the browser posted to, when a rewrite replaced `request`'s. */
+  requestedUrl: string = request.url,
 ): Promise<Response | null> {
-  return handleAction(request, {
+  // A redirect() the action chose stays where it points.
+  let actionRedirected = false;
+  const response = await handleAction(request, {
     allowedOrigins: config.allowedOrigins,
     bodySizeLimit: config.bodySizeLimit,
     // The result islx sends is the envelope, not the action's own type.
@@ -39,7 +43,10 @@ export function handleFarmFormActionRequest(
       runFarmFormAction(actionRequest, action) as Promise<T>,
     mapError(error) {
       const redirect = getFarmRedirectError(error);
-      if (redirect) return { redirect: redirect.url };
+      if (redirect) {
+        actionRedirected = true;
+        return { redirect: redirect.url };
+      }
       if (isFarmNotFoundError(error)) return { status: 404 };
       // A declared failure (`ServerFnFailure`, invalid input) answers with its own status, as the
       // RSC engine does; it is not logged as a crash.
@@ -49,6 +56,23 @@ export function handleFarmFormActionRequest(
     },
     onError: (error) => console.error("[Farm.js] Server action failed:", error),
   });
+  if (!response || actionRedirected) return response;
+  return returnToRequestedUrl(response, request.url, requestedUrl);
+}
+
+/**
+ * A form posted without JavaScript goes back to its page with a 303. After a rewrite, islx sees
+ * the rewritten URL, so the browser would land on the rewrite's target; it goes back to the URL it
+ * posted to instead, as it does without a rewrite.
+ */
+function returnToRequestedUrl(response: Response, url: string, requestedUrl: string): Response {
+  if (response.status !== 303 || requestedUrl === url) return response;
+  const served = new URL(url);
+  if (response.headers.get("location") !== served.pathname + served.search) return response;
+  const requested = new URL(requestedUrl);
+  const headers = new Headers(response.headers);
+  headers.set("location", requested.pathname + requested.search);
+  return new Response(response.body, { status: 303, headers });
 }
 
 /**

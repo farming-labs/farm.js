@@ -48,6 +48,7 @@ function runtime(i18n = false, rewriteDestination = "/base/fr/new?q=rewritten") 
     "_withFarmGuardedResponseCache",
     "farmPluginRuntime",
     "fetchFarmExternalRewrite",
+    "farmRequestedUrls",
     `${handlers}\nreturn handleFarmRequest;`,
   )(
     new Proxy(URL, {
@@ -76,6 +77,7 @@ function runtime(i18n = false, rewriteDestination = "/base/fr/new?q=rewritten") 
     (response: Response) => response,
     null,
     fetchFarmExternalRewrite,
+    new WeakMap<Request, string>(),
   ) as (request: Request, adapterContext?: unknown) => Promise<Response>;
   return { request, parses };
 }

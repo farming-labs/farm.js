@@ -1638,6 +1638,11 @@ export class ServerRenderer {
                 handleFarmFormActionRequest(
                   formActionRequest,
                   resolveServerActionsConfig(this.config.serverActions),
+                  // Before a rewrite, the URL the browser posted to.
+                  new URL(
+                    (req as { originalUrl?: string }).originalUrl ?? req.url ?? "/",
+                    formActionRequest.url,
+                  ).href,
                 ),
             ),
         );
