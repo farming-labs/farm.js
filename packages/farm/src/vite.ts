@@ -462,7 +462,8 @@ export function appDataDir() {
 }
 
 /**
- * In development, pre-bundle each server-bundled package whose only ES module build is `module`
+ * In a Vite server that loads the app's modules (`farm dev`, and the server a build loads route
+ * modules with), pre-bundle each server-bundled package whose only ES module build is `module`
  * into one file, with Vite's SSR dependency optimizer. Served unbundled, such a package is loaded
  * one module at a time through the SSR module runner: a barrel like lucide-react's is thousands of
  * modules on the first page that imports one icon. The bundle is cached in Vite's `deps_ssr`
@@ -505,8 +506,8 @@ export function farmServerOnlyEntriesPlugin(
     /** The browser graph's platform; a web build's mobile client passes `"mobile"`. */
     platform?: FarmPlatform;
     /**
-     * Pre-bundle module-entry packages for SSR (`createFarmServerPrebundleConfig`). Only the dev
-     * server sets it: a build's own Vite server, which loads the project's modules, does not.
+     * Pre-bundle module-entry packages for SSR (`createFarmServerPrebundleConfig`). The dev server
+     * and a build's own Vite server, which load the project's modules, set it; bundling does not.
      */
     prebundleServerPackages?: boolean;
   } = {},

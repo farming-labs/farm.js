@@ -290,7 +290,7 @@ describe("SSR pre-bundling config", () => {
     expect(external("C:/abs/node_modules/icon-kit/dist/esm/index.mjs")).toBe(false);
   });
 
-  it("leaves other Vite servers unchanged, such as the one a build loads modules with", async () => {
+  it("leaves Vite servers that do not ask for it unchanged, such as a bundle build's", async () => {
     const ssr = await ssrConfig();
     expect(ssr.noExternal).toEqual(expect.arrayContaining(["icon-kit", "tweet-kit"]));
     expect(ssr.optimizeDeps).toBeUndefined();
