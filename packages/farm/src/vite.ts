@@ -5457,6 +5457,8 @@ if (import.meta.hot) {
       // keep CSS, generated output and files outside src off this static pass.
       const tracksAsyncOwnerIslands =
         isReactRenderer(currentFarmConfig?.renderer) && planRouteManager !== undefined;
+      // Set once the plan below is rebuilt from this edit, so it is not rebuilt again right after.
+      let clientPlanCurrent = false;
       if (
         isHydrationPlanSource &&
         (isolatedHydrationMode === "enabled" ||
@@ -5500,6 +5502,7 @@ if (import.meta.hot) {
               server.ws.send({ type: "full-reload", path: "*" });
               return [];
             }
+            clientPlanCurrent = true;
           } catch (error) {
             logger.warn(
               `[Farm.js] Could not refresh the client hydration plan after ${file}: ${error instanceof Error ? error.message : String(error)}`,
@@ -5532,7 +5535,9 @@ if (import.meta.hot) {
           return [];
         }
 
-        farmApp?.getRouteManager().invalidateClientManifest();
+        // Dropping a plan rebuilt above from this same edit would only make the next request
+        // rebuild it, which reads and parses every route module again.
+        if (!clientPlanCurrent) farmApp?.getRouteManager().invalidateClientManifest();
         const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
         if (manifestModule) {
           server.moduleGraph.invalidateModule(manifestModule);
