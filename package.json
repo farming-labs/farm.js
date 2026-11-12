@@ -48,6 +48,7 @@
     "docs:check-navigation": "node scripts/check-docs-navigation.mjs",
     "build:examples": "node scripts/build-examples.js",
     "benchmark:frameworks": "node benchmarks/frameworks/run.mjs",
+    "benchmark:app-scale": "NODE_OPTIONS=--max-old-space-size=12288 pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && node benchmarks/app-scale/run.mjs",
     "benchmark:compiler": "node benchmarks/compiler/run.mjs",
     "benchmark:react-optimizer": "node benchmarks/react-optimizer/run.mjs",
     "benchmark:isolated-hydration": "node benchmarks/isolated-hydration/run.mjs",
