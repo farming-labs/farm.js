@@ -1,11 +1,15 @@
 import { expect, test, type Page } from "./fixtures";
 
 // A plugin's `client` hooks run in the browser entry, as in Farm's other entries. The contract
-// app has a plugin that records them in rsc mode only (examples/server-components/farm.config.ts).
+// app has a plugin that records them in rsc mode, and in islands mode with
+// FARM_SERVER_COMPONENTS_CLIENT_PLUGINS=1 (examples/server-components/farm.config.ts).
 const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" : "rsc";
 const dev = process.env.FARM_SERVER_COMPONENTS_SERVER === "dev";
 
-test.skip(mode !== "rsc", "the islands build has no client plugin");
+test.skip(
+  mode !== "rsc" && process.env.FARM_SERVER_COMPONENTS_CLIENT_PLUGINS !== "1",
+  "the islands build has a client plugin only with FARM_SERVER_COMPONENTS_CLIENT_PLUGINS=1",
+);
 
 function collectErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -103,7 +107,14 @@ test("a navigation that fails reaches the plugin's error hook before the page lo
       ),
     );
   });
-  await page.route("**/nav/b.rsc", (route) => route.fulfill({ status: 500, body: "down" }));
+  // The navigation's own request: rsc fetches the page's payload, islands mode its HTML.
+  await page.route(
+    (url) => url.pathname === "/nav/b.rsc" || url.pathname === "/nav/b",
+    (route) =>
+      route.request().resourceType() === "document"
+        ? route.continue()
+        : route.fulfill({ status: 500, body: "down" }),
+  );
 
   await page.getByRole("link", { name: "Page B" }).click();
   await expect(page.getByRole("heading", { name: "Nav page B" })).toBeVisible();
