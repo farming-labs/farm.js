@@ -8812,6 +8812,10 @@ function rememberFarmSyncRender(routeKey, streamedHtml) {
 
 function renderFarmElementSync(ReactDOMServer, element, routeKey) {
   if (!farmReactSyncRender) return undefined;
+  // renderToString takes no nonce, so the scripts React adds itself (the form replay script of a
+  // form with a function action) would go out without one, and a nonce policy blocks them. A
+  // response with a nonce renders with the stream, which gives them the nonce.
+  if (_resolveCurrentCspNonce()) return undefined;
   const addsDoctype = routeKey === undefined ? undefined : farmSyncRenderRoutes.get(routeKey);
   if (addsDoctype === undefined) return undefined;
   if (typeof ReactDOMServer.renderToString !== "function") return undefined;

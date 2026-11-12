@@ -55,3 +55,21 @@ test("a promise prop resolves after a client navigation", async ({ page }) => {
   await expect(like).toHaveText("Likes: 1");
   expect(errors).toEqual([]);
 });
+
+test("React's form replay script carries the nonce on a page that does not suspend", async ({
+  page,
+  request,
+}) => {
+  // Farm renders a page that did not suspend with renderToString from its second request on.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const response = await request.get("/server-fn-middleware");
+    const nonce = /'nonce-([^']+)'/.exec(response.headers()["content-security-policy"] ?? "")?.[1];
+    const replay = /<script([^>]*)>addEventListener\("submit"/.exec(await response.text());
+    expect(replay, "the page has a form with a function action").not.toBeNull();
+    expect(replay![1]).toContain(`nonce="${nonce}"`);
+  }
+  const errors = collectErrors(page);
+  await page.goto("/server-fn-middleware");
+  await page.waitForLoadState("networkidle");
+  expect(errors).toEqual([]);
+});
