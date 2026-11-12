@@ -520,6 +520,30 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([]);
   });
 
+  it("filter buttons with click handlers next to a sibling button", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Toolbar() {
+        const [todos, setTodos] = useState([{ id: 1, done: true }, { id: 2, done: false }]);
+        const [filter, setFilter] = useState("all");
+        return (
+          <section>
+            <nav>
+              {["all", "active", "done"].map((name) => (
+                <button key={name} id={name} className={filter === name ? "selected" : ""} onClick={() => setFilter(name)}>{name}</button>
+              ))}
+              <button id="clear" onClick={() => setTodos(todos.filter((todo) => !todo.done))}>Clear done</button>
+            </nav>
+            <p id="state">{filter}:{todos.length}</p>
+          </section>
+        );
+      }`,
+      "Toolbar",
+      [click("#active"), click("#done"), click("#clear"), click("#all")],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
   it("svg with viewBox and className", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";

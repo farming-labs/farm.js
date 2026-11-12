@@ -282,6 +282,8 @@ interface KeyedRangePlan {
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
   row: t.JSXElement;
   bindings: PendingKeyedRowBinding[];
+  /** Delegatable row events; only top-level keyed ranges carry them. */
+  events?: PendingKeyedRowEvent[];
   syntax: "map" | "list";
 }
 
@@ -6196,7 +6198,15 @@ function analyzeKeyedRangesContainer(
   for (const child of children) {
     const range = analyzeKeyedRowChild(child, statesByValue, safeGlobals, listNames);
     if (range) {
-      if (range.events.length > 0 || range.conditionals.length > 0) return undefined;
+      if (range.conditionals.length > 0) return undefined;
+      // Row events run through the ranges container, as for keyed rows, so they must be ones
+      // React dispatches without the row's own fiber.
+      if (
+        range.events.length > 0 &&
+        !canDelegateKeyedRowEvents({ events: range.events, conditionals: [], source: container })
+      ) {
+        return undefined;
+      }
       ranges.push({
         before: staticBefore,
         source: range.source,
@@ -6205,6 +6215,7 @@ function analyzeKeyedRangesContainer(
         renderCallback: range.renderCallback,
         row: range.row,
         bindings: range.bindings,
+        ...(range.events.length > 0 ? { events: range.events } : {}),
         syntax: range.syntax,
       });
       for (const dependency of range.dependencies) dependencies.add(dependency);
@@ -7547,6 +7558,7 @@ function rewriteKeyedRowEventAttributes(
   eventFactory: t.Identifier,
   item: t.Identifier,
   index: t.Expression,
+  extraArguments: readonly t.Expression[] = [],
 ): void {
   const eventByLocation = new Map(
     events.map((event) => [`${event.path.join(".")}:${event.name}`, event] as const),
@@ -7563,6 +7575,7 @@ function rewriteKeyedRowEventAttributes(
           t.cloneNode(item),
           t.cloneNode(index),
           t.numericLiteral(event.id),
+          ...extraArguments.map((argument) => t.cloneNode(argument)),
         ]),
       );
     }
@@ -8053,7 +8066,69 @@ function keyedRangeObject(
         range.bindings.map((binding) => keyedRowBindingObject(binding, parameters)),
       ),
     ),
+    ...(range.events?.length
+      ? [
+          t.objectProperty(
+            t.identifier("events"),
+            t.arrayExpression(range.events.map((event) => keyedRowEventObject(event, parameters))),
+          ),
+        ]
+      : []),
   ]);
+}
+
+/**
+ * Replaces each range's row event handlers in the rendered source with
+ * `eventFactory(item, index, eventId, rangeIndex)`, which yields the handler only while React
+ * owns the rows. Ranges are the container's non-host children, in order.
+ */
+function rewriteKeyedRangeEvents(
+  source: t.JSXElement,
+  plan: KeyedRangesPlan,
+  eventFactory: t.Identifier,
+): void {
+  let rangeIndex = 0;
+  for (const child of meaningfulJsxChildren(source)) {
+    if (t.isJSXElement(child) && isHostElement(child)) continue;
+    const range = plan.ranges[rangeIndex];
+    const currentRange = rangeIndex;
+    rangeIndex += 1;
+    if (!range?.events?.length) continue;
+    let callback: t.ArrowFunctionExpression | t.FunctionExpression | undefined;
+    if (
+      t.isJSXExpressionContainer(child) &&
+      !t.isJSXEmptyExpression(child.expression) &&
+      isMapCall(child.expression)
+    ) {
+      const candidate = child.expression.arguments[0];
+      if (t.isArrowFunctionExpression(candidate) || t.isFunctionExpression(candidate)) {
+        callback = candidate;
+      }
+    } else if (t.isJSXElement(child)) {
+      const renderChild = meaningfulJsxChildren(child)[0];
+      if (
+        t.isJSXExpressionContainer(renderChild) &&
+        (t.isArrowFunctionExpression(renderChild.expression) ||
+          t.isFunctionExpression(renderChild.expression))
+      ) {
+        callback = renderChild.expression;
+      }
+    }
+    const row = callback && returnedExpression(callback);
+    const item = callback?.params[0];
+    const index = callback?.params[1];
+    if (!t.isJSXElement(row) || !t.isIdentifier(item)) {
+      throw new Error("keyed range events must belong to an inline row callback");
+    }
+    rewriteKeyedRowEventAttributes(
+      row,
+      range.events,
+      eventFactory,
+      item,
+      t.isIdentifier(index) ? index : t.numericLiteral(0),
+      [t.numericLiteral(currentRange)],
+    );
+  }
 }
 
 function keyedRangesBoundary(blockRuntime: t.Identifier, plan: KeyedRangesPlan): t.JSXElement {
@@ -8062,6 +8137,12 @@ function keyedRangesBoundary(blockRuntime: t.Identifier, plan: KeyedRangesPlan):
     t.jsxIdentifier("KeyedRanges"),
   );
   const source = t.cloneNode(plan.source, true);
+  const hasEvents = plan.ranges.some((range) => range.events?.length);
+  const eventFactory = uniqueLocalIdentifier("_farmRowEvent", [
+    plan.source,
+    ...plan.ranges.flatMap((range) => (range.events || []).map((event) => event.value)),
+  ]);
+  if (hasEvents) rewriteKeyedRangeEvents(source, plan, eventFactory);
   let rootRef: t.Expression | undefined;
   source.openingElement.attributes = source.openingElement.attributes.filter((attribute) => {
     if (
@@ -8082,8 +8163,18 @@ function keyedRangesBoundary(blockRuntime: t.Identifier, plan: KeyedRangesPlan):
         t.jsxAttribute(t.jsxIdentifier("id"), t.jsxExpressionContainer(t.numericLiteral(plan.id))),
         t.jsxAttribute(
           t.jsxIdentifier("render"),
-          t.jsxExpressionContainer(t.arrowFunctionExpression([], source)),
+          t.jsxExpressionContainer(
+            t.arrowFunctionExpression(hasEvents ? [t.cloneNode(eventFactory)] : [], source),
+          ),
         ),
+        ...(hasEvents
+          ? [
+              t.jsxAttribute(
+                t.jsxIdentifier("delegateEvents"),
+                t.jsxExpressionContainer(t.booleanLiteral(true)),
+              ),
+            ]
+          : []),
         ...(rootRef
           ? [t.jsxAttribute(t.jsxIdentifier("rootRef"), t.jsxExpressionContainer(rootRef))]
           : []),
