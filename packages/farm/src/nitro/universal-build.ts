@@ -1849,6 +1849,15 @@ async function mergeBuiltFontCss(
   await fs.writeFile(clientCssPath, mergeFarmFontCss(clientCss, normalizedFontCss));
 }
 
+/**
+ * Whether a client import names `packageName` or one of its subpaths. The client entry and app
+ * modules are imported by absolute path, so a substring match let a project directory such as
+ * `conf3` or mkdtemp's `.tmp-Wnf3nE` turn the client entry itself into an empty module.
+ */
+function importsFarmClientBlockedPackage(id: string, packageName: string): boolean {
+  return id === packageName || id.startsWith(`${packageName}/`);
+}
+
 class IncompleteClientBuildOutputError extends Error {
   constructor(detail: string) {
     super(`Farm client build produced incomplete output: ${detail}`);
@@ -2421,7 +2430,7 @@ async function buildClient(
             // resolves one to Farm's browser module for it instead.
             external: (id) => {
               // Externalize native modules that can't be bundled for browser
-              if (id === "fsevents" || id.includes("fsevents") || id.endsWith(".node")) {
+              if (importsFarmClientBlockedPackage(id, "fsevents") || id.endsWith(".node")) {
                 return true;
               }
               return false;
@@ -2506,8 +2515,7 @@ async function buildClient(
                 }
                 // Block problematic node modules
                 if (
-                  id === "fsevents" ||
-                  id.includes("fsevents") ||
+                  importsFarmClientBlockedPackage(id, "fsevents") ||
                   id.endsWith(".node") ||
                   id === "nitro" ||
                   id === "vite" ||
@@ -2516,8 +2524,9 @@ async function buildClient(
                   id.startsWith("rolldown/") ||
                   id === "rollup" ||
                   id.startsWith("nitro/") ||
-                  id.includes("node-pre-gyp") ||
-                  id.includes("nf3")
+                  importsFarmClientBlockedPackage(id, "node-pre-gyp") ||
+                  importsFarmClientBlockedPackage(id, "@mapbox/node-pre-gyp") ||
+                  importsFarmClientBlockedPackage(id, "nf3")
                 ) {
                   return { id: "\0empty-module", external: false };
                 }

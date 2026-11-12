@@ -26,8 +26,8 @@ const hasBun = spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-async function createProductionFixture(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-prebuilt-ssr-"));
+async function createProductionFixture(name = "production-prebuilt-ssr"): Promise<string> {
+  const root = await fs.mkdtemp(path.join(packageRoot, `.tmp-${name}-`));
 
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), {
     recursive: true,
@@ -4745,6 +4745,49 @@ export default function Page() {
         "The client bundle was still incomplete after a sequential rebuild",
       );
       expect(attempts()).toBe(2);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("builds the client entry when the project path contains a blocked package name", async () => {
+    // The client entry is imported by absolute path. Matching blocked packages as substrings
+    // emptied it on every attempt whenever mkdtemp happened to name a fixture `...-Wnf3nE`.
+    const root = await createProductionFixture("nf3-fsevents-node-pre-gyp");
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          vite: {
+            plugins: [
+              {
+                name: "import-blocked-packages-from-client-entry",
+                transform(code, id) {
+                  if (!id.endsWith("farm-client-entry.tsx")) return null;
+                  // None of these resolve from the fixture, so the build fails unless the
+                  // client guard still stubs each package and its subpaths.
+                  return `import "nf3";\nimport "fsevents/fsevents.js";\nimport "@mapbox/node-pre-gyp";\n${code}`;
+                },
+              },
+            ],
+          },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const clientDir = path.join(root, ".farm", "client");
+      const entry = (await fs.readdir(clientDir)).find((name) =>
+        /^farm-client-h[0-9a-f]+\.js$/.test(name),
+      );
+      expect(entry).toBeDefined();
+      await expect(fs.readFile(path.join(clientDir, entry!), "utf8")).resolves.toContain(
+        "__farmPageState",
+      );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
