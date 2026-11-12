@@ -29,6 +29,11 @@ interface FarmDocsAdapterRuntimeHandlerOptions {
    * re-encoding its body. Adapters fall back to `new Response(html, init)` without it.
    */
   createHtmlResponse?: (html: string, init: ResponseInit) => Response;
+  /**
+   * Whether a path guard covers a pathname. Passed only to an adapter that declares the
+   * `guarded-pages` capability, which keeps such pages off its anonymous surfaces.
+   */
+  isPathGuarded?: (pathname: string) => boolean;
 }
 
 interface FarmDocsAdapterServerModule {
@@ -96,27 +101,54 @@ export function hasFarmDocsRuntimeAdapter(
 }
 
 /**
- * The adapter answers pages, Markdown, llms-full.txt, search, and MCP from its own index
- * and never runs the app's guards, so a docs page behind a path guard would reach anyone.
- * Refuse that pairing instead of serving it.
+ * Whether the docs adapter keeps pages a path guard covers off the surfaces that answer without
+ * running the guard (its `guarded-pages` capability), given Farm's `isPathGuarded`.
+ */
+export function farmDocsAdapterServesGuardedPages(
+  docs: FarmDocsResolvedConfig | undefined,
+): boolean {
+  return Boolean(
+    hasFarmDocsRuntimeAdapter(docs) && docs.adapter.capabilities?.includes("guarded-pages"),
+  );
+}
+
+/**
+ * The adapter answers pages, Markdown, llms-full.txt, search, and MCP from its own index,
+ * which never runs the app's guards, so a docs page behind a path guard would reach anyone.
+ * Refuse that pairing instead of serving it, unless the adapter declares `guarded-pages`: it
+ * then takes `isPathGuarded` and leaves those pages out. An edge target serves the adapter's
+ * build-time snapshot, where no guard check runs, so it always refuses.
  */
 export function assertFarmDocsAdapterServesNoGuardedPages(
   docs: FarmDocsResolvedConfig | undefined,
   options: { root: string; srcDir?: string },
   isPathGuarded: ((pathname: string) => boolean) | undefined,
+  runtime: "node" | "edge" = "node",
 ): void {
   if (!isPathGuarded || !hasFarmDocsRuntimeAdapter(docs)) return;
+  const servesGuardedPages = farmDocsAdapterServesGuardedPages(docs);
+  if (servesGuardedPages && runtime !== "edge") return;
   const guarded = getFarmDocsRoots(docs)
     .flatMap((root) => discoverFarmDocsPages(resolveFarmDocsContentDir(root, options), root))
     .filter((page) => isPathGuarded(page.href) || isPathGuarded(getFarmDocsMarkdownPath(page.href)))
     .map((page) => page.href);
   if (guarded.length === 0) return;
+  if (servesGuardedPages) {
+    throw new Error(
+      `Docs pages behind a path guard (${guarded.join(", ")}) would be public on an edge target: ` +
+        `the docs adapter ${JSON.stringify(docs.adapter.id)} serves a build-time snapshot of their ` +
+        "content in llms-full.txt, search, Markdown, and MCP, where no guard runs. Deploy to a " +
+        "Node or serverless target, or move those pages out of the docs content directory.",
+    );
+  }
   throw new Error(
     `Docs pages behind a path guard (${guarded.join(", ")}) would be public: the docs adapter ` +
       `${JSON.stringify(docs.adapter.id)} serves their content in llms-full.txt, search, ` +
-      "Markdown, and MCP without running the app's guards. Move those pages out of the docs " +
-      "content directory, or set docs.adapter = false to use Farm's built-in docs runtime, " +
-      "which keeps guarded pages off anonymous surfaces.",
+      "Markdown, and MCP without running the app's guards. Upgrade the adapter to a release " +
+      "that keeps guarded pages off those surfaces (@farming-labs/farmjs declares it as the " +
+      "`guarded-pages` capability), move those pages out of the docs content directory, or set " +
+      "docs.adapter = false to use Farm's built-in docs runtime, which keeps guarded pages off " +
+      "anonymous surfaces.",
   );
 }
 
@@ -324,6 +356,9 @@ export async function createFarmDocsAdapterHandler(
     resolveLayoutFonts: options.resolveLayoutFonts,
     loadReactModule: () => options.loadModule(docs.adapter.react!),
     ...(options.registerMCPServer ? { registerMCPServer: options.registerMCPServer } : {}),
+    ...(options.isPathGuarded && farmDocsAdapterServesGuardedPages(docs)
+      ? { isPathGuarded: options.isPathGuarded }
+      : {}),
   };
 
   if (multiRoot) {

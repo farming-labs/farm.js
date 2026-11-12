@@ -149,11 +149,16 @@ Only a page's own URL reaches it: `/docs/internal//secret`, `/docs/Internal/secr
 `/api/docs?format=markdown&path=internal/./secret` answer not found rather than serving the file
 under a URL its guard never sees.
 
-An external docs adapter such as `@farming-labs/farmjs` serves pages, Markdown, `llms-full.txt`,
-search, and MCP from its own index and never runs the app's guards. `farm dev` and `farm build`
-stop with an error naming the pages when a guard covers a docs page and an adapter owns the docs
-runtime. Move private pages out of the docs folder, or set `docs.adapter: false` to use Farm's
-built-in docs runtime, which applies the rules above.
+An external docs adapter serves pages, Markdown, `llms-full.txt`, search, Ask AI, and MCP from its
+own index. Farm passes it the app's guards when it declares the `guarded-pages` capability, as
+`@farming-labs/farmjs` does from the release that adds it: a page a guard covers stays out of
+search, `llms.txt`, `llms-full.txt`, the sitemap, MCP, Ask AI, and the content feed, and its
+Markdown answers only at a URL the guard also covers, as with the built-in runtime. On an edge
+target the adapter serves a build-time snapshot that runs no guard, so `farm build` stops with an
+error naming the pages there; deploy guarded docs to a Node or serverless target. An adapter
+without the capability makes `farm dev` and `farm build` stop with that error on every target:
+upgrade it, move private pages out of the docs folder, or set `docs.adapter: false` to use Farm's
+built-in docs runtime.
 
 ## Configure the docs experience
 
