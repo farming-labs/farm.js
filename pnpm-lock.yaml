@@ -1609,6 +1609,9 @@ importers:
       '@farm-fixtures/rsc-kit':
         specifier: link:./fixtures/rsc-kit
         version: link:fixtures/rsc-kit
+      '@farm-fixtures/workspace-ui':
+        specifier: workspace:*
+        version: link:fixtures/workspace-ui
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
@@ -1700,6 +1703,16 @@ importers:
       vite:
         specifier: 8.3.4
         version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
+
+  examples/server-components/fixtures/workspace-ui:
+    dependencies:
+      '@farm-fixtures/widget-kit':
+        specifier: link:../widget-kit
+        version: link:../widget-kit
+    devDependencies:
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
 
   examples/simple-demo:
     dependencies:

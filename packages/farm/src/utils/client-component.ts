@@ -7,6 +7,7 @@ import {
   farmPackageClientImportExports,
   FARM_CLIENT_REFERENCE_PRAGMA,
   findFarmPackageClientImports,
+  parseFarmResolveFrom,
 } from "../islands-package-references";
 import {
   farmReactServerBuildReachesClientModules,
@@ -1622,8 +1623,16 @@ function collectIsolatedClientBoundaries(
       const importedPath = imported.path;
       if (!importedPath) continue;
       let importedBoundaryCount: number;
+      const workspaceEntry =
+        !imported.local && options.packageReferences
+          ? farmWorkspaceServerEntry(importedPath)
+          : null;
       if (imported.local) {
         importedBoundaryCount = visit(importedPath);
+      } else if (workspaceEntry) {
+        // A workspace package's server code is app code, as the bundler compiles it: its
+        // client components, and those of its own dependencies, render as islands.
+        importedBoundaryCount = visit(workspaceEntry);
       } else {
         // A package with a `react-server` build: only the names that build takes from a
         // "use client" module are client components (islands-react-server-exports.ts).
@@ -1635,7 +1644,12 @@ function collectIsolatedClientBoundaries(
           importedBoundaryCount = 0;
           for (const exportName of reactServerClientNames) {
             importedBoundaryCount += visit(
-              ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
+              ensureFarmPackageClientReference(
+                projectRoot!,
+                specifier,
+                exportName,
+                moduleSourcePath,
+              ),
             );
           }
           // The `"use client"` modules that build renders itself (react-tweet's video player).
@@ -1665,7 +1679,12 @@ function collectIsolatedClientBoundaries(
             for (const reference of references) {
               for (const exportName of farmPackageClientImportExports(reference)) {
                 importedBoundaryCount += visit(
-                  ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
+                  ensureFarmPackageClientReference(
+                    projectRoot!,
+                    specifier,
+                    exportName,
+                    moduleSourcePath,
+                  ),
                 );
               }
             }
@@ -1809,6 +1828,17 @@ function inspectClientModuleMetadata(
  * entry graph when it would read exactly what it read before: none of its files are visited yet, and every file where
  * it stopped because an earlier inspection had visited it is visited again.
  */
+/**
+ * The real path of a package entry that is a workspace package's server code (linked from outside
+ * `node_modules`, as pnpm links one, without a `"use client"` directive), or null.
+ */
+function farmWorkspaceServerEntry(entry: string): string | null {
+  const real = realpathOrSelf(entry);
+  if (real.split(path.sep).includes("node_modules")) return null;
+  if (parseClientModuleMetadata(readIfExists(real), false).isClientComponent) return null;
+  return real;
+}
+
 function realpathOrSelf(file: string): string {
   try {
     return fs.realpathSync(file);
@@ -2022,6 +2052,14 @@ export function resolveImportedModule(
 ): { path: string | null; local: boolean } {
   if (specifier.startsWith(".") || specifier.startsWith("/")) {
     return { path: resolveImportedModuleSourcePath(importerPath, specifier, root), local: true };
+  }
+  // A client reference for a package the app root does not resolve to the importer's copy.
+  const resolveFrom = parseFarmResolveFrom(specifier, importerPath);
+  if (resolveFrom) {
+    return {
+      path: resolvePackageModuleSourcePath(resolveFrom.importer, resolveFrom.specifier),
+      local: false,
+    };
   }
   const aliased = resolveProjectAliasSourcePath(specifier, root);
   if (aliased) return { path: aliased, local: true };

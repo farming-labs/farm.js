@@ -251,3 +251,20 @@ test("a cmdk command menu filters its items", async ({ page }) => {
   await expect(page.getByRole("option", { name: "Apple" })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test("a workspace package's server component renders client components of its own dependencies", async ({
+  page,
+  request,
+}) => {
+  // Only @farm-fixtures/workspace-ui depends on @farm-fixtures/widget-kit, as in a pnpm monorepo:
+  // the app's root cannot resolve it.
+  const html = await (await request.get("/compat/workspace-ui")).text();
+  expect(html).toContain("widget panel");
+  expect(html).toContain("widget clicks: 0");
+  const errors = await open(page, "/compat/workspace-ui");
+  const counter = page.getByTestId("widget-counter");
+  await expect(counter).toHaveText("widget clicks: 0");
+  await counter.click();
+  await expect(counter).toHaveText("widget clicks: 1");
+  expect(errors).toEqual([]);
+});
