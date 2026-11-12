@@ -383,6 +383,21 @@ test("client navigation keeps a layout's client state and does not reload the do
   expect(errors).toEqual([]);
 });
 
+test("a layout's island waiting below a client page still hydrates after a navigation", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/nav-client/a");
+  await expect(page.getByRole("heading", { name: "Client page A" })).toBeVisible();
+  // Neither the page nor the layout's counter has hydrated: nothing has touched them.
+  await page.getByRole("link", { name: "Server page" }).click();
+  await expect(page.getByRole("heading", { name: "Server page B" })).toBeVisible();
+  const button = page.getByRole("button", { name: /^Client layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Client layout clicks: 1");
+  expect(errors).toEqual([]);
+});
+
 test("browser-only code runs after hydration without a mismatch", async ({ page, request }) => {
   expect(await (await request.get("/window")).text()).toContain("Measuring");
   const errors = collectErrors(page);
