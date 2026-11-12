@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { pluginHook } from "./plugin-hook";
 import { parseAst } from "rolldown/parseAst";
 import { resolveConfig, type FarmUserConfig, type ResolvedFarmConfig } from "../config";
 import { loadFarmMobileRuntime } from "../config-runtime";
@@ -1161,9 +1162,13 @@ describe("mobile on the web", () => {
     expect(platform()).toBe("web");
     setPlatform("mobile");
     expect(platform()).toBe("mobile");
-    const plugin = farmServerOnlyEntriesPlugin() as any;
-    const id = plugin.resolveId("@farm.js/core/platform", "/app/page.tsx", { ssr: false });
-    expect(plugin.load(id)).toContain('return "mobile";');
+    const plugin = farmServerOnlyEntriesPlugin();
+    const id = pluginHook<[string, string, { ssr: boolean }], string>(plugin, "resolveId")(
+      "@farm.js/core/platform",
+      "/app/page.tsx",
+      { ssr: false },
+    )!;
+    expect(pluginHook<[string], string>(plugin, "load")(id)).toContain('return "mobile";');
     setPlatform("other");
     expect(platform()).toBe("web");
   });
