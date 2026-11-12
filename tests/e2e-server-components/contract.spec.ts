@@ -555,6 +555,31 @@ test("a server action that leaves its layout unchanged keeps what was typed ther
   await expect(page.getByLabel("Layout note")).toHaveValue("still here");
 });
 
+test("a server action that changes its layout keeps what was typed there, and the focus", async ({
+  page,
+}) => {
+  await page.goto("/action-layout");
+  await hydrated(page);
+  const layout = Number((await page.getByTestId("layout-count").textContent())?.replace(/\D/g, ""));
+  const button = page.getByRole("button", { name: /^Layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Layout clicks: 1");
+  await expect(page.getByTestId("layout-streamed")).toBeVisible();
+  const note = page.getByLabel("Layout note");
+  await note.fill("still here");
+  await note.evaluate((input: HTMLInputElement) => input.setSelectionRange(2, 5));
+  // Clicked from script, so the note keeps the focus while the layout around it renders again.
+  await page
+    .getByRole("button", { name: "Bump layout" })
+    .evaluate((bump: HTMLElement) => bump.click());
+  await expect(page.getByTestId("layout-count")).toHaveText(`Layout count: ${layout + 1}`);
+  await expect(note).toHaveValue("still here");
+  await expect(note).toBeFocused();
+  expect(
+    await note.evaluate((input: HTMLInputElement) => [input.selectionStart, input.selectionEnd]),
+  ).toEqual([2, 5]);
+});
+
 test("a server route slot stays on the server, and its client component hydrates", async ({
   page,
 }) => {

@@ -101,6 +101,7 @@ import {
 } from "../document-layout-client";
 import { FARM_NAVIGATION_SCRIPT_SOURCE } from "../client/navigation-scripts";
 import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "../client/navigation-stream-client";
+import { FARM_REFRESH_FIELDS_SOURCE } from "../client/refresh-fields";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
@@ -5126,7 +5127,7 @@ function getLayoutShell(root, patterns, index) {
   return shell.innerHTML;
 }
 
-function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
+${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
   const currentPatterns = getLayoutPatterns(currentRoot);
   const nextPatterns = getLayoutPatterns(nextRoot);
   let sharedCount = 0;
@@ -5150,7 +5151,13 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
     ? findLayoutBoundary(nextRoot, nextPatterns[sharedCount])
     : nextRoot.querySelector("#__farm_page__");
 
-  if (!currentTarget || !nextTarget) return false;
+  if (!currentTarget || !nextTarget) return false;${
+    islandValues
+      ? `
+  // A refresh renders the same layouts again: their fields keep what was typed, and the focus.
+  const fields = refresh ? captureFarmServerFields(currentTarget) : null;`
+      : ""
+  }
   ${
     isolatedHydrationEnabled
       ? `${
@@ -5162,7 +5169,7 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
         }disposeFarmIsolatedClientBoundaries(currentTarget);`
       : ""
   }
-  currentTarget.replaceWith(nextTarget);
+  currentTarget.replaceWith(nextTarget);${islandValues ? "\n  if (fields) restoreFarmServerFields(fields, nextTarget);" : ""}
   activateNavigationScripts(nextTarget);
   if (nextTreeRoot && nextTreeRoot !== nextTarget) nextTreeRoot.remove();
 
