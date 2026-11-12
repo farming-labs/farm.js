@@ -171,6 +171,7 @@ import {
 import {
   assertFarmDocsAdapterServesNoGuardedPages,
   compileFarmDocsAdapterEdgeManifest,
+  farmDocsAdapterServesGuardedPages,
   hasFarmDocsRuntimeAdapter,
   listFarmDocsAdapterPages,
 } from "../docs/adapter";
@@ -5977,6 +5978,7 @@ async function buildSSRInMemory(
       config.docs,
       { root, srcDir: config.srcDir },
       (pathname) => adapterGuardedPaths.has(pathname),
+      getFarmPresetRuntime(preset) === "edge" ? "edge" : "node",
     );
   }
   // Precompiled docs pages are served again on every request, so in nonce mode
@@ -7412,6 +7414,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   createFarmApiCatalogResponse,
   createFarmAppManifestResponse,
   farmPathGuardCoversEndpoint,
+  farmPathGuardCoversPage,
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
@@ -8215,7 +8218,21 @@ const farmDocsHandler = ${
   registerMCPServer: registerFarmMCPServer,
   // A page built with this keeps its HTML string, so the preload budget and the response
   // writer use it instead of reading and re-encoding the body. Older adapters ignore it.
-  createHtmlResponse: farmOwnedHtmlResponse,
+  createHtmlResponse: farmOwnedHtmlResponse,${
+    farmDocsAdapterServesGuardedPages(config.docs)
+      ? `
+  // The adapter keeps pages a path guard covers off search, llms.txt, the sitemap and MCP. It
+  // asks about any path its own content lists, so the guards decide here, not a page list.
+  isPathGuarded: (pathname) =>
+    farmPathGuardCoversPage(
+      {
+        config: { middleware: farmMiddlewareConfig, integrations: serverRuntimeIntegrations },
+        middlewareRoutes: fileMiddlewareModules,
+      },
+      pathname,
+    ),`
+      : ""
+  }
 })`
           : `createFarmDocsHandler(farmDocsResolvedConfig, {
   root: farmDocsRuntimeRoot,
