@@ -7502,7 +7502,13 @@ function getLayoutShell(root, patterns, index, find) {
     : shell.querySelector('#__farm_page__');
   inner?.replaceChildren();
   removeSuspenseContent(shell);
-  shell.querySelectorAll('script').forEach((script) => script.remove());
+  // Each island's props stay, without its id, so new props count as a change.
+  shell.querySelectorAll('script').forEach((script) => {
+    if (script.type !== 'f/props') return script.remove();
+    Array.from(script.attributes).forEach((attribute) => {
+      if (attribute.name !== 'type') script.removeAttribute(attribute.name);
+    });
+  });
   shell.querySelectorAll('f-island').forEach((island) => {
     island.replaceChildren();
     Array.from(island.attributes).forEach((attribute) => island.removeAttribute(attribute.name));

@@ -5107,8 +5107,8 @@ function removeSuspenseContent(root) {
   }
 }
 
-// A layout's own server output, without what it wraps and without its islands, whose live DOM
-// always differs from fresh HTML.
+// A layout's own server output, without what it wraps and without its islands' DOM, which live
+// always differs from fresh HTML. It keeps each island's props, so new props count as a change.
 function getLayoutShell(root, patterns, index) {
   const shell = findLayoutBoundary(root, patterns[index])?.cloneNode(true);
   if (!shell) return null;
@@ -5117,7 +5117,12 @@ function getLayoutShell(root, patterns, index) {
     : shell.querySelector("#__farm_page__");
   inner?.replaceChildren();
   removeSuspenseContent(shell);
-  shell.querySelectorAll("script").forEach(function(script) { script.remove(); });
+  shell.querySelectorAll("script").forEach(function(script) {
+    if (script.type !== "f/props") return script.remove();
+    Array.from(script.attributes).forEach(function(attribute) {
+      if (attribute.name !== "type") script.removeAttribute(attribute.name);
+    });
+  });
   shell.querySelectorAll("f-island").forEach(function(island) {
     island.replaceChildren();
     Array.from(island.attributes).forEach(function(attribute) {
