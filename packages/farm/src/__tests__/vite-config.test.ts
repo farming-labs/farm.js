@@ -83,7 +83,7 @@ describe("Farm Vite server-only entries", () => {
       "\0farm:server-only",
     );
     expect(() => resolveId("server-only", "/app/src/server/db.ts", {})).toThrow(
-      '/app/src/server/db.ts imports "server-only", so it must not reach the browser',
+      '/app/src/server/db.ts - error CLIENT_SERVER_ONLY_IMPORT: This module imports "server-only", so it must not reach the browser',
     );
   });
 

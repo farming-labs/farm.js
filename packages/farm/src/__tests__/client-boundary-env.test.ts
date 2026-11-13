@@ -3,14 +3,24 @@ import { describe, expect, it } from "vitest";
 import { parseAst } from "vite";
 import {
   analyzeClientBoundary,
-  formatClientBoundaryWarning,
+  createClientBoundaryDiagnostic,
   shouldInspectClientBoundary,
+  type ClientBoundaryFindingKind,
 } from "../client-boundary-env";
+import { formatFarmDiagnostic } from "../diagnostics";
 
 const NO_PUBLIC = new Set<string>();
 
 function analyze(code: string, publicKeys: ReadonlySet<string> = NO_PUBLIC) {
-  return analyzeClientBoundary(parseAst(code), publicKeys);
+  const findings = analyzeClientBoundary(parseAst(code), publicKeys);
+  const names = (kind: ClientBoundaryFindingKind) =>
+    findings.filter((finding) => finding.kind === kind).map((finding) => finding.name);
+  return {
+    findings,
+    envKeys: names("server-env"),
+    publicEnvKeys: names("public-env"),
+    builtinImports: names("builtin"),
+  };
 }
 
 describe("shouldInspectClientBoundary", () => {
@@ -21,7 +31,21 @@ describe("shouldInspectClientBoundary", () => {
     expect(shouldInspectClientBoundary("/app/src/db.ts", 'import fs from "node:fs";')).toBe(true);
   });
 
-  it("skips modules without either marker", () => {
+  it("inspects app modules that import a builtin by its bare name", () => {
+    for (const code of [
+      'import fs from "fs";',
+      "import { join } from 'path/posix';",
+      'const os = require("os");',
+      'export * from "url";',
+      'import "crypto";',
+    ]) {
+      expect(shouldInspectClientBoundary("/app/src/db.ts", code), code).toBe(true);
+    }
+  });
+
+  it("skips modules without a marker, including packages named like a builtin's prefix", () => {
+    expect(shouldInspectClientBoundary("/app/src/a.ts", 'import x from "fs-extra";')).toBe(false);
+    expect(shouldInspectClientBoundary("/app/src/a.ts", 'import x from "./path";')).toBe(false);
     expect(shouldInspectClientBoundary("/app/src/button.tsx", "export const n = 1;")).toBe(false);
   });
 
@@ -79,6 +103,27 @@ export const client = createClient(process.env.SECRET_KEY);
     expect(analyze(code).envKeys).toEqual(["SECRET"]);
   });
 
+  it("flags keys destructured from process.env at module scope", () => {
+    const code = `
+const { DATABASE_URL, "API_KEY": key, PUBLIC_URL = "", NODE_ENV, ...rest } = process.env;
+export function later() {
+  const { INSIDE } = process.env;
+}
+`;
+    const findings = analyze(code, new Set(["PUBLIC_URL"]));
+    expect(findings.envKeys).toEqual(["DATABASE_URL", "API_KEY"]);
+    expect(findings.publicEnvKeys).toEqual(["PUBLIC_URL"]);
+  });
+
+  it("reports each finding at its first occurrence, in source order", () => {
+    const code =
+      'const a = process.env.SECRET;\nimport fs from "node:fs";\nconst b = process.env.SECRET;';
+    expect(analyze(code).findings).toEqual([
+      { kind: "server-env", name: "SECRET", start: code.indexOf("process.env.SECRET") },
+      { kind: "builtin", name: "node:fs", start: code.indexOf("import fs") },
+    ]);
+  });
+
   it("ignores other member chains and destructuring of unrelated objects", () => {
     const code = `
 const env = config.env.SECRET;
@@ -118,6 +163,16 @@ export async function readOnServer() {
     expect(analyze(code).builtinImports).toEqual([]);
   });
 
+  it("reports bare builtin specifiers for the resolver to confirm", () => {
+    const code = `
+import fs from "fs";
+import { posix } from "path/posix";
+const events = require("events");
+import extra from "fs-extra";
+`;
+    expect(analyze(code).builtinImports).toEqual(["fs", "path/posix", "events"]);
+  });
+
   it("ignores node: inside ordinary strings and other specifiers", () => {
     const code = `
 const label = "node:fs";
@@ -133,43 +188,42 @@ import pkg from "some-package";
   });
 });
 
-describe("formatClientBoundaryWarning", () => {
-  it("names the module, the keys, and the builtins", () => {
-    const message = formatClientBoundaryWarning("/app/src/layout.tsx", {
-      envKeys: ["DATABASE_URL"],
-      publicEnvKeys: [],
-      builtinImports: ["node:fs"],
-    });
-    expect(message).toContain("/app/src/layout.tsx");
-    expect(message).toContain("process.env.DATABASE_URL");
-    expect(message).toContain("undefined in the browser");
-    expect(message).toContain("node:fs");
-    expect(message).toContain("stubbed in the browser");
+describe("createClientBoundaryDiagnostic", () => {
+  it("formats each finding with its code, position, fix, and docs link", () => {
+    const text = formatFarmDiagnostic(
+      createClientBoundaryDiagnostic(
+        "/app/src/layout.tsx",
+        { kind: "server-env", name: "DATABASE_URL", start: 0 },
+        { line: 10, column: 13 },
+      ),
+      "/app",
+    );
+    expect(text).toBe(
+      [
+        "src/layout.tsx:10:13 - warning CLIENT_SERVER_ENV: process.env.DATABASE_URL is read at module scope in a module compiled for the browser, where it is undefined.",
+        "  fix: Read it on the server (a server function, API route, or server component), or declare it in env.public in farm.config.ts and read it through publicEnv.",
+        "  docs: https://farmjs.dev/docs/environment-functions#client-boundary-diagnostics",
+      ].join("\n"),
+    );
   });
 
   it("points public-key reads at publicEnv", () => {
-    const message = formatClientBoundaryWarning("/app/src/config.ts", {
-      envKeys: [],
-      publicEnvKeys: ["PUBLIC_API_URL"],
-      builtinImports: [],
+    const diagnostic = createClientBoundaryDiagnostic("/app/src/config.ts", {
+      kind: "public-env",
+      name: "PUBLIC_API_URL",
+      start: 0,
     });
-    expect(message).toContain("process.env.PUBLIC_API_URL");
-    expect(message).toContain('publicEnv from "@farm.js/core/env"');
-    expect(message).not.toContain("stubbed");
+    expect(diagnostic).toMatchObject({ code: "CLIENT_PROCESS_ENV_PUBLIC", severity: "warning" });
+    expect(diagnostic.fix).toContain('publicEnv from "@farm.js/core/env"');
   });
 
-  it("omits the section that does not apply", () => {
-    const envOnly = formatClientBoundaryWarning("/app/a.ts", {
-      envKeys: ["SECRET"],
-      publicEnvKeys: [],
-      builtinImports: [],
-    });
-    expect(envOnly).not.toContain("stubbed");
-    const builtinOnly = formatClientBoundaryWarning("/app/b.ts", {
-      envKeys: [],
-      publicEnvKeys: [],
-      builtinImports: ["node:path"],
-    });
-    expect(builtinOnly).not.toContain("process.env");
+  it("names the builtin and keeps the absolute path for a file outside the root", () => {
+    const text = formatFarmDiagnostic(
+      createClientBoundaryDiagnostic("/shared/db.ts", { kind: "builtin", name: "fs", start: 0 }),
+      "/app",
+    );
+    expect(text.split("\n")[0]).toBe(
+      '/shared/db.ts - warning CLIENT_NODE_BUILTIN: "fs" is imported into a module compiled for the browser, which gets a stub whose exports without a Web API equivalent are undefined.',
+    );
   });
 });
