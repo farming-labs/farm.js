@@ -451,9 +451,12 @@ Both setups follow the same route contract:
   is prerendered at build time together with its RSC payload. A dynamic route lists its paths with
   `generateStaticParams()`. Client navigation fetches the payload at `<page>.rsc` (`/index.rsc` for
   `/`), so a prerendered page navigates without reaching the server. A page that any middleware may
-  handle, and every page of an app with i18n, stays server-rendered, because middleware never sees a
-  static file. Pages with `revalidate` also render on each request for now; the pipeline has no
-  revalidating cache yet. A page that asks to be static and fails to render fails the build.
+  handle stays server-rendered, because middleware never sees a static file. With i18n a static page
+  prerenders at each URL that names its locale (`/fr/about`, below the base path); a URL without a
+  locale (the default locale's under `"prefix-except-default"`) redirects visitors whose cookie or
+  `Accept-Language` picks another locale, so it stays server-rendered unless `detection` is off, and
+  `routing: "none"` prerenders nothing. Pages with `revalidate` also render on each request for
+  now; the pipeline has no revalidating cache yet. A page that asks to be static and fails to render fails the build.
 - **Metadata.** Layouts and pages resolve `metadata`, `generateMetadata()`, and viewport exports in
   the same order and with the same title templates as other Farm apps, and the server renders the
   same head tags.
@@ -465,10 +468,10 @@ Both setups follow the same route contract:
   below it as in other Farm apps: with `basePath: "/console"`, `app/about/page.tsx` serves
   `/console/about` and its payload `/console/about.rsc`, `<Link href="/about">` renders
   `/console/about`, and a static page prerenders at its URL below the base path. As in other Farm
-  apps, the page also answers at `/about`, and `redirect()` sends its target as written. With i18n
-  the locale prefix is stripped too, so `/console/fr/about` matches `app/about/page.tsx`; the RSC
-  pipeline has no locale runtime yet, so a page that needs the locale takes it from a `[lang]`
-  folder nested as below: `app/[lang]/`, or `app/console/[lang]/` under the base path.
+  apps, the page also answers at `/about`, and `redirect()` sends its target as written (with i18n,
+  in the request's locale below the base path). With i18n
+  the locale prefix is stripped too, so `/console/fr/about` matches `app/about/page.tsx`, which
+  reads its locale with `getLocale()` (see Internationalization below).
   Pages nested in folders that spell out the prefix, as RSC apps had to write them before
   (`app/console/about/page.tsx`, or `app/[lang]/about/page.tsx` and
   `app/console/[lang]/about/page.tsx` with i18n), keep their URLs and win over a page at the
@@ -476,6 +479,18 @@ Both setups follow the same route contract:
   latter. A dynamic or catch-all folder at the root never takes the base path itself, so
   `app/[[...slug]]/page.tsx` sees `/console/guides` as `guides`. When no page matches the stripped
   path, the path as received is matched.
+- **Internationalization.** With [`i18n`](/docs/internationalization), each request resolves its
+  locale as in other Farm apps: `getLocale()`, `t()` and `format` from `@farm.js/core/i18n/server`
+  work in pages, layouts, server actions, route handlers and middleware, and a page URL without a
+  locale redirects to the one the visitor's cookie or `Accept-Language` picks, varying on those
+  headers. Client components read the locale the page rendered with: `useLocale()`,
+  `useTranslations()`, and `<Link href="/about">`, which renders `/console/fr/about` on a French page.
+  A link to another locale loads a new document. `redirect("/about")` from a French page, server
+  action or form sends `/console/fr/about`, as other Farm apps localize it. Farm sets `lang` and
+  `dir` on the `<html>` it renders; a root layout that renders `<html>` sets them itself, for example
+  `<html lang={getLocale()}>`. With `trailingSlash: true`, a locale redirect goes straight to the
+  page's trailing-slash URL. `hreflang` alternate links are not rendered yet, and `llms.txt` and
+  `sitemap.xml` list each page once, at its unprefixed URL, as in other Farm apps.
 - **Trailing slashes.** Pages follow [`trailingSlash`](/docs/configuration#trailing-slashes) as in
   other Farm apps: by default `/about/` redirects (308) to `/about`, and with `trailingSlash: true`
   `/about` redirects to `/about/`, `<Link href="/about">` renders `/about/`, and its payload is

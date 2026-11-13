@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -33,6 +33,14 @@ async function generateEntry(
     linkRscFixtureDependencies(root);
     if (options.configSource) {
       writeFileSync(path.join(root, "farm.config.ts"), options.configSource);
+    }
+    // A build reads each locale's catalog, as core's build does.
+    const i18n = userConfig.i18n as { locales?: string[] } | undefined;
+    if (i18n?.locales) {
+      mkdirSync(path.join(root, "src/messages"), { recursive: true });
+      for (const locale of i18n.locales) {
+        writeFileSync(path.join(root, `src/messages/${locale}.json`), "{}");
+      }
     }
     const serverPlugins = options.serverPlugins && {
       [path.join(root, "farm.config.ts")]: options.serverPlugins,

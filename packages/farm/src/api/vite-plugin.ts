@@ -17,7 +17,12 @@ import { loadFarmDevModule } from "../dev-module";
  * ```
  */
 
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, ViteDevServer } from "vite";
+import { isFarmI18nCatalogFile, resolveFarmI18nConfig } from "../i18n/config";
+import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
+import type { FarmI18nRuntime } from "../i18n/runtime";
+import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "../i18n/types";
 import {
   APIRouteConflictError,
   API_ROUTE_METHODS,
@@ -78,6 +83,42 @@ export interface FarmApiPluginOptions {
   }) =>
     | readonly { name: string; routes?: PluginRoutesFactory }[]
     | Promise<readonly { name: string; routes?: PluginRoutesFactory }[]>;
+}
+
+/**
+ * The i18n runtime of an app whose Vite config carries the Farm config's `i18n`, read from its
+ * catalogs as core's dev server reads them and reloaded when one changes. Undefined without i18n,
+ * which loads none of the i18n runtime.
+ */
+function createDevI18n(server: ViteDevServer):
+  | Promise<{
+      runtime: FarmI18nRuntime;
+      run: typeof import("../i18n/server")._runWithFarmI18nRequest;
+    }>
+  | undefined {
+  const farmConfig = server.config as { i18n?: FarmI18nUserConfig | false; basePath?: string };
+  if (!farmConfig.i18n) return undefined;
+  return loadDevI18n(
+    server,
+    resolveFarmI18nConfig(farmConfig.i18n, {
+      root: server.config.root,
+      mode: "development",
+      basePath: farmConfig.basePath ?? "/",
+    }),
+  );
+}
+
+async function loadDevI18n(server: ViteDevServer, config: ResolvedFarmI18nConfig) {
+  const { _runWithFarmI18nRequest, createFarmI18nRuntime } = await import("../i18n/server");
+  const runtime = createFarmI18nRuntime(config);
+  await runtime.initialize();
+  server.watcher?.on?.("change", (file: string) => {
+    if (!isFarmI18nCatalogFile(config, file)) return;
+    runtime.reload().catch((error: unknown) => {
+      console.error("[FARM] Could not reload the i18n catalogs:", error);
+    });
+  });
+  return { runtime, run: _runWithFarmI18nRequest };
 }
 
 export interface ApiRoute {
@@ -494,6 +535,54 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         waitForDiscovery,
       };
 
+      // An app with i18n (the RSC pipeline passes the Farm config's `i18n` to Vite): route handlers
+      // and their middleware read the request locale, as in core's dev server and production. API
+      // paths keep their URLs, so nothing redirects.
+      const devI18n = createDevI18n(server);
+      // A catalog that fails to load fails each API request with its error, not the dev server.
+      devI18n?.catch(() => {});
+      const runWithDevI18n = async (
+        req: IncomingMessage,
+        res: ServerResponse,
+        handle: () => unknown,
+      ): Promise<unknown> => {
+        const i18n = (await devI18n)!;
+        const pathname = (req.url || "/").split("?")[0]!;
+        if (
+          !isFarmAPIPathname(pathname, basePath) &&
+          !matchAPIRouteAtBasePath(servedRoutes(), pathname, basePath)
+        ) {
+          return handle();
+        }
+        const headers = new Headers();
+        for (const [key, value] of Object.entries(req.headers)) {
+          if (value) headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+        }
+        const request = new Request(resolveFarmRequestURL(req as FarmRequest), { headers });
+        return i18n.run(
+          i18n.runtime,
+          request,
+          (resolution) => {
+            const config = i18n.runtime.config;
+            const vary = getFarmLocaleVaryHeaders(config, resolution);
+            if (vary.length > 0) {
+              const current = String(res.getHeader("Vary") ?? "");
+              res.setHeader("Vary", [current, ...vary].filter(Boolean).join(", "));
+            }
+            if (resolution.persist) {
+              const cookies = res.getHeader("Set-Cookie");
+              const cookie = createFarmLocaleCookie(resolution.locale, config);
+              res.setHeader(
+                "Set-Cookie",
+                cookies === undefined ? cookie : [...[cookies].flat().map(String), cookie],
+              );
+            }
+            return handle();
+          },
+          { redirect: false },
+        );
+      };
+
       // Add middleware to handle API requests
       return () => {
         const apiMiddleware = _withAfterNodeMiddleware(async (req, res, next) => {
@@ -603,16 +692,18 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
           }
         });
         server.middlewares.use((req, res, next) => {
-          const result = _runWithAPIRequestRuntime(
-            {
-              basePath: basePath ?? "/api",
-              dispatch: async (request) =>
-                apiRouterHandler
-                  ? apiRouterHandler(request)
-                  : Response.json({ error: "Not Found" }, { status: 404 }),
-            },
-            () => apiMiddleware(req, res, next),
-          );
+          const handle = () =>
+            _runWithAPIRequestRuntime(
+              {
+                basePath: basePath ?? "/api",
+                dispatch: async (request) =>
+                  apiRouterHandler
+                    ? apiRouterHandler(request)
+                    : Response.json({ error: "Not Found" }, { status: 404 }),
+              },
+              () => apiMiddleware(req, res, next),
+            );
+          const result = devI18n ? runWithDevI18n(req, res, handle) : handle();
           return Promise.resolve(result).catch((error) => {
             console.error(
               `[FARM] Unhandled API error while handling ${req.method || "GET"} ${req.url || "/"}:`,
