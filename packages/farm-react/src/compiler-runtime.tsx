@@ -2786,10 +2786,6 @@ interface RuntimeCell extends CompilerCell {
   replace(next: unknown): void;
 }
 
-type PendingCellUpdate =
-  | { kind: "state"; update: CompilerStateUpdater }
-  | { kind: "value"; value: unknown };
-
 type SelectableTextControl = HTMLInputElement | HTMLTextAreaElement;
 
 interface InputSelectionSnapshot {
@@ -12377,7 +12373,12 @@ function createCompiledComponentRuntime<Props>(
       this.propCellOffset = initialState.length;
       this.cells = [...initialState, ...initialProps].map((initialValue, index) => {
         let value = initialValue;
-        const pending: PendingCellUpdate[] = [];
+        // Updates since the last flush. An updater runs when it is set, as React's do before
+        // the end of an event, so it reads the event's target before React DOM restores a
+        // controlled field; get() keeps returning the committed value until the flush.
+        let pending = false;
+        let pendingValue: unknown;
+        let pendingError: { error: unknown } | undefined;
         return {
           get: () => {
             if (this.activeBinding && this.activeDependencies) {
@@ -12386,21 +12387,33 @@ function createCompiledComponentRuntime<Props>(
             return value;
           },
           set: (next) => {
-            pending.push({ kind: "state", update: next });
+            // After a failed updater, later updates are dropped and the flush rethrows.
+            if (!pendingError) {
+              const base = pending ? pendingValue : value;
+              try {
+                pendingValue = typeof next === "function" ? next(base) : next;
+              } catch (error) {
+                pendingValue = base;
+                pendingError = { error };
+              }
+              pending = true;
+            }
             this.scheduleBindingFlush(index);
           },
           replace: (next) => {
-            pending.push({ kind: "value", value: next });
+            pendingValue = next;
+            pending = true;
           },
           flush: () => {
-            if (pending.length === 0) return false;
+            if (!pending) return false;
             const previous = value;
-            for (const next of pending.splice(0)) {
-              if (next.kind === "value") {
-                value = next.value;
-              } else {
-                value = typeof next.update === "function" ? next.update(value) : next.update;
-              }
+            value = pendingValue;
+            pending = false;
+            pendingValue = undefined;
+            if (pendingError) {
+              const { error } = pendingError;
+              pendingError = undefined;
+              throw error;
             }
             return !Object.is(previous, value);
           },
