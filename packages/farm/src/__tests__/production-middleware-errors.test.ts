@@ -204,7 +204,7 @@ export default defineConfig({
     ];
   },
   observability: {
-    events: ["middleware.error", "render.error", "api.error"],
+    events: ["middleware.error", "render.error", "api.error", "api.request.complete"],
     onEvent(event) {
       record({ source: "event", type: event.type, pathname: event.pathname, message: event.error?.message });
     },
@@ -291,16 +291,16 @@ async function expectRuntimeHookFailureHeaders(origin: string, logPath: string):
       status: response.status,
       headers: readHeaders(response),
       body: await response.text(),
-      // The plugin hooks only: development still emits an api.error event for a runtime hook
-      // that fails an API request, which production does not.
       trace: (await fs.readFile(logPath, "utf8"))
         .trim()
         .split("\n")
-        .map((line) => JSON.parse(line))
-        .filter((entry) => entry.source !== "event"),
+        .map((line) => JSON.parse(line)),
     };
   }
-  const trace = (pathname: string, contentType: string) => [
+  // The API route completed before runtime.after failed the request, so its observability event
+  // is api.request.complete, not api.error.
+  const trace = (pathname: string, contentType: string, events: object[] = []) => [
+    ...events,
     { source: "runtime.after", pathname, status: 200, contentType },
     { source: "runtime.error", pathname, message: "plugin-after-failed" },
     { source: "onError", phase: "runtime", pathname, message: "plugin-after-failed" },
@@ -317,7 +317,9 @@ async function expectRuntimeHookFailureHeaders(origin: string, logPath: string):
       status: 500,
       headers: { "content-type": "application/json", ...configured },
       body: '{"error":"Internal Server Error"}',
-      trace: trace("/api/ok", "application/json"),
+      trace: trace("/api/ok", "application/json", [
+        { source: "event", type: "api.request.complete", pathname: "/api/ok" },
+      ]),
     },
   });
 }
@@ -416,11 +418,7 @@ async function expectPageRenderFailureTraces(origin: string, logPath: string): P
     accept,
   );
   expect(pageResponse.body).toMatch(/^\s*<!DOCTYPE html>/i);
-  expect({
-    response: { ...pageResponse, body: undefined },
-    // The plugin hooks only: development emits the render.error event more than once.
-    trace: pageTrace.filter((entry) => entry.source !== "event"),
-  }).toEqual({
+  expect({ response: { ...pageResponse, body: undefined }, trace: pageTrace }).toEqual({
     response: {
       status: 500,
       contentType: "text/html; charset=utf-8",
@@ -428,7 +426,9 @@ async function expectPageRenderFailureTraces(origin: string, logPath: string): P
       configured: "yes",
       body: undefined,
     },
+    // The render error reaches observability once.
     trace: [
+      { source: "event", type: "render.error", message: SECRET },
       {
         source: "runtime.after",
         pathname: "/boom",

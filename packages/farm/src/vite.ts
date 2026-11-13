@@ -3935,6 +3935,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 route: apiRoutePattern,
                 method,
               });
+              // The route's outcome reaches observability once, when the route settles, as in
+              // production: a runtime.after hook that fails the request later does not turn a
+              // completed request into an api.error.
+              let apiOutcomeReported = false;
               try {
                 const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
                 const request = await createHandlerRequest();
@@ -3944,7 +3948,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   method,
                   routePath: apiRoutePattern,
                 };
-                let apiHandlerFailed = false;
                 const invokeAPIHandler = async (
                   runtimeRequest: Request,
                   runtime?: FarmPluginRuntimeRequestScope,
@@ -3960,10 +3963,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   let response: Response;
                   try {
                     response = await apiHandler(handledRequest);
+                    apiOutcomeReported = true;
+                    emitFarmEvent({
+                      type: "api.request.complete",
+                      pathname,
+                      route: apiRoutePattern,
+                      method,
+                      status: response.status,
+                      durationMs: Date.now() - startTime,
+                    });
                   } catch (error) {
                     // As in production, a throwing route answers 500: runtime.error observes
                     // the throw, and runtime.after still sees that response.
-                    apiHandlerFailed = true;
+                    apiOutcomeReported = true;
                     emitFarmEvent({
                       type: "api.error",
                       pathname,
@@ -3990,16 +4002,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 });
 
                 const duration = Date.now() - startTime;
-                if (!apiHandlerFailed) {
-                  emitFarmEvent({
-                    type: "api.request.complete",
-                    pathname,
-                    route: apiRoutePattern,
-                    method,
-                    status: handledResponse.status,
-                    durationMs: duration,
-                  });
-                }
                 logResponse(method, urlPath, handledResponse.status, duration, "API");
 
                 // Send response
@@ -4007,14 +4009,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 return;
               } catch (error) {
                 const duration = Date.now() - startTime;
-                emitFarmEvent({
-                  type: "api.error",
-                  pathname,
-                  route: apiRoutePattern,
-                  method,
-                  durationMs: duration,
-                  error,
-                });
+                if (!apiOutcomeReported) {
+                  emitFarmEvent({
+                    type: "api.error",
+                    pathname,
+                    route: apiRoutePattern,
+                    method,
+                    durationMs: duration,
+                    error,
+                  });
+                }
                 const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
                 if (bodyErrorResponse) {
                   logResponse(method, urlPath, bodyErrorResponse.status, duration, "API");
