@@ -86,7 +86,12 @@ export {
   _markFarmOwnedResponse,
   _withFarmResponseHeaders,
 } from "../owned-response";
-export { createFarmAgentRobots } from "../agent-crawlers";
+export {
+  createFarmAgentRobots,
+  resolveFarmAgentCrawlers,
+  type FarmAgentCrawlers,
+  type ResolvedFarmAgentCrawlers,
+} from "../agent-crawlers";
 export {
   createFarmDefaultSitemap,
   resolveFarmAgentSitemap,

@@ -713,6 +713,9 @@ The app's own file wins. Farm serves `/robots.txt` from, in order:
 3. The generated file from `agent.crawlers`.
 4. The [docs engine](/docs/docs-engine)'s robots.txt, when the docs engine is enabled.
 
+[React Server Components](/docs/server-rendering#react-server-components) apps serve the same
+generated file from `agent.crawlers`, after middleware and below a `basePath` as in other Farm apps.
+
 ### AI catalog
 
 When the app mounts an MCP server, through the top-level [`mcp`](/docs/plugins/mcp) config or

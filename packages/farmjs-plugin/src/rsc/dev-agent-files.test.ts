@@ -85,6 +85,7 @@ export default function Page() { return <Link href="/about">About link</Link>; }
       srcDir: "src",
       basePath: "/console",
       trailingSlash: true,
+      agent: { crawlers: { training: "block" } },
       experimental: { serverComponents: true },
       server: { host: "127.0.0.1", port: 0, strictPort: false },
       plugins: [
@@ -155,5 +156,16 @@ export default function Page() { return <Link href="/about">About link</Link>; }
       expect((await fetch(origin + url, { redirect: "manual" })).status, url).toBe(200);
     }
     expect(xml).toContain("<lastmod>");
+  }, 60_000);
+
+  it("serves the robots.txt agent.crawlers generates below the basePath, as core does", async () => {
+    for (const pathname of ["/console/robots.txt", "/robots.txt"]) {
+      const robots = await fetch(origin + pathname);
+      expect(robots.status, pathname).toBe(200);
+      expect(robots.headers.get("content-type"), pathname).toBe("text/plain; charset=utf-8");
+      const body = await robots.text();
+      expect(body, pathname).toMatch(/User-agent: GPTBot\n[\s\S]*Disallow: \//);
+      expect(body, pathname).toContain("User-agent: *\nAllow: /");
+    }
   }, 60_000);
 });

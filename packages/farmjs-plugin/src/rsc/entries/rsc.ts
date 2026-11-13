@@ -350,9 +350,20 @@ function getFarmRoutePathname(pathname) {
 ${i18n ? generateI18nRuntime(ctx, i18n) : ""}`;
   // The generated agent files list the app's static pages.
   const listsAgentPages = ctx.llmsTxt?.enabled === true || ctx.sitemap?.enabled === true;
+  // agent.crawlers: a generated robots.txt, as core serves it.
+  const servesAgentRobots = ctx.crawlers?.enabled === true;
+  if (listsAgentPages || servesAgentRobots) {
+    code += `import { createFarmMetadataRouteResponse } from '@farm.js/core/internal/production-runtime';
+`;
+  }
+  if (servesAgentRobots) {
+    code += `import { createFarmAgentRobots } from '@farm.js/core/internal/production-runtime';
+
+const farmAgentCrawlers = ${JSON.stringify(ctx.crawlers)};
+`;
+  }
   if (listsAgentPages) {
     code += `import {
-  createFarmMetadataRouteResponse,
   farmPathGuardCoversPage,
   isFarmPageNoIndex,
   resolveFarmAgentOrigin,
@@ -1222,6 +1233,14 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
   }
   `
       : ""
+  }${
+    servesAgentRobots
+      ? `// agent.crawlers: answered after middleware, as in core's servers.
+  if (getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/') === '/robots.txt') {
+    return applyProductionMiddlewareHeaders(createFarmAgentRobotsResponse(request), middlewareHeaders);
+  }
+  `
+      : ""
   }if (isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname)) {
     return applyProductionMiddlewareHeaders(new Response(
       JSON.stringify({ error: 'API route not found', pathname: url.pathname }),
@@ -1882,6 +1901,30 @@ function getFarmAgentOrigin(request) {
   return resolveFarmAgentOrigin(
     rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
     new URL(request.url).origin,
+  );
+}
+
+`
+      : ""
+  }${
+    servesAgentRobots
+      ? `/**
+ * agent.crawlers, built the same way as core's servers build it: rules for AI search and training
+ * crawlers, and a Sitemap line for the app's sitemap.xml below the basePath when the root layout
+ * has a metadataBase (the request's host is not trusted in a file crawlers and CDNs cache).
+ */
+function createFarmAgentRobotsResponse(request) {
+  const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
+  return createFarmMetadataRouteResponse(
+    'robots',
+    createFarmAgentRobots({
+      crawlers: farmAgentCrawlers,
+      sitemapPath: ${ctx.sitemap?.enabled ? "'/sitemap.xml'" : "undefined"},
+      metadataBase: rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
+      basePath: ${JSON.stringify(ctx.basePath)},
+    }),
+    {},
+    { method: request.method },
   );
 }
 

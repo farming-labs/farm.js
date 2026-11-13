@@ -770,7 +770,13 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           ...(name === "i18n"
             ? { basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" } }
             : {}),
-          ...(name === "trailing-slash" ? { basePath: "/console", trailingSlash: true } : {}),
+          ...(name === "trailing-slash"
+            ? {
+                basePath: "/console",
+                trailingSlash: true,
+                agent: { crawlers: { training: "block" } },
+              }
+            : {}),
           api,
           middleware: name === "config-middleware" ? { matcher: "/", handler() {} } : undefined,
           plugins,
@@ -1182,6 +1188,10 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(response.status, `${url} ${logs}`).toBe(200);
           }
           expect(listed.filter((url) => !url.endsWith("/"))).toEqual([]);
+          // agent.crawlers serves a generated robots.txt below the basePath, as in core.
+          const robots = await fetch(origin + "/console/robots.txt");
+          expect(robots.status, logs).toBe(200);
+          expect(await robots.text()).toMatch(/User-agent: GPTBot\n[\s\S]*Disallow: \//);
           // The static page and its payload were written at the trailing-slash URL.
           for (const file of ["index.html", "index.rsc"]) {
             expect(

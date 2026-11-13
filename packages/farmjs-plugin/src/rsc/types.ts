@@ -1,5 +1,6 @@
 import type { FarmMarkdownResolvedConfig } from "@farm.js/core/markdown";
 import type {
+  ResolvedFarmAgentCrawlers,
   ResolvedFarmAgentSitemap,
   ResolvedFarmLlmsTxtConfig,
 } from "@farm.js/core/internal/production-runtime";
@@ -220,6 +221,9 @@ export interface EntryContext {
 
   /** Route-relative page keys to their file's last change (ISO), the sitemap's lastmod. */
   pageLastModified?: Record<string, string>;
+
+  /** Resolved `agent.crawlers`: the generated `/robots.txt`, set only when it is on. */
+  crawlers?: ResolvedFarmAgentCrawlers;
 
   /** Whether debug mode is enabled */
   debug: boolean;
