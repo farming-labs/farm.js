@@ -1046,6 +1046,15 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(llmsBody, url).toContain(`(${origin}${url})`);
           }
           expect(llmsBody).not.toContain("/console/console");
+          // So does sitemap.xml, on by default as in core, with each page's lastmod.
+          const sitemap = await fetch(origin + "/console/sitemap.xml");
+          expect(sitemap.status, logs).toBe(200);
+          const sitemapBody = await sitemap.text();
+          for (const url of ["/console/", "/console/about", "/console/legacy"]) {
+            expect(sitemapBody, url).toContain(`<loc>${origin}${url}</loc>`);
+          }
+          expect(sitemapBody).toContain("<lastmod>");
+          expect(sitemapBody).not.toContain("/console/console");
         }
         if (name === "trailing-slash") {
           for (const [pathname, accept, marker] of [

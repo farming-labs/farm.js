@@ -228,7 +228,7 @@ function getFarmRoutePathname(pathname) {
 }
 `;
   // The generated agent files list the app's static pages.
-  const listsAgentPages = ctx.llmsTxt?.enabled === true;
+  const listsAgentPages = ctx.llmsTxt?.enabled === true || ctx.sitemap?.enabled === true;
   if (listsAgentPages) {
     code += `import {
   createFarmMetadataRouteResponse,
@@ -250,6 +250,14 @@ import { FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS } from '@farm.js/core/internal/a
 
 const farmLlmsTxtConfig = ${JSON.stringify(ctx.llmsTxt)};
 const farmLlmsFullRenderer = createFarmLlmsFullRenderer({ revalidate: farmLlmsTxtConfig.revalidate });
+`;
+  }
+  if (ctx.sitemap?.enabled) {
+    code += `import { createFarmDefaultSitemap } from '@farm.js/core/internal/production-runtime';
+
+const farmAgentSitemapConfig = ${JSON.stringify(ctx.sitemap)};
+// Each page file's last change, read by the build (by farm dev when it starts).
+const farmPageLastModified = ${JSON.stringify(ctx.pageLastModified ?? {})};
 `;
   }
   if (ctx.actionsEnabled) {
@@ -1033,6 +1041,14 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
   if (llmsResponse) return applyProductionMiddlewareHeaders(llmsResponse, middlewareHeaders);
   `
       : ""
+  }${
+    ctx.sitemap?.enabled
+      ? `// agent.sitemap: answered after middleware, as in core's servers.
+  if (getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/') === '/sitemap.xml') {
+    return applyProductionMiddlewareHeaders(createFarmAgentSitemapResponse(request), middlewareHeaders);
+  }
+  `
+      : ""
   }if (isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname)) {
     return applyProductionMiddlewareHeaders(new Response(
       JSON.stringify({ error: 'API route not found', pathname: url.pathname }),
@@ -1639,7 +1655,37 @@ function getFarmAgentListedPages() {
   );
 }
 
-// Agent files link to the root layout's metadataBase when it is an absolute URL, else to the
+${
+  ctx.sitemap?.enabled
+    ? `/**
+ * agent.sitemap, built the same way as core's servers build it: the pages llms.txt lists, each at
+ * its URL below the basePath, on the root layout's metadataBase or the request's origin.
+ */
+function createFarmAgentSitemapResponse(request) {
+  const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
+  return createFarmMetadataRouteResponse(
+    'sitemap',
+    createFarmDefaultSitemap(
+      getFarmAgentListedPages().map(({ filePath, pattern, module }) => ({
+        pattern,
+        module,
+        lastModified: farmPageLastModified[filePath],
+      })),
+      {
+        origin: new URL(request.url).origin,
+        config: farmAgentSitemapConfig,
+        metadataBase: rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
+        basePath: ${JSON.stringify(ctx.basePath)},
+      },
+    ),
+    {},
+    { method: request.method },
+  );
+}
+
+`
+    : ""
+}// Agent files link to the root layout's metadataBase when it is an absolute URL, else to the
 // request's origin, as in core's servers.
 function getFarmAgentOrigin(request) {
   const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];

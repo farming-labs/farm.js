@@ -87,7 +87,12 @@ export {
   _withFarmResponseHeaders,
 } from "../owned-response";
 export { createFarmAgentRobots } from "../agent-crawlers";
-export { createFarmDefaultSitemap } from "../agent-sitemap";
+export {
+  createFarmDefaultSitemap,
+  resolveFarmAgentSitemap,
+  type FarmAgentSitemapUserConfig,
+  type ResolvedFarmAgentSitemap,
+} from "../agent-sitemap";
 export { collectFarmDefaultMCPPages, resolveFarmDefaultMCPServer } from "../agent-mcp";
 export { handleFarmDefaultMCPRequest } from "../agent-mcp-handler";
 export { createFarmAiCatalogResponse, listFarmMCPLlmsTxtLinks } from "../ai-catalog";

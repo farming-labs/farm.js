@@ -63,7 +63,10 @@ import {
 } from "@farm.js/core/vite";
 import { generateRscEntry } from "./entries/rsc.js";
 import { resolveMarkdownConfig, type FarmMarkdownUserConfig } from "@farm.js/core/markdown";
-import type { FarmLlmsTxtUserConfig } from "@farm.js/core/internal/production-runtime";
+import type {
+  FarmAgentSitemapUserConfig,
+  FarmLlmsTxtUserConfig,
+} from "@farm.js/core/internal/production-runtime";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateErrorFallbackEntry } from "./entries/error-fallback.js";
 import {
@@ -133,6 +136,7 @@ const {
   createFarmRequestBodyErrorResponse,
   createDefaultErrorMarkup,
   resolveFarmLlmsTxtConfig,
+  resolveFarmAgentSitemap,
 } = require_(
   "@farm.js/core/internal/production-runtime",
 ) as typeof import("@farm.js/core/internal/production-runtime");
@@ -221,11 +225,15 @@ export interface FarmRscConfig {
   /**
    * Agent-facing files. `llmsTxt` serves `/llms.txt`, an index of the app's
    * static pages that links to their Markdown mirrors, and with `full: true`
-   * also `/llms-full.txt`, which inlines them. Same options as core's
-   * `agent.llmsTxt`; `false` turns it off.
-   * @default { llmsTxt: { full: false } }
+   * also `/llms-full.txt`, which inlines them. `sitemap` serves `/sitemap.xml`
+   * of the same pages. Same options as core's `agent.llmsTxt` and
+   * `agent.sitemap`; `false` turns each off.
+   * @default { llmsTxt: { full: false }, sitemap: true }
    */
-  agent?: { llmsTxt?: boolean | FarmLlmsTxtUserConfig };
+  agent?: {
+    llmsTxt?: boolean | FarmLlmsTxtUserConfig;
+    sitemap?: boolean | FarmAgentSitemapUserConfig;
+  };
   /**
    * An MCP endpoint for agents, with the same options as core's top-level
    * `mcp`. Requires `@farm.js/mcp`. Declare it directly in this config object:
@@ -1011,7 +1019,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           i18n?: FarmI18nUserConfig | false;
           middleware?: FarmMiddlewareConfig;
           md?: FarmMarkdownUserConfig | boolean;
-          agent?: { llmsTxt?: boolean | FarmLlmsTxtUserConfig };
+          agent?: {
+            llmsTxt?: boolean | FarmLlmsTxtUserConfig;
+            sitemap?: boolean | FarmAgentSitemapUserConfig;
+          };
           mcp?: FarmMCPUserConfig;
           images?: FarmImageConfig;
         };
@@ -1181,6 +1192,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         // runtime cannot see from module exports: the same baked input core's server merges.
         // Later roots override earlier ones, as the entry's merged page map does.
         const pageRenderingDirectives: Record<string, unknown> = {};
+        // Core's default for an app without docs, as for llms.txt: the sitemap is on.
+        const sitemap = resolveFarmAgentSitemap(c.agent?.sitemap ?? true);
+        // Each page file's last change, for the sitemap's lastmod, as core's build reads it.
+        const pageLastModified: Record<string, string> = {};
         for (const source of getFarmSourceRoots(c)) {
           const routesRoot = path.resolve(root, source.srcDir, configuredRoutesDir);
           for (const { key, file } of await findRouteFiles(routesRoot, (name) =>
@@ -1189,6 +1204,14 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             const directive = readRouteRenderingDirectiveFromFile(file);
             if (directive) pageRenderingDirectives[key] = directive;
             else delete pageRenderingDirectives[key];
+            if (sitemap.enabled) {
+              const modified = await fs.stat(file).then(
+                (stat) => stat.mtime.toISOString(),
+                () => undefined,
+              );
+              if (modified) pageLastModified[key] = modified;
+              else delete pageLastModified[key];
+            }
           }
         }
         // Root layouts that render <html> own the document (Next.js's root layout contract).
@@ -1272,6 +1295,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           markdown: resolveMarkdownConfig(c.md),
           // Core's default for an app without docs: llms.txt on, llms-full.txt off.
           llmsTxt: resolveFarmLlmsTxtConfig(c.agent?.llmsTxt ?? { full: false }),
+          sitemap,
+          ...(sitemap.enabled ? { pageLastModified } : {}),
           // Resolved the same way core resolves it for the config, so RSC and
           // non-RSC apps match middleware against the same pathname.
           i18n: resolveFarmI18nConfig(c.i18n, {
