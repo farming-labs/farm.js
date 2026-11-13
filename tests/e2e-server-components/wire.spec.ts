@@ -81,3 +81,23 @@ test("a promise that settles to the object holding it gives back that object, as
   await expect(page.getByTestId("reply")).toHaveText("reply true");
   expect(errors).toEqual([]);
 });
+
+test("maps with elements, global symbols, errors, iterators, blobs and form data reach a client component and come back from an action", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/wire/kinds");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByTestId("props")).toHaveText("true true ab 4 text/plain page");
+  const panel = page.getByRole("button", { name: /^Panel:/ });
+  await expect(panel).toHaveText("Panel: 1");
+  await panel.click();
+  await expect(panel).toHaveText("Panel: 2");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(page.getByTestId("reply")).toHaveText("true true xy 4 text/plain reply");
+  const mapped = page.getByRole("button", { name: /^Mapped:/ });
+  await expect(mapped).toHaveText("Mapped: 5");
+  await mapped.click();
+  await expect(mapped).toHaveText("Mapped: 6");
+  expect(errors).toEqual([]);
+});
