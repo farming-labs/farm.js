@@ -159,6 +159,8 @@ export { default as nitro } from "./vite-plugin-nitro.js";
 export type { NitroPluginOptions } from "./vite-plugin-nitro.js";
 
 const PAGE_FILE = /^page\.(tsx|jsx|ts|js)$/;
+/** Core's metadata route files that RSC serves (`manifest.ts` is not served yet). */
+const METADATA_ROUTE_FILE = /^(sitemap|robots|llms|llms-full)\.(ts|js)$/;
 
 /** Packages the generated RSC entries import that belong to this plugin, not to the app. */
 const PLUGIN_OWNED_ENTRY_IMPORTS = ["rsc-html-stream/server", "rsc-html-stream/client"];
@@ -1223,6 +1225,17 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             }
           }
         }
+        // sitemap.ts, robots.ts, llms.ts and llms-full.ts route files, as core serves them. A
+        // build bundles them only when the app has one; farm dev always looks, so a file added
+        // while it runs is served.
+        let appMetadataRoutes = env.command === "serve";
+        for (const source of appMetadataRoutes ? [] : getFarmSourceRoots(c)) {
+          const routesRoot = path.resolve(root, source.srcDir, configuredRoutesDir);
+          if ((await findRouteFiles(routesRoot, (name) => METADATA_ROUTE_FILE.test(name))).length) {
+            appMetadataRoutes = true;
+            break;
+          }
+        }
         // Root layouts that render <html> own the document (Next.js's root layout contract).
         const documentLayouts = [
           ...new Set(
@@ -1325,6 +1338,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           sitemap,
           ...(sitemap.enabled ? { pageLastModified } : {}),
           ...(crawlers.enabled ? { crawlers } : {}),
+          ...(appMetadataRoutes ? { appMetadataRoutes } : {}),
           i18n,
           ...(i18nCatalogs ? { i18nCatalogs } : {}),
           server: { trustProxy: resolveFarmServerConfig(c.server).trustProxy },

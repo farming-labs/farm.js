@@ -225,6 +225,12 @@ export interface EntryContext {
   /** Resolved `agent.crawlers`: the generated `/robots.txt`, set only when it is on. */
   crawlers?: ResolvedFarmAgentCrawlers;
 
+  /**
+   * Serve `sitemap.ts`, `robots.ts`, `llms.ts` and `llms-full.ts` route files, as core does: set
+   * when the app has one, and always in development so a new file is picked up.
+   */
+  appMetadataRoutes?: boolean;
+
   /** Whether debug mode is enabled */
   debug: boolean;
 

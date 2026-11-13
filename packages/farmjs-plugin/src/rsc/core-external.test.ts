@@ -295,6 +295,7 @@ export const schema = z.string();`;
     { name: "base-path", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "i18n", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "trailing-slash", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "metadata-routes", api: undefined, baseURL: "/api", mount: "/api" },
     {
       name: "custom",
       api: {
@@ -560,6 +561,47 @@ export default function Page() { return <main>Static with a trailing slash</main
 export default function Page() { return <Link href="/about">About link</Link>; }`,
           );
         }
+        if (name === "metadata-routes") {
+          // basePath "/console" with sitemap.ts, robots.ts, llms.ts and llms-full.ts route files,
+          // which replace the generated files as in core, and a nested dynamic sitemap.ts.
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "about/page.tsx",
+            `export const metadata = { title: "About" };
+export default function Page() { return <main>About from a route file app</main>; }`,
+          );
+          writeRoute(
+            "sitemap.ts",
+            `export const revalidate = 60;
+export default function sitemap({ path }) {
+  return [{ url: "https://shop.example/console/custom", lastModified: "2026-01-02" }, { url: "https://shop.example/at" + path }];
+}`,
+          );
+          writeRoute(
+            "docs/[section]/sitemap.ts",
+            `export default function sitemap({ params, path }) {
+  return [{ url: "https://shop.example/console" + path + "?section=" + params.section }];
+}`,
+          );
+          writeRoute(
+            "robots.ts",
+            `export default function robots() { return { rules: { userAgent: "*", disallow: "/private" } }; }`,
+          );
+          writeRoute(
+            "llms.ts",
+            `export default function llms({ pages, defaults }) {
+  return { ...defaults, title: "Custom index", details: "Paths: " + pages.map((page) => page.path).join(", ") };
+}`,
+          );
+          writeRoute(
+            "llms-full.ts",
+            `export default function llmsFull({ defaults }) { return { ...defaults, title: "Custom full" }; }`,
+          );
+        }
         if (name === "base-path") {
           // basePath "/console": a page at its route path, one nested under app/console/ as RSC
           // apps had to before, and a <Link> that core renders below the basePath.
@@ -769,6 +811,9 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           ...(name === "base-path" ? { basePath: "/console" } : {}),
           ...(name === "i18n"
             ? { basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" } }
+            : {}),
+          ...(name === "metadata-routes"
+            ? { basePath: "/console", agent: { crawlers: true, llmsTxt: true } }
             : {}),
           ...(name === "trailing-slash"
             ? {
@@ -1199,6 +1244,37 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
               file,
             ).toBe(true);
           }
+        }
+        if (name === "metadata-routes") {
+          const get = (pathname: string) =>
+            fetch(origin + pathname, { signal: AbortSignal.timeout(10_000) });
+          // sitemap.ts replaces the generated sitemap, below the basePath and at the origin root.
+          for (const pathname of ["/console/sitemap.xml", "/sitemap.xml"]) {
+            const sitemap = await get(pathname);
+            expect(sitemap.status, `${pathname} ${logs}`).toBe(200);
+            expect(sitemap.headers.get("content-type")).toBe("application/xml; charset=utf-8");
+            expect(sitemap.headers.get("cache-control")).toContain("s-maxage=60");
+            const xml = await sitemap.text();
+            expect(xml).toContain("<loc>https://shop.example/console/custom</loc>");
+            expect(xml).toContain("<loc>https://shop.example/at/</loc>");
+            expect(xml).not.toContain("/console/about");
+          }
+          // A nested dynamic sitemap.ts answers at its segment with its params.
+          expect(await (await get("/console/docs/guides/sitemap.xml")).text()).toContain(
+            "<loc>https://shop.example/console/docs/guides?section=guides</loc>",
+          );
+          // robots.ts wins over the robots.txt agent.crawlers generates.
+          const robots = await (await get("/console/robots.txt")).text();
+          expect(robots).toBe("User-agent: *\nDisallow: /private\n");
+          // llms.ts gets the generated pages and defaults to build on.
+          const llms = await (await get("/console/llms.txt")).text();
+          expect(llms).toMatch(/^# Custom index\n/);
+          expect(llms).toContain("Paths: /, /about");
+          expect(llms).toContain(`(${origin}/console/about.md)`);
+          // An llms-full.ts object inlines each page's Markdown.
+          const full = await (await get("/console/llms-full.txt")).text();
+          expect(full).toMatch(/^# Custom full\n/);
+          expect(full).toContain("About from a route file app");
         }
         if (name === "i18n") {
           const get = (pathname: string, headers: Record<string, string> = {}) =>

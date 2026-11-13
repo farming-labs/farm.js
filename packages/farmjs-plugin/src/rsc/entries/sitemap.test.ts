@@ -179,3 +179,29 @@ describe("RSC sitemap.xml", () => {
     ]);
   });
 });
+
+describe("RSC sitemap.ts, robots.ts and llms.ts route files", () => {
+  it("emits no route file code for a build without them", () => {
+    const entry = generateRscEntry({ ...context, sitemap: resolveFarmAgentSitemap(true) });
+    expect(entry).not.toContain("handleFarmAppMetadataRoute");
+    expect(entry).not.toContain("{sitemap,robots,llms,llms-full}");
+  });
+
+  it("answers them after middleware and API routes, before the generated files", () => {
+    const entry = generateRscEntry({
+      ...context,
+      appMetadataRoutes: true,
+      sitemap: resolveFarmAgentSitemap(true),
+    });
+    expect(entry).toContain(
+      'import.meta.glob("/src/app/**/{sitemap,robots,llms,llms-full}.{ts,js}", { eager: true })',
+    );
+    const api = entry.indexOf("await handleAPIRequest(cloneFarmRequestWithContext(request))");
+    const routeFiles = entry.indexOf("await handleFarmAppMetadataRoute(request, context)");
+    const generated = entry.indexOf("createFarmAgentSitemapResponse(request), middlewareHeaders");
+    expect(routeFiles).toBeGreaterThan(api);
+    expect(generated).toBeGreaterThan(routeFiles);
+    // An llms.ts receives the generated pages even with agent.llmsTxt off.
+    expect(entry).toContain("function createFarmLlmsTxtContext(");
+  });
+});
