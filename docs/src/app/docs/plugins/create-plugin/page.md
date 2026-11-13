@@ -87,6 +87,10 @@ These hooks receive their payload, then a context with `state`, `config`, `isDev
 | `dev.server`        | The Vite dev server                                           | Nothing                      |
 | `dev.update`        | `{ file, modules }`                                           | Nothing                      |
 
+On a page request, `router.before`, `router.after`, and `render.before` run after the runtime
+`before` hooks and before app middleware, in `farm dev` and in a production build. `render.before`
+therefore also runs for a page that middleware answers itself.
+
 ### Other supported hooks
 
 | Hook              | Called                                                                                                 |

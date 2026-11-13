@@ -107,16 +107,16 @@ export default {
   "src/app/hello/render-fails/page.tsx": `export default function Page() { return <h1>render</h1>; }`,
   "src/app/hello/router-fails/page.tsx": `export default function Page() { return <h1>router</h1>; }`,
   "src/app/hello/render-before-fails/page.tsx": `export default function Page() { return <h1>render</h1>; }`,
+  "src/app/hello/guarded/page.tsx": `export default function Page() { return <h1>guarded</h1>; }`,
   "src/app/middleware.ts": `${TRACED}
 export function middleware(request: Request) {
   const pathname = traced(request);
-  // farm dev runs render.before after app middleware, production before it; this checks how
-  // its failure is reported, not that order.
-  if (!pathname || pathname === "/hello/render-before-fails") return;
+  if (!pathname) return;
   trace.push("middleware " + pathname);
   if (pathname === "/api/mw-fails") throw new Error("middleware failed");
   if (
     pathname === "/api/guarded" ||
+    pathname === "/hello/guarded" ||
     (pathname === "/.well-known/farmjs.json" && !new URL(request.url).search)
   ) {
     return new Response("guarded", { status: 401 });
@@ -130,7 +130,8 @@ export function middleware(request: Request) {
 
 // A second plugin with HTML transform hooks, which make farm dev buffer a page response before
 // runtime.after sees it. transformHTML fails on one page's markup, afterRender on another path,
-// and its router.before and render.before hooks fail on their own paths.
+// and its router.before and render.before hooks fail on their own paths. render.before records
+// the pages it runs for, so the trace shows where it runs relative to app middleware.
 const HTML_TRANSFORM_PLUGIN = `
     definePlugin({
       name: "acme:html",
@@ -141,6 +142,7 @@ const HTML_TRANSFORM_PLUGIN = `
       },
       render: {
         before({ pathname }: { pathname: string }) {
+          if (pathname.startsWith("/hello")) trace.push("render.before " + pathname);
           if (pathname === "/hello/render-before-fails") throw new Error("render.before failed");
         },
       },
@@ -407,8 +409,12 @@ const API_HOOK_FAILURE = {
 
 // On a page, a throwing runtime hook answers a plain-text 500: runtime.error observes it, onError
 // gets it once as the "runtime" phase, and no later runtime.after runs. With an HTML transform
-// hook, farm dev buffers the page before runtime.after sees it; the answer is the same.
-async function expectPageHookFailures(origin: string): Promise<void> {
+// hook, farm dev buffers the page before runtime.after sees it; the answer is the same. That app's
+// plugin records render.before, which runs ahead of app middleware.
+async function expectPageHookFailures(
+  origin: string,
+  { renderBefore = false }: { renderBefore?: boolean } = {},
+): Promise<void> {
   const accept = { headers: { accept: "text/html" } };
   expect({
     "/hello/before-fails": await request(origin, "/hello/before-fails", accept),
@@ -426,6 +432,7 @@ async function expectPageHookFailures(origin: string): Promise<void> {
       ...PAGE_HOOK_FAILURE,
       trace: [
         "before page /hello/after-fails",
+        ...(renderBefore ? ["render.before /hello/after-fails"] : []),
         "middleware /hello/after-fails",
         "after /hello/after-fails 200",
         "error /hello/after-fails after failed",
@@ -519,6 +526,7 @@ async function expectHTMLTransformFailures(origin: string): Promise<void> {
       ...PAGE_HOOK_FAILURE,
       trace: [
         "before page /hello/transform-fails",
+        "render.before /hello/transform-fails",
         "middleware /hello/transform-fails",
         "error /hello/transform-fails transform failed",
         "onError runtime transform failed",
@@ -528,6 +536,7 @@ async function expectHTMLTransformFailures(origin: string): Promise<void> {
       ...PAGE_HOOK_FAILURE,
       trace: [
         "before page /hello/render-fails",
+        "render.before /hello/render-fails",
         "middleware /hello/render-fails",
         "error /hello/render-fails render failed",
         "onError runtime render failed",
@@ -538,7 +547,7 @@ async function expectHTMLTransformFailures(origin: string): Promise<void> {
 
 // A router or render hook that throws fails the page as a throwing runtime hook does: runtime.error
 // observes it, onError gets it once as the "runtime" phase, no runtime.after runs, and the page
-// answers the plain-text 500.
+// answers the plain-text 500. Both run before app middleware, so middleware never runs.
 async function expectRouterAndRenderHookFailures(origin: string): Promise<void> {
   const accept = { headers: { accept: "text/html" } };
   expect({
@@ -557,8 +566,41 @@ async function expectRouterAndRenderHookFailures(origin: string): Promise<void> 
       ...PAGE_HOOK_FAILURE,
       trace: [
         "before page /hello/render-before-fails",
+        "render.before /hello/render-before-fails",
         "error /hello/render-before-fails render.before failed",
         "onError runtime render.before failed",
+      ],
+    },
+  });
+}
+
+// render.before runs after runtime.before and before app middleware, as part of the page request
+// rather than of the render, so it runs for a page whose middleware answers it too.
+async function expectRenderBeforeOrder(origin: string): Promise<void> {
+  const accept = { headers: { accept: "text/html" } };
+  const page = await request(origin, "/hello", accept);
+  const guarded = await request(origin, "/hello/guarded", accept);
+  expect({
+    "/hello": { status: page.status, trace: page.trace },
+    "/hello/guarded": { status: guarded.status, body: guarded.body, trace: guarded.trace },
+  }).toEqual({
+    "/hello": {
+      status: 200,
+      trace: [
+        "before page /hello",
+        "render.before /hello",
+        "middleware /hello",
+        "after /hello 200",
+      ],
+    },
+    "/hello/guarded": {
+      status: 401,
+      body: "guarded",
+      trace: [
+        "before page /hello/guarded",
+        "render.before /hello/guarded",
+        "middleware /hello/guarded",
+        "after /hello/guarded 401",
       ],
     },
   });
@@ -660,11 +702,12 @@ describe("plugin runtime hooks for API, integration, and built-in route requests
   }, 240_000);
 });
 
-describe("plugin runtime, router, render, and HTML transform hook failures on a page", () => {
+describe("plugin runtime, router, render, and HTML transform hooks on a page", () => {
   it("in development", async () => {
     const root = await createApp("farm-dev-plugin-runtime-html-", { htmlTransform: true });
     const origin = await startDevelopment(root);
-    await expectPageHookFailures(origin);
+    await expectRenderBeforeOrder(origin);
+    await expectPageHookFailures(origin, { renderBefore: true });
     await expectHTMLTransformFailures(origin);
     await expectRouterAndRenderHookFailures(origin);
   }, 120_000);
@@ -672,7 +715,8 @@ describe("plugin runtime, router, render, and HTML transform hook failures on a 
   it("in a node-server production build", async () => {
     const root = await createApp("farm-prod-plugin-runtime-html-", { htmlTransform: true });
     await withProduction(root, async (origin) => {
-      await expectPageHookFailures(origin);
+      await expectRenderBeforeOrder(origin);
+      await expectPageHookFailures(origin, { renderBefore: true });
       await expectHTMLTransformFailures(origin);
       await expectRouterAndRenderHookFailures(origin);
     });
