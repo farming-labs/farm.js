@@ -101,6 +101,21 @@ test("rejects platform targets with a per-target hint instead of guessing", asyn
   });
 });
 
+test("rejects an unknown deploy target instead of treating it as a platform", async () => {
+  await withTempRoot("farm-cli-start-unknown-target-", async (root) => {
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { deploy: { target: 'nodee' } };\n",
+    );
+
+    // It used to report a "nodee" platform target with an `undefined` deploy hint.
+    await assert.rejects(createFarmStartPlan({ root }), {
+      message:
+        'Unknown deploy target "nodee". Farm\'s deploy targets are "vercel", "cloudflare", "netlify", "node". To build with another Nitro preset, set deploy.preset instead.',
+    });
+  });
+});
+
 test("reports missing build output and hints at farm build", async () => {
   await withTempRoot("farm-cli-start-missing-", async (root) => {
     await writeFile(

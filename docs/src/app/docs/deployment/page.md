@@ -36,6 +36,8 @@ export default defineConfig({
 
 These targets get the most polished Farm defaults. They map `deploy.target` to a Nitro preset, output directory, and the matching `farm deploy` command when Farm has a deploy wrapper for that platform.
 
+`deploy.target` accepts only these four names. Farm rejects any other target, such as the typo `"vercell"`, when it resolves the config and before the build starts, with an error that names the value and lists the targets. To deploy with a Nitro preset that has no first-class target, such as `bun` or `aws-lambda`, set `deploy.preset` instead; see [Nitro preset pass-through](#nitro-preset-pass-through).
+
 When no target or preset is configured, Farm recognizes platform CI through `VERCEL`, `NETLIFY`,
 and `CF_PAGES`. Detection is enabled only by the values `1` or `true` (case-insensitive); unset,
 empty, `0`, `false`, and other values do not select a platform. An explicit target, preset, or CLI

@@ -569,7 +569,9 @@ false }` trims it (a hidden section is `null`); `agent.manifest: false` turns it
 `farm preview` exposes an already-running local app; it does not build or deploy. Bind remote
 sandbox development servers with `farm dev --host 0.0.0.0 --port <port>`. For deployment,
 prefer `deploy.target` for first-class targets and `deploy.preset` only for Nitro pass-through. A
-preset overrides a target. Use `farm deploy --plan` before shipping and run the exact target build.
+preset overrides a target. `deploy.target` must be `vercel`, `cloudflare`, `netlify`, or `node`;
+config resolution rejects any other name. Use `farm deploy --plan` before shipping and run the
+exact target build.
 A static page any middleware guards renders on request. On Vercel, a middleware file with
 `export const config = { runtime: "edge" }` runs in front of the pages it guards, so they prerender;
 it may import only web APIs and the Edge runtime's Node modules (`async_hooks`, `events`, `buffer`,

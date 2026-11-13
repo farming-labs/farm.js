@@ -10,6 +10,7 @@ import {
   loadConfig,
   resolveConfig,
   detectPlatformDeployTarget,
+  getPresetForDeployTarget,
   resolveDeployConfig,
   resolveDocsConfig,
   resolveMigrationsConfig,
@@ -1220,6 +1221,52 @@ describe("resolveDeployConfig", () => {
     // deployment silently shipped a Node server.
     expect(() => resolveDeployConfig(config, overrides)).toThrow(
       'Deploy target "vercel-edge" is not supported: Farm\'s Nitro version has no vercel-edge preset. Use the "vercel" target instead',
+    );
+  });
+
+  it.each([
+    ["deploy.target", { deploy: { target: "vercell" } }, {}],
+    ["deploy.target beside a preset", { deploy: { target: "vercell", preset: "vercel" } }, {}],
+    ["deploy.target under a preset override", { deploy: { target: "vercell" } }, { preset: "bun" }],
+    [
+      "deploy.target in a platform build",
+      { deploy: { target: "vercell" } },
+      { env: { VERCEL: "1" } },
+    ],
+    ["target override", {}, { target: "vercell" }],
+  ] as const)("rejects an unknown target from %s", (_source, config, overrides) => {
+    // An unknown target used to fall back to the node-server preset and build a Node server
+    // into .farm/.output instead of the platform that was asked for.
+    expect(() => resolveDeployConfig(config, overrides)).toThrow(
+      'Unknown deploy target "vercell". Farm\'s deploy targets are "vercel", "cloudflare", "netlify", "node". To build with another Nitro preset, set deploy.preset instead.',
+    );
+  });
+
+  it.each(["cloudflare-workers", "bun", "constructor", "toString", "__proto__"])(
+    "rejects the %s target, which no first-class target defines",
+    (target) => {
+      expect(getPresetForDeployTarget(target)).toBeUndefined();
+      expect(() => resolveDeployConfig({ deploy: { target } })).toThrow(
+        `Unknown deploy target "${target}".`,
+      );
+    },
+  );
+
+  it.each([
+    ["cloudflare-pages", "cloudflare", "cloudflare-pages"],
+    ["cloudflare_pages", "cloudflare", "cloudflare-pages"],
+    ["node-server", "node", "node-server"],
+    ["nitro", "node", "node-server"],
+  ] as const)("keeps accepting the %s target alias", (alias, target, preset) => {
+    expect(resolveDeployConfig({ deploy: { target: alias } }, { env: {} })).toMatchObject({
+      target,
+      preset,
+    });
+  });
+
+  it("rejects an unknown target while resolving the app config", async () => {
+    await expect(resolveConfig({ deploy: { target: "vercell" } }, "production")).rejects.toThrow(
+      'Unknown deploy target "vercell".',
     );
   });
 

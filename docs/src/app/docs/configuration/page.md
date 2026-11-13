@@ -1448,7 +1448,7 @@ export default defineConfig({
 });
 ```
 
-`deploy.target` selects the deployment provider. Farm resolves that to the matching Nitro preset and output shape unless you override it.
+`deploy.target` selects the deployment provider: `vercel`, `cloudflare`, `netlify`, or `node`. Farm resolves that to the matching Nitro preset and output shape unless you override it. Any other target name, such as a typo, fails when Farm resolves the config, so `farm dev`, `farm build`, `farm start`, and `farm deploy` stop with an error that lists these targets. Set `deploy.preset` to build with another Nitro preset. See [First-class targets](/docs/deployment#first-class-targets).
 
 ### Deployment identity
 
