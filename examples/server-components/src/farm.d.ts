@@ -99,7 +99,10 @@ export type RoutePath =
   | "/values/a"
   | "/values/b"
   | "/values/slow"
-  | "/window";
+  | "/window"
+  | "/wire/function-prop"
+  | "/wire/stream-prop"
+  | "/wire/stream-result";
 export type RoutePattern =
   | "/"
   | "/action"
@@ -187,7 +190,10 @@ export type RoutePattern =
   | "/values/a"
   | "/values/b"
   | "/values/slow"
-  | "/window";
+  | "/window"
+  | "/wire/function-prop"
+  | "/wire/stream-prop"
+  | "/wire/stream-result";
 export type RouteModulePattern =
   | "/"
   | "/action"
@@ -279,7 +285,10 @@ export type RouteModulePattern =
   | "/values/a"
   | "/values/b"
   | "/values/slow"
-  | "/window";
+  | "/window"
+  | "/wire/function-prop"
+  | "/wire/stream-prop"
+  | "/wire/stream-result";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;

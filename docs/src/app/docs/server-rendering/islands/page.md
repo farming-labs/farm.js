@@ -55,7 +55,9 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
 
 - **Server.** Farm renders the page once, on its normal server pipeline. Farm's compiler wraps
   every `"use client"` export in islx's island component, which writes the `<f-island>` element and
-  its props. Server output passed to a client component renders once, inside it.
+  its props. Server output passed to a client component renders once, inside it. Props take what
+  RSC sends: promises, `ReadableStream`s and async iterables stream in after the page, and a plain
+  function fails the render with an error that names the component and the prop.
 - **Browser.** Farm's client entry hands every `<f-island>` to islx's hydration runtime, which
   imports the island's module when its strategy is due and hydrates it in place. A page whose
   islands all wait loads a 1.7 KB boot script instead of the runtime.
@@ -64,8 +66,9 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   and a navigation keeps the provider's state.
 - **Actions.** `"use server"` functions compile to islx action references. A form posts its action
   without a page load, or without JavaScript, and the page refreshes with its islands' state kept.
-  An action called from a client component can return elements, as under RSC: they render on the
-  server, and the client components in them hydrate.
+  An action called from a client component can return elements, promises and streams, as under
+  RSC: elements render on the server, and promises and streams settle in the browser after the
+  call returns.
 - **Navigation.** A navigation fetches the page's HTML, streamed, with only the layouts the
   browser does not keep, and hydrates the islands it brings.
 
