@@ -204,6 +204,7 @@ import {
 } from "./ssr-public-assets";
 import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
 import { farmStripPlatformConfigPlugin } from "../build/strip-platform-config";
+import { createReactProductionModePlugin } from "../build/production-node-env";
 import type { FarmPlatform } from "../platform";
 import {
   createFarmBunServerEntry,
@@ -788,33 +789,6 @@ export function isNitroRollupExternal(id: string): boolean {
 }
 
 const FARM_METADATA_IMAGE_WASM_PREFIX = "\0farm-metadata-image-wasm:";
-
-/**
- * Replaces React's `process.env.NODE_ENV` checks with "production", so a bundle
- * that includes React keeps only its production builds. React's entry files pick
- * the development or production build at runtime from that check; left in place,
- * both builds ship.
- */
-function createReactProductionModePlugin() {
-  const nodeEnvExpression = ["process", "env", "NODE_ENV"].join(".");
-  return {
-    name: "farm-react-production-mode",
-    transform: {
-      filter: {
-        id: /\/node_modules\/react(?:-dom)?\//,
-        code: new RegExp(nodeEnvExpression.replace(/\./g, "\\.")),
-      },
-      handler(code: string, id: string) {
-        const normalizedId = id.replace(/\\/g, "/");
-        const isReactRuntime =
-          normalizedId.includes("/node_modules/react/") ||
-          normalizedId.includes("/node_modules/react-dom/");
-        if (!isReactRuntime || !code.includes(nodeEnvExpression)) return null;
-        return { code: code.split(nodeEnvExpression).join('"production"'), map: null };
-      },
-    },
-  };
-}
 
 const FARM_OMITTED_METADATA_IMAGE_RUNTIME_ID = "\0farm-omitted-metadata-image-runtime";
 
