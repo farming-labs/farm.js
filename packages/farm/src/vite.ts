@@ -760,12 +760,23 @@ function createFarmDevMiddlewareErrorResponse(): Response {
 }
 
 /**
+ * The status and headers of the runtime hook 500. Production answers a new response, so none of
+ * the headers the failed request set (app middleware's headers and cookies, a page's cache
+ * policy) is kept; the headers() config, Set-Cookie included, is applied again when the head is
+ * written, as production applies it to that response.
+ */
+function setFarmDevRuntimeHookErrorHead(res: ServerResponse, json: boolean): void {
+  for (const name of res.getHeaderNames()) res.removeHeader(name);
+  res.statusCode = 500;
+  res.setHeader("Content-Type", json ? "application/json" : "text/plain; charset=utf-8");
+}
+
+/**
  * The 500 a request answers when a plugin runtime hook throws, as in the production entry: the
  * generic JSON body on an API path or with `renderer: false`, plain text for a page.
  */
 function sendFarmDevRuntimeHookError(res: ServerResponse, json: boolean): void {
-  res.statusCode = 500;
-  res.setHeader("Content-Type", json ? "application/json" : "text/plain; charset=utf-8");
+  setFarmDevRuntimeHookErrorHead(res, json);
   res.end(json ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error");
 }
 
@@ -972,16 +983,7 @@ function interceptFarmDevPageResponse(options: {
     console.error("Error in afterResponse hook:", error);
   };
   const writeRuntimeHookFailure = () => {
-    res.statusCode = 500;
-    res.removeHeader("Content-Length");
-    // Production answers a new response, with the headers() config but not the cache policy
-    // of the response the hook failed on (an error page's private, no-store, say). The
-    // headers() config is applied again when the head is written.
-    res.removeHeader("Cache-Control");
-    res.setHeader(
-      "Content-Type",
-      options.jsonError ? "application/json" : "text/plain; charset=utf-8",
-    );
+    setFarmDevRuntimeHookErrorHead(res, Boolean(options.jsonError));
     originalWriteHead(500);
     originalWrite(options.jsonError ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error");
   };
@@ -3847,9 +3849,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
                 // The runtime already reported a hook failure to runtime.error and onError.
                 logger.error(`API route error: ${error}`);
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                sendFarmDevRuntimeHookError(res, true);
                 return;
               }
               pm.copyRequestContext(runtimeSession.request, req);
@@ -4023,9 +4023,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
                 // The plugin runtime already reported the failure to runtime.error and onError.
                 logger.error(`API route error: ${error}`);
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                sendFarmDevRuntimeHookError(res, true);
                 return;
               }
             }
@@ -4074,9 +4072,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
                 // The plugin runtime already reported the failure to runtime.error and onError.
                 logger.error(`Docs API route error: ${error}`);
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                sendFarmDevRuntimeHookError(res, true);
                 return;
               }
             }
@@ -4105,9 +4101,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             } catch (error) {
               // The runtime already reported a hook failure to runtime.error and onError.
               logger.error(`API route error: ${error}`);
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+              sendFarmDevRuntimeHookError(res, true);
             }
             return;
           }
@@ -4766,13 +4760,27 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const duration = Date.now() - startTime;
             logResponse(method, urlPath, 500, duration, "PAGE");
             if (pm && runtimeSession) {
-              // A middleware throw is answered inside the runtime request, as production's
-              // reportError reports it: runtime.after still runs on the 500, and a throw there
-              // is reported too.
-              if (middlewareFailed) await pm.reportRuntimeRequestError(runtimeSession, error);
-              else await pm.failRuntimeRequest(runtimeSession, error);
-            }
-            if (!(middlewareFailed && runtimeSession)) {
+              if (middlewareFailed) {
+                // A middleware throw is answered inside the runtime request, as production's
+                // reportError reports it: runtime.after still runs on the 500, and a throw
+                // there is reported too.
+                await pm.reportRuntimeRequestError(runtimeSession, error);
+              } else {
+                // The renderer answers a page that throws with its error page, a 500
+                // runtime.after sees, so what throws here is a hook around the render
+                // (beforeRender, say) or the renderer itself. Production runs both inside the
+                // runtime request, so the throw fails it: runtime.error and onError observe it
+                // once, as the "runtime" phase, runtime.after does not run, and the page answers
+                // the runtime hook 500.
+                await pm.failRuntimeRequest(runtimeSession, error);
+                if (!res.headersSent && !responseInterceptor?.isEnded()) {
+                  responseInterceptor?.release();
+                  console.error("[FARM] Page error:", error);
+                  sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                  return;
+                }
+              }
+            } else {
               await emitPluginError("render-page", error, { pathname });
             }
             // With `renderer: false` no error page renders: answer the JSON 500 production
