@@ -107,10 +107,7 @@ export async function writeSearchIndex(input: SearchBuildInput): Promise<SearchB
 }
 
 export function resolveSearchPublicDir(outputDir: string, preset: string): string {
-  return path.join(
-    outputDir,
-    preset === "vercel" || preset === "vercel-edge" ? "static" : "public",
-  );
+  return path.join(outputDir, preset === "vercel" ? "static" : "public");
 }
 
 export function normalizeBasePath(value: string | undefined): string {

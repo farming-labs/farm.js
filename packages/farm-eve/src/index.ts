@@ -108,7 +108,7 @@ export function eve(options: EveOptions = {}): EveIntegration {
     ...(composeVercel
       ? {
           async afterBuild(context) {
-            if (context.preset !== "vercel" && context.preset !== "vercel-edge") {
+            if (context.preset !== "vercel") {
               // Returning here used to ship the app without Eve: no origin was
               // configured, so every /eve request answered 503 in production.
               throw new Error(
