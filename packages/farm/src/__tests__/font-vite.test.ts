@@ -7,7 +7,12 @@ import os from "node:os";
 import path from "node:path";
 import { build, createServer, type Plugin, type Rollup } from "vite";
 import { describe, expect, it, vi } from "vitest";
-import { farmFontImportsPlugin, mergeFarmFontCss, renderFarmFontDevHead } from "../font-vite";
+import {
+  farmFontImportsPlugin,
+  mergeFarmFontCss,
+  renderFarmFontDevHead,
+  transformFarmFontCalls,
+} from "../font-vite";
 import { appendFarmLinkHeader } from "../nitro/production-runtime";
 import { farmPlugin } from "../vite";
 
@@ -568,5 +573,25 @@ console.log(demo);`,
     expect(merged).toContain(".app { color: green; }");
     expect(merged).toContain(".current-font {}");
     expect(merged).not.toContain(".old-font {}");
+  });
+});
+
+describe("font call detection", () => {
+  it("parses only modules that import from a font module", async () => {
+    const parse = vi.fn(() => {
+      throw new Error("parsed");
+    });
+    const register = vi.fn();
+    // A page that only mentions the loaders, as a docs page about fonts does.
+    const result = await transformFarmFontCalls({
+      code: 'export const prose = "Self-host a font with localFont() or remoteFont().";',
+      id: "/app/src/app/docs/fonts/page.js",
+      root: "/app",
+      production: false,
+      parse,
+      register,
+    });
+    expect(result).toBe(null);
+    expect(parse).not.toHaveBeenCalled();
   });
 });

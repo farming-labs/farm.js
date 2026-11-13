@@ -12,6 +12,7 @@ import {
 } from "./dev-module";
 import { createBundledEnv } from "./env";
 import { parseSync } from "vite";
+import { initSync as initModuleLexer, parse as lexModule } from "es-module-lexer";
 import type {
   AliasOptions,
   ConfigEnv,
@@ -1348,6 +1349,71 @@ interface FarmModuleAstNode {
   [key: string]: unknown;
 }
 
+/** A string-literal module specifier: its value, and the range of the literal with its quotes. */
+interface FarmModuleSpecifier {
+  value: string;
+  start: number;
+  end: number;
+}
+
+let moduleLexerReady = false;
+
+/**
+ * The string-literal specifiers of a JavaScript module's imports, re-exports and dynamic
+ * imports, read with es-module-lexer instead of a full parse. Null when the lexer cannot read
+ * the code, so the caller falls back to the parser.
+ */
+function lexModuleSpecifiers(code: string): FarmModuleSpecifier[] | null {
+  if (!moduleLexerReady) {
+    initModuleLexer();
+    moduleLexerReady = true;
+  }
+  let imports: ReturnType<typeof lexModule>[0];
+  try {
+    [imports] = lexModule(code);
+  } catch {
+    return null;
+  }
+  const specifiers: FarmModuleSpecifier[] = [];
+  for (const entry of imports) {
+    if (entry.n === undefined || entry.d === -2) continue;
+    // A static specifier's range excludes its quotes; a dynamic import's argument includes them.
+    const start = entry.d === -1 ? entry.s - 1 : entry.s;
+    const end = entry.d === -1 ? entry.e + 1 : entry.e;
+    const quote = code[start];
+    if ((quote !== '"' && quote !== "'") || code[end - 1] !== quote) continue;
+    specifiers.push({ value: entry.n, start, end });
+  }
+  return specifiers;
+}
+
+function parseModuleSpecifiers(options: {
+  code: string;
+  parse: (code: string) => FarmModuleAstNode;
+}): FarmModuleSpecifier[] | null {
+  let ast: FarmModuleAstNode;
+  try {
+    ast = options.parse(options.code);
+  } catch {
+    return null;
+  }
+  const specifiers: FarmModuleSpecifier[] = [];
+  walkModuleAst(ast, (node) => {
+    if (
+      node.type !== "ImportDeclaration" &&
+      node.type !== "ExportNamedDeclaration" &&
+      node.type !== "ExportAllDeclaration" &&
+      node.type !== "ImportExpression"
+    ) {
+      return;
+    }
+    const source = node.source;
+    if (!isFarmModuleAstNode(source) || typeof source.value !== "string") return;
+    specifiers.push({ value: source.value, start: source.start, end: source.end });
+  });
+  return specifiers;
+}
+
 export function rewriteEarlySsrRelativeImports(options: {
   code: string;
   id: string;
@@ -1359,27 +1425,12 @@ export function rewriteEarlySsrRelativeImports(options: {
     return null;
   }
 
+  const sources = lexModuleSpecifiers(options.code) ?? parseModuleSpecifiers(options);
+  if (!sources) return null;
+
   const replacements: Array<{ start: number; end: number; code: string }> = [];
-  let ast: FarmModuleAstNode;
-  try {
-    ast = options.parse(options.code);
-  } catch {
-    return null;
-  }
-
-  walkModuleAst(ast, (node) => {
-    if (
-      node.type !== "ImportDeclaration" &&
-      node.type !== "ExportNamedDeclaration" &&
-      node.type !== "ExportAllDeclaration" &&
-      node.type !== "ImportExpression"
-    ) {
-      return;
-    }
-
-    const source = node.source;
-    if (!isFarmModuleAstNode(source) || typeof source.value !== "string") return;
-    if (!source.value.startsWith(".")) return;
+  for (const source of sources) {
+    if (!source.value.startsWith(".")) continue;
 
     const suffixIndex = source.value.search(/[?#]/);
     const sourcePath = suffixIndex === -1 ? source.value : source.value.slice(0, suffixIndex);
@@ -1395,7 +1446,7 @@ export function rewriteEarlySsrRelativeImports(options: {
       end: source.end,
       code: JSON.stringify(`${specifier}${suffix}`),
     });
-  });
+  }
 
   if (replacements.length === 0) return null;
 
