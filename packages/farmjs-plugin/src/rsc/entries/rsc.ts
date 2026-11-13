@@ -1,4 +1,7 @@
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
+import type { ResolvedFarmI18nConfig } from "@farm.js/core/i18n";
 import type { EntryContext } from "../types.js";
 import {
   FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER,
@@ -13,6 +16,91 @@ function generateMCPPluginSource(): { importSource: string; registerSource: stri
     "@farm.js/core/internal/production-runtime",
   ) as typeof import("@farm.js/core/internal/production-runtime");
   return generateNativeMCPPluginSource({ enabled: true });
+}
+
+/** Each locale's catalog file, where core's i18n config resolves it (resolveFarmI18nMessagePath). */
+function farmI18nCatalogFiles(i18n: ResolvedFarmI18nConfig): string[] {
+  return i18n.locales.map((locale) =>
+    i18n.messages.includes("{locale}")
+      ? i18n.messages.split("{locale}").join(locale)
+      : path.join(i18n.messages, `${locale}.json`),
+  );
+}
+
+/**
+ * The request locale of an app with i18n, from core's runtime: each request resolves its locale
+ * as in core's servers, so `getLocale()`, `t()` and `format` from `@farm.js/core/i18n/server`
+ * work in server components, server actions, route handlers and middleware, and client
+ * components read the same locale.
+ */
+function generateI18nRuntime(ctx: EntryContext, i18n: ResolvedFarmI18nConfig): string {
+  const catalogs =
+    ctx.development === true
+      ? `// Development reads the catalogs from disk, as core's dev server does. Importing them makes an
+// edited catalog reload this entry; a missing one fails initialize() with core's error.
+${farmI18nCatalogFiles(i18n)
+  .filter((file) => existsSync(file))
+  .map((file) => `import ${JSON.stringify(`${file.replace(/\\/g, "/")}?raw`)};`)
+  .join("\n")}
+const farmI18nRuntime = createFarmI18nRuntime(farmRouteI18n);
+await farmI18nRuntime.initialize();`
+      : `// The catalogs the build read and validated, inlined as core's build inlines them.
+const farmI18nRuntime = createFarmI18nRuntime(farmRouteI18n, ${JSON.stringify(ctx.i18nCatalogs ?? {})});`;
+  return `import {
+  _runWithFarmI18nRequest,
+  _setDefaultFarmI18nRuntime,
+  createFarmI18nRuntime,
+  getFarmI18nClientSnapshot,
+} from '@farm.js/core/i18n/server';
+import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from '@farm.js/core/internal/production-runtime';
+${catalogs}
+// createTranslator(locale) and runWithLocale() outside a request.
+_setDefaultFarmI18nRuntime(farmI18nRuntime);
+
+/**
+ * Runs a request in its locale, as core's servers do. A page GET whose URL lacks the locale the
+ * visitor's cookie or Accept-Language picks is redirected to it (307), and a payload request to
+ * that page's payload; a response that depends on those signals varies on them and stays out of
+ * shared caches. API routes keep their URLs, as in core, and so do the paths this server answers
+ * only as written: llms.txt and the image optimizer.
+ */
+async function runFarmLocalizedRequest(request, payloadRequested, render) {
+  const { pathname } = new URL(request.url);
+  const redirect =
+    !isFarmAPIPathname(pathname, farmApiBasePath) &&
+    !isFarmAPIPathname(pathname) &&
+    pathname !== farmImagePath &&
+    pathname !== '/llms.txt' &&
+    pathname !== '/llms-full.txt';
+  return _runWithFarmI18nRequest(farmI18nRuntime, request, async (resolution) => {
+    if (resolution.redirect && (request.method === 'GET' || request.method === 'HEAD')) {
+      let location = resolution.redirect;
+      if (payloadRequested) {
+        const target = new URL(location, request.url);
+        location = farmPayloadPath(target.pathname) + target.search;
+      }
+      return applyFarmI18nResponse(new Response(null, { status: 307, headers: { location } }), resolution);
+    }
+    return applyFarmI18nResponse(await render(), resolution);
+  }, { redirect });
+}
+
+function applyFarmI18nResponse(response, resolution) {
+  const varyHeaders = getFarmLocaleVaryHeaders(farmRouteI18n, resolution);
+  if (!resolution.persist && varyHeaders.length === 0) return response;
+  const headers = new Headers(response.headers);
+  if (resolution.persist) {
+    headers.append('set-cookie', createFarmLocaleCookie(resolution.locale, farmRouteI18n));
+  }
+  if (varyHeaders.length > 0) {
+    const vary = new Set((headers.get('vary') || '').split(',').map((entry) => entry.trim()).filter(Boolean));
+    for (const header of varyHeaders) vary.add(header);
+    headers.set('vary', [...vary].join(', '));
+    headers.set('cache-control', 'private, no-store');
+  }
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+`;
 }
 
 /**
@@ -49,7 +137,8 @@ export function generateRscMiddlewareResultHandling(): string {
 export function generateRscEntry(ctx: EntryContext): string {
   // A root-mounted app without i18n matches pages on the path as received, with no extra work.
   const hasBasePath = !["", "/"].includes(ctx.basePath.trim());
-  const routesBelowPrefix = hasBasePath || ctx.i18n?.enabled === true;
+  const i18n = ctx.i18n?.enabled === true ? ctx.i18n : undefined;
+  const routesBelowPrefix = hasBasePath || i18n !== undefined;
   // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
   const appSegment = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
   const glob = appSegment ? `/${ctx.srcDir}/${appSegment}` : `/${ctx.srcDir}`;
@@ -215,7 +304,7 @@ function getFarmRoutePathname(pathname) {
     ? stripFarmLocaleFromPathname(pathname, farmRouteI18n)
     : stripFarmBasePath(pathname, farmRouteI18n.basePath);
 }
-`;
+${i18n ? generateI18nRuntime(ctx, i18n) : ""}`;
   if (ctx.llmsTxt?.enabled) {
     code += `import {
   collectFarmLlmsTxtPages,
@@ -1269,10 +1358,17 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
         layoutContent,
       )
     : h('div', { 'data-farm-root': 'true' }, layoutContent);
-  // Build the full page. root = full document (for SSR). rootContent = what the browser hydrates.
+  ${
+    i18n
+      ? `// The request's locale, as core's renderers serialize it for hydration: client components
+  // (Link, useLocale(), useTranslations()) read it in the browser as they did during SSR.
+  const farmI18nSnapshot = getFarmI18nClientSnapshot() ?? null;
+  `
+      : ""
+  }// Build the full page. root = full document (for SSR). rootContent = what the browser hydrates.
   const payload = {
     ownsDocument,
-    root: ownsDocument ? rootInner : h('html', null,
+    root: ownsDocument ? rootInner : h('html', ${i18n ? "farmI18nSnapshot && { lang: farmI18nSnapshot.locale, dir: farmI18nSnapshot.direction }" : "null"},
         h('head', null,
           h('meta', { charSet: 'utf-8' }),
           renderedHead.hasFavicon ? null : h('link', { rel: 'icon', href: 'data:,' }),
@@ -1287,7 +1383,7 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
       title: metadataTitle,
       description: typeof metadata.description === 'string' ? metadata.description : undefined,
     },
-`;
+${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
 
   // Include action results in payload if actions are enabled
   if (ctx.actionsEnabled) {
@@ -1418,7 +1514,9 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
                   h('head', null, h('meta', { charSet: 'utf-8' }), h('title', null, 'Error')),
                   h('body', null, h('div', { id: 'root' }, rootInner))),
                 rootContent: rootInner,
-                metadata: { title: 'Error' },
+                metadata: { title: 'Error' },${
+                  i18n ? "\n                i18n: getFarmI18nClientSnapshot() ?? null," : ""
+                }
               };
               const rscStream = renderToReadableStream(payload, { onError: farmRscOnError });
               const headers = new Headers(errorHeaders);
@@ -1673,7 +1771,7 @@ ${
 `
     : ""
 }  const pageRequest = toFarmPayloadRequest(request);
-  const response = await handleFarmRequestWithRuntime(pageRequest, context);
+  const response = await handleFarmRequestWithRuntime(pageRequest, context${i18n ? ", pageRequest !== request" : ""});
   if (
     prerendering &&
     pageRequest === request &&
@@ -1712,14 +1810,20 @@ const farmNativeStylesheets = (() => {
     : ""
 }
 
-async function handleFarmRequestWithRuntime(request, context) {
-  return _runWithAPIRequestRuntime({
+${
+  i18n
+    ? `async function handleFarmRequestWithRuntime(request, context, payloadRequested) {
+  // Outermost, so middleware, after() callbacks and local API calls read the locale too.
+  return runFarmLocalizedRequest(request, payloadRequested, () => _runWithAPIRequestRuntime({`
+    : `async function handleFarmRequestWithRuntime(request, context) {
+  return _runWithAPIRequestRuntime({`
+}
     basePath: farmApiBasePath,
     dispatch: async (localRequest) =>
       (await handleAPIRequest(localRequest)) ?? Response.json({ error: 'Not Found' }, { status: 404 }),
   }, () => _runWithCurrentRequest(request, () =>
     _runWithAfterRequest(request, () => handleFarmPageOrMarkdown(request, context), context)
-  ));
+  ))${i18n ? ")" : ""};
 }
 
 export default { fetch: handler };

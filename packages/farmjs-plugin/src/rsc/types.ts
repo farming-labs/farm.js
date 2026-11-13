@@ -1,6 +1,6 @@
 import type { FarmMarkdownResolvedConfig } from "@farm.js/core/markdown";
 import type { ResolvedFarmLlmsTxtConfig } from "@farm.js/core/internal/production-runtime";
-import type { ResolvedFarmI18nConfig } from "@farm.js/core/i18n";
+import type { FarmI18nCatalogs, ResolvedFarmI18nConfig } from "@farm.js/core/i18n";
 import type {
   FarmServerActionsConfig,
   ResolvedFarmServerActionsConfig,
@@ -174,6 +174,12 @@ export interface EntryContext {
    * matches a `/dashboard` middleware.
    */
   i18n?: ResolvedFarmI18nConfig;
+
+  /**
+   * The i18n catalogs a build inlines, read and validated as core's build reads them, so the
+   * server needs no catalog files. Development reads them from disk instead.
+   */
+  i18nCatalogs?: FarmI18nCatalogs;
 
   /**
    * Server settings the request path needs. `trustProxy` decides whether

@@ -68,6 +68,7 @@ import { generateSsrEntry } from "./entries/ssr.js";
 import { generateErrorFallbackEntry } from "./entries/error-fallback.js";
 import {
   CLIENT_ENTRY_CORE_IMPORTS,
+  CLIENT_ENTRY_I18N_IMPORTS,
   generateClientEntry,
   serverFnTransportErrorClientRuntime,
 } from "./entries/client.js";
@@ -1227,6 +1228,24 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         if (env.command === "build" && mobileClient !== "entry") {
           removeFarmRscMobileClientManifest(root);
         }
+        // Resolved the same way core resolves it for the config, so RSC and
+        // non-RSC apps match middleware against the same pathname.
+        const i18n = resolveFarmI18nConfig(c.i18n, {
+          root,
+          mode: env.command === "serve" ? "development" : "production",
+          basePath: c.basePath ?? "/",
+        });
+        // A build inlines the catalogs, read and validated as core's build reads them (a strict
+        // mismatch fails the build), so the server needs no catalog files.
+        let i18nCatalogs: EntryContext["i18nCatalogs"];
+        if (i18n.enabled && env.command === "build") {
+          const { createFarmI18nRuntime } = require_(
+            "@farm.js/core/i18n/server",
+          ) as typeof import("@farm.js/core/i18n/server");
+          const catalogRuntime = createFarmI18nRuntime(i18n);
+          await catalogRuntime.initialize();
+          i18nCatalogs = catalogRuntime.getCatalogs();
+        }
         // Development always optimizes with Sharp, as core's dev server does.
         const imageRuntime =
           env.command === "serve"
@@ -1263,13 +1282,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           markdown: resolveMarkdownConfig(c.md),
           // Core's default for an app without docs: llms.txt on, llms-full.txt off.
           llmsTxt: resolveFarmLlmsTxtConfig(c.agent?.llmsTxt ?? { full: false }),
-          // Resolved the same way core resolves it for the config, so RSC and
-          // non-RSC apps match middleware against the same pathname.
-          i18n: resolveFarmI18nConfig(c.i18n, {
-            root,
-            mode: env.command === "serve" ? "development" : "production",
-            basePath: c.basePath ?? "/",
-          }),
+          i18n,
+          ...(i18nCatalogs ? { i18nCatalogs } : {}),
           server: { trustProxy: resolveFarmServerConfig(c.server).trustProxy },
           middlewareConfigPaths,
           pluginsConfigPaths,
@@ -1488,6 +1502,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                   "react-dom/client",
                   "rsc-html-stream/client",
                   ...CLIENT_ENTRY_CORE_IMPORTS,
+                  ...(i18n.enabled ? CLIENT_ENTRY_I18N_IMPORTS : []),
                   // Client components and the packages they use load only once a page renders
                   // (client references), so they would be found late too.
                   ...clientOptimizeDeps.include,

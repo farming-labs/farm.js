@@ -466,9 +466,8 @@ Both setups follow the same route contract:
   `/console/about` and its payload `/console/about.rsc`, `<Link href="/about">` renders
   `/console/about`, and a static page prerenders at its URL below the base path. As in other Farm
   apps, the page also answers at `/about`, and `redirect()` sends its target as written. With i18n
-  the locale prefix is stripped too, so `/console/fr/about` matches `app/about/page.tsx`; the RSC
-  pipeline has no locale runtime yet, so a page that needs the locale takes it from a `[lang]`
-  folder nested as below: `app/[lang]/`, or `app/console/[lang]/` under the base path.
+  the locale prefix is stripped too, so `/console/fr/about` matches `app/about/page.tsx`, which
+  reads its locale with `getLocale()` (see Internationalization below).
   Pages nested in folders that spell out the prefix, as RSC apps had to write them before
   (`app/console/about/page.tsx`, or `app/[lang]/about/page.tsx` and
   `app/console/[lang]/about/page.tsx` with i18n), keep their URLs and win over a page at the
@@ -476,6 +475,15 @@ Both setups follow the same route contract:
   latter. A dynamic or catch-all folder at the root never takes the base path itself, so
   `app/[[...slug]]/page.tsx` sees `/console/guides` as `guides`. When no page matches the stripped
   path, the path as received is matched.
+- **Internationalization.** With [`i18n`](/docs/internationalization), each request resolves its
+  locale as in other Farm apps: `getLocale()`, `t()` and `format` from `@farm.js/core/i18n/server`
+  work in pages, layouts, server actions, route handlers and middleware, and a page URL without a
+  locale redirects to the one the visitor's cookie or `Accept-Language` picks, varying on those
+  headers. Client components read the locale the page rendered with: `useLocale()`,
+  `useTranslations()`, and `<Link href="/about">`, which renders `/console/fr/about` on a French page.
+  A link to another locale loads a new document. Farm sets `lang` and `dir` on the `<html>` it
+  renders; a root layout that renders `<html>` sets them itself, for example
+  `<html lang={getLocale()}>`. `hreflang` alternate links are not rendered yet.
 
 A client that loaded an older deployment and fetches a prerendered payload from a newer one does not
 get the deployment-mismatch reload that a server-rendered payload triggers.

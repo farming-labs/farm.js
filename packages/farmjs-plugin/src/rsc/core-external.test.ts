@@ -293,6 +293,7 @@ export const schema = z.string();`;
     { name: "config-middleware", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "nested-layouts", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "base-path", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "i18n", api: undefined, baseURL: "/api", mount: "/api" },
     {
       name: "custom",
       api: {
@@ -557,6 +558,44 @@ export default defineConfig({
 export default function Page() { return <Link href="/about">About link</Link>; }`,
           );
         }
+        if (name === "i18n") {
+          // basePath "/console" with en and fr: pages read the request locale from core's runtime,
+          // whether they answer at their route path or under a [lang] folder.
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute("messages/en.json", JSON.stringify({ greeting: "Hello" }));
+          writeRoute("messages/fr.json", JSON.stringify({ greeting: "Bonjour" }));
+          writeRoute(
+            "about/page.tsx",
+            `import { getLocale, getLocaleSource, t } from "@farm.js/core/i18n/server";
+export default function Page() { return <main>{"Locale " + getLocale() + " from " + getLocaleSource() + ": " + t("greeting")}</main>; }`,
+          );
+          writeRoute(
+            "console/[lang]/legacy/page.tsx",
+            `import { getLocale } from "@farm.js/core/i18n/server";
+export default function Page({ params }) { return <main>{"Legacy " + params.lang + " in " + getLocale()}</main>; }`,
+          );
+          writeRoute(
+            "components/greeting.tsx",
+            `"use client";
+import { useLocale, useTranslations } from "@farm.js/core/i18n/client";
+export function Greeting() { const t = useTranslations(); return <p>{"Client " + useLocale().locale + ": " + t("greeting")}</p>; }`,
+          );
+          writeRoute(
+            "links/page.tsx",
+            `import { Link } from "@farm.js/core/client";
+import { Greeting } from "../components/greeting";
+export default function Page() { return <><Link href="/about">About link</Link><Greeting /></>; }`,
+          );
+          writeRoute(
+            "api/locale/route.ts",
+            `import { getLocale, getLocaleSource } from "@farm.js/core/i18n/server";
+export function GET() { return Response.json({ locale: getLocale(), source: getLocaleSource() }); }`,
+          );
+        }
         for (const packageName of [
           "@farm.js/core",
           "@vitejs/plugin-rsc",
@@ -584,7 +623,7 @@ export default function Page() { return <Link href="/about">About link</Link>; }
           path.join(srcDir, "layout.tsx"),
           `${name === "nested-layouts" ? 'import { Provider } from "./components/provider";' : ""}
 export default function Layout({ children }) {
-  return ${name === "nested-layouts" ? "<section>Root layout marker <Provider>{children}</Provider></section>" : "<html><body>{children}</body></html>"};
+  return ${name === "nested-layouts" ? "<section>Root layout marker <Provider>{children}</Provider></section>" : name === "i18n" ? "<section>{children}</section>" : "<html><body>{children}</body></html>"};
 }`,
         );
         writeFileSync(
@@ -682,6 +721,9 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           esbuild: { jsxDev: false },
           experimental: { serverComponents: true, serverActions: true },
           ...(name === "base-path" ? { basePath: "/console" } : {}),
+          ...(name === "i18n"
+            ? { basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" } }
+            : {}),
           api,
           middleware: name === "config-middleware" ? { matcher: "/", handler() {} } : undefined,
           plugins,
@@ -1003,6 +1045,50 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(await response.text(), pathname).toContain(marker);
           }
           expect((await fetch(origin + "/console/missing")).status).toBe(404);
+        }
+        if (name === "i18n") {
+          const get = (pathname: string, headers: Record<string, string> = {}) =>
+            fetch(origin + pathname, {
+              headers,
+              redirect: "manual",
+              signal: AbortSignal.timeout(10_000),
+            });
+          for (const [pathname, accept, markers] of [
+            ["/console/fr/about", "text/html", ["Locale fr from url: Bonjour", '<html lang="fr"']],
+            ["/console/fr/about.rsc", "*/*", ["Locale fr from url: Bonjour", '"locale":"fr"']],
+            ["/console/about", "text/html", ["Locale en from default: Hello", '<html lang="en"']],
+            ["/console/fr/legacy", "text/html", ["Legacy fr in fr"]],
+            // Client components render and hydrate with the request's locale and catalog.
+            ["/console/fr/links", "text/html", ['href="/console/fr/about"', "Client fr: Bonjour"]],
+          ] as const) {
+            // An unsupported language leaves the default locale (fetch sends "*" otherwise).
+            const response = await get(pathname, { accept, "accept-language": "de" });
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            const body = await response.text();
+            for (const marker of markers) expect(body, `${pathname} ${logs}`).toContain(marker);
+          }
+
+          // A page URL without a locale goes to the visitor's, varying on the signal it used.
+          const detected = await get("/console/about", { "accept-language": "fr" });
+          expect(detected.status, logs).toBe(307);
+          expect(detected.headers.get("location")).toBe("/console/fr/about");
+          expect(detected.headers.get("vary")).toContain("Accept-Language");
+          expect(detected.headers.get("cache-control")).toBe("private, no-store");
+          // Client navigation asks for the payload, and is sent to the localized one.
+          const payload = await get("/console/about.rsc", { "accept-language": "fr" });
+          expect(payload.status, logs).toBe(307);
+          expect(payload.headers.get("location")).toBe("/console/fr/about.rsc");
+          // The default locale's prefix is not canonical.
+          const canonical = await get("/console/en/about");
+          expect(canonical.status, logs).toBe(307);
+          expect(canonical.headers.get("location")).toBe("/console/about");
+
+          // API routes keep their URL and read the locale from the same signals.
+          const api = await get("/api/locale", { "accept-language": "fr" });
+          expect(api.status, logs).toBe(200);
+          expect(await api.json()).toEqual({ locale: "fr", source: "accept-language" });
+          expect(api.headers.get("vary")).toContain("Accept-Language");
+          expect(api.headers.get("set-cookie")).toContain("farm_locale=fr");
         }
         // A custom API prefix is not a server-action URL, even with actions enabled.
         const post = await fetch(`${origin}${mount}/echo`, {
