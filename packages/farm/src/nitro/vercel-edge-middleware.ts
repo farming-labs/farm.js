@@ -49,9 +49,9 @@ function escapeRegExp(value: string): string {
 
 /**
  * The Vercel route that runs the edge middleware for exactly these prerendered pages. No URL may
- * reach a guarded file without its guard, so it matches every URL the static output answers for a
- * page: the path its file is written at (prerendered files are written at the app path, without
- * the basePath), the same path under the basePath, and each with `/`, `/index.html`, or `.html`.
+ * reach a guarded file without its guard, so it matches every URL that could answer for a page:
+ * its public path below the basePath (where the file is written), the same path at the origin
+ * root (where Farm also answers pages), and each with `/`, `/index.html`, or `.html`.
  */
 export function createFarmVercelEdgeMiddlewareRoute(
   pathnames: readonly string[],
