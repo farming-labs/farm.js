@@ -56,10 +56,12 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
 - **Server.** Farm renders the page once, on its normal server pipeline. Farm's compiler wraps
   every `"use client"` export in islx's island component, which writes the `<f-island>` element and
   its props. Server output passed to a client component renders once, inside it. Props take what
-  RSC sends: promises, `ReadableStream`s and async iterables stream in after the page, elements
-  they settle to render with their client components hydrated, a value that refers to itself
-  arrives with the same cycle (through a promise or stream too), and a plain function fails the
-  render with an error that names the component and the prop.
+  RSC sends. Maps and sets can hold elements, and global symbols, errors (without their message),
+  iterators, `Blob`s and `FormData` arrive as they left. Promises, `ReadableStream`s and async
+  iterables stream in after the page, and elements they settle to render with their client
+  components hydrated. A value that refers to itself arrives with the same cycle, through a
+  promise or stream too. A plain function fails the render with an error that names the component
+  and the prop.
 - **Browser.** Farm's client entry hands every `<f-island>` to islx's hydration runtime, which
   imports the island's module when its strategy is due and hydrates it in place. A page whose
   islands all wait loads a 1.7 KB boot script instead of the runtime.
