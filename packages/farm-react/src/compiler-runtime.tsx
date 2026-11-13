@@ -2858,6 +2858,8 @@ export interface CompilerHostElement {
   attributes: readonly { name: string; value: unknown }[];
   styles: readonly { name: string; value: unknown }[];
   children: readonly (CompilerHostElement | unknown)[];
+  /** Ids of the keyed row events this element of a host-block row handles. */
+  events?: readonly number[];
   /** Direct-child structure owned without creating another React fiber. */
   block?: CompilerHostBlock;
 }
@@ -2870,7 +2872,10 @@ const delegatedRowChangePlaceholder: React.EventHandler<React.SyntheticEvent> = 
 
 export interface CompilerKeyedRowEvent {
   name: string;
-  /** Host-element path relative to the keyed row root. */
+  /**
+   * Host-element path relative to the keyed row root. Host-block rows omit it: mounting the row
+   * records each element's events from its descriptor.
+   */
   path?: readonly number[];
   invoke(item: unknown, index: number, event: React.SyntheticEvent): unknown;
 }
@@ -5013,6 +5018,10 @@ interface CompilerHostTreeScope {
 
 const UNSET_HOST_CONDITIONAL_BINDING = Symbol("unset host conditional binding");
 
+// The keyed row events of each mounted host-block row element, wherever it sits in the row: a
+// branch, or after content of varying length. The rows container finds handlers through it.
+const compilerHostElementEvents = /* @__PURE__ */ new WeakMap<Element, readonly number[]>();
+
 function mountCompilerHostTree(
   owner: Pick<ConditionalBlockOwner, "subscribe">,
   element: Element,
@@ -5020,6 +5029,7 @@ function mountCompilerHostTree(
   onFallback: () => void,
 ): CompilerHostTreeScope | null {
   if (!matchesCompilerHostElement(element, descriptor)) return null;
+  if (descriptor.events) compilerHostElementEvents.set(element, descriptor.events);
   if (descriptor.block?.kind === "conditional-ranges") {
     const controller = new CompilerNestedConditionalRanges(
       owner,
@@ -7067,6 +7077,24 @@ interface KeyedRowHostRuntime {
     descriptor: CompilerHostElement,
     requestFallback: () => void,
   ): CompilerHostTreeScope | null;
+  /**
+   * Adds the row events named name that the mounted elements from the event target up to the
+   * row root carry, in a branch or not. Their descriptors list them, so they have no path.
+   */
+  matchEvents(
+    row: Element,
+    target: Node,
+    name: string,
+    events: readonly CompilerKeyedRowEvent[],
+    matches: KeyedRowEventMatch[],
+  ): void;
+}
+
+interface KeyedRowEventMatch {
+  descriptor: CompilerKeyedRowEvent;
+  target: Element;
+  /** Elements below the row root, so handlers run innermost first, as in React. */
+  depth: number;
 }
 
 interface KeyedUpdateRuntime {
@@ -9475,6 +9503,22 @@ function createKeyedRowHostRuntime(): KeyedRowHostRuntime {
   return {
     mount: (element, descriptor, requestFallback) =>
       mountCompilerHostTree(owner, element, descriptor, requestFallback),
+    matchEvents(row, target, name, events, matches) {
+      const elements: Element[] = [];
+      let element = target.nodeType === 1 ? (target as Element) : target.parentElement;
+      while (element) {
+        elements.push(element);
+        element = element === row ? null : element.parentElement;
+      }
+      elements.forEach((element, index) => {
+        for (const id of compilerHostElementEvents.get(element) || []) {
+          const descriptor = events[id];
+          if (descriptor?.name === name && descriptor.path === undefined) {
+            matches.push({ descriptor, target: element, depth: elements.length - 1 - index });
+          }
+        }
+      });
+    },
   };
 }
 
@@ -9493,11 +9537,7 @@ function createKeyedRowsBlockComponentCore(
     // here (onChange under React DOM) are rendered by React from the start.
     state: State = {
       fallback: Boolean(
-        this.props.hostBlocks &&
-        this.props.events?.length &&
-        !(
-          this.props.delegateEvents && this.props.events.every((event) => event.path !== undefined)
-        ),
+        this.props.hostBlocks && this.props.events?.length && !this.props.delegateEvents,
       ),
     };
     private root: Element | null = null;
@@ -9644,7 +9684,8 @@ function createKeyedRowsBlockComponentCore(
       return Boolean(
         props.delegateEvents &&
         props.events?.length &&
-        props.events.every((event) => event.path !== undefined),
+        // Host-block rows find an event without a path through the element that mounted it.
+        (props.hostBlocks || props.events.every((event) => event.path !== undefined)),
       );
     }
 
@@ -9697,22 +9738,23 @@ function createKeyedRowsBlockComponentCore(
       if (!instance || !eventTarget) return;
       const capture = name.endsWith("Capture");
       const descriptors = this.currentProps.events || [];
-      const matches: { descriptor: CompilerKeyedRowEvent; target: Element }[] = [];
+      const matches: KeyedRowEventMatch[] = [];
       // Snapshot all matching targets before invoking a handler: a handler can
       // replace the DOM or update the descriptors for the next event.
       for (let index = 0, length = descriptors.length; index < length; index += 1) {
         if (!(index in descriptors)) continue;
         const descriptor = descriptors[index];
         if (descriptor.name !== name || descriptor.path === undefined) continue;
-        const target = findCompilerHostTarget(instance.element, descriptor.path || []);
+        const target = findCompilerHostTarget(instance.element, descriptor.path);
         if (target && (target === eventTarget || target.contains(eventTarget))) {
-          matches.push({ descriptor, target });
+          matches.push({ descriptor, target, depth: descriptor.path.length });
         }
       }
+      if (this.currentProps.hostBlocks) {
+        options.hostBlocks?.matchEvents(instance.element, eventTarget, name, descriptors, matches);
+      }
       matches.sort((left, right) =>
-        capture
-          ? (left.descriptor.path?.length || 0) - (right.descriptor.path?.length || 0)
-          : (right.descriptor.path?.length || 0) - (left.descriptor.path?.length || 0),
+        capture ? left.depth - right.depth : right.depth - left.depth,
       );
 
       for (const match of matches) {
@@ -12939,11 +12981,12 @@ function compiledRootUpdatesWithoutReact(displayName: string, props: unknown): b
     events?: ReadonlyArray<{ path?: unknown }>;
     delegateEvents?: boolean;
     delegateEventsWithoutReact?: boolean;
+    hostBlocks?: boolean;
   };
   const delegated = Boolean(
     (rows.delegateEvents || rows.delegateEventsWithoutReact) &&
     rows.events?.length &&
-    rows.events.every((event) => event.path !== undefined),
+    (rows.hostBlocks || rows.events.every((event) => event.path !== undefined)),
   );
   return !rows.conditionals?.length && (!rows.events?.length || delegated);
 }

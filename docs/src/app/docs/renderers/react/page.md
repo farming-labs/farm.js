@@ -2081,33 +2081,36 @@ expressions, multiple known locations, static siblings, nested lowercase host co
 text, attribute, or inline-style expressions. It applies to automatic keyed `.map(...)` syntax and
 inline host rows rendered by `List`.
 
-The row may also hold inline synchronous events on its static elements, such as a toggle button
-beside the conditional:
+The row may also hold inline synchronous events, on its static elements and inside its branches,
+such as a toggle button beside the conditional and an undo action inside it:
 
 ```tsx
 <ul>
   {todos.map((todo) => (
     <li key={todo.id}>
       <button onClick={() => toggle(todo.id)}>Toggle</button>
-      {todo.done ? <s>{todo.title}</s> : <span>{todo.title}</span>}
+      {todo.done ? <s onClick={() => toggle(todo.id)}>{todo.title}</s> : <span>{todo.title}</span>}
     </li>
   ))}
 </ul>
 ```
 
 The list container receives each event and runs the handler of every row element that contains the
-target, innermost first, with the row's current item and index and with `currentTarget` set to that
-element; `stopPropagation()` stops the remaining row handlers. The container finds the element by its
-position among the row's static elements, so the element must not follow a conditional or a nested
-list at any level of its path (those change how many elements come before it). Events the
-container cannot receive the way React does keep the row React-owned: events that do not bubble,
-such as `onMouseEnter`; a handler on an element that follows a conditional or a list; and a handler
-inside a branch. `onChange`, which React derives from each row's own Fiber, runs through the
-container only on a [root without React DOM](#roots-without-react-dom): under React DOM the block
-lets React render the rows, and with `compiledRoot: false` they keep the React-owned list.
+target, innermost first (outermost first for capture handlers), with the row's current item and
+index and with `currentTarget` set to that element; `stopPropagation()` stops the remaining row
+handlers. Each element's descriptor lists its events, and the runtime records them when it mounts
+the element: when it adopts the first render, when a state change mounts a branch, and when a row
+is added. An element with events may therefore sit in a branch, in a nested branch, or after a
+conditional or a nested list. Events the container cannot receive the way React does keep the row
+React-owned: events that do not bubble, such as `onMouseEnter`, and handlers in the rows of a
+nested list. `onChange`, which React derives from each row's own Fiber, runs through the container
+only on a [root without React DOM](#roots-without-react-dom) and only outside branches: under React
+DOM the block lets React render the rows, with `compiledRoot: false` they keep the React-owned
+list, and an `onChange` inside a branch keeps the React-owned list, which restores a controlled
+field the way React does.
 
-Hooks, custom components, events inside a compiler-owned branch, refs, SVG, fragments, JSX spreads,
-dangerous HTML, controlled inputs inside a conditional, and any unproven shape stay on React.
+Hooks, custom components, refs, SVG, fragments, JSX spreads, dangerous HTML, `onChange` inside a
+conditional, and any unproven shape stay on React.
 Interactive rows outside that event contract keep their React-owned conditional-slot behavior: Farm
 compares row snapshots and asks React to refresh a changed slot, while React retains event, Fiber,
 hydration, and structural-list ownership. Duplicate runtime keys or an invalid adopted shape also
@@ -2373,10 +2376,12 @@ The optimized host-row contract is deliberately narrow:
   mounts, replaces, or removes only those host blocks within each keyed row instance.
 - A dedicated non-interactive row may recursively contain keyed map/`List` ranges in known host
   containers. Each stable parent key receives an isolated child key table and LIS pass.
-- Inline synchronous row events use the hybrid React-owned row path. Branch or inner-row events,
-  non-inline or async handlers, file inputs, dynamic form control types or options, custom
-  components, fragments, refs, SVG, attribute spreads, dangerous HTML, and dynamic text mixed
-  beside nested elements stay React-owned.
+- Inline synchronous row events run through the rows container or the hybrid React-owned row
+  path; rows whose branches compiler-owned host blocks render also run the events inside those
+  branches through the container. Inner-row events, `onChange` inside a branch, non-inline or
+  async handlers, file inputs, dynamic form control types or options, custom components,
+  fragments, refs, SVG, attribute spreads, dangerous HTML, and dynamic text mixed beside nested
+  elements stay React-owned.
 - Unsupported or mutating collection methods, spread children, Hooks in callbacks, and other
   unproven shapes fall back to normal React.
 
