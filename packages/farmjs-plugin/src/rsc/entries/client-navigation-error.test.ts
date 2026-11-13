@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { localizeFarmHref } from "@farm.js/core/i18n";
+import { resolveFarmI18nConfig } from "@farm.js/core/internal/production-runtime";
 import { generateClientEntry } from "./client.js";
 import type { EntryContext } from "../types.js";
 
@@ -51,6 +53,55 @@ describe("RSC client navigation to a server component that fails", () => {
     );
     expect(navigate).toHaveBeenCalledWith("/next/target?a=1;b", "replace");
     expect(location.reload).not.toHaveBeenCalled();
+  });
+
+  it("follows a redirect() to its target in the page's locale with i18n", () => {
+    const i18n = resolveFarmI18nConfig(
+      { locales: ["en", "fr"], defaultLocale: "en" },
+      { basePath: "/console" },
+    );
+    const entry = generateClientEntry({ ...context, basePath: "/console", i18n });
+    const helper = entry.slice(
+      entry.indexOf("function farmLocalizeRedirect(url) {"),
+      entry.indexOf("\n}\n", entry.indexOf("function farmLocalizeRedirect(url) {")) + 3,
+    );
+    const start = entry.indexOf("class FarmNavigationErrorBoundary extends React.Component {");
+    const navigate = vi.fn();
+    const Boundary = new Function(
+      "React",
+      "farmNavigateRef",
+      "location",
+      "window",
+      "localizeFarmHref",
+      `${helper}${entry.slice(start, entry.indexOf("async function main() {", start))}
+return FarmNavigationErrorBoundary;`,
+    )(
+      { Component: class {} },
+      { current: navigate },
+      { reload: vi.fn() },
+      // The snapshot a French page under basePath "/console" hydrated with.
+      {
+        __FARM_I18N__: {
+          locale: "fr",
+          locales: ["en", "fr"],
+          defaultLocale: "en",
+          routing: i18n.routing,
+          basePath: "/console",
+        },
+      },
+      localizeFarmHref,
+    );
+    const boundary = new Boundary({ payload: {}, navigated: true });
+    boundary.componentDidCatch(
+      Object.assign(new Error("redirect"), { digest: "FARM_REDIRECT;307;/about?a=1" }),
+    );
+    boundary.componentDidCatch(
+      Object.assign(new Error("redirect"), { digest: "FARM_REDIRECT;307;https://other.test/" }),
+    );
+    expect(navigate.mock.calls).toEqual([
+      ["/console/fr/about?a=1", "replace"],
+      ["https://other.test/", "replace"],
+    ]);
   });
 
   it("loads any other failure as a document, so the server answers with its status", () => {

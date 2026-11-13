@@ -465,7 +465,8 @@ Both setups follow the same route contract:
   below it as in other Farm apps: with `basePath: "/console"`, `app/about/page.tsx` serves
   `/console/about` and its payload `/console/about.rsc`, `<Link href="/about">` renders
   `/console/about`, and a static page prerenders at its URL below the base path. As in other Farm
-  apps, the page also answers at `/about`, and `redirect()` sends its target as written. With i18n
+  apps, the page also answers at `/about`, and `redirect()` sends its target as written (with i18n,
+  in the request's locale below the base path). With i18n
   the locale prefix is stripped too, so `/console/fr/about` matches `app/about/page.tsx`, which
   reads its locale with `getLocale()` (see Internationalization below).
   Pages nested in folders that spell out the prefix, as RSC apps had to write them before
@@ -481,7 +482,8 @@ Both setups follow the same route contract:
   locale redirects to the one the visitor's cookie or `Accept-Language` picks, varying on those
   headers. Client components read the locale the page rendered with: `useLocale()`,
   `useTranslations()`, and `<Link href="/about">`, which renders `/console/fr/about` on a French page.
-  A link to another locale loads a new document. Farm sets `lang` and `dir` on the `<html>` it
+  A link to another locale loads a new document. `redirect("/about")` from a French page, server
+  action or form sends `/console/fr/about`, as other Farm apps localize it. Farm sets `lang` and `dir` on the `<html>` it
   renders; a root layout that renders `<html>` sets them itself, for example
   `<html lang={getLocale()}>`. `hreflang` alternate links are not rendered yet.
 

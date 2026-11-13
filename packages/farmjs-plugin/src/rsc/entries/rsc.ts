@@ -52,7 +52,11 @@ const farmI18nRuntime = createFarmI18nRuntime(farmRouteI18n, ${JSON.stringify(ct
   createFarmI18nRuntime,
   getFarmI18nClientSnapshot,
 } from '@farm.js/core/i18n/server';
-import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from '@farm.js/core/internal/production-runtime';
+import {
+  createFarmLocaleCookie,
+  getFarmLocaleVaryHeaders,
+  localizeFarmHref,
+} from '@farm.js/core/internal/production-runtime';
 ${catalogs}
 // createTranslator(locale) and runWithLocale() outside a request.
 _setDefaultFarmI18nRuntime(farmI18nRuntime);
@@ -83,6 +87,18 @@ async function runFarmLocalizedRequest(request, payloadRequested, render) {
     }
     return applyFarmI18nResponse(await render(), resolution);
   }, { redirect });
+}
+
+/**
+ * redirect('/about') from a French page sends /fr/about, below the basePath, as core's servers
+ * localize a redirect: pages, server actions and form submissions alike. A URL that is not
+ * app-relative stays as written.
+ */
+function localizeFarmRedirectUrl(url) {
+  const snapshot = getFarmI18nClientSnapshot();
+  return snapshot && url.startsWith('/') && !url.startsWith('//')
+    ? localizeFarmHref(url, snapshot.locale, snapshot)
+    : url;
 }
 
 function applyFarmI18nResponse(response, resolution) {
@@ -1175,7 +1191,7 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
         // sanitizeServerActionError untouched.
         const actionRedirect = getFarmRedirectError(e);
         if (actionRedirect) {
-          returnValue = { ok: false, redirect: { url: actionRedirect.url, status: actionRedirect.status } };
+          returnValue = { ok: false, redirect: { url: ${i18n ? "localizeFarmRedirectUrl(actionRedirect.url)" : "actionRedirect.url"}, status: actionRedirect.status } };
           debug('Server action redirected:', actionId, actionRedirect.url);
         } else {
           const actionError = sanitizeServerActionError(e);
@@ -1222,7 +1238,7 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
           debug('Form action redirected:', formRedirect.url);
           return new Response(null, {
             status: 303,
-            headers: { location: formRedirect.url, 'Cache-Control': 'no-store' },
+            headers: { location: ${i18n ? "localizeFarmRedirectUrl(formRedirect.url)" : "formRedirect.url"}, 'Cache-Control': 'no-store' },
           });
         }
         const actionError = sanitizeServerActionError(e);
@@ -1468,7 +1484,7 @@ ${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
     `
         : ""
     }const redirect = getFarmRedirectError(err);
-    if (redirect) return new Response(null, { status: redirect.status, headers: { location: redirect.url, 'cache-control': 'no-store' } });
+    if (redirect) return new Response(null, { status: redirect.status, headers: { location: ${i18n ? "localizeFarmRedirectUrl(redirect.url)" : "redirect.url"}, 'cache-control': 'no-store' } });
     if (isFarmNotFoundError(err)) return new Response('Not Found', { status: 404, headers: { 'cache-control': 'no-store' } });
     console.error('[RSC] Handler error:', err);
     if (request.method === 'POST') {

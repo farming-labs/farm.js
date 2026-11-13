@@ -90,7 +90,7 @@ setFarmBasePath(${JSON.stringify(ctx.basePath)});
 
   const i18n = ctx.i18n?.enabled === true;
   if (i18n) {
-    imports += `import { resolveFarmLocalePath } from '@farm.js/core/i18n';
+    imports += `import { localizeFarmHref, resolveFarmLocalePath } from '@farm.js/core/i18n';
 import { _setFarmI18nClientSnapshot } from '@farm.js/core/i18n/client';
 
 // A link to another locale loads as a document, as Farm's <Link> does in other apps, so the page
@@ -100,6 +100,15 @@ function farmIsLocaleChange(url) {
   if (!snapshot || snapshot.routing === 'none') return false;
   const target = resolveFarmLocalePath(url.pathname, snapshot);
   return (target.locale || snapshot.defaultLocale) !== snapshot.locale;
+}
+
+// A redirect() thrown while a navigation renders goes to its target in the page's locale, as the
+// server localizes the redirects it answers.
+function farmLocalizeRedirect(url) {
+  const snapshot = window.__FARM_I18N__;
+  return snapshot && url.startsWith('/') && !url.startsWith('//')
+    ? localizeFarmHref(url, snapshot.locale, snapshot)
+    : url;
 }
 `;
   }
@@ -302,7 +311,7 @@ class FarmNavigationErrorBoundary extends React.Component {
   componentDidCatch(error) {
     const digest = error && typeof error.digest === 'string' ? error.digest : '';
     if (digest.startsWith('FARM_REDIRECT;')) {
-      farmNavigateRef.current?.(digest.split(';').slice(2).join(';'), 'replace');
+      farmNavigateRef.current?.(${i18n ? "farmLocalizeRedirect(digest.split(';').slice(2).join(';'))" : "digest.split(';').slice(2).join(';')"}, 'replace');
       return;
     }
     location.reload();

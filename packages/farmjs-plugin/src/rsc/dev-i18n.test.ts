@@ -47,6 +47,11 @@ describe("RSC i18n under farm dev", () => {
       `import { getLocale, getLocaleSource, t } from "@farm.js/core/i18n/server";
 export default function Page() { return <main>{"Locale " + getLocale() + " from " + getLocaleSource() + ": " + t("greeting")}</main>; }`,
     );
+    write(
+      "src/go/page.tsx",
+      `import { redirect } from "@farm.js/core/navigation";
+export default async function Page() { redirect("/about"); }`,
+    );
     for (const packageName of [
       "@farm.js/core",
       "@vitejs/plugin-rsc",
@@ -136,5 +141,11 @@ export default function Page() { return <main>{"Locale " + getLocale() + " from 
     expect(detected.status).toBe(307);
     expect(detected.headers.get("location")).toBe("/console/fr/about");
     expect(detected.headers.get("vary")).toContain("Accept-Language");
+  }, 60_000);
+
+  it("sends redirect() to the target in the request's locale", async () => {
+    const redirected = await get("/console/fr/go");
+    expect(redirected.status).toBe(307);
+    expect(redirected.headers.get("location")).toBe("/console/fr/about");
   }, 60_000);
 });

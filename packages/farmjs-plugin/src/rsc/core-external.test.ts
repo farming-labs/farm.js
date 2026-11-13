@@ -591,6 +591,22 @@ import { Greeting } from "../components/greeting";
 export default function Page() { return <><Link href="/about">About link</Link><Greeting /></>; }`,
           );
           writeRoute(
+            "go/page.tsx",
+            `import { redirect } from "@farm.js/core/navigation";
+export default async function Page() { redirect("/about"); }`,
+          );
+          writeRoute(
+            "form/actions.ts",
+            `"use server";
+import { redirect } from "@farm.js/core/navigation";
+export async function goAbout() { redirect("/about"); }`,
+          );
+          writeRoute(
+            "form/page.tsx",
+            `import { goAbout } from "./actions";
+export default function Page() { return <form action={goAbout}><button type="submit">Go</button></form>; }`,
+          );
+          writeRoute(
             "api/locale/route.ts",
             `import { getLocale, getLocaleSource } from "@farm.js/core/i18n/server";
 export function GET() { return Response.json({ locale: getLocale(), source: getLocaleSource() }); }`,
@@ -1089,6 +1105,42 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           expect(await api.json()).toEqual({ locale: "fr", source: "accept-language" });
           expect(api.headers.get("vary")).toContain("Accept-Language");
           expect(api.headers.get("set-cookie")).toContain("farm_locale=fr");
+
+          // redirect("/about") goes to the page in the request's locale, below the basePath.
+          for (const [pathname, location] of [
+            ["/console/fr/go", "/console/fr/about"],
+            ["/console/go", "/console/about"],
+          ]) {
+            const redirected = await get(pathname, { "accept-language": "de" });
+            expect(redirected.status, `${pathname} ${logs}`).toBe(307);
+            expect(redirected.headers.get("location"), pathname).toBe(location);
+          }
+          // So does a server action's, submitted without JavaScript or called by the router.
+          const form = await (await get("/console/fr/form", { "accept-language": "de" })).text();
+          const actionField = /name="(\$ACTION_ID_[^"]+)"/.exec(form)?.[1];
+          expect(actionField, form).toBeDefined();
+          const formData = new FormData();
+          formData.set(actionField!, "");
+          const submitted = await fetch(origin + "/console/fr/form", {
+            method: "POST",
+            headers: { origin },
+            body: formData,
+            redirect: "manual",
+          });
+          expect(submitted.status, logs).toBe(303);
+          expect(submitted.headers.get("location")).toBe("/console/fr/about");
+          const called = await fetch(origin + "/console/fr/form", {
+            method: "POST",
+            headers: {
+              origin,
+              accept: "text/x-component",
+              "content-type": "text/plain; charset=utf-8",
+              "x-farm-action-id": actionField!.slice("$ACTION_ID_".length),
+            },
+            body: "[]",
+          });
+          expect(called.status, logs).toBe(200);
+          expect(await called.text()).toContain('"redirect":{"url":"/console/fr/about"');
         }
         // A custom API prefix is not a server-action URL, even with actions enabled.
         const post = await fetch(`${origin}${mount}/echo`, {
