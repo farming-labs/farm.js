@@ -338,12 +338,28 @@ export interface NotFoundConfig {
   component?: string;
 }
 
+/**
+ * Farm's first-class deploy targets and the Nitro preset each builds with. This is the closed
+ * set `deploy.target` accepts; `deploy.preset` passes any other Nitro preset through to Nitro.
+ */
+const FARM_DEPLOY_TARGET_PRESETS = {
+  vercel: "vercel",
+  cloudflare: "cloudflare-pages",
+  netlify: "netlify",
+  node: "node-server",
+} as const;
+
+/**
+ * Any string type-checks, so a target read from the environment works; config resolution
+ * rejects a name outside the first-class targets.
+ */
 export type FarmDeployTarget = "vercel" | "cloudflare" | "netlify" | "node" | string;
 
 export interface FarmDeployConfig {
   /**
-   * Deployment platform. When present, Farm picks the matching Nitro preset and
-   * output directory unless explicitly overridden.
+   * Deployment platform: `"vercel"`, `"cloudflare"`, `"netlify"`, or `"node"`. When present,
+   * Farm picks the matching Nitro preset and output directory unless explicitly overridden.
+   * Config resolution rejects any other name; use `preset` for other Nitro presets.
    */
   target?: FarmDeployTarget;
   /** Nitro preset override. Usually inferred from target. */
@@ -592,18 +608,10 @@ export function normalizeDeployTarget(target?: FarmDeployTarget): FarmDeployTarg
 export function getPresetForDeployTarget(
   target?: FarmDeployTarget,
 ): BaseFarmConfig["preset"] | undefined {
-  switch (normalizeDeployTarget(target)) {
-    case "vercel":
-      return "vercel";
-    case "cloudflare":
-      return "cloudflare-pages";
-    case "netlify":
-      return "netlify";
-    case "node":
-      return "node-server";
-    default:
-      return undefined;
-  }
+  const normalized = normalizeDeployTarget(target);
+  return normalized && Object.prototype.hasOwnProperty.call(FARM_DEPLOY_TARGET_PRESETS, normalized)
+    ? FARM_DEPLOY_TARGET_PRESETS[normalized as keyof typeof FARM_DEPLOY_TARGET_PRESETS]
+    : undefined;
 }
 
 export function getDeployTargetForPreset(preset?: string): FarmDeployTarget | undefined {
@@ -674,6 +682,22 @@ function assertFarmDeployNameSupported(kind: "preset" | "target", name: string |
   );
 }
 
+/**
+ * `deploy.target` is a closed set: an unknown name used to fall back to the `node-server`
+ * preset and build a Node server instead of the platform that was asked for.
+ */
+function assertFarmDeployTargetSupported(target: FarmDeployTarget | undefined): void {
+  if (!target || getPresetForDeployTarget(target)) return;
+  assertFarmDeployNameSupported("target", target);
+  const targets = Object.keys(FARM_DEPLOY_TARGET_PRESETS)
+    .map((name) => `"${name}"`)
+    .join(", ");
+  throw new Error(
+    `Unknown deploy target "${String(target)}". Farm's deploy targets are ${targets}. ` +
+      `To build with another Nitro preset, set deploy.preset instead.`,
+  );
+}
+
 export function resolveDeployConfig(
   config: Pick<FarmUserConfig, "deploy" | "preset" | "distDir">,
   overrides: {
@@ -685,6 +709,8 @@ export function resolveDeployConfig(
   } = {},
 ): ResolvedFarmDeployConfig {
   const deploy = config.deploy || {};
+  assertFarmDeployTargetSupported(deploy.target);
+  assertFarmDeployTargetSupported(overrides.target);
   const distDir = config.distDir || ".farm";
   // An explicit preset override replaces the deployment plan, so the
   // configured platform target must not keep steering the output. Otherwise
@@ -735,7 +761,6 @@ export function resolveDeployConfig(
     "node-server";
   const resolvedTarget = target || getDeployTargetForPreset(preset);
   assertFarmDeployNameSupported("preset", preset);
-  assertFarmDeployNameSupported("target", resolvedTarget);
   if (detectedTarget && resolvedTarget !== detectedTarget) {
     const mismatchKey = `mismatch:${resolvedTarget}:${detectedTarget}`;
     if (!warnedPlatformMismatches.has(mismatchKey)) {
