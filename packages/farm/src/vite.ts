@@ -2423,6 +2423,40 @@ export function farmPlugin(
               basePath: farmConfig.basePath,
             })
         : null;
+      // Farm Infra analytics reports a docs page the renderer publishes by its path, as in
+      // production (see route-label.ts). Only when analytics runs, the pages are listed on the
+      // first docs request and again after a file is added or removed.
+      const farmDocsListsPages = Boolean(
+        farmDocsDevRuntime &&
+        pm?.getPlugins().some((plugin) => plugin.name === "farm:infra-analytics"),
+      );
+      let farmDocsPagePaths: Promise<ReadonlySet<string> | undefined> | undefined;
+      const getFarmDocsPagePaths = () => {
+        if (!farmDocsDevRuntime || !farmDocsListsPages) return undefined;
+        farmDocsPagePaths ??= farmDocsDevRuntime
+          .listFarmDocsPagePaths(farmConfig.docs, {
+            root: farmConfig.root,
+            srcDir: farmConfig.srcDir,
+            adapter: farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs),
+          })
+          .then(
+            (pages) => new Set(pages),
+            (error) => {
+              logger.warn(
+                `Farm Infra analytics reports docs pages by the docs route, not each page's path: listing them failed (${error instanceof Error ? error.message : String(error)}).`,
+              );
+              return undefined;
+            },
+          );
+        return farmDocsPagePaths;
+      };
+      if (farmDocsListsPages) {
+        for (const event of ["add", "unlink"] as const) {
+          server.watcher.on(event, () => {
+            farmDocsPagePaths = undefined;
+          });
+        }
+      }
       const wrapFarmDocsResponseWithLayouts = async (
         request: Request,
         response: Response,
@@ -3273,6 +3307,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     {
                       path: farmConfig.docs?.entry || "/docs",
                       roots: farmConfig.docs?.roots?.map((root) => root.entry),
+                      pages: await getFarmDocsPagePaths(),
                     },
                   ),
                 },

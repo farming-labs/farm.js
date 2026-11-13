@@ -2921,7 +2921,7 @@ export default {
     }
   }, 120_000);
 
-  it("reports built-in endpoints, Markdown mirrors, and docs pages by a route template", async () => {
+  it("reports built-in endpoints and Markdown mirrors by a route template, and docs pages by their path", async () => {
     const root = await createProductionFixture();
     const received: string[] = [];
     const receiver = createHttpServer((request, response) => {
@@ -3007,6 +3007,8 @@ export default {
           expect(await status("/about.md")).toBe(200);
           expect(await status("/.well-known/farmjs.json")).toBe(200);
           expect(await status("/docs/routing")).toBe(200);
+          expect(await status("/docs/routing.md")).toBe(200);
+          expect(await status("/docs/private-missing")).toBe(404);
           expect(await status("/blog/private-post?secret=private-query")).toBe(200);
           expect(await status("/private-missing")).toBe(404);
           await vi.waitFor(
@@ -3020,7 +3022,9 @@ export default {
                   "GET /blog/[slug].md 200",
                   "GET /about.md 200",
                   "GET /.well-known/farmjs.json 200",
-                  "GET /docs/[...slug] 200",
+                  "GET /docs/routing 200",
+                  "GET /docs/routing.md 200",
+                  "GET /docs/[...slug] 404",
                   "GET /blog/[slug] 200",
                   "GET /[unmatched] 404",
                 ]),

@@ -88,8 +88,9 @@ Removing `FARMJS_API_KEY` also turns it off.
 
 ## What is sent
 
-- For each request: a random ID, the matched route **template** (such as `/users/[id]`), the
-  method, the response status and the time until Farm returned the response.
+- For each request: a random ID, the matched route **template** (such as `/users/[id]`), or a
+  docs page's own path, the method, the response status and the time until Farm returned the
+  response.
 - For each registered MCP tool call: the tool name, whether it succeeded, and its duration, linked
   to its request.
 - A self-reported agent category when the user-agent declares one of OpenAI's or Anthropic's
@@ -102,18 +103,24 @@ user-agents, request or response bodies, tool arguments or results, or error mes
 
 ### What `route` contains
 
-`route` is always a template, never the requested path:
+`route` is a template, never the requested path. The one exception is a docs page: its path is
+part of your docs, not something a visitor typed, so it's reported as itself:
 
 | Request                                                      | `route`                                                 |
 | ------------------------------------------------------------ | ------------------------------------------------------- |
 | A page, API, integration, or plugin endpoint route           | Its pattern: `/users/[id]`, `/api/stats`                |
 | A Markdown mirror (`/blog/hello.md`)                         | The page's pattern plus `.md`: `/blog/[slug].md`        |
-| A docs page (`/docs/routing`)                                | The docs route: `/docs`, `/docs/[...slug]`              |
+| A docs page (`/docs/routing`) or its Markdown                | The page's path: `/docs/routing`, `/docs/routing.md`    |
+| Any other path below the docs (`/docs/missing`)              | The docs route: `/docs/[...slug]`                       |
 | The docs API (`/api/docs?query=...`)                         | `/api/docs`, or `/api/docs/[...path]` below it          |
 | An MCP server Farm or the docs engine serves                 | Its endpoint: `/mcp`, plus `/mcp/server-card`           |
 | `llms.txt`, `sitemap.xml`, `robots.txt`, `.well-known` files | The fixed path: `/llms.txt`, `/.well-known/farmjs.json` |
 | The OpenAPI spec or reference, the image optimizer           | The configured path: `/openapi.json`, `/_farm/image`    |
 | Anything nothing answered (a 404, or a 405 with no route)    | `/[unmatched]`                                          |
+
+Farm lists your docs pages when it builds (in `farm dev`, on the first docs request and again
+after a file is added or removed). A docs adapter that doesn't list its pages, or a page whose path
+has characters other than letters, digits, `-`, `_`, `.` and `/`, stays on `/docs/[...slug]`.
 
 A deeper path the docs engine serves outside its pages keeps only its leading segments, such as
 `/.well-known/mcp/[...path]`. Static assets and the app's own metadata files (`robots.ts`,

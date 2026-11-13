@@ -85,6 +85,27 @@ describe("route labels", () => {
     expect(resolveFarmDocsRouteLabel("/routing", { path: "/" })).toBe("/[...slug]");
   });
 
+  it("names a page the docs renderer publishes by its path, and nothing else", () => {
+    const listed = {
+      ...docs,
+      pages: new Set(["/docs", "/docs/routing", "/docs/guides/cron", "/docs/caf\u00e9"]),
+    };
+    expect(resolveFarmDocsRouteLabel("/docs/routing", listed)).toBe("/docs/routing");
+    expect(resolveFarmDocsRouteLabel("/docs/routing/", listed)).toBe("/docs/routing");
+    expect(resolveFarmDocsRouteLabel("/docs/routing.md", listed)).toBe("/docs/routing.md");
+    expect(resolveFarmDocsRouteLabel("/docs/guides/cron", listed)).toBe("/docs/guides/cron");
+    expect(resolveFarmDocsRouteLabel("/docs", listed)).toBe("/docs");
+    // A path no page has, a deeper or differently cased one, keeps the catch-all.
+    expect(resolveFarmDocsRouteLabel("/docs/private-missing", listed)).toBe("/docs/[...slug]");
+    expect(resolveFarmDocsRouteLabel("/docs/routing/private", listed)).toBe("/docs/[...slug]");
+    expect(resolveFarmDocsRouteLabel("/docs/Routing", listed)).toBe("/docs/[...slug]");
+    expect(resolveFarmDocsRouteLabel("/docs/private.md", listed)).toBe("/docs/[...slug].md");
+    // A page whose path Farm Infra would refuse as a route keeps it too.
+    expect(resolveFarmDocsRouteLabel("/docs/caf\u00e9", listed)).toBe("/docs/[...slug]");
+    expect(resolveFarmDocsRouteLabel("/api/docs/routing", listed)).toBe("/api/docs/[...path]");
+    expect(resolveFarmDocsEngineRouteLabel("/docs/routing", listed)).toBe("/docs/routing");
+  });
+
   it("names a page of any docs root by that root's routes", () => {
     const roots = { path: "/docs", roots: ["/guides", "/guides/docs"] };
     expect(resolveFarmDocsRouteLabel("/docs/routing", roots)).toBe("/docs/[...slug]");
