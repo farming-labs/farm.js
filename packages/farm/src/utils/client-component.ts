@@ -373,14 +373,45 @@ function skipRegularExpression(content: string, startIndex: number): number | nu
   return null;
 }
 
-function tokenizeModuleSource(content: string): ModuleSourceToken[] {
+const tokenizedModules = new Map<string, readonly ModuleSourceToken[]>();
+const TOKENIZED_MODULE_CACHE_SIZE = 32;
+
+/** The module's tokens. Several helpers inspect the same file in a row, so recent results are kept. */
+function tokenizeModuleSource(content: string): readonly ModuleSourceToken[] {
+  const cached = tokenizedModules.get(content);
+  if (cached) return cached;
+  const tokens = scanModuleSourceTokens(content);
+  if (tokenizedModules.size >= TOKENIZED_MODULE_CACHE_SIZE) {
+    tokenizedModules.delete(tokenizedModules.keys().next().value!);
+  }
+  tokenizedModules.set(content, tokens);
+  return tokens;
+}
+
+/** `/\s/`, without a regular expression per ASCII character. */
+function isWhitespaceCode(code: number): boolean {
+  if (code < 128) return code === 32 || (code >= 9 && code <= 13);
+  return /\s/.test(String.fromCharCode(code));
+}
+
+/** `[A-Za-z_$]`. */
+function isIdentifierStartCode(code: number): boolean {
+  return (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || code === 95 || code === 36;
+}
+
+/** `[\w$]`. */
+function isIdentifierPartCode(code: number): boolean {
+  return isIdentifierStartCode(code) || (code >= 48 && code <= 57);
+}
+
+function scanModuleSourceTokens(content: string): ModuleSourceToken[] {
   const tokens: ModuleSourceToken[] = [];
   let index = 0;
   let line = 1;
 
   while (index < content.length) {
     const character = content[index];
-    if (/\s/.test(character)) {
+    if (isWhitespaceCode(content.charCodeAt(index))) {
       if (character === "\n") line++;
       index++;
       continue;
@@ -455,9 +486,9 @@ function tokenizeModuleSource(content: string): ModuleSourceToken[] {
       continue;
     }
 
-    if (/[A-Za-z_$]/.test(character)) {
+    if (isIdentifierStartCode(content.charCodeAt(index))) {
       const start = index++;
-      while (index < content.length && /[\w$]/.test(content[index])) index++;
+      while (index < content.length && isIdentifierPartCode(content.charCodeAt(index))) index++;
       tokens.push({ kind: "identifier", value: content.slice(start, index), line });
       continue;
     }
@@ -469,7 +500,7 @@ function tokenizeModuleSource(content: string): ModuleSourceToken[] {
   return tokens;
 }
 
-function isIslandExportStart(tokens: ModuleSourceToken[], index: number): boolean {
+function isIslandExportStart(tokens: readonly ModuleSourceToken[], index: number): boolean {
   const token = tokens[index];
   const previous = tokens[index - 1];
   const startsStatement =
@@ -565,7 +596,7 @@ export function hasAsyncDefaultExport(content: string | null): boolean {
   return false;
 }
 
-function isAsyncLocalDeclaration(tokens: ModuleSourceToken[], name: string): boolean {
+function isAsyncLocalDeclaration(tokens: readonly ModuleSourceToken[], name: string): boolean {
   for (let index = 0; index < tokens.length - 2; index++) {
     if (
       tokens[index].value === "async" &&
@@ -1277,7 +1308,7 @@ function countStaticJsxUses(content: string | null, localBindings: string[]): nu
 }
 
 function findMatchingToken(
-  tokens: ModuleSourceToken[],
+  tokens: readonly ModuleSourceToken[],
   openingIndex: number,
   opening: string,
   closing: string,
@@ -1293,7 +1324,7 @@ function findMatchingToken(
 }
 
 function containsClientJsx(
-  tokens: ModuleSourceToken[],
+  tokens: readonly ModuleSourceToken[],
   start: number,
   end: number,
   clientBindings: Set<string>,
@@ -1304,7 +1335,7 @@ function containsClientJsx(
   return false;
 }
 
-function findStatementEnd(tokens: ModuleSourceToken[], start: number): number {
+function findStatementEnd(tokens: readonly ModuleSourceToken[], start: number): number {
   let parentheses = 0;
   let brackets = 0;
   let braces = 0;
@@ -1341,7 +1372,7 @@ function findStatementEnd(tokens: ModuleSourceToken[], start: number): number {
 }
 
 function getClientRenderingHelpers(
-  tokens: ModuleSourceToken[],
+  tokens: readonly ModuleSourceToken[],
   clientBindings: Set<string>,
 ): Set<string> {
   const helperBodies = new Map<string, [start: number, end: number]>();
@@ -2017,7 +2048,7 @@ function getImportSpecifiers(
 }
 
 function isTypeOnlyNamedClause(
-  tokens: ModuleSourceToken[],
+  tokens: readonly ModuleSourceToken[],
   startIndex: number,
   endIndex: number,
 ): boolean {

@@ -1450,11 +1450,13 @@ export function rewriteEarlySsrRelativeImports(options: {
 
   if (replacements.length === 0) return null;
 
-  let output = options.code;
-  for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
-    output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
+  let output = "";
+  let copied = 0;
+  for (const replacement of replacements.sort((left, right) => left.start - right.start)) {
+    output += options.code.slice(copied, replacement.start) + replacement.code;
+    copied = replacement.end;
   }
-  return output;
+  return output + options.code.slice(copied);
 }
 
 export function transformIsolatedClientBoundaryModule(options: {
