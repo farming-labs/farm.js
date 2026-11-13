@@ -387,7 +387,8 @@ integration, image, and metadata routes keep their own URL contracts. A `<Link t
 or `<Link trailingSlash>` prop overrides the app default for that link. The generated
 [`sitemap.xml`](#sitemap) and `llms.txt` list each page at its canonical URL, so none of their
 links redirect: `/console/about/` under `basePath: "/console"` with `trailingSlash: true`, and the
-home page at `/console` without it.
+home page at `/console` without it. A [Markdown mirror](/docs/markdown) such as `/about.md` keeps
+its URL and renders the page at the canonical one.
 
 ## API client base URL
 

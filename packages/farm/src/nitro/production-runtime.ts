@@ -159,6 +159,7 @@ export {
   normalizeFarmTrailingSlashPathname,
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
+  toFarmTrailingSlashPageRequest,
 } from "../trailing-slash";
 export { applyFarmBasePath, setFarmBasePath, stripFarmBasePath } from "../base-path";
 export { appendFarmRedirectQuery } from "../redirect-query";

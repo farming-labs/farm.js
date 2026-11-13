@@ -315,6 +315,32 @@ export default function Page() { return <main>home {getLocale()}</main>; }`,
     );
   }, 120_000);
 
+  it("renders a Markdown mirror's page at its canonical URL under trailingSlash", async () => {
+    const origin = await startApp(
+      'basePath: "/console", trailingSlash: true, agent: { llmsTxt: true }',
+      { "src/app/notes/page.md": "# Notes\n\nnotes-source\n" },
+    );
+    const get = (pathname: string) => fetch(`${origin}${pathname}`, { redirect: "manual" });
+
+    // A mirror renders its page at the canonical URL rather than answering with the 308, and a
+    // Markdown page's source passes the anonymous page check made at that URL.
+    for (const [pathname, body] of [
+      ["/console/about.md", "about"],
+      ["/console/index.md", "home"],
+      ["/console/notes.md", "notes-source"],
+    ]) {
+      const markdown = await get(pathname);
+      expect(markdown.status, pathname).toBe(200);
+      const text = await markdown.text();
+      expect(text, pathname).not.toContain("# Redirected");
+      expect(text, pathname).toContain(body);
+    }
+    expect((await get("/console/notes.md")).headers.get("x-farm-markdown-source")).toBeTruthy();
+    expect(await (await get("/console/llms-full.txt")).text()).toContain(
+      "URL: https://acme.test/console/about.md\n\n# Acme\n\nSource: /console/about\n\nabout",
+    );
+  }, 120_000);
+
   it("lists the basePath home at the URL it answers at without trailingSlash", async () => {
     const origin = await startApp('basePath: "/console", md: false, agent: { llmsTxt: true }');
     const listed = locs(await (await fetch(`${origin}/console/sitemap.xml`)).text());

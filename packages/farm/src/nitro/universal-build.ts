@@ -7500,6 +7500,10 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   withFarmRouteContext,
   createLateNotFoundRecovery,
   createLateRedirectRecovery,${config.mobileClient ? "\n  createFarmNativeTreeResponse," : ""}${
+    config.trailingSlash && (config.md?.enabled || hasMarkdownPages)
+      ? "\n  toFarmTrailingSlashPageRequest,"
+      : ""
+  }${
     hasInfraAnalyticsRuntime
       ? "\n  resolveFarmDocsEngineRouteLabel,\n  resolveFarmDocsRouteLabel,\n  resolveFarmMarkdownRouteLabel,\n  resolveFarmMCPRouteLabel,\n  setFarmRouteLabel,"
       : ""
@@ -8059,7 +8063,17 @@ const farmImageHandler = ${
   onError(error) { console.error("[Farm Image]", error); },
 })`
   };
-const farmMarkdownConfig = ${JSON.stringify(config.md)};
+const farmMarkdownConfig = ${JSON.stringify(config.md)};${
+    config.md?.enabled || hasMarkdownPages
+      ? config.trailingSlash
+        ? `
+// A Markdown mirror, and a page.md source's page check, read the page at the URL it answers at
+// ('/about/'), so the trailing-slash 308 never answers in its place.
+const toFarmMarkdownPageRequest = (request) => toFarmTrailingSlashPageRequest(request, true);`
+        : `
+const toFarmMarkdownPageRequest = (request) => request;`
+      : ""
+  }
 const farmLlmsTxtConfig = ${JSON.stringify(config.agent?.llmsTxt ?? { enabled: false, include: [], exclude: [] })};
 ${
   config.agent?.llmsTxt?.enabled
@@ -10783,7 +10797,7 @@ ${
     clientAddress: adapterContext?.clientAddress,
     // An anonymous visitor's request: guards never see the caller's address.
     renderPage: (targetRequest) =>
-      fetchFarmInnerRequest(targetRequest, {
+      fetchFarmInnerRequest(toFarmMarkdownPageRequest(targetRequest), {
         ...adapterContext,
         clientAddress: FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
       }),
@@ -10838,7 +10852,8 @@ ${
       routePathname: getFarmRoutePathname,
       routeExists: (targetPathname) =>
         Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
-      renderPage: (targetRequest) => fetchFarmInnerRequest(targetRequest, adapterContext),
+      renderPage: (targetRequest) =>
+        fetchFarmInnerRequest(toFarmMarkdownPageRequest(targetRequest), adapterContext),
       apiServerBasePath: farmLocalAPIBasePath,
     });
     if (markdownResponse) {

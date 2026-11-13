@@ -344,5 +344,25 @@ describe("production default sitemap", () => {
         "Sitemap: https://acme.test/console/sitemap.xml",
       );
     });
+
+    it("renders a Markdown mirror's page at its canonical URL", async () => {
+      // A mirror renders its page at '/console/about/' rather than answering with the 308, and a
+      // Markdown page's source passes the anonymous page check made at that URL.
+      for (const [pathname, body] of [
+        ["/console/about.md", "about body"],
+        ["/console/index.md", "home body"],
+        ["/console/notes.md", "notes-source"],
+      ]) {
+        const markdown = await get(pathname);
+        expect(markdown.status, pathname).toBe(200);
+        const text = await markdown.text();
+        expect(text, pathname).not.toContain("# Redirected");
+        expect(text, pathname).toContain(body);
+      }
+      expect((await get("/console/notes.md")).headers.get("x-farm-markdown-source")).toBeTruthy();
+      expect(await (await get("/console/llms-full.txt")).text()).toContain(
+        "URL: https://acme.test/console/about.md\n\n# Console\n\nSource: /console/about\n\nabout body",
+      );
+    });
   });
 });
