@@ -52,6 +52,45 @@ describe("Vercel edge middleware runtime", () => {
     expect(signedIn.headers.get("x-guard")).toBe("ran");
   });
 
+  it("decides a request for a page's static file name as a request for the page", async () => {
+    // A root middleware whose matcher names only the page URL, as apps write it.
+    const dashboardGuard = {
+      config: { runtime: "edge", matcher: "/dashboard" },
+      middleware: signInGuard.middleware,
+    };
+    for (const basePath of ["/", "/console"]) {
+      const prefix = basePath === "/" ? "" : basePath;
+      const run = createFarmVercelEdgeMiddleware({
+        modules: [{ path: "/", filePath: "/app/middleware.ts", module: dashboardGuard }],
+        i18n: resolveConfigI18n(basePath),
+        notFoundPath: `${prefix}/__farm/not-found`,
+        // What the build passes: each guarded page, at the origin root and below the basePath.
+        pages: [...new Set(["/dashboard", `${prefix}/dashboard`, "/", basePath])],
+      });
+
+      for (const pathname of [
+        `${prefix}/dashboard`,
+        `${prefix}/dashboard/`,
+        `${prefix}/dashboard/index.html`,
+        `${prefix}/dashboard.html`,
+      ]) {
+        const signedOut = await run(new Request(`https://app.test${pathname}?tab=1`));
+        expect(signedOut.status, pathname).toBe(307);
+        expect(signedOut.headers.get("x-middleware-next"), pathname).toBeNull();
+
+        const signedIn = await run(
+          new Request(`https://app.test${pathname}?tab=1`, { headers: { cookie: "session=1" } }),
+        );
+        // Vercel still serves the file the visitor asked for, not a rewrite to the page URL.
+        expect(signedIn.headers.get("x-middleware-next"), pathname).toBe("1");
+        expect(signedIn.headers.get("x-middleware-rewrite"), pathname).toBeNull();
+      }
+      // A page the middleware does not match stays unguarded under its file names too.
+      const home = await run(new Request(`https://app.test${prefix}/index.html`));
+      expect(home.headers.get("x-middleware-next")).toBe("1");
+    }
+  });
+
   it("does not run middleware outside the folder it guards", async () => {
     const response = await edgeMiddleware(signInGuard)(new Request("https://app.test/blog"));
     expect(response.headers.get("x-middleware-next")).toBe("1");
@@ -294,6 +333,12 @@ describe('runtime: "edge" middleware in a Vercel build', () => {
         new Request("https://app.test/docs/guide", { headers: { cookie: "session=1" } }),
       );
       expect(signedIn.headers.get("x-middleware-next")).toBe("1");
+      // The function knows the pages it guards, so their file names are decided as the page.
+      const signedOutFile: Response = await middleware(
+        new Request("https://app.test/docs/guide/index.html"),
+      );
+      expect(signedOutFile.status).toBe(307);
+      expect(code).toMatch(/pages:\[["'`]\/docs\/guide["'`]\]/);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
