@@ -81,6 +81,12 @@ import { createFarmRouteAnnouncer, runFarmNavigationDelegates } from '@farm.js/c
 setFarmBasePath(${JSON.stringify(ctx.basePath)});
 `;
   }
+  // trailingSlash: <Link href="/about"> renders /about/, as the RSC server rendered it.
+  if (ctx.trailingSlash) {
+    imports += `import { setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime';
+setFarmTrailingSlashPreference(true);
+`;
+  }
 
   // farm dev --mobile: every page runs in the shell's WebView, so this entry is the mobile client.
   if (ctx.mobileClient === "inline") {

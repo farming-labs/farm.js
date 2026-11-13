@@ -158,6 +158,17 @@ import {
   farmRequestWantsMarkdown,
 } from '@farm.js/core/markdown';
 import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';
+import { resolveFarmTrailingSlashRedirect } from '@farm.js/core/internal/production-runtime';
+${
+  ctx.trailingSlash
+    ? `import { normalizeFarmTrailingSlashPathname, setFarmTrailingSlashPreference } from '@farm.js/core/internal/production-runtime';
+
+// trailingSlash: <Link href="/about"> renders /about/, as in core's renderers. Client components
+// render in the SSR environment, which shares this process; the browser entry sets it too.
+setFarmTrailingSlashPreference(true);
+`
+    : ""
+}
 ${
   hasBasePath
     ? `import { applyFarmBasePath, setFarmBasePath } from '@farm.js/core/internal/production-runtime';
@@ -828,8 +839,15 @@ async function collectFarmStaticPages() {
           ? `// The platform serves a prerendered file only at the URL it was written for, below the
       // basePath, as core's build writes it. A page nested under app/<basePath>/ already is.
       const publicPath = applyFarmBasePath(pagePath, ${JSON.stringify(ctx.basePath)});
-      paths.add(publicPath.length > 1 ? publicPath.replace(/\\/$/, '') : publicPath);`
-          : "paths.add(pagePath);"
+      paths.add(${
+        ctx.trailingSlash
+          ? "normalizeFarmTrailingSlashPathname(publicPath, true)"
+          : "publicPath.length > 1 ? publicPath.replace(/\\/$/, '') : publicPath"
+      });`
+          : ctx.trailingSlash
+            ? // With trailingSlash the page's URL is '/about/', which Nitro writes as about/index.html.
+              "paths.add(normalizeFarmTrailingSlashPathname(pagePath, true));"
+            : "paths.add(pagePath);"
       }
     }
   }
@@ -924,6 +942,7 @@ async function handleFarmRequest(request, context) {
 
 async function resolveFarmRequest(farmCacheGuard, request, context) {
   let url = new URL(request.url);
+  const isFarmPayloadRequest = farmPayloadRequests.has(request);
   let matchedPage = null;
   let errorData = new Map();
   let errorContext = new Map();
@@ -1010,6 +1029,20 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
       JSON.stringify({ error: 'API route not found', pathname: url.pathname }),
       { status: 404, headers: { 'Content-Type': 'application/json' } },
     ), middlewareHeaders);
+  }
+
+  // A page answers at one spelling of its URL, as in core's servers: '/about/' with trailingSlash,
+  // '/about' without. Any other spelling gets a 308 to it, before a server action runs, and a
+  // '<page>.rsc' request is sent to the payload URL of that page.
+  const trailingSlashLocation = resolveFarmTrailingSlashRedirect(url, ${JSON.stringify(ctx.trailingSlash === true)});
+  if (trailingSlashLocation && matchRoute(url.pathname)) {
+    const target = new URL(trailingSlashLocation, url);
+    return applyProductionMiddlewareHeaders(new Response(null, {
+      status: 308,
+      headers: {
+        location: isFarmPayloadRequest ? farmPayloadPath(target.pathname) + target.search : trailingSlashLocation,
+      },
+    }), middlewareHeaders);
   }
 `;
 
@@ -1570,7 +1603,7 @@ async function handleFarmPageOrMarkdown(request, context) {
     routePathname: getFarmRoutePathname,
     // The page the render below selects for the mirrored URL, below the basePath and locale.
     routeExists: (pathname) => Boolean(matchRoute(pathname)),
-    renderPage: (pageRequest) => handleFarmRequest(pageRequest, context),
+    renderPage: (pageRequest) => handleFarmRequest(${ctx.trailingSlash ? "toFarmTrailingSlashPageRequest(pageRequest)" : "pageRequest"}, context),
     apiServerBasePath: farmApiBasePath,
   });
   if (markdown) return markdown;
@@ -1581,13 +1614,30 @@ async function handleFarmPageOrMarkdown(request, context) {
     routePathname: getFarmRoutePathname,
   });
 }
-
+${
+  ctx.trailingSlash
+    ? `
+// The mirror reads the page at its canonical URL ('/about/'), so the trailing-slash redirect never
+// answers in its place.
+function toFarmTrailingSlashPageRequest(request) {
+  const url = new URL(request.url);
+  const pathname = normalizeFarmTrailingSlashPathname(url.pathname, true);
+  if (pathname === url.pathname) return request;
+  url.pathname = pathname;
+  return new Request(url, request);
+}
+`
+    : ""
+}
 // Client navigation addresses a page's RSC payload as '<page>.rsc' ('<dir>/index.rsc' for a
 // trailing slash), so a prerendered page can be a static HTML file next to a static payload file.
 // 'Accept: text/x-component' on the page URL keeps working.
 function farmPayloadPath(pathname) {
   return pathname.endsWith('/') ? pathname + 'index.rsc' : pathname + '.rsc';
 }
+
+// The requests made from a '<page>.rsc' URL, whose redirects name a payload URL too.
+const farmPayloadRequests = new WeakSet();
 
 function toFarmPayloadRequest(request) {
   if (request.method !== 'GET' && request.method !== 'HEAD') return request;
@@ -1598,7 +1648,9 @@ function toFarmPayloadRequest(request) {
   url.pathname = page.endsWith('/index') ? page.slice(0, -'index'.length) : page;
   const headers = new Headers(request.headers);
   headers.set('accept', 'text/x-component');
-  return new Request(url, { method: request.method, headers, signal: request.signal });
+  const payloadRequest = new Request(url, { method: request.method, headers, signal: request.signal });
+  farmPayloadRequests.add(payloadRequest);
+  return payloadRequest;
 }
 
 // The build's prerender pass (Nitro) runs this server with FARM_RSC_PRERENDER set. It seeds one

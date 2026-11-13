@@ -151,6 +151,7 @@ export {
   serializeFarmInlineValue,
 } from "./legacy-runtime";
 export {
+  normalizeFarmTrailingSlashPathname,
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";

@@ -8,6 +8,7 @@ import {
   resolveMarkdownConfig,
 } from "@farm.js/core/markdown";
 import {
+  normalizeFarmTrailingSlashPathname,
   resolveFarmI18nConfig,
   stripFarmBasePath,
   stripFarmLocaleFromPathname,
@@ -79,7 +80,7 @@ function createRouteMatcher(entry: string, pageFiles: string[]) {
  */
 function createHandler(
   markdownConfig = resolveMarkdownConfig(undefined),
-  options: Partial<Pick<EntryContext, "basePath" | "i18n" | "development">> & {
+  options: Partial<Pick<EntryContext, "basePath" | "i18n" | "development" | "trailingSlash">> & {
     pages?: string[];
     pageFiles?: string[];
   } = {},
@@ -112,6 +113,7 @@ function createHandler(
     "matchRoute",
     "handleFarmRequest",
     "farmApiBasePath",
+    "normalizeFarmTrailingSlashPathname",
     `${extractRoutePathname(entry)}\n${entry.slice(start, end)}; return handleFarmPageOrMarkdown;`,
   )(
     markdownConfig,
@@ -122,6 +124,7 @@ function createHandler(
     matchRoute,
     handleFarmRequest,
     "/api",
+    normalizeFarmTrailingSlashPathname,
   ) as (request: Request, context?: unknown) => Promise<Response>;
   return { run, rendered, handleFarmRequest };
 }
@@ -539,6 +542,29 @@ describe.each([
     expect(page.headers.get("link")).toBe(
       '</console/fr/index.md>; rel="alternate"; type="text/markdown"',
     );
+  });
+
+  // With trailingSlash a page's URL is '/about/', and '/about' redirects there: the mirror reads
+  // the page at that URL, so the redirect never answers in place of the page.
+  it("renders each mirror's page at its trailing-slash URL with trailingSlash", async () => {
+    const { run, rendered } = createHandler(resolveMarkdownConfig(undefined), {
+      ...basePath,
+      trailingSlash: true,
+      pageFiles: ["/page.tsx", "/about/page.tsx"],
+    });
+    for (const [pathname, page] of [
+      ["/console/about.md", "/console/about/"],
+      ["/console/index.md", "/console/"],
+    ]) {
+      const response = await run(new Request(`https://farm.test${pathname}`));
+      expect(response.status, pathname).toBe(200);
+      expect(new URL(rendered.at(-1)!.url).pathname, pathname).toBe(page);
+    }
+    const negotiated = await run(
+      new Request("https://farm.test/console/about/", { headers: { accept: "text/markdown" } }),
+    );
+    expect(negotiated.status).toBe(200);
+    expect(new URL(rendered.at(-1)!.url).pathname).toBe("/console/about/");
   });
 
   it("matches md.expose against locale-stripped route paths", async () => {

@@ -6,6 +6,7 @@ import {
   configMiddlewareMayHandlePath,
   materializeSSGRoutePath,
   mergeRouteRenderingDirectiveConfig,
+  normalizeFarmTrailingSlashPathname,
 } from "@farm.js/core/internal/production-runtime";
 import { parseRoutePath } from "../../../../farm/src/utils";
 import type { EntryContext } from "../types.js";
@@ -37,11 +38,13 @@ function collectStaticPages(
     middlewareFiles?: string[];
     configMiddleware?: unknown[];
     basePath?: string;
+    trailingSlash?: boolean;
   } = {},
 ): Promise<string[]> {
   const entry = generateRscEntry({
     ...context,
     basePath: options.basePath ?? context.basePath,
+    trailingSlash: options.trailingSlash,
     pageRenderingDirectives: options.directives,
   });
   const pageRoutes = Object.entries(pages).map(([filePath, module]) => ({
@@ -64,6 +67,7 @@ function collectStaticPages(
     "appMiddlewareMayHandlePath",
     "configMiddlewareMayHandlePath",
     "applyFarmBasePath",
+    "normalizeFarmTrailingSlashPathname",
     `${slice(
       entry,
       "// Each page's parsed rendering directive",
@@ -79,6 +83,7 @@ function collectStaticPages(
     appMiddlewareMayHandlePath,
     configMiddlewareMayHandlePath,
     applyFarmBasePath,
+    normalizeFarmTrailingSlashPathname,
   );
 }
 
@@ -201,6 +206,28 @@ describe("RSC static pages", () => {
       "/console/docs/start%20here",
       "/console/legacy",
     ]);
+  });
+
+  // trailingSlash makes '/about/' the page's URL; '/about' answers with a body-less 308, which
+  // Nitro would save as the page. '/about/' is written as about/index.html, as core's build does.
+  it("prerenders a page at its trailing-slash URL with trailingSlash", async () => {
+    const pages = {
+      "/page.tsx": { dynamic: "force-static" },
+      "/about/page.tsx": { dynamic: "force-static" },
+      "/docs/[[...slug]]/page.tsx": {
+        dynamic: "force-static",
+        generateStaticParams: async () => [{ slug: [] }, { slug: ["start"] }],
+      },
+    };
+    expect((await collectStaticPages(pages, { trailingSlash: true })).sort()).toEqual([
+      "/",
+      "/about/",
+      "/docs/",
+      "/docs/start/",
+    ]);
+    expect(
+      (await collectStaticPages(pages, { basePath: "/console", trailingSlash: true })).sort(),
+    ).toEqual(["/console/", "/console/about/", "/console/docs/", "/console/docs/start/"]);
   });
 });
 

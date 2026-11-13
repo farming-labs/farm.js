@@ -114,6 +114,12 @@ export interface EntryContext {
   /** Base URL path, e.g. '/' */
   basePath: string;
 
+  /**
+   * Core's `trailingSlash`: pages answer at `/about/` instead of `/about`, and `<Link>` renders
+   * that URL. Either way a page's other spelling redirects (308) to it.
+   */
+  trailingSlash?: boolean;
+
   /** Resolved same-origin mount for canonical /api routes. */
   apiBasePath?: string;
 

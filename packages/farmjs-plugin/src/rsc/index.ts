@@ -165,6 +165,12 @@ export interface FarmRscConfig {
   layers?: readonly ResolvedFarmLayer[];
   outDir?: string;
   basePath?: string;
+  /**
+   * Same as core's `trailingSlash`: pages answer at `/about/`, `<Link>` renders that URL, and
+   * `/about` redirects (308) to it. Without it, `/about/` redirects to `/about`.
+   * @default false
+   */
+  trailingSlash?: boolean;
   api?: FarmAPIConfig;
   server?: FarmServerConfig;
   middleware?: FarmMiddlewareConfig;
@@ -259,6 +265,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     layers: config.layers,
     outDir: config.outDir ?? "dist",
     basePath: config.basePath ?? "/",
+    trailingSlash: config.trailingSlash,
     api: config.api,
     serverActions: config.serverActions,
     deploymentId: config.deploymentId,
@@ -991,6 +998,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           srcDir?: string;
           outDir?: string;
           basePath?: string;
+          trailingSlash?: boolean;
           api?: FarmAPIConfig;
           server?: UserConfig["server"] & FarmServerConfig;
           root?: string;
@@ -1248,6 +1256,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           srcDir,
           outDir,
           basePath: c.basePath ?? "/",
+          trailingSlash: c.trailingSlash === true,
           apiBasePath: resolveFarmAPIServerBasePath(api),
           routesDir: options.routesDir,
           globalCssPath,

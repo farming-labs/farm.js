@@ -49,6 +49,7 @@ const FARM_RSC_CONFIG_KEYS = [
   "srcDir",
   "extends",
   "basePath",
+  "trailingSlash",
   "api",
   "server",
   "middleware",
