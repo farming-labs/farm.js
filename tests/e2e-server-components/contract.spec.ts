@@ -513,6 +513,22 @@ test("a client navigation that streams Suspense content in several flushes revea
   expect(errors).toEqual([]);
 });
 
+test("a refresh after an action keeps the state of an island in streamed Suspense content", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/refresh-stream");
+  await expect(page.getByTestId("note")).toHaveText("note arrived");
+  const touch = page.getByRole("button", { name: "Touch" });
+  // Hydrated: its click runs the action.
+  await expect(touch).toHaveAttribute("data-hydrated", "true");
+  await touch.click();
+  // The island set this after the action and the refresh that follows it, and kept it.
+  await expect(page.getByTestId("touched")).toHaveText("touched");
+  await expect(page.getByTestId("note")).toHaveText("note arrived");
+  expect(errors).toEqual([]);
+});
+
 test("a server action that removes an item keeps each client component's state with its key", async ({
   page,
 }) => {

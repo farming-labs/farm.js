@@ -7575,6 +7575,8 @@ ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceNavigationBound
   refresh = false,
   find = findLayoutBoundary,
 ) {
+  // A refresh keeps the islands still on the page: the ones in streamed Suspense content too.
+  if (refresh) revealFarmStreamedContent(fragment);
   let sharedCount = 0;
   while (
     sharedCount < currentPatterns.length &&
@@ -7729,7 +7731,8 @@ async function fetchFarmNavigationDocument(path, context) {
       redirect: 'manual',
       headers: createFarmDeploymentRequestHeaders(deploymentId, {
         Accept: 'text/html',
-        ...(context.prefetch ? {} : { 'F-Stream': 'flush' }),
+        // A refresh arrives whole, like a transition: the islands it keeps are all in it.
+        ...(context.prefetch || context.refresh ? {} : { 'F-Stream': 'flush' }),
         ...getFarmIslandValueHeaders(),
         // A prefetch names its layouts even when it keeps none: that marks it as a navigation,
         // which the server answers without loading.tsx.
