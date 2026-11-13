@@ -71,6 +71,13 @@ describe("client component path resolution", () => {
     expect(stripped.indexOf("useState(0)")).toBe(source.indexOf("useState(0)"));
   });
 
+  it("detects a directive after a byte order mark or other Unicode whitespace", () => {
+    const body = "export default function Counter() { return null; }\n";
+    expect(hasUseClientDirective(`﻿"use client";\n${body}`)).toBe(true);
+    expect(hasUseClientDirective(`  "use client";　${body}`)).toBe(true);
+    expect(hasUseClientDirective(`é"use client";\n${body}`)).toBe(false);
+  });
+
   it("detects directives preceded by comments or other directives", () => {
     const afterBlockComment =
       '/* Copyright 2026 Acme */\n"use client";\nexport default function Counter() { return null; }\n';
