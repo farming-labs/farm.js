@@ -121,6 +121,39 @@ describe("production request URL ownership", () => {
     }
   });
 
+  it("passes an upstream redirect through a rewrite to another origin", async () => {
+    let followed = false;
+    const upstream = http.createServer((req, res) => {
+      if (req.url === "/elsewhere") {
+        followed = true;
+        res.end("followed");
+        return;
+      }
+      res.statusCode = 302;
+      res.setHeader("location", "https://login.example/authorize?state=1");
+      res.setHeader("set-cookie", ["oauth_state=1; Path=/", "session=; Max-Age=0"]);
+      res.end();
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const address = upstream.address();
+    if (!address || typeof address === "string") throw new Error("No upstream");
+    try {
+      const r = runtime(false, `http://127.0.0.1:${address.port}/login`);
+      const response = await r.request(new Request("https://farm.test/base/fr/old"));
+      // The visitor gets the upstream's redirect and its cookies, as the docs promise: the
+      // upstream response, not the page it points at fetched on the visitor's behalf.
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("https://login.example/authorize?state=1");
+      expect(response.headers.getSetCookie()).toEqual([
+        "oauth_state=1; Path=/",
+        "session=; Max-Age=0",
+      ]);
+      expect(followed).toBe(false);
+    } finally {
+      await new Promise((resolve) => upstream.close(resolve));
+    }
+  });
+
   it("keeps parsed URLs local to each concurrent request", async () => {
     const r = runtime();
     const responses = await Promise.all(
