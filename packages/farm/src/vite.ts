@@ -760,12 +760,23 @@ function createFarmDevMiddlewareErrorResponse(): Response {
 }
 
 /**
+ * The status and headers of the runtime hook 500. Production answers a new response, so none of
+ * the headers the failed request set (app middleware's headers and cookies, a page's cache
+ * policy) is kept; the headers() config, Set-Cookie included, is applied again when the head is
+ * written, as production applies it to that response.
+ */
+function setFarmDevRuntimeHookErrorHead(res: ServerResponse, json: boolean): void {
+  for (const name of res.getHeaderNames()) res.removeHeader(name);
+  res.statusCode = 500;
+  res.setHeader("Content-Type", json ? "application/json" : "text/plain; charset=utf-8");
+}
+
+/**
  * The 500 a request answers when a plugin runtime hook throws, as in the production entry: the
  * generic JSON body on an API path or with `renderer: false`, plain text for a page.
  */
 function sendFarmDevRuntimeHookError(res: ServerResponse, json: boolean): void {
-  res.statusCode = 500;
-  res.setHeader("Content-Type", json ? "application/json" : "text/plain; charset=utf-8");
+  setFarmDevRuntimeHookErrorHead(res, json);
   res.end(json ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error");
 }
 
@@ -972,16 +983,7 @@ function interceptFarmDevPageResponse(options: {
     console.error("Error in afterResponse hook:", error);
   };
   const writeRuntimeHookFailure = () => {
-    res.statusCode = 500;
-    res.removeHeader("Content-Length");
-    // Production answers a new response, with the headers() config but not the cache policy
-    // of the response the hook failed on (an error page's private, no-store, say). The
-    // headers() config is applied again when the head is written.
-    res.removeHeader("Cache-Control");
-    res.setHeader(
-      "Content-Type",
-      options.jsonError ? "application/json" : "text/plain; charset=utf-8",
-    );
+    setFarmDevRuntimeHookErrorHead(res, Boolean(options.jsonError));
     originalWriteHead(500);
     originalWrite(options.jsonError ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error");
   };
@@ -3812,9 +3814,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
                 // The runtime already reported a hook failure to runtime.error and onError.
                 logger.error(`API route error: ${error}`);
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                sendFarmDevRuntimeHookError(res, true);
                 return;
               }
               pm.copyRequestContext(runtimeSession.request, req);
@@ -3988,9 +3988,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
                 // The plugin runtime already reported the failure to runtime.error and onError.
                 logger.error(`API route error: ${error}`);
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                sendFarmDevRuntimeHookError(res, true);
                 return;
               }
             }
@@ -4039,9 +4037,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
                 // The plugin runtime already reported the failure to runtime.error and onError.
                 logger.error(`Docs API route error: ${error}`);
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                sendFarmDevRuntimeHookError(res, true);
                 return;
               }
             }
@@ -4070,9 +4066,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             } catch (error) {
               // The runtime already reported a hook failure to runtime.error and onError.
               logger.error(`API route error: ${error}`);
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+              sendFarmDevRuntimeHookError(res, true);
             }
             return;
           }

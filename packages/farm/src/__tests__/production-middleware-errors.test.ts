@@ -14,12 +14,16 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 // Thrown by middleware and checked against every response body: it must stay in server logs.
 const SECRET = "middleware-secret-detail";
 
-const middlewareSource = `export function middleware(request: Request, context: { headers: Headers }) {
+const middlewareSource = `export function middleware(
+  request: Request,
+  context: { headers: Headers; cookies: { set(name: string, value: string): void } },
+) {
   const { pathname } = new URL(request.url);
   if (pathname === "/mw-throw" || pathname === "/api/mw-throw") {
     throw new Error(${JSON.stringify(SECRET)});
   }
   context.headers.set("x-middleware", "ran");
+  context.cookies.set("middleware", "ran");
 }`;
 
 const APP_FILES: Record<string, string> = {
@@ -189,7 +193,15 @@ export default defineConfig({
   images: { provider: "none" },
   generateBuildId: () => "middleware-errors-test",
   async headers() {
-    return [{ source: "/:path*", headers: [{ key: "x-configured", value: "yes" }] }];
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "x-configured", value: "yes" },
+          { key: "set-cookie", value: "configured=yes; Path=/" },
+        ],
+      },
+    ];
   },
   observability: {
     events: ["middleware.error", "render.error", "api.error"],
@@ -214,6 +226,7 @@ export default defineConfig({
             status: response.status,
             contentType: response.headers.get("content-type"),
           });
+          if (new URL(request.url).searchParams.has("after-throw")) throw new Error("plugin-after-failed");
         },
         error({ error, request }) {
           record({ source: "runtime.error", pathname: new URL(request.url).pathname, message: error?.message });
@@ -224,6 +237,7 @@ export default defineConfig({
 });
 `,
   ...APP_FILES,
+  "src/app/api/ok/route.ts": "export function GET() { return Response.json({ ok: true }); }",
 };
 
 /** Requests `pathname` and returns its response with what the app recorded for it. */
@@ -235,6 +249,72 @@ async function readTrace(origin: string, logPath: string, pathname: string, init
     .split("\n")
     .map((line) => JSON.parse(line));
   return { response, trace };
+}
+
+// Headers the connection sets, which differ between servers whatever the app answers.
+const TRANSPORT_HEADERS = new Set([
+  "connection",
+  "content-length",
+  "date",
+  "keep-alive",
+  "transfer-encoding",
+]);
+
+/**
+ * Every header of `response` but the transport's and Cache-Control, with each Set-Cookie value.
+ * Only production keeps a response app middleware let through out of shared caches (see the
+ * middleware docs), so the cache policy is left out.
+ */
+function readHeaders(response: Response): Record<string, string | string[]> {
+  const headers: Record<string, string | string[]> = {};
+  response.headers.forEach((value, name) => {
+    if (!TRANSPORT_HEADERS.has(name) && name !== "cache-control") headers[name] = value;
+  });
+  headers["set-cookie"] = response.headers.getSetCookie();
+  return headers;
+}
+
+// A runtime.after hook that throws after app middleware set a header and a cookie fails the
+// request with a new 500, as production builds it: the headers() config applies, its Set-Cookie
+// included, but no header or cookie of the response the hook failed on.
+async function expectRuntimeHookFailureHeaders(origin: string, logPath: string): Promise<void> {
+  const failures: Record<string, unknown> = {};
+  for (const pathname of ["/?after-throw", "/api/ok?after-throw"]) {
+    await fs.writeFile(logPath, "");
+    const response = await fetch(`${origin}${pathname}`, { headers: { accept: "text/html" } });
+    failures[pathname] = {
+      status: response.status,
+      headers: readHeaders(response),
+      body: await response.text(),
+      // The plugin hooks only: development still emits an api.error event for a runtime hook
+      // that fails an API request, which production does not.
+      trace: (await fs.readFile(logPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((entry) => entry.source !== "event"),
+    };
+  }
+  const trace = (pathname: string, contentType: string) => [
+    { source: "runtime.after", pathname, status: 200, contentType },
+    { source: "runtime.error", pathname, message: "plugin-after-failed" },
+    { source: "onError", phase: "runtime", pathname, message: "plugin-after-failed" },
+  ];
+  const configured = { "x-configured": "yes", "set-cookie": ["configured=yes; Path=/"] };
+  expect(failures).toEqual({
+    "/?after-throw": {
+      status: 500,
+      headers: { "content-type": "text/plain; charset=utf-8", ...configured },
+      body: "Internal Server Error",
+      trace: trace("/", "text/html; charset=utf-8"),
+    },
+    "/api/ok?after-throw": {
+      status: 500,
+      headers: { "content-type": "application/json", ...configured },
+      body: '{"error":"Internal Server Error"}',
+      trace: trace("/api/ok", "application/json"),
+    },
+  });
 }
 
 // What both modes answer and report for a throwing middleware and a throwing page hook.
@@ -313,6 +393,7 @@ async function expectSharedFailureTraces(origin: string, logPath: string): Promi
       },
     ],
   });
+  await expectRuntimeHookFailureHeaders(origin, logPath);
 }
 
 // An app whose plugin has server hooks (onError and HTML transforms) but no runtime hooks.
@@ -535,6 +616,7 @@ describe("production middleware errors", () => {
     const home = await fetch(`${app!.origin}/`);
     expect(home.status).toBe(200);
     expect(home.headers.get("x-middleware")).toBe("ran");
+    expect(home.headers.getSetCookie()).toContain("middleware=ran; Path=/");
     await home.body?.cancel();
 
     const failure = { message: SECRET };
