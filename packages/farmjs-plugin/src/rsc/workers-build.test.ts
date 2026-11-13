@@ -35,6 +35,17 @@ async function resolveConfig(
   );
 }
 
+function keepsReactProductionOnly(preset: string, command: "build" | "serve") {
+  const plugin = farmRsc({ preset }).find(
+    (candidate) => candidate.name === "farm-react-production-mode",
+  );
+  const apply = plugin?.apply as (
+    config: Record<string, unknown>,
+    env: { command: "build" | "serve"; mode: string },
+  ) => boolean;
+  return apply({}, { command, mode: command === "build" ? "production" : "development" });
+}
+
 describe("RSC builds for Cloudflare Workers", () => {
   it("bundle the server's packages, built for workerd", async () => {
     const resolved = await resolveConfig("cloudflare-pages", "build");
@@ -49,6 +60,13 @@ describe("RSC builds for Cloudflare Workers", () => {
     });
     // Nothing is left for a node_modules the worker doesn't have.
     expect(resolved.ssr).toBeUndefined();
+  });
+
+  it("ship only React's production builds, which Node builds and dev load from node_modules", () => {
+    expect(keepsReactProductionOnly("cloudflare-pages", "build")).toBe(true);
+    expect(keepsReactProductionOnly("cloudflare-module", "build")).toBe(true);
+    expect(keepsReactProductionOnly("node-server", "build")).toBe(false);
+    expect(keepsReactProductionOnly("cloudflare-pages", "serve")).toBe(false);
   });
 
   it("refuse the optimized boundary, whose Strata loader needs Node", async () => {

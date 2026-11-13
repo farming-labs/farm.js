@@ -35,9 +35,17 @@ const FILES: Record<string, string> = {
   return <html><body>{children}</body></html>;
 }`,
   "src/app/page.tsx": `import { Counter } from "./counter";
+import { ReactBuild } from "./react-build";
 export const dynamic = "force-dynamic";
 export default function Page() {
-  return <main>home <Counter /></main>;
+  return <main>home <Counter /><ReactBuild /></main>;
+}`,
+  // React's development build exports captureOwnerStack; its production build for SSR doesn't.
+  "src/app/react-build.tsx": `"use client";
+import * as React from "react";
+export function ReactBuild() {
+  const build = typeof React.captureOwnerStack === "function" ? "development" : "production";
+  return <p>{"react " + build}</p>;
 }`,
   "src/app/counter.tsx": `"use client";
 import { useState } from "react";
@@ -112,7 +120,9 @@ async function startWorker(root: string) {
     scriptPath: path.join(workerDirectory, "index.js"),
     // Pages loads every .js and .mjs file in `_worker.js/` as an ES module.
     modulesRules: [{ type: "ESModule", include: ["**/*.js", "**/*.mjs"] }],
-    bindings: { FARM_TEST_SECRET: "from the worker env" },
+    // Stands in for wrangler's NODE_ENV, which picks React's build when it is left to the runtime:
+    // `wrangler pages dev` sets "development", and so does a deploy from a shell that sets it.
+    bindings: { FARM_TEST_SECRET: "from the worker env", NODE_ENV: "development" },
     assets: { directory: output, routerConfig: { has_user_worker: true } },
   });
   disposers.add(() => worker.dispose());
@@ -124,7 +134,7 @@ async function startWorker(root: string) {
 }
 
 describe("an RSC build for Cloudflare Pages", () => {
-  it("runs in workerd: it server-renders pages and reads the worker's env", async (ctx) => {
+  it("runs in workerd: it server-renders pages with React's production build and reads the worker's env", async (ctx) => {
     if (process.platform === "win32") ctx.skip();
     const root = await createApp();
     await buildApp(root);
@@ -141,6 +151,7 @@ describe("an RSC build for Cloudflare Pages", () => {
     expect(html).toContain("home");
     // React separates adjacent text with a comment.
     expect(html).toContain("<button>count <!-- -->0</button>");
+    expect(html).toContain("<p>react production</p>");
 
     const secret = await fetchWorker("/api/secret");
     expect(secret.status).toBe(200);

@@ -39,6 +39,7 @@ import type {
   FarmRscMobileClient,
 } from "./types.js";
 import { isRscWorkersPreset } from "./presets.js";
+import { createReactProductionModePlugin } from "@farm.js/core/internal/production-node-env";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
 import type { FarmAPIConfig } from "@farm.js/core/api";
 import type { FarmMiddlewareConfig } from "@farm.js/core/middleware";
@@ -782,6 +783,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   const debug = options.debug ?? false;
   const automaticDeploymentId = `build-${Date.now()}`;
   const supportsBuildAppHook = Number(viteVersion.split(".")[0]) >= 7;
+  const resolveNitroPreset = () => options.preset || process.env.NITRO_PRESET || "vercel";
 
   type RscApplicationBuilder = {
     environments: Record<string, { config?: { build?: { outDir?: string; assetsDir?: string } } }>;
@@ -887,6 +889,13 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
     farmEnvironmentFunctionsPlugin() as unknown as Plugin,
     rscPrivateClientSourcemaps(),
     createFarmRscMobileClientManifestPlugin(() => mobileClientRoot) as unknown as Plugin,
+    {
+      // A Worker bundles React and has no NODE_ENV of its own, and `wrangler pages dev` defines it
+      // as "development": keep only React's production builds, as core's Workers builds do.
+      ...createReactProductionModePlugin(),
+      enforce: "pre",
+      apply: (_config, env) => env.command === "build" && isRscWorkersPreset(resolveNitroPreset()),
+    },
     {
       name: "@farm.js/plugin/rsc:middleware-config",
       enforce: "pre",
@@ -1188,7 +1197,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         ];
         // The same images contract as core: without Sharp, "auto" keeps original URLs
         // (provider "none") instead of pointing <Image> at an optimizer that cannot run.
-        const nitroPreset = options.preset || process.env.NITRO_PRESET || "vercel";
+        const nitroPreset = resolveNitroPreset();
         // Workers have no node_modules: the server bundles include their packages, built for
         // workerd instead of Node.
         const workersBuild = env.command === "build" && isRscWorkersPreset(nitroPreset);
