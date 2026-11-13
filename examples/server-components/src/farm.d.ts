@@ -100,6 +100,7 @@ export type RoutePath =
   | "/values/b"
   | "/values/slow"
   | "/window"
+  | "/wire/circular"
   | "/wire/function-prop"
   | "/wire/stream-prop"
   | "/wire/stream-result";
@@ -191,6 +192,7 @@ export type RoutePattern =
   | "/values/b"
   | "/values/slow"
   | "/window"
+  | "/wire/circular"
   | "/wire/function-prop"
   | "/wire/stream-prop"
   | "/wire/stream-result";
@@ -286,6 +288,7 @@ export type RouteModulePattern =
   | "/values/b"
   | "/values/slow"
   | "/window"
+  | "/wire/circular"
   | "/wire/function-prop"
   | "/wire/stream-prop"
   | "/wire/stream-result";

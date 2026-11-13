@@ -34,3 +34,17 @@ test("an action returns a stream and a promise that settle after it returned", a
   await expect(page.getByTestId("launch-status")).toHaveText("launched");
   expect(errors).toEqual([]);
 });
+
+test("a value that refers to itself reaches a client component and a server action, and comes back", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/wire/circular");
+  await page.waitForLoadState("networkidle");
+  const node = page.getByRole("button", { name: /^root / });
+  await node.click();
+  await expect(node).toHaveText("root true 1");
+  await page.getByRole("button", { name: "Echo" }).click();
+  await expect(page.getByTestId("echo")).toHaveText("root true true");
+  expect(errors).toEqual([]);
+});
