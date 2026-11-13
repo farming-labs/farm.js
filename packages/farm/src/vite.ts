@@ -198,15 +198,19 @@ import {
   resolveFarmPublicFilePath,
   shouldBypassFarmRouterForDottedPath,
 } from "./dev-static";
-import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
+import {
+  createServerFnBoundaryDiagnostic,
+  findClientServerFnViolation,
+} from "./server-query-boundary";
 
 /** The @farm.js/plugin/rsc transform that turns client imports of server functions into stubs. */
 const SERVER_FN_TRANSFORM_PLUGIN = "@farm.js/plugin/rsc:server-fn-actions";
 import {
   analyzeClientBoundary,
-  formatClientBoundaryWarning,
+  createClientBoundaryDiagnostic,
   shouldInspectClientBoundary,
 } from "./client-boundary-env";
+import { createFarmDiagnostic, createFarmSourceLocator, formatFarmDiagnostic } from "./diagnostics";
 import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
@@ -556,7 +560,14 @@ export function farmServerOnlyEntriesPlugin(
             return FARM_SERVER_ONLY_PACKAGE_ID;
           }
           this.error(
-            `${importer ?? "A module"} imports "server-only", so it must not reach the browser, but client code imports it. Move what the client needs out of that module, or call it from a server component, server function or API route.`,
+            formatFarmDiagnostic(
+              createFarmDiagnostic(
+                "CLIENT_SERVER_ONLY_IMPORT",
+                importer ?? "<unknown module>",
+                `${importer ? "This module" : "A module"} imports "server-only", so it must not reach the browser, but client code imports it.`,
+              ),
+              root,
+            ),
           );
         }
         if (!options?.ssr && isBuiltin(id)) {
@@ -1696,15 +1707,20 @@ const warnedClientBoundaryIds = new Set<string>();
 /**
  * Warn once per module about server-only access in client-compiled code:
  * module-scope non-public process.env reads (undefined in the browser, #560)
- * and node: builtin imports (stubbed by farmServerOnlyEntriesPlugin).
- * Diagnostics only; behavior is unchanged (#1065).
+ * and Node builtin imports (stubbed by farmServerOnlyEntriesPlugin).
+ * Diagnostics only; behavior is unchanged (#1065). Each finding is reported
+ * with its code and its position in the original source.
  */
-function warnClientBoundaryOnce(
-  context: { parse(code: string): unknown },
+async function warnClientBoundaryOnce(
+  context: {
+    parse(code: string): unknown;
+    resolve(source: string, importer?: string): Promise<{ id: string } | null>;
+    getCombinedSourcemap(): unknown;
+  },
   id: string,
   code: string,
   config: FarmVitePluginOptions,
-): void {
+): Promise<void> {
   if (warnedClientBoundaryIds.has(id)) return;
 
   let program: unknown;
@@ -1715,17 +1731,30 @@ function warnClientBoundaryOnce(
     return;
   }
   const publicKeys = new Set(Object.keys((config as any).env?.public ?? {}));
-  const findings = analyzeClientBoundary(program as any, publicKeys);
-
-  if (
-    findings.envKeys.length === 0 &&
-    findings.publicEnvKeys.length === 0 &&
-    findings.builtinImports.length === 0
-  ) {
-    return;
+  const findings = [];
+  for (const finding of analyzeClientBoundary(program as any, publicKeys)) {
+    // A bare specifier counts only when the browser gets Farm's stub for it, not a package the
+    // app installed under the builtin's name (`events`, `buffer`).
+    if (finding.kind === "builtin" && !finding.name.startsWith("node:")) {
+      const resolved = await context.resolve(finding.name, id).catch(() => null);
+      if (!resolved?.id.startsWith(FARM_BROWSER_BUILTIN_PREFIX)) continue;
+    }
+    findings.push(finding);
   }
+  if (findings.length === 0) return;
+
   warnedClientBoundaryIds.add(id);
-  logger.warn(formatClientBoundaryWarning(id, findings));
+  const locate = createFarmSourceLocator(code, () => context.getCombinedSourcemap());
+  logger.warn(
+    findings
+      .map((finding) =>
+        formatFarmDiagnostic(
+          createClientBoundaryDiagnostic(id, finding, locate(finding.start)),
+          config.root,
+        ),
+      )
+      .join("\n"),
+  );
 }
 
 /**
@@ -5248,13 +5277,19 @@ export const manifest = getManifest();
           // @farm.js/plugin/rsc transform makes client imports safe.
           const violation = findClientServerFnViolation(code, id);
           if (violation) {
-            this.error(formatServerFnBoundaryError(violation, id));
+            const locate = createFarmSourceLocator(code, () => this.getCombinedSourcemap());
+            this.error(
+              formatFarmDiagnostic(
+                createServerFnBoundaryDiagnostic(violation, id, locate(violation.start)),
+                currentConfig.root,
+              ),
+            );
           }
         }
       }
 
       if (!transformOptions?.ssr && shouldInspectClientBoundary(id, code)) {
-        warnClientBoundaryOnce(this, id, code, farmApp?.getConfig() ?? options);
+        await warnClientBoundaryOnce(this, id, code, farmApp?.getConfig() ?? options);
       }
 
       if (typeof imageImports.transform === "function") {

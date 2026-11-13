@@ -1,3 +1,5 @@
+import { createFarmDiagnostic, type FarmDiagnostic, type FarmSourceLocation } from "./diagnostics";
+
 const SERVER_FN_FACTORIES = ["createServerQuery", "createServerFn"] as const;
 
 const FARM_CORE_IMPORT_RE =
@@ -5,6 +7,8 @@ const FARM_CORE_IMPORT_RE =
 
 export type ServerFnBoundaryViolation = {
   factory: (typeof SERVER_FN_FACTORIES)[number];
+  /** Offset of the first call to the factory in the analyzed code. */
+  start: number;
 };
 
 /**
@@ -33,22 +37,22 @@ export function findClientServerFnViolation(
       if (!new RegExp(`(?:^|[\\s{,])${factory}(?:[\\s},]|$)`).test(specifiers)) continue;
       // Only a call site makes the module a server-function definition; a
       // type-only or re-exported symbol never executes a handler.
-      if (new RegExp(`(?<![\\w$.])${factory}\\s*(?:<[^>]*>)?\\s*\\(`).test(code)) {
-        return { factory };
-      }
+      const call = new RegExp(`(?<![\\w$.])${factory}\\s*(?:<[^>]*>)?\\s*\\(`).exec(code);
+      if (call) return { factory, start: call.index };
     }
   }
   return null;
 }
 
-export function formatServerFnBoundaryError(
+export function createServerFnBoundaryDiagnostic(
   violation: ServerFnBoundaryViolation,
   id: string,
-): string {
-  return [
-    `${violation.factory} handlers run only on the server, but ${id} is being bundled into the client.`,
-    `Importing a ${violation.factory} module from client code executes the server handler (and its Node-only imports) in the browser.`,
-    `Either enable the server-function transform (add @farm.js/plugin/rsc and set experimental.serverActions: true in farm.config.ts) so client imports become server references,`,
-    `or keep the query on the server: call it from server components, or expose an API route and use createAPIClient from the client.`,
-  ].join("\n");
+  location?: FarmSourceLocation,
+): FarmDiagnostic {
+  return createFarmDiagnostic(
+    "CLIENT_SERVER_FUNCTION",
+    id,
+    `${violation.factory} handlers run only on the server, but this module is bundled into the client, so the handler and its Node-only imports would run in the browser.`,
+    location,
+  );
 }
