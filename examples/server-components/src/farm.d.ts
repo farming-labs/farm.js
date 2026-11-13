@@ -103,6 +103,7 @@ export type RoutePath =
   | "/window"
   | "/wire/circular"
   | "/wire/function-prop"
+  | "/wire/promise-cycle"
   | "/wire/promise-element"
   | "/wire/stream-prop"
   | "/wire/stream-result";
@@ -197,6 +198,7 @@ export type RoutePattern =
   | "/window"
   | "/wire/circular"
   | "/wire/function-prop"
+  | "/wire/promise-cycle"
   | "/wire/promise-element"
   | "/wire/stream-prop"
   | "/wire/stream-result";
@@ -295,6 +297,7 @@ export type RouteModulePattern =
   | "/window"
   | "/wire/circular"
   | "/wire/function-prop"
+  | "/wire/promise-cycle"
   | "/wire/promise-element"
   | "/wire/stream-prop"
   | "/wire/stream-result";

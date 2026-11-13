@@ -66,3 +66,18 @@ test("elements a promise resolves to render with live client components, as a pr
   await expect(revealed).toHaveText("Revealed: 8");
   expect(errors).toEqual([]);
 });
+
+test("a promise that settles to the object holding it gives back that object, as a prop and as an action's result", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/wire/promise-cycle");
+  await page.waitForLoadState("networkidle");
+  const view = page.getByRole("button", { name: /^holder / });
+  await expect(view).toHaveText("holder true 0");
+  await view.click();
+  await expect(view).toHaveText("holder true 1");
+  await page.getByRole("button", { name: "Hold", exact: true }).click();
+  await expect(page.getByTestId("reply")).toHaveText("reply true");
+  expect(errors).toEqual([]);
+});
