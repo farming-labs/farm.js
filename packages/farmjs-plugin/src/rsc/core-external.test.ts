@@ -816,9 +816,16 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           // A static page prerenders at the URL that names its locale. The default locale's URL
           // redirects visitors who prefer French, so it stays server-rendered.
           const publicDir = path.join(outputDir, "public", "console");
-          expect(
-            readFileSync(path.join(publicDir, "fr", "static", "index.html"), "utf8"),
-          ).toContain("Static fr");
+          const prerenderedHtml = readFileSync(
+            path.join(publicDir, "fr", "static", "index.html"),
+            "utf8",
+          );
+          expect(prerenderedHtml).toContain("Static fr");
+          // No visitor's request drives a prerender, so its hreflang links name paths only, as
+          // core's background regeneration renders them without a metadataBase.
+          expect(prerenderedHtml).toContain(
+            '<link rel="alternate" hreflang="fr" href="/console/fr/static">',
+          );
           expect(readFileSync(path.join(publicDir, "fr", "static.rsc"), "utf8")).toContain(
             "Static fr",
           );
@@ -1201,6 +1208,24 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             const body = await response.text();
             for (const marker of markers) expect(body, `${pathname} ${logs}`).toContain(marker);
           }
+
+          // hreflang alternates name the page in each locale and x-default on the request's
+          // origin, in the document and in the payload client navigation reads.
+          const alternates = await (
+            await get("/console/fr/about", { "accept-language": "de" })
+          ).text();
+          for (const [hreflang, pathname] of [
+            ["en", "/console/about"],
+            ["fr", "/console/fr/about"],
+            ["x-default", "/console/about"],
+          ]) {
+            expect(alternates, logs).toContain(
+              `<link rel="alternate" hreflang="${hreflang}" href="${origin}${pathname}">`,
+            );
+          }
+          expect(
+            await (await get("/console/fr/about.rsc", { "accept-language": "de" })).text(),
+          ).toContain(`hreflang=\\"fr\\" href=\\"${origin}/console/fr/about\\"`);
 
           // A page URL without a locale goes to the visitor's, varying on the signal it used.
           const detected = await get("/console/about", { "accept-language": "fr" });

@@ -57,6 +57,8 @@ import {
   getFarmLocaleVaryHeaders,
   localizeFarmHref,
   localizeFarmPathname,
+  renderFarmLocaleAlternateLinks,
+  resolveFarmWebRequestOrigin as resolveFarmI18nRequestOrigin,
 } from '@farm.js/core/internal/production-runtime';
 ${catalogs}
 // createTranslator(locale) and runWithLocale() outside a request.
@@ -109,6 +111,23 @@ function localizeFarmRedirectUrl(url) {
   return snapshot && url.startsWith('/') && !url.startsWith('//')
     ? localizeFarmHref(url, snapshot.locale, snapshot)
     : url;
+}
+
+/**
+ * The page's \`<link rel="alternate" hreflang>\` tags, as core's servers render them: its URL in each
+ * locale and x-default, absolute on the route's metadataBase, else on the request's origin (under
+ * server.trustProxy). A prerendered page, which no visitor's request drives, uses metadataBase
+ * only, as core's background regeneration does.
+ */
+function renderFarmI18nAlternateLinks(request, pathname, metadata) {
+  const snapshot = getFarmI18nClientSnapshot();
+  if (!snapshot) return '';
+  return renderFarmLocaleAlternateLinks(pathname, snapshot, {
+    metadataBase: metadata.metadataBase,
+    origin: isFarmPrerenderRequest(request)
+      ? undefined
+      : resolveFarmI18nRequestOrigin(request, { trustProxy: ${JSON.stringify(ctx.server?.trustProxy === true)} }),
+  });
 }
 
 function applyFarmI18nResponse(response, resolution) {
@@ -1442,7 +1461,7 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
   const metadataHead =
     (renderedHead.hasExplicitTitle ? '<title>' + renderedHead.title + '</title>' : '') +
     renderedHead.viewport +
-    renderedHead.tags;
+    renderedHead.tags${i18n ? " + renderFarmI18nAlternateLinks(request, url.pathname, metadata)" : ""};
   const metadataTitle = resolveMetadataTitle(metadata.title);
   
   debug('Rendering page:', pattern, 'with props:', pageProps);

@@ -489,8 +489,11 @@ Both setups follow the same route contract:
   action or form sends `/console/fr/about`, as other Farm apps localize it. Farm sets `lang` and
   `dir` on the `<html>` it renders; a root layout that renders `<html>` sets them itself, for example
   `<html lang={getLocale()}>`. With `trailingSlash: true`, a locale redirect goes straight to the
-  page's trailing-slash URL. `hreflang` alternate links are not rendered yet, and `llms.txt` and
-  `sitemap.xml` list each page once, at its unprefixed URL, as in other Farm apps.
+  page's trailing-slash URL. The head carries `hreflang` alternate links for each locale and
+  `x-default`, absolute on the route's `metadataBase` or the request's origin (forwarded headers
+  only with `server.trustProxy`), as in other Farm apps; a prerendered page has no request, so
+  without `metadataBase` its alternates name paths. `llms.txt` and `sitemap.xml` list each page
+  once, at its unprefixed URL, as in other Farm apps.
 - **Trailing slashes.** Pages follow [`trailingSlash`](/docs/configuration#trailing-slashes) as in
   other Farm apps: by default `/about/` redirects (308) to `/about`, and with `trailingSlash: true`
   `/about` redirects to `/about/`, `<Link href="/about">` renders `/about/`, and its payload is

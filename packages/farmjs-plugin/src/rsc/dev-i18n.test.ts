@@ -125,6 +125,16 @@ export default async function Page() { redirect("/about"); }`,
     const html = await french.text();
     expect(html).toContain("Locale fr from url: Bonjour");
     expect(html).toContain('<html lang="fr"');
+    // hreflang alternates for each locale and x-default, on the request's origin, as core renders.
+    for (const [hreflang, pathname] of [
+      ["en", "/console/about"],
+      ["fr", "/console/fr/about"],
+      ["x-default", "/console/about"],
+    ]) {
+      expect(html).toContain(
+        `<link rel="alternate" hreflang="${hreflang}" href="${origin}${pathname}">`,
+      );
+    }
 
     const english = await get("/console/about");
     expect(english.status).toBe(200);
@@ -132,7 +142,10 @@ export default async function Page() { redirect("/about"); }`,
 
     const payload = await get("/console/fr/about.rsc");
     expect(payload.status).toBe(200);
-    expect(await payload.text()).toContain("Locale fr from url: Bonjour");
+    const flight = await payload.text();
+    expect(flight).toContain("Locale fr from url: Bonjour");
+    // Client navigation reads the head from the payload.
+    expect(flight).toContain(`hreflang=\\"x-default\\" href=\\"${origin}/console/about\\"`);
   }, 60_000);
 
   it("reads an edited catalog without a restart", async () => {
