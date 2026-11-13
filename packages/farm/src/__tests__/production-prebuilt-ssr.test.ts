@@ -579,7 +579,12 @@ export default { plugins: [
             expect(response.status).toBe(200);
             expect(response.headers.has("x-farm-preload-buffered")).toBe(false);
             expect(response.headers.has("x-farm-preload-streaming")).toBe(false);
-            expect(response.headers.getSetCookie()).toEqual(["a=1; Path=/", "b=2; Path=/"]);
+            // The page's deployment cookie follows the configured ones.
+            expect(response.headers.getSetCookie()).toEqual([
+              "a=1; Path=/",
+              "b=2; Path=/",
+              "__farm_deployment=preload-buffered-response-test; Path=/; HttpOnly; SameSite=Lax",
+            ]);
             const html = await response.text();
             expect(html).toContain("prebuilt SSR output");
             if (withPlugin) {
@@ -5018,6 +5023,9 @@ export default function RootLayout({ children }) {
     }
   }, 120_000);
 
+  const STANDALONE_DEPLOYMENT_COOKIE =
+    "__farm_deployment=standalone-node-test; Path=/; HttpOnly; SameSite=Lax";
+
   it("boots standalone Node output through the package import mapping", async () => {
     const root = await createProductionFixture();
     const isolatedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "farm-standalone-prebuilt-"));
@@ -5070,6 +5078,7 @@ export default function DynamicPage({ params }) {
           root,
           srcDir: "src",
           images: { provider: "none" },
+          deploymentId: "standalone-node-test",
           redirects: () => [
             {
               source: "/legacy-home",
@@ -5178,6 +5187,7 @@ export default function DynamicPage({ params }) {
           expect(exactResponse.headers.getSetCookie()).toEqual([
             "shared=1; Path=/",
             "about=1; Path=/",
+            STANDALONE_DEPLOYMENT_COOKIE,
           ]);
           await expect(exactResponse.text()).resolves.toContain("exact production route");
         }
@@ -5185,7 +5195,10 @@ export default function DynamicPage({ params }) {
         const dynamicResponse = await fetch(new URL("/contact", response.url));
         expect(dynamicResponse.status).toBe(200);
         expect(dynamicResponse.headers.get("x-header-order")).toBe("dynamic");
-        expect(dynamicResponse.headers.getSetCookie()).toEqual(["shared=1; Path=/"]);
+        expect(dynamicResponse.headers.getSetCookie()).toEqual([
+          "shared=1; Path=/",
+          STANDALONE_DEPLOYMENT_COOKIE,
+        ]);
         const dynamicHtml = await dynamicResponse.text();
         expect(dynamicHtml).toContain("dynamic production route");
         expect(dynamicHtml).toContain("contact");
@@ -6229,6 +6242,7 @@ export default function Page() {
               expect(response.headers.getSetCookie()).toEqual([
                 "first=1; Path=/",
                 "second=2; Path=/",
+                "__farm_deployment=production-runtime-request-context-test; Path=/base; HttpOnly; SameSite=Lax",
               ]);
           },
           "/base/incoming?q=one&q=two",

@@ -7499,7 +7499,12 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
   createLateNotFoundRecovery,
-  createLateRedirectRecovery,${config.mobileClient ? "\n  createFarmNativeTreeResponse," : ""}${
+  createLateRedirectRecovery,
+  _withFarmDeploymentCookie,
+  _withFarmResponseHeaders,
+  createFarmDeploymentMismatchResponse,
+  FARM_DEPLOYMENT_ID_HEADER,
+  getFarmDeploymentMismatch,${config.mobileClient ? "\n  createFarmNativeTreeResponse," : ""}${
     hasInfraAnalyticsRuntime
       ? "\n  resolveFarmDocsEngineRouteLabel,\n  resolveFarmDocsRouteLabel,\n  resolveFarmMarkdownRouteLabel,\n  resolveFarmMCPRouteLabel,\n  setFarmRouteLabel,"
       : ""
@@ -8315,6 +8320,10 @@ function fetchFarmInnerRequest(request, context) {
   return fetch(new Request(request, { headers }), context);
 }
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
+// Deployment skew protection (see the deployment docs): documents embed this ID, page responses
+// name it, and a page request from a browser holding another deployment's page is refused.
+const farmDeploymentId = ${JSON.stringify(config.deploymentId)};
+const farmDeploymentCookiePath = ${JSON.stringify(config.basePath || "/")};
 // Reports a failure Farm answers itself (an API or integration route's 500) to the plugin
 // runtime request.
 const farmRuntimeErrorSlot = Symbol("farm.runtime.error.slot");
@@ -8437,7 +8446,8 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
   let source = 'window.__FARM_PROPS__=' + serializedPageProps +
     ';window.__FARM_INTEGRATION_API_MANIFEST__=' +
     serializeFarmInlineValue(integrationManifest) +
-    ';window.__FARM_ROUTE_SLOTS__=' + serializedRouteSlots + ';';
+    ';window.__FARM_ROUTE_SLOTS__=' + serializedRouteSlots +
+    ';window.__FARM_DEPLOYMENT_ID__=' + serializeFarmInlineValue(farmDeploymentId) + ';';
   if (typeof canonicalPath === "string" && canonicalPath.startsWith("/")) {
     const serializedPath = serializeFarmInlineValue(canonicalPath);
     source += 'if(location.pathname+location.search!==' + serializedPath + '){' +
@@ -10447,8 +10457,9 @@ async function handleFarmRequestInContext(
   adapterContext,
   requestUrl = new URL(request.url),
 ) {
-  const farmCacheGuard = { guarded: farmPluginRuntimeKeepsResponsesPrivate };
-  const response = await resolveFarmRequestInContext(
+  // deploymentPage: a page route answered, so the response names this deployment.
+  const farmCacheGuard = { guarded: farmPluginRuntimeKeepsResponsesPrivate, deploymentPage: false };
+  let response = await resolveFarmRequestInContext(
     farmCacheGuard,
     request,
     farmLocaleResolution,
@@ -10457,6 +10468,11 @@ async function handleFarmRequestInContext(
     adapterContext,
     requestUrl,
   );
+  if (farmCacheGuard.deploymentPage) {
+    response = _withFarmResponseHeaders(response, (headers) =>
+      headers.set(FARM_DEPLOYMENT_ID_HEADER, farmDeploymentId)
+    );
+  }
   if (!farmCacheGuard.guarded) return response;
   // Tells the Nitro entry, which keeps this policy over a swr rule's public one.
   adapterContext?.onGuardedResponse?.();
@@ -11069,6 +11085,14 @@ ${
   // Handle page routes (SSR)
   emitFarmEvent({ type: "render.start", route: pathname, pathname });
   const matchedRoute = matchPageRoute(routePathname);
+  if (matchedRoute) {
+    // A browser holding another deployment's page names it: a navigation fetch in its header, a
+    // form or server action post in the deployment cookie. Refuse it before an action runs, and
+    // before a document would refresh that cookie to this deployment.
+    const farmDeploymentMismatch = getFarmDeploymentMismatch(request, farmDeploymentId);
+    if (farmDeploymentMismatch) return createFarmDeploymentMismatchResponse(farmDeploymentMismatch);
+    farmCacheGuard.deploymentPage = true;
+  }
   ${
     farmIslandsMode
       ? `// Islands mode: a form or client component posting a server action to this page.
@@ -12550,9 +12574,15 @@ async function handleFarmFetch(request, context) {
           const configured = applyConfiguredResponseHeaders(response, routePathname);
           // Configured headers may edit the response in place, so check it either way.
           const guarded = farmGuardedResponse ? _withFarmGuardedResponseCache(configured) : configured;
+          // The deployment cookie goes on once the response's cache policy is final.
           return applyFarmPreloadBudget(
             applyFarmCspNonceToResponse(
-              applyFarmMobileShellResponse(runtimeRequest, guarded, context),
+              _withFarmDeploymentCookie(
+                runtimeRequest,
+                applyFarmMobileShellResponse(runtimeRequest, guarded, context),
+                farmDeploymentId,
+                farmDeploymentCookiePath,
+              ),
               farmSecurityConfig,
               cspNonce,
             ),

@@ -87,7 +87,12 @@ import {
 import { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
 import { createFarmSearchParams, searchParamsToObject } from "../search-params";
 import { prepareDeferredData, snapshotDeferredData, type DeferredRecord } from "../deferred";
-import { createFarmDeploymentCookie, FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
+import {
+  createFarmDeploymentCookie,
+  createFarmDeploymentMismatchResponse,
+  FARM_DEPLOYMENT_ID_HEADER,
+  getFarmDeploymentMismatch,
+} from "../deployment";
 import type { StaticMetadataImageInfo } from "../static-metadata-image";
 import {
   _runWithFarmI18nRequest,
@@ -1561,9 +1566,17 @@ export class ServerRenderer {
         return;
       }
 
+      const match = this.routeManager.matchRoute(pathname);
+      // A browser holding another deployment's page is refused before an action runs or the
+      // document refreshes its deployment cookie, as in production.
+      const deploymentMismatch = match.route ? this.getDeploymentMismatch(req) : null;
+      if (deploymentMismatch) {
+        await sendWebResponse(res, createFarmDeploymentMismatchResponse(deploymentMismatch));
+        completeRender(res.statusCode, match.route!.pattern);
+        return;
+      }
       this.applyDeploymentHeaders(req, res);
 
-      const match = this.routeManager.matchRoute(pathname);
       if (match.route) {
         const redirectLocation = resolveFarmTrailingSlashRedirect(url, this.config.trailingSlash);
         if (redirectLocation) {
@@ -4580,6 +4593,18 @@ ${clientScript}
     } else {
       res.setHeader("Set-Cookie", cookie);
     }
+  }
+
+  private getDeploymentMismatch(req: FarmRequest) {
+    const headers = new Headers();
+    for (const name of [FARM_DEPLOYMENT_ID_HEADER, "cookie"]) {
+      const value = req.headers[name];
+      if (value) headers.set(name, Array.isArray(value) ? value.join("; ") : value);
+    }
+    return getFarmDeploymentMismatch(
+      { method: req.method || "GET", headers },
+      this.getDeploymentId(),
+    );
   }
 
   private getDeploymentId(): string {
