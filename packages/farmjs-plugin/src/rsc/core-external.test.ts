@@ -669,7 +669,7 @@ export function GET() { return Response.json({ locale: getLocale(), source: getL
           path.join(srcDir, "layout.tsx"),
           `${name === "nested-layouts" ? 'import { Provider } from "./components/provider";' : ""}
 export default function Layout({ children }) {
-  return ${name === "nested-layouts" ? "<section>Root layout marker <Provider>{children}</Provider></section>" : name === "i18n" ? "<section>{children}</section>" : "<html><body>{children}</body></html>"};
+  return ${name === "nested-layouts" ? "<section>Root layout marker <Provider>{children}</Provider></section>" : name === "i18n" ? '<html lang="en"><body>{children}</body></html>' : "<html><body>{children}</body></html>"};
 }`,
         );
         writeFileSync(
@@ -1195,9 +1195,18 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
               signal: AbortSignal.timeout(10_000),
             });
           for (const [pathname, accept, markers] of [
-            ["/console/fr/about", "text/html", ["Locale fr from url: Bonjour", '<html lang="fr"']],
+            // The root layout renders <html lang="en">: Farm sets the request's lang and dir on it.
+            [
+              "/console/fr/about",
+              "text/html",
+              ["Locale fr from url: Bonjour", '<html lang="fr" dir="ltr">'],
+            ],
             ["/console/fr/about.rsc", "*/*", ["Locale fr from url: Bonjour", '"locale":"fr"']],
-            ["/console/about", "text/html", ["Locale en from default: Hello", '<html lang="en"']],
+            [
+              "/console/about",
+              "text/html",
+              ["Locale en from default: Hello", '<html lang="en" dir="ltr">'],
+            ],
             ["/console/fr/legacy", "text/html", ["Legacy fr in fr"]],
             // Client components render and hydrate with the request's locale and catalog.
             ["/console/fr/links", "text/html", ['href="/console/fr/about"', "Client fr: Bonjour"]],

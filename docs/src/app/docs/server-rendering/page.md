@@ -490,8 +490,9 @@ Both setups follow the same route contract:
   `useTranslations()`, and `<Link href="/about">`, which renders `/console/fr/about` on a French page.
   A link to another locale loads a new document. `redirect("/about")` from a French page, server
   action or form sends `/console/fr/about`, as other Farm apps localize it. Farm sets `lang` and
-  `dir` on the `<html>` it renders; a root layout that renders `<html>` sets them itself, for example
-  `<html lang={getLocale()}>`. With `trailingSlash: true`, a locale redirect goes straight to the
+  `dir` on the document's `<html>`, also on the one a root layout returns, in place of the layout's
+  own, as other Farm apps do; a root layout that is a client component or returns `<html>` inside
+  another component sets them itself, for example `<html lang={getLocale()}>`. With `trailingSlash: true`, a locale redirect goes straight to the
   page's trailing-slash URL. The head carries `hreflang` alternate links for each locale and
   `x-default`, absolute on the route's `metadataBase` or the request's origin (forwarded headers
   only with `server.trustProxy`), as in other Farm apps; a prerendered page has no request, so

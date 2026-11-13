@@ -130,6 +130,26 @@ function renderFarmI18nAlternateLinks(request, pathname, metadata) {
   });
 }
 
+/**
+ * A root layout that renders \`<html>\` gets the request's \`lang\` and \`dir\` on it, replacing its
+ * own, as core's servers set them on any document. They go on the element the layout returns, so
+ * the browser hydrates the attributes the HTML has. FarmLocaleDocument renders a synchronous
+ * layout in its place, within the render, as React would.
+ */
+function FarmLocaleDocument({ Layout, layoutProps }) {
+  const element = Layout(layoutProps);
+  return element && typeof element.then === 'function'
+    ? element.then(withFarmDocumentLocale)
+    : withFarmDocumentLocale(element);
+}
+
+function withFarmDocumentLocale(element) {
+  const snapshot = getFarmI18nClientSnapshot();
+  return snapshot && React.isValidElement(element) && element.type === 'html'
+    ? React.cloneElement(element, { lang: snapshot.locale, dir: snapshot.direction })
+    : element;
+}
+
 function applyFarmI18nResponse(response, resolution) {
   const varyHeaders = getFarmLocaleVaryHeaders(farmRouteI18n, resolution);
   if (!resolution.persist && varyHeaders.length === 0) return response;
@@ -1509,9 +1529,24 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
     const Layout = LayoutModules[index].default;
     const layoutProps = { params: pageProps.params, children: layoutContent };
     if (Layout.constructor.name === 'AsyncFunction') {
-      layoutContent = await Layout(layoutProps);
+      layoutContent = await Layout(layoutProps);${
+        i18n
+          ? `
+      if (index === 0 && farmDocumentLayoutModules.has(LayoutModules[0])) {
+        layoutContent = withFarmDocumentLocale(layoutContent);
+      }`
+          : ""
+      }
     } else {
-      layoutContent = h(Layout, layoutProps);
+      layoutContent = ${
+        i18n
+          ? `index === 0 &&
+        farmDocumentLayoutModules.has(LayoutModules[0]) &&
+        Layout.$$typeof !== Symbol.for('react.client.reference')
+        ? h(FarmLocaleDocument, { Layout, layoutProps })
+        : `
+          : ""
+      }h(Layout, layoutProps);
     }
   }
   

@@ -1,3 +1,4 @@
+import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   renderFarmLocaleAlternateLinks,
@@ -96,5 +97,99 @@ describe("RSC hreflang alternates", () => {
     expect(alternateLinksRenderer(false)(prerender, "/console/fr/static", {})).toContain(
       '<link rel="alternate" hreflang="fr" href="/console/fr/static">',
     );
+  });
+});
+
+/**
+ * The generated layout loop of a page whose root layout renders <html>, run with React and a
+ * request snapshot in `locale`.
+ */
+async function renderRootLayout(
+  Layout: unknown,
+  { ownsDocument = true, locale = "fr", direction = "ltr" } = {},
+): Promise<React.ReactElement> {
+  const source = entry();
+  const start = source.indexOf("  // Render layouts inside out");
+  const end = source.indexOf("  // A root layout that renders <html>", start);
+  const helpersStart = source.indexOf("function FarmLocaleDocument(");
+  const helpersEnd = source.indexOf("function applyFarmI18nResponse(", helpersStart);
+  const rootModule = { default: Layout };
+  return new Function(
+    "React",
+    "getFarmI18nClientSnapshot",
+    "LayoutModules",
+    "farmDocumentLayoutModules",
+    "pageContent",
+    "pageProps",
+    "h",
+    `${source.slice(helpersStart, helpersEnd)}
+return (async () => {
+${source.slice(start, end)}
+return layoutContent;
+})();`,
+  )(
+    React,
+    () => ({ ...i18n, locale, direction }),
+    [rootModule],
+    new Set(ownsDocument ? [rootModule] : []),
+    React.createElement("main", null, "page"),
+    { params: {} },
+    React.createElement,
+  );
+}
+
+/** Render a server component element the way the RSC renderer does, one level. */
+async function renderComponent(element: React.ReactElement): Promise<any> {
+  const type = element.type as (props: unknown) => unknown;
+  return typeof type === "function" ? await type(element.props) : element;
+}
+
+describe("RSC root layouts that render <html> under i18n", () => {
+  it("get the request's lang and dir in place of their own", async () => {
+    const Layout = ({ children }: { children: React.ReactNode }) =>
+      React.createElement("html", { lang: "en" }, React.createElement("body", null, children));
+    const html = await renderComponent(
+      await renderRootLayout(Layout, { locale: "ar", direction: "rtl" }),
+    );
+    expect(html.type).toBe("html");
+    expect(html.props).toMatchObject({ lang: "ar", dir: "rtl" });
+    expect(html.props.children.props.children.props.children).toBe("page");
+  });
+
+  it("set them on an async layout's document and on one a sync layout resolves later", async () => {
+    const AsyncLayout = async ({ children }: { children: React.ReactNode }) =>
+      React.createElement("html", null, React.createElement("body", null, children));
+    const asyncHtml = await renderRootLayout(AsyncLayout);
+    expect(asyncHtml.type).toBe("html");
+    expect(asyncHtml.props).toMatchObject({ lang: "fr", dir: "ltr" });
+
+    const ThenableLayout = ({ children }: { children: React.ReactNode }) =>
+      Promise.resolve(
+        React.createElement("html", null, React.createElement("body", null, children)),
+      );
+    const thenableHtml = await renderComponent(await renderRootLayout(ThenableLayout));
+    expect(thenableHtml.props).toMatchObject({ lang: "fr", dir: "ltr" });
+  });
+
+  it("leave other root layouts, client layouts and non-<html> results as React renders them", async () => {
+    const Section = ({ children }: { children: React.ReactNode }) =>
+      React.createElement("section", null, children);
+    const shell = await renderRootLayout(Section, { ownsDocument: false });
+    expect(shell.type).toBe(Section);
+
+    const ClientLayout = Object.assign(() => null, {
+      $$typeof: Symbol.for("react.client.reference"),
+    });
+    expect((await renderRootLayout(ClientLayout)).type).toBe(ClientLayout);
+
+    const fragment = await renderComponent(await renderRootLayout(Section));
+    expect(fragment.type).toBe("section");
+    expect(fragment.props).not.toHaveProperty("lang");
+  });
+
+  it("are rendered as written without i18n", () => {
+    const source = entry({ i18n: undefined, i18nCatalogs: undefined });
+    expect(source).not.toContain("FarmLocaleDocument");
+    expect(source).not.toContain("withFarmDocumentLocale");
   });
 });
