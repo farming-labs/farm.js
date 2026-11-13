@@ -163,7 +163,7 @@ export async function startBotWidget(
   if (create === Symbol.for("@farm.js/bot/no-widget")) {
     throw new BotError(
       "missing_plugin",
-      `This build has no widget for "${start.widget}". The bot plugin's \`configure\` hook adds it, and \`experimental.serverComponents\` in \`rsc\` mode doesn't run that hook yet. Use \`islands\` mode.`,
+      `This build has no widget for "${start.widget}". The bot plugin's \`configure\` hook adds it, so add \`bot()\` to \`plugins\` in farm.config.ts. \`experimental.serverComponents\` in \`rsc\` mode skips that hook with \`@farm.js/core\` 0.1.67 or earlier.`,
     );
   }
   if (typeof create !== "function") {

@@ -100,6 +100,29 @@ describe("app markdown pages", () => {
     expect(html).toContain('<aside class="callout">Markdown-first pages</aside>');
   });
 
+  it("loads lazily configured components once, on the first render, and retries a failure", async () => {
+    let loads = 0;
+    const mod = createFarmMarkdownRouteModule({
+      filePath: "/app/about/page.mdx",
+      source: ["---", "title: About Farm", "---", "<Callout>Lazy</Callout>"].join("\n"),
+      components: async () => {
+        loads += 1;
+        if (loads === 1) throw new Error("components failed to load");
+        return {
+          Callout: (props) => React.createElement("aside", null, props.children),
+        };
+      },
+    });
+
+    expect(mod.metadata).toMatchObject({ title: "About Farm" });
+    expect(loads).toBe(0);
+    await expect((mod.default as any)({})).rejects.toThrow("components failed to load");
+    for (let render = 0; render < 2; render++) {
+      expect(renderToStaticMarkup(await (mod.default as any)({}))).toContain("<aside>Lazy</aside>");
+    }
+    expect(loads).toBe(2);
+  });
+
   it("serves raw source at the markdown route", async () => {
     const response = await createFarmMarkdownSourceResponse({
       request: new Request("https://farm.test/about.md"),

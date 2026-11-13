@@ -5,6 +5,7 @@ export type BotErrorCode =
   | "test_key_in_production"
   | "invalid_secret_key"
   | "missing_request"
+  | "missing_hostnames"
   | "missing_plugin";
 
 /** A configuration problem the app owner has to fix. Visitor failures are returned, not thrown. */

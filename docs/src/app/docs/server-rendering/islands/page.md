@@ -55,7 +55,10 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
 
 - **Server.** Farm renders the page once, on its normal server pipeline. Farm's compiler wraps
   every `"use client"` export in islx's island component, which writes the `<f-island>` element and
-  its props. Server output passed to a client component renders once, inside it.
+  its props. Server output passed to a client component renders once, inside it. Props take what
+  RSC sends: promises, `ReadableStream`s and async iterables stream in after the page, a value
+  that refers to itself arrives with the same cycle, and a plain function fails the render with an
+  error that names the component and the prop.
 - **Browser.** Farm's client entry hands every `<f-island>` to islx's hydration runtime, which
   imports the island's module when its strategy is due and hydrates it in place. A page whose
   islands all wait loads a 1.7 KB boot script instead of the runtime.
@@ -64,6 +67,9 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   and a navigation keeps the provider's state.
 - **Actions.** `"use server"` functions compile to islx action references. A form posts its action
   without a page load, or without JavaScript, and the page refreshes with its islands' state kept.
+  An action called from a client component can return elements, promises and streams, as under
+  RSC: elements render on the server, and promises and streams settle in the browser after the
+  call returns. Its arguments and result can refer to themselves.
 - **Navigation.** A navigation fetches the page's HTML, streamed, with only the layouts the
   browser does not keep, and hydrates the islands it brings.
 
@@ -119,11 +125,13 @@ parts:
 | `import "server-only"` in server code                                                                                                           | yes   | Server builds get an empty module. A browser build that imports it fails, naming the importer.                                                                                                                         |
 | `import "client-only"`                                                                                                                          | yes   | A client component gets its empty build; a server component gets its `react-server` build, which throws, as RSC rejects it.                                                                                            |
 | A package client component in a server component (`next-themes`, `sonner`'s `Toaster`, Radix parts, jotai's `Provider`, `SWRConfig`)            | yes   | Farm writes a client reference module for each export (`.farm/client-references/`) and server code imports that, so the export renders as an island, as RSC renders a client reference.                                |
+| A workspace package's server component in a monorepo, rendering client components of its own dependencies                                       | yes   | Its server code is app code, as the bundler compiles it. A client reference resolves a package as the importer does, so a dependency the app does not have, or has at another version, still loads.                    |
 | A server module that re-exports package client components (`export { Toaster } from "sonner"`)                                                  | yes   | The re-export points at the same client references, so modules that import it render those components as islands.                                                                                                      |
 | Client components in workspace sources outside the app (a monorepo's `packages/ui/src`, through tsconfig `paths` or a relative import)          | yes   | They render as islands, like the app's own client components.                                                                                                                                                          |
 | A package provider around server content                                                                                                        | yes   | Client components inside it are its descendants and read its context.                                                                                                                                                  |
 | A package provider in a layout                                                                                                                  | yes   | The layout renders as a server tree; the provider keeps its state across navigations.                                                                                                                                  |
 | `useFormStatus` in a client component inside a server `<form>`                                                                                  | yes   | Farm points the import at islx's `useFormStatus`, which reports the server form's submit.                                                                                                                              |
+| `useActionState` with a server action, in a form posted before JavaScript loads                                                                 | yes   | The page renders with the action's result, and its island hydrates with that state, as under React Server Components.                                                                                                  |
 | `useId` in client components                                                                                                                    | yes   | Ids match the server HTML and are unique across islands.                                                                                                                                                               |
 | `cache` from `react` in server code, or `React.cache`                                                                                           | yes   | Farm points them at a request-scoped `cache`, as RSC memoizes it, in app server code and in the `react-server` builds it reaches.                                                                                      |
 | `cacheSignal()` from `react` in server code                                                                                                     | yes   | It returns the request's `AbortSignal`, which aborts when the response ends, as RSC's does after a render.                                                                                                             |

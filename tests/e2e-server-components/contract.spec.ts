@@ -383,6 +383,22 @@ test("client navigation keeps a layout's client state and does not reload the do
   expect(errors).toEqual([]);
 });
 
+test("a layout's island waiting below a client page still hydrates after a navigation", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/nav-client/a");
+  await expect(page.getByRole("heading", { name: "Client page A" })).toBeVisible();
+  // Neither the page nor the layout's counter has hydrated: nothing has touched them.
+  await page.getByRole("link", { name: "Server page" }).click();
+  await expect(page.getByRole("heading", { name: "Server page B" })).toBeVisible();
+  await hydrated(page);
+  const button = page.getByRole("button", { name: /^Client layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Client layout clicks: 1");
+  expect(errors).toEqual([]);
+});
+
 test("browser-only code runs after hydration without a mismatch", async ({ page, request }) => {
   expect(await (await request.get("/window")).text()).toContain("Measuring");
   const errors = collectErrors(page);
@@ -483,6 +499,48 @@ test("a client component calls a server action it received as a prop, and the pa
   expect(errors).toEqual([]);
 });
 
+test("a client navigation that streams Suspense content in several flushes reveals all of it", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/refresh-stream");
+  await hydrated(page);
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("link", { name: "Next visit" }).click();
+  await expect(page.getByTestId("visit")).toHaveText("visit 1");
+  await expect(page.getByTestId("note")).toHaveText("note arrived");
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test("a server action that removes an item keeps each client component's state with its key", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto(`/action-keyed?list=${test.info().workerIndex}-${Date.now()}`);
+  await hydrated(page);
+  for (const label of ["Component Grace", "Parent Grace"]) {
+    const button = page.getByRole("button", { name: new RegExp(`^${label}:`) });
+    await button.click();
+    await expect(button).toHaveText(`${label}: 1`);
+    await button.click();
+    await expect(button).toHaveText(`${label}: 2`);
+  }
+
+  await page.getByRole("button", { name: "Remove first" }).click();
+  await expect(page.getByRole("button", { name: /^Component Ada:/ })).toHaveCount(0);
+  // React keeps state by key: Grace keeps her count, and Linus, now in Grace's place, does not take it.
+  for (const kind of ["Component", "Parent"]) {
+    await expect(page.getByRole("button", { name: new RegExp(`^${kind} Grace:`) })).toHaveText(
+      `${kind} Grace: 2`,
+    );
+    await expect(page.getByRole("button", { name: new RegExp(`^${kind} Linus:`) })).toHaveText(
+      `${kind} Linus: 0`,
+    );
+  }
+  expect(errors).toEqual([]);
+});
+
 test("a server action reads what route middleware put in its context", async ({ page }) => {
   await page.goto("/action-middleware");
   await hydrated(page);
@@ -527,6 +585,50 @@ test("a server action that leaves its layout unchanged keeps what was typed ther
   await expect(page.getByLabel("Layout note")).toHaveValue("still here");
 });
 
+test("a server action that changes only a layout island's props gives the island its new props", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-island-props");
+  await hydrated(page);
+  const pageCount = Number(
+    (await page.getByTestId("page-count").textContent())?.replace(/\D/g, ""),
+  );
+  const counter = page.getByRole("button", { name: /^Layout sees page/ });
+  await counter.click();
+  await expect(counter).toHaveText(`Layout sees page ${pageCount}: 1`);
+  await page.getByRole("button", { name: "Bump page" }).click();
+  await expect(page.getByTestId("page-count")).toHaveText(`Page count: ${pageCount + 1}`);
+  // The new label, with the state the island had.
+  await expect(counter).toHaveText(`Layout sees page ${pageCount + 1}: 1`);
+  expect(errors).toEqual([]);
+});
+
+test("a server action that changes its layout keeps what was typed there, and the focus", async ({
+  page,
+}) => {
+  await page.goto("/action-layout");
+  await hydrated(page);
+  const layout = Number((await page.getByTestId("layout-count").textContent())?.replace(/\D/g, ""));
+  const button = page.getByRole("button", { name: /^Layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Layout clicks: 1");
+  await expect(page.getByTestId("layout-streamed")).toBeVisible();
+  const note = page.getByLabel("Layout note");
+  await note.fill("still here");
+  await note.evaluate((input: HTMLInputElement) => input.setSelectionRange(2, 5));
+  // Clicked from script, so the note keeps the focus while the layout around it renders again.
+  await page
+    .getByRole("button", { name: "Bump layout" })
+    .evaluate((bump: HTMLElement) => bump.click());
+  await expect(page.getByTestId("layout-count")).toHaveText(`Layout count: ${layout + 1}`);
+  await expect(note).toHaveValue("still here");
+  await expect(note).toBeFocused();
+  expect(
+    await note.evaluate((input: HTMLInputElement) => [input.selectionStart, input.selectionEnd]),
+  ).toEqual([2, 5]);
+});
+
 test("a server route slot stays on the server, and its client component hydrates", async ({
   page,
 }) => {
@@ -547,6 +649,94 @@ test("a server route slot stays on the server, and its client component hydrates
   expect(
     (await Promise.all(scripts)).filter((text) => text.includes("SERVER_SLOT_MARKER")),
   ).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("a declared failure from a form posted before JavaScript loads keeps its status", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-nojs");
+  const response = page.waitForResponse((candidate) => candidate.request().method() === "POST");
+  await page.getByRole("button", { name: "Reserve" }).click();
+  expect((await response).status()).toBe(409);
+  await context.close();
+});
+
+test("a form posted before JavaScript loads returns to the URL it was posted to, not a rewrite's target", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-rewrite/alias");
+  await expect(page.getByRole("heading", { name: "Action rewrite" })).toBeVisible();
+  const title = `rewritten no-js item ${Date.now()}`;
+  await page.getByLabel("Title").fill(title);
+  await page.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByTestId("todos")).toContainText(title);
+  expect(new URL(page.url()).pathname).toBe("/action-rewrite/alias");
+  await context.close();
+});
+
+test("useActionState shows the action's result after a form posted before JavaScript loads", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-state");
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 0, last: none");
+  await page.getByLabel("Choice").fill("coffee");
+  await page.getByRole("button", { name: "Vote", exact: true }).click();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 1, last: coffee");
+  await context.close();
+});
+
+test("an island hydrates with the useActionState result of a form posted before it loaded", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  // The first page loads without its scripts, so the form posts as HTML; the response loads them.
+  let blocked = true;
+  await page.route(
+    (url) => url.pathname.endsWith(".js"),
+    (route) => (blocked ? route.abort() : route.continue()),
+  );
+  await page.goto("/action-state");
+  await page.getByLabel("Choice").fill("coffee");
+  blocked = false;
+  await page.getByRole("button", { name: "Vote", exact: true }).click();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 1, last: coffee");
+  await page.waitForLoadState("networkidle");
+  // Hydrated: the island's own state works, and it kept the action's result.
+  await page.getByRole("button", { name: "Vote form clicks: 0" }).click();
+  await expect(page.getByRole("button", { name: "Vote form clicks: 1" })).toBeVisible();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 1, last: coffee");
+  // And the form keeps going from that state (the response rendered the field's default again).
+  await page.getByRole("button", { name: "Vote", exact: true }).click();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 2, last: tea");
+  // The first load's blocked scripts may report late. The checks above prove the second load ran.
+  expect(
+    errors.filter(
+      (error) =>
+        !error.includes("net::ERR_FAILED") &&
+        !error.includes("Failed to fetch dynamically imported module"),
+    ),
+  ).toEqual([]);
+});
+
+test("a server action returns elements, with a server component's output and a live client component", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-element");
+  await hydrated(page);
+  await page.getByRole("button", { name: "Summarize" }).click();
+  const summary = page.getByTestId("action-element");
+  await expect(summary).toContainText("Saved 3 items");
+  const counter = summary.getByRole("button", { name: "Returned clicks: 1" });
+  await counter.click();
+  await expect(summary.getByRole("button", { name: "Returned clicks: 2" })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -889,6 +1079,33 @@ test("a click on an island before the client runtime loads is replayed once it h
   await island.click();
   await expect(island).toHaveAttribute("data-hydrated", "true");
   await expect(island).toHaveText("Interaction: 1");
+  expect(errors).toEqual([]);
+});
+
+test("every click on an island while its code loads is replayed once it hydrates", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  // The runtime is held until both clicks are in, so neither lands after hydration.
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => isClientRuntime(url.pathname),
+    async (route) => {
+      await released;
+      await route.continue();
+    },
+  );
+  await page.goto("/timing/later");
+  await hydrated(page);
+  const island = page.getByTestId("interaction");
+  await island.click();
+  await island.click();
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  release();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await expect(island).toHaveText("Interaction: 2");
   expect(errors).toEqual([]);
 });
 

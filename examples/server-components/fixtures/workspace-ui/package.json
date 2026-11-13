@@ -1,0 +1,19 @@
+{
+  "name": "@farm-fixtures/workspace-ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A workspace package of server components, for the contract suite: it renders @farm-fixtures/widget-kit, a client component package the app does not depend on.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@farm-fixtures/widget-kit": "link:../widget-kit"
+  },
+  "devDependencies": {
+    "react": "19.2.8"
+  },
+  "peerDependencies": {
+    "react": "*"
+  }
+}

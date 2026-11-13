@@ -17,7 +17,7 @@ import { turnstile } from "@farm.js/bot/captcha";
 import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
-  plugins: [bot({ provider: turnstile() })],
+  plugins: [bot({ provider: turnstile(), hostnames: ["example.com"] })],
 });
 ```
 
@@ -44,11 +44,11 @@ export async function POST(request: Request) {
 }
 ```
 
-| Option      | Default                | What it does                        |
-| ----------- | ---------------------- | ----------------------------------- |
-| `provider`  | Required               | The checker to use                  |
-| `hostnames` | The request's hostname | The hostnames a check may come from |
-| `timeoutMs` | `5000`                 | How long to wait for the provider   |
+| Option      | Default                      | What it does                                                        |
+| ----------- | ---------------------------- | ------------------------------------------------------------------- |
+| `provider`  | Required                     | The checker to use                                                  |
+| `hostnames` | Required outside development | The hostnames a check may come from. Development uses the request's |
+| `timeoutMs` | `5000`                       | How long to wait for the provider                                   |
 
 ## What comes back
 
@@ -129,7 +129,7 @@ export const honeypot = defineBotProvider({
   },
 });
 
-// farm.config.ts: plugins: [bot({ provider: honeypot })]
+// farm.config.ts: plugins: [bot({ provider: honeypot, hostnames: ["example.com"] })]
 ```
 
 `verify` receives `{ token, form, request, remoteIp, signal }` and returns `{ success: true, data }` or `{ success: false, code }`.
@@ -138,7 +138,7 @@ export const honeypot = defineBotProvider({
 
 ```ts
 // src/bot.ts
-export const protection = bot({ provider: acme() });
+export const protection = bot({ provider: acme(), hostnames: ["example.com"] });
 
 // farm.config.ts: plugins: [protection]
 // your route:     const check = await protection.verify(form);
@@ -232,10 +232,10 @@ It returns every problem as a sentence: a secret in the browser config, a `verif
 
 ## Limits
 
-- **Server components in `rsc` mode.** Farm runs only a plugin's browser hooks there, not its `configure`, so the build has no widget for `<BotCheck>` and the page logs a `BotError` that says so. A production server doesn't load farm.config.ts either, so `verifyBot` throws a `BotError`, although `farm dev` finds the plugin. To check forms on the server, create the plugin in a module your routes import, such as `src/bot.ts`, and add that instance to `plugins`. `islands` mode works.
+- **Server components in `rsc` mode with `@farm.js/core` 0.1.67 or earlier.** A production server there doesn't load farm.config.ts, so `verifyBot` throws a `BotError`, although `farm dev` finds the plugin. To check forms on the server, create the plugin in a module your routes import, such as `src/bot.ts`, and add that instance to `plugins`. `rsc` mode also skips the plugin's `configure`, so the build has no widget for `<BotCheck>`. Upgrade core, or use `islands` mode.
 - **Cloudflare Pages with `@farm.js/core` 0.1.66 or earlier.** That output exposes no bindings at runtime, so secrets aren't found and every check fails with a `BotError`. Upgrade core, or use compatibility date `2025-04-01` or later, the `cloudflare-module` preset, or pass `secretKey`.
 - **reCAPTCHA** means the v2 checkbox. v3 has no widget, so it needs its own provider.
 - **One checker per app.** The plugin can be added once, so two forms can't use two different checkers.
 - **A checker can't add routes.** One that issues challenges from the server needs a route in the app for it.
 - **A checker with no browser half has no `<BotCheck>`.** Leave the component out, or nothing tells the page it passed.
-- **The hostname check** relies on the provider's report, which test keys don't give. By default it compares against the request's host, which a client can set on a server it reaches directly. Set `hostnames` for a Node server without a proxy that fixes the host, or behind one that rewrites it. Each provider's own domain allowlist still applies.
+- **The hostname check** relies on the provider's report, which test keys don't give. Outside development it accepts only `hostnames`, because a client can set the request's host on a server it reaches directly, so `farm build` fails without it. In development it compares against the request's host. Each provider's own domain allowlist still applies.

@@ -12,6 +12,7 @@ import {
 } from "./dev-module";
 import { createBundledEnv } from "./env";
 import { parseSync } from "vite";
+import { initSync as initModuleLexer, parse as lexModule } from "es-module-lexer";
 import type {
   AliasOptions,
   ConfigEnv,
@@ -22,18 +23,21 @@ import type {
   Connect,
 } from "vite";
 import type { FarmConfig, FarmRequest } from "./types";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { FarmApp } from "./app";
 import { logger, toPosixPath, toViteModuleId } from "./utils";
 import { loadTailwindVitePlugin } from "./build/tailwind";
 import { resolveFarmImageProviderForRuntime } from "./image-runtime";
 import { isOptionalPeerInstalled, VERCEL_OG_INSTALL_HINT } from "./optional-peer";
-import { isBuiltin } from "node:module";
+import { builtinModules, isBuiltin } from "node:module";
 import {
+  FARM_BROWSER_BUILTIN_PREFIX,
   farmBrowserBuiltinsOptimizerPlugin,
   loadFarmBrowserBuiltin,
   resolveFarmBrowserBuiltin,
 } from "./browser-builtins";
+import { exactIdPattern } from "./utils/hook-filters";
 import {
   FARM_NODE_RESPONSE_END_PENDING,
   type FarmPlugin,
@@ -132,7 +136,9 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "./document-layout-client";
+import { FARM_NAVIGATION_SCRIPT_SOURCE } from "./client/navigation-scripts";
 import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "./client/navigation-stream-client";
+import { FARM_REFRESH_FIELDS_SOURCE } from "./client/refresh-fields";
 import {
   getClientModuleMetadata,
   resolveModuleSourcePath,
@@ -210,6 +216,11 @@ import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config
 import { farmImageImportsPlugin } from "./image-vite";
 import { farmFontImportsPlugin } from "./font-vite";
 import type { FarmServerBundledPackage } from "./islands-react-server-exports";
+import {
+  createFarmDeferredMiddleware,
+  type FarmDeferredDevSetup,
+  type FarmDevMiddlewareTarget,
+} from "./dev/deferred-setup";
 import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
@@ -219,7 +230,8 @@ import {
   ensureFarmPackageClientReference,
   FARM_CLIENT_REFERENCE_DIRECTORY,
   FARM_CLIENT_REFERENCE_PRAGMA,
-  readFarmClientReferenceBase,
+  FARM_RESOLVE_FROM_PREFIX,
+  parseFarmResolveFrom,
   rewriteFarmPackageClientImports,
 } from "./islands-package-references";
 import {
@@ -427,6 +439,22 @@ const FARM_SERVER_ONLY_PACKAGE_ID = "\0farm:server-only";
 const FARM_PLATFORM_ENTRY = "@farm.js/core/platform";
 const FARM_PLATFORM_CLIENT_ID = "\0farm:platform-client";
 
+/** The specifiers `farm:server-only-entries` resolves: its own entries and Node builtins. */
+const FARM_SERVER_ONLY_ENTRIES_RESOLVE_FILTER = [
+  exactIdPattern([FARM_PLATFORM_ENTRY, SERVER_ONLY_PACKAGE, ...FARM_SERVER_ONLY_ENTRIES]),
+  new RegExp(`^${FARM_RESOLVE_FROM_PREFIX}`),
+  // What isBuiltin() accepts: `node:` ids and the builtin names, subpaths such as fs/promises
+  // included.
+  /^node:/,
+  exactIdPattern(builtinModules),
+];
+
+/** The ids `farm:server-only-entries` loads. */
+const FARM_SERVER_ONLY_ENTRIES_LOAD_FILTER = [
+  exactIdPattern([FARM_SERVER_ONLY_PACKAGE_ID, FARM_PLATFORM_CLIENT_ID]),
+  new RegExp(`^${FARM_BROWSER_BUILTIN_PREFIX}`),
+];
+
 /**
  * `@farm.js/core/platform` in browser code: `platform()` returns this build's platform as a
  * literal, so `platform() === "desktop"` branches fold away, and nothing reaches for node:fs.
@@ -440,7 +468,8 @@ export function appDataDir() {
 }
 
 /**
- * In development, pre-bundle each server-bundled package whose only ES module build is `module`
+ * In a Vite server that loads the app's modules (`farm dev`, and the server a build loads route
+ * modules with), pre-bundle each server-bundled package whose only ES module build is `module`
  * into one file, with Vite's SSR dependency optimizer. Served unbundled, such a package is loaded
  * one module at a time through the SSR module runner: a barrel like lucide-react's is thousands of
  * modules on the first page that imports one icon. The bundle is cached in Vite's `deps_ssr`
@@ -483,8 +512,8 @@ export function farmServerOnlyEntriesPlugin(
     /** The browser graph's platform; a web build's mobile client passes `"mobile"`. */
     platform?: FarmPlatform;
     /**
-     * Pre-bundle module-entry packages for SSR (`createFarmServerPrebundleConfig`). Only the dev
-     * server sets it: a build's own Vite server, which loads the project's modules, does not.
+     * Pre-bundle module-entry packages for SSR (`createFarmServerPrebundleConfig`). The dev server
+     * and a build's own Vite server, which load the project's modules, set it; bundling does not.
      */
     prebundleServerPackages?: boolean;
   } = {},
@@ -516,41 +545,63 @@ export function farmServerOnlyEntriesPlugin(
     configResolved(config) {
       root = config.root;
     },
-    resolveId(id, importer, options) {
-      if (id === FARM_PLATFORM_ENTRY) return options?.ssr ? null : FARM_PLATFORM_CLIENT_ID;
-      if (id === SERVER_ONLY_PACKAGE) {
-        // Vite's dependency scan walks every route file as if it were browser code.
-        if (options?.ssr || (options as { scan?: boolean } | undefined)?.scan) {
-          return FARM_SERVER_ONLY_PACKAGE_ID;
+    resolveId: {
+      filter: { id: FARM_SERVER_ONLY_ENTRIES_RESOLVE_FILTER },
+      handler(id, importer, options) {
+        if (id === FARM_PLATFORM_ENTRY) return options?.ssr ? null : FARM_PLATFORM_CLIENT_ID;
+        if (id === SERVER_ONLY_PACKAGE) {
+          // Vite's dependency scan walks every route file as if it were browser code.
+          if (options?.ssr || (options as { scan?: boolean } | undefined)?.scan) {
+            return FARM_SERVER_ONLY_PACKAGE_ID;
+          }
+          this.error(
+            `${importer ?? "A module"} imports "server-only", so it must not reach the browser, but client code imports it. Move what the client needs out of that module, or call it from a server component, server function or API route.`,
+          );
         }
-        this.error(
-          `${importer ?? "A module"} imports "server-only", so it must not reach the browser, but client code imports it. Move what the client needs out of that module, or call it from a server component, server function or API route.`,
-        );
-      }
-      if (!options?.ssr && isBuiltin(id)) {
-        return resolveFarmBrowserBuiltin(this, id, importer, options);
-      }
-      if (!FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
-      const importedBy = importer ? ` (imported by ${importer})` : "";
-      if (!options?.ssr) {
-        this.error(
-          `${id} is server-only and cannot be imported into client code${importedBy}. Use it from an API route or another server module.`,
-        );
-      }
-      vercelOgInstalled ||= isOptionalPeerInstalled(root, "@vercel/og");
-      if (!vercelOgInstalled) {
-        this.error(
-          `${id} needs @vercel/og, which is not installed${importedBy}. ${VERCEL_OG_INSTALL_HINT}`,
-        );
-      }
-      return null;
+        if (!options?.ssr && isBuiltin(id)) {
+          return resolveFarmBrowserBuiltin(this, id, importer, options);
+        }
+        // A client reference for a package the app root does not resolve to the importer's copy
+        // (a workspace package's dependency in a pnpm monorepo) resolves it from the importer's
+        // side, as React Server Components resolve a client reference.
+        const resolveFrom = importer ? parseFarmResolveFrom(id, importer.split("?", 1)[0]!) : null;
+        if (resolveFrom) {
+          const directory = path.dirname(resolveFrom.importer);
+          return this.resolve(resolveFrom.specifier, resolveFrom.importer, {
+            ...options,
+            skipSelf: true,
+          }).then((resolved) => {
+            if (resolved) return resolved;
+            return this.error(
+              `Could not resolve "${resolveFrom.specifier}" from ${directory}, the package whose server component renders it. Install it in that package, or run your package manager's install again.`,
+            );
+          });
+        }
+        if (!FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
+        const importedBy = importer ? ` (imported by ${importer})` : "";
+        if (!options?.ssr) {
+          this.error(
+            `${id} is server-only and cannot be imported into client code${importedBy}. Use it from an API route or another server module.`,
+          );
+        }
+        vercelOgInstalled ||= isOptionalPeerInstalled(root, "@vercel/og");
+        if (!vercelOgInstalled) {
+          this.error(
+            `${id} needs @vercel/og, which is not installed${importedBy}. ${VERCEL_OG_INSTALL_HINT}`,
+          );
+        }
+        return null;
+      },
     },
-    load(id) {
-      if (id === FARM_SERVER_ONLY_PACKAGE_ID) return "export {};";
-      if (id === FARM_PLATFORM_CLIENT_ID) {
-        return createFarmPlatformClientModule(options.platform ?? resolveFarmPlatform());
-      }
-      return loadFarmBrowserBuiltin(id) ?? null;
+    load: {
+      filter: { id: FARM_SERVER_ONLY_ENTRIES_LOAD_FILTER },
+      handler(id) {
+        if (id === FARM_SERVER_ONLY_PACKAGE_ID) return "export {};";
+        if (id === FARM_PLATFORM_CLIENT_ID) {
+          return createFarmPlatformClientModule(options.platform ?? resolveFarmPlatform());
+        }
+        return loadFarmBrowserBuiltin(id) ?? null;
+      },
     },
   };
 }
@@ -1298,6 +1349,71 @@ interface FarmModuleAstNode {
   [key: string]: unknown;
 }
 
+/** A string-literal module specifier: its value, and the range of the literal with its quotes. */
+interface FarmModuleSpecifier {
+  value: string;
+  start: number;
+  end: number;
+}
+
+let moduleLexerReady = false;
+
+/**
+ * The string-literal specifiers of a JavaScript module's imports, re-exports and dynamic
+ * imports, read with es-module-lexer instead of a full parse. Null when the lexer cannot read
+ * the code, so the caller falls back to the parser.
+ */
+function lexModuleSpecifiers(code: string): FarmModuleSpecifier[] | null {
+  if (!moduleLexerReady) {
+    initModuleLexer();
+    moduleLexerReady = true;
+  }
+  let imports: ReturnType<typeof lexModule>[0];
+  try {
+    [imports] = lexModule(code);
+  } catch {
+    return null;
+  }
+  const specifiers: FarmModuleSpecifier[] = [];
+  for (const entry of imports) {
+    if (entry.n === undefined || entry.d === -2) continue;
+    // A static specifier's range excludes its quotes; a dynamic import's argument includes them.
+    const start = entry.d === -1 ? entry.s - 1 : entry.s;
+    const end = entry.d === -1 ? entry.e + 1 : entry.e;
+    const quote = code[start];
+    if ((quote !== '"' && quote !== "'") || code[end - 1] !== quote) continue;
+    specifiers.push({ value: entry.n, start, end });
+  }
+  return specifiers;
+}
+
+function parseModuleSpecifiers(options: {
+  code: string;
+  parse: (code: string) => FarmModuleAstNode;
+}): FarmModuleSpecifier[] | null {
+  let ast: FarmModuleAstNode;
+  try {
+    ast = options.parse(options.code);
+  } catch {
+    return null;
+  }
+  const specifiers: FarmModuleSpecifier[] = [];
+  walkModuleAst(ast, (node) => {
+    if (
+      node.type !== "ImportDeclaration" &&
+      node.type !== "ExportNamedDeclaration" &&
+      node.type !== "ExportAllDeclaration" &&
+      node.type !== "ImportExpression"
+    ) {
+      return;
+    }
+    const source = node.source;
+    if (!isFarmModuleAstNode(source) || typeof source.value !== "string") return;
+    specifiers.push({ value: source.value, start: source.start, end: source.end });
+  });
+  return specifiers;
+}
+
 export function rewriteEarlySsrRelativeImports(options: {
   code: string;
   id: string;
@@ -1309,27 +1425,12 @@ export function rewriteEarlySsrRelativeImports(options: {
     return null;
   }
 
+  const sources = lexModuleSpecifiers(options.code) ?? parseModuleSpecifiers(options);
+  if (!sources) return null;
+
   const replacements: Array<{ start: number; end: number; code: string }> = [];
-  let ast: FarmModuleAstNode;
-  try {
-    ast = options.parse(options.code);
-  } catch {
-    return null;
-  }
-
-  walkModuleAst(ast, (node) => {
-    if (
-      node.type !== "ImportDeclaration" &&
-      node.type !== "ExportNamedDeclaration" &&
-      node.type !== "ExportAllDeclaration" &&
-      node.type !== "ImportExpression"
-    ) {
-      return;
-    }
-
-    const source = node.source;
-    if (!isFarmModuleAstNode(source) || typeof source.value !== "string") return;
-    if (!source.value.startsWith(".")) return;
+  for (const source of sources) {
+    if (!source.value.startsWith(".")) continue;
 
     const suffixIndex = source.value.search(/[?#]/);
     const sourcePath = suffixIndex === -1 ? source.value : source.value.slice(0, suffixIndex);
@@ -1345,7 +1446,7 @@ export function rewriteEarlySsrRelativeImports(options: {
       end: source.end,
       code: JSON.stringify(`${specifier}${suffix}`),
     });
-  });
+  }
 
   if (replacements.length === 0) return null;
 
@@ -1634,6 +1735,7 @@ function hasViteAlias(alias: AliasOptions | undefined, find: string): boolean {
 export function farmPlugin(
   options: FarmVitePluginOptions = {},
   initialPluginManager?: PluginManager,
+  deferredSetup?: FarmDeferredDevSetup,
 ): Plugin {
   const rendererDisabled = isFarmRendererDisabled(options.renderer);
   const imageImports = farmImageImportsPlugin();
@@ -1654,6 +1756,21 @@ export function farmPlugin(
   };
   let reactRefreshActive = false;
   let server: ViteDevServer;
+  // Where configureServer registers Farm's middleware: Vite's stack, or the stacks a deferred
+  // setup's gates run once it finishes.
+  let deferredGates:
+    | {
+        pre: ReturnType<typeof createFarmDeferredMiddleware>;
+        post: ReturnType<typeof createFarmDeferredMiddleware>;
+      }
+    | undefined;
+  // While a deferred setup runs, browser-side load and transform calls wait for it: the routes,
+  // config and plans they read are still being built (Vite's dependency scan, for one, would
+  // otherwise cache a plan made mid-discovery). Calls the setup makes itself run in
+  // `farmSetupContext` and never wait. resolveId never waits: Vite resolves the client entries
+  // before it listens, and resolving reads none of that state.
+  let pendingClientSetup: Promise<void> | null = null;
+  const farmSetupContext = new AsyncLocalStorage<true>();
   let apiRouteManager: APIRouteManager;
   let openAPIManager: OpenAPIManager | null = null;
   let middlewareManager: MiddlewareManager;
@@ -1682,7 +1799,7 @@ export function farmPlugin(
   const getProgrammaticClientRoutes = () =>
     options.programmaticClientRoutes ?? farmApp?.getRouteManager().getProgrammaticClientRoutes();
 
-  return {
+  const plugin: Plugin = {
     name: "farm",
     api: { getProgrammaticClientRoutes } satisfies FarmProgrammaticRoutesPluginApi,
 
@@ -1756,6 +1873,10 @@ export function farmPlugin(
         await fontImports.configureServer.call(this, viteServer);
       }
       server = viteServer;
+      const farmMiddlewares: FarmDevMiddlewareTarget =
+        deferredGates?.pre.target ?? viteServer.middlewares;
+      const farmPostMiddlewares: FarmDevMiddlewareTarget =
+        deferredGates?.post.target ?? viteServer.middlewares;
 
       // Store the plugin manager passed during creation
       const pm = initialPluginManager;
@@ -1807,7 +1928,7 @@ export function farmPlugin(
       // agent.noindexPreviews marks every dev response, Vite's own included, when
       // the environment says this is a preview (`FARM_PREVIEW=1 farm dev`).
       if (farmConfig.agent?.noindexPreviews) {
-        server.middlewares.use((_req, res, next) => {
+        farmMiddlewares.use((_req, res, next) => {
           if (isFarmPreviewDeploymentEnvironment(process.env)) {
             res.setHeader("X-Robots-Tag", FARM_PREVIEW_ROBOTS_TAG);
           }
@@ -2497,7 +2618,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       const deferredDottedRequests = new WeakMap<Connect.IncomingMessage, string>();
       // A configured rewrite re-enters this handler with the destination URL, as the production
       // entry re-enters its request handler, so every route and guard sees the destination.
-      server.middlewares.use(
+      farmMiddlewares.use(
         withAPIRequestTracing(async function handleFarmDevRequest(req, res, next) {
           const requestUrl = req.url || "/";
           const requestMethod = req.method || "GET";
@@ -4581,13 +4702,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         }),
       );
       // The handler just registered, so the post hook below can route a deferred dotted path.
-      const farmRequestMiddleware = server.middlewares.stack.at(-1)
+      const farmRequestMiddleware = farmMiddlewares.stack.at(-1)
         ?.handle as Connect.NextHandleFunction;
 
       // What Farm passed on is Vite's (modules, /@vite/*, /@fs/*, public files): give it the CORS
       // policy Vite would have, unless a later plugin turned Vite's own back on.
       if (farmOwnsDevCors && viteServer.config.server.cors === false) {
-        viteServer.middlewares.use(createFarmDevViteCorsMiddleware());
+        farmMiddlewares.use(createFarmDevViteCorsMiddleware());
       }
 
       // A dotted path that no route or file answered falls through to Vite, whose 404 has an
@@ -4595,7 +4716,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       // true misses reach it: route them as production does, where middleware runs and the
       // not-found page (or, with `renderer: false`, the JSON miss) answers.
       return () => {
-        viteServer.middlewares.use((req, res, next) => {
+        farmPostMiddlewares.use((req, res, next) => {
           if (res.headersSent || res.writableEnded) return next();
           // Vite's SPA fallback may have rewritten req.url to /index.html by now.
           const deferredUrl = deferredDottedRequests.get(req);
@@ -4621,15 +4742,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         const relative = root ? path.relative(root, importer.split("?", 1)[0]!) : "";
         if (root && (relative.startsWith("..") || path.isAbsolute(relative))) {
           return this.resolve(id, path.join(root, "package.json"), {
-            ...resolveOptions,
-            skipSelf: true,
-          });
-        }
-      } else if (importer?.includes(FARM_CLIENT_REFERENCE_DIRECTORY)) {
-        // A client reference for a module outside the app imports the package from that module.
-        const base = readFarmClientReferenceBase(importer.split("?", 1)[0]!);
-        if (base) {
-          return this.resolve(id, path.join(base, "package.json"), {
             ...resolveOptions,
             skipSelf: true,
           });
@@ -4665,6 +4777,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
     },
 
     async load(id, loadOptions) {
+      if (pendingClientSetup && !loadOptions?.ssr && !farmSetupContext.getStore()) {
+        await pendingClientSetup;
+      }
       if (isFarmServerFnBoundaryId(id) && islandsServerFns()) {
         // The "use server" boundary of a module whose server functions were found without a
         // directive. Its exports come from the source on disk, never from the request.
@@ -4868,6 +4983,9 @@ export const manifest = getManifest();
     },
 
     async transform(code, id, transformOptions) {
+      if (pendingClientSetup && !transformOptions?.ssr && !farmSetupContext.getStore()) {
+        await pendingClientSetup;
+      }
       // Islands mode: `"use server"` modules register as actions on the server and become stubs in
       // the browser (RFC 0003). The RSC engine has its own transform.
       const actionConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
@@ -5340,6 +5458,8 @@ if (import.meta.hot) {
       invalidateFarmClientOnlyScan();
     },
     async handleHotUpdate(ctx: HmrContext) {
+      // A file changed while a deferred setup still discovers routes: handle it against the result.
+      if (pendingClientSetup && !farmSetupContext.getStore()) await pendingClientSetup;
       const { file, server, modules } = ctx;
       if (initialPluginManager) {
         try {
@@ -5449,6 +5569,8 @@ if (import.meta.hot) {
       // keep CSS, generated output and files outside src off this static pass.
       const tracksAsyncOwnerIslands =
         isReactRenderer(currentFarmConfig?.renderer) && planRouteManager !== undefined;
+      // Set once the plan below is rebuilt from this edit, so it is not rebuilt again right after.
+      let clientPlanCurrent = false;
       if (
         isHydrationPlanSource &&
         (isolatedHydrationMode === "enabled" ||
@@ -5492,6 +5614,7 @@ if (import.meta.hot) {
               server.ws.send({ type: "full-reload", path: "*" });
               return [];
             }
+            clientPlanCurrent = true;
           } catch (error) {
             logger.warn(
               `[Farm.js] Could not refresh the client hydration plan after ${file}: ${error instanceof Error ? error.message : String(error)}`,
@@ -5524,7 +5647,9 @@ if (import.meta.hot) {
           return [];
         }
 
-        farmApp?.getRouteManager().invalidateClientManifest();
+        // Dropping a plan rebuilt above from this same edit would only make the next request
+        // rebuild it, which reads and parses every route module again.
+        if (!clientPlanCurrent) farmApp?.getRouteManager().invalidateClientManifest();
         const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
         if (manifestModule) {
           server.moduleGraph.invalidateModule(manifestModule);
@@ -5550,6 +5675,51 @@ if (import.meta.hot) {
       return modules;
     },
   };
+  if (!deferredSetup) return plugin;
+
+  // startDevServer opens the port before Farm's setup finishes. Vite awaits configureServer, so
+  // this hook returns as soon as the setup has started, leaving gates where Farm's middleware
+  // goes; requests wait there until the setup is done.
+  const setUpDevServer = plugin.configureServer as (
+    this: unknown,
+    server: ViteDevServer,
+  ) => Promise<() => void>;
+  let deferred = false;
+  plugin.configureServer = function (viteServer: ViteDevServer) {
+    // Only the first start is deferred: a server Vite restarts finishes setup before it listens.
+    if (deferred) {
+      deferredGates = undefined;
+      return setUpDevServer.call(this, viteServer);
+    }
+    deferred = true;
+    const ready = () => deferredSetup.ready;
+    deferredGates = {
+      pre: createFarmDeferredMiddleware(ready),
+      post: createFarmDeferredMiddleware(ready),
+    };
+    // Registers the preview guard and font middleware synchronously, ahead of the gate below.
+    const setup = farmSetupContext
+      .run(true, () => setUpDevServer.call(this, viteServer))
+      .then((registerPostMiddleware) => {
+        registerPostMiddleware();
+      });
+    viteServer.middlewares.use(deferredGates.pre.handle);
+    deferredSetup.setup = setup;
+    deferredSetup.ready = setup;
+    pendingClientSetup = setup.then(
+      () => {
+        pendingClientSetup = null;
+      },
+      () => {
+        pendingClientSetup = null;
+      },
+    );
+    const post = deferredGates.post.handle;
+    return () => {
+      viteServer.middlewares.use(post);
+    };
+  };
+  return plugin;
 }
 
 /**
@@ -7354,14 +7524,11 @@ function readActiveLayoutPatterns() {
     .filter(Boolean);
 }
 
+${FARM_NAVIGATION_SCRIPT_SOURCE}
+
 function activateFragmentScripts(root) {
   for (const script of Array.from(root.querySelectorAll?.('script') || [])) {
-    const freshScript = document.createElement('script');
-    for (const attribute of Array.from(script.attributes)) {
-      freshScript.setAttribute(attribute.name, attribute.value);
-    }
-    freshScript.textContent = script.textContent || '';
-    script.replaceWith(freshScript);
+    script.replaceWith(createFarmNavigationScript(script));
   }
 }
 
@@ -7402,7 +7569,13 @@ function getLayoutShell(root, patterns, index, find) {
     : shell.querySelector('#__farm_page__');
   inner?.replaceChildren();
   removeSuspenseContent(shell);
-  shell.querySelectorAll('script').forEach((script) => script.remove());
+  // Each island's props stay, without its id, so new props count as a change.
+  shell.querySelectorAll('script').forEach((script) => {
+    if (script.type !== 'f/props') return script.remove();
+    Array.from(script.attributes).forEach((attribute) => {
+      if (attribute.name !== 'type') script.removeAttribute(attribute.name);
+    });
+  });
   shell.querySelectorAll('f-island').forEach((island) => {
     island.replaceChildren();
     Array.from(island.attributes).forEach((attribute) => island.removeAttribute(attribute.name));
@@ -7410,7 +7583,7 @@ function getLayoutShell(root, patterns, index, find) {
   return shell.innerHTML;
 }
 
-function replaceNavigationBoundary(
+${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceNavigationBoundary(
   container,
   fragment,
   currentPatterns,
@@ -7447,7 +7620,13 @@ function replaceNavigationBoundary(
     activateFragmentScripts(container);
     return container;
   }
-
+${
+  islandValues
+    ? `
+  // A refresh renders the same layouts again: their fields keep what was typed, and the focus.
+  const fields = refresh ? captureFarmServerFields(currentTarget) : null;`
+    : ""
+}
   ${
     isolatedHydrationEnabled
       ? `${
@@ -7459,7 +7638,7 @@ function replaceNavigationBoundary(
         }disposeFarmIsolatedClientBoundaries(currentTarget);`
       : ""
   }
-  currentTarget.replaceWith(nextTarget);
+  currentTarget.replaceWith(nextTarget);${islandValues ? "\n  if (fields) restoreFarmServerFields(fields, nextTarget);" : ""}
   activateFragmentScripts(nextTarget);
   if (fragmentTreeRoot && fragmentTreeRoot !== nextTarget) fragmentTreeRoot.remove();
 
@@ -7469,7 +7648,17 @@ function replaceNavigationBoundary(
     const support = document.createElement('div');
     support.hidden = true;
     support.dataset.farmFragmentSupport = 'true';
-    support.append(fragment);
+    while (fragment.firstChild) {
+      const node = fragment.firstChild;
+      // React's staged Suspense content stays in the root, where a later flush of a streamed
+      // navigation reveals it; React removes it then.
+      if (node.nodeType === 1 && node.matches('div[hidden][id^="S:"]')) {
+        container.appendChild(node);
+        activateFragmentScripts(node);
+      } else {
+        support.appendChild(node);
+      }
+    }
     document.body.appendChild(support);
     activateFragmentScripts(support);
     setTimeout(() => support.remove(), 0);

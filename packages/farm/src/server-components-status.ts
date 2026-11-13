@@ -201,7 +201,7 @@ export function farmAppUsesRscPipeline(
   return true;
 }
 
-/** Of the config RSC ignores, `plugins` is the one it runs part of: their `client` hooks. */
+/** Of the config RSC ignores, `plugins` is the one it runs part of: `configure` and `client`. */
 function formatFarmRscIgnoredMessage(ignoredKeys: readonly string[]): string {
   const others = ignoredKeys.filter((key) => key !== "plugins");
   const clauses: string[] = [];
@@ -212,7 +212,7 @@ function formatFarmRscIgnoredMessage(ignoredKeys: readonly string[]): string {
   }
   if (others.length < ignoredKeys.length) {
     clauses.push(
-      "runs only the browser `client` hooks of `plugins` and ignores their other hooks.",
+      "runs only the `configure` and browser `client` hooks of `plugins` and ignores their other hooks.",
     );
   }
   return `experimental.serverComponents runs on the RSC pipeline, which ${clauses.join(" It also ")}`;

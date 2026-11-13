@@ -275,7 +275,9 @@ including lists that sit between static sibling elements (keyed ranges).
 Rows with `onChange` handlers stay React-owned under React DOM, because React derives `onChange`
 from each row's own Fiber; this root instead listens on the list container for the native event
 React's `onChange` follows for each control (`input` for text fields, `change` for checkboxes,
-radios, selects, and file inputs), so those lists need no React DOM either. Fields it creates get
+radios, selects, and file inputs), so those lists need no React DOM either. The same holds for
+`onChange` rows beside conditional content and in lists between static siblings: under React DOM
+their blocks let React render the rows, and here they run the rows themselves. Fields it creates get
 the same `value` and `checked` defaults React sets, so a form reset behaves the same.
 Rows with conditional content mount here too when their events can be delegated, as described in
 [Compiler-owned host conditionals inside keyed rows](#compiler-owned-host-conditionals-inside-keyed-rows).
@@ -296,8 +298,11 @@ Fast Refresh, an edit reloads the page.
 
 Imports that also name `hydrateRoot`, default or namespace imports, dependencies, and server
 modules keep React DOM. Pages that Farm renders and hydrates are not affected. Set
-`compiledRoot: false` to keep React DOM for every root. To pass options such as `onFallback`, call
-`createCompiledRoot(container, options)` from `@farm.js/react/compiled-root`.
+`compiledRoot: false` to keep React DOM for every root. That also compiles `onChange` rows beside
+conditional content or in a list between static siblings to the React-owned list, which ships less
+code when no root mounts without React DOM; with `compiledRoot` on, those rows compile to blocks
+that React renders under React DOM, as it would the React-owned list. To pass options such as
+`onFallback`, call `createCompiledRoot(container, options)` from `@farm.js/react/compiled-root`.
 
 ### Static and hybrid reactivity
 
@@ -2095,9 +2100,11 @@ target, innermost first, with the row's current item and index and with `current
 element; `stopPropagation()` stops the remaining row handlers. The container finds the element by its
 position among the row's static elements, so the element must not follow a conditional or a nested
 list at any level of its path (those change how many elements come before it). Events the
-container cannot receive the way React does keep the row React-owned: `onChange`, which React
-derives from each row's own Fiber; events that do not bubble, such as `onMouseEnter`; a handler on
-an element that follows a conditional or a list; and a handler inside a branch.
+container cannot receive the way React does keep the row React-owned: events that do not bubble,
+such as `onMouseEnter`; a handler on an element that follows a conditional or a list; and a handler
+inside a branch. `onChange`, which React derives from each row's own Fiber, runs through the
+container only on a [root without React DOM](#roots-without-react-dom): under React DOM the block
+lets React render the rows, and with `compiledRoot: false` they keep the React-owned list.
 
 Hooks, custom components, events inside a compiler-owned branch, refs, SVG, fragments, JSX spreads,
 dangerous HTML, controlled inputs inside a conditional, and any unproven shape stay on React.
@@ -2339,7 +2346,9 @@ row-local conditional slots. Rows may carry the same inline event handlers keyed
 such as `onClick` on a filter button beside a static "Clear" button: React renders a row's
 handlers only while it owns the rows, and otherwise the container runs the handler for the row the
 event came from with that row's current item, innermost element first, stopping at
-`stopPropagation()`. Static siblings keep their own handlers. Rows with `onChange`, a container with
+`stopPropagation()`. Static siblings keep their own handlers. Row `onChange` handlers run through
+the container only on a [root without React DOM](#roots-without-react-dom); under React DOM, React
+renders those rows, and with `compiledRoot: false` they keep the React-owned list. A container with
 its own event handlers, fragments, components between ranges, controlled rows, and nested dynamic
 structures use the existing React-owned boundaries. Parent prop or compatible Fast Refresh changes remount this one
 range container through React so static markup cannot become stale. Duplicate keys or a

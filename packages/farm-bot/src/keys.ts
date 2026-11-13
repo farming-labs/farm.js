@@ -48,8 +48,8 @@ function readEnv(name: string): string | undefined {
 
 // A test secret passes every visitor, so a server that doesn't say what it is gets none, as on
 // a deployed worker where `NODE_ENV` is often unset. A built server can't be started into test
-// keys either, whatever its `NODE_ENV`.
-function isDevelopment(): boolean {
+// keys either, whatever its `NODE_ENV`. The hostname check uses the same rule for its default.
+export function isDevelopment(): boolean {
   if (isProductionBuild()) return false;
   const mode = readEnv("NODE_ENV");
   return mode === "development" || mode === "test";

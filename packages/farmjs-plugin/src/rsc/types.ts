@@ -69,7 +69,23 @@ export interface FarmRscPluginOptions {
    * and its `src/client.ts`, as core generates it for every entry.
    */
   clientPlugins?: FarmRscClientPlugins;
+
+  /**
+   * @internal Set by `farm build` when some of the app's Farm `plugins` have server hooks: for
+   * each config file, by absolute path, where those entries sit in its `plugins` array. The
+   * server loads them, so their factories run there.
+   */
+  serverPlugins?: FarmRscServerPlugins;
+
+  /**
+   * @internal Set by `farm build`: the Nitro preset it deploys with. A Cloudflare preset builds
+   * the RSC and SSR bundles with their packages included, since Workers have no node_modules.
+   */
+  preset?: string;
 }
+
+/** @internal See `FarmRscPluginOptions.serverPlugins`. */
+export type FarmRscServerPlugins = Record<string, { indexes: number[]; count: number }>;
 
 /** @internal See `FarmRscPluginOptions.mobileClient`. */
 export type FarmRscMobileClient = "entry" | "inline";
@@ -127,6 +143,12 @@ export interface EntryContext {
   pageRenderingDirectives?: Record<string, unknown>;
 
   /**
+   * Whether the server runs in Cloudflare Workers, where SSR renders to web streams because there
+   * are no Node streams.
+   */
+  workers?: boolean;
+
+  /**
    * The resolved `images` config, its public half for `<Image>`, and the optimizer the server
    * mounts at `images.path` (`none` when Image keeps original URLs).
    */
@@ -168,6 +190,9 @@ export interface EntryContext {
 
   /** Modules that export `{ mcp }`, read from the app's config files, in layer order. */
   mcpConfigPaths?: string[];
+
+  /** Modules that export `{ plugins }`, read from the app's config files, in layer order. */
+  pluginsConfigPaths?: string[];
 
   /** Resolved Markdown mirror settings (core's `md`): `.md` pages and `Accept: text/markdown`. */
   markdown?: FarmMarkdownResolvedConfig;

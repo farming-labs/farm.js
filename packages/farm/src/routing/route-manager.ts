@@ -1061,14 +1061,16 @@ export class RouteManager {
 
       if (isFarmMarkdownPageFile(modulePath)) {
         const mdxConfig = resolveMdxConfig(this.config.mdx);
-        const components = await loadFarmMdxComponents(mdxConfig, {
-          root: this.config.root,
-          loadModule: this.viteServer
-            ? (componentModulePath) => loadFarmDevModule(this.viteServer!, componentModulePath)
-            : undefined,
-        });
+        const viteServer = this.viteServer;
         return await createFarmMarkdownRouteModuleFromFile(modulePath, {
-          components,
+          // Loaded on render: the route runtime manifest only reads metadata and rendering config.
+          components: () =>
+            loadFarmMdxComponents(mdxConfig, {
+              root: this.config.root,
+              loadModule: viteServer
+                ? (componentModulePath) => loadFarmDevModule(viteServer, componentModulePath)
+                : undefined,
+            }),
           config: mdxConfig,
         });
       }
@@ -1605,22 +1607,16 @@ export class RouteManager {
     }
   }
 
-  /** The page routes a docs adapter answers before Farm's own page rendering. */
+  /** The page routes the docs runtime answers before Farm's own page rendering. */
   private getDocsAdapterRoutes():
     | { owns: (routePath: string) => boolean; prerender: boolean }
     | undefined {
     const docs = this.config.docs;
-    if (
-      !docs ||
-      typeof docs !== "object" ||
-      !docs.enabled ||
-      !docs.adapter ||
-      !docs.adapter.server ||
-      !docs.adapter.react ||
-      !isReactRenderer(this.config.renderer)
-    ) {
-      return undefined;
-    }
+    if (!docs || typeof docs !== "object" || !docs.enabled) return undefined;
+    // The docs runtime answers its paths before page routes: Farm's built-in renderer always,
+    // an adapter when the app renders with React.
+    const usesAdapter = Boolean(docs.adapter && docs.adapter.server && docs.adapter.react);
+    if (usesAdapter && !isReactRenderer(this.config.renderer)) return undefined;
     const entry = `/${String(docs.entry || "docs").replace(/^\/+|\/+$/g, "")}`;
     return {
       owns: (routePath) =>

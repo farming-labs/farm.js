@@ -4,7 +4,13 @@ import { botProvider } from "./src/bot";
 
 export default defineConfig({
   images: { provider: "none" },
-  plugins: [bot({ provider: botProvider() })],
+  plugins: [
+    bot({
+      provider: botProvider(),
+      // Production builds need the hostnames the forms are served from.
+      hostnames: process.env.BOT_HOSTNAMES?.split(",") ?? ["localhost"],
+    }),
+  ],
   // A strict policy: the plugin adds the provider's sources to it.
   security: {
     csp: {

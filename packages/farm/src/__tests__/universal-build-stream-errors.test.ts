@@ -51,6 +51,7 @@ function instantiateStreamRenderer(
     "ReadableStream",
     "_resolveCurrentCspNonce",
     "getFarmRendererRenderOptions",
+    "farmFormState",
     `${source.slice(start, end)}\nreturn { renderFarmElement, renderFarmElementToString };`,
   );
   return factory(
@@ -61,6 +62,7 @@ function instantiateStreamRenderer(
     primitives.TextEncoder,
     primitives.TextDecoder,
     primitives.ReadableStream,
+    () => undefined,
     () => undefined,
     () => undefined,
   ) as StreamRenderer;

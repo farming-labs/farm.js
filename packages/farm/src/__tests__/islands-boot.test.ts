@@ -118,6 +118,17 @@ describe("startFarmIslandsBoot", () => {
     expect(click(button)).toBe(false);
   });
 
+  it("holds every click on an island's control, and a submit button's repeat once", () => {
+    boot(
+      '<f-island strategy="interaction"><button type="button">Add</button><form><button>Save</button></form></f-island>',
+    );
+    const [add, save] = Array.from(document.querySelectorAll("button"));
+    for (const target of [add!, add!, save!, save!]) expect(click(target)).toBe(true);
+    expect(
+      (window as QueueWindow).__FARM_PREHYDRATION_CLICK_QUEUE__!.map((item) => item.target),
+    ).toEqual([add, add, save]);
+  });
+
   it("leaves clicks and submits outside islands alone, and starts on a form's focus", () => {
     const load = boot(
       '<f-island strategy="interaction"></f-island>' +

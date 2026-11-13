@@ -6,14 +6,17 @@ import { compileReactModule } from "../compiler";
 import { normalizeReactCompilerOptions } from "../index";
 
 const infer = normalizeReactCompilerOptions(true);
+// An app that opts out of compiled roots keeps rows React DOM must own on React-owned paths.
+const withoutCompiledRoot = normalizeReactCompilerOptions({ compiledRoot: false });
 
-async function compile(source: string) {
-  return compileReactModule(source, "/app/KeyedRowHostBlocks.tsx", infer);
+async function compile(source: string, options = infer) {
+  return compileReactModule(source, "/app/KeyedRowHostBlocks.tsx", options);
 }
 
 describe("React AOT compiler-owned keyed-row host blocks", () => {
   it("selects the complete keyed-row runtime when sibling lists need both extensions", async () => {
-    const result = await compile(`
+    const result = await compile(
+      `
       import { useState } from "react";
       export function MixedRows() {
         const [items, setItems] = useState([
@@ -41,7 +44,9 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
           </main>
         );
       }
-    `);
+    `,
+      withoutCompiledRoot,
+    );
 
     expect(result.compiled).toEqual(["MixedRows"]);
     expect(result.diagnostics).toEqual([]);
@@ -548,10 +553,6 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
       name: "a handler after a public List",
       row: "<li key={todo.id}><List each={todo.tags} by={(tag) => tag}>{(tag) => <b>{tag}</b>}</List><button onClick={() => setTodos([])}>x</button>{todo.done ? <s>done</s> : <i>open</i>}</li>",
     },
-    {
-      name: "an onChange handler React derives from the row's own fiber",
-      row: '<li key={todo.id}><input type="checkbox" checked={todo.done} onChange={() => setTodos([])} />{todo.done ? <s>done</s> : <i>open</i>}</li>',
-    },
   ])("keeps $name on the React-owned keyed boundary", async ({ row }) => {
     const result = await compile(`
       import { useState } from "react";
@@ -569,6 +570,41 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     expect(result.compiled).toEqual(["Todos"]);
     expect(result.code).not.toContain("hostBlocks={true}");
     expect(result.code).not.toContain("delegateEvents={true}");
+  });
+
+  it("delegates row onChange beside conditional content only on roots without React DOM", async () => {
+    const source = `
+      import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: "a", done: false }]);
+        return (
+          <section>
+            <ul>
+              {todos.map((todo) => (
+                <li key={todo.id}>
+                  <input type="checkbox" checked={todo.done} onChange={() => setTodos([])} />
+                  {todo.done ? <s>done</s> : <i>open</i>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      }
+    `;
+    // React derives onChange from the row's own fiber, so React DOM renders these rows (the
+    // block's React fallback) and a compiled root delegates the event to the rows container.
+    const result = await compile(source);
+    expect(result.compiled).toEqual(["Todos"]);
+    expect(result.code).toContain("hostBlocks={true}");
+    expect(result.code).toContain("delegateEventsWithoutReact={true}");
+    expect(result.code).not.toContain("delegateEvents={true}");
+    expect(result.code).toContain("onChange={_farmRowEvent(todo, 0, 0)}");
+
+    const optedOut = await compile(source, withoutCompiledRoot);
+    expect(optedOut.compiled).toEqual(["Todos"]);
+    expect(optedOut.code).toContain("farmBlocks.KeyedList");
+    expect(optedOut.code).not.toContain("hostBlocks={true}");
+    expect(optedOut.code).not.toContain("delegateEventsWithoutReact");
   });
 
   it("keeps block ids unique across sibling lists and component-level blocks", async () => {

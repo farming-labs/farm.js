@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.67",
+  "version": "0.1.68",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -698,6 +698,11 @@
       "import": "./dist/internal/compression-runtime.mjs",
       "require": "./dist/internal/compression-runtime.cjs"
     },
+    "./internal/vercel-edge-middleware": {
+      "types": "./dist/internal/vercel-edge-middleware.d.ts",
+      "import": "./dist/internal/vercel-edge-middleware.mjs",
+      "require": "./dist/internal/vercel-edge-middleware.cjs"
+    },
     "./internal/client-runtime": {
       "types": "./dist/internal/client-runtime.d.ts",
       "import": "./dist/internal/client-runtime.mjs",
@@ -825,7 +830,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farm.js/islx": "0.0.9",
+    "@farm.js/islx": "0.0.15",
     "@farming-labs/orm": "0.0.66",
     "@farming-labs/orm-runtime": "0.0.66",
     "@formatjs/icu-messageformat-parser": "3.5.15",

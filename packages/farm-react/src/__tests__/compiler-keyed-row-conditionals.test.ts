@@ -6,9 +6,11 @@ import { compileReactModule } from "../compiler";
 import { normalizeReactCompilerOptions } from "../index";
 
 const infer = normalizeReactCompilerOptions(true);
+// An app that opts out of compiled roots keeps rows React DOM must own on React-owned paths.
+const withoutCompiledRoot = normalizeReactCompilerOptions({ compiledRoot: false });
 
-async function compile(source: string) {
-  return compileReactModule(source, "/app/RowConditionals.tsx", infer);
+async function compile(source: string, options = infer) {
+  return compileReactModule(source, "/app/RowConditionals.tsx", options);
 }
 
 describe("React AOT keyed-row conditional compiler", () => {
@@ -67,7 +69,8 @@ describe("React AOT keyed-row conditional compiler", () => {
   // React derives onChange from the row's own fiber, so these rows cannot delegate it and keep
   // React-owned conditional rows; delegatable row events use compiler-owned host blocks instead.
   it("composes row events and conditionals through the public List boundary", async () => {
-    const result = await compile(`
+    const result = await compile(
+      `
       import { useState } from "react";
       import { List } from "@farm.js/react/list";
       export function Tasks() {
@@ -87,7 +90,9 @@ describe("React AOT keyed-row conditional compiler", () => {
           </main>
         );
       }
-    `);
+    `,
+      withoutCompiledRoot,
+    );
 
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);

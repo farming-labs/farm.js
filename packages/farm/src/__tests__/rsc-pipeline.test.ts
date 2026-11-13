@@ -235,6 +235,111 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(entry.registrations).not.toContain("farm:mobile-shell");
   });
 
+  it("has the production server load only the plugins with server hooks", async () => {
+    const root = createApp();
+    writeFileSync(path.join(root, "farm.config.ts"), "export default {};");
+    const serverPlugins = async (plugins: unknown[], command: "serve" | "build") =>
+      (
+        (await createFarmRscViteConfig(
+          { experimental: { serverComponents: { mode: "rsc" as const } }, plugins },
+          { root, command, preset: "node-server" },
+        )) as Record<string, any>
+      ).farm.serverPlugins;
+    const withServerHooks = { name: "with-server-hooks", runtime: {} };
+    const clientOnly = { name: "client-only", client: { setup() {} } };
+    // Like devtools, a plugin with server hooks can leave a production build.
+    const devOnly: Record<string, any> = {
+      name: "dev-only",
+      runtime: {},
+      configure: (config: Record<string, any>, context: { isProd: boolean }) =>
+        context.isProd
+          ? { ...config, plugins: config.plugins.filter((plugin: unknown) => plugin !== devOnly) }
+          : undefined,
+    };
+
+    expect(await serverPlugins([clientOnly, withServerHooks, devOnly], "build")).toEqual({
+      [path.join(root, "farm.config.ts")]: { indexes: [1], count: 3 },
+    });
+    expect(await serverPlugins([clientOnly, devOnly], "build")).toBeUndefined();
+    // `farm dev` loaded the config in its own process, so the plugins have already run there.
+    expect(await serverPlugins([withServerHooks], "serve")).toBeUndefined();
+  });
+
+  it("runs the app's plugin `configure` hooks first, as Farm's other pipelines do", async () => {
+    const root = createApp();
+    const contexts: Array<{ isDev: boolean; isProd: boolean }> = [];
+    const addsVitePlugin = {
+      name: "adds-vite-plugin",
+      configure(config: Record<string, any>, context: { isDev: boolean; isProd: boolean }) {
+        contexts.push({ isDev: context.isDev, isProd: context.isProd });
+        const plugins = [...(config.vite?.plugins ?? []), { name: "from-configure" }];
+        return { ...config, vite: { ...config.vite, plugins } };
+      },
+    };
+    // Like devtools and msw, a plugin can leave a production build, browser half included.
+    const devOnly: Record<string, any> = {
+      name: "dev-only",
+      client: {
+        setup() {
+          return "dev";
+        },
+      },
+      configure(config: Record<string, any>, context: { isProd: boolean }) {
+        if (!context.isProd) return undefined;
+        return {
+          ...config,
+          plugins: config.plugins.filter((plugin: unknown) => plugin !== devOnly),
+        };
+      },
+    };
+    const create = async (command: "serve" | "build") =>
+      (await createFarmRscViteConfig(
+        {
+          experimental: { serverComponents: { mode: "rsc" as const } },
+          // Called the way Farm's config resolution calls it.
+          vite: () => ({ plugins: [{ name: "app-plugin" }] }),
+          plugins: [addsVitePlugin, devOnly],
+        },
+        { root, command, preset: "node-server" },
+      )) as Record<string, any>;
+
+    const production = await create("build");
+    const names = (production.plugins.flat(Infinity) as Array<{ name: string }>).map(
+      (plugin) => plugin.name,
+    );
+    expect(names.indexOf("app-plugin")).toBeGreaterThanOrEqual(0);
+    expect(names.indexOf("from-configure")).toBe(names.indexOf("app-plugin") + 1);
+    expect(names.indexOf("rsc")).toBeGreaterThan(names.indexOf("from-configure"));
+    expect(production.farm.clientPlugins.registrations).not.toContain("dev-only");
+
+    const development = await create("serve");
+    expect(development.farm.clientPlugins.registrations).toContain('name: "dev-only"');
+    expect(contexts).toEqual([
+      { isDev: false, isProd: true },
+      { isDev: true, isProd: false },
+    ]);
+  });
+
+  it("refuses config a plugin's `configure` adds that RSC would not run", async () => {
+    const root = createApp();
+    const addsHeaders = {
+      name: "adds-headers",
+      configure: (config: Record<string, unknown>) => ({
+        ...config,
+        headers: [{ source: "/(.*)", headers: [{ key: "x-frame-options", value: "DENY" }] }],
+      }),
+    };
+    await expect(
+      createFarmRscViteConfig(
+        {
+          experimental: { serverComponents: { mode: "rsc" as const } },
+          plugins: [addsHeaders],
+        },
+        { root, command: "build", preset: "node-server" },
+      ),
+    ).rejects.toThrow("does not run `headers` yet");
+  });
+
   it("gives development Fast Refresh with core's plugin-react when the app has none", async () => {
     // The RSC client bootstrap imports /@react-refresh in development.
     const config = (await createFarmRscViteConfig(
@@ -313,9 +418,9 @@ describe("experimental.serverComponents from farm.config", () => {
       ),
     ).toBe(true);
     expect(warn).toHaveBeenCalledOnce();
-    // Of a plugin, RSC runs the browser half.
+    // Of a plugin, RSC runs `configure` and the browser half.
     expect(warn.mock.calls[0]![0]).toContain(
-      "which runs only the browser `client` hooks of `plugins` and ignores their other hooks.",
+      "which runs only the `configure` and browser `client` hooks of `plugins` and ignores their other hooks.",
     );
     farmAppUsesRscPipeline(
       {
@@ -326,7 +431,7 @@ describe("experimental.serverComponents from farm.config", () => {
       root,
     );
     expect(warn.mock.calls[1]![0]).toContain(
-      "which does not run `cron` yet. It is ignored. It also runs only the browser `client` hooks of `plugins` and ignores their other hooks.",
+      "which does not run `cron` yet. It is ignored. It also runs only the `configure` and browser `client` hooks of `plugins` and ignores their other hooks.",
     );
   });
 

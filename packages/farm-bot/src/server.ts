@@ -22,7 +22,7 @@ export async function verifyBot<TData = unknown>(
   if (!verify) {
     throw new BotError(
       "missing_plugin",
-      "`verifyBot()` found no bot plugin. Add `bot({ provider })` to `plugins` in farm.config.ts. A production server in `rsc` mode doesn't load farm.config.ts, so there create the plugin in a module your route imports and call its `verify` instead.",
+      "`verifyBot()` found no bot plugin. Add `bot({ provider })` to `plugins` in farm.config.ts. With `@farm.js/core` 0.1.67 or earlier, a production server in `rsc` mode doesn't load farm.config.ts, so there create the plugin in a module your route imports and call its `verify` instead.",
     );
   }
   return verify(input, options) as Promise<BotCheckResult<TData>>;

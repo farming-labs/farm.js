@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
+import { fileNamePattern } from "../utils/hook-filters";
 
 /** Config keys that only the CLI reads. Their values never belong in a server bundle. */
 const PLATFORM_CONFIG_KEYS = new Set(["desktop", "mobile"]);
@@ -113,20 +114,23 @@ export function farmStripPlatformConfigPlugin(configFiles: readonly string[]): P
     // Before the TypeScript transform, so its import elision also drops imports only the
     // removed block used (`readFileSync` for a version, say).
     enforce: "pre",
-    async transform(code, id) {
-      const file = id.split("?", 1)[0];
-      if (!files.has(path.resolve(file)) && !files.has(realPath(file))) return null;
-      const { parseAst } = await import("rolldown/parseAst");
-      const extension = path.extname(file).slice(1);
-      const lang = /^[cm]?tsx?$/.test(extension)
-        ? extension.endsWith("x")
-          ? "tsx"
-          : "ts"
-        : extension.endsWith("x")
-          ? "jsx"
-          : "js";
-      const stripped = stripPlatformConfigSource(code, (source) => parseAst(source, { lang }));
-      return stripped === null ? null : { code: stripped, map: null };
+    transform: {
+      filter: { id: fileNamePattern(configFiles) },
+      async handler(code, id) {
+        const file = id.split("?", 1)[0];
+        if (!files.has(path.resolve(file)) && !files.has(realPath(file))) return null;
+        const { parseAst } = await import("rolldown/parseAst");
+        const extension = path.extname(file).slice(1);
+        const lang = /^[cm]?tsx?$/.test(extension)
+          ? extension.endsWith("x")
+            ? "tsx"
+            : "ts"
+          : extension.endsWith("x")
+            ? "jsx"
+            : "js";
+        const stripped = stripPlatformConfigSource(code, (source) => parseAst(source, { lang }));
+        return stripped === null ? null : { code: stripped, map: null };
+      },
     },
   };
 }
