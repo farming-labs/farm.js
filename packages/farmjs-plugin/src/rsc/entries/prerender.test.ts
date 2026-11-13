@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isFarmAPIPathname } from "@farm.js/core/api/runtime";
 import {
+  applyFarmBasePath,
   appMiddlewareMayHandlePath,
   configMiddlewareMayHandlePath,
   materializeSSGRoutePath,
@@ -35,9 +36,14 @@ function collectStaticPages(
     directives?: Record<string, unknown>;
     middlewareFiles?: string[];
     configMiddleware?: unknown[];
+    basePath?: string;
   } = {},
 ): Promise<string[]> {
-  const entry = generateRscEntry({ ...context, pageRenderingDirectives: options.directives });
+  const entry = generateRscEntry({
+    ...context,
+    basePath: options.basePath ?? context.basePath,
+    pageRenderingDirectives: options.directives,
+  });
   const pageRoutes = Object.entries(pages).map(([filePath, module]) => ({
     filePath,
     module,
@@ -57,6 +63,7 @@ function collectStaticPages(
     "materializeSSGRoutePath",
     "appMiddlewareMayHandlePath",
     "configMiddlewareMayHandlePath",
+    "applyFarmBasePath",
     `${slice(
       entry,
       "// Each page's parsed rendering directive",
@@ -71,6 +78,7 @@ function collectStaticPages(
     materializeSSGRoutePath,
     appMiddlewareMayHandlePath,
     configMiddlewareMayHandlePath,
+    applyFarmBasePath,
   );
 }
 
@@ -170,6 +178,29 @@ describe("RSC static pages", () => {
       expect.stringContaining("/posts/[id]/page.tsx on each request"),
       expect.any(Error),
     );
+  });
+
+  it("prerenders a page at its URL below the basePath, where the platform serves it", async () => {
+    const pages = await collectStaticPages(
+      {
+        "/page.tsx": { dynamic: "force-static" },
+        "/about/page.tsx": { dynamic: "force-static" },
+        "/docs/[[...slug]]/page.tsx": {
+          dynamic: "force-static",
+          generateStaticParams: async () => [{ slug: ["start here"] }],
+        },
+        // Nested under app/<basePath>/, it already names its URL.
+        "/console/legacy/page.tsx": { dynamic: "force-static" },
+        "/admin/page.tsx": { dynamic: "force-static" },
+      },
+      { basePath: "/console", middlewareFiles: ["/admin/middleware.ts"] },
+    );
+    expect(pages.sort()).toEqual([
+      "/console",
+      "/console/about",
+      "/console/docs/start%20here",
+      "/console/legacy",
+    ]);
   });
 });
 

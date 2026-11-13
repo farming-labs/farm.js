@@ -463,9 +463,9 @@ Both setups follow the same route contract:
   browser hydrates the whole document.
 - **Base path.** Under a [`basePath`](/docs/configuration#application-base-path), pages answer
   below it as in other Farm apps: with `basePath: "/console"`, `app/about/page.tsx` serves
-  `/console/about` and its payload `/console/about.rsc`, and `<Link href="/about">` renders
-  `/console/about`. As in other Farm apps, the page also answers at `/about`, and `redirect()`
-  sends its target as written. With i18n
+  `/console/about` and its payload `/console/about.rsc`, `<Link href="/about">` renders
+  `/console/about`, and a static page prerenders at its URL below the base path. As in other Farm
+  apps, the page also answers at `/about`, and `redirect()` sends its target as written. With i18n
   the locale prefix is stripped too, so `/console/fr/about` matches `app/about/page.tsx`; the RSC
   pipeline has no locale runtime yet, so a page that needs the locale takes it from a `[lang]`
   folder nested as below: `app/[lang]/`, or `app/console/[lang]/` under the base path.

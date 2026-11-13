@@ -160,7 +160,7 @@ import {
 import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';
 ${
   hasBasePath
-    ? `import { setFarmBasePath } from '@farm.js/core/internal/production-runtime';
+    ? `import { applyFarmBasePath, setFarmBasePath } from '@farm.js/core/internal/production-runtime';
 
 // <Link href="/about"> renders /console/about, as in core's renderers. Client components render in
 // the SSR environment, which shares this process; the browser entry sets it for hydration.
@@ -823,7 +823,14 @@ async function collectFarmStaticPages() {
       ) {
         continue;
       }
-      paths.add(pagePath);
+      ${
+        hasBasePath
+          ? `// The platform serves a prerendered file only at the URL it was written for, below the
+      // basePath, as core's build writes it. A page nested under app/<basePath>/ already is.
+      const publicPath = applyFarmBasePath(pagePath, ${JSON.stringify(ctx.basePath)});
+      paths.add(publicPath.length > 1 ? publicPath.replace(/\\/$/, '') : publicPath);`
+          : "paths.add(pagePath);"
+      }
     }
   }
   return [...paths];
