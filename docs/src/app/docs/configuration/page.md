@@ -366,6 +366,10 @@ Farm accepts a leading-slash or bare pathname and removes duplicate and trailing
 URLs, query strings, hashes, backslashes, control characters, and `.` or `..` segments because a
 browser could otherwise resolve a different path than Farm's server router.
 
+Apps on the RSC pipeline route the same way: `app/about/page.tsx` answers at `/console/about`.
+Pages that earlier RSC apps nested under `app/console/` keep their URLs; see
+[React Server Components](/docs/server-rendering#react-server-components) for the precedence.
+
 ## Trailing slashes
 
 Application page URLs omit a trailing slash by default. Set `trailingSlash: true` to generate

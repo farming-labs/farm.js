@@ -292,6 +292,7 @@ export const schema = z.string();`;
     { name: "cache-variants", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "config-middleware", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "nested-layouts", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "base-path", api: undefined, baseURL: "/api", mount: "/api" },
     {
       name: "custom",
       api: {
@@ -534,6 +535,28 @@ export default defineConfig({
             `export default async function Page() { await Promise.resolve(); return <p>Async page</p>; }`,
           );
         }
+        if (name === "base-path") {
+          // basePath "/console": a page at its route path, one nested under app/console/ as RSC
+          // apps had to before, and a <Link> that core renders below the basePath.
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "about/page.tsx",
+            `export default function Page() { return <main>About below the basePath</main>; }`,
+          );
+          writeRoute(
+            "console/legacy/page.tsx",
+            `export default function Page() { return <main>Nested under the basePath</main>; }`,
+          );
+          writeRoute(
+            "links/page.tsx",
+            `import { Link } from "@farm.js/core/client";
+export default function Page() { return <Link href="/about">About link</Link>; }`,
+          );
+        }
         for (const packageName of [
           "@farm.js/core",
           "@vitejs/plugin-rsc",
@@ -658,6 +681,7 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           outDir: "dist",
           esbuild: { jsxDev: false },
           experimental: { serverComponents: true, serverActions: true },
+          ...(name === "base-path" ? { basePath: "/console" } : {}),
           api,
           middleware: name === "config-middleware" ? { matcher: "/", handler() {} } : undefined,
           plugins,
@@ -957,6 +981,28 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           ]) {
             expect(body, logs).toContain(marker);
           }
+        }
+        if (name === "base-path") {
+          for (const [pathname, accept, marker] of [
+            ["/console", "text/html", "RSC root runtime fixture"],
+            ["/console/about", "text/html", "About below the basePath"],
+            ["/console/about", "text/x-component", "About below the basePath"],
+            // Client navigation requests '<page>.rsc'.
+            ["/console/about.rsc", "*/*", "About below the basePath"],
+            ["/console/legacy", "text/html", "Nested under the basePath"],
+            ["/console/legacy.rsc", "*/*", "Nested under the basePath"],
+            ["/console/links", "text/html", 'href="/console/about"'],
+            // Core's renderers answer without the basePath too.
+            ["/about", "text/html", "About below the basePath"],
+          ] as const) {
+            const response = await fetch(origin + pathname, {
+              headers: { accept },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            expect(await response.text(), pathname).toContain(marker);
+          }
+          expect((await fetch(origin + "/console/missing")).status).toBe(404);
         }
         // A custom API prefix is not a server-action URL, even with actions enabled.
         const post = await fetch(`${origin}${mount}/echo`, {

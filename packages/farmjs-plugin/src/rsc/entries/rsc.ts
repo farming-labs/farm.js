@@ -47,6 +47,9 @@ export function generateRscMiddlewareResultHandling(): string {
  * - Either returns the stream directly (for client navigation) or delegates to SSR (for initial page load)
  */
 export function generateRscEntry(ctx: EntryContext): string {
+  // A root-mounted app without i18n matches pages on the path as received, with no extra work.
+  const hasBasePath = !["", "/"].includes(ctx.basePath.trim());
+  const routesBelowPrefix = hasBasePath || ctx.i18n?.enabled === true;
   // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
   const appSegment = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
   const glob = appSegment ? `/${ctx.srcDir}/${appSegment}` : `/${ctx.srcDir}`;
@@ -155,7 +158,16 @@ import {
   farmRequestWantsMarkdown,
 } from '@farm.js/core/markdown';
 import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';
+${
+  hasBasePath
+    ? `import { applyFarmBasePath, setFarmBasePath } from '@farm.js/core/internal/production-runtime';
 
+// <Link href="/about"> renders /console/about, as in core's renderers. Client components render in
+// the SSR environment, which shares this process; the browser entry sets it for hydration.
+setFarmBasePath(${JSON.stringify(ctx.basePath)});
+`
+    : ""
+}
 ${
   ctx.images && ctx.images.runtime !== "none"
     ? `import { createCloudflareImageTransformer, createFarmImageHandler } from '@farm.js/core/image/server';
@@ -195,8 +207,8 @@ const farmRouteI18n = ${JSON.stringify(ctx.i18n ?? { enabled: false, basePath: c
 
 /**
  * A request path without the app's basePath and locale prefix, as core's servers and the
- * middleware runner read it: '/console/fr/about' is '/about'. Markdown names a home page
- * '<prefix>/index.md' and matches md.expose on it. Pages still match the path as received.
+ * middleware runner read it: '/console/fr/about' is '/about'. Pages match it (matchRoute), and
+ * Markdown names a home page '<prefix>/index.md' and matches md.expose on it.
  */
 function getFarmRoutePathname(pathname) {
   return farmRouteI18n.enabled
@@ -580,7 +592,8 @@ const farmMiddlewareRunner = createProductionMiddlewareRunner({
   i18n: ${JSON.stringify(ctx.i18n) ?? "undefined"},
   server: ${JSON.stringify(ctx.server) ?? "undefined"},
   apiBasePath: farmApiBasePath,
-  // matchRoute() reads url.pathname as received, so middleware guards that path too.
+  // matchRoute() can select a page by the path as received (a page under app/<basePath>/ or
+  // app/[lang]/) as well as by the route path, so middleware guards both.
   rawPathRouting: true,
 });
 
@@ -699,12 +712,50 @@ const pageRoutes = Object.entries(pages)
  * Simple file-based router
  * Converts URL pathname to matching page component
  */
-function matchRoute(pathname) {
+${
+  routesBelowPrefix
+    ? `function matchRoute(pathname) {
   const normalized = pathname.replace(/\\/$/, '') || '/';
-  
+  const routePathname = getFarmRoutePathname(normalized);
+  if (routePathname === normalized) return matchFarmPagePath(normalized);
+  // Pages answer at their route path, as in core's renderers: app/about/page.tsx at
+  // '/console/about' under basePath "/console", and at '/console/fr/about' with an 'fr' locale.
+  // A page whose folders spell out the prefix the request carries (app/console/about, or
+  // app/[lang]/about for the locale) keeps the URL it had when RSC matched the path as received,
+  // and any other page matching only that path still answers there. Middleware runs for both
+  // paths (rawPathRouting), so the page that renders keeps its guards.
+  const asReceived = matchFarmPagePath(normalized);
+  if (asReceived && farmPageSpellsRoutePrefix(asReceived.segments, normalized, routePathname)) {
+    return asReceived;
+  }
+  return matchFarmPagePath(routePathname) ?? asReceived;
+}
+
+/**
+ * Whether a page matched on the path as received takes the prefix with its own folders: a static
+ * folder for each basePath segment, then any folder but a catch-all for the locale. A catch-all
+ * or dynamic folder that merely absorbs the basePath ('[...slug]' at the root) does not.
+ */
+function farmPageSpellsRoutePrefix(segments, pathname, routePathname) {
+  const count = (path) => path.split('/').filter(Boolean).length;
+  const prefixLength = count(pathname) - count(routePathname);
+  const basePathLength = count(pathname) - count(stripFarmBasePath(pathname, farmRouteI18n.basePath));
+  for (let index = 0; index < prefixLength; index++) {
+    const segment = segments[index];
+    if (!segment || segment.isCatchAll || (index < basePathLength && segment.isDynamic)) return false;
+  }
+  return true;
+}
+`
+    : `function matchRoute(pathname) {
+  return matchFarmPagePath(pathname.replace(/\\/$/, '') || '/');
+}
+`
+}
+function matchFarmPagePath(normalized) {
   for (const { filePath, module, segments } of pageRoutes) {
     const match = matchFarmPageRoute(normalized, segments);
-    
+
     if (match.matches) {
       debug('Matched route:', filePath, 'for path:', normalized);
       return {
@@ -712,10 +763,11 @@ function matchRoute(pathname) {
         pattern: filePath,
         params: match.params,
         module,
+        segments,
       };
     }
   }
-  
+
   debug('No route matched for:', normalized);
   return null;
 }
@@ -771,7 +823,14 @@ async function collectFarmStaticPages() {
       ) {
         continue;
       }
-      paths.add(pagePath);
+      ${
+        hasBasePath
+          ? `// The platform serves a prerendered file only at the URL it was written for, below the
+      // basePath, as core's build writes it. A page nested under app/<basePath>/ already is.
+      const publicPath = applyFarmBasePath(pagePath, ${JSON.stringify(ctx.basePath)});
+      paths.add(publicPath.length > 1 ? publicPath.replace(/\\/$/, '') : publicPath);`
+          : "paths.add(pagePath);"
+      }
     }
   }
   return [...paths];
@@ -1509,7 +1568,7 @@ async function handleFarmPageOrMarkdown(request, context) {
     request,
     config: farmMarkdownConfig,
     routePathname: getFarmRoutePathname,
-    // matchRoute() reads the path as received, as the page render below does.
+    // The page the render below selects for the mirrored URL, below the basePath and locale.
     routeExists: (pathname) => Boolean(matchRoute(pathname)),
     renderPage: (pageRequest) => handleFarmRequest(pageRequest, context),
     apiServerBasePath: farmApiBasePath,

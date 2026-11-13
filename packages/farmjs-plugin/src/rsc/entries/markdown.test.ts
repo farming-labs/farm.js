@@ -12,6 +12,11 @@ import {
   stripFarmBasePath,
   stripFarmLocaleFromPathname,
 } from "@farm.js/core/internal/production-runtime";
+import { matchRoute as matchFarmPageRoute, parseRoutePath } from "../../../../farm/src/utils";
+import {
+  compareRouteSpecificity,
+  getRoutePatternSpecificity,
+} from "../../../../farm/src/routing/specificity";
 import type { EntryContext } from "../types.js";
 import {
   createProductionMiddlewareRunner,
@@ -39,26 +44,60 @@ function extractRoutePathname(entry: string): string {
   return entry.slice(start, entry.indexOf("\n}\n", fn) + 2);
 }
 
+/** The entry's generated matchRoute() over these page files, with core's real helpers. */
+function createRouteMatcher(entry: string, pageFiles: string[]) {
+  const start = entry.indexOf("function filePathToRoute(");
+  const end = entry.indexOf("// Each page's parsed rendering directive", start);
+  return new Function(
+    "pages",
+    "React",
+    "debug",
+    "parseRoutePath",
+    "matchFarmPageRoute",
+    "compareRouteSpecificity",
+    "getRoutePatternSpecificity",
+    "stripFarmBasePath",
+    "stripFarmLocaleFromPathname",
+    `${extractRoutePathname(entry)}\n${entry.slice(start, end)}; return matchRoute;`,
+  )(
+    Object.fromEntries(pageFiles.map((file) => [file, { default: () => file }])),
+    {},
+    () => {},
+    parseRoutePath,
+    matchFarmPageRoute,
+    compareRouteSpecificity,
+    getRoutePatternSpecificity,
+    stripFarmBasePath,
+    stripFarmLocaleFromPathname,
+  ) as (pathname: string) => { pattern: string } | null;
+}
+
 /**
  * Runs the generated outer handler with the real core Markdown helpers. `pages` are the request
- * paths RSC's matchRoute() matches; each renders a page titled after its path.
+ * paths matchRoute() matches; each renders a page titled after its path. With `pageFiles`, the
+ * entry's own matchRoute() selects among those files, and a page is titled after its file.
  */
 function createHandler(
   markdownConfig = resolveMarkdownConfig(undefined),
   options: Partial<Pick<EntryContext, "basePath" | "i18n" | "development">> & {
     pages?: string[];
+    pageFiles?: string[];
   } = {},
 ) {
-  const { pages = ["/pricing"], ...entryOptions } = options;
+  const { pages = ["/pricing"], pageFiles, ...entryOptions } = options;
   const entry = generateRscEntry({ ...context, ...entryOptions, markdown: markdownConfig });
   const start = entry.indexOf("async function handleFarmPageOrMarkdown(request, context)");
   const end = entry.indexOf("async function handler(request, context)", start);
+  const matchRoute = pageFiles
+    ? createRouteMatcher(entry, pageFiles)
+    : (pathname: string) => (pages.includes(pathname) ? { pattern: pathname } : null);
   const rendered: Request[] = [];
   const handleFarmRequest = vi.fn(async (request: Request) => {
     rendered.push(request);
     const { pathname } = new URL(request.url);
-    if (!pages.includes(pathname)) return new Response("Not Found", { status: 404 });
-    const title = pathname === "/pricing" ? "Pricing" : `Page ${pathname}`;
+    const matched = matchRoute(pathname);
+    if (!matched) return new Response("Not Found", { status: 404 });
+    const title = pathname === "/pricing" ? "Pricing" : `Page ${matched.pattern}`;
     return new Response(
       `<html><head><title>${title}</title></head><body><main><h1>${title}</h1><p>Plans.</p></main></body></html>`,
       { headers: { "content-type": "text/html" } },
@@ -80,7 +119,7 @@ function createHandler(
     applyMarkdownNegotiationHeaders,
     stripFarmBasePath,
     stripFarmLocaleFromPathname,
-    (pathname: string) => (pages.includes(pathname) ? { pattern: pathname } : null),
+    matchRoute,
     handleFarmRequest,
     "/api",
   ) as (request: Request, context?: unknown) => Promise<Response>;
@@ -388,10 +427,10 @@ describe("RSC Markdown mirrors", () => {
   });
 });
 
-// RSC's matchRoute() reads the request path as received, so under a basePath the pages live in
-// app/<basePath>/ (and app/<basePath>/[lang]/ with i18n). Markdown still reads the route path
-// core's servers read: <prefix>/index.md is that prefix's home page, which is what every
-// advertised URL names, and md.expose lists route paths.
+// Under a basePath (and locale), pages answer below the prefix: app/about/page.tsx, or a page
+// nested under app/<basePath>/ (app/<basePath>/[lang]/), answers at /console/about. Markdown
+// reads the route path core's servers read: <prefix>/index.md is that prefix's home page, which is
+// what every advertised URL names, and md.expose lists route paths.
 describe.each([
   ["development", true],
   ["production", false],
@@ -419,6 +458,35 @@ describe.each([
     expect(generateRscEntry({ ...context, ...basePath })).toContain(
       "import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';",
     );
+  });
+
+  it("finds the page the render selects: at its route path, or nested under the prefix", async () => {
+    for (const options of [
+      { ...basePath, pageFiles: ["/page.tsx", "/about/page.tsx", "/console/legacy/page.tsx"] },
+      {
+        ...localized,
+        pageFiles: ["/page.tsx", "/about/page.tsx", "/console/[lang]/legacy/page.tsx"],
+      },
+    ]) {
+      const prefix = options.i18n.enabled ? "/console/fr" : "/console";
+      const { run } = createHandler(resolveMarkdownConfig(undefined), options);
+      for (const [pathname, title] of [
+        [`${prefix}/index.md`, "# Page /page.tsx"],
+        [`${prefix}/about.md`, "# Page /about/page.tsx"],
+        [`${prefix}/legacy.md`, `# Page ${options.pageFiles[2]}`],
+      ]) {
+        const response = await run(new Request(`https://farm.test${pathname}`));
+        expect(response.status, pathname).toBe(200);
+        expect(response.headers.get("content-location"), pathname).toBe(pathname);
+        expect(await response.text(), pathname).toContain(title);
+      }
+      const page = await run(new Request(`https://farm.test${prefix}/about`));
+      expect(page.headers.get("link")).toBe(
+        `<${prefix}/about.md>; rel="alternate"; type="text/markdown"`,
+      );
+      const missing = await run(new Request(`https://farm.test${prefix}/missing.md`));
+      expect(missing.status).toBe(404);
+    }
   });
 
   it("serves <basePath>/index.md as the home page and advertises it", async () => {

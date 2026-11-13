@@ -74,6 +74,13 @@ import {
 } from '@farm.js/core/deployment';
 import { createFarmRouteAnnouncer, runFarmNavigationDelegates } from '@farm.js/core/internal/client-runtime';
 `;
+  // <Link href="/about"> renders /console/about under basePath "/console", as the RSC server
+  // rendered it, so the page hydrates with the same href.
+  if (!["", "/"].includes(ctx.basePath.trim())) {
+    imports += `import { setFarmBasePath } from '@farm.js/core/internal/client-runtime';
+setFarmBasePath(${JSON.stringify(ctx.basePath)});
+`;
+  }
 
   // farm dev --mobile: every page runs in the shell's WebView, so this entry is the mobile client.
   if (ctx.mobileClient === "inline") {

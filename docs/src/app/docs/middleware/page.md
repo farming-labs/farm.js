@@ -19,10 +19,11 @@ pipeline. Farm extracts an explicit `middleware` property, from `farm.config.ts`
 `defineConfig` from `@farm.js/plugin/rsc` in `vite.config.ts`, and the imports and local bindings it
 references into a server-only RSC module. This preserves handler closures, regular-expression
 matchers, and function matchers without shipping unrelated build plugins or integrations. Config
-middleware still runs before matching `src/app/**/middleware.ts` files. RSC pages match the
-request path as received, so pages under a `basePath` or locale prefix live in
-`src/app/<basePath>/` or `src/app/[lang]/`; middleware there runs for them, and middleware matching
-the path without the prefix runs as well. Farm reports an error for a dynamic config shape or a
+middleware still runs before matching `src/app/**/middleware.ts` files. RSC pages answer below a
+`basePath` or locale prefix at their route path, as in other Farm apps, and pages nested in
+`src/app/<basePath>/` or `src/app/[lang]/` keep answering at the path as received
+([precedence](/docs/server-rendering#react-server-components)); middleware matching either path
+runs for them. Farm reports an error for a dynamic config shape or a
 spread that makes the middleware value ambiguous; declare the property directly or move that
 middleware to `src/app/**/middleware.ts`.
 
