@@ -26,8 +26,10 @@ export interface FarmPackageClientImport {
   specifier: string;
   /** `import Name from` */
   defaultLocal?: string;
-  /** `import { imported as local } from` */
+  /** `import { imported as local } from`, or `export { imported as local } from` when `reexport`. */
   named: Array<{ imported: string; local: string }>;
+  /** An `export { … } from` declaration: `named` and `kept` are re-exports. */
+  reexport?: true;
   /**
    * Bindings the package defines outside any `"use client"` module (`dehydrate`, `QueryClient`),
    * which stay plain imports, as RSC imports them.
@@ -42,6 +44,12 @@ export interface FarmPackageClientImport {
 }
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/** The name an import or export specifier binds: an identifier, or a string literal. */
+const moduleName = (node: AstNode | undefined): string | null => {
+  const name = node?.type === "Identifier" ? node.name : node?.value;
+  return typeof name === "string" ? name : null;
+};
 
 function parse(code: string, file: string): AstNode | null {
   const extension = path.extname(file).slice(1);
@@ -107,17 +115,19 @@ export function findFarmPackageClientImports(
   file: string,
   isClientPackage: (specifier: string) => boolean,
 ): FarmPackageClientImport[] {
-  if (!code.includes("import")) return [];
+  if (!code.includes("import") && !code.includes("export")) return [];
   const program = parse(code, file);
   if (!program) return [];
   const found: FarmPackageClientImport[] = [];
   for (const node of program.body ?? []) {
-    if (node.type !== "ImportDeclaration" || node.importKind === "type") continue;
+    const reexport = node.type === "ExportNamedDeclaration" && node.source != null;
+    if (node.type !== "ImportDeclaration" && !reexport) continue;
+    if (node.importKind === "type" || node.exportKind === "type") continue;
     const specifier = node.source?.value;
     if (typeof specifier !== "string" || specifier.startsWith(".") || specifier.startsWith("/"))
       continue;
     const specifiers: AstNode[] = (node.specifiers ?? []).filter(
-      (entry: AstNode) => entry.importKind !== "type",
+      (entry: AstNode) => entry.importKind !== "type" && entry.exportKind !== "type",
     );
     if (specifiers.length === 0 || !isClientPackage(specifier)) continue;
     const entry: FarmPackageClientImport = {
@@ -126,11 +136,19 @@ export function findFarmPackageClientImports(
       specifier,
       named: [],
       kept: [],
+      ...(reexport ? { reexport: true as const } : {}),
     };
     const client = (name: string) => isFarmPackageClientExport(file, specifier, name);
     let supported = true;
     for (const binding of specifiers) {
-      if (binding.type === "ImportDefaultSpecifier") {
+      if (binding.type === "ExportSpecifier") {
+        const imported = moduleName(binding.local);
+        const exported = moduleName(binding.exported);
+        if (!imported || !exported || !IDENTIFIER.test(imported) || !IDENTIFIER.test(exported))
+          supported = false;
+        else if (client(imported)) entry.named.push({ imported, local: exported });
+        else entry.kept.push({ imported, local: exported });
+      } else if (binding.type === "ImportDefaultSpecifier") {
         if (client("default")) entry.defaultLocal = binding.local.name;
         else entry.kept.push({ imported: "default", local: binding.local.name });
       } else if (binding.type === "ImportNamespaceSpecifier") {
@@ -150,9 +168,8 @@ export function findFarmPackageClientImports(
           ...(values.length > 0 ? { values } : {}),
         };
       } else {
-        const imported =
-          binding.imported?.type === "Identifier" ? binding.imported.name : binding.imported?.value;
-        if (typeof imported !== "string" || !IDENTIFIER.test(imported)) supported = false;
+        const imported = moduleName(binding.imported);
+        if (!imported || !IDENTIFIER.test(imported)) supported = false;
         else if (client(imported)) entry.named.push({ imported, local: binding.local.name });
         else entry.kept.push({ imported, local: binding.local.name });
       }
@@ -316,17 +333,18 @@ export function rewriteFarmPackageClientImports(options: {
     // An import of server exports only stays as it is.
     if (farmPackageClientImportExports(entry).length === 0) continue;
     changed = true;
+    const keyword = entry.reexport ? "export" : "import";
     const lines: string[] = [];
     if (entry.kept.length > 0) {
       const bindings = entry.kept.map((binding) => `${binding.imported} as ${binding.local}`);
-      lines.push(`import { ${bindings.join(", ")} } from ${JSON.stringify(entry.specifier)};`);
+      lines.push(`${keyword} { ${bindings.join(", ")} } from ${JSON.stringify(entry.specifier)};`);
     }
     if (entry.defaultLocal) {
       lines.push(`import ${entry.defaultLocal} from ${reference(entry.specifier, "default")};`);
     }
     for (const binding of entry.named) {
       lines.push(
-        `import { ${binding.imported} as ${binding.local} } from ${reference(entry.specifier, binding.imported)};`,
+        `${keyword} { ${binding.imported} as ${binding.local} } from ${reference(entry.specifier, binding.imported)};`,
       );
     }
     if (entry.namespace) {
