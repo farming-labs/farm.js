@@ -1683,3 +1683,32 @@ test("basic starters ship what agents read: server-rendered copy and an Open Gra
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("starter templates pin the @farming-labs/* versions the docs app runs", async () => {
+  const docsManifest = JSON.parse(
+    await readFile(path.resolve(packageDir, "..", "..", "docs", "package.json"), "utf8"),
+  );
+  const templatesDir = path.join(packageDir, "templates");
+  const pins = [];
+
+  for (const entry of await readdir(templatesDir, { withFileTypes: true, recursive: true })) {
+    const parent = entry.parentPath ?? entry.path;
+    if (!entry.isFile() || entry.name !== "package.json" || parent.includes("node_modules")) {
+      continue;
+    }
+    const manifest = JSON.parse(await readFile(path.join(parent, entry.name), "utf8"));
+    for (const section of ["dependencies", "devDependencies"]) {
+      for (const [name, version] of Object.entries(manifest[section] ?? {})) {
+        if (!name.startsWith("@farming-labs/")) continue;
+        pins.push(name);
+        assert.equal(
+          version,
+          docsManifest.dependencies[name],
+          `${path.relative(templatesDir, parent)} pins ${name}@${version}`,
+        );
+      }
+    }
+  }
+
+  assert.ok(pins.length > 0, "expected at least one template to pin @farming-labs/*");
+});
