@@ -1029,6 +1029,23 @@ describe("generateRedirectInterpolationSource", () => {
         pathname: "/e/foo",
         expected: "/e/foo-foo",
       },
+      // A param name that starts another param's name is read whole, in either order.
+      {
+        source: "/u/:id/:idx",
+        destination: "/v/:idx/:id",
+        pathname: "/u/A/B",
+        expected: "/v/B/A",
+      },
+      {
+        source: "/blog/:slug/:s",
+        destination: "/posts/:s/:slug",
+        pathname: "/blog/hello/2",
+        expected: "/posts/2/hello",
+      },
+      // An unknown name stays as written instead of losing its start to a shorter param.
+      { source: "/k/:id", destination: "/k/:idx/:id", pathname: "/k/7", expected: "/k/:idx/7" },
+      // A value that itself looks like a reference is injected once, never read again.
+      { source: "/q/:a/:b", destination: "/q/:b/:a", pathname: "/q/:b/x", expected: "/q/x/%3Ab" },
     ];
 
   for (const { source, destination, pathname, expected } of cases) {
