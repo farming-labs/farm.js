@@ -499,6 +499,20 @@ test("a client component calls a server action it received as a prop, and the pa
   expect(errors).toEqual([]);
 });
 
+test("a client navigation that streams Suspense content in several flushes reveals all of it", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/refresh-stream");
+  await hydrated(page);
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("link", { name: "Next visit" }).click();
+  await expect(page.getByTestId("visit")).toHaveText("visit 1");
+  await expect(page.getByTestId("note")).toHaveText("note arrived");
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
 test("a server action that removes an item keeps each client component's state with its key", async ({
   page,
 }) => {
