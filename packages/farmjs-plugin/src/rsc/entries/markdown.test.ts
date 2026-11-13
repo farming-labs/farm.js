@@ -5,10 +5,13 @@ import {
   createFarmMarkdownErrorBody,
   createMarkdownMirrorResponse,
   farmRequestWantsMarkdown,
+  getFarmMarkdownAlternatePath,
   resolveMarkdownConfig,
 } from "@farm.js/core/markdown";
 import {
+  addMetadataMarkdownAlternate,
   normalizeFarmTrailingSlashPathname,
+  renderMetadataHead,
   resolveFarmI18nConfig,
   stripFarmBasePath,
   stripFarmLocaleFromPathname,
@@ -575,5 +578,89 @@ describe.each([
     // The home page is not in the list.
     const home = await run(new Request("https://farm.test/console/fr/index.md"));
     expect(home.status).toBe(404);
+  });
+});
+
+/**
+ * The head the entry renders for a page at `pathname`: its generated metadata statement over
+ * `pageMetadata`, then core's renderMetadataHead, as the request handler runs them.
+ */
+async function renderHeadTags(
+  markdownConfig: ReturnType<typeof resolveMarkdownConfig>,
+  pathname: string,
+  options: Partial<Pick<EntryContext, "basePath" | "i18n">> = {},
+  pageMetadata: Record<string, unknown> = { title: "Page" },
+): Promise<string> {
+  const entry = generateRscEntry({ ...context, ...options, markdown: markdownConfig });
+  const start = entry.indexOf("const metadata = ");
+  const end = entry.indexOf("\n  const renderedHead = ", start);
+  expect(start).toBeGreaterThan(-1);
+  const metadata = await new Function(
+    "farmMarkdownConfig",
+    "resolveFarmRouteMetadata",
+    "addMetadataMarkdownAlternate",
+    "getFarmMarkdownAlternatePath",
+    "stripFarmBasePath",
+    "stripFarmLocaleFromPathname",
+    "url",
+    "LayoutModules",
+    "pageModule",
+    "pageProps",
+    `${extractRoutePathname(entry)}
+return (async () => { ${entry.slice(start, end)}; return metadata; })();`,
+  )(
+    markdownConfig,
+    async () => pageMetadata,
+    addMetadataMarkdownAlternate,
+    getFarmMarkdownAlternatePath,
+    stripFarmBasePath,
+    stripFarmLocaleFromPathname,
+    new URL(pathname, "https://farm.test"),
+    [],
+    {},
+    {},
+  );
+  return renderMetadataHead(metadata, { pathname }).tags;
+}
+
+// Core's servers advertise a page's mirror in the document head as well as the Link header.
+describe("RSC Markdown head link", () => {
+  it("advertises the page's mirror in the head", async () => {
+    expect(await renderHeadTags(resolveMarkdownConfig(undefined), "/pricing")).toContain(
+      '<link rel="alternate" href="/pricing.md" type="text/markdown">',
+    );
+    expect(
+      await renderHeadTags(resolveMarkdownConfig(undefined), "/console", {
+        basePath: "/console",
+        i18n: resolveFarmI18nConfig(false, {
+          root: "/tmp",
+          mode: "production",
+          basePath: "/console",
+        }),
+      }),
+    ).toContain('<link rel="alternate" href="/console/index.md" type="text/markdown">');
+  });
+
+  it("leaves pages without a mirror, and apps with md off, without one", async () => {
+    const exposed = resolveMarkdownConfig({ expose: ["/pricing"] });
+    expect(await renderHeadTags(exposed, "/about")).not.toContain("text/markdown");
+    const off = resolveMarkdownConfig(false);
+    expect(await renderHeadTags(off, "/pricing")).not.toContain("text/markdown");
+    expect(generateRscEntry({ ...context, markdown: off })).not.toContain(
+      "addMetadataMarkdownAlternate",
+    );
+  });
+
+  it("keeps a Markdown alternate the page declares", async () => {
+    const tags = await renderHeadTags(
+      resolveMarkdownConfig(undefined),
+      "/pricing",
+      {},
+      {
+        alternates: { types: { "text/markdown": "/docs/pricing.md" } },
+      },
+    );
+    expect(tags).toContain('href="/docs/pricing.md"');
+    expect(tags).not.toContain('href="/pricing.md"');
   });
 });

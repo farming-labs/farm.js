@@ -157,7 +157,13 @@ import {
   createMarkdownMirrorResponse,
   farmRequestWantsMarkdown,
 } from '@farm.js/core/markdown';
-import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';
+${
+  ctx.markdown?.enabled
+    ? `import { getFarmMarkdownAlternatePath } from '@farm.js/core/markdown';
+import { addMetadataMarkdownAlternate } from '@farm.js/core/internal/production-runtime';
+`
+    : ""
+}import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';
 import { resolveFarmTrailingSlashRedirect } from '@farm.js/core/internal/production-runtime';
 ${
   ctx.trailingSlash
@@ -1255,7 +1261,15 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
   
   // Page props passed to components (includes middleware shared data)
   const pageProps = { params, searchParams, middlewareData };
-  const metadata = await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps);
+  ${
+    ctx.markdown?.enabled
+      ? `// The head advertises the page's Markdown mirror as the Link header does, as in core's servers.
+  const metadata = addMetadataMarkdownAlternate(
+    await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps),
+    getFarmMarkdownAlternatePath(farmMarkdownConfig, url.pathname, { routePathname: getFarmRoutePathname }),
+  );`
+      : "const metadata = await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps);"
+  }
   const renderedHead = renderMetadataHead(metadata, { pathname: url.pathname });
   // Injected into <head> by the SSR entry; React renders only the charset.
   const metadataHead =

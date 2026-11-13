@@ -1055,6 +1055,17 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           }
           expect(sitemapBody).toContain("<lastmod>");
           expect(sitemapBody).not.toContain("/console/console");
+          // The head advertises each page's Markdown mirror, as the Link header does.
+          for (const [pathname, mirror] of [
+            ["/console", "/console/index.md"],
+            ["/console/about", "/console/about.md"],
+            ["/console/legacy", "/console/legacy.md"],
+          ]) {
+            const html = await (await fetch(origin + pathname)).text();
+            expect(html, pathname).toContain(
+              `<link rel="alternate" href="${mirror}" type="text/markdown">`,
+            );
+          }
         }
         if (name === "trailing-slash") {
           for (const [pathname, accept, marker] of [

@@ -414,8 +414,8 @@ callers.
 
 Apps built with `defineConfig` from `@farm.js/plugin/rsc` serve the same mirrors. Every page answers
 at its `.md` URL and to `Accept: text/markdown`, with `?outline`, `?section`, `?max_tokens`, and
-`?actions`. HTML pages send the `Link` header, a missing `.md` page answers a Markdown 404, and reads
-fire `agent.read` events. The mirror renders the page through the normal request path, so middleware
+`?actions`. HTML pages send the `Link` header and the `<link rel="alternate" type="text/markdown">`
+head tag, a missing `.md` page answers a Markdown 404, and reads fire `agent.read` events. The mirror renders the page through the normal request path, so middleware
 and sign-in gates apply, and a page that must not be shared keeps its private `Cache-Control`.
 Under a `basePath` or locale prefix, a home page's mirror is `<prefix>/index.md` and `md.expose`
 lists route paths without the prefix, as described above.
