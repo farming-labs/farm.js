@@ -14,11 +14,14 @@ import { fileURLToPath } from "node:url";
 import viteRsc from "@vitejs/plugin-rsc";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import farmRsc from "./index.js";
+import { defineConfig } from "./index.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-/** farm dev of an RSC app with basePath "/console" and en/fr locales, on a real Vite server. */
+/**
+ * farm dev of an RSC app with basePath "/console" and en/fr locales, on a real Vite server
+ * configured as `farm dev` configures it: defineConfig() plus the Farm config's `i18n`.
+ */
 describe("RSC i18n under farm dev", () => {
   let root: string;
   let server: ViteDevServer;
@@ -48,6 +51,11 @@ describe("RSC i18n under farm dev", () => {
 export default function Page() { return <main>{"Locale " + getLocale() + " from " + getLocaleSource() + ": " + t("greeting")}</main>; }`,
     );
     write(
+      "src/api/locale/route.ts",
+      `import { getLocale } from "@farm.js/core/i18n/server";
+export function GET() { return Response.json({ locale: getLocale() }); }`,
+    );
+    write(
       "src/go/page.tsx",
       `import { redirect } from "@farm.js/core/navigation";
 export default async function Page() { redirect("/about"); }`,
@@ -71,26 +79,27 @@ export default async function Page() { redirect("/about"); }`,
       symlinkSync(realpathSync(source), target, process.platform === "win32" ? "junction" : "dir");
     }
 
+    const config = defineConfig({
+      srcDir: "src",
+      routesDir: "",
+      basePath: "/console",
+      plugins: viteRsc({
+        serverHandler: false,
+        entries: {
+          rsc: "./.farm/rsc-entries/entry.rsc.tsx",
+          ssr: "./.farm/rsc-entries/entry.ssr.tsx",
+          client: "./.farm/rsc-entries/entry.browser.tsx",
+        },
+      }),
+    });
     server = await createServer({
+      ...config,
       root,
       configFile: false,
       logLevel: "silent",
-      srcDir: "src",
-      experimental: { serverComponents: true },
-      basePath: "/console",
+      customLogger: undefined,
       i18n: { locales: ["en", "fr"], defaultLocale: "en" },
       server: { host: "127.0.0.1", port: 0 },
-      plugins: [
-        ...farmRsc({ routesDir: "" }),
-        ...viteRsc({
-          serverHandler: false,
-          entries: {
-            rsc: "./.farm/rsc-entries/entry.rsc.tsx",
-            ssr: "./.farm/rsc-entries/entry.ssr.tsx",
-            client: "./.farm/rsc-entries/entry.browser.tsx",
-          },
-        }),
-      ],
     } as never);
     await server.listen();
     const address = server.httpServer!.address() as AddressInfo;
@@ -141,6 +150,13 @@ export default async function Page() { redirect("/about"); }`,
     expect(detected.status).toBe(307);
     expect(detected.headers.get("location")).toBe("/console/fr/about");
     expect(detected.headers.get("vary")).toContain("Accept-Language");
+  }, 60_000);
+
+  it("reads the locale in route handlers, which keep their URL", async () => {
+    const api = await get("/api/locale", { "accept-language": "fr" });
+    expect(api.status).toBe(200);
+    expect(await api.json()).toEqual({ locale: "fr" });
+    expect(api.headers.get("vary")).toContain("Accept-Language");
   }, 60_000);
 
   it("sends redirect() to the target in the request's locale", async () => {
