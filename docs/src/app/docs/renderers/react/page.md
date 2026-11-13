@@ -568,6 +568,7 @@ satisfy all of these rules:
 | State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                                                       |
 | Memoization         | `useMemo(() => value, deps)` and `useCallback(handler, deps)` whose dependency array names every state, prop, and local they read; read as the value or handler itself.          |
 | Refs                | `const ref = useRef(initial)`, read and written in handlers, and attached with `ref={ref}` to a static element below the root (not inside a list or conditional).                |
+| Effects             | `useEffect` and `useLayoutEffect` with a synchronous callback and an array of names; they close over the render and run after the DOM update.                                    |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                                                           |
 | Tree                | A statically known host tree around eligible conditional, keyed-list, compiled keyed-row, and component-island boundaries.                                                       |
 | Text bindings       | State-driven text in a leaf host element.                                                                                                                                        |
@@ -2547,7 +2548,7 @@ row path; put Hooks inside a keyed row component.
 | Interactive ranges beside siblings or non-host range siblings                                                                         | The range owner requires a host container and non-interactive host rows.           |
 | Branch events, keys, components, fragments, refs, SVG, interactive rows, or unsupported nested blocks in a compiled conditional range | They require the React-owned conditional path rather than compiler-created hosts.  |
 | Dynamic/member component types, component spreads, refs, keys, or children                                                            | Their identity or ownership is outside the first component-island contract.        |
-| Effects or hooks other than `useState` and `useRef`, and `useMemo` or `useCallback` with an incomplete dependency list                | Their lifecycle and ordering must remain under React's hook dispatcher.            |
+| Hooks other than state, ref, memo, and effect hooks; async effects; memoization with incomplete dependencies                          | Their lifecycle and ordering must remain under React's hook dispatcher.            |
 | A ref read during render, on the root element, or in a list or conditional, other refs, or `dangerouslySetInnerHTML`                  | They directly participate in DOM ownership.                                        |
 | Stateful `children` or `key` bindings outside an eligible boundary                                                                    | These need structure or identity semantics.                                        |
 | Conditional style objects, style spreads, methods, or computed names                                                                  | The final property set or precedence cannot be prepared statically.                |

@@ -437,6 +437,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-conditional-structural-prepend-map-hinted"
   | "keyed-rows-conditional-prepend-hinted"
   | "keyed-rows-conditional-filter-prepend-hinted"
+  | "effects"
   | "keyed-rows-host"
   | "keyed-rows-host-hinted"
   | "keyed-rows-host-position-hinted"
@@ -588,6 +589,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-ranges": "keyedRangesRuntimeFeature",
   "mixed-ranges": "mixedRangesRuntimeFeature",
   component: "componentRuntimeFeature",
+  effects: "effectsRuntimeFeature",
 };
 
 function runtimeFeaturesForPlans(
@@ -801,7 +803,8 @@ function isUseStateCall(
 }
 
 type MemoHook = "useMemo" | "useCallback";
-type ReactHook = MemoHook | "useRef";
+type EffectHook = "useEffect" | "useLayoutEffect";
+type ReactHook = MemoHook | "useRef" | EffectHook;
 
 /** The local hook name a call uses, whether imported from react or called on React. */
 function reactHookCall(
@@ -819,7 +822,9 @@ function reactHookCall(
     t.isIdentifier(callee.property) &&
     (callee.property.name === "useMemo" ||
       callee.property.name === "useCallback" ||
-      callee.property.name === "useRef")
+      callee.property.name === "useRef" ||
+      callee.property.name === "useEffect" ||
+      callee.property.name === "useLayoutEffect")
     ? (callee.property.name as ReactHook)
     : undefined;
 }
@@ -868,6 +873,88 @@ function memoHookValue(
       : undefined;
   if (!value) return "useMemo callbacks must return one expression";
   return { hook, value, dependencies };
+}
+
+/**
+ * The component's render scope for its effects: its props, state and refs read from the cells,
+ * its derived values and handlers, then each effect callback with its dependency values. Effects
+ * close over these as React's close over a render, stale closures included.
+ */
+function effectScope(
+  path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>,
+  effects: ReadonlyArray<{
+    callback: t.ArrowFunctionExpression | t.FunctionExpression;
+    dependencies?: t.ArrayExpression;
+    layout: boolean;
+  }>,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  locals: readonly LocalBinding[],
+  propsParameter: t.Identifier,
+  stateParameter: t.Identifier,
+): t.BlockStatement {
+  const cell = (index: number, member: "get" | "set") =>
+    t.memberExpression(
+      t.memberExpression(t.cloneNode(stateParameter), t.numericLiteral(index), true),
+      t.identifier(member),
+    );
+  const statements: t.Statement[] = [];
+  const parameter = path.node.params[0];
+  if (parameter && !t.isIdentifier(parameter)) {
+    statements.push(
+      t.variableDeclaration("const", [
+        t.variableDeclarator(t.cloneNode(parameter, true) as t.LVal, t.cloneNode(propsParameter)),
+      ]),
+    );
+  }
+  const localsByName = new Map(locals.map((local) => [local.name, local]));
+  for (const statement of (path.node.body as t.BlockStatement).body) {
+    if (t.isFunctionDeclaration(statement)) {
+      statements.push(t.cloneNode(statement, true));
+      continue;
+    }
+    if (!t.isVariableDeclaration(statement)) continue;
+    const id = statement.declarations[0].id;
+    if (t.isArrayPattern(id)) {
+      const [value, setter] = id.elements as [t.Identifier, t.Identifier];
+      const index = statesByValue.get(value.name)!.index;
+      statements.push(
+        t.variableDeclaration("const", [
+          t.variableDeclarator(t.identifier(value.name), t.callExpression(cell(index, "get"), [])),
+          t.variableDeclarator(t.identifier(setter.name), cell(index, "set")),
+        ]),
+      );
+      continue;
+    }
+    if (!t.isIdentifier(id)) continue;
+    const ref = statesByValue.get(id.name);
+    const local = localsByName.get(id.name);
+    const value = ref?.ref
+      ? t.callExpression(cell(ref.index, "get"), [])
+      : local
+        ? t.cloneNode(local.value, true)
+        : undefined;
+    if (value) {
+      statements.push(
+        t.variableDeclaration("const", [t.variableDeclarator(t.identifier(id.name), value)]),
+      );
+    }
+  }
+  statements.push(
+    t.returnStatement(
+      t.arrayExpression(
+        effects.map((effect) =>
+          t.arrayExpression([
+            t.cloneNode(effect.callback, true),
+            effect.dependencies
+              ? t.cloneNode(effect.dependencies, true)
+              : t.identifier("undefined"),
+            ...(effect.layout ? [t.booleanLiteral(true)] : []),
+          ]),
+        ),
+      ),
+    ),
+  );
+  return t.blockStatement(statements);
 }
 
 /** A ref the JSX reads outside a handler or a ref attribute, if there is one. */
@@ -10017,6 +10104,11 @@ function compileCandidate(
 
   const states: StateBinding[] = [];
   const locals: LocalBinding[] = [];
+  const effects: Array<{
+    callback: t.ArrowFunctionExpression | t.FunctionExpression;
+    dependencies?: t.ArrayExpression;
+    layout: boolean;
+  }> = [];
   const memoDeclarations: Array<{
     name: string;
     hook: MemoHook;
@@ -10029,6 +10121,36 @@ function compileCandidate(
       if (returned) return "components must have one unconditional return";
       returned = statement;
       continue;
+    }
+    if (t.isExpressionStatement(statement)) {
+      const hook = reactHookCall(statement.expression, hookNames, reactNames);
+      if (hook === "useEffect" || hook === "useLayoutEffect") {
+        const [callback, dependencyList, ...rest] = (statement.expression as t.CallExpression)
+          .arguments;
+        if (
+          rest.length > 0 ||
+          (!t.isArrowFunctionExpression(callback) && !t.isFunctionExpression(callback)) ||
+          callback.async ||
+          callback.generator ||
+          callback.params.length > 0
+        ) {
+          return `${hook} needs one inline synchronous callback`;
+        }
+        if (containsDirectHookCall(callback)) return `Hooks cannot be called inside ${hook}`;
+        if (
+          dependencyList &&
+          (!t.isArrayExpression(dependencyList) ||
+            !dependencyList.elements.every((element) => t.isIdentifier(element)))
+        ) {
+          return `${hook} dependencies must be an array of names`;
+        }
+        effects.push({
+          callback,
+          dependencies: dependencyList as t.ArrayExpression | undefined,
+          layout: hook === "useLayoutEffect",
+        });
+        continue;
+      }
     }
     if (t.isFunctionDeclaration(statement)) {
       if (!statement.id) return "named event handler declarations must have a name";
@@ -11230,6 +11352,7 @@ function compileCandidate(
     appliedKeyedMapUpdateHints > 0 || appliedKeyedArrayAppendHints > 0,
     appliedKeyedArrayAppendHints > 0 && appliedKeyedMapUpdateHints === 0,
   );
+  if (effects.length > 0) runtimeFeatures.push("effects");
   // Reserve only features this module actually uses, once per program. Babel
   // still owns collision avoidance for bindings and referenced global names.
   for (const feature of runtimeFeatures) {
@@ -11345,6 +11468,17 @@ function compileCandidate(
           rewrittenRoot,
         ),
       ),
+      ...(effects.length > 0
+        ? [
+            t.objectProperty(
+              t.identifier("effects"),
+              t.arrowFunctionExpression(
+                [t.cloneNode(propsParameter), t.cloneNode(stateParameter)],
+                effectScope(path, effects, statesByValue, locals, propsParameter, stateParameter),
+              ),
+            ),
+          ]
+        : []),
       t.objectProperty(
         t.identifier("bindings"),
         t.arrayExpression(
@@ -11510,7 +11644,9 @@ export async function compileReactModule(
               t.isIdentifier(specifier.imported) &&
               (specifier.imported.name === "useMemo" ||
                 specifier.imported.name === "useCallback" ||
-                specifier.imported.name === "useRef")
+                specifier.imported.name === "useRef" ||
+                specifier.imported.name === "useEffect" ||
+                specifier.imported.name === "useLayoutEffect")
             ) {
               hookNames.set(specifier.local.name, specifier.imported.name);
             }
