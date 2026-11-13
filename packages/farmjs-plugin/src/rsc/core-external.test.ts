@@ -293,6 +293,7 @@ export const schema = z.string();`;
     { name: "config-middleware", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "nested-layouts", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "base-path", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "trailing-slash", api: undefined, baseURL: "/api", mount: "/api" },
     {
       name: "custom",
       api: {
@@ -535,6 +536,29 @@ export default defineConfig({
             `export default async function Page() { await Promise.resolve(); return <p>Async page</p>; }`,
           );
         }
+        if (name === "trailing-slash") {
+          // basePath "/console" with trailingSlash: pages answer at '/console/about/', a <Link>
+          // renders that URL, and a static page prerenders there.
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "about/page.tsx",
+            `export default function Page() { return <main>About with a trailing slash</main>; }`,
+          );
+          writeRoute(
+            "static/page.tsx",
+            `export const dynamic = "force-static";
+export default function Page() { return <main>Static with a trailing slash</main>; }`,
+          );
+          writeRoute(
+            "links/page.tsx",
+            `import { Link } from "@farm.js/core/client";
+export default function Page() { return <Link href="/about">About link</Link>; }`,
+          );
+        }
         if (name === "base-path") {
           // basePath "/console": a page at its route path, one nested under app/console/ as RSC
           // apps had to before, and a <Link> that core renders below the basePath.
@@ -682,6 +706,7 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           esbuild: { jsxDev: false },
           experimental: { serverComponents: true, serverActions: true },
           ...(name === "base-path" ? { basePath: "/console" } : {}),
+          ...(name === "trailing-slash" ? { basePath: "/console", trailingSlash: true } : {}),
           api,
           middleware: name === "config-middleware" ? { matcher: "/", handler() {} } : undefined,
           plugins,
@@ -1003,6 +1028,80 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(await response.text(), pathname).toContain(marker);
           }
           expect((await fetch(origin + "/console/missing")).status).toBe(404);
+          // Without trailingSlash, a page's trailing-slash URL redirects to the one without.
+          for (const [pathname, location] of [
+            ["/console/about/?tab=1", "/console/about?tab=1"],
+            ["/console/", "/console"],
+            ["/console/about/index.rsc", "/console/about.rsc"],
+          ]) {
+            const response = await fetch(origin + pathname, { redirect: "manual" });
+            expect(response.status, `${pathname} ${logs}`).toBe(308);
+            expect(response.headers.get("location"), pathname).toBe(location);
+          }
+          // llms.txt answers below the basePath and lists each page's public Markdown URL.
+          const llms = await fetch(origin + "/console/llms.txt");
+          expect(llms.status, logs).toBe(200);
+          const llmsBody = await llms.text();
+          for (const url of ["/console/index.md", "/console/about.md", "/console/legacy.md"]) {
+            expect(llmsBody, url).toContain(`(${origin}${url})`);
+          }
+          expect(llmsBody).not.toContain("/console/console");
+          // So does sitemap.xml, on by default as in core, with each page's lastmod.
+          const sitemap = await fetch(origin + "/console/sitemap.xml");
+          expect(sitemap.status, logs).toBe(200);
+          const sitemapBody = await sitemap.text();
+          for (const url of ["/console/", "/console/about", "/console/legacy"]) {
+            expect(sitemapBody, url).toContain(`<loc>${origin}${url}</loc>`);
+          }
+          expect(sitemapBody).toContain("<lastmod>");
+          expect(sitemapBody).not.toContain("/console/console");
+          // The head advertises each page's Markdown mirror, as the Link header does.
+          for (const [pathname, mirror] of [
+            ["/console", "/console/index.md"],
+            ["/console/about", "/console/about.md"],
+            ["/console/legacy", "/console/legacy.md"],
+          ]) {
+            const html = await (await fetch(origin + pathname)).text();
+            expect(html, pathname).toContain(
+              `<link rel="alternate" href="${mirror}" type="text/markdown">`,
+            );
+          }
+        }
+        if (name === "trailing-slash") {
+          for (const [pathname, accept, marker] of [
+            ["/console/", "text/html", "RSC root runtime fixture"],
+            ["/console/about/", "text/html", "About with a trailing slash"],
+            ["/console/about/", "text/x-component", "About with a trailing slash"],
+            ["/console/about/index.rsc", "*/*", "About with a trailing slash"],
+            ["/console/links/", "text/html", 'href="/console/about/"'],
+            ["/console/static/", "text/html", "Static with a trailing slash"],
+            ["/console/static/index.rsc", "*/*", "Static with a trailing slash"],
+          ] as const) {
+            const response = await fetch(origin + pathname, {
+              headers: { accept },
+              redirect: "manual",
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            expect(await response.text(), pathname).toContain(marker);
+          }
+          for (const [pathname, location] of [
+            ["/console/about?tab=1", "/console/about/?tab=1"],
+            ["/console", "/console/"],
+            // A navigation's payload request goes to the canonical page's payload.
+            ["/console/about.rsc", "/console/about/index.rsc"],
+          ]) {
+            const response = await fetch(origin + pathname, { redirect: "manual" });
+            expect(response.status, `${pathname} ${logs}`).toBe(308);
+            expect(response.headers.get("location"), pathname).toBe(location);
+          }
+          // The static page and its payload were written at the trailing-slash URL.
+          for (const file of ["index.html", "index.rsc"]) {
+            expect(
+              existsSync(path.join(isolatedOutput, "public", "console", "static", file)),
+              file,
+            ).toBe(true);
+          }
         }
         // A custom API prefix is not a server-action URL, even with actions enabled.
         const post = await fetch(`${origin}${mount}/echo`, {

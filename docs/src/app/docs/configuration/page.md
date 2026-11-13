@@ -622,6 +622,11 @@ same `include` and `exclude`. A `public/sitemap.xml`
 or a root [`sitemap.ts`](/docs/routing#application-metadata-routes), which can list dynamic pages,
 replaces the generated file.
 
+Apps on the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`) serve the same
+generated `/sitemap.xml`, on by default, with the same options in `agent.sitemap`. `farm dev` reads
+each page's `<lastmod>` when it starts. A `public/sitemap.xml` still replaces it; `sitemap.ts` is
+not supported in RSC apps yet.
+
 ### Default MCP server
 
 Left unset, `mcp` serves a read-only [MCP](https://modelcontextprotocol.io) server at `/mcp`

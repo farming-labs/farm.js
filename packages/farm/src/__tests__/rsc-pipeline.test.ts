@@ -101,6 +101,7 @@ describe("experimental.serverComponents from farm.config", () => {
       {
         srcDir: "web",
         basePath: "/docs",
+        trailingSlash: true,
         middleware,
         images: { provider: "none" },
         md: false,
@@ -120,6 +121,7 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(config.farm).toMatchObject({
       srcDir: "web",
       basePath: "/docs",
+      trailingSlash: true,
       middleware,
       images: { provider: "none" },
       md: false,

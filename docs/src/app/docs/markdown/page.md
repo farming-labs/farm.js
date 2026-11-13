@@ -414,8 +414,8 @@ callers.
 
 Apps built with `defineConfig` from `@farm.js/plugin/rsc` serve the same mirrors. Every page answers
 at its `.md` URL and to `Accept: text/markdown`, with `?outline`, `?section`, `?max_tokens`, and
-`?actions`. HTML pages send the `Link` header, a missing `.md` page answers a Markdown 404, and reads
-fire `agent.read` events. The mirror renders the page through the normal request path, so middleware
+`?actions`. HTML pages send the `Link` header and the `<link rel="alternate" type="text/markdown">`
+head tag, a missing `.md` page answers a Markdown 404, and reads fire `agent.read` events. The mirror renders the page through the normal request path, so middleware
 and sign-in gates apply, and a page that must not be shared keeps its private `Cache-Control`.
 Under a `basePath` or locale prefix, a home page's mirror is `<prefix>/index.md` and `md.expose`
 lists route paths without the prefix, as described above.
@@ -437,8 +437,12 @@ export default defineConfig({
 `md: false` turns mirrors off. `page.md` sources are not part of the RSC pipeline yet.
 
 RSC apps also serve `/llms.txt` by default, listing their static pages with links to these mirrors.
-It is answered after middleware, like a page. Set `agent.llmsTxt` with the same options as core;
-`full: true` adds `/llms-full.txt`, and `false` turns both off:
+It is answered after middleware, like a page, and lists the same pages as in other Farm apps. Under
+a `basePath` it answers at `/console/llms.txt` and links each page at its public URL
+(`/console/index.md` for the home page), on the root layout's `metadataBase` when it has one;
+`include`, `exclude`, and `md.expose` match route paths. Pages a path-specific guard or a route
+`guard` covers, and pages that render noindex, are left out. Set `agent.llmsTxt` with the same
+options as core; `full: true` adds `/llms-full.txt`, and `false` turns both off:
 
 ```ts title="vite.config.ts"
 export default defineConfig({
