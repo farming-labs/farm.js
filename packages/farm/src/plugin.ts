@@ -1560,6 +1560,25 @@ export class PluginManager {
     );
   }
 
+  /**
+   * @internal Reports an error the handler answered to `runtime.error` and `onError`, as the
+   * runtime scope's `reportError` does, without failing the session: `after` still runs, and a
+   * later throw in it is reported too.
+   */
+  async reportRuntimeRequestError(
+    session: FarmPluginRuntimeSession,
+    error: unknown,
+  ): Promise<void> {
+    await this.runRuntimeErrorHooks(
+      session.request,
+      error,
+      session.ctx,
+      Date.now() - session.startedAt,
+      session.options,
+      session.waitUntil,
+    );
+  }
+
   async runRuntimeRequest(
     request: Request,
     handler: FarmPluginRuntimeRequestHandler,
@@ -1583,15 +1602,7 @@ export class PluginManager {
         (await handler(session.request, {
           // Not a failed session: the handler answers, so `after` runs and a later throw in it
           // is still reported.
-          reportError: (error) =>
-            this.runRuntimeErrorHooks(
-              session.request,
-              error,
-              session.ctx,
-              Date.now() - session.startedAt,
-              session.options,
-              session.waitUntil,
-            ),
+          reportError: (error) => this.reportRuntimeRequestError(session, error),
         }));
       if (!(response instanceof Response)) {
         throw new TypeError("Farm plugin runtime handlers must return a Response");

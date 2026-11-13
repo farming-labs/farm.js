@@ -88,7 +88,7 @@ export default {
           const pathname = traced(request);
           if (!pathname) return;
           trace.push("after " + pathname + " " + response.status);
-          if (pathname.endsWith("/after-fails") || new URL(request.url).search === "?after-fails") {
+          if (pathname.endsWith("/after-fails") || new URL(request.url).searchParams.has("after-fails")) {
             throw new Error("after failed");
           }
         },
@@ -110,7 +110,9 @@ export function middleware(request: Request) {
   const pathname = traced(request);
   if (!pathname) return;
   trace.push("middleware " + pathname);
-  if (pathname === "/api/mw-fails") throw new Error("middleware failed");
+  if (pathname === "/api/mw-fails" || new URL(request.url).searchParams.has("mw-fails")) {
+    throw new Error("middleware failed");
+  }
   if (
     pathname === "/api/guarded" ||
     (pathname === "/.well-known/farmjs.json" && !new URL(request.url).search)
@@ -362,6 +364,31 @@ async function expectRuntimeHookContract(
     await expectConfigRouteHookFailures(origin);
   }
 
+  // App middleware that throws on a built-in route fails the request as it fails a page or an
+  // API route: runtime.error observes the throw, onError gets it once as the "runtime" phase, and
+  // runtime.after sees the 500, kept out of shared caches. A page path answers HTML (the error
+  // document in production, Vite's error page in development), a `renderer: false` app JSON.
+  const builtInMiddlewareFailure = await request(origin, "/.well-known/farmjs.json?mw-fails", {
+    headers: { accept: "text/html" },
+  });
+  if (pages) expect(builtInMiddlewareFailure.body).toMatch(/^\s*<!DOCTYPE html>/i);
+  expect({
+    ...builtInMiddlewareFailure,
+    body: pages ? undefined : builtInMiddlewareFailure.body,
+  }).toEqual({
+    status: 500,
+    contentType: pages ? "text/html; charset=utf-8" : "application/json",
+    cacheControl: "private, no-store",
+    body: pages ? undefined : '{"error":"Internal Server Error"}',
+    trace: [
+      "before page /.well-known/farmjs.json",
+      "middleware /.well-known/farmjs.json",
+      "error /.well-known/farmjs.json middleware failed",
+      "onError runtime middleware failed",
+      "after /.well-known/farmjs.json 500",
+    ],
+  });
+
   // A built-in route on a page path whose runtime.after throws answers the page's plain-text
   // 500, not the JSON an API path gets. A `renderer: false` app has no pages, so it answers JSON.
   expect(await request(origin, "/.well-known/farmjs.json?after-fails")).toEqual({
@@ -373,6 +400,47 @@ async function expectRuntimeHookContract(
       "error /.well-known/farmjs.json after failed",
       "onError runtime after failed",
     ],
+  });
+
+  await expectAfterHookFailureOnMiddlewareError(origin, { pages });
+}
+
+// A runtime.after hook that throws on the 500 a throwing middleware answered is a second failure:
+// runtime.error and onError observe the middleware throw, then the after hook's, each once, and
+// the request answers the runtime hook 500 for its path.
+async function expectAfterHookFailureOnMiddlewareError(
+  origin: string,
+  { pages }: { pages: boolean },
+): Promise<void> {
+  const accept = { headers: { accept: "text/html" } };
+  const trace = (pathname: string, kind: string) => [
+    `before ${kind} ${pathname}`,
+    `middleware ${pathname}`,
+    `error ${pathname} middleware failed`,
+    "onError runtime middleware failed",
+    `after ${pathname} 500`,
+    `error ${pathname} after failed`,
+    "onError runtime after failed",
+  ];
+  expect({
+    "/api/mw-fails?after-fails": await request(origin, "/api/mw-fails?after-fails", accept),
+    "/.well-known/farmjs.json?mw-fails&after-fails": await request(
+      origin,
+      "/.well-known/farmjs.json?mw-fails&after-fails",
+      accept,
+    ),
+    "/hello?mw-fails&after-fails": await request(origin, "/hello?mw-fails&after-fails", accept),
+  }).toEqual({
+    "/api/mw-fails?after-fails": { ...API_HOOK_FAILURE, trace: trace("/api/mw-fails", "api") },
+    "/.well-known/farmjs.json?mw-fails&after-fails": {
+      ...(pages ? PAGE_HOOK_FAILURE : API_HOOK_FAILURE),
+      trace: trace("/.well-known/farmjs.json", "page"),
+    },
+    // A `renderer: false` app has no page there, and answers JSON.
+    "/hello?mw-fails&after-fails": {
+      ...(pages ? PAGE_HOOK_FAILURE : API_HOOK_FAILURE),
+      trace: trace("/hello", "page"),
+    },
   });
 }
 
@@ -529,6 +597,25 @@ async function expectBuiltInRouteFailure(origin: string): Promise<void> {
   expect({ status: docs.status, trace: docs.trace }).toEqual({
     status: 200,
     trace: ["before docs /docs", "middleware /docs", "after /docs 200"],
+  });
+  // App middleware that throws on a docs page is reported to the runtime once, and runtime.after
+  // sees the HTML 500 (the error document in production, Vite's error page in development).
+  const middlewareFailure = await request(origin, "/docs?mw-fails", {
+    headers: { accept: "text/html" },
+  });
+  expect(middlewareFailure.body).toMatch(/^\s*<!DOCTYPE html>/i);
+  expect({ ...middlewareFailure, body: undefined }).toEqual({
+    status: 500,
+    contentType: "text/html; charset=utf-8",
+    cacheControl: "private, no-store",
+    body: undefined,
+    trace: [
+      "before docs /docs",
+      "middleware /docs",
+      "error /docs middleware failed",
+      "onError runtime middleware failed",
+      "after /docs 500",
+    ],
   });
   expect(await request(origin, "/docs/layout-fails", { headers: { accept: "text/html" } })).toEqual(
     {
