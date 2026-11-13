@@ -196,6 +196,51 @@ export default function Home() { return <main>home</main>; }`,
     expect(routes.filter((route) => route !== "/")).toEqual(["/index.md"]);
   }, 30_000);
 
+  it("reports a docs page by its path, as production does, and never a path no page has", async () => {
+    const port = await listen(receiver);
+    const root = await createFixture(
+      `FARMJS_API_KEY=fti_${"l".repeat(43)}\nFARMJS_API_URL=http://127.0.0.1:${port}\n`,
+      `export default { docs: { entry: "/docs", search: false } };`,
+    );
+    await fs.mkdir(path.join(root, "src", "app", "docs", "routing"), { recursive: true });
+    await fs.writeFile(path.join(root, "src", "app", "docs", "page.md"), "# Docs\n\nHome.");
+    await fs.writeFile(
+      path.join(root, "src", "app", "docs", "routing", "page.md"),
+      "# Routing\n\nFile routes.",
+    );
+    const server = await createServer({ root, images: { provider: "none" } });
+    servers.add(server);
+    await server.listen(0);
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+    const status = async (pathname: string) => {
+      const response = await fetch(`http://localhost:${address.port}${pathname}`);
+      await response.arrayBuffer();
+      return response.status;
+    };
+
+    expect(await status("/docs/routing")).toBe(200);
+    expect(await status("/docs/private-missing")).toBe(404);
+    // A page added while the server runs is reported by its path once the watcher sees it.
+    const added = new Promise((resolve) => server.watcher.once("add", resolve));
+    await fs.mkdir(path.join(root, "src", "app", "docs", "cron"), { recursive: true });
+    await fs.writeFile(path.join(root, "src", "app", "docs", "cron", "page.md"), "# Cron");
+    await added;
+    expect(await status("/docs/cron")).toBe(200);
+    await Promise.all([...servers].map((value) => value.close()));
+    servers.clear();
+
+    const requests = received
+      .flatMap(({ body }) => JSON.parse(body).events)
+      .filter(({ kind }) => kind === "request")
+      .map(({ method, route, status }) => `${method} ${route} ${status}`);
+    expect(requests).toHaveLength(3);
+    expect(requests).toEqual(
+      expect.arrayContaining(["GET /docs/routing 200", "GET /docs/cron 200"]),
+    );
+    expect(received.map(({ body }) => body).join("")).not.toContain("private");
+  }, 30_000);
+
   it("sends nothing when the config sets analytics to false", async () => {
     const port = await listen(receiver);
     const root = await createFixture(
