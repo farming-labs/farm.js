@@ -66,7 +66,8 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   an islx server tree: the browser rebuilds it from the HTML, so its module stays on the server,
   and a navigation keeps the provider's state.
 - **Actions.** `"use server"` functions compile to islx action references. A form posts its action
-  without a page load, or without JavaScript, and the page refreshes with its islands' state kept.
+  without a page load, or without JavaScript, and the page refreshes with its islands' state kept,
+  including islands in Suspense content that streams in after the page.
   An action called from a client component can return elements, promises and streams, as under
   RSC: elements render on the server, and promises and streams settle in the browser after the
   call returns. Its arguments and result can refer to themselves.

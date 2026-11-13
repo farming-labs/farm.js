@@ -3240,10 +3240,12 @@ ${
     const record = recover ? null : { valid: true, deploymentId, promise: null };
     // A navigation (not a prefetch) streams when the router supports it: the page goes in as
     // soon as its shell arrives, and its Suspense content follows (takeNavigationStream). A page
-    // whose layouts hydrate, or one rendered in this page's React root, arrives whole.
+    // whose layouts hydrate, or one rendered in this page's React root, arrives whole. So does a
+    // refresh, which renders every layout again (no layout chain): like a transition, it keeps
+    // the page on screen until the new one is ready, so the islands it keeps are all in it.
     const streamShell = ${
       streamNavigations
-        ? `recover && !interceptFrom && !partialHeaders["F-Render"] &&
+        ? `recover && layoutChain && !interceptFrom && !partialHeaders["F-Render"] &&
       !hasHydratableLayout(new URL(url, window.location.href).pathname)`
         : "false"
     };
@@ -5111,6 +5113,8 @@ function getLayoutShell(root, patterns, index) {
 }
 
 ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
+  // A refresh keeps the islands still on the page: the ones in streamed Suspense content too.
+  if (refresh) revealFarmStreamedContent(nextRoot);
   const currentPatterns = getLayoutPatterns(currentRoot);
   const nextPatterns = getLayoutPatterns(nextRoot);
   let sharedCount = 0;
