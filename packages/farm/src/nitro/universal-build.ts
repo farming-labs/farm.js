@@ -142,7 +142,7 @@ import {
   mergeScheduledTasks,
   prepareFarmCronForNitro,
 } from "../cron";
-import { routeRulesToNitroRouteRules } from "../route-rules";
+import { nitroRouteRulesBelowBasePath, routeRulesToNitroRouteRules } from "../route-rules";
 import { getFarmAppDirectories } from "../layers";
 import { HOISTED_HEAD_ELEMENT } from "../server/full-document";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
@@ -13399,9 +13399,13 @@ function toFarmNodeResponse(request, response) {
     ssrOutputDir,
     ssrEntryFile,
   );
-  const configuredNitroRouteRules = shouldBuildFarmMobileClient(config)
-    ? varyFarmNitroCacheRulesByShell(routeRulesToNitroRouteRules(config.routeRules))
-    : routeRulesToNitroRouteRules(config.routeRules);
+  const configuredNitroRouteRules = nitroRouteRulesBelowBasePath(
+    shouldBuildFarmMobileClient(config)
+      ? varyFarmNitroCacheRulesByShell(routeRulesToNitroRouteRules(config.routeRules))
+      : routeRulesToNitroRouteRules(config.routeRules),
+    config.basePath,
+    resolveFarmAPIServerBasePath(config.api),
+  );
   // Visitors request a page below the basePath, and the platform serves a prerendered file
   // only at the URL it was written for, so the page is rendered at its public URL. Farm's
   // headers() and routeRules are written for the app path, so they are matched on it.

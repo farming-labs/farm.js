@@ -1,3 +1,4 @@
+import { applyFarmBasePath, normalizeFarmBasePath } from "./base-path";
 import type { HeaderConfig, RedirectConfig } from "./config";
 import { isFarmRedirectStatus, type FarmRedirectStatus } from "./navigation-errors";
 import type { FarmRouteRuntimeConfig } from "./route-runtime";
@@ -149,6 +150,39 @@ export function routeRulesToNitroRouteRules(routeRules: FarmRouteRules): Record<
   }
 
   return nitroRules;
+}
+
+/**
+ * Nitro matches route rules against the full request path, and a Farm app is served below its
+ * basePath, so each rule also applies at `basePath + source`: a `swr`, `cache`, `cors` or
+ * `redirect` rule written for `/about` must cover the `/console/about` visitors request. The app
+ * path keeps its rule, as before. Local API routes are not served below the basePath, so a rule for
+ * the API path is not copied, and an app-relative redirect target moves below the basePath as
+ * Farm's own redirects do.
+ */
+export function nitroRouteRulesBelowBasePath(
+  nitroRules: Record<string, any>,
+  basePath: string | undefined,
+  apiServerBasePath: string,
+): Record<string, any> {
+  const prefix = normalizeFarmBasePath(basePath);
+  if (!prefix) return nitroRules;
+  const isAPISource = (source: string) =>
+    source === apiServerBasePath || source.startsWith(`${apiServerBasePath}/`);
+
+  const rules: Record<string, any> = { ...nitroRules };
+  for (const [source, rule] of Object.entries(nitroRules)) {
+    if (isAPISource(source)) continue;
+    const publicSource = applyFarmBasePath(source, prefix);
+    // A rule the app wrote for the public path itself is kept as written.
+    if (publicSource in nitroRules) continue;
+    const to = rule.redirect?.to;
+    rules[publicSource] =
+      typeof to === "string" && to.startsWith("/") && !to.startsWith("//")
+        ? { ...rule, redirect: { ...rule.redirect, to: applyFarmBasePath(to, prefix) } }
+        : rule;
+  }
+  return rules;
 }
 
 /**
