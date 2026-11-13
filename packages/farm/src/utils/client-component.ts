@@ -2468,7 +2468,22 @@ export function isFarmPackageClientBoundary(
 }
 
 const CLIENT_PACKAGE_SCAN_EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
-const CLIENT_PACKAGE_SCAN_SKIP = new Set(["node_modules", ".farm", ".git", "dist", ".output"]);
+const CLIENT_PACKAGE_SCAN_SKIP = new Set([
+  "node_modules",
+  ".farm",
+  ".git",
+  "dist",
+  ".output",
+  "__tests__",
+]);
+const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
+/** An app source module: test files run under a test runner, never in the app's module graphs. */
+function isScannedSourceFile(name: string): boolean {
+  return (
+    CLIENT_PACKAGE_SCAN_EXTENSIONS.test(name) && !name.endsWith(".d.ts") && !TEST_FILE.test(name)
+  );
+}
 
 /** The package a bare specifier names: `@scope/name` or `name`, without a subpath. */
 function bareSpecifierPackage(specifier: string): string | null {
@@ -2524,8 +2539,7 @@ function scanFarmPackageImports(
         if (!CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
         continue;
       }
-      if (!CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) || entry.name.endsWith(".d.ts"))
-        continue;
+      if (!isScannedSourceFile(entry.name)) continue;
       const content = readIfExists(file);
       if (!content) continue;
       const client = hasUseClientDirective(content);
@@ -2570,8 +2584,7 @@ export function collectFarmServerBundledPackageInfo(directory: string): FarmServ
         if (!CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
         continue;
       }
-      if (!CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) || entry.name.endsWith(".d.ts"))
-        continue;
+      if (!isScannedSourceFile(entry.name)) continue;
       const content = readIfExists(file);
       if (!content) continue;
       for (const specifier of new Set(getImportSpecifiers(content))) {
@@ -2617,7 +2630,7 @@ export function getFarmClientReachableModules(directory: string, root: string): 
       const file = path.join(current, entry.name);
       if (entry.isDirectory()) {
         if (!entry.name.startsWith(".") && !CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
-      } else if (CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) && !entry.name.endsWith(".d.ts")) {
+      } else if (isScannedSourceFile(entry.name)) {
         const content = readIfExists(file);
         if (hasUseClientDirective(content) || hasHydrateExport(content)) queue.push(file);
       }
