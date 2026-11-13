@@ -1,34 +1,19 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import { request as httpRequest } from "node:http";
-import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
+import { startProductionServer, type ProductionServer } from "./production-server";
 
 // The node-server handler passes srvx's Request on unchanged. Its signal must
 // abort on a real disconnect only, like Farm's own signal on other adapters.
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-
-async function getAvailablePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : 0;
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return port;
-}
 
 const files: Record<string, string> = {
   "package.json": JSON.stringify({
@@ -83,8 +68,7 @@ export async function GET() {
 describe("production request signal on node-server", () => {
   let root = "";
   let base = "";
-  let server: ReturnType<typeof spawn> | undefined;
-  const output: string[] = [];
+  let server: ProductionServer | undefined;
 
   const state = async () =>
     (await (await fetch(`${base}/api/state`)).json()) as Record<
@@ -119,34 +103,13 @@ describe("production request signal on node-server", () => {
     );
     await build(config, { root, preset: "node-server" });
 
-    const serverDirectory = path.join(root, ".farm", ".output", "server");
-    const port = await getAvailablePort();
-    base = `http://127.0.0.1:${port}`;
-    server = spawn(process.execPath, [path.join(serverDirectory, "index.mjs")], {
-      cwd: serverDirectory,
-      env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    server.stdout?.on("data", (chunk) => output.push(String(chunk)));
-    server.stderr?.on("data", (chunk) => output.push(String(chunk)));
-    for (let attempt = 0; attempt < 120; attempt++) {
-      try {
-        await fetch(`${base}/api/state`);
-        return;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    }
-    throw new Error(`Production server did not start\n${output.join("")}`);
+    server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+    base = server.origin;
   }, 180_000);
 
   afterAll(async () => {
     // Windows keeps the server directory locked until the process has exited.
-    if (server && server.exitCode === null && server.signalCode === null) {
-      const exited = new Promise((resolve) => server?.once("exit", resolve));
-      server.kill();
-      await exited;
-    }
+    await server?.stop();
     if (root) await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 

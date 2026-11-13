@@ -4,7 +4,6 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import fs from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
-import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +18,8 @@ import { reviveDeferredData, type DeferredSettlements } from "../deferred";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
 import { logger } from "../utils";
+import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 const isWindows = process.platform === "win32";
 // Bun is optional: the bun preset's shutdown runs only where it is installed.
@@ -223,43 +224,6 @@ async function linkReact18(root: string): Promise<void> {
   await fs.symlink(reactDOMPath, path.join(root, "node_modules", "react-dom"), "junction");
 }
 
-async function getAvailablePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : 0;
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return port;
-}
-
-async function waitForServer(
-  url: string,
-  processOutput: () => string,
-  hasExited: () => boolean,
-  requestInit?: RequestInit,
-) {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (hasExited()) {
-      throw new Error(`Production server exited before it was ready:\n${processOutput()}`);
-    }
-    try {
-      return await fetch(url, requestInit);
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  throw new Error(
-    `Production server did not become ready: ${String(lastError)}\n${processOutput()}`,
-  );
-}
-
 async function readClientBundle(root: string): Promise<string> {
   const clientDir = path.join(root, ".farm", "client");
   const entries = await fs.readdir(clientDir);
@@ -310,51 +274,16 @@ async function runProductionRequest(
   requestInit?: RequestInit,
   env: Record<string, string | undefined> = {},
 ): Promise<void> {
-  const port = await getAvailablePort();
-  const output: string[] = [];
-  let spawnError: Error | undefined;
-  const productionServer = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
-    cwd: serverDir,
-    env: {
-      ...process.env,
-      ...env,
-      HOST: "127.0.0.1",
-      PORT: String(port),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  productionServer.stdout.on("data", (chunk) => output.push(String(chunk)));
-  productionServer.stderr.on("data", (chunk) => output.push(String(chunk)));
-  productionServer.on("error", (error) => {
-    spawnError = error;
-  });
-
+  const production = await startProductionServer(serverDir, { env });
   try {
-    const response = await waitForServer(
-      `http://127.0.0.1:${port}${pathname}`,
-      () => (spawnError ? `${spawnError.message}\n${output.join("")}` : output.join("")),
-      () => spawnError !== undefined || productionServer.exitCode !== null,
-      requestInit,
-    );
+    const response = await fetch(`${production.origin}${pathname}`, requestInit);
     try {
       await assertion(response);
     } catch (error) {
-      throw new Error(`${String(error)}\nProduction output:\n${output.join("")}`);
+      throw new Error(`${String(error)}\nProduction output:\n${production.output()}`);
     }
   } finally {
-    if (productionServer.exitCode === null) {
-      productionServer.kill("SIGTERM");
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          productionServer.kill("SIGKILL");
-          resolve();
-        }, 2_000);
-        productionServer.once("exit", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-      });
-    }
+    await production.stop();
   }
 }
 
@@ -5306,30 +5235,15 @@ export default defineConfig({
         await build(config, { root, preset });
 
         const serverDir = path.join(root, ".farm", ".output", "server");
-        const port = await getAvailablePort();
-        const output: string[] = [];
-        const productionServer = spawn(command, [path.join(serverDir, "index.mjs")], {
-          cwd: serverDir,
-          env: {
-            ...process.env,
-            HOST: "127.0.0.1",
-            PORT: String(port),
-          },
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        productionServer.stdout.on("data", (chunk) => output.push(String(chunk)));
-        productionServer.stderr.on("data", (chunk) => output.push(String(chunk)));
+        const production = await startProductionServer(serverDir, { command });
+        const productionServer = production.process;
 
         try {
-          const healthResponse = await waitForServer(
-            `http://127.0.0.1:${port}/health/ready`,
-            () => output.join(""),
-            () => productionServer.exitCode !== null,
-          );
+          const healthResponse = await fetch(`${production.origin}/health/ready`);
           expect(healthResponse.status).toBe(200);
           await expect(healthResponse.json()).resolves.toMatchObject({ status: "ok" });
 
-          const request = fetch(`http://127.0.0.1:${port}/api/slow`);
+          const request = fetch(`${production.origin}/api/slow`);
           for (let attempt = 0; attempt < 100; attempt++) {
             const marker = await fs.readFile(markerPath, "utf8").catch(() => "");
             if (marker.includes("request:start")) break;
@@ -5355,7 +5269,7 @@ export default defineConfig({
             new Promise<never>((_, reject) => {
               shutdownTimeout = setTimeout(() => {
                 productionServer.kill("SIGKILL");
-                reject(new Error(`Production server did not shut down:\n${output.join("")}`));
+                reject(new Error(`Production server did not shut down:\n${production.output()}`));
               }, 5_000);
             }),
           ]).finally(() => clearTimeout(shutdownTimeout));
@@ -5373,20 +5287,10 @@ export default defineConfig({
 
         // An idle server exits right away, still running the shutdown hooks.
         await fs.rm(markerPath);
-        const idleServer = spawn(command, [path.join(serverDir, "index.mjs")], {
-          cwd: serverDir,
-          env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        const idleOutput: string[] = [];
-        idleServer.stdout.on("data", (chunk) => idleOutput.push(String(chunk)));
-        idleServer.stderr.on("data", (chunk) => idleOutput.push(String(chunk)));
+        const idle = await startProductionServer(serverDir, { command });
+        const idleServer = idle.process;
         try {
-          const ready = await waitForServer(
-            `http://127.0.0.1:${port}/health/ready`,
-            () => idleOutput.join(""),
-            () => idleServer.exitCode !== null,
-          );
+          const ready = await fetch(`${idle.origin}/health/ready`);
           await ready.arrayBuffer();
           const exited = new Promise<number | null>((resolve) => idleServer.once("exit", resolve));
           const signalledAt = performance.now();

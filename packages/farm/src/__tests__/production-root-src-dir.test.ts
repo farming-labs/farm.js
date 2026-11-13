@@ -1,13 +1,12 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
-import { createServer as createNetServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
+import { startProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -66,71 +65,6 @@ export default function HomePage() { return <main>{greeting()}</main>; }`,
 async function loadFixtureConfig(root: string) {
   const userConfig = await loadConfig(root, undefined, "production");
   return resolveConfig({ ...userConfig, root }, "production");
-}
-
-async function getAvailablePort(): Promise<number> {
-  const server = createNetServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : 0;
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return port;
-}
-
-async function startProductionServer(serverDir: string): Promise<{
-  origin: string;
-  stop: () => Promise<void>;
-}> {
-  const port = await getAvailablePort();
-  const output: string[] = [];
-  const child = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
-    cwd: serverDir,
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout.on("data", (chunk) => output.push(String(chunk)));
-  child.stderr.on("data", (chunk) => output.push(String(chunk)));
-  const origin = `http://127.0.0.1:${port}`;
-
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (child.exitCode !== null) {
-      throw new Error(`Production server exited before readiness:\n${output.join("")}`);
-    }
-    try {
-      await fetch(`${origin}/`);
-      return {
-        origin,
-        stop: async () => {
-          if (child.exitCode !== null) return;
-          child.kill("SIGTERM");
-          await new Promise<void>((resolve) => {
-            const timeout = setTimeout(() => {
-              child.kill("SIGKILL");
-              resolve();
-            }, 2_000);
-            child.once("exit", () => {
-              clearTimeout(timeout);
-              resolve();
-            });
-          });
-        },
-      };
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-
-  child.kill("SIGKILL");
-  throw new Error(
-    `Production server did not become ready: ${String(lastError)}\n${output.join("")}`,
-  );
 }
 
 describe("production build without a src directory", () => {
