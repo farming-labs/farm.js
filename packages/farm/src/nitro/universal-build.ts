@@ -13304,12 +13304,19 @@ function resolveTrustedLocalOrigin(event, request) {
       : requestURL.hostname
   const isLoopback = (value) =>
     value === 'localhost' || value === '::1' || /^127(?:[.][0-9]{1,3}){3}$/.test(value)
-  return requestURL.protocol === protocol &&
+  if (
+    requestURL.protocol === protocol &&
     requestPort === port &&
     isLoopback(address) &&
     isLoopback(normalizedRequestHostname)
-    ? requestURL.origin
-    : undefined
+  ) {
+    return requestURL.origin
+  }
+  // Any other Host is the client's to choose, so it must not decide where a local image is
+  // fetched from: the optimizer reads local sources from this server's own socket address, as the
+  // development server does. A TLS socket's certificate names the public host, not this address,
+  // so there the request origin still stands in.
+  return socket.encrypted ? undefined : origin
 }
 
 // Export the event handler for Nitro

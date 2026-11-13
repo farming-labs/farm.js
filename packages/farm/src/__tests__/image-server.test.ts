@@ -142,6 +142,58 @@ describe("Farm image optimizer", () => {
     expect(fetchRemote).not.toHaveBeenCalled();
   });
 
+  it("does not treat a source that matches a spoofed Host as local", async () => {
+    const fetch = vi.fn(async () => new Response(PNG));
+    const fetchRemote = vi.fn(
+      async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler(
+      resolveFarmImageConfig({ remotePatterns: [{ hostname: "cdn.trusted.example" }] }),
+      {
+        fetch: fetch as typeof globalThis.fetch,
+        fetchRemote: fetchRemote as typeof globalThis.fetch,
+        validateRemoteUrl: vi.fn(),
+        transform: passthroughTransformer(),
+      },
+    );
+    const query = new URLSearchParams({
+      url: "http://attacker.example/x.png",
+      w: "640",
+      q: "75",
+    });
+
+    // The Node server builds request.url from the client's Host header.
+    const response = await handler(new Request(`http://attacker.example/_farm/image?${query}`), {
+      trustedLocalOrigin: "http://127.0.0.1:3000",
+    });
+
+    expect(response?.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(fetchRemote).not.toHaveBeenCalled();
+  });
+
+  it("still allows a remote source that matches remotePatterns, whatever the Host", async () => {
+    const fetchRemote = vi.fn(
+      async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler(
+      resolveFarmImageConfig({ remotePatterns: [{ hostname: "cdn.trusted.example" }] }),
+      {
+        fetch: vi.fn() as unknown as typeof globalThis.fetch,
+        fetchRemote: fetchRemote as typeof globalThis.fetch,
+        validateRemoteUrl: vi.fn(),
+        transform: passthroughTransformer(),
+      },
+    );
+
+    const response = await handler(new Request(optimizerUrl("https://cdn.trusted.example/a.png")), {
+      trustedLocalOrigin: "http://127.0.0.1:3000",
+    });
+
+    expect(response?.status).toBe(200);
+    expect(fetchRemote).toHaveBeenCalledTimes(1);
+  });
+
   it("uses an adapter-owned origin for local asset requests", async () => {
     const fetch = vi.fn(
       async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
