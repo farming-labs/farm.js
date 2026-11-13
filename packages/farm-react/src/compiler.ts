@@ -129,7 +129,13 @@ interface PendingStaticRangeBinding extends PendingKeyedRowBinding {
 
 interface PendingKeyedRowEvent {
   id: number;
-  path: number[];
+  /**
+   * Static host-element path from the row root, by which the rows container finds the element.
+   * Absent in host-block rows: the runtime records each element's events when it mounts the row.
+   */
+  path?: number[];
+  /** The element's location from forEachKeyedRowElement, which names it in any clone of the row. */
+  location: string;
   name: string;
   value: t.ArrowFunctionExpression | t.FunctionExpression;
 }
@@ -200,6 +206,8 @@ interface KeyedRowsPlan {
   events: PendingKeyedRowEvent[];
   conditionals: PendingKeyedRowConditional[];
   descriptorBlocks?: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
+  /** Host-block row elements that carry events, with their event ids. */
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>;
   syntax: "map" | "list";
 }
 
@@ -5699,38 +5707,77 @@ function keyedRowEventHandler(
 }
 
 /**
- * Events on a row's static elements, in the order the keyed-row analysis assigns ids. Rows whose
- * conditional content recursive host blocks own need them collected apart from that analysis,
- * which stops at the conditional's container. Handlers inside branches are not static and stay out.
+ * Visits a keyed row's host elements in document order, including the elements of its logical
+ * and ternary branches. Lists and components are not entered: their own rows and fibers own their
+ * events. The location names an element the same way in every clone of the row. A static
+ * element's location is its element path joined by dots; a branch adds `/<child index><t|f>`.
  */
-function staticKeyedRowEvents(
+function forEachKeyedRowElement(
+  row: t.JSXElement,
+  visit: (element: t.JSXElement, location: string) => void,
+): void {
+  const walk = (element: t.JSXElement, location: string): void => {
+    visit(element, location);
+    let elementIndex = 0;
+    element.children.forEach((child, childIndex) => {
+      if (t.isJSXElement(child)) {
+        if (isHostElement(child))
+          walk(child, location ? `${location}.${elementIndex}` : `${elementIndex}`);
+        elementIndex += 1;
+        return;
+      }
+      if (!t.isJSXExpressionContainer(child) || t.isJSXEmptyExpression(child.expression)) return;
+      const shape = conditionalBlockShape(child.expression);
+      if (shape?.truthy) walk(shape.truthy, `${location}/${childIndex}t`);
+      if (shape?.falsy) walk(shape.falsy, `${location}/${childIndex}f`);
+    });
+  };
+  walk(row, "");
+}
+
+/**
+ * Events of a row whose conditional content compiler-owned host blocks render: on its static
+ * elements and inside its branches. Each element's descriptor lists its event ids, so the runtime
+ * records them when it mounts the element and the rows container needs no static path. Returns
+ * undefined when a handler cannot run from the rows block.
+ */
+function hostBlockKeyedRowEvents(
   row: t.JSXElement,
   compilerSetters: ReadonlySet<string>,
-): PendingKeyedRowEvent[] | undefined {
+):
+  | {
+      events: PendingKeyedRowEvent[];
+      elements: Map<t.JSXElement, number[]>;
+      attributes: Set<t.JSXAttribute>;
+    }
+  | undefined {
   const events: PendingKeyedRowEvent[] = [];
-  const visit = (element: t.JSXElement, path: number[]): boolean => {
+  const elements = new Map<t.JSXElement, number[]>();
+  const attributes = new Set<t.JSXAttribute>();
+  let supported = true;
+  forEachKeyedRowElement(row, (element, location) => {
     for (const attribute of element.openingElement.attributes) {
       if (!t.isJSXAttribute(attribute)) continue;
       const name = jsxAttributeName(attribute);
       if (!name || !/^on[A-Z]/.test(name)) continue;
       const handler = keyedRowEventHandler(attribute);
-      if (typeof handler === "string") return false;
+      // React restores a controlled field after onChange; the delegated row path does not yet,
+      // so a field inside a branch keeps the React-owned list that restores it.
+      if (typeof handler === "string" || (location.includes("/") && name.startsWith("onChange"))) {
+        supported = false;
+        continue;
+      }
+      elements.set(element, [...(elements.get(element) || []), events.length]);
+      attributes.add(attribute);
       events.push({
         id: events.length,
-        path: [...path],
+        location,
         name,
         value: stabilizeDeferredEventCurrentTarget(handler, compilerSetters),
       });
     }
-    let elementIndex = 0;
-    for (const child of element.children) {
-      if (!t.isJSXElement(child)) continue;
-      if (!visit(child, [...path, elementIndex])) return false;
-      elementIndex += 1;
-    }
-    return true;
-  };
-  return visit(row, []) ? events : undefined;
+  });
+  return supported ? { events, elements, attributes } : undefined;
 }
 
 function analyzeKeyedRowTree(
@@ -5830,6 +5877,7 @@ function analyzeKeyedRowTree(
         events.push({
           id: events.length,
           path: [...path],
+          location: path.join("."),
           name,
           value: stabilizeDeferredEventCurrentTarget(handler, compilerSetters),
         });
@@ -6668,6 +6716,7 @@ function analyzeRecursiveHostTree(
               listNames,
               id,
               allocateId,
+              delegatedEvents,
             )
           : {
               bindings: [],
@@ -6682,6 +6731,7 @@ function analyzeRecursiveHostTree(
               listNames,
               id,
               allocateId,
+              delegatedEvents,
             )
           : {
               bindings: [],
@@ -6876,56 +6926,6 @@ function analyzeRecursiveHostTree(
   return { bindings, plans, blocks, reason };
 }
 
-function jsxCanRenderElements(expression: t.Expression): boolean {
-  let found = false;
-  traverse(expressionFile(cloneExpression(expression)), {
-    JSXElement(path) {
-      found = true;
-      path.stop();
-    },
-    JSXFragment(path) {
-      found = true;
-      path.stop();
-    },
-  });
-  return found;
-}
-
-/**
- * True when, at every level of the path, only host elements precede the next element: no
- * conditional, list or component that renders a varying number of elements. Counting static
- * elements then finds the same DOM element.
- */
-function keyedRowEventPathIsStable(row: t.JSXElement, path: readonly number[]): boolean {
-  let element = row;
-  for (const index of path) {
-    let seen = 0;
-    let next: t.JSXElement | undefined;
-    for (const child of element.children) {
-      if (t.isJSXElement(child)) {
-        if (!isHostElement(child)) return false;
-        if (seen === index) {
-          next = child;
-          break;
-        }
-        seen += 1;
-        continue;
-      }
-      if (t.isJSXFragment(child)) return false;
-      if (
-        t.isJSXExpressionContainer(child) &&
-        !t.isJSXEmptyExpression(child.expression) &&
-        jsxCanRenderElements(child.expression)
-      ) {
-        return false;
-      }
-    }
-    if (!next) return false;
-    element = next;
-  }
-  return true;
-}
-
 function analyzeCompilerOwnedKeyedRowHostBlocks(
   shape: KeyedRowsShape,
   container: t.JSXElement,
@@ -6942,43 +6942,26 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
       descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
       nestedPlans: HostDescriptorBlockPlan[];
       events: PendingKeyedRowEvent[];
+      eventElements: ReadonlyMap<t.JSXElement, readonly number[]>;
     }
   | undefined {
-  const events = shape.rowReason
-    ? staticKeyedRowEvents(
-        shape.row,
-        new Set([...statesByValue.values()].map((state) => state.setterName)),
-      )
-    : shape.events;
-  // The rows container dispatches each event by its element's static path, so that path must
-  // also be its DOM path: no child that can render elements may come before the element.
-  if (
-    !events ||
-    (events.length > 0 &&
-      (!canDelegateKeyedRowEvents(
-        { events, conditionals: [], source: container },
-        delegateWithoutReact,
-      ) ||
-        !events.every((event) => keyedRowEventPathIsStable(shape.row, event.path))))
-  ) {
-    return undefined;
-  }
-
   const row = t.cloneNode(shape.row, true);
   row.openingElement.attributes = row.openingElement.attributes.filter(
     (attribute) => !t.isJSXAttribute(attribute) || jsxAttributeName(attribute) !== "key",
   );
-  const delegatedEvents = new Set<t.JSXAttribute>();
-  for (const event of events) {
-    let element = row;
-    for (const index of event.path) {
-      element = element.children.filter((child) => t.isJSXElement(child))[index] as t.JSXElement;
-    }
-    for (const attribute of element.openingElement.attributes) {
-      if (t.isJSXAttribute(attribute) && jsxAttributeName(attribute) === event.name) {
-        delegatedEvents.add(attribute);
-      }
-    }
+  const rowEvents = hostBlockKeyedRowEvents(
+    row,
+    new Set([...statesByValue.values()].map((state) => state.setterName)),
+  );
+  if (
+    !rowEvents ||
+    (rowEvents.events.length > 0 &&
+      !canDelegateKeyedRowEvents(
+        { events: rowEvents.events, conditionals: [], source: container },
+        delegateWithoutReact,
+      ))
+  ) {
+    return undefined;
   }
   const analysis = analyzeRecursiveHostTree(
     row,
@@ -6987,7 +6970,7 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
     listNames,
     parent,
     allocateId,
-    delegatedEvents,
+    rowEvents.attributes,
   );
   if (analysis.reason || analysis.plans.length === 0) {
     return undefined;
@@ -6997,7 +6980,8 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
     bindings: analysis.bindings,
     descriptorBlocks: analysis.blocks,
     nestedPlans: analysis.plans,
-    events,
+    events: rowEvents.events,
+    eventElements: rowEvents.elements,
   };
 }
 
@@ -7301,6 +7285,7 @@ function analyzeMixedRangesContainer(
               listNames,
               parent,
               allocateId,
+              delegatedEvents,
             )
           : {
               bindings: [],
@@ -7315,6 +7300,7 @@ function analyzeMixedRangesContainer(
               listNames,
               parent,
               allocateId,
+              delegatedEvents,
             )
           : {
               bindings: [],
@@ -7438,6 +7424,8 @@ function keyedListBoundary(
 function hostElementDescriptor(
   element: t.JSXElement,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan> = new Map(),
+  /** Host-block row elements that carry events; the runtime records their ids on mount. */
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.ObjectExpression {
   const tag = element.openingElement.name as t.JSXIdentifier;
   const attributes: t.ObjectExpression[] = [];
@@ -7510,13 +7498,15 @@ function hostElementDescriptor(
           children.push(keyedRangeDescriptorChildren(keyedRange, descriptorBlocks));
         }
       } else {
-        children.push(hostElementDescriptor(child, descriptorBlocks));
+        children.push(hostElementDescriptor(child, descriptorBlocks, eventElements));
       }
     } else if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
       const conditionalRange = conditionalBySource.get(child.expression);
       const keyedRange = keyedBySource.get(child.expression);
       if (conditionalRange) {
-        children.push(conditionalRangeDescriptorChild(conditionalRange, descriptorBlocks));
+        children.push(
+          conditionalRangeDescriptorChild(conditionalRange, descriptorBlocks, eventElements),
+        );
       } else if (keyedRange) {
         if (block?.kind !== "nested-host-keyed-ranges") {
           children.push(keyedRangeDescriptorChildren(keyedRange, descriptorBlocks));
@@ -7534,9 +7524,21 @@ function hostElementDescriptor(
     t.objectProperty(t.identifier("styles"), t.arrayExpression(styles)),
     t.objectProperty(t.identifier("children"), t.arrayExpression(children)),
   ];
+  const events = eventElements?.get(element);
+  if (events) {
+    properties.push(
+      t.objectProperty(
+        t.identifier("events"),
+        t.arrayExpression(events.map((id) => t.numericLiteral(id))),
+      ),
+    );
+  }
   if (block) {
     properties.push(
-      t.objectProperty(t.identifier("block"), nestedHostBlockObject(block, descriptorBlocks)),
+      t.objectProperty(
+        t.identifier("block"),
+        nestedHostBlockObject(block, descriptorBlocks, eventElements),
+      ),
     );
   }
   return t.objectExpression(properties);
@@ -7545,9 +7547,10 @@ function hostElementDescriptor(
 function conditionalRangeDescriptorChild(
   range: ConditionalRangePlan,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.Expression {
   const truthy = range.truthy
-    ? hostElementDescriptor(range.truthy, descriptorBlocks)
+    ? hostElementDescriptor(range.truthy, descriptorBlocks, eventElements)
     : t.nullLiteral();
   if (range.logical) {
     return t.logicalExpression("&&", cloneExpression(range.test), truthy);
@@ -7555,7 +7558,9 @@ function conditionalRangeDescriptorChild(
   return t.conditionalExpression(
     cloneExpression(range.test),
     truthy,
-    range.falsy ? hostElementDescriptor(range.falsy, descriptorBlocks) : t.nullLiteral(),
+    range.falsy
+      ? hostElementDescriptor(range.falsy, descriptorBlocks, eventElements)
+      : t.nullLiteral(),
   );
 }
 
@@ -7701,14 +7706,14 @@ function rewriteKeyedRowEventAttributes(
   extraArguments: readonly t.Expression[] = [],
 ): void {
   const eventByLocation = new Map(
-    events.map((event) => [`${event.path.join(".")}:${event.name}`, event] as const),
+    events.map((event) => [`${event.location}:${event.name}`, event] as const),
   );
-  const visit = (element: t.JSXElement, path: number[]): void => {
+  forEachKeyedRowElement(row, (element, location) => {
     for (const attribute of element.openingElement.attributes) {
       if (!t.isJSXAttribute(attribute)) continue;
       const name = jsxAttributeName(attribute);
       if (!name || !/^on[A-Z]/.test(name)) continue;
-      const event = eventByLocation.get(`${path.join(".")}:${name}`);
+      const event = eventByLocation.get(`${location}:${name}`);
       if (!event) continue;
       attribute.value = t.jsxExpressionContainer(
         t.callExpression(t.cloneNode(eventFactory), [
@@ -7719,15 +7724,7 @@ function rewriteKeyedRowEventAttributes(
         ]),
       );
     }
-
-    let elementIndex = 0;
-    for (const child of element.children) {
-      if (!t.isJSXElement(child)) continue;
-      visit(child, [...path, elementIndex]);
-      elementIndex += 1;
-    }
-  };
-  visit(row, []);
+  });
 }
 
 function rewriteKeyedRowConditionalExpressions(
@@ -7839,10 +7836,14 @@ function keyedRowEventObject(
   const parameters = [t.cloneNode(renderParameters[0], true), index, syntheticEvent];
   return t.objectExpression([
     t.objectProperty(t.identifier("name"), t.stringLiteral(event.name)),
-    t.objectProperty(
-      t.identifier("path"),
-      t.arrayExpression(event.path.map((part) => t.numericLiteral(part))),
-    ),
+    ...(event.path
+      ? [
+          t.objectProperty(
+            t.identifier("path"),
+            t.arrayExpression(event.path.map((part) => t.numericLiteral(part))),
+          ),
+        ]
+      : []),
     t.objectProperty(
       t.identifier("invoke"),
       t.arrowFunctionExpression(
@@ -8103,7 +8104,7 @@ function keyedRowsBoundary(
           t.jsxExpressionContainer(
             t.arrowFunctionExpression(
               parameters.map((parameter) => t.cloneNode(parameter, true)),
-              hostElementDescriptor(plan.row, plan.descriptorBlocks),
+              hostElementDescriptor(plan.row, plan.descriptorBlocks, plan.eventElements),
             ),
           ),
         ),
@@ -8353,11 +8354,12 @@ function hostConditionalBranchObject(
   branch: t.JSXElement,
   bindings: readonly PendingKeyedRowBinding[],
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan> = new Map(),
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.ObjectExpression {
   return t.objectExpression([
     t.objectProperty(
       t.identifier("create"),
-      t.arrowFunctionExpression([], hostElementDescriptor(branch, descriptorBlocks)),
+      t.arrowFunctionExpression([], hostElementDescriptor(branch, descriptorBlocks, eventElements)),
     ),
     t.objectProperty(
       t.identifier("bindings"),
@@ -8412,6 +8414,7 @@ function hostConditionalBoundary(
 function conditionalRangeObject(
   range: ConditionalRangePlan,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan> = new Map(),
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.ObjectExpression {
   const properties: t.ObjectProperty[] = [
     t.objectProperty(t.identifier("before"), t.numericLiteral(range.before)),
@@ -8427,7 +8430,12 @@ function conditionalRangeObject(
     properties.push(
       t.objectProperty(
         t.identifier("truthy"),
-        hostConditionalBranchObject(range.truthy, range.truthyBindings, descriptorBlocks),
+        hostConditionalBranchObject(
+          range.truthy,
+          range.truthyBindings,
+          descriptorBlocks,
+          eventElements,
+        ),
       ),
     );
   }
@@ -8435,7 +8443,12 @@ function conditionalRangeObject(
     properties.push(
       t.objectProperty(
         t.identifier("falsy"),
-        hostConditionalBranchObject(range.falsy, range.falsyBindings, descriptorBlocks),
+        hostConditionalBranchObject(
+          range.falsy,
+          range.falsyBindings,
+          descriptorBlocks,
+          eventElements,
+        ),
       ),
     );
   }
@@ -8445,6 +8458,7 @@ function conditionalRangeObject(
 function nestedHostBlockObject(
   plan: HostDescriptorBlockPlan,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.ObjectExpression {
   const kind =
     plan.kind === "nested-host-conditional-ranges"
@@ -8459,10 +8473,12 @@ function nestedHostBlockObject(
       t.identifier("ranges"),
       t.arrayExpression(
         plan.kind === "nested-host-conditional-ranges"
-          ? plan.ranges.map((range) => conditionalRangeObject(range, descriptorBlocks))
+          ? plan.ranges.map((range) =>
+              conditionalRangeObject(range, descriptorBlocks, eventElements),
+            )
           : plan.kind === "nested-host-keyed-ranges"
             ? plan.ranges.map((range) => keyedRangeObject(range, descriptorBlocks))
-            : plan.ranges.map((range) => mixedRangeObject(range, descriptorBlocks)),
+            : plan.ranges.map((range) => mixedRangeObject(range, descriptorBlocks, eventElements)),
       ),
     ),
     t.objectProperty(t.identifier("trailing"), t.numericLiteral(plan.trailing)),
@@ -8479,10 +8495,11 @@ function nestedHostBlockObject(
 function mixedRangeObject(
   range: MixedRangePlan,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.ObjectExpression {
   const value =
     range.rangeKind === "conditional"
-      ? conditionalRangeObject(range, descriptorBlocks)
+      ? conditionalRangeObject(range, descriptorBlocks, eventElements)
       : keyedRangeObject(range, descriptorBlocks);
   value.properties.unshift(
     t.objectProperty(t.identifier("kind"), t.stringLiteral(range.rangeKind)),
@@ -8972,6 +8989,7 @@ function analyzeComposableBlocks(
               events: hostBlocks?.events || keyedRows.events,
               conditionals: hostBlocks ? [] : keyedRows.conditionals,
               descriptorBlocks: hostBlocks?.descriptorBlocks,
+              eventElements: hostBlocks?.eventElements,
               syntax: keyedRows.syntax,
             });
             plans.push(...(hostBlocks?.nestedPlans || []));

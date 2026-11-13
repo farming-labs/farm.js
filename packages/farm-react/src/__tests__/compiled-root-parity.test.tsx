@@ -564,6 +564,51 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([]);
   });
 
+  it("row events inside branches, including branches and rows created after mount", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: 1, done: false, open: false }, { id: 2, done: true, open: true }]);
+        const [log, setLog] = useState("");
+        const patch = (id, change) => setTodos(todos.map((todo) => todo.id === id ? { ...todo, ...change } : todo));
+        return (
+          <section>
+            <button id="add" onClick={() => setTodos([...todos, { id: todos.length + 1, done: false, open: false }])}>Add</button>
+            <ul>
+              {todos.map((todo) => (
+                <li key={todo.id} data-id={todo.id} onClick={() => setLog((current) => current + "|row:" + todo.id)}>
+                  {todo.done ? (
+                    <s className="undo" onClick={() => patch(todo.id, { done: false })}>{todo.id}</s>
+                  ) : (
+                    <button className="done" onClick={(event) => { event.stopPropagation(); patch(todo.id, { done: true }); }}>{todo.id}</button>
+                  )}
+                  <div className="details">
+                    {todo.open && <p className="body" onClick={() => patch(todo.id, { open: false })}><b className="inner" onClick={() => setLog((current) => current + "|inner:" + todo.id)}>close</b></p>}
+                  </div>
+                  <button className="expand" onClick={() => patch(todo.id, { open: true })}>expand</button>
+                </li>
+              ))}
+            </ul>
+            <p id="log">{log}</p>
+          </section>
+        );
+      }`,
+      "Todos",
+      [
+        click('li[data-id="1"] .done'),
+        click('li[data-id="1"] .undo'),
+        click('li[data-id="2"] .inner'),
+        click('li[data-id="1"] .expand'),
+        click('li[data-id="1"] .inner'),
+        click("#add"),
+        click('li[data-id="3"] .done'),
+        click('li[data-id="3"] .expand'),
+        click('li[data-id="3"] .body'),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
   it("a keyed list between static siblings with bindings and events", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";

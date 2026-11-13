@@ -109,8 +109,9 @@ describe("React AOT keyed-row conditional compiler", () => {
 
   it.each([
     {
-      name: "an event inside the conditional branch",
-      content: "{item.done && <button onClick={() => setItems([])}>Done</button>}",
+      // The rows container cannot receive an event that does not bubble.
+      name: "a non-bubbling event inside the conditional branch",
+      content: "{item.done && <button onMouseEnter={() => setItems([])}>Done</button>}",
     },
     {
       name: "a component inside the conditional branch",
