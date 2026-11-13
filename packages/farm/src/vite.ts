@@ -4567,20 +4567,49 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           const routeMatch =
             pathname === requestedPathname ? requestedMatch : routeManager.matchRoute(pathname);
 
-          if (pm && hasBeforeRouteMatchHook) {
-            await pm.runHookParallel("beforeRouteMatch", {
-              pathname,
-              method,
-            });
-          }
-          if (pm && hasAfterRouteMatchHook) {
-            await pm.runHookParallel("afterRouteMatch", {
-              pathname,
-              matched: !!routeMatch?.route,
-              routePattern: routeMatch?.route?.pattern || null,
-              params: routeMatch?.params || {},
-              layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
-            });
+          // A router or render hook that throws fails the page as a throwing runtime hook does,
+          // as in production, where these hooks run inside the runtime request: runtime.error
+          // observes it, onError gets it once as the "runtime" phase, no runtime.after runs,
+          // and the page answers the runtime hook 500.
+          const failPageHook = async (
+            error: unknown,
+            interceptor?: { release(): void },
+          ): Promise<void> => {
+            interceptor?.release();
+            logResponse(method, urlPath, 500, Date.now() - startTime, "PAGE");
+            if (runtimeSession) {
+              await pm!.failRuntimeRequest(runtimeSession, error);
+            } else {
+              // No session to fail (no plugin has runtime request hooks): report what the
+              // runtime would, as production does.
+              await emitPluginError("runtime", error, {
+                kind: "page",
+                pathname,
+                durationMs: Date.now() - startTime,
+              });
+            }
+            if (!res.headersSent) sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+          };
+
+          try {
+            if (pm && hasBeforeRouteMatchHook) {
+              await pm.runHookParallel("beforeRouteMatch", {
+                pathname,
+                method,
+              });
+            }
+            if (pm && hasAfterRouteMatchHook) {
+              await pm.runHookParallel("afterRouteMatch", {
+                pathname,
+                matched: !!routeMatch?.route,
+                routePattern: routeMatch?.route?.pattern || null,
+                params: routeMatch?.params || {},
+                layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
+              });
+            }
+          } catch (error) {
+            await failPageHook(error);
+            return;
           }
           const renderPayload = {
             pathname,
@@ -4665,7 +4694,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
             const renderer = farmApp.getServerRenderer();
             if (pm && hasBeforeRenderHook) {
-              await pm.runHookParallel("beforeRender", renderPayload);
+              try {
+                await pm.runHookParallel("beforeRender", renderPayload);
+              } catch (error) {
+                await failPageHook(error, responseInterceptor);
+                return;
+              }
             }
             await renderer.renderPage(req as any, res as any);
             if (!shouldInterceptResponse) {
