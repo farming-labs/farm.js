@@ -338,7 +338,10 @@ For each application request, Farm runs the runtime hooks in this order:
    the JSON body `{"error":"Internal Server Error"}` under the API base path or in a
    `renderer: false` app, and a plain-text `Internal Server Error` for a page. That `500` is a
    new response: it carries your `headers()` config, but no header or cookie that middleware or
-   the route had set.
+   the route had set. In production, a `500` from a hook that runs after the app answered (such
+   as `runtime.after` or an HTML transform) is sent with `Cache-Control: private, no-store` when
+   middleware or a `runtime.before` hook let the request through, as the response it replaces
+   would be.
 
 This order is the same in `farm dev` and in a production build. A thrown route error reaches the
 flat `onError` hook once, with `phase: "runtime"` and `meta.kind` naming the request kind (such as

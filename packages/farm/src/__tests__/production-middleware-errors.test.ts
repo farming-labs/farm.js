@@ -496,8 +496,14 @@ export default defineConfig({
 // A plugin with server hooks opens the plugin runtime for every request, runtime hooks or not, so
 // a page failure reaches onError once as the "runtime" phase in both modes. A middleware throw
 // answers the HTML 500 (the error document in production, Vite's error page in development), and
-// a throwing HTML transform hook fails the request with the plain-text runtime hook 500.
-async function expectNoRuntimeHookFailureTraces(origin: string, logPath: string): Promise<void> {
+// a throwing HTML transform hook fails the request with the plain-text runtime hook 500. The app
+// middleware let that request through, so production keeps the 500 out of shared caches, as it
+// keeps the page it replaces, with or without a headers() config; development sets no cache header.
+async function expectNoRuntimeHookFailureTraces(
+  origin: string,
+  logPath: string,
+  production: boolean,
+): Promise<void> {
   const accept = { headers: { accept: "text/html" } };
   const { response: pageResponse, trace: pageTrace } = await readTrace(
     origin,
@@ -519,7 +525,7 @@ async function expectNoRuntimeHookFailureTraces(origin: string, logPath: string)
   const hookFailure = {
     status: 500,
     contentType: "text/plain; charset=utf-8",
-    cacheControl: null,
+    cacheControl: production ? "private, no-store" : null,
     configured: null,
     body: "Internal Server Error",
   };
@@ -577,7 +583,7 @@ describe("page errors with a plugin that has no runtime hooks", () => {
       { linkReact: true },
     );
     try {
-      await expectNoRuntimeHookFailureTraces(app.origin, logPath);
+      await expectNoRuntimeHookFailureTraces(app.origin, logPath, false);
     } finally {
       await app.stop();
       if (previousLog === undefined) delete process.env.FARM_MW_ERROR_LOG;
@@ -592,7 +598,7 @@ describe("page errors with a plugin that has no runtime hooks", () => {
       { linkReact: true, env: { FARM_MW_ERROR_LOG: logPath } },
     );
     try {
-      await expectNoRuntimeHookFailureTraces(app.origin, logPath);
+      await expectNoRuntimeHookFailureTraces(app.origin, logPath, true);
     } finally {
       await app.stop();
     }
@@ -705,6 +711,24 @@ describe("production middleware errors", () => {
     ]);
     await expectSharedFailureTraces(app!.origin, logPath);
     expect(app!.output.join("")).toContain(SECRET);
+  });
+
+  // The same policy as the app without a headers() config (expectNoRuntimeHookFailureTraces): a
+  // runtime hook 500 on a request middleware let through stays private, and one that failed
+  // before the request reached the app sets no cache header.
+  it("keeps a runtime hook 500 private when middleware let the request through", async () => {
+    const accept = { headers: { accept: "text/html" } };
+    const cacheControl: Record<string, string | null> = {};
+    for (const pathname of ["/?after-throw", "/api/ok?after-throw", "/plugin-throw"]) {
+      const response = await readResponse(await fetch(`${app!.origin}${pathname}`, accept));
+      expect(response.status, pathname).toBe(500);
+      cacheControl[pathname] = response.cacheControl;
+    }
+    expect(cacheControl).toEqual({
+      "/?after-throw": "private, no-store",
+      "/api/ok?after-throw": "private, no-store",
+      "/plugin-throw": null,
+    });
   });
 });
 

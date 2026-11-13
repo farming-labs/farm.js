@@ -12535,9 +12535,10 @@ async function handleFarmFetch(request, context) {
   );
 
   // headers() config applies after middleware let the request through, so it learns
-  // whether the response was guarded and can't make that response shareable again.
+  // whether the response was guarded and can't make that response shareable again. A plugin
+  // runtime hook that throws answers a new 500 out here, which learns it the same way.
   let farmGuardedResponse = false;
-  if (configuredHeaderRoutes.length > 0) {
+  if (configuredHeaderRoutes.length > 0 || farmPluginRuntime) {
     const adapterContext = context;
     context = {
       ...adapterContext,
