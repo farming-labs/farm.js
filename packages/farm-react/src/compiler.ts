@@ -798,6 +798,64 @@ function isUseStateCall(
   );
 }
 
+type MemoHook = "useMemo" | "useCallback";
+
+/**
+ * The value a useMemo or useCallback call stands for, when a compiled component can use it in
+ * place of the call: useMemo's computed expression is read as a derived value, recomputed where
+ * it is read, and useCallback's function is a handler. Memoization is a performance hint, so this
+ * holds only when the dependency list names every reactive value the callback reads (checked by
+ * the caller); undefined means the declaration is not such a call.
+ */
+function memoHookValue(
+  expression: t.Expression,
+  memoHookNames: ReadonlyMap<string, MemoHook>,
+  reactNames: ReadonlySet<string>,
+): { hook: MemoHook; value: t.Expression; dependencies?: string[] } | string | undefined {
+  if (!t.isCallExpression(expression)) return undefined;
+  const callee = expression.callee;
+  const hook = t.isIdentifier(callee)
+    ? memoHookNames.get(callee.name)
+    : t.isMemberExpression(callee) &&
+        !callee.computed &&
+        t.isIdentifier(callee.object) &&
+        reactNames.has(callee.object.name) &&
+        t.isIdentifier(callee.property) &&
+        (callee.property.name === "useMemo" || callee.property.name === "useCallback")
+      ? (callee.property.name as MemoHook)
+      : undefined;
+  if (!hook) return undefined;
+  const [callback, dependencyList, ...rest] = expression.arguments;
+  if (
+    rest.length > 0 ||
+    (!t.isArrowFunctionExpression(callback) && !t.isFunctionExpression(callback)) ||
+    callback.async ||
+    callback.generator
+  ) {
+    return `${hook} needs one inline synchronous callback`;
+  }
+  let dependencies: string[] | undefined;
+  if (dependencyList) {
+    if (
+      !t.isArrayExpression(dependencyList) ||
+      !dependencyList.elements.every((element) => t.isIdentifier(element))
+    ) {
+      return `${hook} dependencies must be an array of names`;
+    }
+    dependencies = dependencyList.elements.map((element) => (element as t.Identifier).name);
+  }
+  if (hook === "useCallback") return { hook, value: callback, dependencies };
+  if (callback.params.length > 0) return "useMemo callbacks take no parameters";
+  const body = callback.body;
+  const value = t.isExpression(body)
+    ? body
+    : body.body.length === 1 && t.isReturnStatement(body.body[0]) && body.body[0].argument
+      ? body.body[0].argument
+      : undefined;
+  if (!value) return "useMemo callbacks must return one expression";
+  return { hook, value, dependencies };
+}
+
 function cloneExpression<T extends t.Expression>(expression: T): T {
   return t.cloneNode(expression, true) as T;
 }
@@ -9878,6 +9936,7 @@ function compileCandidate(
     keyedArrayWindowReplaceHints: number;
   },
   useStateNames: ReadonlySet<string>,
+  memoHookNames: ReadonlyMap<string, MemoHook>,
   reactNames: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
   moduleId: string,
@@ -9901,6 +9960,12 @@ function compileCandidate(
 
   const states: StateBinding[] = [];
   const locals: LocalBinding[] = [];
+  const memoDeclarations: Array<{
+    name: string;
+    hook: MemoHook;
+    value: t.Expression;
+    dependencies?: string[];
+  }> = [];
   let returned: t.ReturnStatement | undefined;
   for (const statement of path.node.body.body) {
     if (t.isReturnStatement(statement)) {
@@ -9951,21 +10016,28 @@ function compileCandidate(
     if (!t.isIdentifier(declaration.id) || !t.isExpression(declaration.init)) {
       return "derived const values and event handlers must use one identifier and one expression";
     }
-    if (t.isArrowFunctionExpression(declaration.init) || t.isFunctionExpression(declaration.init)) {
-      if (declaration.init.generator) {
+    let init = declaration.init;
+    const memo = memoHookValue(init, memoHookNames, reactNames);
+    if (typeof memo === "string") return memo;
+    if (memo) {
+      memoDeclarations.push({ name: declaration.id.name, ...memo });
+      init = memo.value;
+    }
+    if (t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)) {
+      if (init.generator) {
         return `event handler ${declaration.id.name} cannot be a generator`;
       }
       locals.push({
         kind: "handler",
         name: declaration.id.name,
-        value: declaration.init,
+        value: init,
         statesBefore: states.length,
       });
     } else {
       locals.push({
         kind: "derived",
         name: declaration.id.name,
-        value: declaration.init,
+        value: init,
         statesBefore: states.length,
       });
     }
@@ -9980,6 +10052,24 @@ function compileCandidate(
   const statesBySetter = new Map(states.map((state) => [state.setterName, state]));
   const localNames = new Set(locals.map((binding) => binding.name));
   if (localNames.size !== locals.length) return "local binding names must be unique";
+  // A memoized value read where it is used matches React only when its dependency list names
+  // every reactive value it reads; a shorter list keeps a stale value on purpose.
+  const reactiveNames = [
+    ...states.map((state) => state.valueName),
+    ...propsPlan.destructuredNames,
+    ...(propsPlan.wrapperProps ? [propsPlan.definitionParameter.name] : []),
+    ...localNames,
+  ];
+  for (const memo of memoDeclarations) {
+    if (!memo.dependencies) continue;
+    const listed = new Set(memo.dependencies);
+    const missing = reactiveNames.find(
+      (name) => name !== memo.name && !listed.has(name) && referencesIdentifier(memo.value, name),
+    );
+    if (missing) {
+      return `${memo.hook} ${memo.name} reads ${missing} without listing it as a dependency`;
+    }
+  }
   for (const state of states) {
     if (
       state.initialValue &&
@@ -11302,6 +11392,7 @@ export async function compileReactModule(
         const moduleDirectives = new Set(directiveValues(programPath.node));
         markForeignContent(programPath);
         const useStateNames = new Set<string>();
+        const memoHookNames = new Map<string, MemoHook>();
         const reactNames = new Set<string>();
         const listNames = new Set<string>();
         for (const statement of programPath.node.body) {
@@ -11326,6 +11417,12 @@ export async function compileReactModule(
               t.isIdentifier(specifier.imported, { name: "useState" })
             ) {
               useStateNames.add(specifier.local.name);
+            } else if (
+              t.isImportSpecifier(specifier) &&
+              t.isIdentifier(specifier.imported) &&
+              (specifier.imported.name === "useMemo" || specifier.imported.name === "useCallback")
+            ) {
+              memoHookNames.set(specifier.local.name, specifier.imported.name);
             }
           }
         }
@@ -11458,6 +11555,7 @@ export async function compileReactModule(
             optimizationCounts,
             compilerUsage,
             useStateNames,
+            memoHookNames,
             reactNames,
             listNames,
             id,

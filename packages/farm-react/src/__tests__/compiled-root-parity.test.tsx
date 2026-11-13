@@ -690,6 +690,26 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([]);
   });
 
+  it("useMemo values and useCallback handlers with complete dependencies", async () => {
+    const fallbacks = await expectParity(
+      `import { useCallback, useMemo, useState } from "react";
+      export function Cart() {
+        const [items, setItems] = useState([{ id: 1, price: 3 }]);
+        const total = useMemo(() => items.filter((item) => item.price > 0).length, [items]);
+        const add = useCallback(() => setItems((current) => [...current, { id: current.length + 1, price: current.length }]), []);
+        return (
+          <section>
+            <button id="add" onClick={add}>add</button>
+            <output>{total} of {items.length}</output>
+          </section>
+        );
+      }`,
+      "Cart",
+      [click("#add"), click("#add"), click("#add")],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
   it("a keyed list between static siblings with bindings and events", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";
