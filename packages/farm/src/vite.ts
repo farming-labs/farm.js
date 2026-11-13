@@ -974,6 +974,10 @@ function interceptFarmDevPageResponse(options: {
   const writeRuntimeHookFailure = () => {
     res.statusCode = 500;
     res.removeHeader("Content-Length");
+    // Production answers a new response, with the headers() config but not the cache policy
+    // of the response the hook failed on (an error page's private, no-store, say). The
+    // headers() config is applied again when the head is written.
+    res.removeHeader("Cache-Control");
     res.setHeader(
       "Content-Type",
       options.jsonError ? "application/json" : "text/plain; charset=utf-8",
@@ -2978,8 +2982,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 throw error;
               }
               // As in production, runtime.error and onError observe the throw once, and
-              // runtime.after sees the HTML 500 through the interceptor.
-              if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
+              // runtime.after sees the HTML 500 through the interceptor. The session is not
+              // failed, so a runtime.after throw is reported too.
+              if (runtimeSession) await pm!.reportRuntimeRequestError(runtimeSession, error);
               sendDevErrorPage(error);
               return true;
             }
@@ -4721,7 +4726,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const duration = Date.now() - startTime;
             logResponse(method, urlPath, 500, duration, "PAGE");
             if (pm && runtimeSession) {
-              await pm.failRuntimeRequest(runtimeSession, error);
+              // A middleware throw is answered inside the runtime request, as production's
+              // reportError reports it: runtime.after still runs on the 500, and a throw there
+              // is reported too.
+              if (middlewareFailed) await pm.reportRuntimeRequestError(runtimeSession, error);
+              else await pm.failRuntimeRequest(runtimeSession, error);
             }
             if (!(middlewareFailed && runtimeSession)) {
               await emitPluginError("render-page", error, { pathname });

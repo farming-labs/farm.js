@@ -401,6 +401,47 @@ async function expectRuntimeHookContract(
       "onError runtime after failed",
     ],
   });
+
+  await expectAfterHookFailureOnMiddlewareError(origin, { pages });
+}
+
+// A runtime.after hook that throws on the 500 a throwing middleware answered is a second failure:
+// runtime.error and onError observe the middleware throw, then the after hook's, each once, and
+// the request answers the runtime hook 500 for its path.
+async function expectAfterHookFailureOnMiddlewareError(
+  origin: string,
+  { pages }: { pages: boolean },
+): Promise<void> {
+  const accept = { headers: { accept: "text/html" } };
+  const trace = (pathname: string, kind: string) => [
+    `before ${kind} ${pathname}`,
+    `middleware ${pathname}`,
+    `error ${pathname} middleware failed`,
+    "onError runtime middleware failed",
+    `after ${pathname} 500`,
+    `error ${pathname} after failed`,
+    "onError runtime after failed",
+  ];
+  expect({
+    "/api/mw-fails?after-fails": await request(origin, "/api/mw-fails?after-fails", accept),
+    "/.well-known/farmjs.json?mw-fails&after-fails": await request(
+      origin,
+      "/.well-known/farmjs.json?mw-fails&after-fails",
+      accept,
+    ),
+    "/hello?mw-fails&after-fails": await request(origin, "/hello?mw-fails&after-fails", accept),
+  }).toEqual({
+    "/api/mw-fails?after-fails": { ...API_HOOK_FAILURE, trace: trace("/api/mw-fails", "api") },
+    "/.well-known/farmjs.json?mw-fails&after-fails": {
+      ...(pages ? PAGE_HOOK_FAILURE : API_HOOK_FAILURE),
+      trace: trace("/.well-known/farmjs.json", "page"),
+    },
+    // A `renderer: false` app has no page there, and answers JSON.
+    "/hello?mw-fails&after-fails": {
+      ...(pages ? PAGE_HOOK_FAILURE : API_HOOK_FAILURE),
+      trace: trace("/hello", "page"),
+    },
+  });
 }
 
 const PAGE_HOOK_FAILURE = {
