@@ -5863,10 +5863,20 @@ function runFarmMiddlewareWithNavigation(
   execute: () => Promise<boolean>,
 ): Promise<boolean> {
   return renderer.runWithRequestContext(middlewareRequest, async () => {
+    // Middleware writes ctx.cookies to the response as it runs.
+    const headersBeforeMiddleware = res.getHeaders();
     try {
       return await execute();
     } catch (error) {
       if (await renderer.respondToNavigationError(req as any, res as any, error)) return true;
+      // As in production, the 500 a throwing middleware fails the request with carries nothing
+      // the failed run set: drop its headers and cookies.
+      if (!res.headersSent) {
+        for (const name of res.getHeaderNames()) res.removeHeader(name);
+        for (const [name, value] of Object.entries(headersBeforeMiddleware)) {
+          if (value !== undefined) res.setHeader(name, value);
+        }
+      }
       throw error;
     }
   });

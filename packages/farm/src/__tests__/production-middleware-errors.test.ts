@@ -19,11 +19,11 @@ const middlewareSource = `export function middleware(
   context: { headers: Headers; cookies: { set(name: string, value: string): void } },
 ) {
   const { pathname } = new URL(request.url);
+  context.headers.set("x-middleware", "ran");
+  context.cookies.set("middleware", "ran");
   if (pathname === "/mw-throw" || pathname === "/api/mw-throw") {
     throw new Error(${JSON.stringify(SECRET)});
   }
-  context.headers.set("x-middleware", "ran");
-  context.cookies.set("middleware", "ran");
 }`;
 
 const APP_FILES: Record<string, string> = {
@@ -400,8 +400,27 @@ async function expectSharedFailureTraces(origin: string, logPath: string): Promi
       },
     ],
   });
+  await expectMiddlewareFailureHeaders(origin);
   await expectRuntimeHookFailureHeaders(origin, logPath);
   await expectPageRenderFailureTraces(origin, logPath);
+}
+
+// A middleware that sets a header and a cookie, then throws, fails the request with a 500 that
+// carries the headers() config but nothing the failed middleware run set (see the middleware
+// docs), on a page path and under the API base path.
+async function expectMiddlewareFailureHeaders(origin: string): Promise<void> {
+  const failures: Record<string, unknown> = {};
+  for (const pathname of ["/mw-throw", "/api/mw-throw"]) {
+    const response = await fetch(`${origin}${pathname}`, { headers: { accept: "text/html" } });
+    await response.body?.cancel();
+    failures[pathname] = {
+      status: response.status,
+      middleware: response.headers.get("x-middleware"),
+      cookies: response.headers.getSetCookie(),
+    };
+  }
+  const failure = { status: 500, middleware: null, cookies: ["configured=yes; Path=/"] };
+  expect(failures).toEqual({ "/mw-throw": failure, "/api/mw-throw": failure });
 }
 
 // A page that throws as it renders answers its error page, a 500 runtime.after sees, and no
