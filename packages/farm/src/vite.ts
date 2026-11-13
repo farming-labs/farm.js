@@ -4655,11 +4655,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // as in production, where these hooks run inside the runtime request: runtime.error
           // observes it, onError gets it once as the "runtime" phase, no runtime.after runs,
           // and the page answers the runtime hook 500.
-          const failPageHook = async (
-            error: unknown,
-            interceptor?: { release(): void },
-          ): Promise<void> => {
-            interceptor?.release();
+          const failPageHook = async (error: unknown): Promise<void> => {
             logResponse(method, urlPath, 500, Date.now() - startTime, "PAGE");
             if (runtimeSession) {
               await pm!.failRuntimeRequest(runtimeSession, error);
@@ -4675,6 +4671,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (!res.headersSent) sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
           };
 
+          const renderPayload = {
+            pathname,
+            method,
+            routePattern: routeMatch?.route?.pattern || null,
+            params: routeMatch?.params || {},
+          };
           try {
             if (pm && hasBeforeRouteMatchHook) {
               await pm.runHookParallel("beforeRouteMatch", {
@@ -4691,16 +4693,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
               });
             }
+            // As in production, render.before runs before app middleware, which may then answer
+            // the request itself.
+            if (pm && hasBeforeRenderHook) {
+              await pm.runHookParallel("beforeRender", renderPayload);
+            }
           } catch (error) {
             await failPageHook(error);
             return;
           }
-          const renderPayload = {
-            pathname,
-            method,
-            routePattern: routeMatch?.route?.pattern || null,
-            params: routeMatch?.params || {},
-          };
 
           // Runtime response transforms need the complete byte stream, including
           // responses completed by middleware or beforeRequest hooks.
@@ -4777,14 +4778,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
 
             const renderer = farmApp.getServerRenderer();
-            if (pm && hasBeforeRenderHook) {
-              try {
-                await pm.runHookParallel("beforeRender", renderPayload);
-              } catch (error) {
-                await failPageHook(error, responseInterceptor);
-                return;
-              }
-            }
             await renderer.renderPage(req as any, res as any);
             if (!shouldInterceptResponse) {
               logResponse(method, urlPath, res.statusCode || 200, Date.now() - startTime, "PAGE");
@@ -4802,7 +4795,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               } else {
                 // The renderer answers a page that throws with its error page, a 500
                 // runtime.after sees, so what throws here is a hook around the render
-                // (beforeRender, say) or the renderer itself. Production runs both inside the
+                // (beforeRequest, say) or the renderer itself. Production runs both inside the
                 // runtime request, so the throw fails it: runtime.error and onError observe it
                 // once, as the "runtime" phase, runtime.after does not run, and the page answers
                 // the runtime hook 500.

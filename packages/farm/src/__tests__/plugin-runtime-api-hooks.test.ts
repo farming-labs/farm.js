@@ -107,18 +107,18 @@ export default {
   "src/app/hello/render-fails/page.tsx": `export default function Page() { return <h1>render</h1>; }`,
   "src/app/hello/router-fails/page.tsx": `export default function Page() { return <h1>router</h1>; }`,
   "src/app/hello/render-before-fails/page.tsx": `export default function Page() { return <h1>render</h1>; }`,
+  "src/app/hello/guarded/page.tsx": `export default function Page() { return <h1>guarded</h1>; }`,
   "src/app/middleware.ts": `${TRACED}
 export function middleware(request: Request) {
   const pathname = traced(request);
-  // farm dev runs render.before after app middleware, production before it; this checks how
-  // its failure is reported, not that order.
-  if (!pathname || pathname === "/hello/render-before-fails") return;
+  if (!pathname) return;
   trace.push("middleware " + pathname);
   if (pathname === "/api/mw-fails" || new URL(request.url).searchParams.has("mw-fails")) {
     throw new Error("middleware failed");
   }
   if (
     pathname === "/api/guarded" ||
+    pathname === "/hello/guarded" ||
     (pathname === "/.well-known/farmjs.json" && !new URL(request.url).search)
   ) {
     return new Response("guarded", { status: 401 });
@@ -143,6 +143,7 @@ const HTML_TRANSFORM_PLUGIN = `
       },
       render: {
         before({ pathname }: { pathname: string }) {
+          if (pathname === "/hello" || pathname === "/hello/guarded") trace.push("render.before " + pathname);
           if (pathname === "/hello/render-before-fails") throw new Error("render.before failed");
         },
       },
@@ -632,6 +633,30 @@ async function expectRouterAndRenderHookFailures(origin: string): Promise<void> 
   });
 }
 
+// Router and render hooks run before app middleware, inside the runtime request, as the production
+// entry runs them before it hands the request to its handler: render.before sees a page app
+// middleware then renders, or answers itself.
+async function expectRenderHookOrder(origin: string): Promise<void> {
+  const accept = { headers: { accept: "text/html" } };
+  expect({
+    "/hello": (await request(origin, "/hello", accept)).trace,
+    "/hello/guarded": (await request(origin, "/hello/guarded", accept)).trace,
+  }).toEqual({
+    "/hello": [
+      "before page /hello",
+      "render.before /hello",
+      "middleware /hello",
+      "after /hello 200",
+    ],
+    "/hello/guarded": [
+      "before page /hello/guarded",
+      "render.before /hello/guarded",
+      "middleware /hello/guarded",
+      "after /hello/guarded 401",
+    ],
+  });
+}
+
 // A built-in route whose own handler throws (here the docs engine's layout wrap) fails the
 // request as a throwing runtime hook does: runtime.error observes it, onError gets it once as the
 // "runtime" phase, no runtime.after runs, and a page path answers the plain-text 500.
@@ -754,6 +779,7 @@ describe("plugin runtime, router, render, and HTML transform hook failures on a 
     await expectPageHookFailures(origin);
     await expectHTMLTransformFailures(origin);
     await expectRouterAndRenderHookFailures(origin);
+    await expectRenderHookOrder(origin);
   }, 120_000);
 
   it("in a node-server production build", async () => {
@@ -762,6 +788,7 @@ describe("plugin runtime, router, render, and HTML transform hook failures on a 
       await expectPageHookFailures(origin);
       await expectHTMLTransformFailures(origin);
       await expectRouterAndRenderHookFailures(origin);
+      await expectRenderHookOrder(origin);
     });
   }, 240_000);
 });
