@@ -1588,12 +1588,6 @@ function collectIsolatedClientBoundaries(
     const parsed = parseClientModuleMetadata(content, false);
 
     if (parsed.isClientComponent) {
-      if (projectRoot && !path.resolve(moduleSourcePath).startsWith(`${projectRoot}${path.sep}`)) {
-        fallbackReason = `client boundary ${moduleSourcePath} is outside the application root`;
-        fallbackHint =
-          "Move the component into the application, or publish it as a package (package client components render as static HTML)";
-        return 0;
-      }
       if (!isIsolatableClientBoundarySource(content)) {
         fallbackReason = `client boundary ${moduleSourcePath} uses an unsupported export shape`;
         fallbackHint =
@@ -1635,7 +1629,12 @@ function collectIsolatedClientBoundaries(
           importedBoundaryCount = 0;
           for (const exportName of reactServerClientNames) {
             importedBoundaryCount += visit(
-              ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
+              ensureFarmPackageClientReference(
+                projectRoot!,
+                specifier,
+                exportName,
+                moduleSourcePath,
+              ),
             );
           }
           // The `"use client"` modules that build renders itself (react-tweet's video player).
@@ -1665,7 +1664,12 @@ function collectIsolatedClientBoundaries(
             for (const reference of references) {
               for (const exportName of farmPackageClientImportExports(reference)) {
                 importedBoundaryCount += visit(
-                  ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
+                  ensureFarmPackageClientReference(
+                    projectRoot!,
+                    specifier,
+                    exportName,
+                    moduleSourcePath,
+                  ),
                 );
               }
             }

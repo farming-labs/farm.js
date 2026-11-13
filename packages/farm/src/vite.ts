@@ -219,6 +219,7 @@ import {
   ensureFarmPackageClientReference,
   FARM_CLIENT_REFERENCE_DIRECTORY,
   FARM_CLIENT_REFERENCE_PRAGMA,
+  readFarmClientReferenceBase,
   rewriteFarmPackageClientImports,
 } from "./islands-package-references";
 import {
@@ -4610,6 +4611,28 @@ window.__FARM_MANIFEST__ = ${inlineValue({
     },
 
     async resolveId(id, importer, resolveOptions) {
+      // The island transform imports Farm's runtime into client components, including ones in a
+      // workspace package's source that does not depend on Farm: those resolve from the app.
+      if (id.startsWith("@farm.js/core/internal/") && importer) {
+        const root = farmApp?.getConfig().root || server?.config.root || options.root;
+        const relative = root ? path.relative(root, importer.split("?", 1)[0]!) : "";
+        if (root && (relative.startsWith("..") || path.isAbsolute(relative))) {
+          return this.resolve(id, path.join(root, "package.json"), {
+            ...resolveOptions,
+            skipSelf: true,
+          });
+        }
+      } else if (importer?.includes(FARM_CLIENT_REFERENCE_DIRECTORY)) {
+        // A client reference for a module outside the app imports the package from that module.
+        const base = readFarmClientReferenceBase(importer.split("?", 1)[0]!);
+        if (base) {
+          return this.resolve(id, path.join(base, "package.json"), {
+            ...resolveOptions,
+            skipSelf: true,
+          });
+        }
+      }
+
       if (typeof fontImports.resolveId === "function") {
         const fontId = await fontImports.resolveId.call(this, id, importer, resolveOptions);
         if (fontId) return fontId;
@@ -4880,7 +4903,7 @@ export const manifest = getManifest();
                 code,
                 file,
                 reference: (specifier, exportName) =>
-                  ensureFarmPackageClientReference(projectRoot, specifier, exportName),
+                  ensureFarmPackageClientReference(projectRoot, specifier, exportName, file),
                 onServerFile: (serverFile) => farmReactServerFiles.add(serverFile),
               });
           if (reactServer !== null) {

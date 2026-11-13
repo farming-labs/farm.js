@@ -140,4 +140,136 @@ describe("TypeScript sources outside the app root", () => {
     expect(await page.text()).toContain("<h1>[op:set]</h1>");
     expect(page.status).toBe(200);
   }, 180_000);
+
+  it("hydrate their client components as islands in production", async () => {
+    const root = await createWorkspace();
+    const workspace = path.resolve(root, "../..");
+    // The package depends on React, not on Farm, whose runtime the island transform imports.
+    await fs.mkdir(path.join(workspace, "packages/lib/node_modules"), { recursive: true });
+    await fs.symlink(
+      await fs.realpath(path.join(packageRoot, "node_modules", "react")),
+      path.join(workspace, "packages/lib/node_modules/react"),
+      "junction",
+    );
+    await writeModule(
+      workspace,
+      "packages/lib/src/counter.tsx",
+      `"use client";
+import { useState } from "react";
+export function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>count {count}</button>;
+}`,
+    );
+    await writeModule(
+      root,
+      "src/app/page.tsx",
+      `import { Counter } from "../../../../packages/lib/src/counter";
+export default function Page() {
+  return <main><Counter /></main>;
+}`,
+    );
+    const config = await resolveConfig(
+      {
+        root,
+        srcDir: "src",
+        images: { provider: "none" },
+        telemetry: false,
+        deploy: { target: "vercel" },
+        experimental: { serverComponents: { mode: "islands" } },
+      },
+      "production",
+    );
+    await build(config, { root, preset: "vercel" });
+    const functionPath = path.resolve(
+      root,
+      config.deploy.outputDir,
+      "functions",
+      "__nitro.func",
+      "index.mjs",
+    );
+    const { default: handler } = await import(/* @vite-ignore */ pathToFileURL(functionPath).href);
+
+    const page = await handler.fetch(
+      new Request("https://site.test/", { headers: { accept: "text/html" } }),
+    );
+    const html = await page.text();
+    expect(page.status).toBe(200);
+    expect(html).toMatch(/<f-island src="[^"]*\/packages\/lib\/src\/counter\.tsx"/);
+    expect(html).toContain("count <!-- -->0");
+  }, 180_000);
+
+  it("render package client components their server components import as islands in production", async () => {
+    const root = await createWorkspace();
+    const workspace = path.resolve(root, "../..");
+    // Only the workspace package depends on the client package, as a UI package depends on Radix.
+    const lib = path.join(workspace, "packages/lib");
+    await fs.mkdir(path.join(lib, "node_modules"), { recursive: true });
+    await fs.symlink(
+      await fs.realpath(path.join(packageRoot, "node_modules", "react")),
+      path.join(lib, "node_modules/react"),
+      "junction",
+    );
+    await writeModule(
+      lib,
+      "node_modules/toggle-kit/package.json",
+      JSON.stringify({ name: "toggle-kit", type: "module", exports: { ".": "./index.js" } }),
+    );
+    await writeModule(
+      lib,
+      "node_modules/toggle-kit/index.js",
+      `"use client";
+import { createElement, useState } from "react";
+export function Toggle() {
+  const [on, setOn] = useState(false);
+  return createElement("button", { onClick: () => setOn(!on) }, on ? "on" : "off");
+}`,
+    );
+    await writeModule(
+      lib,
+      "src/panel.tsx",
+      `import { Toggle } from "toggle-kit";
+export function Panel() {
+  return <section><Toggle /></section>;
+}`,
+    );
+    await writeModule(
+      root,
+      "src/app/page.tsx",
+      `import { Panel } from "../../../../packages/lib/src/panel";
+export default function Page() {
+  return <main><Panel /></main>;
+}`,
+    );
+    const config = await resolveConfig(
+      {
+        root,
+        srcDir: "src",
+        images: { provider: "none" },
+        telemetry: false,
+        deploy: { target: "vercel" },
+        experimental: { serverComponents: { mode: "islands" } },
+      },
+      "production",
+    );
+    await build(config, { root, preset: "vercel" });
+    const functionPath = path.resolve(
+      root,
+      config.deploy.outputDir,
+      "functions",
+      "__nitro.func",
+      "index.mjs",
+    );
+    const { default: handler } = await import(/* @vite-ignore */ pathToFileURL(functionPath).href);
+
+    const page = await handler.fetch(
+      new Request("https://site.test/", { headers: { accept: "text/html" } }),
+    );
+    const html = await page.text();
+    expect(page.status).toBe(200);
+    expect(html).toMatch(
+      /<f-island src="\/\.farm\/client-references\/toggle-kit\/[^"]*Toggle\.tsx"/,
+    );
+    expect(html).toContain(">off</button>");
+  }, 180_000);
 });
