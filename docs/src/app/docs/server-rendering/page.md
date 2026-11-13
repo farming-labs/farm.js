@@ -461,6 +461,21 @@ Both setups follow the same route contract:
   original image URLs, and the optimizer at `images.path` runs only when it can.
 - **Root layouts.** A root layout that renders `<html>` owns the document, as in Next.js, and the
   browser hydrates the whole document.
+- **Base path.** Under a [`basePath`](/docs/configuration#application-base-path), pages answer
+  below it as in other Farm apps: with `basePath: "/console"`, `app/about/page.tsx` serves
+  `/console/about` and its payload `/console/about.rsc`, and `<Link href="/about">` renders
+  `/console/about`. As in other Farm apps, the page also answers at `/about`, and `redirect()`
+  sends its target as written. With i18n
+  the locale prefix is stripped too, so `/console/fr/about` matches `app/about/page.tsx`; the RSC
+  pipeline has no locale runtime yet, so a page that needs the locale takes it from a `[lang]`
+  folder nested as below: `app/[lang]/`, or `app/console/[lang]/` under the base path.
+  Pages nested in folders that spell out the prefix, as RSC apps had to write them before
+  (`app/console/about/page.tsx`, or `app/[lang]/about/page.tsx` and
+  `app/console/[lang]/about/page.tsx` with i18n), keep their URLs and win over a page at the
+  stripped path: with both `app/page.tsx` and `app/console/page.tsx`, `/console` renders the
+  latter. A dynamic or catch-all folder at the root never takes the base path itself, so
+  `app/[[...slug]]/page.tsx` sees `/console/guides` as `guides`. When no page matches the stripped
+  path, the path as received is matched.
 
 A client that loaded an older deployment and fetches a prerendered payload from a newer one does not
 get the deployment-mismatch reload that a server-rendered payload triggers.

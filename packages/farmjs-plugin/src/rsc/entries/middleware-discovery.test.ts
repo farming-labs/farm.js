@@ -192,8 +192,8 @@ describe("RSC file middleware with api.basePath", () => {
 });
 
 describe("RSC file middleware under a basePath or locale prefix", () => {
-  // RSC matchRoute() reads the request path as received, so pages under a basePath live in
-  // app/<basePath>/ and locale pages in app/[lang]/. Their middleware has to run for them.
+  // RSC matchRoute() still selects a page nested under app/<basePath>/ or app/[lang]/ by the
+  // request path as received, so its middleware has to run for it.
   async function blocked(
     i18n: ReturnType<typeof resolveFarmI18nConfig>,
     middlewares: Record<string, string>,
