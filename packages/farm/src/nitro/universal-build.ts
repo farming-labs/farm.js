@@ -14179,6 +14179,7 @@ async function postProcessVercelOutput(
       buildDir: edgeMiddleware.buildDir,
       config,
       routes: edgeMiddlewareRoutes,
+      guardedPages: edgeMiddleware.guardedPages,
       fs,
     });
   }

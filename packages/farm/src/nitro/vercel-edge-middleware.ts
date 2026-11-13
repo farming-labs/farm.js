@@ -47,6 +47,13 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** The URLs a guarded page answers at: below the basePath and at the origin root. */
+function toFarmVercelEdgeGuardedUrls(pathnames: readonly string[], basePath: string): string[] {
+  return [
+    ...new Set(pathnames.flatMap((pathname) => [pathname, applyFarmBasePath(pathname, basePath)])),
+  ];
+}
+
 /**
  * The Vercel route that runs the edge middleware for exactly these prerendered pages. No URL may
  * reach a guarded file without its guard, so it matches every URL that could answer for a page:
@@ -57,9 +64,7 @@ export function createFarmVercelEdgeMiddlewareRoute(
   pathnames: readonly string[],
   basePath = "/",
 ): { src: string; middlewarePath: string; middlewareRawSrc: string[]; continue: true } {
-  const publicPaths = [
-    ...new Set(pathnames.flatMap((pathname) => [pathname, applyFarmBasePath(pathname, basePath)])),
-  ];
+  const publicPaths = toFarmVercelEdgeGuardedUrls(pathnames, basePath);
   const alternatives = publicPaths.map((pathname) => {
     const trimmed = pathname.replace(/\/+$/, "");
     return trimmed ? `${escapeRegExp(trimmed)}(?:/|/index\\.html|\\.html)?` : "/(?:index\\.html)?";
@@ -76,6 +81,7 @@ export function createFarmVercelEdgeMiddlewareRoute(
 export function generateFarmVercelEdgeMiddlewareEntry(
   routes: readonly FarmEdgeMiddlewareRoute[],
   config: ResolvedFarmConfig,
+  guardedPages: readonly string[],
 ): string {
   const imports = routes.map(
     (route, index) =>
@@ -96,6 +102,7 @@ ${modules.join("\n")}
   server: ${JSON.stringify({ trustProxy: config.server?.trustProxy === true })},
   apiBasePath: ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))},
   notFoundPath: ${JSON.stringify(applyFarmBasePath(FARM_VERCEL_EDGE_NOT_FOUND_PATH, config.basePath))},
+  pages: ${JSON.stringify(toFarmVercelEdgeGuardedUrls(guardedPages, config.basePath))},
 });
 `;
 }
@@ -147,9 +154,11 @@ export async function writeFarmVercelEdgeMiddlewareFunction(options: {
   buildDir: string;
   config: ResolvedFarmConfig;
   routes: readonly FarmEdgeMiddlewareRoute[];
+  /** The prerendered pages the edge route sends to the middleware. */
+  guardedPages: readonly string[];
   fs: typeof import("fs/promises");
 }): Promise<void> {
-  const { root, outputDir, buildDir, config, routes, fs } = options;
+  const { root, outputDir, buildDir, config, routes, guardedPages, fs } = options;
   const functionDir = path.join(
     outputDir,
     "functions",
@@ -158,7 +167,10 @@ export async function writeFarmVercelEdgeMiddlewareFunction(options: {
   // The entry sits inside the project so `@farm.js/core` resolves from the app's own install.
   const entryPath = path.join(buildDir, "vercel-edge-middleware-entry.mjs");
   await fs.mkdir(path.dirname(entryPath), { recursive: true });
-  await fs.writeFile(entryPath, generateFarmVercelEdgeMiddlewareEntry(routes, config));
+  await fs.writeFile(
+    entryPath,
+    generateFarmVercelEdgeMiddlewareEntry(routes, config, guardedPages),
+  );
 
   const unsupported = new Set<string>();
   const coreDir = await resolveFarmCoreDir(root, fs);
