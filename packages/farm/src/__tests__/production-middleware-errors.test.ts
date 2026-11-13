@@ -315,6 +315,148 @@ async function expectSharedFailureTraces(origin: string, logPath: string): Promi
   });
 }
 
+// An app whose plugin has server hooks (onError and HTML transforms) but no runtime hooks.
+const NO_RUNTIME_HOOKS_APP_FILES: Record<string, string> = {
+  "farm.config.ts": `import { appendFileSync } from "node:fs";
+import { defineConfig, definePlugin } from "@farm.js/core";
+
+function record(entry) {
+  appendFileSync(process.env.FARM_MW_ERROR_LOG, JSON.stringify(entry) + "\\n");
+}
+
+export default defineConfig({
+  telemetry: false,
+  images: { provider: "none" },
+  plugins: [
+    definePlugin({
+      name: "test:no-runtime-hooks",
+      onError({ phase, error, meta }) {
+        record({ source: "onError", phase, pathname: meta?.pathname, message: error?.message });
+      },
+      transformHTML(html) {
+        if (html.includes("transform-fails-marker")) throw new Error("transform failed");
+        return html;
+      },
+      afterRender(html, { pathname }) {
+        if (pathname === "/render-fails") throw new Error("render failed");
+        return html;
+      },
+    }),
+  ],
+});
+`,
+  ...APP_FILES,
+  "src/app/transform-fails/page.tsx":
+    "export default function Page() { return <main>transform-fails-marker</main>; }",
+  "src/app/render-fails/page.tsx": "export default function Page() { return <main>render</main>; }",
+};
+
+// A plugin with server hooks opens the plugin runtime for every request, runtime hooks or not, so
+// a page failure reaches onError once as the "runtime" phase in both modes. A middleware throw
+// answers the HTML 500 (the error document in production, Vite's error page in development), and
+// a throwing HTML transform hook fails the request with the plain-text runtime hook 500.
+async function expectNoRuntimeHookFailureTraces(origin: string, logPath: string): Promise<void> {
+  const accept = { headers: { accept: "text/html" } };
+  const { response: pageResponse, trace: pageTrace } = await readTrace(
+    origin,
+    logPath,
+    "/mw-throw",
+    accept,
+  );
+  expect(pageResponse.body).toMatch(/^\s*<!DOCTYPE html>/i);
+  expect({ response: { ...pageResponse, body: undefined }, trace: pageTrace }).toEqual({
+    response: {
+      status: 500,
+      contentType: "text/html; charset=utf-8",
+      cacheControl: "private, no-store",
+      configured: null,
+      body: undefined,
+    },
+    trace: [{ source: "onError", phase: "runtime", pathname: "/mw-throw", message: SECRET }],
+  });
+  const hookFailure = {
+    status: 500,
+    contentType: "text/plain; charset=utf-8",
+    cacheControl: null,
+    configured: null,
+    body: "Internal Server Error",
+  };
+  expect({
+    "/transform-fails": await readTrace(origin, logPath, "/transform-fails", accept),
+    "/render-fails": await readTrace(origin, logPath, "/render-fails", accept),
+  }).toEqual({
+    "/transform-fails": {
+      response: hookFailure,
+      trace: [
+        {
+          source: "onError",
+          phase: "runtime",
+          pathname: "/transform-fails",
+          message: "transform failed",
+        },
+      ],
+    },
+    "/render-fails": {
+      response: hookFailure,
+      trace: [
+        {
+          source: "onError",
+          phase: "runtime",
+          pathname: "/render-fails",
+          message: "render failed",
+        },
+      ],
+    },
+  });
+}
+
+// Development runs first: it renders pages, which it must do before a production build in this
+// process loads React for production.
+describe("page errors with a plugin that has no runtime hooks", () => {
+  let logDirectory = "";
+  let logPath = "";
+
+  beforeAll(async () => {
+    logDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "farm-no-runtime-log-"));
+    logPath = path.join(logDirectory, "log");
+  });
+
+  afterAll(async () => {
+    if (logDirectory) await fs.rm(logDirectory, { recursive: true, force: true });
+  });
+
+  it("in development", async () => {
+    // The dev server loads the config in this process.
+    const previousLog = process.env.FARM_MW_ERROR_LOG;
+    process.env.FARM_MW_ERROR_LOG = logPath;
+    const app = await startDevelopmentApp(
+      "farm-dev-no-runtime-hooks-",
+      NO_RUNTIME_HOOKS_APP_FILES,
+      { linkReact: true },
+    );
+    try {
+      await expectNoRuntimeHookFailureTraces(app.origin, logPath);
+    } finally {
+      await app.stop();
+      if (previousLog === undefined) delete process.env.FARM_MW_ERROR_LOG;
+      else process.env.FARM_MW_ERROR_LOG = previousLog;
+    }
+  }, 120_000);
+
+  it("in a node-server production build", async () => {
+    const app = await startProductionApp(
+      "farm-production-no-runtime-hooks-",
+      NO_RUNTIME_HOOKS_APP_FILES,
+      { linkReact: true, env: { FARM_MW_ERROR_LOG: logPath } },
+    );
+    try {
+      await expectNoRuntimeHookFailureTraces(app.origin, logPath);
+    } finally {
+      await app.stop();
+    }
+  }, 240_000);
+});
+
 describe("production middleware errors", () => {
   let app: ProductionApp | undefined;
   let logPath = "";

@@ -47,6 +47,7 @@ import {
   type FarmPluginRuntimeSession,
   type PluginManager,
 } from "./plugin";
+import { hasFarmServerRuntimePlugins } from "./plugin-server-runtime";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
 import {
   generateClientCachePersistenceCode,
@@ -766,6 +767,15 @@ function sendFarmDevRuntimeHookError(res: ServerResponse, json: boolean): void {
   res.statusCode = 500;
   res.setHeader("Content-Type", json ? "application/json" : "text/plain; charset=utf-8");
   res.end(json ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error");
+}
+
+/**
+ * Whether a dev request runs inside a plugin runtime session. The production entry runs every
+ * request inside the plugin runtime whenever a plugin has hooks its server runs, runtime hooks
+ * or not, so a page failure is the runtime's to report, as the "runtime" phase.
+ */
+function opensFarmDevRuntimeSession(pm: PluginManager): boolean {
+  return pm.hasRuntimeRequestHooks() || hasFarmServerRuntimePlugins(pm.getPlugins());
 }
 
 const FARM_CONFIG_ROUTE_PLUGIN_NAMES = new Set([
@@ -2841,7 +2851,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 status: redirect.statusCode,
                 headers: { Location: redirect.destination },
               });
-              if (pm.hasRuntimeRequestHooks()) {
+              if (opensFarmDevRuntimeSession(pm)) {
                 const redirectResponse = response;
                 try {
                   // The session describes the request as production's does for a path no route
@@ -3021,7 +3031,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               await sendWebResponse(res, runtimeResponse);
             };
             let runtimeSession: FarmPluginRuntimeSession | undefined;
-            if (pm?.hasRuntimeRequestHooks()) {
+            if (pm && opensFarmDevRuntimeSession(pm)) {
               try {
                 const routePathname = stripFarmBasePath(requestPathname, farmConfig.basePath);
                 const route = setFarmRouteLabel(
@@ -3755,7 +3765,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // request; middleware and the route handler then run inside it.
             let runtimeSession: FarmPluginRuntimeSession | undefined;
             let sessionRequestUrl: string | undefined;
-            if (pm?.hasRuntimeRequestHooks()) {
+            if (pm && opensFarmDevRuntimeSession(pm)) {
               try {
                 runtimeSession = await pm.beginRuntimeRequest(
                   await createAPIRequest(),
@@ -4525,7 +4535,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           const hasAfterResponseHook = pm?.hasHook("afterResponse") ?? false;
           const hasHTMLTransformHook =
             (pm?.hasHook("transformHTML") ?? false) || (pm?.hasHook("afterRender") ?? false);
-          const hasRuntimeRequestHooks = pm?.hasRuntimeRequestHooks() ?? false;
+          const opensRuntimeSession = pm ? opensFarmDevRuntimeSession(pm) : false;
           const hasRuntimeAfterHook = pm?.hasRuntimeHook("after") ?? false;
 
           // `runtime.before` may return a replacement Request, and the page has
@@ -4549,7 +4559,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           };
           let runtimeSession: FarmPluginRuntimeSession | undefined;
           let pathname = requestedPathname;
-          if (pm && hasRuntimeRequestHooks) {
+          if (pm && opensRuntimeSession) {
             try {
               const sessionOptions = {
                 kind: "page" as const,
