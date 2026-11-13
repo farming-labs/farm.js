@@ -5160,7 +5160,17 @@ ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceSharedLayoutBou
     const support = document.createElement("div");
     support.hidden = true;
     support.dataset.farmFragmentSupport = "true";
-    while (nextRoot.firstChild) support.appendChild(nextRoot.firstChild);
+    while (nextRoot.firstChild) {
+      const node = nextRoot.firstChild;
+      // React's staged Suspense content stays in the root, where a later flush of a streamed
+      // navigation reveals it; React removes it then.
+      if (node.nodeType === 1 && node.matches('div[hidden][id^="S:"]')) {
+        currentRoot.appendChild(node);
+        activateNavigationScripts(node);
+      } else {
+        support.appendChild(node);
+      }
+    }
     document.body.appendChild(support);
     activateNavigationScripts(support);
     setTimeout(function() { support.remove(); }, 0);

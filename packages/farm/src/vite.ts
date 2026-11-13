@@ -7632,7 +7632,17 @@ ${
     const support = document.createElement('div');
     support.hidden = true;
     support.dataset.farmFragmentSupport = 'true';
-    support.append(fragment);
+    while (fragment.firstChild) {
+      const node = fragment.firstChild;
+      // React's staged Suspense content stays in the root, where a later flush of a streamed
+      // navigation reveals it; React removes it then.
+      if (node.nodeType === 1 && node.matches('div[hidden][id^="S:"]')) {
+        container.appendChild(node);
+        activateFragmentScripts(node);
+      } else {
+        support.appendChild(node);
+      }
+    }
     document.body.appendChild(support);
     activateFragmentScripts(support);
     setTimeout(() => support.remove(), 0);
