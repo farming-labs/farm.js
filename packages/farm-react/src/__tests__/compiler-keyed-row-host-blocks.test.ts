@@ -201,9 +201,8 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
       branch: "<strong dangerouslySetInnerHTML={{ __html: item.label }} />",
     },
     {
-      // React DOM restores the field after onChange; delegated rows do not yet.
-      name: "a controlled input in a branch",
-      branch: "<input value={item.label} onChange={() => undefined} />",
+      name: "a controlled input of a dynamic type in a branch",
+      branch: "<input type={item.label} value={item.label} onChange={() => undefined} />",
     },
   ])("leaves $name on React's safe fallback", async ({ branch, declaration = "" }) => {
     const result = await compile(`
@@ -610,7 +609,18 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     expect(result.code).not.toContain("delegateEvents={true}");
   });
 
-  it("delegates row onChange beside conditional content only on roots without React DOM", async () => {
+  it.each([
+    {
+      place: "beside conditional content",
+      content:
+        '<input type="checkbox" checked={todo.done} onChange={() => setTodos([])} />{todo.done ? <s>done</s> : <i>open</i>}',
+    },
+    {
+      place: "inside a branch",
+      content:
+        '{todo.done ? <s>done</s> : <input type="checkbox" checked={todo.done} onChange={() => setTodos([])} />}',
+    },
+  ])("delegates row onChange $place only on roots without React DOM", async ({ content }) => {
     const source = `
       import { useState } from "react";
       export function Todos() {
@@ -619,10 +629,7 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
           <section>
             <ul>
               {todos.map((todo) => (
-                <li key={todo.id}>
-                  <input type="checkbox" checked={todo.done} onChange={() => setTodos([])} />
-                  {todo.done ? <s>done</s> : <i>open</i>}
-                </li>
+                <li key={todo.id}>${content}</li>
               ))}
             </ul>
           </section>
@@ -643,6 +650,27 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     expect(optedOut.code).toContain("farmBlocks.KeyedList");
     expect(optedOut.code).not.toContain("hostBlocks={true}");
     expect(optedOut.code).not.toContain("delegateEventsWithoutReact");
+  });
+
+  it("keeps a file input after row conditional content on the React-owned list", async () => {
+    // The keyed-row analysis stops at the conditional, so the host-block path checks the field.
+    const result = await compile(`
+      import { useState } from "react";
+      export function Uploads() {
+        const [rows, setRows] = useState([{ id: "a", done: false, file: "" }]);
+        return (
+          <section>
+            <ul>
+              {rows.map((row) => (
+                <li key={row.id}>{row.done ? <s>done</s> : null}<input type="file" value={row.file} onChange={() => setRows([])} /></li>
+              ))}
+            </ul>
+          </section>
+        );
+      }
+    `);
+    expect(result.compiled).toEqual(["Uploads"]);
+    expect(result.code).not.toContain("hostBlocks={true}");
   });
 
   it("keeps block ids unique across sibling lists and component-level blocks", async () => {

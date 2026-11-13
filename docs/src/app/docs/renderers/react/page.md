@@ -276,13 +276,13 @@ Rows with `onChange` handlers stay React-owned under React DOM, because React de
 from each row's own Fiber; this root instead listens on the list container for the native event
 React's `onChange` follows for each control (`input` for text fields, `change` for checkboxes,
 radios, selects, and file inputs), so those lists need no React DOM either. The same holds for
-`onChange` rows beside conditional content and in lists between static siblings: under React DOM
-their blocks let React render the rows, and here they run the rows themselves. Fields it creates get
-the same `value` and `checked` defaults React sets, so a form reset behaves the same. Like React DOM,
-the root puts a controlled field back to its `value` or `checked` after that native event, once the
-event's compiled updates have committed: an edit the state rejects disappears, and in a radio group
-the other radios return too. A field whose state took the edit is not written again, so its caret
-and undo history stay.
+`onChange` rows beside or inside conditional content and in lists between static siblings: under
+React DOM their blocks let React render the rows, and here they run the rows themselves. Fields it
+creates get the same `value` and `checked` defaults React sets, so a form reset behaves the same.
+Like React DOM, the root puts a controlled field back to its `value` or `checked` after that native
+event, once the event's compiled updates have committed: an edit the state rejects disappears, and
+in a radio group the other radios return too. A field whose state took the edit is not written
+again, so its caret and undo history stay.
 Rows with conditional content mount here too when their events can be delegated, as described in
 [Compiler-owned host conditionals inside keyed rows](#compiler-owned-host-conditionals-inside-keyed-rows).
 Compiled parts that still re-render through React, such as conditional sections, child component
@@ -302,11 +302,11 @@ Fast Refresh, an edit reloads the page.
 
 Imports that also name `hydrateRoot`, default or namespace imports, dependencies, and server
 modules keep React DOM. Pages that Farm renders and hydrates are not affected. Set
-`compiledRoot: false` to keep React DOM for every root. That also compiles `onChange` rows beside
-conditional content or in a list between static siblings to the React-owned list, which ships less
-code when no root mounts without React DOM; with `compiledRoot` on, those rows compile to blocks
-that React renders under React DOM, as it would the React-owned list. To pass options such as
-`onFallback`, call `createCompiledRoot(container, options)` from `@farm.js/react/compiled-root`.
+`compiledRoot: false` to keep React DOM for every root. That also compiles `onChange` rows beside or
+inside conditional content or in a list between static siblings to the React-owned list, which
+ships less code when no root mounts without React DOM; with `compiledRoot` on, those rows compile to
+blocks that React renders under React DOM, as it would the React-owned list. To pass options such
+as `onFallback`, call `createCompiledRoot(container, options)` from `@farm.js/react/compiled-root`.
 
 ### Static and hybrid reactivity
 
@@ -2108,13 +2108,15 @@ is added. An element with events may therefore sit in a branch, in a nested bran
 conditional or a nested list. Events the container cannot receive the way React does keep the row
 React-owned: events that do not bubble, such as `onMouseEnter`, and handlers in the rows of a
 nested list. `onChange`, which React derives from each row's own Fiber, runs through the container
-only on a [root without React DOM](#roots-without-react-dom) and only outside branches: under React
-DOM the block lets React render the rows, with `compiledRoot: false` they keep the React-owned
-list, and an `onChange` inside a branch keeps the React-owned list, which restores a controlled
-field the way React does.
+only on a [root without React DOM](#roots-without-react-dom), in a branch or not: under React DOM
+the block lets React render the rows, and with `compiledRoot: false` they keep the React-owned
+list. That root restores a controlled field after a rejected change, as React DOM does. Form fields
+in these rows meet the same rules as in other keyed rows: a controlled input needs a static `type`,
+and file inputs with a `value`, controlled textareas with children, and controlled selects with
+dynamic options keep the React-owned list.
 
-Hooks, custom components, refs, SVG, fragments, JSX spreads, dangerous HTML, `onChange` inside a
-conditional, and any unproven shape stay on React.
+Hooks, custom components, refs, SVG, fragments, JSX spreads, dangerous HTML, and any unproven shape
+stay on React.
 Interactive rows outside that event contract keep their React-owned conditional-slot behavior: Farm
 compares row snapshots and asks React to refresh a changed slot, while React retains event, Fiber,
 hydration, and structural-list ownership. Duplicate runtime keys or an invalid adopted shape also
@@ -2382,10 +2384,9 @@ The optimized host-row contract is deliberately narrow:
   containers. Each stable parent key receives an isolated child key table and LIS pass.
 - Inline synchronous row events run through the rows container or the hybrid React-owned row
   path; rows whose branches compiler-owned host blocks render also run the events inside those
-  branches through the container. Inner-row events, `onChange` inside a branch, non-inline or
-  async handlers, file inputs, dynamic form control types or options, custom components,
-  fragments, refs, SVG, attribute spreads, dangerous HTML, and dynamic text mixed beside nested
-  elements stay React-owned.
+  branches through the container. Inner-row events, non-inline or async handlers, file inputs,
+  dynamic form control types or options, custom components, fragments, refs, SVG, attribute
+  spreads, dangerous HTML, and dynamic text mixed beside nested elements stay React-owned.
 - Unsupported or mutating collection methods, spread children, Hooks in callbacks, and other
   unproven shapes fall back to normal React.
 

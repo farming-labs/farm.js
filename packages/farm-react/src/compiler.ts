@@ -5683,6 +5683,38 @@ function reactOwnedAttribute(name: string, attribute: t.JSXAttribute): boolean {
   );
 }
 
+/** Why a keyed row form field needs React to own it, if it does. */
+function keyedRowFieldReason(element: t.JSXElement): string | undefined {
+  const tag = (element.openingElement.name as t.JSXIdentifier).name;
+  const attributeNames = new Set(
+    element.openingElement.attributes
+      .filter((attribute): attribute is t.JSXAttribute => t.isJSXAttribute(attribute))
+      .map(jsxAttributeName)
+      .filter((name): name is string => name !== undefined),
+  );
+  const controlled = attributeNames.has("value") || attributeNames.has("checked");
+  if (attributeNames.has("contentEditable")) {
+    return "content-editable keyed rows require React ownership";
+  }
+  if (tag === "input" && controlled) {
+    const type = jsxAttribute(element, "type");
+    const staticType = staticJsxAttributeString(type);
+    if (type && staticType === undefined) {
+      return "controlled keyed row inputs require a static type";
+    }
+    if (attributeNames.has("value") && staticType?.toLowerCase() === "file") {
+      return "file inputs require React ownership";
+    }
+  }
+  if (tag === "textarea" && controlled && meaningfulJsxChildren(element).length > 0) {
+    return "controlled keyed row textareas cannot also use children";
+  }
+  if (tag === "select" && controlled && controlledSelectHasDynamicOptions(element)) {
+    return "controlled keyed row selects require static options";
+  }
+  return undefined;
+}
+
 /** The inline handler a keyed row event can run from its rows block, or why it cannot. */
 function keyedRowEventHandler(
   attribute: t.JSXAttribute,
@@ -5756,14 +5788,15 @@ function hostBlockKeyedRowEvents(
   const attributes = new Set<t.JSXAttribute>();
   let supported = true;
   forEachKeyedRowElement(row, (element, location) => {
+    // The keyed-row analysis can stop at a conditional before reaching later fields, and branch
+    // fields are interactive now that their events run here, so check every field.
+    if (keyedRowFieldReason(element)) supported = false;
     for (const attribute of element.openingElement.attributes) {
       if (!t.isJSXAttribute(attribute)) continue;
       const name = jsxAttributeName(attribute);
       if (!name || !/^on[A-Z]/.test(name)) continue;
       const handler = keyedRowEventHandler(attribute);
-      // React restores a controlled field after onChange; the delegated row path does not yet,
-      // so a field inside a branch keeps the React-owned list that restores it.
-      if (typeof handler === "string" || (location.includes("/") && name.startsWith("onChange"))) {
+      if (typeof handler === "string") {
         supported = false;
         continue;
       }
@@ -5829,32 +5862,8 @@ function analyzeKeyedRowTree(
     if (tag.name === "title" || tag.name === "meta") {
       return "document metadata requires React ownership";
     }
-    const attributeNames = new Set(
-      element.openingElement.attributes
-        .filter((attribute): attribute is t.JSXAttribute => t.isJSXAttribute(attribute))
-        .map(jsxAttributeName)
-        .filter((name): name is string => name !== undefined),
-    );
-    const controlled = attributeNames.has("value") || attributeNames.has("checked");
-    if (attributeNames.has("contentEditable")) {
-      return "content-editable keyed rows require React ownership";
-    }
-    if (tag.name === "input" && controlled) {
-      const type = jsxAttribute(element, "type");
-      const staticType = staticJsxAttributeString(type);
-      if (type && staticType === undefined) {
-        return "controlled keyed row inputs require a static type";
-      }
-      if (attributeNames.has("value") && staticType?.toLowerCase() === "file") {
-        return "file inputs require React ownership";
-      }
-    }
-    if (tag.name === "textarea" && controlled && meaningfulJsxChildren(element).length > 0) {
-      return "controlled keyed row textareas cannot also use children";
-    }
-    if (tag.name === "select" && controlled && controlledSelectHasDynamicOptions(element)) {
-      return "controlled keyed row selects require static options";
-    }
+    const fieldReason = keyedRowFieldReason(element);
+    if (fieldReason) return fieldReason;
 
     for (const attribute of element.openingElement.attributes) {
       if (t.isJSXSpreadAttribute(attribute)) {

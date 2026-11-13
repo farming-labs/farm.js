@@ -609,6 +609,57 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([]);
   });
 
+  it("onChange fields inside row branches, including branches and rows created after mount", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Editor() {
+        const [rows, setRows] = useState([{ id: 1, label: "One", editing: true, done: false }]);
+        const patch = (id, change) => setRows(rows.map((row) => row.id === id ? { ...row, ...change } : row));
+        return (
+          <section>
+            <button id="add" onClick={() => setRows([...rows, { id: rows.length + 1, label: "", editing: false, done: false }])}>Add</button>
+            <ul>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  {row.editing ? (
+                    <div className="form">
+                      <input className="label" value={row.label} onChange={(event) => { if (event.target.value.length <= 5) patch(row.id, { label: event.target.value }); }} />
+                      <input className="done" type="checkbox" checked={row.done} onChange={(event) => patch(row.id, { done: event.target.checked })} />
+                      <select className="size" value={row.size || "s"} onChange={(event) => patch(row.id, { size: event.target.value })}>
+                        <option value="s">S</option>
+                        <option value="l">L</option>
+                      </select>
+                      <button className="save" onClick={() => patch(row.id, { editing: false })}>save</button>
+                    </div>
+                  ) : (
+                    <span className="view" onClick={() => patch(row.id, { editing: true })}>{row.label}:{row.done ? "done" : "open"}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      }`,
+      "Editor",
+      [
+        type('li[data-id="1"] .label', "One!"),
+        type('li[data-id="1"] .label', "Toolong"),
+        click('li[data-id="1"] .done'),
+        choose('li[data-id="1"] .size', "l"),
+        click('li[data-id="1"] .save'),
+        click('li[data-id="1"] .view'),
+        type('li[data-id="1"] .label', "Uno"),
+        click("#add"),
+        click('li[data-id="2"] .view'),
+        type('li[data-id="2"] .label', "Two"),
+        type('li[data-id="2"] .label', "Twotwo"),
+        click('li[data-id="2"] .done'),
+        click('li[data-id="2"] .save'),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
   it("a keyed list between static siblings with bindings and events", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";
