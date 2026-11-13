@@ -130,6 +130,105 @@ function applyFarmI18nResponse(response, resolution) {
 }
 
 /**
+ * The config `redirects()`, `rewrites()` and `headers()` in the production server, with core's
+ * matchers: sources match the path below the basePath and locale, a redirect keeps the query and
+ * an internal destination stays below the basePath (in the request's locale under i18n), and a
+ * rewrite keeps the query when its destination names none. A payload request ('<page>.rsc')
+ * matches as its page and is sent to the destination's payload. Development gets only the check
+ * for a local route, which its dev server asks before a rewrite.
+ */
+export function generateConfigRoutesRuntime(
+  ctx: EntryContext,
+  configRoutes: EntryContext["configRoutes"],
+  localRouteCheck: boolean,
+): string {
+  if (!configRoutes && !localRouteCheck) return "";
+  const llms = ctx.llmsTxt?.enabled === true;
+  const localRoute = localRouteCheck
+    ? `
+// Whether this server answers the URL itself: a page, an API route, the image optimizer, or an
+// agent file. A config rewrite applies only when none does, as in core's servers.
+function farmHasLocalRequestRoute(url) {
+  const pathname = url.pathname;
+  if (matchRoute(pathname)) return true;
+  if (matchAPIRouteAtBasePath(apiRouteMap, pathname, farmApiBasePath)) return true;
+  if (farmImageHandler && pathname === farmImagePath) return true;
+  const routePathname = getFarmRoutePathname(pathname.replace(/\\/+$/, '') || '/');${
+    llms
+      ? `
+  if (routePathname === '/llms.txt' || (farmLlmsTxtConfig.full && routePathname === '/llms-full.txt')) return true;`
+      : ""
+  }${
+    ctx.sitemap?.enabled
+      ? `
+  if (routePathname === '/sitemap.xml') return true;`
+      : ""
+  }
+  return false;
+}
+${
+  ctx.development === true
+    ? `// farm dev applies config rewrites ahead of this entry, and asks it first.
+export function __farmHasLocalRequestRoute(href) {
+  return farmHasLocalRequestRoute(new URL(href));
+}
+`
+    : ""
+}`
+    : "";
+  if (!configRoutes) return localRoute;
+  return `
+import {
+  applyConfigResponseHeaders,
+  createConfigHeadersMatcher,
+  createConfigRedirectMatcher,
+  createConfigRewriteMatcher,
+  fetchFarmExternalRewrite,
+} from '@farm.js/core/internal/production-runtime';
+
+// The config redirects(), rewrites() and headers(), resolved by the build as core resolves them.
+const farmConfigRouteOptions = { i18n: farmRouteI18n, basePath: ${JSON.stringify(ctx.basePath)} };
+const matchFarmConfigRedirect = createConfigRedirectMatcher(${JSON.stringify(configRoutes.redirects)}, farmConfigRouteOptions);
+const matchFarmConfigRewrite = createConfigRewriteMatcher(${JSON.stringify(configRoutes.rewrites)}, farmConfigRouteOptions);
+const matchFarmConfigHeaders = createConfigHeadersMatcher(${JSON.stringify(configRoutes.headers)}, farmConfigRouteOptions);
+${localRoute}
+/**
+ * A config redirect's response, the Request a config rewrite replaces this one with (a payload
+ * request's stays one), the proxied response of a rewrite to another origin, or null.
+ */
+async function resolveFarmConfigRoute(request, payloadRequested) {
+  const url = new URL(request.url);
+  const redirect = matchFarmConfigRedirect(url);
+  if (redirect) {
+    let location = redirect.destination;
+    if (payloadRequested) {
+      const target = new URL(location, url);
+      if (target.origin === url.origin) location = farmPayloadPath(target.pathname) + target.search;
+    }
+    return new Response('Redirecting to ' + location, {
+      status: redirect.statusCode,
+      headers: { Location: location },
+    });
+  }
+  const destination = matchFarmConfigRewrite(url);
+  if (!destination${localRouteCheck ? " || farmHasLocalRequestRoute(url)" : ""}) return null;
+  const rewritten = new Request(destination, request);
+  if (destination.origin !== url.origin) return fetchFarmExternalRewrite(rewritten);
+  if (payloadRequested) farmPayloadRequests.add(rewritten);
+  return rewritten;
+}
+
+// A prerendered page is a file the platform serves without this server, so a page a config
+// redirect or rewrite may answer, or that config headers apply to, stays server-rendered.
+function farmConfigRouteMayHandlePath(pathname) {
+  const url = new URL(pathname, 'http://farm.invalid');
+  return Boolean(matchFarmConfigRedirect(url) || matchFarmConfigRewrite(url)) ||
+    matchFarmConfigHeaders(url).length > 0;
+}
+`;
+}
+
+/**
  * Generates the terminal middleware-result handling shared by the RSC entry
  * and its executable contract tests.
  */
@@ -165,6 +264,11 @@ export function generateRscEntry(ctx: EntryContext): string {
   const hasBasePath = !["", "/"].includes(ctx.basePath.trim());
   const i18n = ctx.i18n?.enabled === true ? ctx.i18n : undefined;
   const routesBelowPrefix = hasBasePath || i18n !== undefined;
+  // The config redirects(), rewrites() and headers(). This server applies them in production; in
+  // development the dev server does, ahead of Vite and the API routes, as core's dev server does.
+  const configRoutes = ctx.development === true ? undefined : ctx.configRoutes;
+  const configHeaders = (configRoutes?.headers.length ?? 0) > 0;
+  const localRouteCheck = (ctx.configRoutes?.rewrites.length ?? 0) > 0;
   // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
   const appSegment = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
   const glob = appSegment ? `/${ctx.srcDir}/${appSegment}` : `/${ctx.srcDir}`;
@@ -1005,7 +1109,7 @@ async function collectFarmStaticPages() {
       }
     }
   }
-  return [...paths];
+  return [...paths]${configRoutes ? ".filter((path) => !farmConfigRouteMayHandlePath(path))" : ""};
 }
 ${
   i18n
@@ -1126,11 +1230,17 @@ function getMatchingBoundary(pageFilePath, modules, kind) {
  */
 async function handleFarmRequest(request, context) {
   const farmCacheGuard = { guarded: false };
-  const response = await resolveFarmRequest(farmCacheGuard, request, context);
+  const response = await resolveFarmRequest(farmCacheGuard, request, context);${
+    configHeaders
+      ? `
+  // Tells handler(), whose config headers() must not make this response shareable again.
+  if (farmCacheGuard.guarded) context?.onGuardedResponse?.();`
+      : ""
+  }
   return farmCacheGuard.guarded ? _withFarmGuardedResponseCache(response) : response;
 }
 
-async function resolveFarmRequest(farmCacheGuard, request, context) {
+async function resolveFarmRequest(farmCacheGuard, request, context${configRoutes ? ", farmConfigRewritten = false" : ""}) {
   let url = new URL(request.url);
   const isFarmPayloadRequest = farmPayloadRequests.has(request);
   let matchedPage = null;
@@ -1139,7 +1249,24 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
   let errorHeaders = new Headers();
   try {
   debug('Handling request:', request.method, url.pathname);
-
+${
+  configRoutes
+    ? `
+  // Config redirects() answer before any route or middleware, and a config rewrite applies when
+  // no route of this server answers the URL, once: its destination runs through middleware and
+  // routing again, as in core's servers.
+  if (!farmConfigRewritten) {
+    const configRoute = await resolveFarmConfigRoute(request, isFarmPayloadRequest);
+    if (configRoute instanceof Response) return configRoute;
+    if (configRoute) {
+      return await _runWithCurrentRequest(configRoute, () =>
+        resolveFarmRequest(farmCacheGuard, configRoute, context, true)
+      );
+    }
+  }
+`
+    : ""
+}
   const deploymentMismatch = getFarmDeploymentMismatch(request, farmDeploymentId);
   if (deploymentMismatch) {
     return createFarmDeploymentMismatchResponse(deploymentMismatch);
@@ -1950,7 +2077,7 @@ function toFarmPayloadRequest(request) {
   farmPayloadRequests.add(payloadRequest);
   return payloadRequest;
 }
-
+${generateConfigRoutesRuntime(ctx, configRoutes, localRouteCheck)}
 // The build's prerender pass (Nitro) runs this server with FARM_RSC_PRERENDER set. It seeds one
 // route that lists the static pages, and each prerendered page queues its payload, both through
 // Nitro's x-nitro-prerender response header. Production servers never answer either.
@@ -2022,8 +2149,34 @@ ${
   }
 `
     : ""
-}  const pageRequest = toFarmPayloadRequest(request);
-  const response = await handleFarmRequestWithRuntime(pageRequest, context${i18n ? ", pageRequest !== request" : ""});
+}  const pageRequest = toFarmPayloadRequest(request);${
+    configHeaders
+      ? `
+  // Config headers() apply to whatever answers the URL as requested (a payload's page), redirects
+  // included, after middleware let it through, so a guarded response stays private.
+  const farmConfigHeaders = matchFarmConfigHeaders(new URL(pageRequest.url));
+  let farmGuardedResponse = false;
+  if (farmConfigHeaders.length > 0) {
+    const adapterContext = context;
+    context = {
+      ...adapterContext,
+      onGuardedResponse() {
+        farmGuardedResponse = true;
+        adapterContext?.onGuardedResponse?.();
+      },
+    };
+  }`
+      : ""
+  }
+  ${configHeaders ? "let" : "const"} response = await handleFarmRequestWithRuntime(pageRequest, context${i18n ? ", pageRequest !== request" : ""});${
+    configHeaders
+      ? `
+  if (farmConfigHeaders.length > 0) {
+    response = applyConfigResponseHeaders(response, farmConfigHeaders);
+    if (farmGuardedResponse) response = _withFarmGuardedResponseCache(response);
+  }`
+      : ""
+  }
   if (
     prerendering &&
     pageRequest === request &&

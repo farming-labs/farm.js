@@ -295,6 +295,7 @@ export const schema = z.string();`;
     { name: "base-path", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "i18n", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "trailing-slash", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "config-routes", api: undefined, baseURL: "/api", mount: "/api" },
     {
       name: "custom",
       api: {
@@ -560,6 +561,43 @@ export default function Page() { return <main>Static with a trailing slash</main
 export default function Page() { return <Link href="/about">About link</Link>; }`,
           );
         }
+        if (name === "config-routes") {
+          // basePath "/console" with config redirects(), rewrites() and headers().
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "about/page.tsx",
+            `export default function Page() { return <main>About page</main>; }`,
+          );
+          writeRoute(
+            "guarded/page.tsx",
+            `export default function Page() { return <main>Guarded page</main>; }`,
+          );
+          writeRoute(
+            "guarded/middleware.ts",
+            `export function middleware(request, context) {
+  context.headers.set("x-mw-path", new URL(request.url).pathname);
+}`,
+          );
+          writeRoute(
+            "api/hello/route.ts",
+            `export function GET(request) { return Response.json({ hello: new URL(request.url).pathname }); }`,
+          );
+          // Config headers apply to this static page, so the server renders it.
+          writeRoute(
+            "static/page.tsx",
+            `export const dynamic = "force-static";
+export default function Page() { return <main>Static with config headers</main>; }`,
+          );
+          writeRoute(
+            "prerendered/page.tsx",
+            `export const dynamic = "force-static";
+export default function Page() { return <main>Prerendered page</main>; }`,
+          );
+        }
         if (name === "base-path") {
           // basePath "/console": a page at its route path, one nested under app/console/ as RSC
           // apps had to before, and a <Link> that core renders below the basePath.
@@ -771,6 +809,35 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             ? { basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" } }
             : {}),
           ...(name === "trailing-slash" ? { basePath: "/console", trailingSlash: true } : {}),
+          ...(name === "config-routes"
+            ? {
+                basePath: "/console",
+                redirects: async () => [
+                  { source: "/old", destination: "/about", permanent: true },
+                  { source: "/cfg/:slug", destination: "/:slug" },
+                ],
+                rewrites: () => [
+                  { source: "/alias", destination: "/about" },
+                  // /about is a page, so this never applies.
+                  { source: "/about", destination: "/" },
+                  { source: "/hello-alias", destination: "/api/hello" },
+                  { source: "/alias-guarded", destination: "/guarded" },
+                ],
+                headers: () => [
+                  { source: "/about", headers: [{ key: "x-config-header", value: "about" }] },
+                  { source: "/api/:path*", headers: [{ key: "x-config-header", value: "api" }] },
+                  { source: "/old", headers: [{ key: "x-config-header", value: "old" }] },
+                  { source: "/static", headers: [{ key: "x-config-header", value: "static" }] },
+                  {
+                    source: "/alias-guarded",
+                    headers: [
+                      { key: "x-config-header", value: "guarded" },
+                      { key: "cache-control", value: "public, max-age=60" },
+                    ],
+                  },
+                ],
+              }
+            : {}),
           api,
           middleware: name === "config-middleware" ? { matcher: "/", handler() {} } : undefined,
           plugins,
@@ -823,6 +890,14 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             "Static fr",
           );
           expect(existsSync(path.join(publicDir, "static", "index.html"))).toBe(false);
+        }
+
+        if (name === "config-routes") {
+          // A static page config headers apply to stays server-rendered; another prerenders.
+          const publicDir = path.join(outputDir, "public", "console");
+          expect(existsSync(path.join(publicDir, "prerendered", "index.html"))).toBe(true);
+          expect(existsSync(path.join(publicDir, "static", "index.html"))).toBe(false);
+          expect(existsSync(path.join(publicDir, "static.rsc"))).toBe(false);
         }
 
         const isolatedOutput = path.join(isolatedRoot, ".output");
@@ -1179,6 +1254,65 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
               file,
             ).toBe(true);
           }
+        }
+        if (name === "config-routes") {
+          const send = (pathname: string, init: RequestInit = {}) =>
+            fetch(origin + pathname, {
+              redirect: "manual",
+              signal: AbortSignal.timeout(10_000),
+              ...init,
+            });
+          // Redirects answer before any route, for any method, below the basePath, and
+          // headers() apply to them.
+          for (const method of ["GET", "POST"]) {
+            const redirected = await send("/console/old?tab=1", { method });
+            expect(redirected.status, `${method} ${logs}`).toBe(308);
+            expect(redirected.headers.get("location")).toBe("/console/about?tab=1");
+            expect(redirected.headers.get("x-config-header")).toBe("old");
+            expect(await redirected.text()).toBe("Redirecting to /console/about?tab=1");
+          }
+          // An encoded slash stays encoded, so the target never becomes another origin.
+          const encoded = await send("/console/cfg/%2F%2Fexample.com?q=1");
+          expect(encoded.status, logs).toBe(307);
+          expect(encoded.headers.get("location")).toBe("/console/%2F%2Fexample.com?q=1");
+          // A payload request is sent to the destination's payload.
+          const payloadRedirect = await send("/console/old.rsc");
+          expect(payloadRedirect.status, logs).toBe(308);
+          expect(payloadRedirect.headers.get("location")).toBe("/console/about.rsc");
+
+          // A rewrite applies where no route answers, page and payload alike.
+          const rewritten = await send("/console/alias");
+          expect(rewritten.status, logs).toBe(200);
+          expect(await rewritten.text()).toContain("About page");
+          const rewrittenPayload = await send("/console/alias.rsc");
+          expect(rewrittenPayload.status, logs).toBe(200);
+          expect(rewrittenPayload.headers.get("content-type")).toContain("text/x-component");
+          expect(await rewrittenPayload.text()).toContain("About page");
+          const about = await send("/console/about");
+          expect(about.status, logs).toBe(200);
+          expect(about.headers.get("x-config-header")).toBe("about");
+          expect(await about.text()).toContain("About page");
+          const apiAlias = await send("/console/hello-alias");
+          expect(apiAlias.status, logs).toBe(200);
+          expect(await apiAlias.json()).toEqual({ hello: "/api/hello" });
+
+          // Middleware runs on the destination, and the response it let through stays private
+          // whatever Cache-Control headers() give it.
+          const guarded = await send("/console/alias-guarded");
+          expect(guarded.status, logs).toBe(200);
+          expect(guarded.headers.get("x-mw-path")).toMatch(/\/guarded$/);
+          expect(guarded.headers.get("x-config-header")).toBe("guarded");
+          expect(guarded.headers.get("cache-control")).toBe("private, no-store");
+          expect(await guarded.text()).toContain("Guarded page");
+
+          const api = await send("/api/hello");
+          expect(api.status, logs).toBe(200);
+          expect(api.headers.get("x-config-header")).toBe("api");
+
+          const staticPage = await send("/console/static");
+          expect(staticPage.status, logs).toBe(200);
+          expect(staticPage.headers.get("x-config-header")).toBe("static");
+          expect(await staticPage.text()).toContain("Static with config headers");
         }
         if (name === "i18n") {
           const get = (pathname: string, headers: Record<string, string> = {}) =>

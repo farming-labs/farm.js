@@ -700,6 +700,10 @@ export { farmImageImportsPlugin } from "./image-vite";
 export { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
 export { readRouteRenderingDirectiveFromFile } from "./ssg";
 export { resolveFarmImageProviderForRuntime, resolveFarmImageServerRuntime } from "./image-runtime";
+// Config headers() on those pipelines' dev responses, and the requests Vite keeps from config
+// routes (#2685).
+export { installConfigResponseHeaders } from "./plugins/headers";
+export { isViteDevClientRequest, isViteModuleRequest } from "./dev-static";
 
 /** Exported for tests: the request boundary all Farm dev middlewares share. */
 export function withFarmRequestTracing(

@@ -1268,6 +1268,12 @@ same header is returned by a handler. They match the requested path and also app
 and middleware responses. `Link` is additive: handler and configured link values are
 merged instead of replacing one another. `Set-Cookie` is also additive, and each handler or
 configured cookie remains a separate response header.
+Apps on the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`) apply all three the
+same way in `farm dev` and in their production server. A page's RSC payload (`/about.rsc`) matches
+as its page: headers for `/about` apply to it, a redirect sends it to the destination's payload,
+and a rewrite renders the destination's payload. A static page that any of them matches is
+rendered on each request instead of prerendered, because a prerendered file never reaches the
+server that applies them.
 
 ```ts
 export default defineConfig({

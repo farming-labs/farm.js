@@ -3,7 +3,7 @@ import type { HeaderConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { resolveFarmRequestURL } from "../server/request";
-import { compileConfigRoutePattern, resolveConfigRoutePathname } from "./route-pattern";
+import { createConfigHeadersMatcher } from "./config-routes";
 
 export const FARM_CONFIG_HEADERS_PLUGIN_NAME = "farm:headers";
 
@@ -79,6 +79,36 @@ function applyWriteHeadHeaders(res: FarmResponse, headers: unknown): void {
   }
 }
 
+/**
+ * Give a Node response the matched config headers, as the dev server's headers plugin does: now,
+ * and again when it writes its head, so a header the handler sets does not replace a configured
+ * one. Used by pipelines that serve without this plugin (React Server Components).
+ */
+export function installConfigResponseHeaders(
+  res: FarmResponse,
+  matchedHeaders: readonly HeaderConfig["headers"][],
+): void {
+  applyResponseHeaders(res, matchedHeaders);
+
+  const responseWithFinalizer = res as FarmResponse & {
+    [FARM_CONFIG_HEADERS_FINALIZER]?: boolean;
+  };
+  if (matchedHeaders.length === 0 || responseWithFinalizer[FARM_CONFIG_HEADERS_FINALIZER]) {
+    return;
+  }
+
+  responseWithFinalizer[FARM_CONFIG_HEADERS_FINALIZER] = true;
+  const writeHead = res.writeHead;
+  res.writeHead = ((statusCode: number, ...args: unknown[]) => {
+    const statusMessage = typeof args[0] === "string" ? (args.shift() as string) : undefined;
+    applyWriteHeadHeaders(res, args[0]);
+    applyResponseHeaders(res, matchedHeaders);
+    return statusMessage === undefined
+      ? (writeHead as any).call(res, statusCode)
+      : (writeHead as any).call(res, statusCode, statusMessage);
+  }) as FarmResponse["writeHead"];
+}
+
 export function createHeadersPlugin(
   headers: HeaderConfig[],
   {
@@ -102,10 +132,7 @@ export function createHeadersPlugin(
     basePath?: string;
   } = {},
 ): FarmPlugin {
-  const compiledHeaders = headers.map((config) => ({
-    config,
-    pattern: compileConfigRoutePattern(config.source),
-  }));
+  const matchHeaders = createConfigHeadersMatcher(headers, { i18n, basePath });
 
   return {
     name: FARM_CONFIG_HEADERS_PLUGIN_NAME,
@@ -115,31 +142,7 @@ export function createHeadersPlugin(
       if (overrideBeforeRequest) {
         await overrideBeforeRequest(req, res, context);
       }
-      const url = resolveFarmRequestURL(req);
-      const pathname = resolveConfigRoutePathname(url.pathname, i18n, basePath).pathname;
-      const matchedHeaders = compiledHeaders
-        .filter(({ pattern }) => pattern.regex.test(pathname))
-        .map(({ config }) => config.headers);
-
-      applyResponseHeaders(res, matchedHeaders);
-
-      const responseWithFinalizer = res as FarmResponse & {
-        [FARM_CONFIG_HEADERS_FINALIZER]?: boolean;
-      };
-      if (matchedHeaders.length === 0 || responseWithFinalizer[FARM_CONFIG_HEADERS_FINALIZER]) {
-        return;
-      }
-
-      responseWithFinalizer[FARM_CONFIG_HEADERS_FINALIZER] = true;
-      const writeHead = res.writeHead;
-      res.writeHead = ((statusCode: number, ...args: unknown[]) => {
-        const statusMessage = typeof args[0] === "string" ? (args.shift() as string) : undefined;
-        applyWriteHeadHeaders(res, args[0]);
-        applyResponseHeaders(res, matchedHeaders);
-        return statusMessage === undefined
-          ? (writeHead as any).call(res, statusCode)
-          : (writeHead as any).call(res, statusCode, statusMessage);
-      }) as FarmResponse["writeHead"];
+      installConfigResponseHeaders(res, matchHeaders(resolveFarmRequestURL(req)));
     },
 
     async afterResponse(req, res, context) {
