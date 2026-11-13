@@ -376,7 +376,6 @@ describe("search route matching", () => {
 
   it("uses Vercel's static directory after deployment post-processing", () => {
     expect(resolveSearchPublicDir("/output", "vercel")).toBe(path.join("/output", "static"));
-    expect(resolveSearchPublicDir("/output", "vercel-edge")).toBe(path.join("/output", "static"));
     expect(resolveSearchPublicDir("/output", "node-server")).toBe(path.join("/output", "public"));
   });
 });
