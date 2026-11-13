@@ -660,6 +660,36 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([]);
   });
 
+  it("a list that is the component's root, with row conditionals and row events", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: 1, done: false }, { id: 2, done: true }]);
+        const toggle = (id) => setTodos(todos.map((todo) => todo.id === id ? { ...todo, done: !todo.done } : todo));
+        return (
+          <ul className="todos">
+            {todos.map((todo) => (
+              <li key={todo.id} data-id={todo.id}>
+                <button className="toggle" onClick={() => toggle(todo.id)}>toggle</button>
+                {todo.done ? <s className="undo" onClick={() => toggle(todo.id)}>{todo.id}</s> : <i>{todo.id}</i>}
+                <button className="add" onClick={() => setTodos([...todos, { id: todos.length + 1, done: false }])}>add</button>
+              </li>
+            ))}
+          </ul>
+        );
+      }`,
+      "Todos",
+      [
+        click('li[data-id="1"] .toggle'),
+        click('li[data-id="2"] .undo'),
+        click('li[data-id="1"] .add'),
+        click('li[data-id="3"] .toggle'),
+        click('li[data-id="3"] .undo'),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
   it("a keyed list between static siblings with bindings and events", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";

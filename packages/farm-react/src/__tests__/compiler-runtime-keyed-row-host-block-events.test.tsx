@@ -423,3 +423,39 @@ describe("row events inside compiler-owned row branches", () => {
     );
   });
 });
+
+describe("rows of a list that is the component's root", () => {
+  it("run events beside and inside conditional content", async () => {
+    await expectParity(
+      `import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: "a", done: false }, { id: "b", done: true }]);
+        const toggle = (id) => setTodos(todos.map((todo) => todo.id === id ? { ...todo, done: !todo.done } : todo));
+        return (
+          <ul>
+            {todos.map((todo) => (
+              <li key={todo.id} data-id={todo.id}>
+                <button className="toggle" onClick={() => toggle(todo.id)}>toggle</button>
+                {todo.done ? <s className="undo" onClick={() => toggle(todo.id)}>{todo.id}</s> : <i>{todo.id}</i>}
+                <button className="add" onClick={() => setTodos([...todos, { id: todo.id + todos.length, done: false }])}>add</button>
+                <button className="remove" onClick={() => setTodos(todos.filter((item) => item.id !== todo.id))}>x</button>
+                <button className="reverse" onClick={() => setTodos([...todos].reverse())}>reverse</button>
+              </li>
+            ))}
+          </ul>
+        );
+      }`,
+      "Todos",
+      [
+        click('[data-id="a"] .toggle'),
+        click('[data-id="b"] .undo'),
+        click('[data-id="a"] .add'),
+        click('[data-id="a2"] .toggle'),
+        click('[data-id="a2"] .reverse'),
+        click('[data-id="a2"] .undo'),
+        click('[data-id="b"] .remove'),
+        click('[data-id="a"] .undo'),
+      ],
+    );
+  });
+});

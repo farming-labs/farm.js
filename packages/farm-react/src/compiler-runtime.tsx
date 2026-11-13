@@ -3004,6 +3004,8 @@ export interface CompilerKeyedRowBinding {
 }
 
 export interface CompilerKeyedRowsBlockProps {
+  /** Receives the container when the rows block is the component's root element. */
+  rootRef?: React.RefCallback<Element>;
   id: number;
   render(
     event: (
@@ -9589,6 +9591,7 @@ function createKeyedRowsBlockComponentCore(
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
+      this.currentProps.rootRef?.(root);
     };
 
     private requestHostScopeFallback = () => {
@@ -12831,13 +12834,15 @@ function createCompiledComponentRuntime<Props>(
       if (
         element.type === this.blockRuntime.KeyedRanges ||
         element.type === this.blockRuntime.ConditionalRanges ||
-        element.type === this.blockRuntime.MixedRanges
+        element.type === this.blockRuntime.MixedRanges ||
+        element.type === this.blockRuntime.KeyedRows
       ) {
         renderedElement = React.cloneElement(
           element as React.ReactElement<
             | CompilerKeyedRangesBlockProps
             | CompilerConditionalRangesBlockProps
             | CompilerMixedRangesBlockProps
+            | CompilerKeyedRowsBlockProps
           >,
           { rootRef: captureCommittedRoot },
         );
