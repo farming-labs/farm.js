@@ -1955,6 +1955,8 @@ async function buildClient(
     hasIsolatedClientBoundaries: boolean;
     isolatedBoundaries: IsolatedClientBoundaryReference[];
     serverTree?: true;
+    /** A docs route without a page module, which matches before the app's pages. */
+    docs?: true;
   }> = [];
 
   const integrationProviders = getIntegrationProviders(config.integrations).filter(
@@ -2245,6 +2247,7 @@ async function buildClient(
         : "load";
       const docsClientRoutes = syntheticDocsPatterns.map((pattern) => ({
         pattern,
+        docs: true as const,
         modulePath: "",
         relativePath: "",
         pageShouldHydrate: false,
@@ -2710,6 +2713,19 @@ function hasAbsoluteNavigationHref(href) {
   return /^[a-zA-Z][a-zA-Z\\d+.-]*:/.test(href) || href.startsWith("//");
 }
 `.trim();
+}
+
+/**
+ * The production client's page directory, which decides route-group layouts. A docs route takes
+ * the directory of the app page at its path, as the server's layouts do.
+ */
+export function generateClientPageDirectorySource(): string {
+  return `function getFarmPageDirectory(pathname) {
+  const path = getFarmRoutePathname(pathname);
+  let matched = clientRouteMatcher.match(path);
+  if (matched && matched.route.meta.docs) matched = clientPageRouteMatcher.match(path);
+  return matched ? matched.route.meta.directory || matched.route.meta.pattern : null;
+}`;
 }
 
 /**
@@ -3690,6 +3706,7 @@ export function generateClientHydrationEntry(
     hasIsolatedClientBoundaries: boolean;
     isolatedBoundaries: IsolatedClientBoundaryReference[];
     serverTree?: true;
+    docs?: true;
   }>,
   layoutRoutes: Array<{
     pattern: string;
@@ -4209,7 +4226,7 @@ document.addEventListener("click", function(e) {
     pattern: ${JSON.stringify(page.pattern)},${
       page.directory ? `\n    directory: ${JSON.stringify(page.directory)},` : ""
     }
-    pageShouldHydrate: ${JSON.stringify(page.pageShouldHydrate)},
+    pageShouldHydrate: ${JSON.stringify(page.pageShouldHydrate)},${page.docs ? "\n    docs: true," : ""}
     ${page.hasIsolatedClientBoundaries ? "hasIsolatedClientBoundaries: true," : ""}
     islandStrategy: ${JSON.stringify(page.islandStrategy)},
     navigation: "html-fragment",
@@ -4327,6 +4344,16 @@ ${routeEntries.join(",\n")}
 const clientRouteMatcher = createFarmRouter(clientRoutes.map(function(route) {
   return { path: route.pattern, meta: route };
 }));
+${
+  clientPages.some((page) => page.docs)
+    ? `const clientPageRouteMatcher = createFarmRouter(clientRoutes.filter(function(route) {
+  return !route.docs;
+}).map(function(route) {
+  return { path: route.pattern, meta: route };
+}));`
+    : "const clientPageRouteMatcher = clientRouteMatcher;"
+}
+${generateClientPageDirectorySource()}
 
 ${isolatedHydrationRuntime}
 ${routeClientGraphRuntime}
@@ -4352,10 +4379,7 @@ function getApplicableLayouts(pathname) {
     const urlPattern = layout.urlPattern || layout.pattern;
     if (urlPattern !== '/' && !isFarmRouteActive(urlPattern, normalizedPath, { exact: false })) continue;
     if (layout.groupScope) {
-      if (directory === undefined) {
-        const matched = matchRoute(pathname);
-        directory = matched ? matched.route.directory || matched.route.pattern : null;
-      }
+      if (directory === undefined) directory = getFarmPageDirectory(pathname);
       if (
         typeof directory !== 'string' ||
         (directory !== layout.groupScope && !directory.startsWith(layout.groupScope + '/'))

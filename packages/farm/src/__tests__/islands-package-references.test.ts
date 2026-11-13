@@ -180,6 +180,33 @@ describe("package client references", () => {
     expect(statSync(theme).mtimeMs).toBe(written);
   });
 
+  it("points re-exports of package client components at their client references", () => {
+    const root = tempRoot();
+    const code = [
+      'export { ThemeProvider, ThemeProvider as Theme } from "next-themes";',
+      'export type { DialogProps } from "@radix-ui/react-dialog";',
+      'export { type ToasterProps } from "sonner";',
+      'export * from "sonner";',
+    ].join("\n");
+    const file = path.join(root, "src/components/theme.tsx");
+    expect(
+      findFarmPackageClientImports(code, file, isClientPackage).map((entry) => [
+        entry.specifier,
+        farmPackageClientImportExports(entry),
+      ]),
+    ).toEqual([["next-themes", ["ThemeProvider", "ThemeProvider"]]]);
+
+    const output = rewriteFarmPackageClientImports({ code, file, root, isClientPackage })!;
+    const theme = JSON.stringify(
+      farmPackageClientReferencePath(root, "next-themes", "ThemeProvider"),
+    );
+    expect(output).toContain(`export { ThemeProvider as ThemeProvider } from ${theme};`);
+    expect(output).toContain(`export { ThemeProvider as Theme } from ${theme};`);
+    expect(output).not.toContain('from "next-themes"');
+    expect(output).toContain('export type { DialogProps } from "@radix-ui/react-dialog";');
+    expect(output).toContain('export * from "sonner";');
+  });
+
   it("resolves a package from the importer's side when the app root has another copy or none", () => {
     // A pnpm monorepo: packages/ui depends on sonner, the app does not.
     const workspace = tempRoot();

@@ -1622,11 +1622,14 @@ export function transformIsolatedClientBoundaryModule(options: {
     output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
   }
 
+  // Names are a guess: an uppercase export can be a constant (`SURFACES`) or a context, which
+  // stay as they are.
+  const isComponent = `(value) => typeof value === "function" || (typeof value === "object" && value !== null && [Symbol.for("react.memo"), Symbol.for("react.forward_ref"), Symbol.for("react.lazy")].includes(value.$$typeof))`;
   const runtimeImport = options.slots
     ? options.browser
       ? "const __farm_islx_island__ = (component) => component;"
-      : `import { createIsland as __farm_islx_island__ } from "@farm.js/core/internal/islx-react";`
-    : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";`;
+      : `import { createIsland as __farm_islx_create_island__ } from "@farm.js/core/internal/islx-react";\nconst __farm_is_component__ = ${isComponent};\nconst __farm_islx_island__ = (component, ...rest) => __farm_is_component__(component) ? __farm_islx_create_island__(component, ...rest) : component;`
+    : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_boundary__ } from "@farm.js/core/internal/isolated-boundary";\nconst __farm_is_component__ = ${isComponent};\nconst __farm_create_isolated_boundary__ = (react, component, ...rest) => __farm_is_component__(component) ? __farm_create_boundary__(react, component, ...rest) : component;`;
   return `${runtimeImport}\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
 }
 
@@ -4734,6 +4737,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
     },
 
     async resolveId(id, importer, resolveOptions) {
+      // The island transform imports Farm's runtime into client components, including ones in a
+      // workspace package's source that does not depend on Farm: those resolve from the app.
+      if (id.startsWith("@farm.js/core/internal/") && importer) {
+        const root = farmApp?.getConfig().root || server?.config.root || options.root;
+        const relative = root ? path.relative(root, importer.split("?", 1)[0]!) : "";
+        if (root && (relative.startsWith("..") || path.isAbsolute(relative))) {
+          return this.resolve(id, path.join(root, "package.json"), {
+            ...resolveOptions,
+            skipSelf: true,
+          });
+        }
+      }
+
       if (typeof fontImports.resolveId === "function") {
         const fontId = await fontImports.resolveId.call(this, id, importer, resolveOptions);
         if (fontId) return fontId;

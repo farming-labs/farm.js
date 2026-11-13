@@ -255,6 +255,40 @@ describe("islands mode", () => {
     expect(output).not.toMatch(/export \{ Counter, helper/);
   });
 
+  it("keeps uppercase exports that are not components as they are", async () => {
+    // A client module that a server module imports is one module in islands mode, so client
+    // modules importing its constants get the server build's exports.
+    const { parseSync } = await import("vite");
+    const output = transformIsolatedClientBoundaryModule({
+      code: [
+        '"use client";',
+        'export const SURFACES = ["react", "react-native"];',
+        "export const LABELS = { react: 'React' };",
+        "export function Tabs() { return null; }",
+        "export const Memo = { $$typeof: Symbol.for('react.memo'), type: Tabs };",
+        "export const ThemeContext = { $$typeof: Symbol.for('react.context') };",
+      ].join("\n"),
+      moduleReference: "/src/platform.tsx",
+      islandStrategy: "load",
+      parse: (code) => (parseSync("platform.js", code) as { program: unknown }).program as never,
+      slots: true,
+    })!;
+    // islx's createIsland, stubbed so the module runs on its own.
+    const runnable = output.replace(
+      /import \{ createIsland as (\w+) \} from "@farm\.js\/core\/internal\/islx-react";/,
+      "const $1 = (component) => ({ island: component });",
+    );
+    expect(runnable).not.toContain("@farm.js/core/internal/islx-react");
+    const module = await import(
+      /* @vite-ignore */ `data:text/javascript,${encodeURIComponent(runnable)}`
+    );
+    expect(module.SURFACES).toEqual(["react", "react-native"]);
+    expect(module.LABELS).toEqual({ react: "React" });
+    expect(module.ThemeContext).toEqual({ $$typeof: Symbol.for("react.context") });
+    expect(module.Tabs).toEqual({ island: module.__farm_client_boundary_originals__.Tabs });
+    expect(module.Memo).toEqual({ island: module.__farm_client_boundary_originals__.Memo });
+  });
+
   it("wraps a generated client reference's export as an island whatever its name", async () => {
     // `import * as motion from "motion/react-client"` renders `motion.div`: a lowercase export.
     const { parseSync } = await import("vite");

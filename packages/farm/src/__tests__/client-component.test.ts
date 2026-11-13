@@ -1358,6 +1358,41 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
       }
     });
 
+    it("hydrates workspace client components outside the app root as islands", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-workspace-island-"));
+      tempDirs.push(workspace);
+      const root = path.join(workspace, "apps", "web");
+      const shared = path.join(workspace, "packages", "ui", "src");
+      const pageFile = path.join(root, "src", "app", "demo", "page.tsx");
+      fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+      fs.mkdirSync(shared, { recursive: true });
+      fs.writeFileSync(
+        path.join(root, "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { paths: { "@ui/*": ["../../packages/ui/src/*"] } } }),
+      );
+      const aliased = path.join(shared, "star-button.tsx");
+      const relative = path.join(shared, "badge.tsx");
+      fs.writeFileSync(
+        aliased,
+        '"use client";\nexport function StarButton({ count }) { return <button>{count}</button>; }\n',
+      );
+      fs.writeFileSync(
+        relative,
+        '"use client";\nexport function Badge({ label }) { return <button>{label}</button>; }\n',
+      );
+      fs.writeFileSync(
+        pageFile,
+        'import { StarButton } from "@ui/star-button";\nimport { Badge } from "../../../../../packages/ui/src/badge";\nexport default async function Page() { const stars = await load(); return <main><StarButton count={stars} /><Badge label="new" /></main>; }\n',
+      );
+
+      const plan = getClientModuleHydrationPlan(pageFile, root, "off", islands);
+      expect(plan.fallbackReason).toBeUndefined();
+      expect(plan).toMatchObject({ hasIsolatedClientBoundaries: true, asyncOwnerIslands: true });
+      expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath).sort()).toEqual(
+        [aliased, relative].sort(),
+      );
+    });
+
     it("keeps correctness fallbacks and reports why", () => {
       // Element children no longer reject an async page's islands: below a hydrating layout the
       // server tree carries them, and elsewhere that one boundary keeps its server HTML.

@@ -7,7 +7,9 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
+import { createFarmRouter } from "../router";
 import {
+  generateClientPageDirectorySource,
   generateConfiguredResponseHeadersRuntimeSource,
   generateRedirectInterpolationSource,
   generateRuntimePathMatcherSource,
@@ -1071,5 +1073,41 @@ describe("toBakedMarkdownSourcePath", () => {
     expect(toBakedMarkdownSourcePath(root, path.resolve("/etc/secrets/page.md"))).toBe("page.md");
     expect(toBakedMarkdownSourcePath(root, "src/app/page.md")).toBe("src/app/page.md");
     expect(toBakedMarkdownSourcePath(root, undefined)).toBe("");
+  });
+});
+
+describe("generateClientPageDirectorySource", () => {
+  type Route = { pattern: string; directory?: string; docs?: true };
+  const pageDirectory = (routes: Route[]) => {
+    const matcher = (entries: Route[]) =>
+      createFarmRouter(entries.map((route) => ({ path: route.pattern, meta: route })));
+    return new Function(
+      "clientRouteMatcher",
+      "clientPageRouteMatcher",
+      "getFarmRoutePathname",
+      `${generateClientPageDirectorySource()}; return getFarmPageDirectory;`,
+    )(
+      matcher(routes),
+      matcher(routes.filter((route) => !route.docs)),
+      (pathname: string) => pathname,
+    ) as (pathname: string) => string | null;
+  };
+
+  it("takes a docs path's directory from the app page there, as the server does", () => {
+    const docs: Route[] = [
+      { pattern: "/docs", docs: true },
+      { pattern: "/docs/[...slug]", docs: true },
+    ];
+    const getFarmPageDirectory = pageDirectory([
+      ...docs,
+      { pattern: "/docs/[[...slug]]", directory: "/(docs)/docs/[[...slug]]" },
+      { pattern: "/blog", directory: "/(home)/blog" },
+    ]);
+    expect(getFarmPageDirectory("/docs/installation")).toBe("/(docs)/docs/[[...slug]]");
+    expect(getFarmPageDirectory("/docs")).toBe("/(docs)/docs/[[...slug]]");
+    expect(getFarmPageDirectory("/blog")).toBe("/(home)/blog");
+    expect(getFarmPageDirectory("/missing")).toBeNull();
+    // Docs the app has no page for sit in no route group.
+    expect(pageDirectory(docs)("/docs/installation")).toBeNull();
   });
 });

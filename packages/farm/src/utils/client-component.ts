@@ -1620,12 +1620,6 @@ function collectIsolatedClientBoundaries(
     const parsed = parseClientModuleMetadata(content, false);
 
     if (parsed.isClientComponent) {
-      if (projectRoot && !path.resolve(moduleSourcePath).startsWith(`${projectRoot}${path.sep}`)) {
-        fallbackReason = `client boundary ${moduleSourcePath} is outside the application root`;
-        fallbackHint =
-          "Move the component into the application, or publish it as a package (package client components render as static HTML)";
-        return 0;
-      }
       if (!isIsolatableClientBoundarySource(content)) {
         fallbackReason = `client boundary ${moduleSourcePath} uses an unsupported export shape`;
         fallbackHint =
