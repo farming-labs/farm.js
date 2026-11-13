@@ -4725,13 +4725,27 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const duration = Date.now() - startTime;
             logResponse(method, urlPath, 500, duration, "PAGE");
             if (pm && runtimeSession) {
-              // A middleware throw is answered inside the runtime request, as production's
-              // reportError reports it: runtime.after still runs on the 500, and a throw there
-              // is reported too.
-              if (middlewareFailed) await pm.reportRuntimeRequestError(runtimeSession, error);
-              else await pm.failRuntimeRequest(runtimeSession, error);
-            }
-            if (!(middlewareFailed && runtimeSession)) {
+              if (middlewareFailed) {
+                // A middleware throw is answered inside the runtime request, as production's
+                // reportError reports it: runtime.after still runs on the 500, and a throw
+                // there is reported too.
+                await pm.reportRuntimeRequestError(runtimeSession, error);
+              } else {
+                // The renderer answers a page that throws with its error page, a 500
+                // runtime.after sees, so what throws here is a hook around the render
+                // (beforeRender, say) or the renderer itself. Production runs both inside the
+                // runtime request, so the throw fails it: runtime.error and onError observe it
+                // once, as the "runtime" phase, runtime.after does not run, and the page answers
+                // the runtime hook 500.
+                await pm.failRuntimeRequest(runtimeSession, error);
+                if (!res.headersSent && !responseInterceptor?.isEnded()) {
+                  responseInterceptor?.release();
+                  console.error("[FARM] Page error:", error);
+                  sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                  return;
+                }
+              }
+            } else {
               await emitPluginError("render-page", error, { pathname });
             }
             // With `renderer: false` no error page renders: answer the JSON 500 production

@@ -215,6 +215,9 @@ export default defineConfig({
       onError({ phase, error, meta }) {
         record({ source: "onError", phase, pathname: meta?.pathname, message: error?.message });
       },
+      beforeRender({ pathname }) {
+        if (pathname === "/render-hook-throw") throw new Error("plugin-render-failed");
+      },
       runtime: {
         before({ request }) {
           if (new URL(request.url).pathname === "/plugin-throw") throw new Error("plugin-before-failed");
@@ -238,6 +241,8 @@ export default defineConfig({
 `,
   ...APP_FILES,
   "src/app/api/ok/route.ts": "export function GET() { return Response.json({ ok: true }); }",
+  "src/app/render-hook-throw/page.tsx":
+    "export default function Page() { return <main>unreachable</main>; }",
 };
 
 /** Requests `pathname` and returns its response with what the app recorded for it. */
@@ -394,6 +399,62 @@ async function expectSharedFailureTraces(origin: string, logPath: string): Promi
     ],
   });
   await expectRuntimeHookFailureHeaders(origin, logPath);
+  await expectPageRenderFailureTraces(origin, logPath);
+}
+
+// A page that throws as it renders answers its error page, a 500 runtime.after sees, and no
+// plugin hook reports it. A plugin's beforeRender hook runs inside the plugin runtime request, so
+// its throw fails that request as a throwing runtime hook does: runtime.error observes it, onError
+// gets it once as the "runtime" phase, no runtime.after runs, and the page answers the runtime
+// hook 500 with the headers() config.
+async function expectPageRenderFailureTraces(origin: string, logPath: string): Promise<void> {
+  const accept = { headers: { accept: "text/html" } };
+  const { response: pageResponse, trace: pageTrace } = await readTrace(
+    origin,
+    logPath,
+    "/boom",
+    accept,
+  );
+  expect(pageResponse.body).toMatch(/^\s*<!DOCTYPE html>/i);
+  expect({
+    response: { ...pageResponse, body: undefined },
+    // The plugin hooks only: development emits the render.error event more than once.
+    trace: pageTrace.filter((entry) => entry.source !== "event"),
+  }).toEqual({
+    response: {
+      status: 500,
+      contentType: "text/html; charset=utf-8",
+      cacheControl: "private, no-store",
+      configured: "yes",
+      body: undefined,
+    },
+    trace: [
+      {
+        source: "runtime.after",
+        pathname: "/boom",
+        status: 500,
+        contentType: "text/html; charset=utf-8",
+      },
+    ],
+  });
+  expect(await readTrace(origin, logPath, "/render-hook-throw", accept)).toEqual({
+    response: {
+      status: 500,
+      contentType: "text/plain; charset=utf-8",
+      cacheControl: null,
+      configured: "yes",
+      body: "Internal Server Error",
+    },
+    trace: [
+      { source: "runtime.error", pathname: "/render-hook-throw", message: "plugin-render-failed" },
+      {
+        source: "onError",
+        phase: "runtime",
+        pathname: "/render-hook-throw",
+        message: "plugin-render-failed",
+      },
+    ],
+  });
 }
 
 // An app whose plugin has server hooks (onError and HTML transforms) but no runtime hooks.
