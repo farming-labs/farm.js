@@ -1726,7 +1726,7 @@ function createFarmLlmsTxtContext(request, context, full) {
       basePath: ${JSON.stringify(ctx.basePath)},
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
-      exclude: farmLlmsTxtConfig.exclude,
+      exclude: farmLlmsTxtConfig.exclude,${ctx.trailingSlash ? "\n      // A page without a mirror is linked at the URL it answers at ('/console/about/').\n      trailingSlash: true," : ""}
     },
   );
   const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
@@ -1865,7 +1865,7 @@ function createFarmAgentSitemapResponse(request) {
         origin: new URL(request.url).origin,
         config: farmAgentSitemapConfig,
         metadataBase: rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
-        basePath: ${JSON.stringify(ctx.basePath)},
+        basePath: ${JSON.stringify(ctx.basePath)},${ctx.trailingSlash ? "\n        // Each page at the URL it answers at: '/console/about/'.\n        trailingSlash: true," : ""}
       },
     ),
     {},

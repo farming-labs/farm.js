@@ -1127,7 +1127,8 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           const sitemap = await fetch(origin + "/console/sitemap.xml");
           expect(sitemap.status, logs).toBe(200);
           const sitemapBody = await sitemap.text();
-          for (const url of ["/console/", "/console/about", "/console/legacy"]) {
+          // Each at the URL it answers at: '/console/' redirects to '/console'.
+          for (const url of ["/console", "/console/about", "/console/legacy"]) {
             expect(sitemapBody, url).toContain(`<loc>${origin}${url}</loc>`);
           }
           expect(sitemapBody).toContain("<lastmod>");
@@ -1172,6 +1173,15 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(response.status, `${pathname} ${logs}`).toBe(308);
             expect(response.headers.get("location"), pathname).toBe(location);
           }
+          // sitemap.xml lists each page at the URL it answers at, so none of them redirects.
+          const sitemapBody = await (await fetch(origin + "/console/sitemap.xml")).text();
+          const listed = [...sitemapBody.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+          for (const url of ["/console/", "/console/about/", "/console/static/"]) {
+            expect(listed, url).toContain(origin + url);
+            const response = await fetch(origin + url, { redirect: "manual" });
+            expect(response.status, `${url} ${logs}`).toBe(200);
+          }
+          expect(listed.filter((url) => !url.endsWith("/"))).toEqual([]);
           // The static page and its payload were written at the trailing-slash URL.
           for (const file of ["index.html", "index.rsc"]) {
             expect(

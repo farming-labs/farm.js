@@ -40,12 +40,14 @@ function createSitemap(
     middlewares?: Record<string, unknown>;
     rootMetadata?: Record<string, unknown>;
     lastModified?: Record<string, string>;
+    trailingSlash?: boolean;
   },
 ) {
   const basePath = options.basePath ?? "/";
   const entry = generateRscEntry({
     ...context,
     basePath,
+    trailingSlash: options.trailingSlash,
     sitemap: resolveFarmAgentSitemap(sitemap),
     pageLastModified: options.lastModified,
   });
@@ -156,9 +158,24 @@ describe("RSC sitemap.xml", () => {
       },
     );
     expect(await locs(respond(new Request("http://127.0.0.1/console/sitemap.xml")))).toEqual([
-      "https://www.shop.example/console/",
+      // The home page answers at '/console'; '/console/' redirects there.
+      "https://www.shop.example/console",
       "https://www.shop.example/console/about",
       "https://www.shop.example/console/legacy",
+    ]);
+  });
+
+  it("lists each page at its trailing-slash URL under trailingSlash", async () => {
+    const respond = createSitemap(true, {
+      basePath: "/console",
+      trailingSlash: true,
+      rootMetadata: { metadataBase: "https://www.shop.example" },
+      pages: { "/page.tsx": {}, "/about/page.tsx": {}, "/console/legacy/page.tsx": {} },
+    });
+    expect(await locs(respond(new Request("http://127.0.0.1/console/sitemap.xml")))).toEqual([
+      "https://www.shop.example/console/",
+      "https://www.shop.example/console/about/",
+      "https://www.shop.example/console/legacy/",
     ]);
   });
 });

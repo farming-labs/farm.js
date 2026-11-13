@@ -495,7 +495,8 @@ Both setups follow the same route contract:
   other Farm apps: by default `/about/` redirects (308) to `/about`, and with `trailingSlash: true`
   `/about` redirects to `/about/`, `<Link href="/about">` renders `/about/`, and its payload is
   `/about/index.rsc`. A payload request at the other spelling redirects to the canonical page's
-  payload, and a static page prerenders at its canonical URL.
+  payload, a static page prerenders at its canonical URL, and `sitemap.xml` and `llms.txt` list
+  each page at that URL.
 
 A client that loaded an older deployment and fetches a prerendered payload from a newer one does not
 get the deployment-mismatch reload that a server-rendered payload triggers.

@@ -149,8 +149,10 @@ export default function Page() { return <Link href="/about">About link</Link>; }
     const sitemap = await fetch(origin + "/console/sitemap.xml");
     expect(sitemap.status).toBe(200);
     const xml = await sitemap.text();
-    for (const url of ["/console/", "/console/about", "/console/legacy"]) {
+    // Each page at the URL it answers at, so none of them meets the trailing-slash 308.
+    for (const url of ["/console/", "/console/about/", "/console/legacy/"]) {
       expect(xml, url).toContain(`<loc>${origin}${url}</loc>`);
+      expect((await fetch(origin + url, { redirect: "manual" })).status, url).toBe(200);
     }
     expect(xml).toContain("<lastmod>");
   }, 60_000);
