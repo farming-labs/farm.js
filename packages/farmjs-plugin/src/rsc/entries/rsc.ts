@@ -1457,7 +1457,8 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
       : "const metadata = await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps);"
   }
   const renderedHead = renderMetadataHead(metadata, { pathname: url.pathname });
-  // Injected into <head> by the SSR entry; React renders only the charset.
+  // Injected into <head> by the SSR entry (React renders only the charset), and swapped in by the
+  // browser entry on client navigation.
   const metadataHead =
     (renderedHead.hasExplicitTitle ? '<title>' + renderedHead.title + '</title>' : '') +
     renderedHead.viewport +
@@ -1548,10 +1549,7 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
     ),
     rootContent: rootInner,
     metadataHead,
-    metadata: {
-      title: metadataTitle,
-      description: typeof metadata.description === 'string' ? metadata.description : undefined,
-    },
+    metadata: { title: metadataTitle },
 ${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
 
   // Include action results in payload if actions are enabled

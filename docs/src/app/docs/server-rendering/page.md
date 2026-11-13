@@ -459,7 +459,10 @@ Both setups follow the same route contract:
   now; the pipeline has no revalidating cache yet. A page that asks to be static and fails to render fails the build.
 - **Metadata.** Layouts and pages resolve `metadata`, `generateMetadata()`, and viewport exports in
   the same order and with the same title templates as other Farm apps, and the server renders the
-  same head tags.
+  same head tags. A client navigation sets the next page's title and replaces the tags Farm rendered
+  from metadata (description, canonical and alternate links, robots, Open Graph, JSON-LD) with
+  that page's, as other Farm apps do; tags your components render (React 19 `<meta>` and `<title>`)
+  stay React's.
 - **Images.** `<Image>` follows the app's `images` config. Without `sharp`, `provider: "auto"` keeps
   original image URLs, and the optimizer at `images.path` runs only when it can.
 - **Root layouts.** A root layout that renders `<html>` owns the document, as in Next.js, and the
