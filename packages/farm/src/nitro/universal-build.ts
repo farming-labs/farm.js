@@ -198,7 +198,7 @@ import {
 } from "../route-runtime-manifest";
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
-import { buildFarmVercelRoutes } from "./vercel-assets";
+import { buildFarmVercelRoutes, createFarmVercelCanonicalSlashRoutes } from "./vercel-assets";
 import {
   assertServerReadSSRAssetsSupported,
   collectServerOnlySSRAssets,
@@ -13948,6 +13948,7 @@ function toFarmNodeResponse(request, response) {
         middlewareRoutes: edgeMiddlewareRoutes,
         guardedPages: edgeGuardedPrerenderRoutes,
       },
+      prerenderRoutes.map(toPrerenderPublicPath),
     );
   }
 
@@ -14149,6 +14150,8 @@ async function postProcessVercelOutput(
     /** Prerendered pages that middleware guards. */
     guardedPages: readonly string[];
   },
+  /** The URLs pages were prerendered at, in the configured trailing-slash spelling. */
+  prerenderedPages: readonly string[],
 ) {
   const serverDir = path.join(outputDir, "server");
   const functionsDir = path.join(outputDir, "functions");
@@ -14219,6 +14222,7 @@ async function postProcessVercelOutput(
       edgeMiddlewareRoutes.length > 0
         ? [createFarmVercelEdgeMiddlewareRoute(edgeMiddleware.guardedPages, config.basePath)]
         : [],
+    canonicalSlashRoutes: createFarmVercelCanonicalSlashRoutes(prerenderedPages),
   });
 
   const vercelConfigWithWorkflowCrons = applyFarmWorkflowVercelCrons(

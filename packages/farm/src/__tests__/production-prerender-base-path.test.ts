@@ -3,10 +3,14 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
+import {
+  buildFarmVercelRoutes,
+  createFarmVercelCanonicalSlashRoutes,
+} from "../nitro/vercel-assets";
 import { getAvailablePort } from "./dev-server-port";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -104,6 +108,33 @@ async function withServer(
   }
 }
 
+/**
+ * Vercel sends the page's other trailing-slash spelling to Farm's function ahead of its static
+ * files, and the function answers it with a 308 to the configured spelling, keeping the query.
+ */
+async function expectOtherSpellingRedirects(
+  outputDir: string,
+  routes: Array<{ src?: string; dest?: string; handle?: string }>,
+  canonical: string,
+  other: string,
+): Promise<void> {
+  const filesystemIndex = routes.findIndex((route) => route.handle === "filesystem");
+  const toServer = routes.findIndex(
+    (route) => route.dest === "/__nitro" && route.src && new RegExp(route.src).test(other),
+  );
+  expect(toServer).toBeGreaterThanOrEqual(0);
+  expect(toServer).toBeLessThan(filesystemIndex);
+  expect(new RegExp(routes[toServer]!.src!).test(canonical)).toBe(false);
+
+  const { default: handler } = await import(
+    /* @vite-ignore */ pathToFileURL(path.join(outputDir, "functions", "__nitro.func", "index.mjs"))
+      .href
+  );
+  const response: Response = await handler.fetch(new Request(`https://farm.test${other}?tab=1`));
+  expect(response.status).toBe(308);
+  expect(response.headers.get("location")).toBe(`${canonical}?tab=1`);
+}
+
 const renderedAt = (html: string | null) => html?.match(/data-rendered-at="(\d+)"/)?.[1];
 
 describe("prerendering beneath a basePath", () => {
@@ -129,6 +160,8 @@ describe("prerendering beneath a basePath", () => {
     expect(aboutHeaders?.["cache-control"]).toBe("public, max-age=0, must-revalidate");
     // The Markdown alternate stays below the basePath, as on a dynamic page.
     expect(aboutHeaders?.Link).toBe('</console/about.md>; rel="alternate"; type="text/markdown"');
+    await expectOtherSpellingRedirects(outputDir, routes, "/console/about", "/console/about/");
+    await expectOtherSpellingRedirects(outputDir, routes, "/console", "/console/");
   }, 180_000);
 
   it("serves the prerendered file below the basePath from a Node server", async () => {
@@ -209,5 +242,43 @@ describe("prerendering with trailingSlash: true", () => {
         route.headers && route.src && new RegExp(route.src).test("/console/about/"),
     )?.headers;
     expect(aboutHeaders?.["cache-control"]).toBe("public, max-age=0, must-revalidate");
+    await expectOtherSpellingRedirects(
+      outputDir,
+      vercelConfig.routes,
+      "/console/about/",
+      "/console/about",
+    );
   }, 180_000);
+});
+
+describe("Vercel routes for a prerendered page's other trailing-slash spelling", () => {
+  it("sends only the spelling trailingSlash does not choose to the server", () => {
+    const [route] = createFarmVercelCanonicalSlashRoutes(["/", "/about", "/console", "/a.b"]);
+    const matches = (pathname: string) => new RegExp(route!.src!).test(pathname);
+    expect(route!.dest).toBe("/__nitro");
+    for (const pathname of ["/about/", "/console/", "/a.b/"]) expect(matches(pathname)).toBe(true);
+    for (const pathname of ["/about", "/console", "/", "/a.b", "/axb/", "/about/x"]) {
+      expect(matches(pathname), pathname).toBe(false);
+    }
+
+    const [slashRoute] = createFarmVercelCanonicalSlashRoutes(["/", "/about/"]);
+    expect(new RegExp(slashRoute!.src!).test("/about")).toBe(true);
+    expect(new RegExp(slashRoute!.src!).test("/about/")).toBe(false);
+    expect(createFarmVercelCanonicalSlashRoutes(["/"])).toEqual([]);
+  });
+
+  it("runs after routing middleware and before Vercel serves static files", () => {
+    const middleware = { src: "^/docs$", middlewarePath: "_farm_middleware", continue: true };
+    const [canonical] = createFarmVercelCanonicalSlashRoutes(["/docs"]);
+    const routes = buildFarmVercelRoutes({
+      presetRoutes: [{ handle: "filesystem" }],
+      runtimeRoutes: [],
+      middlewareRoutes: [middleware],
+      canonicalSlashRoutes: [canonical!],
+    });
+    expect(routes.indexOf(middleware)).toBeLessThan(routes.indexOf(canonical!));
+    expect(routes.indexOf(canonical!)).toBeLessThan(
+      routes.findIndex((route) => route.handle === "filesystem"),
+    );
+  });
 });
