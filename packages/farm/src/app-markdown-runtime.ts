@@ -27,7 +27,12 @@ export interface FarmMarkdownPageSource {
 }
 
 export interface FarmMarkdownPageModuleInput extends FarmMarkdownPageSource {
-  components?: FarmMdxComponents;
+  /**
+   * The page's MDX components, or a function that loads them. The function runs once, when the
+   * page first renders, so loading the route module for its metadata or rendering config does not
+   * evaluate the components' module graph.
+   */
+  components?: FarmMdxComponents | (() => Promise<FarmMdxComponents>);
   config?: FarmMdxResolvedConfig;
 }
 
@@ -129,9 +134,9 @@ export function createFarmMarkdownRouteModule(
   input: FarmMarkdownPageModuleInput,
 ): RouteModule & { source: string } {
   const { body } = parseMarkdownFrontmatter(input.source);
-  const components = input.components || {};
   const className = input.config?.className || "farm-markdown";
   let evaluatedPromise: Promise<{ default: ComponentType<any> }> | undefined;
+  let componentsPromise: Promise<FarmMdxComponents> | undefined;
 
   const loadContent = async () => {
     evaluatedPromise ??= evaluateMdxSource(body, input.filePath) as Promise<{
@@ -140,9 +145,20 @@ export function createFarmMarkdownRouteModule(
     return evaluatedPromise;
   };
 
+  const loadComponents = () => {
+    const configured = input.components;
+    if (typeof configured !== "function") return configured || {};
+    // A failed load is retried on the next render, as a failed route module load is.
+    componentsPromise ??= configured().catch((error: unknown) => {
+      componentsPromise = undefined;
+      throw error;
+    });
+    return componentsPromise;
+  };
+
   async function FarmMarkdownPage(props: any) {
     const { createElement } = await import("react");
-    const evaluated = await loadContent();
+    const [evaluated, components] = await Promise.all([loadContent(), loadComponents()]);
     const MDXContent = evaluated.default;
     return createElement(
       "article",
