@@ -66,20 +66,29 @@ _setDefaultFarmI18nRuntime(farmI18nRuntime);
  * Runs a request in its locale, as core's servers do. A page GET whose URL lacks the locale the
  * visitor's cookie or Accept-Language picks is redirected to it (307), and a payload request to
  * that page's payload; a response that depends on those signals varies on them and stays out of
- * shared caches. API routes keep their URLs, as in core, and so do the paths this server answers
- * only as written: llms.txt and the image optimizer.
+ * shared caches. API routes keep their URLs, as in core, and so does the image optimizer, which
+ * this server answers only at its path. llms.txt and sitemap.xml answer at their localized URLs
+ * too (they match the route path), so they redirect as in core.
  */
 async function runFarmLocalizedRequest(request, payloadRequested, render) {
   const { pathname } = new URL(request.url);
   const redirect =
     !isFarmAPIPathname(pathname, farmApiBasePath) &&
     !isFarmAPIPathname(pathname) &&
-    pathname !== farmImagePath &&
-    pathname !== '/llms.txt' &&
-    pathname !== '/llms-full.txt';
+    pathname !== farmImagePath;
   return _runWithFarmI18nRequest(farmI18nRuntime, request, async (resolution) => {
     if (resolution.redirect && (request.method === 'GET' || request.method === 'HEAD')) {
-      let location = resolution.redirect;
+      let location = resolution.redirect;${
+        ctx.trailingSlash
+          ? `
+      // With trailingSlash a page answers at '/fr/about/': send the visitor there at once rather
+      // than through the trailing-slash 308 that would follow (core's renderers redirect twice).
+      const localized = new URL(location, request.url);
+      if (matchRoute(localized.pathname)) {
+        location = normalizeFarmTrailingSlashPathname(localized.pathname, true) + localized.search;
+      }`
+          : ""
+      }
       if (payloadRequested) {
         const target = new URL(location, request.url);
         location = farmPayloadPath(target.pathname) + target.search;
@@ -263,7 +272,24 @@ import {
   createMarkdownMirrorResponse,
   farmRequestWantsMarkdown,
 } from '@farm.js/core/markdown';
-import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';
+${
+  ctx.markdown?.enabled
+    ? `import { getFarmMarkdownAlternatePath } from '@farm.js/core/markdown';
+import { addMetadataMarkdownAlternate } from '@farm.js/core/internal/production-runtime';
+`
+    : ""
+}import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';
+import { resolveFarmTrailingSlashRedirect } from '@farm.js/core/internal/production-runtime';
+${
+  ctx.trailingSlash
+    ? `import { normalizeFarmTrailingSlashPathname, setFarmTrailingSlashPreference } from '@farm.js/core/internal/production-runtime';
+
+// trailingSlash: <Link href="/about"> renders /about/, as in core's renderers. Client components
+// render in the SSR environment, which shares this process; the browser entry sets it too.
+setFarmTrailingSlashPreference(true);
+`
+    : ""
+}
 ${
   hasBasePath
     ? `import { applyFarmBasePath, setFarmBasePath } from '@farm.js/core/internal/production-runtime';
@@ -322,20 +348,37 @@ function getFarmRoutePathname(pathname) {
     : stripFarmBasePath(pathname, farmRouteI18n.basePath);
 }
 ${i18n ? generateI18nRuntime(ctx, i18n) : ""}`;
+  // The generated agent files list the app's static pages.
+  const listsAgentPages = ctx.llmsTxt?.enabled === true || ctx.sitemap?.enabled === true;
+  if (listsAgentPages) {
+    code += `import {
+  createFarmMetadataRouteResponse,
+  farmPathGuardCoversPage,
+  isFarmPageNoIndex,
+  resolveFarmAgentOrigin,
+} from '@farm.js/core/internal/production-runtime';
+`;
+  }
   if (ctx.llmsTxt?.enabled) {
     code += `import {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsFullRenderer,
   createFarmLlmsMarkdownReader,
-  createFarmMetadataRouteResponse,
-  farmPathGuardCoversPage,
   renderFarmLlmsFullTxt,
 } from '@farm.js/core/internal/production-runtime';
 import { FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS } from '@farm.js/core/internal/app-markdown-runtime';
 
 const farmLlmsTxtConfig = ${JSON.stringify(ctx.llmsTxt)};
 const farmLlmsFullRenderer = createFarmLlmsFullRenderer({ revalidate: farmLlmsTxtConfig.revalidate });
+`;
+  }
+  if (ctx.sitemap?.enabled) {
+    code += `import { createFarmDefaultSitemap } from '@farm.js/core/internal/production-runtime';
+
+const farmAgentSitemapConfig = ${JSON.stringify(ctx.sitemap)};
+// Each page file's last change, read by the build (by farm dev when it starts).
+const farmPageLastModified = ${JSON.stringify(ctx.pageLastModified ?? {})};
 `;
   }
   if (ctx.actionsEnabled) {
@@ -950,8 +993,15 @@ async function collectFarmStaticPages() {
             ? `// The platform serves a prerendered file only at the URL it was written for, below the
       // basePath, as core's build writes it. A page nested under app/<basePath>/ already is.
       const publicPath = applyFarmBasePath(pagePath, ${JSON.stringify(ctx.basePath)});
-      paths.add(publicPath.length > 1 ? publicPath.replace(/\\/$/, '') : publicPath);`
-            : "paths.add(pagePath);"
+      paths.add(${
+        ctx.trailingSlash
+          ? "normalizeFarmTrailingSlashPathname(publicPath, true)"
+          : "publicPath.length > 1 ? publicPath.replace(/\\/$/, '') : publicPath"
+      });`
+            : ctx.trailingSlash
+              ? // With trailingSlash the page's URL is '/about/', which Nitro writes as about/index.html.
+                "paths.add(normalizeFarmTrailingSlashPathname(pagePath, true));"
+              : "paths.add(pagePath);"
       }
     }
   }
@@ -982,7 +1032,13 @@ function farmLocalizedStaticPaths(pagePath) {
     : farmRouteI18n.locales.map((locale) => localizeFarmPathname(pagePath, locale, farmRouteI18n));
   return urls
     .map((url) => (url.length > 1 ? url.replace(/\\/$/, '') : url))
-    .filter((url) => canonical(url) && (namesLocale(url) || !detects));
+    .filter((url) => canonical(url) && (namesLocale(url) || !detects))${
+      ctx.trailingSlash
+        ? `
+    // With trailingSlash the page's URL is '/fr/about/', which Nitro writes as fr/about/index.html.
+    .map((url) => normalizeFarmTrailingSlashPathname(url, true))`
+        : ""
+    };
 }
 
 `
@@ -1076,6 +1132,7 @@ async function handleFarmRequest(request, context) {
 
 async function resolveFarmRequest(farmCacheGuard, request, context) {
   let url = new URL(request.url);
+  const isFarmPayloadRequest = farmPayloadRequests.has(request);
   let matchedPage = null;
   let errorData = new Map();
   let errorContext = new Map();
@@ -1157,11 +1214,33 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
   if (llmsResponse) return applyProductionMiddlewareHeaders(llmsResponse, middlewareHeaders);
   `
       : ""
+  }${
+    ctx.sitemap?.enabled
+      ? `// agent.sitemap: answered after middleware, as in core's servers.
+  if (getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/') === '/sitemap.xml') {
+    return applyProductionMiddlewareHeaders(createFarmAgentSitemapResponse(request), middlewareHeaders);
+  }
+  `
+      : ""
   }if (isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname)) {
     return applyProductionMiddlewareHeaders(new Response(
       JSON.stringify({ error: 'API route not found', pathname: url.pathname }),
       { status: 404, headers: { 'Content-Type': 'application/json' } },
     ), middlewareHeaders);
+  }
+
+  // A page answers at one spelling of its URL, as in core's servers: '/about/' with trailingSlash,
+  // '/about' without. Any other spelling gets a 308 to it, before a server action runs, and a
+  // '<page>.rsc' request is sent to the payload URL of that page.
+  const trailingSlashLocation = resolveFarmTrailingSlashRedirect(url, ${JSON.stringify(ctx.trailingSlash === true)});
+  if (trailingSlashLocation && matchRoute(url.pathname)) {
+    const target = new URL(trailingSlashLocation, url);
+    return applyProductionMiddlewareHeaders(new Response(null, {
+      status: 308,
+      headers: {
+        location: isFarmPayloadRequest ? farmPayloadPath(target.pathname) + target.search : trailingSlashLocation,
+      },
+    }), middlewareHeaders);
   }
 `;
 
@@ -1349,7 +1428,15 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
   
   // Page props passed to components (includes middleware shared data)
   const pageProps = { params, searchParams, middlewareData };
-  const metadata = await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps);
+  ${
+    ctx.markdown?.enabled
+      ? `// The head advertises the page's Markdown mirror as the Link header does, as in core's servers.
+  const metadata = addMetadataMarkdownAlternate(
+    await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps),
+    getFarmMarkdownAlternatePath(farmMarkdownConfig, url.pathname, { routePathname: getFarmRoutePathname }),
+  );`
+      : "const metadata = await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps);"
+  }
   const renderedHead = renderMetadataHead(metadata, { pathname: url.pathname });
   // Injected into <head> by the SSR entry; React renders only the charset.
   const metadataHead =
@@ -1626,27 +1713,17 @@ ${
  * /llms-full.txt inlines each mirror.
  */
 function createFarmLlmsTxtContext(request, context, full) {
-  const origin = new URL(request.url).origin;
-  // A page a path-specific guard covers (a non-root middleware.ts, a config
-  // middleware matcher naming the path) is left out, as core's server does.
-  const guard = {
-    config: { middleware: farmConfigMiddleware },
-    middlewareRoutes: Object.keys(middlewares)
-      .map((filePath) => ({ path: middlewarePathToRoute(filePath) }))
-      .filter((route) => route.path !== null),
-  };
+  const origin = getFarmAgentOrigin(request);
+  // Each page links to its public URL below the basePath ('/console/index.md' for the home page),
+  // and include and exclude match its route path, as in core's servers.
   const pages = collectFarmLlmsTxtPages(
-    pageRoutes
-      .map(({ module, segments }) => ({
-        // Dynamic routes have no single URL, so the collector skips them.
-        pattern: '/' + segments
-          .map((part) => (part.isDynamic ? '[' + part.segment + ']' : part.segment))
-          .join('/'),
-        metadata: module && module.metadata,
-      }))
-      .filter((page) => page.pattern.includes('[') || !farmPathGuardCoversPage(guard, page.pattern)),
+    getFarmAgentListedPages().map(({ pattern, module }) => ({
+      pattern,
+      metadata: module && module.metadata,
+    })),
     {
       origin,
+      basePath: ${JSON.stringify(ctx.basePath)},
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
       exclude: farmLlmsTxtConfig.exclude,
@@ -1654,6 +1731,7 @@ function createFarmLlmsTxtContext(request, context, full) {
   );
   const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
   return {
+    origin,
     defaults: createFarmDefaultLlmsTxt({
       origin,
       pages,
@@ -1677,9 +1755,11 @@ function createFarmLlmsTxtContext(request, context, full) {
 
 async function handleFarmLlmsTxtRequest(request, context) {
   const { origin, pathname } = new URL(request.url);
-  const kind = pathname === '/llms.txt'
+  // Served at the path routes see, as core serves it: /console/llms.txt under basePath "/console".
+  const routePathname = getFarmRoutePathname(pathname.replace(/\\/+$/, '') || '/');
+  const kind = routePathname === '/llms.txt'
     ? 'llms'
-    : farmLlmsTxtConfig.full && pathname === '/llms-full.txt' ? 'llms-full' : null;
+    : farmLlmsTxtConfig.full && routePathname === '/llms-full.txt' ? 'llms-full' : null;
   if (!kind) return null;
   const method = request.method.toUpperCase();
   if (method !== 'GET' && method !== 'HEAD') {
@@ -1690,7 +1770,7 @@ async function handleFarmLlmsTxtRequest(request, context) {
   let complete = true;
   const renderFull = (shared) =>
     renderFarmLlmsFullTxt(llmsContext.defaults, {
-      origin,
+      origin: llmsContext.origin,
       readMarkdown: llmsContext.markdown,
       onIncomplete: () => {
         complete = false;
@@ -1717,7 +1797,97 @@ async function handleFarmLlmsTxtRequest(request, context) {
 
 `
     : ""
-}/**
+}${
+    listsAgentPages
+      ? `/**
+ * The static pages the generated agent files list, as core's servers pick them: each at its route
+ * path, below the basePath and locale, leaving out a page a path-specific guard (a non-root
+ * middleware.ts, a config middleware matcher naming the path) or a route guard covers, and one
+ * that renders noindex through its own robots or, without one, its nearest layout's.
+ */
+function getFarmAgentListedPages() {
+  const guard = {
+    config: { middleware: farmConfigMiddleware },
+    middlewareRoutes: Object.keys(middlewares)
+      .map((filePath) => ({ path: middlewarePathToRoute(filePath) }))
+      .filter((route) => route.path !== null),
+  };
+  const listed = new Map();
+  for (const { filePath, module, segments } of pageRoutes) {
+    // Dynamic routes have no single URL.
+    if (segments.some((part) => part.isDynamic)) continue;
+    const filePattern = '/' + segments.map((part) => part.segment).join('/');
+    ${
+      routesBelowPrefix
+        ? `// A page nested under app/<basePath>/ answers at the path without it, and wins there, as
+    // matchRoute() selects it.
+    const routePathname = getFarmRoutePathname(filePattern);
+    const nested = routePathname !== filePattern &&
+      farmPageSpellsRoutePrefix(segments, filePattern, routePathname);
+    const pattern = nested ? routePathname : filePattern;
+    const current = listed.get(pattern);
+    if (current && (current.nested || !nested)) continue;`
+        : `const pattern = filePattern;
+    const nested = false;
+    if (listed.has(pattern)) continue;`
+    }
+    listed.set(pattern, { filePath, filePattern, pattern, module, nested });
+  }
+  // Middleware runs for both the path as received and the route path, so either may guard it.
+  return [...listed.values()].filter(({ filePath, filePattern, pattern, module }) =>
+    !farmPathGuardCoversPage(guard, filePattern) &&
+    !farmPathGuardCoversPage(guard, pattern) &&
+    !(module && module.__farmRouteGuard) &&
+    !isFarmPageNoIndex(
+      module && module.metadata,
+      getRouteModules(filePath, layouts, 'layout').map((layout) => layout.metadata),
+    ),
+  );
+}
+
+${
+  ctx.sitemap?.enabled
+    ? `/**
+ * agent.sitemap, built the same way as core's servers build it: the pages llms.txt lists, each at
+ * its URL below the basePath, on the root layout's metadataBase or the request's origin.
+ */
+function createFarmAgentSitemapResponse(request) {
+  const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
+  return createFarmMetadataRouteResponse(
+    'sitemap',
+    createFarmDefaultSitemap(
+      getFarmAgentListedPages().map(({ filePath, pattern, module }) => ({
+        pattern,
+        module,
+        lastModified: farmPageLastModified[filePath],
+      })),
+      {
+        origin: new URL(request.url).origin,
+        config: farmAgentSitemapConfig,
+        metadataBase: rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
+        basePath: ${JSON.stringify(ctx.basePath)},
+      },
+    ),
+    {},
+    { method: request.method },
+  );
+}
+
+`
+    : ""
+}// Agent files link to the root layout's metadataBase when it is an absolute URL, else to the
+// request's origin, as in core's servers.
+function getFarmAgentOrigin(request) {
+  const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
+  return resolveFarmAgentOrigin(
+    rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
+    new URL(request.url).origin,
+  );
+}
+
+`
+      : ""
+  }/**
  * Serves a page's Markdown mirror (\`/page.md\` or \`Accept: text/markdown\`) by
  * rendering the page through the normal request path, so middleware and sign-in
  * gates apply; every other request renders as usual, and HTML pages advertise
@@ -1731,7 +1901,7 @@ async function handleFarmPageOrMarkdown(request, context) {
     routePathname: getFarmRoutePathname,
     // The page the render below selects for the mirrored URL, below the basePath and locale.
     routeExists: (pathname) => Boolean(matchRoute(pathname)),
-    renderPage: (pageRequest) => handleFarmRequest(pageRequest, context),
+    renderPage: (pageRequest) => handleFarmRequest(${ctx.trailingSlash ? "toFarmTrailingSlashPageRequest(pageRequest)" : "pageRequest"}, context),
     apiServerBasePath: farmApiBasePath,
   });
   if (markdown) return markdown;
@@ -1742,13 +1912,30 @@ async function handleFarmPageOrMarkdown(request, context) {
     routePathname: getFarmRoutePathname,
   });
 }
-
+${
+  ctx.trailingSlash
+    ? `
+// The mirror reads the page at its canonical URL ('/about/'), so the trailing-slash redirect never
+// answers in its place.
+function toFarmTrailingSlashPageRequest(request) {
+  const url = new URL(request.url);
+  const pathname = normalizeFarmTrailingSlashPathname(url.pathname, true);
+  if (pathname === url.pathname) return request;
+  url.pathname = pathname;
+  return new Request(url, request);
+}
+`
+    : ""
+}
 // Client navigation addresses a page's RSC payload as '<page>.rsc' ('<dir>/index.rsc' for a
 // trailing slash), so a prerendered page can be a static HTML file next to a static payload file.
 // 'Accept: text/x-component' on the page URL keeps working.
 function farmPayloadPath(pathname) {
   return pathname.endsWith('/') ? pathname + 'index.rsc' : pathname + '.rsc';
 }
+
+// The requests made from a '<page>.rsc' URL, whose redirects name a payload URL too.
+const farmPayloadRequests = new WeakSet();
 
 function toFarmPayloadRequest(request) {
   if (request.method !== 'GET' && request.method !== 'HEAD') return request;
@@ -1759,7 +1946,9 @@ function toFarmPayloadRequest(request) {
   url.pathname = page.endsWith('/index') ? page.slice(0, -'index'.length) : page;
   const headers = new Headers(request.headers);
   headers.set('accept', 'text/x-component');
-  return new Request(url, { method: request.method, headers, signal: request.signal });
+  const payloadRequest = new Request(url, { method: request.method, headers, signal: request.signal });
+  farmPayloadRequests.add(payloadRequest);
+  return payloadRequest;
 }
 
 // The build's prerender pass (Nitro) runs this server with FARM_RSC_PRERENDER set. It seeds one

@@ -325,11 +325,11 @@ Besides their own arguments, hooks receive a context with:
 
 These flat hooks are still supported and have no structured replacement:
 
-| Hook                                | Called                                                                                                                         |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `configResolved(config, context)`   | In development, once the dev server's config is final                                                                          |
-| `onError(payload, context)`         | When Farm reports an error; `payload` has `phase` (such as `"runtime"`, `"render-page"`, `"api-handler"`), `error`, and `meta` |
-| `afterNitroBuild(payload, context)` | After the Nitro production build, with `{ root, preset, distDir, outputDir }`                                                  |
+| Hook                                | Called                                                                                                          |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `configResolved(config, context)`   | In development, once the dev server's config is final                                                           |
+| `onError(payload, context)`         | When Farm reports an error; `payload` has `phase` (such as `"runtime"` or `"render-page"`), `error`, and `meta` |
+| `afterNitroBuild(payload, context)` | After the Nitro production build, with `{ root, preset, distDir, outputDir }`                                   |
 
 ## Deprecated hooks
 

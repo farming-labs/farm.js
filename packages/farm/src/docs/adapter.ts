@@ -315,6 +315,23 @@ export async function listFarmDocsAdapterPages(
 }
 
 /**
+ * The paths of the docs pages the renderer serving them publishes: the adapter's list when the
+ * adapter owns the docs runtime, else every page Farm's built-in renderer discovers. Empty when
+ * the adapter does not list its pages. Farm Infra analytics reports these pages by their path.
+ *
+ * @internal
+ */
+export async function listFarmDocsPagePaths(
+  docs: FarmDocsResolvedConfig,
+  options: { root: string; srcDir?: string; adapter: boolean },
+): Promise<string[]> {
+  if (options.adapter) return (await listFarmDocsAdapterPages(docs, options)) ?? [];
+  return getFarmDocsRoots(docs).flatMap((root) =>
+    discoverFarmDocsPages(resolveFarmDocsContentDir(root, options), root).map(({ href }) => href),
+  );
+}
+
+/**
  * Load a documentation runtime through the versioned adapter descriptor.
  *
  * Core deliberately knows nothing about the adapter's DOM or theme. It only

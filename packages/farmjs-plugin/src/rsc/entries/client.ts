@@ -87,6 +87,12 @@ import { createFarmRouteAnnouncer, runFarmNavigationDelegates } from '@farm.js/c
 setFarmBasePath(${JSON.stringify(ctx.basePath)});
 `;
   }
+  // trailingSlash: <Link href="/about"> renders /about/, as the RSC server rendered it.
+  if (ctx.trailingSlash) {
+    imports += `import { setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime';
+setFarmTrailingSlashPreference(true);
+`;
+  }
 
   const i18n = ctx.i18n?.enabled === true;
   if (i18n) {

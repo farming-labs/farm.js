@@ -1,5 +1,8 @@
 import type { FarmMarkdownResolvedConfig } from "@farm.js/core/markdown";
-import type { ResolvedFarmLlmsTxtConfig } from "@farm.js/core/internal/production-runtime";
+import type {
+  ResolvedFarmAgentSitemap,
+  ResolvedFarmLlmsTxtConfig,
+} from "@farm.js/core/internal/production-runtime";
 import type { FarmI18nCatalogs, ResolvedFarmI18nConfig } from "@farm.js/core/i18n";
 import type {
   FarmServerActionsConfig,
@@ -114,6 +117,12 @@ export interface EntryContext {
   /** Base URL path, e.g. '/' */
   basePath: string;
 
+  /**
+   * Core's `trailingSlash`: pages answer at `/about/` instead of `/about`, and `<Link>` renders
+   * that URL. Either way a page's other spelling redirects (308) to it.
+   */
+  trailingSlash?: boolean;
+
   /** Resolved same-origin mount for canonical /api routes. */
   apiBasePath?: string;
 
@@ -205,6 +214,12 @@ export interface EntryContext {
 
   /** Resolved `agent.llmsTxt`: the generated `/llms.txt` and `/llms-full.txt`. */
   llmsTxt?: ResolvedFarmLlmsTxtConfig;
+
+  /** Resolved `agent.sitemap`: the generated `/sitemap.xml`. */
+  sitemap?: ResolvedFarmAgentSitemap;
+
+  /** Route-relative page keys to their file's last change (ISO), the sitemap's lastmod. */
+  pageLastModified?: Record<string, string>;
 
   /** Whether debug mode is enabled */
   debug: boolean;

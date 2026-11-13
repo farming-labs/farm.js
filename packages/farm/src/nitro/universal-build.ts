@@ -176,6 +176,7 @@ import {
   farmDocsAdapterServesGuardedPages,
   hasFarmDocsRuntimeAdapter,
   listFarmDocsAdapterPages,
+  listFarmDocsPagePaths,
 } from "../docs/adapter";
 import {
   createFarmClientModulePreloadPlugin,
@@ -198,7 +199,7 @@ import {
 } from "../route-runtime-manifest";
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
-import { buildFarmVercelRoutes } from "./vercel-assets";
+import { buildFarmVercelRoutes, createFarmVercelCanonicalSlashRoutes } from "./vercel-assets";
 import {
   assertServerReadSSRAssetsSupported,
   collectServerOnlySSRAssets,
@@ -6038,6 +6039,7 @@ async function buildSSRInMemory(
   if (farmDocsPrecompiledManifest && farmDocsCspNonceMarker) {
     farmDocsPrecompiledManifest.cspNonceMarker = farmDocsCspNonceMarker;
   }
+  const farmDocsAnalyticsPages = await listFarmDocsAnalyticsPages(config, root, preset);
 
   // Generate virtual entry code that imports and bundles all routes
   // This ensures all route handlers are captured in the bundle closure
@@ -6068,6 +6070,7 @@ async function buildSSRInMemory(
     isolatedClientBoundaryModules,
     hydrationPlanCache,
     mobileShellLoadingRoutes,
+    farmDocsAnalyticsPages,
   );
 
   // Find a temporary file path for the virtual entry
@@ -6888,6 +6891,7 @@ function generateVirtualEntryCode(
   isolatedClientBoundaryModules: ReadonlySet<string>,
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
   mobileShellLoadingRoutes: UniversalBoundaryRoute[] = [],
+  farmDocsAnalyticsPages: readonly string[] = [],
 ): string {
   // `renderer: false`: no pages, so every miss answers JSON rather than a rendered page.
   const farmRendererDisabled = isFarmRendererDisabled(config.renderer);
@@ -10095,6 +10099,10 @@ ${
     config.docs.roots?.length
       ? "\n  roots: farmDocsResolvedConfig.roots.map((farmDocsRoot) => farmDocsRoot.entry),"
       : ""
+  }${
+    farmDocsAnalyticsPages.length
+      ? `\n  pages: new Set(${JSON.stringify(farmDocsAnalyticsPages)}),`
+      : ""
   }
 };
 `
@@ -12840,6 +12848,38 @@ async function getFarmDocsPrerenderPages(
 }
 
 /**
+ * The docs pages Farm Infra analytics reports by their own path, listed from the renderer that
+ * serves them. Empty when the server cannot report analytics (`analytics: false`, or not a Node
+ * runtime). An adapter whose list fails leaves its pages on the docs catch-all rather than
+ * failing the build.
+ */
+async function listFarmDocsAnalyticsPages(
+  config: ResolvedFarmConfig,
+  root: string,
+  preset: string,
+): Promise<string[]> {
+  if (
+    !config.docs?.enabled ||
+    config.analytics === false ||
+    resolveFarmInstrumentationRuntime(preset) !== "nodejs"
+  ) {
+    return [];
+  }
+  try {
+    return await listFarmDocsPagePaths(config.docs, {
+      root,
+      srcDir: config.srcDir,
+      adapter: isReactRenderer(config.renderer) && hasFarmDocsRuntimeAdapter(config.docs),
+    });
+  } catch (error) {
+    logger.warn(
+      `Farm Infra analytics reports docs pages by the docs route, not each page's path: listing them failed (${error instanceof Error ? error.message : String(error)}).`,
+    );
+    return [];
+  }
+}
+
+/**
  * Whether a route rule makes Nitro write cache headers over Farm's response: a `swr` or raw
  * `cache` rule caches through Nitro, and a `headers` rule sets its headers after Farm answered.
  */
@@ -13972,6 +14012,7 @@ function toFarmNodeResponse(request, response) {
         middlewareRoutes: edgeMiddlewareRoutes,
         guardedPages: edgeGuardedPrerenderRoutes,
       },
+      prerenderRoutes.map(toPrerenderPublicPath),
     );
   }
 
@@ -14173,6 +14214,8 @@ async function postProcessVercelOutput(
     /** Prerendered pages that middleware guards. */
     guardedPages: readonly string[];
   },
+  /** The URLs pages were prerendered at, in the configured trailing-slash spelling. */
+  prerenderedPages: readonly string[],
 ) {
   const serverDir = path.join(outputDir, "server");
   const functionsDir = path.join(outputDir, "functions");
@@ -14243,6 +14286,7 @@ async function postProcessVercelOutput(
       edgeMiddlewareRoutes.length > 0
         ? [createFarmVercelEdgeMiddlewareRoute(edgeMiddleware.guardedPages, config.basePath)]
         : [],
+    canonicalSlashRoutes: createFarmVercelCanonicalSlashRoutes(prerenderedPages),
   });
 
   const vercelConfigWithWorkflowCrons = applyFarmWorkflowVercelCrons(

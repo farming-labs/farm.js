@@ -10,6 +10,7 @@ import {
   createFarmDocsAdapterHandler,
   hasFarmDocsRuntimeAdapter,
   listFarmDocsAdapterPages,
+  listFarmDocsPagePaths,
 } from "../docs/adapter";
 import type { FarmDocsResolvedConfig } from "../docs/types";
 
@@ -87,6 +88,62 @@ describe("Farm docs runtime adapters", () => {
       "/pinboard/docs",
       "/pinboard/docs/guide",
     ]);
+  });
+
+  it("lists the published pages from the renderer that serves them", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-docs-page-paths-"));
+    tempDirs.push(root);
+    const adapterDir = path.join(root, "node_modules", "fake-docs-adapter");
+    await mkdir(adapterDir, { recursive: true });
+    await mkdir(path.join(root, "content", "docs", "guides"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "app" }));
+    await writeFile(
+      path.join(adapterDir, "package.json"),
+      JSON.stringify({
+        name: "fake-docs-adapter",
+        type: "module",
+        exports: { "./server": "./server.js" },
+      }),
+    );
+    await writeFile(
+      path.join(adapterDir, "server.js"),
+      `export function listFarmDocsPages() { return ["/docs", "/docs/from-adapter"]; }`,
+    );
+    await writeFile(path.join(root, "content", "docs", "index.md"), "# Docs");
+    await writeFile(path.join(root, "content", "docs", "guides", "cron.md"), "# Cron");
+    const docs = createAdapterDocs();
+    docs.adapter = { ...docs.adapter!, server: "fake-docs-adapter/server" };
+
+    expect(await listFarmDocsPagePaths(docs, { root, adapter: true })).toEqual([
+      "/docs",
+      "/docs/from-adapter",
+    ]);
+    // Without the adapter, Farm's built-in renderer answers what it discovers.
+    expect((await listFarmDocsPagePaths(docs, { root, adapter: false })).sort()).toEqual([
+      "/docs",
+      "/docs/guides/cron",
+    ]);
+  });
+
+  it("lists no pages for an adapter that does not list them", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-docs-page-paths-"));
+    tempDirs.push(root);
+    const adapterDir = path.join(root, "node_modules", "fake-docs-adapter");
+    await mkdir(adapterDir, { recursive: true });
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "app" }));
+    await writeFile(
+      path.join(adapterDir, "package.json"),
+      JSON.stringify({
+        name: "fake-docs-adapter",
+        type: "module",
+        exports: { "./server": "./server.js" },
+      }),
+    );
+    await writeFile(path.join(adapterDir, "server.js"), "export {};");
+    const docs = createAdapterDocs();
+    docs.adapter = { ...docs.adapter!, server: "fake-docs-adapter/server" };
+
+    expect(await listFarmDocsPagePaths(docs, { root, adapter: true })).toEqual([]);
   });
 
   it("recognizes only enabled adapters with server and React entrypoints", () => {

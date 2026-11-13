@@ -71,14 +71,17 @@ export interface FarmVercelRoute {
  *
  * Routing middleware (`runtime: "edge"` middleware in front of the pages it
  * guards) goes after the redirect and header routes and before `filesystem`,
- * so it decides a request before Vercel serves a static file.
+ * so it decides a request before Vercel serves a static file. Routes that send
+ * a prerendered page's other trailing-slash spelling to the server come next,
+ * also ahead of the static files that would otherwise answer it.
  */
 export function buildFarmVercelRoutes(options: {
   presetRoutes: FarmVercelRoute[];
   runtimeRoutes: FarmVercelRoute[];
   middlewareRoutes?: FarmVercelRoute[];
+  canonicalSlashRoutes?: FarmVercelRoute[];
 }): FarmVercelRoute[] {
-  const { presetRoutes, runtimeRoutes, middlewareRoutes = [] } = options;
+  const { presetRoutes, runtimeRoutes, middlewareRoutes = [], canonicalSlashRoutes = [] } = options;
   const filesystemIndex = presetRoutes.findIndex((route) => route.handle === "filesystem");
   const sourceRoutes = filesystemIndex >= 0 ? presetRoutes.slice(0, filesystemIndex) : [];
   // Drop the preset's blanket immutable public-asset routes (the only
@@ -90,6 +93,7 @@ export function buildFarmVercelRoutes(options: {
   return [
     ...preservedSourceRoutes,
     ...middlewareRoutes,
+    ...canonicalSlashRoutes,
     createFarmVercelImmutableAssetRoute(),
     { handle: "filesystem" },
     ...runtimeRoutes,
@@ -98,4 +102,30 @@ export function buildFarmVercelRoutes(options: {
       dest: "/__nitro",
     },
   ];
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * The route that sends the other trailing-slash spelling of each prerendered page to Farm's
+ * server. Vercel can answer either spelling with the page's `index.html`, so without it a static
+ * page answers both, where Farm's server answers the spelling `trailingSlash` does not
+ * choose with a 308 to the one it does (keeping the query), as it does for every dynamic page.
+ * `publicPaths` are the URLs the pages were prerendered at, already in the configured spelling.
+ */
+export function createFarmVercelCanonicalSlashRoutes(
+  publicPaths: readonly string[],
+): FarmVercelRoute[] {
+  const otherSpellings = [
+    ...new Set(
+      publicPaths
+        .filter((pathname) => pathname !== "/")
+        .map((pathname) => (pathname.endsWith("/") ? pathname.replace(/\/+$/, "") : `${pathname}/`))
+        .filter((pathname) => pathname !== ""),
+    ),
+  ];
+  if (otherSpellings.length === 0) return [];
+  return [{ src: `^(?:${otherSpellings.map(escapeRegExp).join("|")})$`, dest: "/__nitro" }];
 }

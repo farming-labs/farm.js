@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { isFarmAPIPathname } from "@farm.js/core/api/runtime";
 import {
   resolveFarmI18nConfig,
+  resolveFarmTrailingSlashRedirect,
   stripFarmBasePath,
   stripFarmLocaleFromPathname,
 } from "@farm.js/core/internal/production-runtime";
+import { applyProductionMiddlewareHeaders } from "@farm.js/core/middleware";
 import { matchRoute as matchFarmPageRoute, parseRoutePath } from "../../../../farm/src/utils";
 import {
   compareRouteSpecificity,
@@ -14,7 +16,9 @@ import type { EntryContext } from "../types.js";
 import { generateClientEntry } from "./client.js";
 import { generateRscEntry } from "./rsc.js";
 
-type EntryOptions = Partial<Pick<EntryContext, "basePath" | "i18n" | "development">>;
+type EntryOptions = Partial<
+  Pick<EntryContext, "basePath" | "i18n" | "development" | "trailingSlash">
+>;
 
 function entryFor(options: EntryOptions = {}) {
   return generateRscEntry({
@@ -266,4 +270,127 @@ it("matches a root-mounted app's pages on the path as received, with nothing mor
     "getFarmRoutePathname",
   );
   expect(entryFor({ basePath: "/console" })).toContain("farmPageSpellsRoutePrefix");
+});
+
+/**
+ * The entry's trailing-slash redirect, as the request handler runs it after middleware: the
+ * generated block over the entry's own matchRoute() and payload helpers, with core's real helpers.
+ */
+function createTrailingSlashRedirect(paths: string[], options: EntryOptions = {}) {
+  const entry = entryFor(options);
+  const start = entry.indexOf("  const trailingSlashLocation = ");
+  expect(start).toBeGreaterThan(-1);
+  const block = entry.slice(start, entry.indexOf("\n  }\n", start) + 4);
+  const { farmPayloadPath, toFarmPayloadRequest, farmPayloadRequests } = new Function(
+    "isFarmAPIPathname",
+    "farmApiBasePath",
+    `${slice(
+      entry,
+      "// Client navigation addresses a page's RSC payload",
+      "// The build's prerender pass",
+    )}; return { farmPayloadPath, toFarmPayloadRequest, farmPayloadRequests };`,
+  )(isFarmAPIPathname, "/api") as {
+    farmPayloadPath: (pathname: string) => string;
+    toFarmPayloadRequest: (request: Request) => Request;
+    farmPayloadRequests: WeakSet<Request>;
+  };
+  const redirect = new Function(
+    "matchRoute",
+    "farmPayloadPath",
+    "resolveFarmTrailingSlashRedirect",
+    "applyProductionMiddlewareHeaders",
+    "url",
+    "isFarmPayloadRequest",
+    "middlewareHeaders",
+    `${block}\nreturn null;`,
+  );
+  const matchRoute = createMatcher(paths, options);
+  // What the client requests: the page URL, or '<page>.rsc' for a navigation's payload.
+  return (href: string, middlewareHeaders = new Headers()): Response | null => {
+    const request = toFarmPayloadRequest(new Request(new URL(href, "https://farm.test")));
+    return redirect(
+      matchRoute,
+      farmPayloadPath,
+      resolveFarmTrailingSlashRedirect,
+      applyProductionMiddlewareHeaders,
+      new URL(request.url),
+      farmPayloadRequests.has(request),
+      middlewareHeaders,
+    );
+  };
+}
+
+// Core's servers answer a page at one spelling of its URL and send any other to it with a 308:
+// without trailingSlash '/about', with it '/about/'. The root is always '/'.
+describe.each([
+  ["development", true],
+  ["production", false],
+])("RSC trailing slashes (%s entry)", (_mode, development) => {
+  const pages = ["/page.tsx", "/about/page.tsx", "/console/legacy/page.tsx"];
+  const location = (response: Response | null) =>
+    response ? [response.status, response.headers.get("location")] : null;
+
+  it("redirect a page's trailing-slash URL to the one without, by default", () => {
+    const redirect = createTrailingSlashRedirect(pages, { basePath: "/console", development });
+    expect(location(redirect("/console/about/?tab=a&tab=b"))).toEqual([
+      308,
+      "/console/about?tab=a&tab=b",
+    ]);
+    expect(location(redirect("/console/"))).toEqual([308, "/console"]);
+    expect(location(redirect("/console/legacy/"))).toEqual([308, "/console/legacy"]);
+    // A navigation's payload request is sent to the canonical page's payload.
+    expect(location(redirect("/console/about/index.rsc?q=1"))).toEqual([
+      308,
+      "/console/about.rsc?q=1",
+    ]);
+    for (const canonical of ["/console/about", "/console", "/", "/console/about.rsc"]) {
+      expect(redirect(canonical), canonical).toBeNull();
+    }
+    // No page: the request goes on to the 404.
+    expect(redirect("/console/missing/")).toBeNull();
+    // Headers middleware set reach the redirect, as in core's servers.
+    const headers = new Headers({ "x-middleware": "ran" });
+    expect(redirect("/about/", headers)?.headers.get("x-middleware")).toBe("ran");
+  });
+
+  it("redirect to the trailing-slash URL with trailingSlash", () => {
+    const redirect = createTrailingSlashRedirect(pages, {
+      basePath: "/console",
+      trailingSlash: true,
+      development,
+    });
+    expect(location(redirect("/console/about?q=1"))).toEqual([308, "/console/about/?q=1"]);
+    expect(location(redirect("/console"))).toEqual([308, "/console/"]);
+    expect(location(redirect("/console/about.rsc"))).toEqual([308, "/console/about/index.rsc"]);
+    expect(location(redirect("/console.rsc"))).toEqual([308, "/console/index.rsc"]);
+    for (const canonical of ["/console/about/", "/console/", "/", "/console/about/index.rsc"]) {
+      expect(redirect(canonical), canonical).toBeNull();
+    }
+
+    const root = createTrailingSlashRedirect(pages, { trailingSlash: true, development });
+    expect(location(root("/about"))).toEqual([308, "/about/"]);
+    expect(root("/")).toBeNull();
+    expect(root("/index.rsc")).toBeNull();
+  });
+
+  it("set the trailing-slash preference <Link> applies in the server and browser entries", () => {
+    const context = {
+      srcDir: "src",
+      outDir: "dist",
+      basePath: "/",
+      actionsEnabled: false,
+      serverActions: { allowedOrigins: [], bodySizeLimit: 1000 },
+      deploymentId: "routing",
+      debug: false,
+      development,
+    };
+    expect(entryFor({ trailingSlash: true, development })).toContain(
+      "setFarmTrailingSlashPreference(true);",
+    );
+    expect(generateClientEntry({ ...context, trailingSlash: true })).toContain(
+      "setFarmTrailingSlashPreference(true);",
+    );
+    expect(entryFor({ development })).not.toContain("setFarmTrailingSlashPreference");
+    expect(generateClientEntry(context)).not.toContain("setFarmTrailingSlashPreference");
+  });
 });

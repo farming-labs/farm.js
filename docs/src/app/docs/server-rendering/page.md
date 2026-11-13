@@ -488,7 +488,14 @@ Both setups follow the same route contract:
   A link to another locale loads a new document. `redirect("/about")` from a French page, server
   action or form sends `/console/fr/about`, as other Farm apps localize it. Farm sets `lang` and
   `dir` on the `<html>` it renders; a root layout that renders `<html>` sets them itself, for example
-  `<html lang={getLocale()}>`. `hreflang` alternate links are not rendered yet.
+  `<html lang={getLocale()}>`. With `trailingSlash: true`, a locale redirect goes straight to the
+  page's trailing-slash URL. `hreflang` alternate links are not rendered yet, and `llms.txt` and
+  `sitemap.xml` list each page once, at its unprefixed URL, as in other Farm apps.
+- **Trailing slashes.** Pages follow [`trailingSlash`](/docs/configuration#trailing-slashes) as in
+  other Farm apps: by default `/about/` redirects (308) to `/about`, and with `trailingSlash: true`
+  `/about` redirects to `/about/`, `<Link href="/about">` renders `/about/`, and its payload is
+  `/about/index.rsc`. A payload request at the other spelling redirects to the canonical page's
+  payload, and a static page prerenders at its canonical URL.
 
 A client that loaded an older deployment and fetches a prerendered payload from a newer one does not
 get the deployment-mismatch reload that a server-rendered payload triggers.

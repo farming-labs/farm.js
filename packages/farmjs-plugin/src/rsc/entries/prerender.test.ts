@@ -8,6 +8,7 @@ import {
   localizeFarmPathname,
   materializeSSGRoutePath,
   mergeRouteRenderingDirectiveConfig,
+  normalizeFarmTrailingSlashPathname,
   resolveFarmI18nConfig,
   stripFarmBasePath,
   stripFarmLocaleFromPathname,
@@ -46,11 +47,13 @@ function collectStaticPages(
     middlewareFiles?: string[];
     configMiddleware?: unknown[];
     basePath?: string;
+    trailingSlash?: boolean;
   } = {},
 ): Promise<string[]> {
   const entry = generateRscEntry({
     ...context,
     basePath: options.basePath ?? context.basePath,
+    trailingSlash: options.trailingSlash,
     pageRenderingDirectives: options.directives,
   });
   const pageRoutes = Object.entries(pages).map(([filePath, module]) => ({
@@ -73,6 +76,7 @@ function collectStaticPages(
     "appMiddlewareMayHandlePath",
     "configMiddlewareMayHandlePath",
     "applyFarmBasePath",
+    "normalizeFarmTrailingSlashPathname",
     `${slice(
       entry,
       "// Each page's parsed rendering directive",
@@ -88,6 +92,7 @@ function collectStaticPages(
     appMiddlewareMayHandlePath,
     configMiddlewareMayHandlePath,
     applyFarmBasePath,
+    normalizeFarmTrailingSlashPathname,
   );
 }
 
@@ -97,13 +102,19 @@ function collectStaticPages(
  */
 function collectLocalizedStaticPages(
   pages: Record<string, Record<string, unknown>>,
-  options: { i18n: FarmI18nUserConfig; basePath?: string; middlewareFiles?: string[] },
+  options: {
+    i18n: FarmI18nUserConfig;
+    basePath?: string;
+    middlewareFiles?: string[];
+    trailingSlash?: boolean;
+  },
 ): Promise<string[]> {
   const basePath = options.basePath ?? "/";
   const entry = generateRscEntry({
     ...context,
     basePath,
     i18n: resolveFarmI18nConfig(options.i18n, { basePath }),
+    trailingSlash: options.trailingSlash,
   });
   const routeHelperStart = entry.indexOf("const farmRouteI18n = ");
   const routeHelperEnd =
@@ -130,6 +141,7 @@ function collectLocalizedStaticPages(
     "materializeSSGRoutePath",
     "appMiddlewareMayHandlePath",
     "configMiddlewareMayHandlePath",
+    "normalizeFarmTrailingSlashPathname",
     `${entry.slice(routeHelperStart, routeHelperEnd)}
 ${slice(entry, "function filePathToRoute(", "// The route's metadata as core's server resolves it")}
 return collectFarmStaticPages();`,
@@ -154,6 +166,7 @@ return collectFarmStaticPages();`,
     materializeSSGRoutePath,
     appMiddlewareMayHandlePath,
     configMiddlewareMayHandlePath,
+    normalizeFarmTrailingSlashPathname,
   );
 }
 
@@ -277,6 +290,28 @@ describe("RSC static pages", () => {
       "/console/legacy",
     ]);
   });
+
+  // trailingSlash makes '/about/' the page's URL; '/about' answers with a body-less 308, which
+  // Nitro would save as the page. '/about/' is written as about/index.html, as core's build does.
+  it("prerenders a page at its trailing-slash URL with trailingSlash", async () => {
+    const pages = {
+      "/page.tsx": { dynamic: "force-static" },
+      "/about/page.tsx": { dynamic: "force-static" },
+      "/docs/[[...slug]]/page.tsx": {
+        dynamic: "force-static",
+        generateStaticParams: async () => [{ slug: [] }, { slug: ["start"] }],
+      },
+    };
+    expect((await collectStaticPages(pages, { trailingSlash: true })).sort()).toEqual([
+      "/",
+      "/about/",
+      "/docs/",
+      "/docs/start/",
+    ]);
+    expect(
+      (await collectStaticPages(pages, { basePath: "/console", trailingSlash: true })).sort(),
+    ).toEqual(["/console/", "/console/about/", "/console/docs/", "/console/docs/start/"]);
+  });
 });
 
 describe("RSC static pages with i18n", () => {
@@ -316,6 +351,19 @@ describe("RSC static pages with i18n", () => {
       "/fr",
       "/fr/about",
       "/fr/docs/start%20here",
+    ]);
+  });
+
+  it("prerenders each locale URL at its trailing-slash spelling with trailingSlash", async () => {
+    const pages = await collectLocalizedStaticPages(staticPages, {
+      basePath: "/console",
+      i18n: { locales: ["en", "fr"], defaultLocale: "en" },
+      trailingSlash: true,
+    });
+    expect(pages.sort()).toEqual([
+      "/console/fr/",
+      "/console/fr/about/",
+      "/console/fr/docs/start%20here/",
     ]);
   });
 
