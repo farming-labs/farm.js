@@ -1061,14 +1061,16 @@ export class RouteManager {
 
       if (isFarmMarkdownPageFile(modulePath)) {
         const mdxConfig = resolveMdxConfig(this.config.mdx);
-        const components = await loadFarmMdxComponents(mdxConfig, {
-          root: this.config.root,
-          loadModule: this.viteServer
-            ? (componentModulePath) => loadFarmDevModule(this.viteServer!, componentModulePath)
-            : undefined,
-        });
+        const viteServer = this.viteServer;
         return await createFarmMarkdownRouteModuleFromFile(modulePath, {
-          components,
+          // Loaded on render: the route runtime manifest only reads metadata and rendering config.
+          components: () =>
+            loadFarmMdxComponents(mdxConfig, {
+              root: this.config.root,
+              loadModule: viteServer
+                ? (componentModulePath) => loadFarmDevModule(viteServer, componentModulePath)
+                : undefined,
+            }),
           config: mdxConfig,
         });
       }
