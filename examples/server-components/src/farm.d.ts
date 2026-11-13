@@ -106,6 +106,7 @@ export type RoutePath =
   | "/wire/kinds"
   | "/wire/promise-cycle"
   | "/wire/promise-element"
+  | "/wire/round-trip"
   | "/wire/stream-prop"
   | "/wire/stream-result";
 export type RoutePattern =
@@ -202,6 +203,7 @@ export type RoutePattern =
   | "/wire/kinds"
   | "/wire/promise-cycle"
   | "/wire/promise-element"
+  | "/wire/round-trip"
   | "/wire/stream-prop"
   | "/wire/stream-result";
 export type RouteModulePattern =
@@ -302,6 +304,7 @@ export type RouteModulePattern =
   | "/wire/kinds"
   | "/wire/promise-cycle"
   | "/wire/promise-element"
+  | "/wire/round-trip"
   | "/wire/stream-prop"
   | "/wire/stream-result";
 declare module "@farm.js/core/client" {
