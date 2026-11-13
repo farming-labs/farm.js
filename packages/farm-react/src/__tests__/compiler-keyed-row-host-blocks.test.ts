@@ -673,6 +673,53 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     expect(result.code).not.toContain("hostBlocks={true}");
   });
 
+  it("renders a component-root list with row conditionals as compiler-owned rows", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: "a", done: false }]);
+        return (
+          <ul className="todos">
+            {todos.map((todo) => (
+              <li key={todo.id}>
+                <button onClick={() => setTodos([])}>x</button>
+                {todo.done ? <s>{todo.id}</s> : <i>{todo.id}</i>}
+              </li>
+            ))}
+          </ul>
+        );
+      }
+    `);
+
+    // Keyed ranges, which root lists use otherwise, do not support row conditionals.
+    expect(result.compiled).toEqual(["Todos"]);
+    expect(result.code).toMatch(
+      /render: \(_props, _farmState, _farmBlocks\) => <_farmBlocks\.KeyedRows/,
+    );
+    expect(result.code).toContain("hostBlocks={true}");
+    expect(result.code).toContain("delegateEvents={true}");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
+  });
+
+  it("keeps a component-root list with row conditionals beside static siblings React-owned", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: "a", done: false }]);
+        return (
+          <ul>
+            <li>Head</li>
+            {todos.map((todo) => <li key={todo.id}>{todo.done ? <s>{todo.id}</s> : <i>{todo.id}</i>}</li>)}
+          </ul>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Todos"]);
+    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).not.toContain("hostBlocks={true}");
+  });
+
   it("keeps block ids unique across sibling lists and component-level blocks", async () => {
     const result = await compile(`
       import { useState } from "react";

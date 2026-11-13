@@ -9182,6 +9182,58 @@ function analyzeComposableBlocks(
     };
   }
 
+  // A root list whose rows hold conditional content, which keyed ranges do not support: the rows
+  // block renders the root container itself and hands it to the component through rootRef.
+  const rootKeyedRowsStart = nextId;
+  const rootKeyedRowsId = nextId++;
+  const rootKeyedRows = analyzeKeyedRowsContainer(root, statesByValue, safeGlobals, listNames);
+  const rootHostBlocks =
+    rootKeyedRows &&
+    analyzeCompilerOwnedKeyedRowHostBlocks(
+      rootKeyedRows,
+      root,
+      statesByValue,
+      safeGlobals,
+      listNames,
+      rootKeyedRowsId,
+      () => nextId++,
+      delegateWithoutReact,
+    );
+  if (rootKeyedRows && rootHostBlocks) {
+    plans.push({
+      kind: "keyed-rows",
+      id: rootKeyedRowsId,
+      dependencies: rootKeyedRows.dependencies,
+      source: root,
+      collection: rootKeyedRows.collection,
+      collectionDependency: rootKeyedRows.collectionDependency,
+      structureDependencies: rootKeyedRows.structureDependencies,
+      keyCallback: rootKeyedRows.keyCallback,
+      renderCallback: rootKeyedRows.renderCallback,
+      row: rootHostBlocks.row,
+      bindings: rootHostBlocks.bindings,
+      events: rootHostBlocks.events,
+      conditionals: [],
+      descriptorBlocks: rootHostBlocks.descriptorBlocks,
+      eventElements: rootHostBlocks.eventElements,
+      syntax: rootKeyedRows.syntax,
+    });
+    plans.push(...rootHostBlocks.nestedPlans);
+    const list = meaningfulJsxChildren(root)[0];
+    if (t.isJSXElement(list)) ownedElements.add(list);
+    else if (t.isJSXExpressionContainer(list) && !t.isJSXEmptyExpression(list.expression)) {
+      keyedExpressions.add(list.expression);
+    }
+    return {
+      plans,
+      componentElements,
+      conditionalExpressions,
+      ownedElements,
+      keyedExpressions,
+    };
+  }
+  nextId = rootKeyedRowsStart;
+
   const rootConditionalRangeStart = nextId;
   const rootConditionalRangeId = nextId++;
   const rootConditionalRanges = analyzeConditionalRangesContainer(
@@ -9279,6 +9331,17 @@ function lowerComposableBlocks(
   }
   if (rootPlan?.kind === "conditional-ranges") {
     return conditionalRangesBoundary(blockRuntime, rootPlan);
+  }
+  if (rootPlan?.kind === "keyed-rows") {
+    return keyedRowsBoundary(
+      blockRuntime,
+      rootPlan,
+      keyedMapUpdateHints,
+      keyedArrayFilterHintedStateIndices,
+      keyedArrayPrependHintedStateIndices,
+      keyedArrayPositionHintedStateIndices,
+      keyedArrayReorderHintedStateIndices,
+    );
   }
 
   const visit = (element: t.JSXElement): void => {

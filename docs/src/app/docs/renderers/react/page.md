@@ -2083,7 +2083,9 @@ are added to SSR output.
 This compiler-owned tier requires a lowercase host row. Branches may use logical or ternary
 expressions, multiple known locations, static siblings, nested lowercase host conditions, and safe
 text, attribute, or inline-style expressions. It applies to automatic keyed `.map(...)` syntax and
-inline host rows rendered by `List`.
+inline host rows rendered by `List`. The list's container may be the component's returned root
+element when the list is its only child and the container's attributes do not depend on state; a
+root list beside static siblings keeps its React-owned rows when they hold conditional content.
 
 The row may also hold inline synchronous events, on its static elements and inside its branches,
 such as a toggle button beside the conditional and an undo action inside it:
