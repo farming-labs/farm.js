@@ -77,6 +77,7 @@ import {
 } from "../routing/route-groups";
 import type { APIRouteManager } from "../api/route-manager";
 import { resolveFarmAPIServerBasePath } from "../api/server-path";
+import { applyFarmBasePath } from "../base-path";
 import type { ServerRenderer } from "../server/renderer";
 import type { FarmPlugin, PluginManager } from "../plugin";
 import {
@@ -13386,11 +13387,20 @@ function toFarmNodeResponse(request, response) {
   const configuredNitroRouteRules = shouldBuildFarmMobileClient(config)
     ? varyFarmNitroCacheRulesByShell(routeRulesToNitroRouteRules(config.routeRules))
     : routeRulesToNitroRouteRules(config.routeRules);
+  // Visitors request a page below the basePath, and the platform serves a prerendered file
+  // only at the URL it was written for, so the page is rendered at its public URL. Farm's
+  // headers() and routeRules are written for the app path, so they are matched on it.
+  // The app root becomes the basePath itself: Nitro writes `/console/` as `console/index` with no
+  // extension, while `/console` gets `console/index.html` like every other page.
+  const toPrerenderPublicPath = (route: string) => {
+    const publicPath = applyFarmBasePath(route, config.basePath);
+    return route === "/" && publicPath !== "/" ? publicPath.replace(/\/$/, "") : publicPath;
+  };
   const prerenderNitroRouteRules = Object.fromEntries(
     prerenderRoutes.map((route) => {
       const configuredRule = configuredNitroRouteRules[route] || {};
       return [
-        route,
+        toPrerenderPublicPath(route),
         {
           ...configuredRule,
           prerender: true,
@@ -13451,7 +13461,7 @@ function toFarmNodeResponse(request, response) {
             // answered independently, as by the production server, so keeping several
             // in flight overlaps the worker's rendering with this thread's per-route work.
             concurrency: Math.min(os.availableParallelism(), 8),
-            routes: prerenderRoutes,
+            routes: prerenderRoutes.map(toPrerenderPublicPath),
           },
         }
       : {}),
