@@ -66,6 +66,9 @@ export default {
             throw new Error("integration failed");
           },
         },
+        // runtime.before and runtime.after throw on these paths.
+        { path: "/integration/before-fails", methods: ["GET"], handler: () => Response.json({}) },
+        { path: "/integration/after-fails", methods: ["GET"], handler: () => Response.json({}) },
       ],
     }),
   },
@@ -250,6 +253,8 @@ async function expectRuntimeHookContract(
     "/api/after-fails",
     "/api/mw-fails",
     "/integration/boom",
+    "/integration/before-fails",
+    "/integration/after-fails",
     "/.well-known/farmjs.json",
     ...(pages ? ["/hello"] : []),
   ];
@@ -340,6 +345,24 @@ async function expectRuntimeHookContract(
         "after /integration/boom 500",
       ],
     },
+    // A throwing runtime hook on an integration route fails the request as on any route.
+    "/integration/before-fails": {
+      status: 500,
+      trace: [
+        "before integration /integration/before-fails",
+        "error /integration/before-fails before failed",
+        "onError runtime before failed",
+      ],
+    },
+    "/integration/after-fails": {
+      status: 500,
+      trace: [
+        "before integration /integration/after-fails",
+        "after /integration/after-fails 200",
+        "error /integration/after-fails after failed",
+        "onError runtime after failed",
+      ],
+    },
     // A built-in route (here the app manifest) app middleware answers: runtime.after sees
     // that response, as for an API route.
     "/.well-known/farmjs.json": {
@@ -362,17 +385,28 @@ async function expectRuntimeHookContract(
   });
   // A throwing API or integration route, and a throwing runtime hook on an API path, answer
   // Farm's generic 500 body in both modes, not the server's own error response. A middleware
-  // failure is kept out of shared caches, and a runtime hook failure sets no cache header.
+  // failure is kept out of shared caches, and a runtime hook failure sets no cache header. A
+  // runtime hook failure outside the API base path answers the runtime hook 500 for a page path,
+  // plain text, even on an integration route; a `renderer: false` app answers JSON.
   const internalServerError = {
     contentType: "application/json",
     body: '{"error":"Internal Server Error"}',
   };
+  const runtimeHookFailure = pages
+    ? {
+        contentType: "text/plain; charset=utf-8",
+        cacheControl: null,
+        body: "Internal Server Error",
+      }
+    : { ...internalServerError, cacheControl: null };
   expect(thrown).toEqual({
     "/api/boom": internalServerError,
     "/api/before-fails": { ...internalServerError, cacheControl: null },
     "/api/after-fails": { ...internalServerError, cacheControl: null },
     "/api/mw-fails": { ...internalServerError, cacheControl: "private, no-store" },
     "/integration/boom": internalServerError,
+    "/integration/before-fails": runtimeHookFailure,
+    "/integration/after-fails": runtimeHookFailure,
   });
 
   if (pages) {

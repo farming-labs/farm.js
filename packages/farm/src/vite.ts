@@ -3659,7 +3659,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 });
               }
               logger.error(`Integration route error: ${error}`);
-              if (!res.writableEnded) {
+              if (runtimeReportsErrors) {
+                // A runtime hook failed the request: answer the runtime hook 500 for its path,
+                // plain text outside the API base path, as production does.
+                if (!res.headersSent) sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                else if (!res.writableEnded) res.end();
+              } else if (!res.writableEnded) {
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
                 res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
