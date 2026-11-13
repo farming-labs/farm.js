@@ -78,6 +78,7 @@ import {
 import type { APIRouteManager } from "../api/route-manager";
 import { resolveFarmAPIServerBasePath } from "../api/server-path";
 import { applyFarmBasePath } from "../base-path";
+import { normalizeFarmTrailingSlashPathname } from "../trailing-slash";
 import type { ServerRenderer } from "../server/renderer";
 import type { FarmPlugin, PluginManager } from "../plugin";
 import {
@@ -13404,12 +13405,13 @@ function toFarmNodeResponse(request, response) {
   // Visitors request a page below the basePath, and the platform serves a prerendered file
   // only at the URL it was written for, so the page is rendered at its public URL. Farm's
   // headers() and routeRules are written for the app path, so they are matched on it.
-  // The app root becomes the basePath itself: Nitro writes `/console/` as `console/index` with no
-  // extension, while `/console` gets `console/index.html` like every other page.
-  const toPrerenderPublicPath = (route: string) => {
-    const publicPath = applyFarmBasePath(route, config.basePath);
-    return route === "/" && publicPath !== "/" ? publicPath.replace(/\/$/, "") : publicPath;
-  };
+  // The public URL carries the app's trailingSlash preference: any other spelling is answered
+  // with Farm's body-less 308 to it, which Nitro would save as the page, an empty file.
+  const toPrerenderPublicPath = (route: string) =>
+    normalizeFarmTrailingSlashPathname(
+      applyFarmBasePath(route, config.basePath),
+      config.trailingSlash === true,
+    );
   const prerenderNitroRouteRules = Object.fromEntries(
     prerenderRoutes.map((route) => {
       const configuredRule = configuredNitroRouteRules[route] || {};
