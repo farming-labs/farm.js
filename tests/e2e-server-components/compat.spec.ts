@@ -55,6 +55,24 @@ test("Radix parts composed in a server component open and close", async ({ page 
   expect(errors).toEqual([]);
 });
 
+test("a Radix trigger with asChild gives its props to the server button it wraps", async ({
+  page,
+}) => {
+  const errors = await open(page, "/compat/dialog");
+  // By class: an open modal hides the rest of the page from the accessibility tree.
+  const trigger = page.locator(".as-child-trigger");
+  await expect(trigger).toHaveText("Open as child");
+  await expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+  await expect(trigger).toHaveAttribute("data-state", "closed");
+  await trigger.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("As child title");
+  await expect(trigger).toHaveAttribute("data-state", "open");
+  await page.getByRole("button", { name: "Close as child" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test("a package Toaster in a server component shows a toast a client component raises", async ({
   page,
 }) => {

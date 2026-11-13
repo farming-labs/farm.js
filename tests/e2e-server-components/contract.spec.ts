@@ -711,6 +711,21 @@ test("an island hydrates with the useActionState result of a form posted before 
   ).toEqual([]);
 });
 
+test("a server action returns elements, with a server component's output and a live client component", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-element");
+  await hydrated(page);
+  await page.getByRole("button", { name: "Summarize" }).click();
+  const summary = page.getByTestId("action-element");
+  await expect(summary).toContainText("Saved 3 items");
+  const counter = summary.getByRole("button", { name: "Returned clicks: 1" });
+  await counter.click();
+  await expect(summary.getByRole("button", { name: "Returned clicks: 2" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test("a server action passed as a prop works before JavaScript loads", async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
