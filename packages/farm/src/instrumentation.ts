@@ -9,13 +9,16 @@ export * from "./instrumentation-runtime";
 const INSTRUMENTATION_EXTENSIONS = ["ts", "mts", "js", "mjs"] as const;
 
 export function resolveFarmInstrumentationFile(root: string, srcDir = "src"): string | null {
+  // A srcDir of "." makes both lists name the same files.
   const candidates = [
-    ...INSTRUMENTATION_EXTENSIONS.map((extension) =>
-      path.join(root, srcDir, `instrumentation.${extension}`),
-    ),
-    ...INSTRUMENTATION_EXTENSIONS.map((extension) =>
-      path.join(root, `instrumentation.${extension}`),
-    ),
+    ...new Set([
+      ...INSTRUMENTATION_EXTENSIONS.map((extension) =>
+        path.join(root, srcDir, `instrumentation.${extension}`),
+      ),
+      ...INSTRUMENTATION_EXTENSIONS.map((extension) =>
+        path.join(root, `instrumentation.${extension}`),
+      ),
+    ]),
   ].filter((candidate) => fs.existsSync(candidate));
 
   if (candidates.length > 1) {
