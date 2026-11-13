@@ -83,6 +83,14 @@ function CounterSource() {
     </button>
   );
 }
+function DisclosureSource({ icon }: { icon: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button id="disclosure" onClick={() => setOpen((value) => !value)}>
+      {open ? icon : "closed"}
+    </button>
+  );
+}
 
 const modules: Record<string, Record<string, unknown>> = {
   "/src/page-button.tsx": {
@@ -101,6 +109,10 @@ const modules: Record<string, Record<string, unknown>> = {
   "/src/counter.tsx": {
     Counter: CounterSource,
     __farm_client_boundary_originals__: { Counter: CounterSource },
+  },
+  "/src/disclosure.tsx": {
+    Disclosure: DisclosureSource,
+    __farm_client_boundary_originals__: { Disclosure: DisclosureSource },
   },
 };
 const PageButton = createFarmIsolatedClientBoundary(
@@ -130,6 +142,13 @@ const Counter = createFarmIsolatedClientBoundary(
   CounterSource,
   "/src/counter.tsx",
   "Counter",
+  "load",
+);
+const Disclosure = createFarmIsolatedClientBoundary(
+  React,
+  DisclosureSource,
+  "/src/disclosure.tsx",
+  "Disclosure",
   "load",
 );
 
@@ -348,6 +367,30 @@ describe("server tree pages", () => {
     expect(container.querySelector("#island")!.textContent).toBe("1");
     await click(container, "#header");
     expect(container.querySelector("#page")!.textContent).toBe("tree:open");
+  });
+
+  it("hydrates when a client component does not render a server HTML prop until later", async () => {
+    // A hook makes the icon server HTML, like an icon library that reads a context.
+    function Icon() {
+      const id = useId();
+      return <svg data-icon={id} />;
+    }
+    async function Page() {
+      return (
+        <>
+          <Disclosure icon={<Icon />} />
+          <PageButton label="tree" />
+        </>
+      );
+    }
+    const html = await renderPage(<Page />);
+    const { container, errors } = await hydratePage(html);
+    expect(errors).toEqual([]);
+    await click(container, "#header");
+    expect(container.querySelector("#page")!.textContent).toBe("tree:open");
+
+    await click(container, "#disclosure");
+    expect(container.querySelector("#disclosure svg[data-icon]")).not.toBeNull();
   });
 
   it("keeps a client component whose props do not serialize as server HTML", async () => {
