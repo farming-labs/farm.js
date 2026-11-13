@@ -2,11 +2,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { FARM_NAVIGATION_SCRIPT_SOURCE } from "../client/navigation-scripts";
 
-type NavigationScripts = { createFarmNavigationScript(script: Element): HTMLScriptElement };
+type NavigationScripts = {
+  createFarmNavigationScript(script: Element): HTMLScriptElement;
+  revealFarmStreamedContent(root: ParentNode): void;
+};
 
 /** Evaluates the source as the client entry does: once, with the document as it is now. */
 function load(): NavigationScripts {
-  return new Function(`${FARM_NAVIGATION_SCRIPT_SOURCE}\nreturn { createFarmNavigationScript };`)();
+  return new Function(
+    `${FARM_NAVIGATION_SCRIPT_SOURCE}\nreturn { createFarmNavigationScript, revealFarmStreamedContent };`,
+  )();
 }
 
 function boot(nonce: string) {
@@ -66,5 +71,37 @@ describe("navigation scripts", () => {
     expect(script.type).toBe("module");
     expect(script.getAttribute("src")).toBe("/island.js");
     expect(script.nonce).toBe("");
+  });
+});
+
+describe("streamed content in a parsed page", () => {
+  it("moves each revealed segment into place and drops the calls it made", () => {
+    const { revealFarmStreamedContent } = load();
+    const root = document.createElement("div");
+    // A boundary whose content holds a placeholder that a later segment fills, as React streams it.
+    root.innerHTML =
+      '<section><!--$?--><template id="B:0"></template><p>Loading</p><!--/$--></section>' +
+      '<div hidden id="S:0"><f-island><template id="P:1"></template></f-island></div>' +
+      '<div hidden id="S:1"><p data-note>note</p></div>' +
+      '<script>$RS=function(a,b){};$RS("S:1","P:1")</script>' +
+      '<script>$RC=function(a,b){};$RC("B:0","S:0")</script>' +
+      '<script>$RX("B:9","","")</script>';
+    revealFarmStreamedContent(root);
+    expect(root.querySelector("section")!.innerHTML).toBe(
+      '<!--$--><f-island><p data-note="">note</p></f-island><!--/$-->',
+    );
+    expect(root.querySelector('[id^="S:"], [id^="P:"], [id^="B:"]')).toBeNull();
+    const scripts = Array.from(root.querySelectorAll("script"), (script) => script.textContent);
+    expect(scripts).toEqual(["$RS=function(a,b){};", "$RC=function(a,b){};", '$RX("B:9","","")']);
+  });
+
+  it("leaves a call whose segment has not arrived", () => {
+    const { revealFarmStreamedContent } = load();
+    const root = document.createElement("div");
+    root.innerHTML =
+      '<!--$?--><template id="B:0"></template><p>Loading</p><!--/$--><script>$RC("B:0","S:0")</script>';
+    revealFarmStreamedContent(root);
+    expect(root.querySelector("p")!.textContent).toBe("Loading");
+    expect(root.querySelector("script")!.textContent).toBe('$RC("B:0","S:0")');
   });
 });

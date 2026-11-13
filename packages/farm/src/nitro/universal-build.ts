@@ -78,6 +78,7 @@ import {
 import type { APIRouteManager } from "../api/route-manager";
 import { resolveFarmAPIServerBasePath } from "../api/server-path";
 import { applyFarmBasePath } from "../base-path";
+import { normalizeFarmTrailingSlashPathname } from "../trailing-slash";
 import type { ServerRenderer } from "../server/renderer";
 import type { FarmPlugin, PluginManager } from "../plugin";
 import {
@@ -141,7 +142,7 @@ import {
   mergeScheduledTasks,
   prepareFarmCronForNitro,
 } from "../cron";
-import { routeRulesToNitroRouteRules } from "../route-rules";
+import { nitroRouteRulesBelowBasePath, routeRulesToNitroRouteRules } from "../route-rules";
 import { getFarmAppDirectories } from "../layers";
 import { HOISTED_HEAD_ELEMENT } from "../server/full-document";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
@@ -3256,10 +3257,12 @@ ${
     const record = recover ? null : { valid: true, deploymentId, promise: null };
     // A navigation (not a prefetch) streams when the router supports it: the page goes in as
     // soon as its shell arrives, and its Suspense content follows (takeNavigationStream). A page
-    // whose layouts hydrate, or one rendered in this page's React root, arrives whole.
+    // whose layouts hydrate, or one rendered in this page's React root, arrives whole. So does a
+    // refresh, which renders every layout again (no layout chain): like a transition, it keeps
+    // the page on screen until the new one is ready, so the islands it keeps are all in it.
     const streamShell = ${
       streamNavigations
-        ? `recover && !interceptFrom && !partialHeaders["F-Render"] &&
+        ? `recover && layoutChain && !interceptFrom && !partialHeaders["F-Render"] &&
       !hasHydratableLayout(new URL(url, window.location.href).pathname)`
         : "false"
     };
@@ -5135,6 +5138,8 @@ function getLayoutShell(root, patterns, index) {
 }
 
 ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
+  // A refresh keeps the islands still on the page: the ones in streamed Suspense content too.
+  if (refresh) revealFarmStreamedContent(nextRoot);
   const currentPatterns = getLayoutPatterns(currentRoot);
   const nextPatterns = getLayoutPatterns(nextRoot);
   let sharedCount = 0;
@@ -13418,18 +13423,23 @@ function toFarmNodeResponse(request, response) {
     ssrOutputDir,
     ssrEntryFile,
   );
-  const configuredNitroRouteRules = shouldBuildFarmMobileClient(config)
-    ? varyFarmNitroCacheRulesByShell(routeRulesToNitroRouteRules(config.routeRules))
-    : routeRulesToNitroRouteRules(config.routeRules);
+  const configuredNitroRouteRules = nitroRouteRulesBelowBasePath(
+    shouldBuildFarmMobileClient(config)
+      ? varyFarmNitroCacheRulesByShell(routeRulesToNitroRouteRules(config.routeRules))
+      : routeRulesToNitroRouteRules(config.routeRules),
+    config.basePath,
+    resolveFarmAPIServerBasePath(config.api),
+  );
   // Visitors request a page below the basePath, and the platform serves a prerendered file
   // only at the URL it was written for, so the page is rendered at its public URL. Farm's
   // headers() and routeRules are written for the app path, so they are matched on it.
-  // The app root becomes the basePath itself: Nitro writes `/console/` as `console/index` with no
-  // extension, while `/console` gets `console/index.html` like every other page.
-  const toPrerenderPublicPath = (route: string) => {
-    const publicPath = applyFarmBasePath(route, config.basePath);
-    return route === "/" && publicPath !== "/" ? publicPath.replace(/\/$/, "") : publicPath;
-  };
+  // The public URL carries the app's trailingSlash preference: any other spelling is answered
+  // with Farm's body-less 308 to it, which Nitro would save as the page, an empty file.
+  const toPrerenderPublicPath = (route: string) =>
+    normalizeFarmTrailingSlashPathname(
+      applyFarmBasePath(route, config.basePath),
+      config.trailingSlash === true,
+    );
   const prerenderNitroRouteRules = Object.fromEntries(
     prerenderRoutes.map((route) => {
       const configuredRule = configuredNitroRouteRules[route] || {};

@@ -48,3 +48,56 @@ test("a value that refers to itself reaches a client component and a server acti
   await expect(page.getByTestId("echo")).toHaveText("root true true");
   expect(errors).toEqual([]);
 });
+
+test("elements a promise resolves to render with live client components, as a prop and as an action's result", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/wire/promise-element");
+  await page.waitForLoadState("networkidle");
+  const promised = page.getByRole("button", { name: /^Promised:/ });
+  await expect(promised).toHaveText("Promised: 2");
+  await promised.click();
+  await expect(promised).toHaveText("Promised: 3");
+  await page.getByRole("button", { name: "Reveal" }).click();
+  const revealed = page.getByRole("button", { name: /^Revealed:/ });
+  await expect(revealed).toHaveText("Revealed: 7");
+  await revealed.click();
+  await expect(revealed).toHaveText("Revealed: 8");
+  expect(errors).toEqual([]);
+});
+
+test("a promise that settles to the object holding it gives back that object, as a prop and as an action's result", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/wire/promise-cycle");
+  await page.waitForLoadState("networkidle");
+  const view = page.getByRole("button", { name: /^holder / });
+  await expect(view).toHaveText("holder true 0");
+  await view.click();
+  await expect(view).toHaveText("holder true 1");
+  await page.getByRole("button", { name: "Hold", exact: true }).click();
+  await expect(page.getByTestId("reply")).toHaveText("reply true");
+  expect(errors).toEqual([]);
+});
+
+test("maps with elements, global symbols, errors, iterators, blobs and form data reach a client component and come back from an action", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/wire/kinds");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByTestId("props")).toHaveText("true true ab 4 text/plain page");
+  const panel = page.getByRole("button", { name: /^Panel:/ });
+  await expect(panel).toHaveText("Panel: 1");
+  await panel.click();
+  await expect(panel).toHaveText("Panel: 2");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(page.getByTestId("reply")).toHaveText("true true xy 4 text/plain reply");
+  const mapped = page.getByRole("button", { name: /^Mapped:/ });
+  await expect(mapped).toHaveText("Mapped: 5");
+  await mapped.click();
+  await expect(mapped).toHaveText("Mapped: 6");
+  expect(errors).toEqual([]);
+});
