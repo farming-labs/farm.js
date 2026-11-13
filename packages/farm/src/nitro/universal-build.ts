@@ -14356,9 +14356,11 @@ async function copyFarmDocsRootContent(
   }
   await fs.rm(bundledContentDir, { recursive: true, force: true });
   await fs.mkdir(path.dirname(bundledContentDir), { recursive: true });
+  // A linked docs folder must ship as files: a symlink would point at the build machine.
   await fs.cp(docsContentDir, bundledContentDir, {
     recursive: true,
     force: true,
+    dereference: true,
   });
   await fs.writeFile(
     path.join(bundledContentDir, FARM_DOCS_LAST_MODIFIED_MANIFEST),
