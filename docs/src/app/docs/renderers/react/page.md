@@ -278,7 +278,11 @@ React's `onChange` follows for each control (`input` for text fields, `change` f
 radios, selects, and file inputs), so those lists need no React DOM either. The same holds for
 `onChange` rows beside conditional content and in lists between static siblings: under React DOM
 their blocks let React render the rows, and here they run the rows themselves. Fields it creates get
-the same `value` and `checked` defaults React sets, so a form reset behaves the same.
+the same `value` and `checked` defaults React sets, so a form reset behaves the same. Like React DOM,
+the root puts a controlled field back to its `value` or `checked` after that native event, once the
+event's compiled updates have committed: an edit the state rejects disappears, and in a radio group
+the other radios return too. A field whose state took the edit is not written again, so its caret
+and undo history stay.
 Rows with conditional content mount here too when their events can be delegated, as described in
 [Compiler-owned host conditionals inside keyed rows](#compiler-owned-host-conditionals-inside-keyed-rows).
 Compiled parts that still re-render through React, such as conditional sections, child component

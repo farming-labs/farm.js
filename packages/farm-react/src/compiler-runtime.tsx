@@ -3340,11 +3340,27 @@ function compilerAttributeName(name: string): string {
   return name === "className" ? "class" : name === "htmlFor" ? "for" : name;
 }
 
+// The value and checked state compiled code last gave each controlled field. A compiled root puts
+// them back after a change event, as React DOM restores controlled fields from their props.
+const compilerControlledValues = /* @__PURE__ */ new WeakMap<Element, unknown>();
+const compilerControlledChecked = /* @__PURE__ */ new WeakMap<Element, unknown>();
+
+function recordControlledField(
+  fields: WeakMap<Element, unknown>,
+  element: Element,
+  value: unknown,
+): void {
+  // React treats a null or undefined value or checked prop as uncontrolled.
+  if (value == null) fields.delete(element);
+  else fields.set(element, value);
+}
+
 function updateAttribute(element: Element, name: string, value: unknown): void {
   const attributeName = compilerAttributeName(name);
   const stringifiesBoolean = attributeName.startsWith("data-") || attributeName.startsWith("aria-");
 
   if (name === "value" && (isInputElement(element) || isTextAreaElement(element))) {
+    recordControlledField(compilerControlledValues, element, value);
     const nextValue = value === null || value === undefined ? "" : String(value);
     if (element.value !== nextValue) element.value = nextValue;
     // React synchronizes controlled input values with the native reset baseline.
@@ -3363,11 +3379,13 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
   }
 
   if (name === "value" && isSelectElement(element)) {
+    recordControlledField(compilerControlledValues, element, value);
     updateSelectValue(element, value);
     return;
   }
 
   if (name === "checked" && isInputElement(element)) {
+    recordControlledField(compilerControlledChecked, element, value);
     element.checked = Boolean(value);
     return;
   }
@@ -6957,6 +6975,9 @@ function reorderCompilerKeyedRows(
 }
 
 const RESOLVED_COMPILER_MICROTASK = Promise.resolve();
+// Compiled updates scheduled and not yet run. A compiled root restores controlled fields only once
+// none remain, as React DOM restores them after it has flushed an event's updates.
+let pendingCompilerMicrotasks = 0;
 
 /**
  * Runs `callback` as a microtask, in the same queue and order as `queueMicrotask`. Every compiled
@@ -6965,7 +6986,9 @@ const RESOLVED_COMPILER_MICROTASK = Promise.resolve();
  * `queueMicrotask` so it is reported as an uncaught error, not an unhandled rejection.
  */
 function scheduleCompilerMicrotask(callback: () => void): void {
+  pendingCompilerMicrotasks += 1;
   void RESOLVED_COMPILER_MICROTASK.then(() => {
+    pendingCompilerMicrotasks -= 1;
     try {
       callback();
     } catch (error) {
@@ -12999,6 +13022,68 @@ interface CompiledRootMount {
   instances: React.Component[];
 }
 
+/** Puts a controlled field back to the value compiled code last gave it, as React DOM does. */
+function restoreCompilerControlledField(element: Element): void {
+  if (compilerControlledValues.has(element)) {
+    const value = compilerControlledValues.get(element);
+    if (isSelectElement(element)) {
+      updateSelectValue(element, value);
+    } else if (isInputElement(element) || isTextAreaElement(element)) {
+      // React compares a number input loosely, so "1." stays while its value is 1.
+      const changed =
+        element.type === "number" && typeof value === "number"
+          ? (value === 0 && element.value === "") || Number(element.value) !== value
+          : element.value !== String(value);
+      if (changed) element.value = String(value);
+    }
+  }
+  if (isInputElement(element) && compilerControlledChecked.has(element)) {
+    element.checked = Boolean(compilerControlledChecked.get(element));
+    // Checking a radio unchecks the others in its group, so React restores those too.
+    if (element.type === "radio" && element.name) {
+      for (const radio of (element.getRootNode() as ParentNode).querySelectorAll(
+        'input[type="radio"]',
+      )) {
+        const other = radio as HTMLInputElement;
+        if (
+          other !== element &&
+          other.name === element.name &&
+          other.form === element.form &&
+          compilerControlledChecked.has(other)
+        ) {
+          other.checked = Boolean(compilerControlledChecked.get(other));
+        }
+      }
+    }
+  }
+}
+
+function restoreControlledFieldOnceSettled(element: Element): void {
+  // Wait for the event's compiled updates: a field whose state took the edit is then current, and
+  // is not written again.
+  queueMicrotask(() =>
+    pendingCompilerMicrotasks > 0
+      ? restoreControlledFieldOnceSettled(element)
+      : restoreCompilerControlledField(element),
+  );
+}
+
+function scheduleControlledFieldRestore(event: Event): void {
+  const target = event.target;
+  // Restore after the event this root runs onChange on: restoring a checkbox after its click,
+  // before its change event, would hide the new state from the handler.
+  if (
+    target instanceof Element &&
+    event.type === compiledRootChangeEvent(target) &&
+    (compilerControlledValues.has(target) || compilerControlledChecked.has(target))
+  ) {
+    restoreControlledFieldOnceSettled(target);
+  }
+}
+
+// The native events this root runs onChange on (compiledRootChangeEvent).
+const COMPILED_ROOT_CONTROLLED_FIELD_EVENTS = ["input", "change"];
+
 function toCompiledRootEvent(nativeEvent: Event, currentTarget: Element, type: string): unknown {
   let propagationStopped = false;
   const own: Record<PropertyKey, unknown> = {
@@ -13008,6 +13093,8 @@ function toCompiledRootEvent(nativeEvent: Event, currentTarget: Element, type: s
     stopPropagation() {
       propagationStopped = true;
       nativeEvent.stopPropagation();
+      // The root's own listener will not see the event now, so restore the field from here.
+      scheduleControlledFieldRestore(nativeEvent);
     },
     isPropagationStopped: () => propagationStopped,
     isDefaultPrevented: () => nativeEvent.defaultPrevented,
@@ -13276,6 +13363,9 @@ export function createCompiledRoot(
   let unmounted = false;
 
   const stopCompiled = () => {
+    for (const type of COMPILED_ROOT_CONTROLLED_FIELD_EVENTS) {
+      container.removeEventListener(type, scheduleControlledFieldRestore);
+    }
     // React unmounts parents before children.
     for (const instance of instances.slice().reverse()) {
       (instance as { componentWillUnmount?(): void }).componentWillUnmount?.();
@@ -13329,6 +13419,11 @@ export function createCompiledRoot(
       container.replaceChildren(mount.fragment);
       instances = mount.instances;
       mode = "compiled";
+      // React DOM restores a controlled field after an event that changes it; this root does
+      // that here, after the event's handlers have run.
+      for (const type of COMPILED_ROOT_CONTROLLED_FIELD_EVENTS) {
+        container.addEventListener(type, scheduleControlledFieldRestore);
+      }
       for (const effect of mount.effects) effect();
     },
     unmount() {

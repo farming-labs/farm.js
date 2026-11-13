@@ -702,3 +702,148 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([]);
   });
 });
+
+describe("compiled root controlled fields after a change the state does not take", () => {
+  it("restores text inputs, textareas, checkboxes, radios and selects", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Form() {
+        const [name, setName] = useState("Ada");
+        const [code, setCode] = useState("ab");
+        const [bio, setBio] = useState("Hi");
+        const [agree, setAgree] = useState(false);
+        const [size, setSize] = useState("s");
+        const [color, setColor] = useState("red");
+        const [log, setLog] = useState("");
+        return (
+          <form>
+            <input id="name" value={name} onChange={(event) => { if (event.target.value.length <= 4) setName(event.target.value); }} />
+            <input id="code" value={code} onChange={(event) => setCode(event.target.value.slice(0, 3))} />
+            <textarea id="bio" value={bio} onChange={(event) => { if (!event.target.value.includes("!")) setBio(event.target.value); }} />
+            <input id="agree" type="checkbox" checked={agree} onChange={() => setLog(log + "|agree")} />
+            <input id="small" type="radio" name="size" checked={size === "s"} onChange={() => setSize("s")} />
+            <input id="large" type="radio" name="size" checked={size === "l"} onChange={() => setLog(log + "|large")} />
+            <select id="color" value={color} onChange={(event) => { if (event.target.value !== "blue") setColor(event.target.value); }}>
+              <option value="red">Red</option>
+              <option value="green">Green</option>
+              <option value="blue">Blue</option>
+            </select>
+            <output>{name}|{code}|{bio}|{String(agree)}|{size}|{color}|{log}</output>
+          </form>
+        );
+      }`,
+      "Form",
+      [
+        type("#name", "Grace"),
+        type("#name", "Gra"),
+        type("#code", "abcd"),
+        type("#code", "x"),
+        type("#bio", "Hi!"),
+        type("#bio", "Hello"),
+        click("#agree"),
+        click("#large"),
+        choose("#color", "blue"),
+        choose("#color", "green"),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("lets checkbox and radio handlers read the state a browser click gave them", async () => {
+    // A browser runs microtasks between a checkbox's click and its input and change events. A
+    // plain click Event toggles nothing itself, so the step sets checked as a browser would.
+    const browserClick =
+      (selector: string): Step =>
+      async (root) => {
+        const field = root.querySelector<HTMLInputElement>(selector)!;
+        // The prototype setter, as a browser does, so React's value tracker sees a user change.
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked")!.set!.call(
+          field,
+          field.type === "radio" ? true : !field.checked,
+        );
+        field.dispatchEvent(new Event("click", { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Choices() {
+        const [agree, setAgree] = useState(false);
+        const [size, setSize] = useState("s");
+        return (
+          <form>
+            <input id="agree" type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} />
+            <input id="small" type="radio" name="size" checked={size === "s"} onChange={(event) => event.target.checked && setSize("s")} />
+            <input id="large" type="radio" name="size" checked={size === "l"} onChange={(event) => event.target.checked && setSize("l")} />
+            <output>{String(agree)}|{size}</output>
+          </form>
+        );
+      }`,
+      "Choices",
+      [
+        browserClick("#agree"),
+        browserClick("#large"),
+        browserClick("#agree"),
+        browserClick("#small"),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("restores a read-only checkbox whose click handler leaves its state", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Toggle() {
+        const [clicks, setClicks] = useState(0);
+        return (
+          <section>
+            <input id="locked" type="checkbox" readOnly checked={true} onClick={() => setClicks(clicks + 1)} />
+            <output>{clicks}</output>
+          </section>
+        );
+      }`,
+      "Toggle",
+      [click("#locked"), click("#locked")],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("restores fields in keyed rows and in child components", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      function Field({ value, onValue }) {
+        return <input className="child" value={value} onChange={(event) => onValue(event.target.value)} />;
+      }
+      export function Editor() {
+        const [rows, setRows] = useState([{ id: 1, label: "One" }, { id: 2, label: "Two" }]);
+        const [title, setTitle] = useState("Rows");
+        const update = (id, label) => {
+          if (label.length <= 5) setRows(rows.map((row) => (row.id === id ? { ...row, label } : row)));
+        };
+        return (
+          <section>
+            <Field value={title} onValue={(value) => { if (value.length <= 6) setTitle(value); }} />
+            <ul>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  <input className="label" value={row.label} onChange={(event) => update(row.id, event.target.value)} />
+                </li>
+              ))}
+            </ul>
+            <output>{title}|{rows[0].label}|{rows[1].label}</output>
+          </section>
+        );
+      }`,
+      "Editor",
+      [
+        type('li[data-id="1"] .label', "Uno"),
+        type('li[data-id="2"] .label', "Twotwo"),
+        type(".child", "Rows!!!"),
+        type(".child", "Rows!"),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+});
