@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" : "rsc";
+
 function collectErrors(page: Page) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -99,5 +101,34 @@ test("maps with elements, global symbols, errors, iterators, blobs and form data
   await expect(mapped).toHaveText("Mapped: 5");
   await mapped.click();
   await expect(mapped).toHaveText("Mapped: 6");
+  expect(errors).toEqual([]);
+});
+
+test("values the browser sends to an action come back as the same values, as React Server Components return temporary references", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/wire/round-trip");
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Echo", exact: true }).click();
+  await expect(page.getByTestId("echo")).toHaveText("true true true");
+  await expect(page.getByTestId("badge")).toHaveText("sent from the browser");
+  expect(errors).toEqual([]);
+});
+
+test("an action bound in the browser can be sent to another action, which runs it with its captured and bound values, as React Server Components do", async ({
+  page,
+}) => {
+  test.fail(
+    mode === "rsc",
+    "rsc mode sends an action bound in the browser as a temporary reference",
+  );
+  const errors = collectErrors(page);
+  await page.goto("/wire/round-trip");
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(page.getByTestId("run")).toHaveText("bound call");
+  await page.getByRole("button", { name: "Greet", exact: true }).click();
+  await expect(page.getByTestId("greet")).toHaveText("hello kinfe, hello bound call");
   expect(errors).toEqual([]);
 });
