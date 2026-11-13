@@ -217,11 +217,25 @@ describe("collectFarmLlmsTxtPages", () => {
       markdown: resolveMarkdownConfig({ expose: ["/docs/[...slug]"] }),
     });
     expect(pages.map((page) => page.url)).toEqual([
-      // applyFarmBasePath maps the home page to "/app/", like every other Farm link.
-      "https://acme.test/app/",
+      // The URL each page answers at: "/app/" redirects to "/app" without trailingSlash.
+      "https://acme.test/app",
       "https://acme.test/app/admin/users",
       "https://acme.test/app/docs/getting-started.md",
       "https://acme.test/app/pricing",
+    ]);
+    // With trailingSlash a page answers at "/app/pricing/"; a mirror keeps its .md URL.
+    expect(
+      collectFarmLlmsTxtPages(sources, {
+        origin,
+        basePath: "/app",
+        markdown: resolveMarkdownConfig({ expose: ["/docs/[...slug]"] }),
+        trailingSlash: true,
+      }).map((page) => page.url),
+    ).toEqual([
+      "https://acme.test/app/",
+      "https://acme.test/app/admin/users/",
+      "https://acme.test/app/docs/getting-started.md",
+      "https://acme.test/app/pricing/",
     ]);
     expect(
       collectFarmLlmsTxtPages(sources, {

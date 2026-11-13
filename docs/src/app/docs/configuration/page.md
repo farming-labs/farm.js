@@ -384,7 +384,10 @@ export default defineConfig({
 
 The redirect uses status 308 and preserves the query string. The root URL remains `/`, and API,
 integration, image, and metadata routes keep their own URL contracts. A `<Link trailingSlash={false}>`
-or `<Link trailingSlash>` prop overrides the app default for that link.
+or `<Link trailingSlash>` prop overrides the app default for that link. The generated
+[`sitemap.xml`](#sitemap) and `llms.txt` list each page at its canonical URL, so none of their
+links redirect: `/console/about/` under `basePath: "/console"` with `trailingSlash: true`, and the
+home page at `/console` without it.
 
 ## API client base URL
 

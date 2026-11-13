@@ -9594,7 +9594,7 @@ function createFarmAgentSitemapResponse(request) {
         metadataBase: rootLayout && rootLayout.module && rootLayout.module.metadata
           ? rootLayout.module.metadata.metadataBase
           : undefined,
-        basePath: ${JSON.stringify(config.basePath)},
+        basePath: ${JSON.stringify(config.basePath)},${config.trailingSlash ? "\n        trailingSlash: true," : ""}
       },
     ),
     {},
@@ -9665,7 +9665,7 @@ function createFarmLlmsTxtContext(request, full) {
       origin,
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
-      exclude: farmLlmsTxtConfig.exclude,
+      exclude: farmLlmsTxtConfig.exclude,${config.trailingSlash ? "\n      trailingSlash: true," : ""}
     },
   );
   const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
