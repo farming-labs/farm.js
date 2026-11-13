@@ -2884,30 +2884,35 @@ function encodeRuntimePathSegment(value) {
 }
 
 function interpolateRedirectDestination(destination, params) {
-  let result = destination;
   const catchAllParamSegments = params[farmCatchAllParamSegments] || {};
+  const encodedParams = new Map();
   const orderedCaptures = [];
   for (const [key, value] of Object.entries(params)) {
     const segments = catchAllParamSegments[key];
     const encodedValue = Array.isArray(segments)
       ? segments.map(encodeRuntimePathSegment).join("/")
       : encodeRuntimePathSegment(value);
+    encodedParams.set(key, encodedValue);
     orderedCaptures.push(encodedValue);
-    result = result.split("[[..." + key + "]]").join(encodedValue);
-    result = result.split("[..." + key + "]").join(encodedValue);
-    result = result.split("[" + key + "]").join(encodedValue);
-    result = result.split(":" + key + "*").join(encodedValue);
-    result = result.split(":" + key).join(encodedValue);
-    if (key === "wildcard") result = result.split("*").join(encodedValue);
   }
-  // Numbered captures resolve after the named substitutions. Encoded values
-  // never contain "$", so this cannot rewrite an already-injected value. An
-  // out-of-range index resolves to "", matching the development path.
-  result = result.replace(/\\$(\\d+)/g, function(_whole, group) {
-    const captured = orderedCaptures[Number(group) - 1];
-    return captured === undefined ? "" : captured;
-  });
-  return result;
+  // One pass that reads each reference whole, as the development path does: ":id" never
+  // consumes the start of ":idx", an unknown ":name" stays as written, and an injected value is
+  // never read again. An out-of-range "$n" resolves to "", matching the development path.
+  return destination.replace(
+    /\\[\\[\\.\\.\\.(\\w+)\\]\\]|\\[\\.\\.\\.(\\w+)\\]|\\[(\\w+)\\]|:([A-Za-z0-9_]+)(\\*?)|\\$(\\d+)|\\*/g,
+    function(whole, optionalCatchAll, catchAll, bracket, name, star, group) {
+      if (group !== undefined) {
+        const captured = orderedCaptures[Number(group) - 1];
+        return captured === undefined ? "" : captured;
+      }
+      const wildcard = encodedParams.has("wildcard") ? encodedParams.get("wildcard") : "*";
+      const key = optionalCatchAll || catchAll || bracket || name;
+      if (key === undefined) return wildcard;
+      if (encodedParams.has(key)) return encodedParams.get(key);
+      if (name === undefined) return whole;
+      return ":" + name + (star ? wildcard : "");
+    },
+  );
 }
 `.trim();
 }
