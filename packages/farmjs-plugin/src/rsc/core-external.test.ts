@@ -591,6 +591,12 @@ import { Greeting } from "../components/greeting";
 export default function Page() { return <><Link href="/about">About link</Link><Greeting /></>; }`,
           );
           writeRoute(
+            "static/page.tsx",
+            `import { getLocale } from "@farm.js/core/i18n/server";
+export const dynamic = "force-static";
+export default function Page() { return <main>{"Static " + getLocale()}</main>; }`,
+          );
+          writeRoute(
             "go/page.tsx",
             `import { redirect } from "@farm.js/core/navigation";
 export default async function Page() { redirect("/about"); }`,
@@ -780,6 +786,19 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
         expect(existsSync(path.join(outputDir, "server", "node_modules", "@farm.js", "core"))).toBe(
           false,
         );
+
+        if (name === "i18n") {
+          // A static page prerenders at the URL that names its locale. The default locale's URL
+          // redirects visitors who prefer French, so it stays server-rendered.
+          const publicDir = path.join(outputDir, "public", "console");
+          expect(
+            readFileSync(path.join(publicDir, "fr", "static", "index.html"), "utf8"),
+          ).toContain("Static fr");
+          expect(readFileSync(path.join(publicDir, "fr", "static.rsc"), "utf8")).toContain(
+            "Static fr",
+          );
+          expect(existsSync(path.join(publicDir, "static", "index.html"))).toBe(false);
+        }
 
         const isolatedOutput = path.join(isolatedRoot, ".output");
         cpSync(outputDir, isolatedOutput, { recursive: true });
@@ -1105,6 +1124,18 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           expect(await api.json()).toEqual({ locale: "fr", source: "accept-language" });
           expect(api.headers.get("vary")).toContain("Accept-Language");
           expect(api.headers.get("set-cookie")).toContain("farm_locale=fr");
+
+          // The prerendered page and payload are served as files; the default locale's is rendered.
+          for (const pathname of ["/console/fr/static", "/console/fr/static.rsc"]) {
+            const prerendered = await get(pathname);
+            expect(prerendered.status, `${pathname} ${logs}`).toBe(200);
+            expect(prerendered.headers.get("last-modified"), pathname).toBeTruthy();
+            expect(await prerendered.text()).toContain("Static fr");
+          }
+          const rendered = await get("/console/static", { "accept-language": "de" });
+          expect(rendered.status, logs).toBe(200);
+          expect(rendered.headers.get("last-modified")).toBeNull();
+          expect(await rendered.text()).toContain("Static en");
 
           // redirect("/about") goes to the page in the request's locale, below the basePath.
           for (const [pathname, location] of [

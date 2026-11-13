@@ -56,6 +56,7 @@ import {
   createFarmLocaleCookie,
   getFarmLocaleVaryHeaders,
   localizeFarmHref,
+  localizeFarmPathname,
 } from '@farm.js/core/internal/production-runtime';
 ${catalogs}
 // createTranslator(locale) and runWithLocale() outside a request.
@@ -889,8 +890,9 @@ const farmPageRenderingDirectives = ${JSON.stringify(ctx.pageRenderingDirectives
  */
 async function collectFarmStaticPages() {
   ${
-    ctx.i18n?.enabled
-      ? `console.info('[Farm.js] Prerendering is off: i18n resolves the locale per request.');
+    i18n?.routing === "none"
+      ? `// As in core's SSG: one URL serves every locale, by the visitor's cookie or Accept-Language.
+  console.info('[Farm.js] Prerendering is off: with i18n routing "none" one URL serves every locale.');
   return [];`
       : ""
   }
@@ -929,18 +931,63 @@ async function collectFarmStaticPages() {
         continue;
       }
       ${
-        hasBasePath
-          ? `// The platform serves a prerendered file only at the URL it was written for, below the
+        i18n
+          ? `for (const publicPath of farmLocalizedStaticPaths(pagePath)) {
+        // Only where the server would render this page, and no middleware may handle the URL.
+        const routePath = getFarmRoutePathname(publicPath);
+        if (
+          matchRoute(publicPath)?.pattern !== filePath ||
+          appMiddlewareMayHandlePath(middlewareRoutes, routePath) ||
+          configMiddlewareMayHandlePath(farmConfigMiddleware, routePath) ||
+          appMiddlewareMayHandlePath(middlewareRoutes, publicPath) ||
+          configMiddlewareMayHandlePath(farmConfigMiddleware, publicPath)
+        ) {
+          continue;
+        }
+        paths.add(publicPath);
+      }`
+          : hasBasePath
+            ? `// The platform serves a prerendered file only at the URL it was written for, below the
       // basePath, as core's build writes it. A page nested under app/<basePath>/ already is.
       const publicPath = applyFarmBasePath(pagePath, ${JSON.stringify(ctx.basePath)});
       paths.add(publicPath.length > 1 ? publicPath.replace(/\\/$/, '') : publicPath);`
-          : "paths.add(pagePath);"
+            : "paths.add(pagePath);"
       }
     }
   }
   return [...paths];
 }
+${
+  i18n
+    ? `/**
+ * The URLs a static page prerenders at with i18n, as core's SSG lists them: the page at each
+ * locale's URL below the basePath (localizeFarmPathname). A page whose folders name the locale
+ * (app/[lang]/...) listed its URLs itself; one the server redirects to its canonical URL (the
+ * default locale's prefix under "prefix-except-default") is left out. A URL without a locale (the
+ * default locale's, under "prefix-except-default") answers by the visitor's cookie or
+ * Accept-Language and redirects those that pick another locale, so it stays server-rendered while
+ * the app detects either.
+ */
+function farmLocalizedStaticPaths(pagePath) {
+  const namesLocale = (pathname) =>
+    stripFarmLocaleFromPathname(pathname, farmRouteI18n) !==
+    stripFarmBasePath(pathname, farmRouteI18n.basePath);
+  const canonical = (pathname) =>
+    farmRouteI18n.locales.some(
+      (locale) => localizeFarmPathname(pathname, locale, farmRouteI18n) === pathname,
+    );
+  const detects = farmRouteI18n.detection.some((signal) => signal !== 'url');
+  const urls = namesLocale(pagePath)
+    ? [${hasBasePath ? `applyFarmBasePath(pagePath, ${JSON.stringify(ctx.basePath)})` : "pagePath"}]
+    : farmRouteI18n.locales.map((locale) => localizeFarmPathname(pagePath, locale, farmRouteI18n));
+  return urls
+    .map((url) => (url.length > 1 ? url.replace(/\\/$/, '') : url))
+    .filter((url) => canonical(url) && (namesLocale(url) || !detects));
+}
 
+`
+    : ""
+}
 // The route's metadata as core's server resolves it: layouts root to leaf, then the page, each
 // module's \`metadata\`, \`generateMetadata()\` and viewport exports merged in order.
 async function resolveFarmRouteMetadata(layoutModules, pageModule, pageProps) {

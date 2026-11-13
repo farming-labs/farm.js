@@ -451,9 +451,12 @@ Both setups follow the same route contract:
   is prerendered at build time together with its RSC payload. A dynamic route lists its paths with
   `generateStaticParams()`. Client navigation fetches the payload at `<page>.rsc` (`/index.rsc` for
   `/`), so a prerendered page navigates without reaching the server. A page that any middleware may
-  handle, and every page of an app with i18n, stays server-rendered, because middleware never sees a
-  static file. Pages with `revalidate` also render on each request for now; the pipeline has no
-  revalidating cache yet. A page that asks to be static and fails to render fails the build.
+  handle stays server-rendered, because middleware never sees a static file. With i18n a static page
+  prerenders at each URL that names its locale (`/fr/about`, below the base path); a URL without a
+  locale (the default locale's under `"prefix-except-default"`) redirects visitors whose cookie or
+  `Accept-Language` picks another locale, so it stays server-rendered unless `detection` is off, and
+  `routing: "none"` prerenders nothing. Pages with `revalidate` also render on each request for
+  now; the pipeline has no revalidating cache yet. A page that asks to be static and fails to render fails the build.
 - **Metadata.** Layouts and pages resolve `metadata`, `generateMetadata()`, and viewport exports in
   the same order and with the same title templates as other Farm apps, and the server renders the
   same head tags.
@@ -483,8 +486,8 @@ Both setups follow the same route contract:
   headers. Client components read the locale the page rendered with: `useLocale()`,
   `useTranslations()`, and `<Link href="/about">`, which renders `/console/fr/about` on a French page.
   A link to another locale loads a new document. `redirect("/about")` from a French page, server
-  action or form sends `/console/fr/about`, as other Farm apps localize it. Farm sets `lang` and `dir` on the `<html>` it
-  renders; a root layout that renders `<html>` sets them itself, for example
+  action or form sends `/console/fr/about`, as other Farm apps localize it. Farm sets `lang` and
+  `dir` on the `<html>` it renders; a root layout that renders `<html>` sets them itself, for example
   `<html lang={getLocale()}>`. `hreflang` alternate links are not rendered yet.
 
 A client that loaded an older deployment and fetches a prerendered payload from a newer one does not

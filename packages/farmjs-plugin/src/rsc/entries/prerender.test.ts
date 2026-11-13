@@ -1,13 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isFarmAPIPathname } from "@farm.js/core/api/runtime";
+import type { FarmI18nUserConfig } from "@farm.js/core/i18n";
 import {
   applyFarmBasePath,
   appMiddlewareMayHandlePath,
   configMiddlewareMayHandlePath,
+  localizeFarmPathname,
   materializeSSGRoutePath,
   mergeRouteRenderingDirectiveConfig,
+  resolveFarmI18nConfig,
+  stripFarmBasePath,
+  stripFarmLocaleFromPathname,
 } from "@farm.js/core/internal/production-runtime";
-import { parseRoutePath } from "../../../../farm/src/utils";
+import { matchRoute as matchFarmPageRoute, parseRoutePath } from "../../../../farm/src/utils";
+import {
+  compareRouteSpecificity,
+  getRoutePatternSpecificity,
+} from "../../../../farm/src/routing/specificity";
 import type { EntryContext } from "../types.js";
 import { generateRscEntry } from "./rsc.js";
 
@@ -79,6 +88,72 @@ function collectStaticPages(
     appMiddlewareMayHandlePath,
     configMiddlewareMayHandlePath,
     applyFarmBasePath,
+  );
+}
+
+/**
+ * Runs the generated static page collector of an app with i18n, with the entry's own page matcher
+ * and route-path helper and core's real helpers.
+ */
+function collectLocalizedStaticPages(
+  pages: Record<string, Record<string, unknown>>,
+  options: { i18n: FarmI18nUserConfig; basePath?: string; middlewareFiles?: string[] },
+): Promise<string[]> {
+  const basePath = options.basePath ?? "/";
+  const entry = generateRscEntry({
+    ...context,
+    basePath,
+    i18n: resolveFarmI18nConfig(options.i18n, { basePath }),
+  });
+  const routeHelperStart = entry.indexOf("const farmRouteI18n = ");
+  const routeHelperEnd =
+    entry.indexOf("\n}\n", entry.indexOf("function getFarmRoutePathname(pathname)")) + 2;
+  const middlewares = Object.fromEntries(
+    (options.middlewareFiles ?? []).map((file) => [file, { default() {} }]),
+  );
+  return new Function(
+    "pages",
+    "React",
+    "debug",
+    "parseRoutePath",
+    "matchFarmPageRoute",
+    "compareRouteSpecificity",
+    "getRoutePatternSpecificity",
+    "stripFarmBasePath",
+    "stripFarmLocaleFromPathname",
+    "localizeFarmPathname",
+    "applyFarmBasePath",
+    "middlewares",
+    "middlewarePathToRoute",
+    "farmConfigMiddleware",
+    "mergeRouteRenderingDirectiveConfig",
+    "materializeSSGRoutePath",
+    "appMiddlewareMayHandlePath",
+    "configMiddlewareMayHandlePath",
+    `${entry.slice(routeHelperStart, routeHelperEnd)}
+${slice(entry, "function filePathToRoute(", "// The route's metadata as core's server resolves it")}
+return collectFarmStaticPages();`,
+  )(
+    Object.fromEntries(
+      Object.entries(pages).map(([file, module]) => [file, { default: () => file, ...module }]),
+    ),
+    {},
+    () => {},
+    parseRoutePath,
+    matchFarmPageRoute,
+    compareRouteSpecificity,
+    getRoutePatternSpecificity,
+    stripFarmBasePath,
+    stripFarmLocaleFromPathname,
+    localizeFarmPathname,
+    applyFarmBasePath,
+    middlewares,
+    (filePath: string) => filePath.replace(/\/middleware\.[tj]sx?$/, "") || "/",
+    [],
+    mergeRouteRenderingDirectiveConfig,
+    materializeSSGRoutePath,
+    appMiddlewareMayHandlePath,
+    configMiddlewareMayHandlePath,
   );
 }
 
@@ -201,6 +276,86 @@ describe("RSC static pages", () => {
       "/console/docs/start%20here",
       "/console/legacy",
     ]);
+  });
+});
+
+describe("RSC static pages with i18n", () => {
+  const staticPages = {
+    "/page.tsx": { dynamic: "force-static" },
+    "/about/page.tsx": { dynamic: "force-static" },
+    "/docs/[slug]/page.tsx": {
+      dynamic: "force-static",
+      generateStaticParams: async () => [{ slug: "start here" }],
+    },
+    "/account/page.tsx": {},
+  };
+
+  it("prerenders each static page at every locale URL that names its locale", async () => {
+    // "prefix-except-default": the English URLs carry no locale and redirect a visitor whose
+    // cookie or Accept-Language picks French, so they stay server-rendered.
+    const pages = await collectLocalizedStaticPages(staticPages, {
+      basePath: "/console",
+      i18n: { locales: ["en", "fr", "de"], defaultLocale: "en" },
+    });
+    expect(pages.sort()).toEqual([
+      "/console/de",
+      "/console/de/about",
+      "/console/de/docs/start%20here",
+      "/console/fr",
+      "/console/fr/about",
+      "/console/fr/docs/start%20here",
+    ]);
+
+    const always = await collectLocalizedStaticPages(staticPages, {
+      i18n: { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-always" },
+    });
+    expect(always.sort()).toEqual([
+      "/en",
+      "/en/about",
+      "/en/docs/start%20here",
+      "/fr",
+      "/fr/about",
+      "/fr/docs/start%20here",
+    ]);
+  });
+
+  it("prerenders the default locale's URL too when the app detects no locale", async () => {
+    const pages = await collectLocalizedStaticPages(
+      { "/about/page.tsx": { dynamic: "force-static" } },
+      { i18n: { locales: ["en", "fr"], defaultLocale: "en", detection: false } },
+    );
+    expect(pages.sort()).toEqual(["/about", "/fr/about"]);
+  });
+
+  it("keeps a page under a [lang] folder at the URLs it lists, where it renders", async () => {
+    const pages = await collectLocalizedStaticPages(
+      {
+        "/console/[lang]/legacy/page.tsx": {
+          dynamic: "force-static",
+          generateStaticParams: async () => [{ lang: "fr" }, { lang: "en" }],
+        },
+      },
+      { basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" } },
+    );
+    // /console/en/legacy redirects to /console/legacy, where this page does not answer.
+    expect(pages).toEqual(["/console/fr/legacy"]);
+  });
+
+  it("keeps locale URLs that middleware may handle server-rendered", async () => {
+    const pages = await collectLocalizedStaticPages(staticPages, {
+      i18n: { locales: ["en", "fr"], defaultLocale: "en" },
+      middlewareFiles: ["/about/middleware.ts", "/[lang]/docs/middleware.ts"],
+    });
+    expect(pages.sort()).toEqual(["/fr"]);
+  });
+
+  it('prerenders nothing with routing "none", where one URL serves every locale', async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const pages = await collectLocalizedStaticPages(staticPages, {
+      i18n: { locales: ["en", "fr"], defaultLocale: "en", routing: "none" },
+    });
+    expect(pages).toEqual([]);
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('routing "none"'));
   });
 });
 
