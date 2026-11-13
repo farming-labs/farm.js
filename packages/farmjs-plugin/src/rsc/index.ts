@@ -38,6 +38,7 @@ import type {
   FarmRscServerPlugins,
   FarmRscMobileClient,
 } from "./types.js";
+import { isRscWorkersPreset } from "./presets.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
 import type { FarmAPIConfig } from "@farm.js/core/api";
 import type { FarmMiddlewareConfig } from "@farm.js/core/middleware";
@@ -231,6 +232,8 @@ export interface FarmRscConfig {
   clientPlugins?: FarmRscClientPlugins;
   /** @internal See `FarmRscPluginOptions.serverPlugins`; set by `farm build`. */
   serverPlugins?: FarmRscServerPlugins;
+  /** @internal See `FarmRscPluginOptions.preset`; set by `farm build`. */
+  preset?: string;
 }
 
 /**
@@ -311,6 +314,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
         mobileClient: config.mobileClient,
         clientPlugins: config.clientPlugins,
         serverPlugins: config.serverPlugins,
+        preset: config.preset,
       }),
       ...(Array.isArray(config.plugins) ? config.plugins : []),
     ],
@@ -1184,7 +1188,15 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         ];
         // The same images contract as core: without Sharp, "auto" keeps original URLs
         // (provider "none") instead of pointing <Image> at an optimizer that cannot run.
-        const nitroPreset = process.env.NITRO_PRESET || "vercel";
+        const nitroPreset = options.preset || process.env.NITRO_PRESET || "vercel";
+        // Workers have no node_modules: the server bundles include their packages, built for
+        // workerd instead of Node.
+        const workersBuild = env.command === "build" && isRscWorkersPreset(nitroPreset);
+        if (workersBuild && optimizedBoundaryEnabled) {
+          throw new Error(
+            `[Farm.js] \`experimental.optimizedBoundary\` loads Strata, a native Node module, which Cloudflare Workers can't run (preset \`${nitroPreset}\`). Turn it off for this build, or deploy to a Node target such as \`node-server\` or \`vercel\`.`,
+          );
+        }
         const imageConfig = resolveFarmImageConfig(
           resolveFarmImageProviderForRuntime(c.images, {
             root,
@@ -1217,6 +1229,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         entryContext = {
           documentLayouts,
           pageRenderingDirectives,
+          ...(workersBuild ? { workers: true } : {}),
           images: {
             config: imageConfig,
             public: publicImageConfig,
@@ -1315,18 +1328,23 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             __FARM_API_BASE_URL__: JSON.stringify(api.baseURL),
             __FARM_IMAGE_CONFIG__: JSON.stringify(entryContext.images?.public),
           },
-          ssr: {
-            external: [
-              "react",
-              "react-dom",
-              "react-dom/server",
-              "react/jsx-runtime",
-              "react/jsx-dev-runtime",
-              ...(optimizedBoundaryEnabled
-                ? [STRATA_PACKAGE, `${STRATA_PACKAGE}/react-server`]
-                : []),
-            ],
-          },
+          // A Workers build bundles React too: there is no node_modules to load it from.
+          ...(workersBuild
+            ? {}
+            : {
+                ssr: {
+                  external: [
+                    "react",
+                    "react-dom",
+                    "react-dom/server",
+                    "react/jsx-runtime",
+                    "react/jsx-dev-runtime",
+                    ...(optimizedBoundaryEnabled
+                      ? [STRATA_PACKAGE, `${STRATA_PACKAGE}/react-server`]
+                      : []),
+                  ],
+                },
+              }),
           ...(optimizedBoundaryEnabled
             ? {
                 optimizeDeps: {
@@ -1415,7 +1433,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                 rollupOptions: { input: { index: entryRsc } },
               },
               resolve: {
-                conditions: ["react-server", "node", "import"],
+                conditions: workersBuild
+                  ? ["react-server", "workerd", "worker", "import", "module"]
+                  : ["react-server", "node", "import"],
+                ...(workersBuild ? { noExternal: true } : {}),
                 // Strata is a native CommonJS loader: Node must load it, not Vite's
                 // module runner. ssr.external does not reach this environment.
                 ...(optimizedBoundaryEnabled
@@ -1429,7 +1450,9 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                 copyPublicDir: false,
                 rollupOptions: { input: { index: entrySsr } },
               },
-              resolve: { conditions: ["node", "import"] },
+              resolve: workersBuild
+                ? { conditions: ["workerd", "worker", "import", "module"], noExternal: true }
+                : { conditions: ["node", "import"] },
             },
             client: {
               build: {

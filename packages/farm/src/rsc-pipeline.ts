@@ -219,6 +219,7 @@ export async function createFarmRscViteConfig(
     // Plugins with server hooks load in the production server, as in Farm's other servers, so
     // factories such as `bot()` run there. Dev loaded them with the config already.
     ...(serverPlugins ? { serverPlugins } : {}),
+    ...(options.preset ? { preset: options.preset } : {}),
     experimental: { ...config.experimental, serverComponents: { mode: "rsc" } },
     port: options.port ?? config.server?.port,
     plugins: [
