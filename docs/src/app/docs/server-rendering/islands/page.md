@@ -58,8 +58,8 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   its props. Server output passed to a client component renders once, inside it. Props take what
   RSC sends: promises, `ReadableStream`s and async iterables stream in after the page, elements
   they settle to render with their client components hydrated, a value that refers to itself
-  arrives with the same cycle, and a plain function fails the render with an error that names the
-  component and the prop.
+  arrives with the same cycle (through a promise or stream too), and a plain function fails the
+  render with an error that names the component and the prop.
 - **Browser.** Farm's client entry hands every `<f-island>` to islx's hydration runtime, which
   imports the island's module when its strategy is due and hydrates it in place. A page whose
   islands all wait loads a 1.7 KB boot script instead of the runtime.
@@ -71,7 +71,8 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   including islands in Suspense content that streams in after the page.
   An action called from a client component can return elements, promises and streams, as under
   RSC: elements render on the server, and promises and streams settle in the browser after the
-  call returns. Its arguments and result can refer to themselves.
+  call returns. Its arguments and result can refer to themselves, through a promise or stream in
+  the result too.
 - **Navigation.** A navigation fetches the page's HTML, streamed, with only the layouts the
   browser does not keep, and hydrates the islands it brings.
 
