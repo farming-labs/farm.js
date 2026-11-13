@@ -227,14 +227,23 @@ function getFarmRoutePathname(pathname) {
     : stripFarmBasePath(pathname, farmRouteI18n.basePath);
 }
 `;
+  // The generated agent files list the app's static pages.
+  const listsAgentPages = ctx.llmsTxt?.enabled === true;
+  if (listsAgentPages) {
+    code += `import {
+  createFarmMetadataRouteResponse,
+  farmPathGuardCoversPage,
+  isFarmPageNoIndex,
+  resolveFarmAgentOrigin,
+} from '@farm.js/core/internal/production-runtime';
+`;
+  }
   if (ctx.llmsTxt?.enabled) {
     code += `import {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsFullRenderer,
   createFarmLlmsMarkdownReader,
-  createFarmMetadataRouteResponse,
-  farmPathGuardCoversPage,
   renderFarmLlmsFullTxt,
 } from '@farm.js/core/internal/production-runtime';
 import { FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS } from '@farm.js/core/internal/app-markdown-runtime';
@@ -1498,27 +1507,17 @@ ${
  * /llms-full.txt inlines each mirror.
  */
 function createFarmLlmsTxtContext(request, context, full) {
-  const origin = new URL(request.url).origin;
-  // A page a path-specific guard covers (a non-root middleware.ts, a config
-  // middleware matcher naming the path) is left out, as core's server does.
-  const guard = {
-    config: { middleware: farmConfigMiddleware },
-    middlewareRoutes: Object.keys(middlewares)
-      .map((filePath) => ({ path: middlewarePathToRoute(filePath) }))
-      .filter((route) => route.path !== null),
-  };
+  const origin = getFarmAgentOrigin(request);
+  // Each page links to its public URL below the basePath ('/console/index.md' for the home page),
+  // and include and exclude match its route path, as in core's servers.
   const pages = collectFarmLlmsTxtPages(
-    pageRoutes
-      .map(({ module, segments }) => ({
-        // Dynamic routes have no single URL, so the collector skips them.
-        pattern: '/' + segments
-          .map((part) => (part.isDynamic ? '[' + part.segment + ']' : part.segment))
-          .join('/'),
-        metadata: module && module.metadata,
-      }))
-      .filter((page) => page.pattern.includes('[') || !farmPathGuardCoversPage(guard, page.pattern)),
+    getFarmAgentListedPages().map(({ pattern, module }) => ({
+      pattern,
+      metadata: module && module.metadata,
+    })),
     {
       origin,
+      basePath: ${JSON.stringify(ctx.basePath)},
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
       exclude: farmLlmsTxtConfig.exclude,
@@ -1526,6 +1525,7 @@ function createFarmLlmsTxtContext(request, context, full) {
   );
   const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
   return {
+    origin,
     defaults: createFarmDefaultLlmsTxt({
       origin,
       pages,
@@ -1549,9 +1549,11 @@ function createFarmLlmsTxtContext(request, context, full) {
 
 async function handleFarmLlmsTxtRequest(request, context) {
   const { origin, pathname } = new URL(request.url);
-  const kind = pathname === '/llms.txt'
+  // Served at the path routes see, as core serves it: /console/llms.txt under basePath "/console".
+  const routePathname = getFarmRoutePathname(pathname.replace(/\\/+$/, '') || '/');
+  const kind = routePathname === '/llms.txt'
     ? 'llms'
-    : farmLlmsTxtConfig.full && pathname === '/llms-full.txt' ? 'llms-full' : null;
+    : farmLlmsTxtConfig.full && routePathname === '/llms-full.txt' ? 'llms-full' : null;
   if (!kind) return null;
   const method = request.method.toUpperCase();
   if (method !== 'GET' && method !== 'HEAD') {
@@ -1562,7 +1564,7 @@ async function handleFarmLlmsTxtRequest(request, context) {
   let complete = true;
   const renderFull = (shared) =>
     renderFarmLlmsFullTxt(llmsContext.defaults, {
-      origin,
+      origin: llmsContext.origin,
       readMarkdown: llmsContext.markdown,
       onIncomplete: () => {
         complete = false;
@@ -1589,7 +1591,67 @@ async function handleFarmLlmsTxtRequest(request, context) {
 
 `
     : ""
-}/**
+}${
+    listsAgentPages
+      ? `/**
+ * The static pages the generated agent files list, as core's servers pick them: each at its route
+ * path, below the basePath and locale, leaving out a page a path-specific guard (a non-root
+ * middleware.ts, a config middleware matcher naming the path) or a route guard covers, and one
+ * that renders noindex through its own robots or, without one, its nearest layout's.
+ */
+function getFarmAgentListedPages() {
+  const guard = {
+    config: { middleware: farmConfigMiddleware },
+    middlewareRoutes: Object.keys(middlewares)
+      .map((filePath) => ({ path: middlewarePathToRoute(filePath) }))
+      .filter((route) => route.path !== null),
+  };
+  const listed = new Map();
+  for (const { filePath, module, segments } of pageRoutes) {
+    // Dynamic routes have no single URL.
+    if (segments.some((part) => part.isDynamic)) continue;
+    const filePattern = '/' + segments.map((part) => part.segment).join('/');
+    ${
+      routesBelowPrefix
+        ? `// A page nested under app/<basePath>/ answers at the path without it, and wins there, as
+    // matchRoute() selects it.
+    const routePathname = getFarmRoutePathname(filePattern);
+    const nested = routePathname !== filePattern &&
+      farmPageSpellsRoutePrefix(segments, filePattern, routePathname);
+    const pattern = nested ? routePathname : filePattern;
+    const current = listed.get(pattern);
+    if (current && (current.nested || !nested)) continue;`
+        : `const pattern = filePattern;
+    const nested = false;
+    if (listed.has(pattern)) continue;`
+    }
+    listed.set(pattern, { filePath, filePattern, pattern, module, nested });
+  }
+  // Middleware runs for both the path as received and the route path, so either may guard it.
+  return [...listed.values()].filter(({ filePath, filePattern, pattern, module }) =>
+    !farmPathGuardCoversPage(guard, filePattern) &&
+    !farmPathGuardCoversPage(guard, pattern) &&
+    !(module && module.__farmRouteGuard) &&
+    !isFarmPageNoIndex(
+      module && module.metadata,
+      getRouteModules(filePath, layouts, 'layout').map((layout) => layout.metadata),
+    ),
+  );
+}
+
+// Agent files link to the root layout's metadataBase when it is an absolute URL, else to the
+// request's origin, as in core's servers.
+function getFarmAgentOrigin(request) {
+  const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
+  return resolveFarmAgentOrigin(
+    rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
+    new URL(request.url).origin,
+  );
+}
+
+`
+      : ""
+  }/**
  * Serves a page's Markdown mirror (\`/page.md\` or \`Accept: text/markdown\`) by
  * rendering the page through the normal request path, so middleware and sign-in
  * gates apply; every other request renders as usual, and HTML pages advertise

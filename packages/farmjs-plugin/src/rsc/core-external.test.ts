@@ -1038,6 +1038,14 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(response.status, `${pathname} ${logs}`).toBe(308);
             expect(response.headers.get("location"), pathname).toBe(location);
           }
+          // llms.txt answers below the basePath and lists each page's public Markdown URL.
+          const llms = await fetch(origin + "/console/llms.txt");
+          expect(llms.status, logs).toBe(200);
+          const llmsBody = await llms.text();
+          for (const url of ["/console/index.md", "/console/about.md", "/console/legacy.md"]) {
+            expect(llmsBody, url).toContain(`(${origin}${url})`);
+          }
+          expect(llmsBody).not.toContain("/console/console");
         }
         if (name === "trailing-slash") {
           for (const [pathname, accept, marker] of [

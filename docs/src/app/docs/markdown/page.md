@@ -437,8 +437,12 @@ export default defineConfig({
 `md: false` turns mirrors off. `page.md` sources are not part of the RSC pipeline yet.
 
 RSC apps also serve `/llms.txt` by default, listing their static pages with links to these mirrors.
-It is answered after middleware, like a page. Set `agent.llmsTxt` with the same options as core;
-`full: true` adds `/llms-full.txt`, and `false` turns both off:
+It is answered after middleware, like a page, and lists the same pages as in other Farm apps. Under
+a `basePath` it answers at `/console/llms.txt` and links each page at its public URL
+(`/console/index.md` for the home page), on the root layout's `metadataBase` when it has one;
+`include`, `exclude`, and `md.expose` match route paths. Pages a path-specific guard or a route
+`guard` covers, and pages that render noindex, are left out. Set `agent.llmsTxt` with the same
+options as core; `full: true` adds `/llms-full.txt`, and `false` turns both off:
 
 ```ts title="vite.config.ts"
 export default defineConfig({
