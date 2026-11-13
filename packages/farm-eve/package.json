@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/eve",
-  "version": "0.1.68",
+  "version": "0.1.69",
   "description": "First-class Eve agent runtime integration for Farm.js",
   "keywords": [
     "agents",
