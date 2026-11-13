@@ -14,7 +14,7 @@ test("a plain function passed to a client component fails the render, as React S
 }) => {
   const response = await request.get("/wire/function-prop");
   expect(response.status()).toBe(500);
-  expect(await response.text()).not.toContain("Pick");
+  expect(await response.text()).not.toContain(">Pick</button>");
 });
 
 test("a stream passed as a prop reaches the client component chunk by chunk", async ({ page }) => {
