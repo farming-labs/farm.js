@@ -364,6 +364,13 @@ Farm keeps the output options the server reads or that would publish private dat
 `output` to one object; an array of outputs fails the build. The server build keeps Farm's own
 output options.
 
+A production document lists the chunks its page needs before it hydrates as
+`<link rel="modulepreload">`: the static imports of the client entry (Farm's runtime and the
+hydrating layouts), of the page's hydrating module, and of the islands that hydrate at load.
+Dynamically imported modules, other routes' chunks, and islands with a deferred strategy
+(`interaction`, `visible`, or `idle`) are not preloaded; they load when they are needed. Each
+chunk in that static closure is one request, which matters most over HTTP/1.1.
+
 `vite.build.sourcemap` never publishes client source maps. A client map carries the original
 source of each module, including code Farm strips from the browser bundle such as
 `createServerOnlyFn` bodies and `generateMetadata`, so any enabled value builds hidden maps (the

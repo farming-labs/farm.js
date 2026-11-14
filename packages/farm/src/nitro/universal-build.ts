@@ -9178,8 +9178,9 @@ const farmClientEntryPreloadTags = farmClientModulePreloads
   ? farmClientModulePreloads.entry.map(renderFarmClientModulePreload).join("")
   : "";
 // The client modules a document's markup loads: its islands' boundaries and the
-// client references of its server tree.
-const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"|"r":"(\\/[^"]+)"/g;
+// client references of its server tree. An island with a deferred strategy loads its
+// module on its own trigger, so it is not preloaded.
+const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"([^>]*)>|"r":"(\\/[^"]+)"/g;
 
 function renderFarmClientModulePreload(index) {
   return '\\n  <link rel="modulepreload" href="/' +
@@ -9207,7 +9208,10 @@ function renderFarmClientModulePreloads(markup, pageModule) {
   };
   add(pageModule);
   if (typeof markup === "string") {
-    for (const match of markup.matchAll(FARM_CLIENT_MODULE_REFERENCE_PATTERN)) add(match[1] || match[2]);
+    for (const match of markup.matchAll(FARM_CLIENT_MODULE_REFERENCE_PATTERN)) {
+      if (match[1] && FARM_DEFERRED_ISLAND_STRATEGY.test(match[2])) continue;
+      add(match[1] || match[3]);
+    }
   }
   return tags;
 }
