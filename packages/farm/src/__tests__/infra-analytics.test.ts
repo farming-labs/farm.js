@@ -6,6 +6,7 @@ import {
   resetFarmObservability,
 } from "../observability";
 import { _runWithCurrentRequest } from "../server/request";
+import { setFarmBasePath } from "../base-path";
 import {
   classifyFarmInfraAgent,
   createFarmInfraAnalyticsExporter,
@@ -180,14 +181,14 @@ describe("runtime plugin", () => {
     resetFarmObservability();
   });
 
-  it("collects only route templates and correlates a tool error under HTTP 200", async () => {
+  it("sends the route template and path, never the query, headers or body, and correlates a tool error under HTTP 200", async () => {
     const send = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(null, { status: 202 }));
     configureFarmObservability({ events: ["request.start"] });
     const value = manager();
     const work: Promise<unknown>[] = [];
-    const request = new Request("https://app.example/users/private-customer?secret=private-query", {
+    const request = new Request("https://app.example/users/42?secret=private-query#private-hash", {
       headers: {
         "user-agent": "ChatGPT-User/1.0",
         authorization: "Bearer private-credential",
@@ -218,7 +219,7 @@ describe("runtime plugin", () => {
         }),
       {
         kind: "api",
-        route: { pathname: "/users/private-customer", pattern: "/users/:id" },
+        route: { pathname: "/users/42", pattern: "/users/:id" },
         waitUntil: (job) => work.push(job),
       },
     );
@@ -229,11 +230,17 @@ describe("runtime plugin", () => {
     const body = send.mock.calls[0]![1]!.body as string;
     const events = sentEvents(send);
     expect(events.map((item) => item.kind)).toEqual(["mcp.tool", "request"]);
-    expect(events[0]).toMatchObject({ outcome: "error", tool: "lookup", route: "/users/:id" });
+    expect(events[0]).toMatchObject({
+      outcome: "error",
+      tool: "lookup",
+      route: "/users/:id",
+      path: "/users/42",
+    });
     expect(events[1]).toMatchObject({
       status: 200,
       method: "GET",
       route: "/users/:id",
+      path: "/users/42",
       agent: { family: "openai", category: "agent", identity: "self-reported" },
     });
     expect(events[0]!.requestId).toBe(events[1]!.requestId);
@@ -541,12 +548,12 @@ describe("recorder for servers without a plugin runtime", () => {
     vi.restoreAllMocks();
   });
 
-  it("reports the route template, method and status, not the URL", async () => {
+  it("reports the route template, path, method and status, never the query string", async () => {
     const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
     const recorder = farmInfraAnalyticsRecorder(options, send);
     const work: Promise<unknown>[] = [];
     const response = await recorder.record(
-      new Request("https://app.example/users/private-customer?secret=private-query", {
+      new Request("https://app.example/users/42?secret=private-query", {
         method: "POST",
         headers: { "user-agent": "GPTBot/1.4", cookie: "private-cookie" },
       }),
@@ -562,12 +569,45 @@ describe("recorder for servers without a plugin runtime", () => {
       expect.objectContaining({
         kind: "request",
         route: "/users/[id]",
+        path: "/users/42",
         method: "POST",
         status: 201,
         agent: { family: "openai", category: "crawler", identity: "self-reported" },
       }),
     ]);
     await recorder.close();
+  });
+
+  it("reports the path below the base path, and leaves out one Farm Infra would refuse", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const recorder = farmInfraAnalyticsRecorder(options, send);
+    const record = (url: string) =>
+      recorder.record(
+        new Request(url),
+        { route: { pattern: "/products/[id]" } },
+        undefined,
+        async () => new Response(),
+      );
+    setFarmBasePath("/shop");
+    try {
+      await record("https://app.example/shop/products/42");
+      await record("https://app.example/shop/caf%C3%A9");
+      await record("https://app.example/shop/products/caf\u00e9");
+      // A leading `//` fails Infra's rule, so the event goes with its template alone.
+      await record("https://app.example//products/42");
+      await record(`https://app.example/shop/${"a".repeat(1024)}`);
+    } finally {
+      setFarmBasePath("");
+    }
+    await recorder.close();
+    expect(sentEvents(send).map((item) => item.path ?? null)).toEqual([
+      "/products/42",
+      "/caf%C3%A9",
+      "/products/caf%C3%A9",
+      null,
+      null,
+    ]);
+    expect(sentEvents(send).every((item) => item.route === "/products/[id]")).toBe(true);
   });
 
   it("skips assets, keeps exceptions unreported, and flushes on close without waitUntil", async () => {
