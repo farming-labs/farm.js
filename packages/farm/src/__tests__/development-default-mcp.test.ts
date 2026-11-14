@@ -126,6 +126,11 @@ describe("development default MCP server", () => {
       "/",
       "/about",
     ]);
+    // Without a metadataBase, URLs use the request's origin.
+    expect(listed.structuredContent.pages.map((page: { url: string }) => page.url)).toEqual([
+      `${origin}/`,
+      `${origin}/about`,
+    ]);
 
     const about = await call(origin, "read_page", { path: "/about" });
     expect(about.isError).toBeUndefined();
@@ -381,6 +386,46 @@ export default function Page() { return <main>Plans for teams.</main>; }`,
       ["/base/en/", "/base/en/about/", "/base/en/pricing/"],
     );
   }, 180_000);
+
+  it("links pages on the root layout's metadataBase, as the sitemap and llms.txt do", async () => {
+    const origin = await startApp(`basePath: "/base"`, {
+      "src/app/layout.tsx": `import React from "react";
+export const metadata = { title: "Acme", metadataBase: new URL("https://www.acme.example") };
+export default function Layout({ children }) { return <>{children}</>; }`,
+    });
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const response = await fetch(`${origin}/base/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      });
+      return ((await response.json()) as { result: any }).result;
+    };
+
+    const pages = (await call("list_pages")).structuredContent.pages;
+    expect(pages.map((page: { url: string }) => page.url)).toEqual([
+      "https://www.acme.example/base",
+      "https://www.acme.example/base/about",
+    ]);
+    const sitemap = await (await fetch(`${origin}/base/sitemap.xml`)).text();
+    for (const page of pages) expect(sitemap).toContain(`<loc>${page.url}</loc>`);
+    expect(await (await fetch(`${origin}/base/llms.txt`)).text()).toContain(
+      "(https://www.acme.example/base/about.md)",
+    );
+
+    // read_page takes those URLs and reads the page from this server.
+    for (const path of ["https://www.acme.example/base/about", `${origin}/base/about`]) {
+      expect((await call("read_page", { path })).content[0].text, path).toContain("We ship tools.");
+    }
+    const elsewhere = await call("read_page", { path: "https://evil.test/base/about" });
+    expect(elsewhere.isError).toBe(true);
+    expect(elsewhere.content[0].text).toContain("No public page");
+  }, 120_000);
 
   it("turns off with agent.mcp: false", async () => {
     const origin = await startApp("agent: { mcp: false }");

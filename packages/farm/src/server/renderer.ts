@@ -2935,10 +2935,13 @@ export class ServerRenderer {
       const { handleFarmDefaultMCPRequest } = await import("../agent-mcp-handler");
       const origin = new URL(request.url).origin;
       const i18n = this.i18nRuntime?.config;
+      // Pages are linked on metadataBase, as sitemap.xml and llms.txt link them.
+      const metadataBase = await this.getRootMetadataBase();
       const response = await handleFarmDefaultMCPRequest(request, {
         server,
         basePath: this.config.basePath,
         i18n,
+        metadataBase,
         listPages: async () => {
           const sources = await Promise.all(
             this.getAgentListedRoutes().map(async ([pattern, route]) => {
@@ -2957,6 +2960,7 @@ export class ServerRenderer {
             sources.filter((source) => source !== null),
             {
               origin,
+              metadataBase,
               basePath: this.config.basePath,
               markdown: resolveMarkdownConfig(this.config.md as any),
               trailingSlash: this.config.trailingSlash,
@@ -3060,18 +3064,20 @@ export class ServerRenderer {
   }
 
   /**
-   * The origin llms.txt and llms-full.txt link to: the root layout's `metadataBase`, else the
-   * request's origin, as for the sitemap and the production server.
+   * The origin llms.txt, llms-full.txt and list_pages link to: the root layout's
+   * `metadataBase`, else the request's origin, as for the sitemap and the production server.
    */
   private async getAgentOrigin(request: Request): Promise<string> {
+    return resolveFarmAgentOrigin(await this.getRootMetadataBase(), new URL(request.url).origin);
+  }
+
+  /** The root layout's `metadataBase`, which generated agent files and list_pages link to. */
+  private async getRootMetadataBase(): Promise<unknown> {
     const rootLayout = this.routeManager.getLayouts().get("/");
     const rootMetadata = rootLayout
       ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
       : undefined;
-    return resolveFarmAgentOrigin(
-      (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
-      new URL(request.url).origin,
-    );
+    return (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase;
   }
 
   /**
