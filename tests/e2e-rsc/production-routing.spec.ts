@@ -88,22 +88,31 @@ test("SPA navigation keeps document metadata synchronized", async ({ page }) => 
   await expect(page).toHaveURL(/\/about$/);
   await expect(page.getByRole("heading", { name: "About React Server Components" })).toBeVisible();
   await expect(page).toHaveTitle("About | Farm.js RSC Demo");
+  // Every head tag rendered from the route's metadata follows the page, as a page load renders it.
+  const canonical = page.locator('link[rel="canonical"]');
+  const description = page.locator('meta[name="description"]');
+  await expect(canonical).toHaveCount(1);
+  await expect(canonical).toHaveAttribute("href", "/about");
+  await expect(description).toHaveCount(1);
+  await expect(description).toHaveAttribute("content", "Learn about React Server Components");
 
   await page.locator('nav a[href="/server-query"]').click();
   await expect(page).toHaveURL(/\/server-query$/);
   await expect(page).toHaveTitle("Farm.js RSC Demo");
-  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
-    "content",
-    "React Server Components demo with Farm.js",
-  );
+  await expect(description).toHaveAttribute("content", "React Server Components demo with Farm.js");
+  await expect(canonical).toHaveAttribute("href", "/server-query");
 
   await page.evaluate(() => history.back());
   await expect(page).toHaveURL(/\/about$/);
   await expect(page).toHaveTitle("About | Farm.js RSC Demo");
+  await expect(canonical).toHaveAttribute("href", "/about");
 
   await page.evaluate(() => history.back());
   await expect(page).toHaveURL(/\/$/);
   await expect(page).toHaveTitle("Home | Farm.js RSC Demo");
+  await expect(canonical).toHaveCount(1);
+  await expect(canonical).toHaveAttribute("href", "/");
+  await expect(description).toHaveCount(1);
 });
 
 test("production output hydrates client components", async ({ page }) => {

@@ -459,7 +459,10 @@ Both setups follow the same route contract:
   now; the pipeline has no revalidating cache yet. A page that asks to be static and fails to render fails the build.
 - **Metadata.** Layouts and pages resolve `metadata`, `generateMetadata()`, and viewport exports in
   the same order and with the same title templates as other Farm apps, and the server renders the
-  same head tags.
+  same head tags. A client navigation sets the next page's title and replaces the tags Farm rendered
+  from metadata (description, canonical and alternate links, robots, Open Graph, JSON-LD) with
+  that page's, as other Farm apps do; tags your components render (React 19 `<meta>` and `<title>`)
+  stay React's.
 - **Images.** `<Image>` follows the app's `images` config. Without `sharp`, `provider: "auto"` keeps
   original image URLs, and the optimizer at `images.path` runs only when it can.
 - **Root layouts.** A root layout that renders `<html>` owns the document, as in Next.js, and the
@@ -487,10 +490,14 @@ Both setups follow the same route contract:
   `useTranslations()`, and `<Link href="/about">`, which renders `/console/fr/about` on a French page.
   A link to another locale loads a new document. `redirect("/about")` from a French page, server
   action or form sends `/console/fr/about`, as other Farm apps localize it. Farm sets `lang` and
-  `dir` on the `<html>` it renders; a root layout that renders `<html>` sets them itself, for example
-  `<html lang={getLocale()}>`. With `trailingSlash: true`, a locale redirect goes straight to the
-  page's trailing-slash URL. `hreflang` alternate links are not rendered yet, and `llms.txt` and
-  `sitemap.xml` list each page once, at its unprefixed URL, as in other Farm apps.
+  `dir` on the document's `<html>`, also on the one a root layout returns, in place of the layout's
+  own, as other Farm apps do; a root layout that is a client component or returns `<html>` inside
+  another component sets them itself, for example `<html lang={getLocale()}>`. With `trailingSlash: true`, a locale redirect goes straight to the
+  page's trailing-slash URL. The head carries `hreflang` alternate links for each locale and
+  `x-default`, absolute on the route's `metadataBase` or the request's origin (forwarded headers
+  only with `server.trustProxy`), as in other Farm apps; a prerendered page has no request, so
+  without `metadataBase` its alternates name paths. `llms.txt` and `sitemap.xml` list each page
+  once, at its unprefixed URL, as in other Farm apps.
 - **Trailing slashes.** Pages follow [`trailingSlash`](/docs/configuration#trailing-slashes) as in
   other Farm apps: by default `/about/` redirects (308) to `/about`, and with `trailingSlash: true`
   `/about` redirects to `/about/`, `<Link href="/about">` renders `/about/`, and its payload is

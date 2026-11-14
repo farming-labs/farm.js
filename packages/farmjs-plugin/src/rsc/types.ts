@@ -261,11 +261,13 @@ export interface RscPayload {
   /** Content for div#root only (for client hydration to avoid double/repeated content) */
   rootContent?: React.ReactElement;
 
-  /** Serializable document metadata used during client-side navigation. */
+  /** The document title, which client-side navigation sets. */
   metadata?: {
     title?: string;
-    description?: string;
   };
+
+  /** The head tags rendered from the route's metadata, which client-side navigation swaps in. */
+  metadataHead?: string;
 
   /** Server action return value (if action was executed) */
   returnValue?: {

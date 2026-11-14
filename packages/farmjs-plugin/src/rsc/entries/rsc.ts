@@ -57,6 +57,8 @@ import {
   getFarmLocaleVaryHeaders,
   localizeFarmHref,
   localizeFarmPathname,
+  renderFarmLocaleAlternateLinks,
+  resolveFarmWebRequestOrigin as resolveFarmI18nRequestOrigin,
 } from '@farm.js/core/internal/production-runtime';
 ${catalogs}
 // createTranslator(locale) and runWithLocale() outside a request.
@@ -109,6 +111,43 @@ function localizeFarmRedirectUrl(url) {
   return snapshot && url.startsWith('/') && !url.startsWith('//')
     ? localizeFarmHref(url, snapshot.locale, snapshot)
     : url;
+}
+
+/**
+ * The page's \`<link rel="alternate" hreflang>\` tags, as core's servers render them: its URL in each
+ * locale and x-default, absolute on the route's metadataBase, else on the request's origin (under
+ * server.trustProxy). A prerendered page, which no visitor's request drives, uses metadataBase
+ * only, as core's background regeneration does.
+ */
+function renderFarmI18nAlternateLinks(request, pathname, metadata) {
+  const snapshot = getFarmI18nClientSnapshot();
+  if (!snapshot) return '';
+  return renderFarmLocaleAlternateLinks(pathname, snapshot, {
+    metadataBase: metadata.metadataBase,
+    origin: isFarmPrerenderRequest(request)
+      ? undefined
+      : resolveFarmI18nRequestOrigin(request, { trustProxy: ${JSON.stringify(ctx.server?.trustProxy === true)} }),
+  });
+}
+
+/**
+ * A root layout that renders \`<html>\` gets the request's \`lang\` and \`dir\` on it, replacing its
+ * own, as core's servers set them on any document. They go on the element the layout returns, so
+ * the browser hydrates the attributes the HTML has. FarmLocaleDocument renders a synchronous
+ * layout in its place, within the render, as React would.
+ */
+function FarmLocaleDocument({ Layout, layoutProps }) {
+  const element = Layout(layoutProps);
+  return element && typeof element.then === 'function'
+    ? element.then(withFarmDocumentLocale)
+    : withFarmDocumentLocale(element);
+}
+
+function withFarmDocumentLocale(element) {
+  const snapshot = getFarmI18nClientSnapshot();
+  return snapshot && React.isValidElement(element) && element.type === 'html'
+    ? React.cloneElement(element, { lang: snapshot.locale, dir: snapshot.direction })
+    : element;
 }
 
 function applyFarmI18nResponse(response, resolution) {
@@ -1438,11 +1477,12 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
       : "const metadata = await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps);"
   }
   const renderedHead = renderMetadataHead(metadata, { pathname: url.pathname });
-  // Injected into <head> by the SSR entry; React renders only the charset.
+  // Injected into <head> by the SSR entry (React renders only the charset), and swapped in by the
+  // browser entry on client navigation.
   const metadataHead =
     (renderedHead.hasExplicitTitle ? '<title>' + renderedHead.title + '</title>' : '') +
     renderedHead.viewport +
-    renderedHead.tags;
+    renderedHead.tags${i18n ? " + renderFarmI18nAlternateLinks(request, url.pathname, metadata)" : ""};
   const metadataTitle = resolveMetadataTitle(metadata.title);
   
   debug('Rendering page:', pattern, 'with props:', pageProps);
@@ -1489,9 +1529,24 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
     const Layout = LayoutModules[index].default;
     const layoutProps = { params: pageProps.params, children: layoutContent };
     if (Layout.constructor.name === 'AsyncFunction') {
-      layoutContent = await Layout(layoutProps);
+      layoutContent = await Layout(layoutProps);${
+        i18n
+          ? `
+      if (index === 0 && farmDocumentLayoutModules.has(LayoutModules[0])) {
+        layoutContent = withFarmDocumentLocale(layoutContent);
+      }`
+          : ""
+      }
     } else {
-      layoutContent = h(Layout, layoutProps);
+      layoutContent = ${
+        i18n
+          ? `index === 0 &&
+        farmDocumentLayoutModules.has(LayoutModules[0]) &&
+        Layout.$$typeof !== Symbol.for('react.client.reference')
+        ? h(FarmLocaleDocument, { Layout, layoutProps })
+        : `
+          : ""
+      }h(Layout, layoutProps);
     }
   }
   
@@ -1529,10 +1584,7 @@ async function resolveFarmRequest(farmCacheGuard, request, context) {
     ),
     rootContent: rootInner,
     metadataHead,
-    metadata: {
-      title: metadataTitle,
-      description: typeof metadata.description === 'string' ? metadata.description : undefined,
-    },
+    metadata: { title: metadataTitle },
 ${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
 
   // Include action results in payload if actions are enabled
