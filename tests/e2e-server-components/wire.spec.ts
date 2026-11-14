@@ -116,12 +116,12 @@ test("values the browser sends to an action come back as the same values, as Rea
   expect(errors).toEqual([]);
 });
 
-test("an action bound in the browser can be sent to another action, which runs it with its captured and bound values, as React Server Components do", async ({
+test("an action bound in the browser can be sent to another action, which runs it with its captured and bound values", async ({
   page,
 }) => {
   test.fail(
     mode === "rsc",
-    "rsc mode sends an action bound in the browser as a temporary reference",
+    "React's browser client keeps Function.prototype.bind on server references, so rsc mode sends a bound action as a temporary reference",
   );
   const errors = collectErrors(page);
   await page.goto("/wire/round-trip");
