@@ -188,6 +188,9 @@ and `isProd`. `before`, `after`, and `error` also get `ctx`, the merged context 
 `after` and `error` get `durationMs`; `after` gets `response`; `error` gets `error`. Endpoint
 handlers get `path`.
 
+An app metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, or a metadata image)
+is an `"asset"` request, with the metadata route's `pattern`, in `farm dev` and production.
+
 **`endpoints`** are exact application-relative paths such as `/status`, without parameters,
 wildcards, or query strings; Farm adds the configured `basePath`. They run before request context
 and routing, so check authorization inside the handler. Their responses still pass through
@@ -228,11 +231,13 @@ for that page. Use `render.before` when you don't need to rewrite HTML.
 Render hooks run for every page request, in `farm dev` and production: one a page route matches, or
 a `GET` or `HEAD` request that no API route, integration route, docs page, or app metadata route
 (`sitemap.ts`, `robots.ts`, `manifest.ts`, a metadata image) answers. So `before` also runs for a
-config redirect, a config rewrite (once, for the URL as requested), the generated `llms.txt`,
-`sitemap.xml`, and `robots.txt`, the app manifest, a Markdown mirror, and the not-found page,
-before Farm answers them. `routePattern` is `null` when no page route matches the requested URL.
-Neither hook runs when `runtime.before` answers the request, and `html` sees only HTML responses.
-The React Server Components pipeline does not run render hooks yet.
+config redirect, a route-file `redirect()`, a config rewrite (once, for the URL as requested), the
+generated `llms.txt`, `sitemap.xml`, and `robots.txt`, the app manifest, a Markdown mirror, and the
+not-found page, before Farm answers them. `routePattern` is `null` when no page route matches the
+requested URL. The router and render hooks describe the requested URL even when `runtime.before`
+returns a replacement `Request`, which Farm then routes and renders. Neither hook runs when
+`runtime.before` answers the request, and `html` sees only HTML responses. The React Server
+Components pipeline does not run render hooks yet.
 
 ## `build`: production build hooks
 

@@ -2857,11 +2857,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 (isViteDevClientRequest(parsedRequestUrl, req.headers) &&
                   devServableFileExists(requestPathname, [server.config.root]))));
 
-          // Config headers() and redirects() see the requested URL before any route or app
-          // middleware does, as in the production entry: headers() then apply to whatever
-          // answers, a redirect or a middleware response included, and a redirect passes through
-          // the plugin runtime like any response. A request a config rewrite re-entered this
-          // handler with, or a dotted path back from Vite's file serving, has passed them already.
+          // Config headers() and redirects(), and route-file redirects, see the requested URL
+          // before any route or app middleware does, as in the production entry: headers() then
+          // apply to whatever answers, a redirect or a middleware response included, and a
+          // redirect passes through the plugin runtime like any response. A request a config
+          // rewrite re-entered this handler with, or a dotted path back from Vite's file
+          // serving, has passed them already.
           const configRewriteSource = (req as FarmDevConfigRewriteRequest)[
             FARM_DEV_CONFIG_REWRITE_SOURCE
           ];
@@ -2872,8 +2873,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
           // The router and render hooks, as the production entry runs them for every request its
           // plugin runtime classes as a page (kind "page"): on the URL as requested (a config
-          // rewrite's source; the page handler passes the request runtime.before yielded, which
-          // it routes on), inside the runtime request, before the request is resolved. So
+          // rewrite's source, and the incoming URL when runtime.before returned a replacement
+          // Request), inside the runtime request, before the request is resolved. So
           // they run for a config redirect, the generated llms.txt, sitemap.xml and robots.txt,
           // a Markdown mirror, the app manifest, and the not-found page as for a page route, and
           // not for an app metadata route (sitemap.ts, robots.ts, a metadata image), which
@@ -2886,8 +2887,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           let pageHookRouteMatch:
             | { render: RenderLifecyclePayload & Record<string, unknown>; layoutPatterns: string[] }
             | undefined;
-          const pageHookRoute = (pathname: string) => {
-            if (pageHookRouteMatch?.render.pathname === pathname) return pageHookRouteMatch;
+          const pageHookRoute = () => {
+            if (pageHookRouteMatch) return pageHookRouteMatch;
+            const pathname = requestedPagePathname;
             const match = farmApp.getRouteManager().matchRoute(pathname);
             pageHookRouteMatch = {
               render: {
@@ -2900,7 +2902,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             };
             return pageHookRouteMatch;
           };
-          const runFarmDevPageHooks = async (pathname = requestedPagePathname): Promise<void> => {
+          // An app metadata route (sitemap.ts, robots.ts, manifest.ts, llms.ts, a metadata
+          // image) the path matches: production's plugin runtime classes its request as an asset,
+          // with the metadata route's pattern and params, whatever the method.
+          const matchAppMetadataRoute = (
+            pathname: string,
+          ): { pattern: string; params: Record<string, string> } | null => {
+            const routeManager = farmApp.getRouteManager();
+            const image = routeManager.matchMetadataImage(pathname);
+            if (image) return { pattern: image.image.pattern, params: image.params };
+            const metadata = routeManager.matchMetadataRoute(pathname);
+            return metadata
+              ? { pattern: metadata.metadata.pattern, params: metadata.params }
+              : null;
+          };
+          const runFarmDevPageHooks = async (): Promise<void> => {
             if (
               !pm ||
               (!pm.hasHook("beforeRouteMatch") &&
@@ -2909,11 +2925,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             ) {
               return;
             }
-            const { render, layoutPatterns } = pageHookRoute(pathname);
-            const routeManager = farmApp.getRouteManager();
+            const { render, layoutPatterns } = pageHookRoute();
             if (
-              routeManager.matchMetadataRoute(render.pathname) ||
-              routeManager.matchMetadataImage(render.pathname) ||
+              matchAppMetadataRoute(render.pathname) ||
               // A path no page route matches is a page only for a GET or HEAD request.
               (!render.routePattern && requestMethod !== "GET" && requestMethod !== "HEAD")
             ) {
@@ -2933,22 +2947,30 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             await pm.runHookParallel("beforeRender", render);
           };
 
+          const meetsRequestedURLRoutes =
+            configRewriteSource === undefined && !deferredDottedRequests.has(req);
+          // Production lists route-file redirects before config redirects, so they win.
+          const routeRedirect = meetsRequestedURLRoutes
+            ? farmApp.getRouteManager().matchRedirect(requestPathname, parsedRequestUrl.search)
+            : null;
           if (
-            pm &&
-            configRewriteSource === undefined &&
-            !deferredDottedRequests.has(req) &&
-            (configRoutePlugins.has(FARM_CONFIG_HEADERS_PLUGIN_NAME) ||
-              configRedirectMatchers.length > 0) &&
+            meetsRequestedURLRoutes &&
+            (routeRedirect ||
+              (pm &&
+                (configRoutePlugins.has(FARM_CONFIG_HEADERS_PLUGIN_NAME) ||
+                  configRedirectMatchers.length > 0))) &&
             !isViteOwnedRequest()
           ) {
-            let redirect: ReturnType<(typeof configRedirectMatchers)[number]> = null;
+            let redirect: { destination: string; statusCode: number } | null = routeRedirect;
             try {
-              await pm.runHookParallelFiltered(
-                "beforeRequest",
-                (plugin) => plugin.name === FARM_CONFIG_HEADERS_PLUGIN_NAME,
-                req,
-                res,
-              );
+              if (pm) {
+                await pm.runHookParallelFiltered(
+                  "beforeRequest",
+                  (plugin) => plugin.name === FARM_CONFIG_HEADERS_PLUGIN_NAME,
+                  req,
+                  res,
+                );
+              }
               for (const matchRedirect of configRedirectMatchers) {
                 redirect ??= matchRedirect(parsedRequestUrl);
               }
@@ -2966,16 +2988,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 status: redirect.statusCode,
                 headers: { Location: redirect.destination },
               });
-              if (opensFarmDevRuntimeSession(pm)) {
+              if (pm && opensFarmDevRuntimeSession(pm)) {
                 const redirectResponse = response;
                 try {
                   // The session describes the request as production's does for a path no route
-                  // answers.
-                  const kind = isFarmAPIPathname(requestPathname, apiServerBasePath)
-                    ? "api"
-                    : requestMethod === "GET" || requestMethod === "HEAD"
-                      ? "page"
-                      : "request";
+                  // answers, or an app metadata route.
+                  const metadataRoute = matchAppMetadataRoute(requestPathname);
+                  const kind = metadataRoute
+                    ? "asset"
+                    : isFarmAPIPathname(requestPathname, apiServerBasePath)
+                      ? "api"
+                      : requestMethod === "GET" || requestMethod === "HEAD"
+                        ? "page"
+                        : "request";
                   response = await pm.runRuntimeRequest(
                     createRequestFromNodeRequest(req, parsedRequestUrl),
                     async () => {
@@ -2983,7 +3008,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                       if (kind === "page") await runFarmDevPageHooks();
                       return redirectResponse;
                     },
-                    { kind, route: { pathname: requestPathname } },
+                    { kind, route: { pathname: requestPathname, ...metadataRoute } },
                   );
                 } catch {
                   // The runtime reported the failure to runtime.error and onError.
@@ -3850,16 +3875,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             return;
           }
 
-          const redirectMatch = farmApp
-            .getRouteManager()
-            .matchRedirect(requestPathname, parsedRequestUrl.search);
-          if (redirectMatch) {
-            res.statusCode = redirectMatch.statusCode;
-            res.setHeader("Location", redirectMatch.destination);
-            res.end(`Redirecting to ${redirectMatch.destination}`);
-            return;
-          }
-
           // Handle API routes first
           const matchedApiRoute = apiRouteManager.matchRoute(requestPathname);
           const hasMatchedApiRoute = Boolean(matchedApiRoute);
@@ -4709,8 +4724,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // to be routed on whatever the session yields: that is what
           // `runRuntimeRequest` does in the production entry, where the routed
           // request is the session's. So the session opens before the route is
-          // resolved. The session options still describe the requested route,
-          // because production computes them from the incoming request too.
+          // resolved. The session options, and the router and render hooks, still
+          // describe the requested route, because production computes them from the
+          // incoming request too.
           const requestedMatch = routeManager.matchRoute(requestedPathname);
           // What the renderer serves without a route (llms.txt, robots.txt, sitemap.xml, the
           // default MCP server) is reported by its fixed path; see route-label.ts.
@@ -4726,23 +4742,25 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           };
           let runtimeSession: FarmPluginRuntimeSession | undefined;
           let pathname = requestedPathname;
-          // The route the router and render hooks describe: the URL as requested for a config
-          // rewrite, as in production; otherwise the request runtime.before yields, which the
-          // page is routed on.
-          let pageHookPathname = requestedPagePathname;
           if (pm && opensRuntimeSession) {
             try {
-              const sessionOptions = {
-                kind: "page" as const,
-                route: setFarmRouteLabel(
-                  {
-                    pathname: requestedPathname,
-                    pattern: requestedMatch?.route?.pattern || null,
-                    params: requestedMatch?.params || {},
-                  },
-                  requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
-                ),
-              };
+              // The renderer answers an app metadata route here too; production classes it as
+              // an asset. A config rewrite never starts from one, since a local route wins.
+              const metadataRoute =
+                configRewriteSource === undefined ? matchAppMetadataRoute(requestedPathname) : null;
+              const sessionOptions: FarmPluginRuntimeRequestOptions = metadataRoute
+                ? { kind: "asset", route: { pathname: requestedPathname, ...metadataRoute } }
+                : {
+                    kind: "page",
+                    route: setFarmRouteLabel(
+                      {
+                        pathname: requestedPathname,
+                        pattern: requestedMatch?.route?.pattern || null,
+                        params: requestedMatch?.params || {},
+                      },
+                      requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
+                    ),
+                  };
               // A config rewrite's session opens on the requested URL, and runtime.before runs
               // again on the destination with the same ctx, as on production's re-entry.
               runtimeSession = await pm.beginRuntimeRequest(
@@ -4750,15 +4768,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 sessionOptions,
               );
               // The router and render hooks run once runtime.before let the request through,
-              // and before a config rewrite's runtime.before, on its requested URL, as in
-              // production. A hook that throws fails the session below.
-              if (!runtimeSession.response) {
-                pageHookPathname =
-                  configRewriteSource === undefined
-                    ? new URL(runtimeSession.request.url).pathname
-                    : requestedPagePathname;
-                await runFarmDevPageHooks(pageHookPathname);
-              }
+              // and before a config rewrite's runtime.before. They describe the URL as
+              // requested even when runtime.before replaced the Request, as production takes
+              // their route from the incoming request; the page is still routed on the
+              // replacement below. A hook that throws fails the session below.
+              if (!runtimeSession.response) await runFarmDevPageHooks();
               const routedRequest =
                 runtimeSession.response ??
                 (configRewriteSource === undefined
@@ -4811,7 +4825,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // before app middleware, which may then answer the request itself.
           if (!runtimeSession) {
             try {
-              await runFarmDevPageHooks(pageHookPathname);
+              await runFarmDevPageHooks();
             } catch (error) {
               await failPageHook(error);
               return;
@@ -4837,7 +4851,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   hasAfterResponseHook,
                   hasHTMLTransformHook,
                   // render.html gets the render info render.before got.
-                  renderPayload: pageHookRoute(pageHookPathname).render,
+                  renderPayload: pageHookRoute().render,
                   method,
                   urlPath,
                   pathname,
