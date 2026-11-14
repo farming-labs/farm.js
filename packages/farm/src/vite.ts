@@ -3382,8 +3382,33 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 : { body: createFarmNodeRequestBodyStream(req), duplex: "half" };
             const docsResponse = await farmDocsHandler(new Request(docsRequest, docsBodyInit));
             if (docsResponse) {
+              const docsPage = docsResponse.headers
+                .get("content-type")
+                ?.toLowerCase()
+                .includes("text/html");
               await serveBuiltInRoute(
-                () => wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
+                async (request) => {
+                  if (!docsPage) return wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse);
+                  // A docs page is a page document: it names this deployment, and a navigation
+                  // from another deployment's page is refused, as for an app page.
+                  const deploymentMismatch = getFarmDeploymentMismatch(
+                    request,
+                    farmConfig.deploymentId,
+                  );
+                  if (deploymentMismatch) {
+                    await docsResponse.body?.cancel();
+                    return createFarmDeploymentMismatchResponse(deploymentMismatch);
+                  }
+                  return withFarmDeploymentResponse(
+                    await wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
+                    farmConfig.deploymentId,
+                    {
+                      setCookie: request.method.toUpperCase() === "GET",
+                      cookiePath: farmConfig.basePath || "/",
+                      secureCookie: new URL(request.url).protocol === "https:",
+                    },
+                  );
+                },
                 {
                   kind: "docs",
                   computed: docsResponse,

@@ -10761,6 +10761,14 @@ ${
           middlewareHeaders,
         );
       }
+      // A docs page is a page document: it names this deployment, and a navigation from
+      // another deployment's page is refused, as for an app page.
+      const farmDocsDeploymentMismatch = getFarmDeploymentMismatch(request, farmDeploymentId);
+      if (farmDocsDeploymentMismatch) {
+        await docsResponse.body?.cancel();
+        return createFarmDeploymentMismatchResponse(farmDocsDeploymentMismatch);
+      }
+      farmCacheGuard.deploymentPage = true;
       const wrappedDocsResponse = withFarmDocsRequestCache(
         await wrapFarmDocsResponseWithLayouts(request, docsResponse),
         request,
@@ -12275,6 +12283,13 @@ ${
 `
     : ""
 }
+  // The not-found page is a page document: it names this deployment, and a navigation from
+  // another deployment's page is refused, as for an app page.
+  const farmNotFoundDeploymentMismatch = getFarmDeploymentMismatch(request, farmDeploymentId);
+  if (farmNotFoundDeploymentMismatch) {
+    return createFarmDeploymentMismatchResponse(farmNotFoundDeploymentMismatch);
+  }
+  farmCacheGuard.deploymentPage = true;
   // Agents that navigate in Markdown (a \`.md\` URL or \`Accept: text/markdown\`)
   // get a Markdown error body instead of the HTML not-found shell.
   if (farmRequestWantsMarkdown(pathname, request.headers.get("accept"))) {
