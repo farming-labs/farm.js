@@ -12749,15 +12749,22 @@ function withFarmEdgeGuardedPrerenderHeaders(
 }
 
 /**
- * Whether prerendering would render or write the page at a different URL than visitors request.
- * A param can hold a character that only survives in a URL escaped: `#` (`%23`), `?` (`%3F`),
- * `/` (`%2F`) and `%` (`%25`). Nitro's prerenderer does not keep those escapes: it renders the
- * page for another URL or writes its file where it answers another URL, and drops some of them.
- * Such a page is rendered on request instead, where its URL is kept as sent.
- * Other escapes (a space, `+`, non-ASCII letters) round-trip and still prerender.
+ * Whether prerendering would render or write the page at a different URL than visitors request,
+ * or not at all. A param can hold a character that only survives in a URL escaped: `#` (`%23`),
+ * `?` (`%3F`), `/` (`%2F`) and `%` (`%25`). Nitro's prerenderer does not keep those escapes: it
+ * renders the page for another URL or writes its file where it answers another URL, and drops
+ * some of them. It also decodes a route (a space from `%20`, a non-ASCII letter) before it looks
+ * up the route's rules, while h3 keys those rules by the encoded URL, so such a page never matches
+ * its `prerender: true` rule and is skipped. Either page is rendered on request instead, where
+ * its URL is kept as sent. An escape `decodeURI` keeps (`+` as `%2B`) still prerenders.
  */
 function prerenderWouldChangePageUrl(pathname: string): boolean {
-  return /%(?:23|25|2F|3F)/i.test(pathname);
+  if (/%(?:23|25|2F|3F)/i.test(pathname)) return true;
+  try {
+    return decodeURI(pathname) !== pathname;
+  } catch {
+    return true;
+  }
 }
 
 function getPhysicalPrerenderBypassReason(options: {
