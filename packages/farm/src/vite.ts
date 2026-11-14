@@ -179,7 +179,7 @@ import type { FarmPlatform } from "./platform";
 import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
 import * as fs from "fs";
 import * as path from "path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
 import { getRouteGroupScope, stripRouteGroups } from "./routing/route-groups";
@@ -243,7 +243,10 @@ import {
   rewriteFarmReactServerClientModuleImports,
   rewriteFarmReactServerImports,
 } from "./islands-react-server-exports";
-import { rewriteFarmReactCacheImport } from "./islands-react-cache-transform";
+import {
+  FARM_REACT_CACHE_MODULE,
+  rewriteFarmReactCacheImport,
+} from "./islands-react-cache-transform";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { renderFarmLocaleAlternateLinks } from "./i18n/alternates";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
@@ -251,6 +254,7 @@ import {
   createFarmClientOptimizeDepsConfig,
   createFarmClientOptimizeDepsEntries,
   createFarmSourceAlias,
+  mergeFarmViteAlias,
 } from "./server/vite-config";
 import {
   generateFarmDocsAdapterClientRuntime,
@@ -1495,7 +1499,14 @@ export function transformIsolatedClientBoundaryModule(options: {
    * (RFC 0003, section 11); `islandStrategy` is ignored.
    */
   inferredInteraction?: boolean;
+  /** The specifier the module imports a Farm runtime module by (see farmPlugin's transform). */
+  runtimeModule?: (specifier: string) => string;
 }): string | null {
+  const runtimeModule = options.runtimeModule ?? ((specifier: string) => specifier);
+  const islxReact = JSON.stringify(runtimeModule("@farm.js/core/internal/islx-react"));
+  const isolatedBoundary = JSON.stringify(
+    runtimeModule("@farm.js/core/internal/isolated-boundary"),
+  );
   // Islands mode: a server component's form around an island reports its submit to the island's
   // useFormStatus, which then comes from islx instead of react-dom. Both builds rewrite it.
   if (options.slots) {
@@ -1504,7 +1515,7 @@ export function transformIsolatedClientBoundaryModule(options: {
         code: options.code,
         id: options.moduleReference,
         parse: options.parse as (code: string) => AstNode,
-        from: "@farm.js/core/internal/islx-react",
+        from: runtimeModule("@farm.js/core/internal/islx-react"),
       });
       if (rewritten) options = { ...options, code: rewritten.code };
     } catch {
@@ -1650,8 +1661,8 @@ export function transformIsolatedClientBoundaryModule(options: {
   const runtimeImport = options.slots
     ? options.browser
       ? "const __farm_islx_island__ = (component) => component;"
-      : `import { createIsland as __farm_islx_create_island__ } from "@farm.js/core/internal/islx-react";\nconst __farm_is_component__ = ${isComponent};\nconst __farm_islx_island__ = (component, ...rest) => __farm_is_component__(component) ? __farm_islx_create_island__(component, ...rest) : component;`
-    : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_boundary__ } from "@farm.js/core/internal/isolated-boundary";\nconst __farm_is_component__ = ${isComponent};\nconst __farm_create_isolated_boundary__ = (react, component, ...rest) => __farm_is_component__(component) ? __farm_create_boundary__(react, component, ...rest) : component;`;
+      : `import { createIsland as __farm_islx_create_island__ } from ${islxReact};\nconst __farm_is_component__ = ${isComponent};\nconst __farm_islx_island__ = (component, ...rest) => __farm_is_component__(component) ? __farm_islx_create_island__(component, ...rest) : component;`
+    : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_boundary__ } from ${isolatedBoundary};\nconst __farm_is_component__ = ${isComponent};\nconst __farm_create_isolated_boundary__ = (react, component, ...rest) => __farm_is_component__(component) ? __farm_create_boundary__(react, component, ...rest) : component;`;
   return `${runtimeImport}\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
 }
 
@@ -1748,11 +1759,59 @@ export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer | false): bo
   return getFarmRendererCapabilities(resolveFarmRenderer(renderer)).reconcilesRerenders;
 }
 
-function hasViteAlias(alias: AliasOptions | undefined, find: string): boolean {
+/**
+ * Prefix of the id a development server module imports a Farm runtime module by when the module
+ * lives outside the app root. Farm's plugin resolves it from Farm's own install.
+ *
+ * Vite's server environment externalizes a bare `@farm.js/core/internal/*` import, deciding once
+ * per specifier, and then resolves it with Node from the importing file's directory. A workspace
+ * package that does not depend on Farm cannot resolve it from there, so a client component in
+ * one failed to load in `farm dev` once an app component had made the specifier external.
+ */
+const FARM_RUNTIME_MODULE_PREFIX = "/@farm/runtime/";
+
+function toFarmRuntimeModuleId(specifier: string): string {
+  return FARM_RUNTIME_MODULE_PREFIX + specifier;
+}
+
+/** A file of the `@farm.js/core` install this code runs from, which resolves its own exports. */
+function getFarmCoreFile(): string {
+  return typeof __filename === "string" ? __filename : fileURLToPath(import.meta.url);
+}
+
+// `@/` imports an app alias must answer to stand in for Farm's own `@`: shallow and nested paths,
+// with and without an extension, and a directory no app would alias by name.
+const FARM_SOURCE_ALIAS_PROBES = [
+  "@/x",
+  "@/index.ts",
+  "@/components/button",
+  "@/lib/utils/format.ts",
+  "@/__farm__/probe",
+];
+
+/** Whether a Vite alias `find` matches a specifier, as Vite matches it. */
+function matchesViteAlias(find: string | RegExp, specifier: string): boolean {
+  if (typeof find === "string") return specifier === find || specifier.startsWith(`${find}/`);
+  // A global or sticky pattern carries `lastIndex` from one test to the next.
+  find.lastIndex = 0;
+  const matched = find.test(specifier);
+  find.lastIndex = 0;
+  return matched;
+}
+
+/**
+ * Whether one of the app's aliases answers every `@/…` import, so Farm's `@` alias would never be
+ * reached: `"@"` itself, or a pattern such as `/^@\/(.*)$/`. One that answers only some, such as
+ * `/^@\/components\/ui\/(.*)$/`, narrows `@` for those paths; Farm's `@`, merged after the app's
+ * aliases, still serves the rest.
+ */
+function hasFarmSourceAliasOverride(alias: AliasOptions | undefined): boolean {
   if (!alias) return false;
-  if (!Array.isArray(alias)) return Object.prototype.hasOwnProperty.call(alias, find);
-  return alias.some((entry) =>
-    typeof entry.find === "string" ? entry.find === find : entry.find.test(`${find}/`),
+  const finds = Array.isArray(alias)
+    ? alias.map((entry: { find: string | RegExp }) => entry.find)
+    : Object.keys(alias);
+  return finds.some((find) =>
+    FARM_SOURCE_ALIAS_PROBES.every((probe) => matchesViteAlias(find, probe)),
   );
 }
 
@@ -1823,18 +1882,37 @@ export function farmPlugin(
   const getProgrammaticClientRoutes = () =>
     options.programmaticClientRoutes ?? farmApp?.getRouteManager().getProgrammaticClientRoutes();
 
+  // A workspace package's source or a linked package: Node resolution from there may not reach
+  // the app's dependencies.
+  const isOutsideAppRoot = (file: string) => {
+    const root = farmApp?.getConfig().root || server?.config.root || options.root;
+    if (!root) return false;
+    const relative = path.relative(root, file.split("?", 1)[0]!);
+    return relative.startsWith("..") || path.isAbsolute(relative);
+  };
+
   const plugin: Plugin = {
     name: "farm",
     api: { getProgrammaticClientRoutes } satisfies FarmProgrammaticRoutesPluginApi,
 
     config(userConfig, configEnv) {
       isBuild = configEnv.command === "build";
-      const layerAliases = getFarmLayerAliases(options.layers);
       // `@/` resolves to the source directory in development as it does in production
-      // builds. An `@` alias in the app's own Vite config wins.
-      const sourceAlias = hasViteAlias(userConfig.resolve?.alias, "@")
-        ? {}
-        : createFarmSourceAlias(options.root || process.cwd(), options.srcDir);
+      // builds. An app alias that answers every `@/` import replaces it.
+      const farmAliases = {
+        ...getFarmLayerAliases(options.layers),
+        ...(hasFarmSourceAliasOverride(userConfig.resolve?.alias)
+          ? {}
+          : createFarmSourceAlias(options.root || process.cwd(), options.srcDir)),
+      };
+      // Vite puts the aliases a plugin's config hook returns ahead of the app's, and uses the
+      // first that matches, so an app alias for `@/components/ui/*` lost to Farm's `@` in
+      // development while production builds, which merge the app's first, honored it. Merge
+      // Farm's after the app's here too.
+      if (Object.keys(farmAliases).length > 0) {
+        userConfig.resolve ??= {};
+        userConfig.resolve.alias = mergeFarmViteAlias(farmAliases, userConfig.resolve.alias);
+      }
       const layerRoots = (options.layers ?? []).map((layer) => layer.root);
       // Vite's CORS middleware runs ahead of every plugin's and ends each OPTIONS request with a
       // 204, so route OPTIONS exports, app middleware, and routeRules CORS never saw one, and app
@@ -1849,9 +1927,6 @@ export function farmPlugin(
         // Keep development module ownership explicit; the RSC plugin adds its
         // environment only when enabled. Production environment setup is unchanged.
         ...(!isBuild ? { environments: { client: {}, ssr: {} } } : {}),
-        resolve: {
-          alias: { ...layerAliases, ...sourceAlias },
-        },
         server: {
           ...(farmOwnsDevCors ? { cors: false } : {}),
           fs: {
@@ -4991,17 +5066,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
     },
 
     async resolveId(id, importer, resolveOptions) {
+      // A Farm runtime module the transform below anchored at Farm's own install.
+      if (id.startsWith(FARM_RUNTIME_MODULE_PREFIX)) {
+        return this.resolve(id.slice(FARM_RUNTIME_MODULE_PREFIX.length), getFarmCoreFile(), {
+          ...resolveOptions,
+          skipSelf: true,
+        });
+      }
       // The island transform imports Farm's runtime into client components, including ones in a
       // workspace package's source that does not depend on Farm: those resolve from the app.
-      if (id.startsWith("@farm.js/core/internal/") && importer) {
-        const root = farmApp?.getConfig().root || server?.config.root || options.root;
-        const relative = root ? path.relative(root, importer.split("?", 1)[0]!) : "";
-        if (root && (relative.startsWith("..") || path.isAbsolute(relative))) {
-          return this.resolve(id, path.join(root, "package.json"), {
-            ...resolveOptions,
-            skipSelf: true,
-          });
-        }
+      if (id.startsWith("@farm.js/core/internal/") && importer && isOutsideAppRoot(importer)) {
+        const root = (farmApp?.getConfig().root || server?.config.root || options.root)!;
+        return this.resolve(id, path.join(root, "package.json"), {
+          ...resolveOptions,
+          skipSelf: true,
+        });
       }
 
       if (typeof fontImports.resolveId === "function") {
@@ -5242,6 +5321,14 @@ export const manifest = getManifest();
       if (pendingClientSetup && !transformOptions?.ssr && !farmSetupContext.getStore()) {
         await pendingClientSetup;
       }
+      // How the runtime imports Farm adds below are written. A development server module outside
+      // the app root imports them from Farm's own install (see FARM_RUNTIME_MODULE_PREFIX). Builds
+      // and the browser keep the package specifier, which the resolveId hook resolves from the
+      // app, so the browser shares the copy Vite pre-bundles for the app's own modules.
+      const runtimeModule =
+        !isBuild && transformOptions?.ssr === true && isOutsideAppRoot(id)
+          ? toFarmRuntimeModuleId
+          : undefined;
       // Islands mode: `"use server"` modules register as actions on the server and become stubs in
       // the browser (RFC 0003). The RSC engine has its own transform.
       const actionConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
@@ -5313,7 +5400,11 @@ export const manifest = getManifest();
         }
         // Server code only: in the browser React's own cache is the one RSC has there too.
         if (transformOptions?.ssr === true) {
-          const cached = rewriteFarmReactCacheImport(code, file);
+          const cached = rewriteFarmReactCacheImport(
+            code,
+            file,
+            runtimeModule?.(FARM_REACT_CACHE_MODULE),
+          );
           if (cached !== null) {
             code = cached;
             rewrotePackageImports = true;
@@ -5353,6 +5444,7 @@ export const manifest = getManifest();
           ssr: transformOptions?.ssr === true,
           // Parsed by file type: page components are TSX.
           parse: (source) => (parseSync(file, source) as { program: unknown }).program as never,
+          runtimeModule,
         });
         if (actionModule) return { code: actionModule, map: null };
       }
@@ -5476,6 +5568,7 @@ export const manifest = getManifest();
             slots: islandsMode,
             browser: transformOptions?.ssr !== true,
             inferredInteraction: inference?.strategy === "interaction",
+            runtimeModule,
           });
           if (!transformedBoundary) {
             this.error(

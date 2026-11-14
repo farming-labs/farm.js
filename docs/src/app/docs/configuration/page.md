@@ -336,6 +336,28 @@ Farm keeps the options it needs to produce its production output: `root`, `base`
 `build.rollupOptions.input`, and `build.rollupOptions.output`), and any `build`, `define`, or
 `esbuild` value Farm sets for that build. Use `basePath` and `publicDir` in Farm's config instead.
 
+Farm aliases `@/` to `srcDir`. Aliases in `vite.resolve.alias` come before Farm's in dev and in
+both builds, and Vite uses the first one that matches, so an app alias for part of `@/` wins for
+the imports it matches and Farm's `@` handles the rest. For example, this sends
+`@/components/ui/*` to a shared workspace package:
+
+```ts
+import path from "node:path";
+
+const ui = path.resolve("../../packages/ui/src");
+
+export default defineConfig({
+  vite: {
+    resolve: {
+      alias: [{ find: /^@\/components\/ui\/(.*)$/, replacement: `${ui}/components/ui/$1` }],
+    },
+  },
+});
+```
+
+Farm leaves out its own `@` only when an app alias matches every `@/` import: `"@"` itself, or a
+pattern such as `/^@\/(.*)$/`.
+
 `vite.build.sourcemap` never publishes client source maps. A client map carries the original
 source of each module, including code Farm strips from the browser bundle such as
 `createServerOnlyFn` bodies and `generateMetadata`, so any enabled value builds hidden maps (the

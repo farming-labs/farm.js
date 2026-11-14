@@ -18,7 +18,12 @@ const REACT_CACHE_APIS: Record<string, string> = {
   cacheSignal: "__farm_react_cache_signal__",
 };
 
-export function rewriteFarmReactCacheImport(code: string, file: string): string | null {
+export function rewriteFarmReactCacheImport(
+  code: string,
+  file: string,
+  /** The specifier the module imports Farm's cache by (see farmPlugin's transform). */
+  cacheModule: string = FARM_REACT_CACHE_MODULE,
+): string | null {
   if (!code.includes("cache") || !code.includes("react")) return null; // also covers cacheSignal
   const extension = path.extname(file).slice(1);
   const lang = extension === "ts" || extension === "mts" || extension === "cts" ? "ts" : "tsx";
@@ -68,7 +73,7 @@ export function rewriteFarmReactCacheImport(code: string, file: string): string 
     ].join(", ");
     const lines = [
       ...(clause ? [`import ${clause} from "react";`] : []),
-      `import { ${caches.map((specifier) => `${specifier.imported?.name ?? specifier.imported?.value} as ${specifier.local.name}`).join(", ")} } from ${JSON.stringify(FARM_REACT_CACHE_MODULE)};`,
+      `import { ${caches.map((specifier) => `${specifier.imported?.name ?? specifier.imported?.value} as ${specifier.local.name}`).join(", ")} } from ${JSON.stringify(cacheModule)};`,
     ];
     edits.push({ start: node.start, end: node.end, text: lines.join("\n") });
   }
@@ -106,7 +111,7 @@ export function rewriteFarmReactCacheImport(code: string, file: string): string 
       edits.push({
         start: memberImportAt,
         end: memberImportAt,
-        text: `\nimport { ${[...used].map((name) => `${name} as ${REACT_CACHE_APIS[name]}`).join(", ")} } from ${JSON.stringify(FARM_REACT_CACHE_MODULE)};`,
+        text: `\nimport { ${[...used].map((name) => `${name} as ${REACT_CACHE_APIS[name]}`).join(", ")} } from ${JSON.stringify(cacheModule)};`,
       });
     }
   }
