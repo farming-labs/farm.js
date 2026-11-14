@@ -1440,7 +1440,6 @@ export async function buildUniversal(
   assertFarmDocsRuntimeSupported(config, preset);
   const srcDir = config.srcDir || "src";
   const distDir = config.distDir || ".farm";
-  const deployOutputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
   const lifecyclePluginManager = options.pluginManager;
   // Attach all-settled handlers immediately so an earlier discovery failure
   // cannot leave a rejected preload unobserved.
