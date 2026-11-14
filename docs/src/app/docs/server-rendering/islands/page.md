@@ -76,8 +76,9 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   call returns. Its arguments and result can refer to themselves, through a promise or stream in
   the result too. A value the server cannot carry (an element, a plain function, a class instance)
   can still be an argument: the action can only return it, and the browser gets the same object
-  back. An action bound with `.bind` in the browser can be passed to another action, and an
-  action can return one that captured values.
+  back. An action bound with `.bind` in the browser can be passed to another action, which RSC
+  cannot do (React's browser client sends it as a temporary reference), and an action can return
+  one that captured values.
 - **Navigation.** A navigation fetches the page's HTML, streamed, with only the layouts the
   browser does not keep, and hydrates the islands it brings.
 
