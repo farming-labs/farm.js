@@ -6,10 +6,13 @@ import {
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
   getMarkdownPageHydrationPlan,
+  isFarmPackageClientBoundary,
+  withFarmSourceSnapshot,
 } from "../utils/client-component";
 import { resolveConfig } from "../config";
 import { RouteManager } from "../routing/route-manager";
 import {
+  dropLatestPackageClientBoundaryCache,
   runWithPackageClientBoundaryCacheFile,
   usePackageClientBoundaryCacheFile,
   withPackageClientBoundaryCache,
@@ -19,6 +22,7 @@ const tempDirs: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  dropLatestPackageClientBoundaryCache();
   while (tempDirs.length > 0) {
     fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
   }
@@ -348,5 +352,204 @@ describe("package client-boundary cache", () => {
     const { reads } = countPackageReads();
     expect(routeManager.regenerateClientManifest(root)).toEqual(uncached);
     expect(reads).toEqual([]);
+  });
+
+  it("reuses the latest dev plan's inspections in transforms until a watched change", async () => {
+    const { root, cacheFile, modules } = createProject();
+    const config = await resolveConfig({ root, srcDir: "src" }, "development");
+    const routeManager = new RouteManager(config);
+    await routeManager.discoverRoutes();
+    routeManager.usePackageClientBoundaryCacheFile(cacheFile);
+    routeManager.generateClientManifest(root);
+
+    // A transform asks whether each package a module imports is a client boundary.
+    const toolbar = path.join(root, "src", "components", "toolbar.tsx");
+    const inspect = () =>
+      routeManager.inspectPackages(() => isFarmPackageClientBoundary(toolbar, "ui-kit", root));
+    const { reads } = countPackageReads();
+    expect(inspect()).toBe(true);
+    expect(inspect()).toBe(true);
+    expect(reads).toEqual([]);
+    vi.restoreAllMocks();
+
+    // A dependency reinstalled while the dev server runs, then the change the watcher reports.
+    fs.writeFileSync(
+      path.join(root, "node_modules", "ui-kit", "dist", "button.js"),
+      "export function Button() { return null; }\n",
+    );
+    dropLatestPackageClientBoundaryCache();
+    expect(inspect()).toBe(isFarmPackageClientBoundary(toolbar, "ui-kit", root));
+    expect(modules.length).toBeGreaterThan(0);
+  });
+});
+
+describe("incremental dev replans", () => {
+  async function plannedProject() {
+    const project = createProject();
+    const config = await resolveConfig({ root: project.root, srcDir: "src" }, "development");
+    const fresh = async () => {
+      const manager = new RouteManager(config);
+      await manager.discoverRoutes();
+      return manager.generateClientManifest(project.root);
+    };
+    const routeManager = new RouteManager(config);
+    await routeManager.discoverRoutes();
+    routeManager.trackSourceChanges();
+    routeManager.generateClientManifest(project.root);
+    return { ...project, routeManager, fresh };
+  }
+
+  function countSourceReads(): string[] {
+    const reads: string[] = [];
+    const readFileSync = fs.readFileSync;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((
+      file: fs.PathOrFileDescriptor,
+      ...rest: []
+    ) => {
+      if (typeof file === "string") reads.push(file);
+      return readFileSync.call(fs, file, ...rest);
+    }) as typeof fs.readFileSync);
+    return reads;
+  }
+
+  it("replans only the route modules that read an edited file, as a full plan would", async () => {
+    const { root, routeManager, fresh } = await plannedProject();
+    const clientNav = path.join(root, "src", "components", "client-nav.tsx");
+    fs.writeFileSync(
+      clientNav,
+      '"use client";\nimport { Icon1 } from "ui-kit/icons";\nexport const island = "idle";\nexport function ClientNav() { return <Icon1 />; }\n',
+    );
+    routeManager.noteSourceChange(clientNav, "update");
+    const reads = countSourceReads();
+    const replanned = routeManager.regenerateClientManifest(root);
+    vi.restoreAllMocks();
+    expect(replanned).toEqual(await fresh());
+    expect(replanned.routes.find((route) => route.pattern === "/docs")).toMatchObject({
+      isolatedBoundaries: [expect.objectContaining({ islandStrategy: "idle" })],
+    });
+    // Every module the edit did not change is answered from the kept snapshot.
+    expect(new Set(reads.filter((file) => file.startsWith(path.join(root, "src"))))).toEqual(
+      new Set([clientNav]),
+    );
+  });
+
+  it("needs no replan for an edit inside a client component that keeps what plans read", async () => {
+    const { root, routeManager, fresh } = await plannedProject();
+    const clientNav = path.join(root, "src", "components", "client-nav.tsx");
+    const original = fs.readFileSync(clientNav, "utf8");
+    // The route types the dev server writes as it starts are not modules a plan reads.
+    const types = path.join(root, "src", "farm.d.ts");
+    fs.writeFileSync(types, "export {};\n");
+    routeManager.noteSourceChange(types, "create");
+    fs.writeFileSync(
+      clientNav,
+      original.replace("return <Icon1 />", "return <nav><Icon1 /></nav>"),
+    );
+    routeManager.noteSourceChange(clientNav, "update");
+    expect(routeManager.isEditPlanNeutral(clientNav)).toBe(true);
+    // The plan it keeps is the one a full plan makes.
+    expect(routeManager.generateClientManifest(root)).toEqual(await fresh());
+
+    // A deferred strategy changes what the plan reads.
+    fs.writeFileSync(
+      clientNav,
+      original.replace("export function", 'export const island = "idle";\nexport function'),
+    );
+    expect(routeManager.isEditPlanNeutral(clientNav)).toBe(false);
+    // A server module's JSX is read by plans.
+    const toolbar = path.join(root, "src", "components", "toolbar.tsx");
+    expect(routeManager.isEditPlanNeutral(toolbar)).toBe(false);
+  });
+
+  it("sees an edit the watcher did not report", async () => {
+    const { root, routeManager, fresh } = await plannedProject();
+    const clientNav = path.join(root, "src", "components", "client-nav.tsx");
+    fs.writeFileSync(
+      clientNav,
+      '"use client";\nimport { Icon1 } from "ui-kit/icons";\nexport const island = "visible";\nexport function ClientNav() { return <Icon1 />; }\n',
+    );
+    const future = new Date(Date.now() + 5_000);
+    fs.utimesSync(clientNav, future, future);
+    const replanned = routeManager.regenerateClientManifest(root);
+    expect(replanned).toEqual(await fresh());
+    expect(replanned.routes.find((route) => route.pattern === "/docs")).toMatchObject({
+      isolatedBoundaries: [expect.objectContaining({ islandStrategy: "visible" })],
+    });
+  });
+
+  it("replans every route module after a source file is added", async () => {
+    const { root, routeManager, fresh } = await plannedProject();
+    const added = path.join(root, "src", "components", "added.tsx");
+    fs.writeFileSync(added, "export const added = true;\n");
+    routeManager.noteSourceChange(added, "create");
+    const reads = countSourceReads();
+    const replanned = routeManager.regenerateClientManifest(root);
+    vi.restoreAllMocks();
+    expect(replanned).toEqual(await fresh());
+    expect(reads).toContain(path.join(root, "src", "app", "about", "page.tsx"));
+  });
+
+  it("replans every route module without tracking", async () => {
+    const { root, routeManager } = await plannedProject();
+    const config = await resolveConfig({ root, srcDir: "src" }, "development");
+    const untracked = new RouteManager(config);
+    await untracked.discoverRoutes();
+    untracked.generateClientManifest(root);
+    const reads = countSourceReads();
+    untracked.regenerateClientManifest(root);
+    vi.restoreAllMocks();
+    expect(reads).toContain(path.join(root, "src", "app", "about", "page.tsx"));
+    expect(routeManager).toBeDefined();
+  });
+});
+
+describe("source snapshot", () => {
+  it("plans the same and reads each shared module once across a plan's routes", () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "farm-source-snapshot-")));
+    tempDirs.push(root);
+    const files: Record<string, string> = {
+      "src/ui/index.ts": Array.from(
+        { length: 8 },
+        (_, index) => `export { Part${index} } from "./part-${index}";`,
+      ).join("\n"),
+      "src/ui/counter.tsx":
+        '"use client";\nimport { useState } from "react";\nexport function Counter() { const [n, setN] = useState(0); return <button onClick={() => setN(n + 1)}>{n}</button>; }\n',
+    };
+    for (let index = 0; index < 8; index++) {
+      files[`src/ui/part-${index}.tsx`] =
+        `export function Part${index}({ children }) { return <div>{children}</div>; }\n`;
+    }
+    const pages: string[] = [];
+    for (let index = 0; index < 12; index++) {
+      const page = `src/app/page-${index}/page.tsx`;
+      files[page] =
+        `import { Part${index % 8} } from "../../ui";\nimport { Counter } from "../../ui/counter";\nexport default async function Page() { return <Part${index % 8}><Counter /></Part${index % 8}>; }\n`;
+      pages.push(path.join(root, page));
+    }
+    writeFiles(root, files);
+    const plan = () =>
+      pages.map((page) =>
+        getClientModuleHydrationPlan(page, root, "off", {
+          asyncOwnerIslands: true,
+          serverOwners: true,
+        }),
+      );
+    const expected = plan();
+    expect(expected.every((entry) => entry.isolatedBoundaries.length === 1)).toBe(true);
+
+    const reads: string[] = [];
+    const readFileSync = fs.readFileSync;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((
+      file: fs.PathOrFileDescriptor,
+      ...rest: []
+    ) => {
+      if (typeof file === "string") reads.push(file);
+      return readFileSync.call(fs, file, ...rest);
+    }) as typeof fs.readFileSync);
+    expect(withFarmSourceSnapshot(plan)).toEqual(expected);
+    const barrel = path.join(root, "src", "ui", "index.ts");
+    const counter = path.join(root, "src", "ui", "counter.tsx");
+    expect(reads.filter((file) => file === barrel)).toHaveLength(1);
+    expect(reads.filter((file) => file === counter)).toHaveLength(1);
   });
 });

@@ -104,6 +104,8 @@ import {
   farmRequestWantsMarkdown,
   isFarmMarkdownPageFile,
   normalizeFarmMarkdownRoutePath,
+  resolveFarmMdxComponentsModulePath,
+  resolveMdxConfig,
 } from "./app-markdown";
 import {
   applyWebResponseHeaders,
@@ -155,7 +157,10 @@ import {
   resolveFarmIsolatedClientHydrationMode,
   stripUseClientDirective,
 } from "./utils/client-component";
-import { resolvePackageClientBoundaryCacheFile } from "./utils/package-client-boundary-cache";
+import {
+  dropLatestPackageClientBoundaryCache,
+  resolvePackageClientBoundaryCacheFile,
+} from "./utils/package-client-boundary-cache";
 import {
   dispatchIntegrationRequest,
   getFarmIntegrationPluginOwner,
@@ -291,7 +296,11 @@ import type { FarmRenderer } from "./renderer";
 import { createFarmReactRefreshPlugins, isFarmReactRefreshActive } from "./react-refresh";
 import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
-import { inferFarmIslandStrategy, resolveFarmRouteRootStrategy } from "./island-inference";
+import {
+  inferFarmIslandStrategy,
+  invalidateFarmRouteRootInferences,
+  resolveFarmRouteRootStrategy,
+} from "./island-inference";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
   createFarmRouteRenderPlan,
@@ -1828,7 +1837,36 @@ export function farmPlugin(
     publicDir: options.publicDir,
   });
   let farmApp: FarmApp;
+  // Files Farm writes under its output directory (client references, caches), as a POSIX path.
+  const isFarmGeneratedOutput = (file: string): boolean => {
+    const root = farmApp?.getConfig().root ?? options.root;
+    if (!root) return file.includes("/.farm/");
+    const output = toPosixPath(path.resolve(root, options.distDir || ".farm"));
+    return file === output || file.startsWith(`${output}/`);
+  };
   let serverFnTransformActive = false;
+  // The modules a page render evaluates on the server: route modules and the MDX components.
+  const getFarmRenderedServerModules = (): Set<string> => {
+    const routeManager = farmApp?.getRouteManager();
+    if (!routeManager) return new Set();
+    const files = new Set<string>();
+    for (const entries of [
+      routeManager.getRoutes(),
+      routeManager.getLayouts(),
+      routeManager.getLoadings(),
+      routeManager.getErrors(),
+      routeManager.getRouteSlots(),
+    ]) {
+      for (const entry of entries.values()) files.add(entry.modulePath);
+    }
+    const config = farmApp.getConfig();
+    const mdxComponents = resolveFarmMdxComponentsModulePath(
+      resolveMdxConfig(config.mdx),
+      config.root,
+    );
+    if (mdxComponents) files.add(mdxComponents);
+    return files;
+  };
   // Islands mode runs server functions on islx's actions: no @farm.js/plugin/rsc needed.
   const islandsServerFns = () => {
     const config = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
@@ -2019,6 +2057,8 @@ export function farmPlugin(
             options.distDir || ".farm",
           ),
         );
+      // A replan after an edit reuses the plans of route modules that read no edited file.
+      farmApp.getRouteManager().trackSourceChanges();
 
       await farmApp.initialize();
 
@@ -5388,12 +5428,20 @@ export const manifest = getManifest();
             rewrotePackageImports = true;
           }
         }
-        const referenced = rewriteFarmPackageClientImports({
-          code,
-          file,
-          root: projectRoot,
-          isClientPackage: (specifier) => isFarmPackageClientBoundary(file, specifier, projectRoot),
-        });
+        const rewritePackageImports = (source: string) =>
+          rewriteFarmPackageClientImports({
+            code: source,
+            file,
+            root: projectRoot,
+            isClientPackage: (specifier) =>
+              isFarmPackageClientBoundary(file, specifier, projectRoot),
+          });
+        // Each module that imports a package would otherwise read the package's whole entry graph.
+        const routeManager = farmApp?.getRouteManager();
+        const source = code;
+        const referenced = routeManager
+          ? routeManager.inspectPackages(() => rewritePackageImports(source))
+          : rewritePackageImports(source);
         if (referenced !== null) {
           code = referenced;
           rewrotePackageImports = true;
@@ -5801,10 +5849,18 @@ if (import.meta.hot) {
       }
     },
 
-    watchChange() {
+    watchChange(id, change) {
+      // The next hydration plan replans only the route modules that read an edited source file.
+      // Generated output (client references, caches, Vite's deps) is not the app's source.
+      const watched = toPosixPath(id);
+      if (!watched.includes("/node_modules/") && !isFarmGeneratedOutput(watched)) {
+        farmApp?.getRouteManager().noteSourceChange(id, change.event);
+      }
       // A module that gains or loses "use client", or an import, changes what client code reaches.
       invalidateFarmClientReachableModules();
       invalidateFarmClientOnlyScan();
+      invalidateFarmRouteRootInferences();
+      dropLatestPackageClientBoundaryCache();
     },
     async handleHotUpdate(ctx: HmrContext) {
       // A file changed while a deferred setup still discovers routes: handle it against the result.
@@ -5909,13 +5965,16 @@ if (import.meta.hot) {
 
       const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
       const planRouteManager = farmApp?.getRouteManager();
+      // A source module outside src (a workspace package's) can be a client boundary too. A replan
+      // recomputes only the route modules that read the edited file, so it costs nothing for a
+      // module no plan read.
       const isHydrationPlanSource =
-        currentSrcRoot !== null &&
-        normalizedFile.startsWith(`${currentSrcRoot}/`) &&
-        /\.[cm]?[jt]sx?$/.test(normalizedFile);
+        /\.[cm]?[jt]sx?$/.test(normalizedFile) &&
+        !normalizedFile.includes("/node_modules/") &&
+        !isFarmGeneratedOutput(normalizedFile);
       // Any source module can become an async owner's client boundary. Replan
       // React source updates even when the previous plan had no islands, but
-      // keep CSS, generated output and files outside src off this static pass.
+      // keep CSS and generated output off this static pass.
       const tracksAsyncOwnerIslands =
         isReactRenderer(currentFarmConfig?.renderer) && planRouteManager !== undefined;
       // Set once the plan below is rebuilt from this edit, so it is not rebuilt again right after.
@@ -5927,7 +5986,14 @@ if (import.meta.hot) {
           tracksAsyncOwnerIslands)
       ) {
         const routeManager = planRouteManager;
-        if (routeManager) {
+        // An edit inside a client component (its markup, state or handlers) changes no plan, so
+        // React Fast Refresh applies it without the replan; the next replan reads the file again.
+        if (routeManager?.isEditPlanNeutral(file)) {
+          clientPlanCurrent = true;
+        } else if (routeManager) {
+          // Vite reported the change to watchChange first; say it again for a caller that runs
+          // this hook alone, so the replan recomputes every route module that read the file.
+          routeManager.noteSourceChange(file, "update");
           try {
             const previousPlan = JSON.stringify(
               routeManager.generateClientManifest(currentFarmConfig.root),
@@ -6019,6 +6085,20 @@ if (import.meta.hot) {
 
           return [];
         }
+      }
+
+      // A server component a page or layout renders, such as one imported only by server
+      // modules in islands mode: the browser holds none of its code, so no hot update reached
+      // the open page, which kept the old server output until a manual reload. Run the new code
+      // on the next render and reload the page, as an edit to the page itself does.
+      if (
+        /\.[cm]?[jt]sx?$/.test(normalizedFile) &&
+        !server.environments.client?.moduleGraph.getModulesByFile(normalizedFile)?.size &&
+        invalidateFarmDevDependents(server, file, getFarmRenderedServerModules()).length > 0
+      ) {
+        logUpdate("PAGE", `updated ${path.basename(file)}`);
+        server.ws.send({ type: "full-reload", path: "*" });
+        return [];
       }
 
       return modules;

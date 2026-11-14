@@ -90,6 +90,21 @@ test("a client component reads context from a client provider in a server layout
   expect(errors).toEqual([]);
 });
 
+test("a client component that defers its hydration reads its layout's provider", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/context/deferred");
+  await hydrated(page);
+  await page.getByTestId("theme-later").scrollIntoViewIfNeeded();
+  await expect(page.getByTestId("theme-later")).toHaveText("Later theme: light");
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  // Both consumers read the one provider: a deferred island is not a root outside it.
+  await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
+  await expect(page.getByTestId("theme-later")).toHaveText("Later theme: dark");
+  expect(errors).toEqual([]);
+});
+
 test("a server layout around a client provider keeps its code on the server", async ({ page }) => {
   const scripts: string[] = [];
   page.on("response", async (response) => {

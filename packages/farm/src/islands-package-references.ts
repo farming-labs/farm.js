@@ -16,6 +16,7 @@ import {
   listFarmModuleExports,
   listFarmPackageExports,
 } from "./islands-react-server-exports";
+import { memoizeInFarmSourceSnapshot } from "./utils/source-snapshot";
 
 type AstNode = Record<string, any>;
 
@@ -54,6 +55,11 @@ const moduleName = (node: AstNode | undefined): string | null => {
 function parse(code: string, file: string): AstNode | null {
   const extension = path.extname(file).slice(1);
   const lang = extension === "ts" || extension === "mts" || extension === "cts" ? "ts" : "tsx";
+  // A hydration plan inspects each module that imports packages once per route reaching it.
+  return memoizeInFarmSourceSnapshot(`ast:${lang}`, code, () => parseAs(code, lang));
+}
+
+function parseAs(code: string, lang: "ts" | "tsx"): AstNode | null {
   try {
     return parseAst(code, { lang: lang as "tsx" }) as unknown as AstNode;
   } catch {
