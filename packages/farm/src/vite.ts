@@ -5986,7 +5986,11 @@ if (import.meta.hot) {
           tracksAsyncOwnerIslands)
       ) {
         const routeManager = planRouteManager;
-        if (routeManager) {
+        // An edit inside a client component (its markup, state or handlers) changes no plan, so
+        // React Fast Refresh applies it without the replan; the next replan reads the file again.
+        if (routeManager?.isEditPlanNeutral(file)) {
+          clientPlanCurrent = true;
+        } else if (routeManager) {
           // Vite reported the change to watchChange first; say it again for a caller that runs
           // this hook alone, so the replan recomputes every route module that read the file.
           routeManager.noteSourceChange(file, "update");

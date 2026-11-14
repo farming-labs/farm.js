@@ -98,13 +98,32 @@ export default function Page() { return <main><Counter /></main>; }`,
     const handleHotUpdate = farm.handleHotUpdate as (
       context: Pick<HmrContext, "file" | "server" | "modules">,
     ) => Promise<unknown>;
-    // The edit keeps the component a client boundary, so the plan stays the same and Vite
-    // updates the module in place.
-    await handleHotUpdate({
-      file: counter,
-      server,
-      modules: [...(server.moduleGraph.getModulesByFile(counter) ?? [])],
-    });
+    const hotUpdate = () =>
+      handleHotUpdate({
+        file: counter,
+        server,
+        modules: [...(server.moduleGraph.getModulesByFile(counter) ?? [])],
+      });
+    // An edit inside the component (its markup) keeps everything a plan reads, so the plan
+    // stays as it is and Vite updates the module in place without a replan.
+    await fs.writeFile(
+      counter,
+      (await fs.readFile(counter, "utf8")).replace("count {count}", "n {count}"),
+    );
+    await hotUpdate();
+    expect(computeClientManifest).not.toHaveBeenCalled();
+    await requestPlanReaders();
+    expect(computeClientManifest).not.toHaveBeenCalled();
+
+    // A deferred strategy keeps the component a client boundary but changes the plan's island.
+    await fs.writeFile(
+      counter,
+      (await fs.readFile(counter, "utf8")).replace(
+        "export function Counter",
+        'export const island = "idle";\nexport function Counter',
+      ),
+    );
+    await hotUpdate();
     expect(computeClientManifest).toHaveBeenCalledTimes(1);
 
     // The page and the manifest module read the plan the edit already rebuilt.

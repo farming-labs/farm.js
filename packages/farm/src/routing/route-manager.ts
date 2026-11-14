@@ -790,6 +790,8 @@ export class RouteManager {
    * (stylesheets, Markdown, assets) are not read by plans.
    */
   noteSourceChange(file: string, event: "create" | "update" | "delete"): void {
+    // Declarations (Farm writes src/farm.d.ts as the server starts) are never read as modules.
+    if (file.endsWith(".d.ts")) return;
     if (PLAN_SOURCE.test(file)) {
       if (event === "update") {
         this.editedSources?.add(path.resolve(file));
@@ -801,6 +803,19 @@ export class RouteManager {
     this.editedSources = null;
     this.sourceSnapshot?.clear();
     this.linkedSources.clear();
+  }
+
+  /**
+   * @internal Whether an edit to `file` leaves the current plan as it is: a client module the
+   * last plan read whose directive, island and hydrate exports, export shape and imports the edit
+   * kept. The next replan reads it again (the watcher reported it).
+   */
+  isEditPlanNeutral(file: string): boolean {
+    if (!this.sourceChangeTracking || !this.editedSources || !this.clientManifestCache) {
+      return false;
+    }
+    const previous = this.sourceSnapshot?.peekSource(path.resolve(file));
+    return previous !== undefined && isFarmClientModulePlanUnchanged(file, previous);
   }
 
   /**

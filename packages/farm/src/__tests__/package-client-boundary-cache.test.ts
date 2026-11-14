@@ -433,6 +433,34 @@ describe("incremental dev replans", () => {
     );
   });
 
+  it("needs no replan for an edit inside a client component that keeps what plans read", async () => {
+    const { root, routeManager, fresh } = await plannedProject();
+    const clientNav = path.join(root, "src", "components", "client-nav.tsx");
+    const original = fs.readFileSync(clientNav, "utf8");
+    // The route types the dev server writes as it starts are not modules a plan reads.
+    const types = path.join(root, "src", "farm.d.ts");
+    fs.writeFileSync(types, "export {};\n");
+    routeManager.noteSourceChange(types, "create");
+    fs.writeFileSync(
+      clientNav,
+      original.replace("return <Icon1 />", "return <nav><Icon1 /></nav>"),
+    );
+    routeManager.noteSourceChange(clientNav, "update");
+    expect(routeManager.isEditPlanNeutral(clientNav)).toBe(true);
+    // The plan it keeps is the one a full plan makes.
+    expect(routeManager.generateClientManifest(root)).toEqual(await fresh());
+
+    // A deferred strategy changes what the plan reads.
+    fs.writeFileSync(
+      clientNav,
+      original.replace("export function", 'export const island = "idle";\nexport function'),
+    );
+    expect(routeManager.isEditPlanNeutral(clientNav)).toBe(false);
+    // A server module's JSX is read by plans.
+    const toolbar = path.join(root, "src", "components", "toolbar.tsx");
+    expect(routeManager.isEditPlanNeutral(toolbar)).toBe(false);
+  });
+
   it("sees an edit the watcher did not report", async () => {
     const { root, routeManager, fresh } = await plannedProject();
     const clientNav = path.join(root, "src", "components", "client-nav.tsx");

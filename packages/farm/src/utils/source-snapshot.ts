@@ -70,6 +70,12 @@ export class FarmSourceSnapshotStore {
     return changed;
   }
 
+  /** The source text the last plan read for `file`, if it read it. */
+  peekSource(file: string): string | undefined {
+    const value = this.entries.get("source")?.get(file)?.value;
+    return typeof value === "string" ? value : undefined;
+  }
+
   /** Records the stamp of every file an entry read that has none yet. */
   stamp(): void {
     for (const entries of this.entries.values()) {
