@@ -110,7 +110,6 @@ describe("static params with characters a URL only keeps escaped", () => {
   it("prerenders only the pages whose URL the prerenderer keeps", async () => {
     const files = await listFiles(path.join(root!, ".farm", ".output", "public", "post"));
     expect(files.filter((file) => file.endsWith(".html")).sort()).toEqual([
-      "a b/index.html",
       "a+b/index.html",
       "plain/index.html",
     ]);
@@ -118,9 +117,9 @@ describe("static params with characters a URL only keeps escaped", () => {
 
   it("serves every page at its own URL with its own param", async () => {
     expect(await visit("/post/plain")).toEqual({ status: 200, id: "plain", static: true });
-    expect(await visit("/post/a%20b")).toEqual({ status: 200, id: "a b", static: true });
     expect(await visit("/post/a%2Bb")).toEqual({ status: 200, id: "a+b", static: true });
     // Rendered on request, for the param the URL names.
+    expect(await visit("/post/a%20b")).toEqual({ status: 200, id: "a b", static: false });
     expect(await visit("/post/h%231")).toEqual({ status: 200, id: "h#1", static: false });
     expect(await visit("/post/x%3Fy")).toEqual({ status: 200, id: "x?y", static: false });
     expect(await visit("/post/a%2Fb")).toEqual({ status: 200, id: "a/b", static: false });

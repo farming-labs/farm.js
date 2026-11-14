@@ -841,7 +841,7 @@
     "better-call": "^1.0.19",
     "db0": "^0.3.4",
     "es-module-lexer": "2.0.0",
-    "h3": "2.0.1-rc.32",
+    "h3": "2.0.8",
     "image-size": "^2.0.4",
     "intl-messageformat": "11.2.12",
     "marked": "^12.0.2",
