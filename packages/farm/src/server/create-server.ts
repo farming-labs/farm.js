@@ -28,7 +28,6 @@ import {
   createHeadersPlugin,
   createRewritesPlugin,
   createCompressionPlugin,
-  createLoggerPlugin,
 } from "../plugins";
 import { createFarmInfraAnalyticsPlugin } from "../plugins/infra-analytics";
 import {
@@ -352,13 +351,6 @@ export async function createServer(
     const infraAnalytics =
       resolvedConfig.analytics !== false ? createFarmInfraAnalyticsPlugin() : null;
     if (infraAnalytics) pluginManager.addPlugin(infraAnalytics);
-
-    if (mode === "development") {
-      const hasLogger = pluginManager.getPlugins().some((p) => p.name === "farm:logger");
-      if (!hasLogger) {
-        pluginManager.addPlugin(createLoggerPlugin());
-      }
-    }
 
     // Run config hooks
     await pluginManager.runHookParallel("init");

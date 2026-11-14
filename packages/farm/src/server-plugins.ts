@@ -18,3 +18,9 @@ export type {
   FarmPluginRuntimeEndpointEvent,
 } from "./plugin";
 export type { RedirectConfig, HeaderConfig, RewriteConfig } from "./config";
+export type {
+  FarmRequestLogEntry,
+  FarmRequestLogFormat,
+  FarmRequestLogLevel,
+  LoggerPluginOptions,
+} from "./plugins/logger";

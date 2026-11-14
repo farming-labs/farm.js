@@ -1,5 +1,4 @@
 import { defineConfig } from '@farm.js/core';
-import { createLoggerPlugin } from '@farm.js/core/plugin/server';
 
 export default defineConfig({
   deploy: {
@@ -22,9 +21,4 @@ export default defineConfig({
       },
     ];
   },
-
-  // Plugins
-  plugins: [
-    createLoggerPlugin({}),
-  ],
 });

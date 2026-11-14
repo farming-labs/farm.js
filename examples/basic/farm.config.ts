@@ -1,5 +1,5 @@
 import { defineConfig, definePlugin } from '@farm.js/core';
-import { createLoggerPlugin, createEnvPlugin } from '@farm.js/core/plugin/server';
+import { createEnvPlugin } from '@farm.js/core/plugin/server';
 import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
 import { integrationLab } from './src/lib/integration-lab.ts';
@@ -308,7 +308,6 @@ export default defineConfig({
   plugins: [
     projectRoutes,
     runtimeLifecyclePlugin,
-    createLoggerPlugin({}),
     createEnvPlugin({
         FARM_API_URL: 'https://api.example-to-something.com',
         API_URL: 'https://api.example.com',
