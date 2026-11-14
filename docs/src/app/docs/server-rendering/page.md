@@ -462,7 +462,10 @@ Both setups follow the same route contract:
   same head tags. A client navigation sets the next page's title and replaces the tags Farm rendered
   from metadata (description, canonical and alternate links, robots, Open Graph, JSON-LD) with
   that page's, as other Farm apps do; tags your components render (React 19 `<meta>` and `<title>`)
-  stay React's.
+  stay React's. [Metadata route files](/docs/routing#application-metadata-routes)
+  (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, `llms-full.ts`) and `opengraph-image` and
+  `twitter-image` files are served as in other Farm apps, and the head names the nearest manifest
+  and images unless the metadata sets them.
 - **Images.** `<Image>` follows the app's `images` config. Without `sharp`, `provider: "auto"` keeps
   original image URLs, and the optimizer at `images.path` runs only when it can.
 - **Root layouts.** A root layout that renders `<html>` owns the document, as in Next.js, and the
@@ -507,9 +510,9 @@ Both setups follow the same route contract:
 - **Redirects, rewrites and headers.** The config [`redirects()`, `rewrites()` and
   `headers()`](/docs/configuration#route-rules) apply in `farm dev` and in production as in other
   Farm apps: redirects answer before any route or middleware, a rewrite applies only where no page,
-  API route, route file (`sitemap.ts`, `robots.ts`, `llms.ts`, `llms-full.ts`) or generated agent
-  file (`llms.txt`, `sitemap.xml`, `robots.txt`) answers, and headers apply to whatever answers, API
-  routes, agent files and redirects included; a response middleware let through keeps `Cache-Control: private, no-store`. A payload
+  API route, route file (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, `llms-full.ts`),
+  metadata image or generated agent file (`llms.txt`, `sitemap.xml`, `robots.txt`) answers, and
+  headers apply to whatever answers, API routes, agent files and redirects included; a response middleware let through keeps `Cache-Control: private, no-store`. A payload
   request matches as its page, so a client navigation follows a redirect to the destination's
   payload. A static page any of them matches renders on each request instead of prerendering.
 

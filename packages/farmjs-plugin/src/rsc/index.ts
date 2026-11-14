@@ -70,7 +70,7 @@ import {
   resolveFarmImageServerRuntime,
   readRouteRenderingDirectiveFromFile,
 } from "@farm.js/core/vite";
-import { generateRscEntry } from "./entries/rsc.js";
+import { FARM_METADATA_IMAGE_QUERY, generateRscEntry } from "./entries/rsc.js";
 import { resolveMarkdownConfig, type FarmMarkdownUserConfig } from "@farm.js/core/markdown";
 import type {
   FarmAgentCrawlers,
@@ -136,9 +136,12 @@ const { normalizeFarmDeploymentId } = require_(
 const {
   getFarmLayerAliases,
   getFarmSourceRoots,
+  inspectStaticMetadataImage,
+  isOptionalPeerInstalled,
   resolveFarmLayers,
   resolveFarmMCPConfig,
   resolveFarmMCPPlugin,
+  VERCEL_OG_INSTALL_HINT,
 } = require_("@farm.js/core/server") as typeof import("@farm.js/core/server");
 const {
   readNodeRequestBody,
@@ -168,8 +171,22 @@ export { default as nitro } from "./vite-plugin-nitro.js";
 export type { NitroPluginOptions } from "./vite-plugin-nitro.js";
 
 const PAGE_FILE = /^page\.(tsx|jsx|ts|js)$/;
-/** Core's metadata route files that RSC serves (`manifest.ts` is not served yet). */
-const METADATA_ROUTE_FILE = /^(sitemap|robots|llms|llms-full)\.(ts|js)$/;
+/** Core's metadata route files. */
+const METADATA_ROUTE_FILE = /^(sitemap|robots|manifest|llms|llms-full)\.(ts|js)$/;
+/** Core's metadata image files: a generated module or a static image. */
+const METADATA_IMAGE_FILE =
+  /^(opengraph-image|twitter-image)\.(tsx|jsx|ts|js|png|jpg|jpeg|gif|webp)$/;
+const STATIC_METADATA_IMAGE_FILE = /\.(png|jpg|jpeg|gif|webp)$/;
+/** The static metadata image files the entry globs, and so the only files its loader reads. */
+const STATIC_METADATA_IMAGE_NAME = /^(opengraph-image|twitter-image)\.(png|jpg|jpeg|gif|webp)$/;
+
+/** Whether `file` is inside one of `roots` (each resolved, without a trailing separator). */
+function isFileInsideRoots(file: string, roots: readonly string[]): boolean {
+  return roots.some((root) => {
+    const relative = path.relative(root, file);
+    return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+  });
+}
 
 /** Packages the generated RSC entries import that belong to this plugin, not to the app. */
 const PLUGIN_OWNED_ENTRY_IMPORTS = ["rsc-html-stream/server", "rsc-html-stream/client"];
@@ -838,6 +855,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   let devConfigRoutes: RscDevConfigRoutes | undefined;
   const middlewareConfigModules = new Map<string, string>();
   let mcpConfigCandidates: string[] | null = null;
+  /** The app's route roots (and their real paths): the only places metadata images load from. */
+  let metadataImageRoots: string[] = [];
 
   // Store for debugging
   const debug = options.debug ?? false;
@@ -1002,6 +1021,44 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
 
       load(id) {
         return middlewareConfigModules.get(id.replace(/\\/g, "/")) ?? null;
+      },
+    },
+    {
+      // Static opengraph-image and twitter-image files, as the RSC entry globs them: the info
+      // core's router reads (dimensions, content type, alt text, hash) and the bytes, which a
+      // build inlines as core's build does. farm dev reloads them when the image or its
+      // .alt.txt changes. The query is untrusted (a browser can send it to the dev server), so
+      // only the RSC environment, which imports these modules, reads a file, and only an image
+      // the entry's glob names: an opengraph-image or twitter-image under a route root.
+      name: "@farm.js/plugin/rsc:metadata-images",
+      enforce: "pre",
+
+      async load(id) {
+        const queryIndex = id.indexOf("?");
+        if (
+          queryIndex === -1 ||
+          !new URLSearchParams(id.slice(queryIndex + 1)).has(FARM_METADATA_IMAGE_QUERY.slice(1))
+        ) {
+          return null;
+        }
+        const environmentName = (this as { environment?: { name?: string } }).environment?.name;
+        if (environmentName !== "rsc") return null;
+        const file = path.resolve(id.slice(0, queryIndex));
+        if (
+          !STATIC_METADATA_IMAGE_NAME.test(path.basename(file)) ||
+          !isFileInsideRoots(file, metadataImageRoots)
+        ) {
+          throw new Error(
+            `[Farm.js] ${file} is not an opengraph-image or twitter-image file of the app's routes.`,
+          );
+        }
+        this.addWatchFile(file);
+        this.addWatchFile(
+          path.join(path.dirname(file), `${path.basename(file, path.extname(file))}.alt.txt`),
+        );
+        const info = await inspectStaticMetadataImage(file);
+        const data = (await fs.readFile(file)).toString("base64");
+        return `export default ${JSON.stringify({ info, data })};`;
       },
     },
     {
@@ -1265,15 +1322,59 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             }
           }
         }
-        // sitemap.ts, robots.ts, llms.ts and llms-full.ts route files, as core serves them. A
-        // build bundles them only when the app has one; farm dev always looks, so a file added
-        // while it runs is served.
+        // sitemap.ts, robots.ts, manifest.ts, llms.ts and llms-full.ts route files, and
+        // opengraph-image and twitter-image files, as core serves them. A build bundles them only
+        // when the app has one; farm dev always looks, so a file added while it runs is served.
         let appMetadataRoutes = env.command === "serve";
-        for (const source of appMetadataRoutes ? [] : getFarmSourceRoots(c)) {
+        const metadataImages = { static: appMetadataRoutes, generated: appMetadataRoutes };
+        metadataImageRoots = [];
+        for (const source of getFarmSourceRoots(c)) {
           const routesRoot = path.resolve(root, source.srcDir, configuredRoutesDir);
-          if ((await findRouteFiles(routesRoot, (name) => METADATA_ROUTE_FILE.test(name))).length) {
-            appMetadataRoutes = true;
-            break;
+          // Vite names a module by its real path, so the root's real path counts too.
+          metadataImageRoots.push(
+            routesRoot,
+            await fs.realpath(routesRoot).catch(() => routesRoot),
+          );
+          const files = await findRouteFiles(
+            routesRoot,
+            (name) => METADATA_ROUTE_FILE.test(name) || METADATA_IMAGE_FILE.test(name),
+          );
+          const images = new Map<string, string>();
+          for (const { key, file } of files) {
+            const name = path.basename(file);
+            if (!METADATA_IMAGE_FILE.test(name)) {
+              appMetadataRoutes = true;
+              continue;
+            }
+            const isStatic = STATIC_METADATA_IMAGE_FILE.test(name);
+            if (isStatic) metadataImages.static = true;
+            else metadataImages.generated = true;
+            // A generated image renders with @vercel/og: a build without it fails, as core's does.
+            if (
+              !isStatic &&
+              env.command === "build" &&
+              !isOptionalPeerInstalled(root, "@vercel/og")
+            ) {
+              throw new Error(
+                `[Farm.js] ${path.relative(root, file).split(path.sep).join("/")} renders with @vercel/og, which is not installed. ${VERCEL_OG_INSTALL_HINT}`,
+              );
+            }
+            // One image of each kind per route segment (route groups add none), as core's
+            // router requires.
+            const fileName = name.slice(0, name.indexOf("."));
+            const pattern =
+              key
+                .split("/")
+                .slice(0, -1)
+                .filter((segment) => !/^\(.+\)$/.test(segment))
+                .join("/") || "/";
+            const existing = images.get(`${fileName}:${pattern}`);
+            if (existing) {
+              throw new Error(
+                `[Farm.js] Duplicate ${fileName} route "${pattern}". Found both ${existing} and ${file}. Keep only one static image or module per route segment.`,
+              );
+            }
+            images.set(`${fileName}:${pattern}`, file);
           }
         }
         // Root layouts that render <html> own the document (Next.js's root layout contract).
@@ -1386,6 +1487,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           ...(sitemap.enabled ? { pageLastModified } : {}),
           ...(crawlers.enabled ? { crawlers } : {}),
           ...(appMetadataRoutes ? { appMetadataRoutes } : {}),
+          ...(metadataImages.static || metadataImages.generated ? { metadataImages } : {}),
           i18n,
           ...(i18nCatalogs ? { i18nCatalogs } : {}),
           ...(configRoutes ? { configRoutes } : {}),

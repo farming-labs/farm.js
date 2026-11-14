@@ -184,7 +184,7 @@ describe("RSC sitemap.ts, robots.ts and llms.ts route files", () => {
   it("emits no route file code for a build without them", () => {
     const entry = generateRscEntry({ ...context, sitemap: resolveFarmAgentSitemap(true) });
     expect(entry).not.toContain("handleFarmAppMetadataRoute");
-    expect(entry).not.toContain("{sitemap,robots,llms,llms-full}");
+    expect(entry).not.toContain("{sitemap,robots,manifest,llms,llms-full}");
   });
 
   it("answers them after middleware and API routes, before the generated files", () => {
@@ -194,7 +194,7 @@ describe("RSC sitemap.ts, robots.ts and llms.ts route files", () => {
       sitemap: resolveFarmAgentSitemap(true),
     });
     expect(entry).toContain(
-      'import.meta.glob("/src/app/**/{sitemap,robots,llms,llms-full}.{ts,js}", { eager: true })',
+      'import.meta.glob("/src/app/**/{sitemap,robots,manifest,llms,llms-full}.{ts,js}", { eager: true })',
     );
     const api = entry.indexOf("await handleAPIRequest(cloneFarmRequestWithContext(request))");
     const routeFiles = entry.indexOf("await handleFarmAppMetadataRoute(request, context)");
