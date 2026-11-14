@@ -1,20 +1,11 @@
 # `@farm.js/scroll-restoration`
 
-Per-route scroll restoration for Farm.js, as a client plugin.
+**Restore the window scroll position on Back/Forward once the page has rendered.**
 
-Core already saves a scroll position per path and restores it on
-back/forward — but it restores synchronously, right after the new page data
-arrives and before the route has rendered, so the scroll is often clamped
-to the not-yet-rendered document and the visit lands at the top. This
-plugin re-does the restore at the moment the layout is final: it saves the
-window position on `navigation.before` and restores it on
-`navigation.rendered`, for back/forward (`pop`) navigations only. New
-pushes keep the top, as core already scrolls them there.
-
-Positions are keyed by route pattern + params when the navigation session
-carries a route (`/posts/[id]#{"id":"7"}`), and by pathname otherwise, and
-live in `sessionStorage` for the tab's lifetime. Every storage access is
-try/catch-wrapped: a hostile storage never breaks a navigation.
+Core already saves and restores window scroll for its HTML and SPA routers. It restores as soon
+as the new page is in the DOM. This plugin restores again on `navigation.rendered`, two frames
+after the page renders, so content that settles after core's restore still lands where you left
+it. It also covers Server Components mode, where core has no scroll restoration of its own.
 
 ## Install
 
@@ -24,11 +15,12 @@ pnpm add @farm.js/scroll-restoration
 
 ```ts
 // farm.config.ts
+import { defineConfig } from "@farm.js/core";
 import { scrollRestoration } from "@farm.js/scroll-restoration";
 
-export default {
+export default defineConfig({
   plugins: [scrollRestoration()],
-};
+});
 ```
 
 ## Options
@@ -37,26 +29,22 @@ export default {
 | ------------------ | ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `storageKeyPrefix` | `"farm-scroll-restore"` | Prefix for the `sessionStorage` keys. Change it only to avoid a collision with another entry in the same storage. |
 
-## Opting a navigation out
+## Behavior
 
-A link opts its navigation out with `data-farm-scroll-restore="off"` —
-the runtime skips both the save and the restore for the navigation that
-click starts:
+- On every client navigation, the position of the page being left is saved. On Back/Forward
+  (`pop`), the saved position of the page being entered is restored. Pushes and replaces keep
+  core's scroll-to-top.
+- Positions are keyed by pathname plus query string, like core's: `/search?q=a` and
+  `/search?q=b` keep their own positions. They live in `sessionStorage` for the tab's
+  lifetime.
+- A destination with a hash is left to core, which scrolls to the fragment.
+- Every storage and scroll call is wrapped, so a disabled or full storage never breaks a
+  navigation.
 
-```html
-<a href="/posts/7" data-farm-scroll-restore="off">Read without restoring</a>
-```
+## What it does not do
 
-## What it does (and does not) do
-
-- Restores the **window** scroll position only. Registered scroll elements
-  (the `useScrollRestoration` hook) stay with core.
-- A fragment in the destination URL is an explicit scroll target: core
-  scrolls to it, and this plugin does not restore over it.
-- The router does not populate `session.route` today, so keys fall back to
-  the pathname in practice; the pattern + params branch activates when the
-  session carries a route.
-- This plugin keeps its own `sessionStorage` namespace
-  (`farm-scroll-restore:*`) and never reads or overwrites core's
-  `farm-scroll-*` entries. Core's early restore still runs first on a pop;
-  this plugin's restore after `navigation.rendered` is the one that sticks.
+- It restores the **window** only. Nested scroll containers stay with core's
+  `useScrollRestoration` hook.
+- It does not change pushes. To keep the current scroll on a link click, use
+  `<Link scroll={false}>`.
+- It never reads or writes core's `farm-scroll-*` entries.

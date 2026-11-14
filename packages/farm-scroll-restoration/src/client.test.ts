@@ -1,251 +1,158 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startScrollRestorationRuntime } from "./client.js";
-import type {
-  ResolvedScrollRestorationOptions,
-  ScrollRestorationNavigationEvent,
-  ScrollRestorationRuntime,
-} from "./types.js";
+import type { ScrollRestorationNavigationEvent, ScrollRestorationRuntime } from "./types.js";
 
-function baseOptions(
-  overrides: Partial<ResolvedScrollRestorationOptions> = {},
-): ResolvedScrollRestorationOptions {
-  return { storageKeyPrefix: "farm-scroll-restore", ...overrides };
-}
+const PREFIX = "farm-scroll-restore";
+let sequence = 0;
 
-function navEvent(
-  overrides: Partial<ScrollRestorationNavigationEvent> = {},
+function navigation(
+  action: ScrollRestorationNavigationEvent["action"],
+  to: string,
 ): ScrollRestorationNavigationEvent {
+  const url = new URL(to, "http://localhost");
   return {
-    id: "navigation:1",
-    from: { href: "http://localhost/", pathname: "/", search: "", hash: "" },
-    to: { href: "http://localhost/posts/7", pathname: "/posts/7", search: "", hash: "" },
-    action: "pop",
-    ...overrides,
+    id: `navigation:${++sequence}`,
+    to: { href: url.href, pathname: url.pathname, search: url.search, hash: url.hash },
+    action,
   };
 }
 
 describe("startScrollRestorationRuntime", () => {
   let scrollTo: ReturnType<typeof vi.fn>;
-  let originalScrollTo: unknown;
-  let originalScrollX: PropertyDescriptor | undefined;
-  let originalScrollY: PropertyDescriptor | undefined;
-  let originalSessionStorage: unknown;
   let runtime: ScrollRestorationRuntime | null = null;
+  const descriptors = new Map<string, PropertyDescriptor | undefined>();
 
-  function setScroll(x: number, y: number): void {
-    Object.defineProperty(window, "scrollX", { configurable: true, value: x });
+  function setScroll(y: number): void {
     Object.defineProperty(window, "scrollY", { configurable: true, value: y });
   }
 
-  function start(
-    options: ResolvedScrollRestorationOptions = baseOptions(),
-    target: Window & typeof globalThis = window,
-  ): ScrollRestorationRuntime {
-    runtime = startScrollRestorationRuntime(options, target);
+  /** Start on `path`, as if the tab had loaded it. */
+  function start(path = "/"): ScrollRestorationRuntime {
+    window.history.replaceState(null, "", path);
+    runtime = startScrollRestorationRuntime({ storageKeyPrefix: PREFIX }, window);
     return runtime;
   }
 
+  /** One client navigation, the way core drives the hooks. */
+  function go(action: ScrollRestorationNavigationEvent["action"], to: string): void {
+    const event = navigation(action, to);
+    runtime?.saveForNavigation(event);
+    runtime?.restoreForNavigation(event);
+  }
+
   beforeEach(() => {
-    document.body.innerHTML = "";
-    window.sessionStorage.clear();
+    for (const key of ["scrollTo", "scrollX", "scrollY"]) {
+      descriptors.set(key, Object.getOwnPropertyDescriptor(window, key));
+    }
     scrollTo = vi.fn();
-    originalScrollTo = (window as unknown as Record<string, unknown>).scrollTo;
     Object.defineProperty(window, "scrollTo", { configurable: true, value: scrollTo });
-    originalScrollX = Object.getOwnPropertyDescriptor(window, "scrollX");
-    originalScrollY = Object.getOwnPropertyDescriptor(window, "scrollY");
-    originalSessionStorage = window.sessionStorage;
-    setScroll(0, 0);
+    Object.defineProperty(window, "scrollX", { configurable: true, value: 0 });
+    setScroll(0);
+    window.sessionStorage.clear();
   });
 
   afterEach(() => {
     runtime?.close();
     runtime = null;
-    Object.defineProperty(window, "scrollTo", { configurable: true, value: originalScrollTo });
-    if (originalScrollX === undefined)
-      delete (window as unknown as Record<string, unknown>).scrollX;
-    else Object.defineProperty(window, "scrollX", originalScrollX);
-    if (originalScrollY === undefined)
-      delete (window as unknown as Record<string, unknown>).scrollY;
-    else Object.defineProperty(window, "scrollY", originalScrollY);
-    Object.defineProperty(window, "sessionStorage", {
-      configurable: true,
-      value: originalSessionStorage,
-    });
-    document.body.innerHTML = "";
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(window, key, descriptor);
+      else delete (window as unknown as Record<string, unknown>)[key];
+    }
     window.sessionStorage.clear();
-    vi.restoreAllMocks();
+    window.history.replaceState(null, "", "/");
   });
 
-  it("saves the from-page position on navigation.before", () => {
-    start();
-    setScroll(0, 300);
+  it("saves the page being left on navigation.before", () => {
+    start("/");
+    setScroll(300);
+    runtime?.saveForNavigation(navigation("push", "/about"));
 
-    runtime?.saveForNavigation(
-      navEvent({
-        action: "push",
-        to: { href: "http://localhost/about", pathname: "/about", search: "", hash: "" },
-      }),
-    );
-
-    expect(window.sessionStorage.getItem("farm-scroll-restore:/")).toBe('{"x":0,"y":300}');
+    expect(window.sessionStorage.getItem(`${PREFIX}:/`)).toBe('{"x":0,"y":300}');
   });
 
-  it("restores the saved position on rendered for a pop navigation", () => {
-    start();
-    window.sessionStorage.setItem("farm-scroll-restore:/posts/7", '{"x":0,"y":420}');
+  it("restores the first page the tab loaded on Back", () => {
+    start("/posts/7");
+    setScroll(900);
+    go("push", "/about");
+    go("pop", "/posts/7");
 
-    runtime?.restoreForNavigation(navEvent({ action: "pop" }));
+    expect(scrollTo).toHaveBeenLastCalledWith(0, 900);
+  });
 
-    expect(scrollTo).toHaveBeenCalledWith(0, 420);
+  it("restores the page being left on Forward", () => {
+    start("/");
+    setScroll(1200);
+    go("push", "/about");
+    setScroll(300);
+    go("pop", "/");
+    expect(scrollTo).toHaveBeenLastCalledWith(0, 1200);
+
+    go("pop", "/about");
+    expect(scrollTo).toHaveBeenLastCalledWith(0, 300);
+  });
+
+  it("keeps a position per query string", () => {
+    start("/search?q=a");
+    setScroll(800);
+    go("push", "/search?q=b");
+    setScroll(300);
+    go("pop", "/search?q=a");
+
+    expect(scrollTo).toHaveBeenLastCalledWith(0, 800);
+    expect(window.sessionStorage.getItem(`${PREFIX}:/search?q=b`)).toBe('{"x":0,"y":300}');
   });
 
   it("does not restore for push or replace navigations", () => {
-    start();
-    window.sessionStorage.setItem("farm-scroll-restore:/posts/7", '{"x":0,"y":420}');
-
-    runtime?.restoreForNavigation(navEvent({ action: "push" }));
-    runtime?.restoreForNavigation(navEvent({ action: "replace", id: "navigation:2" }));
+    start("/");
+    window.sessionStorage.setItem(`${PREFIX}:/posts/7`, '{"x":0,"y":420}');
+    go("push", "/posts/7");
+    go("replace", "/posts/7");
 
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  it("does not restore when the destination has a hash", () => {
-    start();
-    window.sessionStorage.setItem("farm-scroll-restore:/posts/7", '{"x":0,"y":420}');
-
-    runtime?.restoreForNavigation(
-      navEvent({
-        action: "pop",
-        to: {
-          href: "http://localhost/posts/7#comments",
-          pathname: "/posts/7",
-          search: "",
-          hash: "#comments",
-        },
-      }),
-    );
+  it("leaves a destination hash to core", () => {
+    start("/");
+    window.sessionStorage.setItem(`${PREFIX}:/posts/7`, '{"x":0,"y":420}');
+    go("pop", "/posts/7#comments");
 
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
   it("does nothing when nothing was saved for the destination", () => {
-    start();
-
-    runtime?.restoreForNavigation(navEvent({ action: "pop" }));
+    start("/");
+    go("pop", "/posts/7");
 
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  it("skips the save and the restore for an opted-out link", () => {
-    start();
-    setScroll(0, 300);
-    window.sessionStorage.setItem("farm-scroll-restore:/posts/7", '{"x":0,"y":420}');
-    document.body.innerHTML = `<a href="/posts/7" data-farm-scroll-restore="off">Read</a>`;
-    const anchor = document.querySelector("a") as HTMLAnchorElement;
-    anchor.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-
-    runtime?.saveForNavigation(navEvent({ action: "push" }));
-    expect(window.sessionStorage.getItem("farm-scroll-restore:/")).toBeNull();
-
-    runtime?.restoreForNavigation(navEvent({ action: "pop" }));
-    expect(scrollTo).not.toHaveBeenCalled();
-  });
-
-  it("does not let an opt-out leak to a different destination", () => {
-    start();
-    setScroll(0, 300);
-    window.sessionStorage.setItem("farm-scroll-restore:/other", '{"x":0,"y":55}');
-    document.body.innerHTML = `<a href="/posts/7" data-farm-scroll-restore="off">Read</a>`;
-    const anchor = document.querySelector("a") as HTMLAnchorElement;
-    anchor.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-
-    runtime?.saveForNavigation(
-      navEvent({
-        action: "push",
-        to: { href: "http://localhost/other", pathname: "/other", search: "", hash: "" },
-      }),
-    );
-    expect(window.sessionStorage.getItem("farm-scroll-restore:/")).toBe('{"x":0,"y":300}');
-
-    runtime?.restoreForNavigation(
-      navEvent({
-        action: "pop",
-        id: "navigation:2",
-        to: { href: "http://localhost/other", pathname: "/other", search: "", hash: "" },
-      }),
-    );
-    expect(scrollTo).toHaveBeenCalledWith(0, 55);
-  });
-
-  it("keys by route pattern plus params when the session carries a route", () => {
-    start();
-    window.sessionStorage.setItem('farm-scroll-restore:/posts/[id]#{"id":"7"}', '{"x":0,"y":500}');
-
-    runtime?.restoreForNavigation(
-      navEvent({ action: "pop", route: { pattern: "/posts/[id]", params: { id: "7" } } }),
-    );
-    expect(scrollTo).toHaveBeenCalledWith(0, 500);
-
-    // The next save uses the pattern key, not the pathname.
-    setScroll(0, 610);
-    runtime?.saveForNavigation(
-      navEvent({
-        action: "push",
-        id: "navigation:2",
-        to: { href: "http://localhost/about", pathname: "/about", search: "", hash: "" },
-      }),
-    );
-    expect(window.sessionStorage.getItem('farm-scroll-restore:/posts/[id]#{"id":"7"}')).toBe(
-      '{"x":0,"y":610}',
-    );
-  });
-
-  it("discards a recorded opt-out so a later restore proceeds", () => {
-    start();
-    window.sessionStorage.setItem("farm-scroll-restore:/posts/7", '{"x":0,"y":420}');
-    document.body.innerHTML = `<a href="/posts/7" data-farm-scroll-restore="off">Read</a>`;
-    const anchor = document.querySelector("a") as HTMLAnchorElement;
-    anchor.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-
-    runtime?.saveForNavigation(navEvent({ action: "push" }));
-    runtime?.discard("navigation:1");
-    runtime?.restoreForNavigation(navEvent({ action: "pop" }));
-
-    expect(scrollTo).toHaveBeenCalledWith(0, 420);
-  });
-
-  it("stops everything after close", () => {
-    start();
-    setScroll(0, 300);
+  it("stops saving and restoring after close", () => {
+    start("/");
+    window.sessionStorage.setItem(`${PREFIX}:/posts/7`, '{"x":0,"y":420}');
     runtime?.close();
+    setScroll(300);
+    go("pop", "/posts/7");
 
-    document.body.innerHTML = `<a href="/posts/7" data-farm-scroll-restore="off">Read</a>`;
-    const anchor = document.querySelector("a") as HTMLAnchorElement;
-    anchor.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-    runtime?.saveForNavigation(navEvent({ action: "push" }));
-    expect(window.sessionStorage.getItem("farm-scroll-restore:/")).toBeNull();
-
-    window.sessionStorage.setItem("farm-scroll-restore:/posts/7", '{"x":0,"y":420}');
-    runtime?.restoreForNavigation(navEvent({ action: "pop" }));
+    expect(window.sessionStorage.getItem(`${PREFIX}:/`)).toBeNull();
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  it("never throws when storage is hostile", () => {
+  it("never throws when storage or scrollTo is hostile", () => {
     const hostileWindow = {
       location: new URL("http://localhost/"),
       scrollX: 0,
       scrollY: 120,
-      scrollTo: vi.fn(),
-      addEventListener: () => {},
-      removeEventListener: () => {},
+      scrollTo() {
+        throw new Error("denied");
+      },
       get sessionStorage(): never {
         throw new Error("denied");
       },
     } as unknown as Window & typeof globalThis;
-    const hostile = start(baseOptions(), hostileWindow);
+    const hostile = startScrollRestorationRuntime({ storageKeyPrefix: PREFIX }, hostileWindow);
 
-    expect(() => hostile.saveForNavigation(navEvent({ action: "push" }))).not.toThrow();
-    expect(() => hostile.restoreForNavigation(navEvent({ action: "pop" }))).not.toThrow();
+    expect(() => hostile.saveForNavigation(navigation("push", "/about"))).not.toThrow();
+    expect(() => hostile.restoreForNavigation(navigation("pop", "/"))).not.toThrow();
     hostile.close();
   });
 });

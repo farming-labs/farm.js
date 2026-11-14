@@ -25,40 +25,19 @@ function memoryStorage(initial: Record<string, string> = {}): ScrollStorage & {
 }
 
 describe("scrollKeyFor", () => {
-  it("keys by route pattern plus sorted params when a route is carried", () => {
-    expect(
-      scrollKeyFor(
-        { pathname: "/posts/7", search: "?tab=comments", hash: "#top" },
-        { pattern: "/posts/[id]", params: { id: "7" } },
-      ),
-    ).toBe('/posts/[id]#{"id":"7"}');
+  it("keys by pathname plus query string", () => {
+    expect(scrollKeyFor({ pathname: "/search", search: "?q=a" })).toBe("/search?q=a");
+    expect(scrollKeyFor({ pathname: "/search", search: "?q=b" })).toBe("/search?q=b");
   });
 
-  it("sorts params so key order does not matter", () => {
-    expect(
-      scrollKeyFor(
-        { pathname: "/a/1/b/2" },
-        { pattern: "/a/[x]/b/[y]", params: { y: "2", x: "1" } },
-      ),
-    ).toBe('/a/[x]/b/[y]#{"x":"1","y":"2"}');
+  it("keys by pathname alone without a query string", () => {
+    expect(scrollKeyFor({ pathname: "/posts/7", search: "" })).toBe("/posts/7");
+    expect(scrollKeyFor({ pathname: "/posts/7" })).toBe("/posts/7");
   });
 
-  it("uses the bare pattern when the route has no params", () => {
-    expect(scrollKeyFor({ pathname: "/pricing" }, { pattern: "/pricing", params: {} })).toBe(
-      "/pricing",
-    );
-  });
-
-  it("falls back to the pathname when no route is carried", () => {
-    expect(scrollKeyFor({ pathname: "/posts/7", search: "?tab=code", hash: "#top" })).toBe(
-      "/posts/7",
-    );
-  });
-
-  it("falls back to the pathname when the pattern is empty", () => {
-    expect(scrollKeyFor({ pathname: "/posts/7" }, { pattern: "   ", params: { id: "7" } })).toBe(
-      "/posts/7",
-    );
+  it("leaves the hash out of the key", () => {
+    const location = { pathname: "/posts/7", search: "", hash: "#top" };
+    expect(scrollKeyFor(location)).toBe("/posts/7");
   });
 });
 

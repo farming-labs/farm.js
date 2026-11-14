@@ -14,19 +14,14 @@ export type {
 } from "./types.js";
 
 /**
- * Restore the scroll position per route on back/forward navigations.
+ * Restore the window scroll position on Back/Forward once the page has
+ * rendered.
  *
- * Core saves a position per path but restores it before the new route has
- * rendered, so back/forward visits often land at the top. This plugin
- * saves on `navigation.before` and restores on `navigation.rendered` —
- * after the layout is final — for `pop` navigations only; new pushes keep
- * the top. Positions are keyed by route pattern + params when the session
- * carries a route, and by pathname otherwise, and live in
+ * Saves the position of the page being left on `navigation.before` and
+ * restores the saved position of the page being entered on
+ * `navigation.rendered`, for `pop` navigations only; new pushes keep the
+ * top. Positions are keyed by pathname plus query string and live in
  * `sessionStorage` for the tab's lifetime.
- *
- * A link opts its navigation out with
- * `data-farm-scroll-restore="off"`: the runtime skips both the save and
- * the restore for the navigation that click starts.
  */
 export function scrollRestoration(options: ScrollRestorationOptions = {}) {
   const resolved = resolveScrollRestorationOptions(options);
@@ -64,17 +59,9 @@ export function scrollRestoration(options: ScrollRestorationOptions = {}) {
       navigation: {
         before(event) {
           event.state.saveForNavigation(event);
-          // Core aborts a navigation without `rendered` or `error` when a
-          // hash link or a link to the current page cancels it.
-          event.signal.addEventListener("abort", () => event.state.discard(event.id), {
-            once: true,
-          });
         },
         rendered(event) {
           event.state.restoreForNavigation(event);
-        },
-        error(event) {
-          event.state.discard(event.id);
         },
       },
       close({ state }) {

@@ -42,7 +42,6 @@ describe("scrollRestoration Farm plugin", () => {
     const state = {
       saveForNavigation: vi.fn(),
       restoreForNavigation: vi.fn(),
-      discard: vi.fn(),
       close: vi.fn(),
     };
     const signal = new AbortController().signal;
@@ -60,8 +59,5 @@ describe("scrollRestoration Farm plugin", () => {
 
     (plugin.client?.navigation?.rendered as Function)?.(event);
     expect(state.restoreForNavigation).toHaveBeenCalledWith(event);
-
-    (plugin.client?.navigation?.error as Function)?.(event);
-    expect(state.discard).toHaveBeenCalledWith("navigation:1");
   });
 });

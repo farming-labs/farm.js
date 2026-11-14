@@ -1,18 +1,11 @@
 /**
- * Pure, DOM-free decisions for the scroll-restoration runtime: per-route
- * scroll keys, sessionStorage key building, and stored-position parsing.
- * Everything here is unit-testable in Node.
+ * Pure, DOM-free decisions for the scroll-restoration runtime: scroll keys,
+ * sessionStorage key building, and stored-position parsing.
  */
-
-export interface ScrollRoute {
-  pattern?: string | null;
-  params?: Record<string, string>;
-}
 
 export interface ScrollLocation {
   pathname: string;
   search?: string;
-  hash?: string;
 }
 
 export interface ScrollPosition {
@@ -21,40 +14,20 @@ export interface ScrollPosition {
 }
 
 /** The smallest storage surface the runtime needs. `sessionStorage`
- * satisfies it; a fake object works in tests. */
+ * satisfies it. */
 export interface ScrollStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
 }
 
-function stableParams(params: Record<string, string>): string {
-  const sorted: Record<string, string> = {};
-  for (const key of Object.keys(params).sort()) {
-    sorted[key] = params[key];
-  }
-  return JSON.stringify(sorted);
-}
-
 /**
- * The key a scroll position is saved under for one route.
- *
- * When the navigation session carries a route, the key is the route pattern
- * plus its params (`/posts/[id]#{"id":"7"}`), so every visit to the same
- * route instance shares one saved position and the query string does not
- * split it. When no route is carried — the router does not populate
- * `session.route` today — the key falls back to the pathname, which is the
- * same granularity core uses for its own `farm-scroll-*` keys.
+ * The key a scroll position is saved under: the pathname plus the query
+ * string, the same granularity core uses for its own `farm-scroll-*` keys.
+ * `/search?q=a` and `/search?q=b` are different pages with different
+ * positions. The hash is left out because it is a scroll target, not a page.
  */
-export function scrollKeyFor(location: ScrollLocation, route?: ScrollRoute): string {
-  const pattern = route?.pattern?.trim();
-  if (pattern) {
-    const params = route?.params;
-    if (params && Object.keys(params).length > 0) {
-      return `${pattern}#${stableParams(params)}`;
-    }
-    return pattern;
-  }
-  return location.pathname;
+export function scrollKeyFor(location: ScrollLocation): string {
+  return location.pathname + (location.search ?? "");
 }
 
 /** The `sessionStorage` key for a scroll key. Kept in its own namespace
@@ -103,7 +76,7 @@ export function readStoredScrollPosition(
   }
 }
 
-/** Save a scroll position. A throwing or missing storage is ignored —
+/** Save a scroll position. A throwing or missing storage is ignored:
  * scroll restoration is best-effort and must never break a navigation. */
 export function writeStoredScrollPosition(
   storage: ScrollStorage | null | undefined,
