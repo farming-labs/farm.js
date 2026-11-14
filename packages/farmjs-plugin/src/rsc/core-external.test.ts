@@ -668,6 +668,40 @@ export default function sitemap({ path }) {
             `import { Link } from "@farm.js/core/client";
 export default function Page() { return <Link href="/about">About link</Link>; }`,
           );
+          // Revalidating pages: one a shared cache may store, one behind a guard, one behind
+          // middleware that opts back into shared caching and sets its own Cache-Control, and one
+          // whose layout reads the request.
+          writeRoute(
+            "isr/page.tsx",
+            `export const revalidate = 300;
+export default async function Page() { return <main>Revalidating page</main>; }`,
+          );
+          writeRoute(
+            "isr/guarded/page.tsx",
+            `export const revalidate = 300;
+export default function Page() { return <main>Guarded revalidating page</main>; }`,
+          );
+          writeRoute("isr/guarded/middleware.ts", `export function middleware() {}`);
+          writeRoute(
+            "isr/public/page.tsx",
+            `export const revalidate = 300;
+export default function Page() { return <main>Public revalidating page</main>; }`,
+          );
+          writeRoute(
+            "isr/public/middleware.ts",
+            `export const config = { cache: "public" };
+export function middleware(request, context) { context.headers.set("cache-control", "public, max-age=5"); }`,
+          );
+          writeRoute(
+            "isr/layout-reads/layout.tsx",
+            `import { headers } from "@farm.js/core";
+export default async function Layout({ children }) { return <section data-agent={headers().get("user-agent") ? "1" : "0"}>{children}</section>; }`,
+          );
+          writeRoute(
+            "isr/layout-reads/page.tsx",
+            `export const revalidate = 300;
+export default function Page() { return <main>Layout reads the request</main>; }`,
+          );
         }
         if (name === "i18n") {
           // basePath "/console" with en and fr: pages read the request locale from core's runtime,
@@ -1327,6 +1361,52 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
               `<link rel="alternate" href="${mirror}" type="text/markdown">`,
             );
           }
+
+          // A revalidating page gets core's shared Cache-Control on its HTML, its Flight payload
+          // and its '.rsc' payload, which vary by Accept and never set the deployment cookie. A
+          // browser holding only that cookie still gets the shared response.
+          const SHARED = "public, s-maxage=300, stale-while-revalidate=300";
+          const isrRequest = (pathname: string, headers: Record<string, string> = {}) =>
+            fetch(origin + pathname, { headers, signal: AbortSignal.timeout(10_000) });
+          const home = await isrRequest("/console");
+          const deploymentId = home.headers.get("x-farm-deployment-id");
+          expect(deploymentId).toBeTruthy();
+          for (const [pathname, headers] of [
+            ["/console/isr", { accept: "text/html" }],
+            ["/console/isr", { accept: "text/x-component" }],
+            ["/console/isr.rsc", { accept: "*/*" }],
+            ["/console/isr", { accept: "text/html", cookie: `__farm_deployment=${deploymentId}` }],
+            // A cache: "public" middleware's own Cache-Control yields to the page's, as in core.
+            ["/console/isr/public", { accept: "text/html" }],
+            ["/console/isr/public.rsc", { accept: "*/*" }],
+          ] as const) {
+            const response = await isrRequest(pathname, headers);
+            const label = `${pathname} ${JSON.stringify(headers)}`;
+            expect(response.status, `${label} ${logs}`).toBe(200);
+            expect(await response.text(), label).toContain("evalidating page");
+            expect(response.headers.get("cache-control"), label).toBe(SHARED);
+            expect(response.headers.get("vary")?.toLowerCase(), label).toContain("accept");
+            expect(response.headers.get("x-farm-deployment-id"), label).toBe(deploymentId);
+            expect(response.headers.getSetCookie(), label).toEqual([]);
+          }
+          // One visitor's render stays private, as core keeps it: a session cookie, credentials,
+          // middleware that let the request through, and a layout that read the request.
+          for (const [pathname, headers] of [
+            ["/console/isr", { accept: "text/html", cookie: "session=abc" }],
+            ["/console/isr", { accept: "text/x-component", authorization: "Bearer token" }],
+            ["/console/isr/guarded", { accept: "text/html" }],
+            ["/console/isr/guarded.rsc", { accept: "*/*" }],
+            ["/console/isr/layout-reads", { accept: "text/html" }],
+            ["/console/isr/layout-reads.rsc", { accept: "*/*" }],
+          ] as const) {
+            const response = await isrRequest(pathname, headers);
+            const label = `${pathname} ${JSON.stringify(headers)}`;
+            expect(response.status, `${label} ${logs}`).toBe(200);
+            await response.text();
+            expect(response.headers.get("cache-control"), label).toBe("private, no-store");
+          }
+          // Revalidating pages render on each request: none is prerendered.
+          expect(existsSync(path.join(isolatedOutput, "public", "console", "isr.rsc"))).toBe(false);
         }
         if (name === "trailing-slash") {
           for (const [pathname, accept, marker] of [

@@ -318,6 +318,10 @@ export function generateRscEntry(ctx: EntryContext): string {
   // development the dev server does, ahead of Vite and the API routes, as core's dev server does.
   const configRoutes = ctx.development === true ? undefined : ctx.configRoutes;
   const configHeaders = (configRoutes?.headers.length ?? 0) > 0;
+  // A static or revalidating page gets core's shared Cache-Control in production. farm dev keeps
+  // pages out of shared caches, as core's dev server never sends an s-maxage.
+  const sharedPageCache = ctx.development !== true;
+  const pageCacheArg = sharedPageCache ? ", farmPageCacheControl" : "";
   const localRouteCheck = (ctx.configRoutes?.rewrites.length ?? 0) > 0;
   // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
   const appSegment = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
@@ -418,7 +422,16 @@ import {
   renderMetadataHead,
   resolveMetadataTitle,
 } from '@farm.js/core/internal/production-runtime';
-
+${
+  sharedPageCache
+    ? `import {
+  _getRequestReadCount,
+  _hasPrivateFarmRequestHeaders,
+  resolveRouteSharedCacheControl,
+} from '@farm.js/core/internal/production-runtime';
+${i18n ? "import { getLocaleSource } from '@farm.js/core/i18n/server';\n" : ""}`
+    : ""
+}
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
   applyMarkdownNegotiationHeaders,
@@ -660,12 +673,15 @@ function withFarmDeploymentCookie(request, response) {
   });
 }
 
-function applyActionResponseHeaders(headers, request) {
+function applyActionResponseHeaders(headers, request, pageCacheControl) {
   // The same page URL serves HTML or Flight depending on Accept.
   const vary = (headers.get('vary') || '').split(',').map(value => value.trim().toLowerCase());
   if (!vary.includes('*') && !vary.includes('accept')) headers.append('vary', 'Accept');
   // handler() sets the deployment cookie once the response's cache policy is final.
   headers.set('x-farm-deployment-id', farmDeploymentId);
+  // A static or revalidating page's own policy (getFarmPageCacheControl) wins over a Cache-Control
+  // middleware set, as a page's own headers do in core's server.
+  if (pageCacheControl) headers.set('cache-control', pageCacheControl);
   if (${ctx.actionsEnabled ? "true" : "false"} && request.method === 'POST') {
     headers.set('cache-control', 'no-store');
     headers.set('x-content-type-options', 'nosniff');
@@ -1127,7 +1143,41 @@ function matchFarmPagePath(normalized) {
 // Each page's parsed rendering directive and whether its source reads request state, baked by
 // the build because module exports cannot tell.
 const farmPageRenderingDirectives = ${JSON.stringify(ctx.pageRenderingDirectives ?? {})};
-
+${
+  sharedPageCache
+    ? `
+/**
+ * The Cache-Control of a page a shared cache may store (\`revalidate\`, or a static page this server
+ * renders), as core's production server decides it: core's policy for the route, or
+ * \`private, no-store\` when this render is one visitor's (a cookie other than the deployment
+ * cookie, \`Authorization\`, middleware request data, or a request read since \`readsBefore\`).
+ * Null for any other page, which keeps the default. Decided before the page streams, so its HTML
+ * and its Flight payload get the same policy; middleware that let the request through makes it
+ * private afterwards, as in core.
+ */
+function getFarmPageCacheControl(request, matched, readsBefore, middlewareData, middlewareContext) {
+  const shared = resolveRouteSharedCacheControl(
+    mergeRouteRenderingDirectiveConfig(farmPageRenderingDirectives[matched.pattern], matched.module),
+  );
+  if (!shared) return null;
+  const method = request.method.toUpperCase();
+  const perRequest =
+    (method !== 'GET' && method !== 'HEAD') ||
+    _hasPrivateFarmRequestHeaders(request${
+      i18n
+        ? `, getLocaleSource() === 'url'
+      ? { name: farmRouteI18n.cookie.name, locales: farmRouteI18n.locales }
+      : undefined`
+        : ""
+    }) ||
+    middlewareData.size > 0 ||
+    middlewareContext.size > 0 ||
+    _getRequestReadCount(request) !== readsBefore;
+  return perRequest ? 'private, no-store' : shared;
+}
+`
+    : ""
+}
 /**
  * The URL paths the build prerenders, by core's SSG rules: a page asks to be static
  * (dynamic = "force-static", generateStaticParams, "use ssg"), does not read request
@@ -1668,7 +1718,14 @@ ${
   // every non-RSC environment produces (see core's search-params.ts).
   const searchParams = searchParamsToObject(url.searchParams);
   
-  // Page props passed to components (includes middleware shared data)
+  ${
+    sharedPageCache
+      ? `// A request read from here on (metadata, the page, its layouts) makes the render one visitor's,
+  // as in core's server; reads in middleware do not count.
+  const farmReadsBeforeRender = _getRequestReadCount(request);
+  `
+      : ""
+  }// Page props passed to components (includes middleware shared data)
   const pageProps = { params, searchParams, middlewareData };
   ${
     ctx.markdown?.enabled
@@ -1802,7 +1859,18 @@ ${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
   // Check if this is a client-side navigation request
   // Client sends Accept: text/x-component header for RSC requests
   const acceptHeader = request.headers.get('accept') || '';
-  
+  ${
+    sharedPageCache
+      ? `const farmPageCacheControl = getFarmPageCacheControl(
+    request,
+    matched,
+    farmReadsBeforeRender,
+    middlewareResult.data,
+    middlewareContext,
+  );
+  `
+      : ""
+  }
   if (renderToReadableStream) {
     // Full RSC mode with streaming
     debug('Using RSC streaming mode');
@@ -1814,7 +1882,7 @@ ${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
       // Merge middleware headers with response headers
       const responseHeaders = new Headers(middlewareHeaders);
       responseHeaders.set('content-type', 'text/x-component');
-      applyActionResponseHeaders(responseHeaders, request);
+      applyActionResponseHeaders(responseHeaders, request${pageCacheArg});
       return new Response(rscStream, { headers: responseHeaders });
     }
 
@@ -1834,7 +1902,7 @@ ${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
       // Merge middleware headers with response headers
       const responseHeaders = new Headers(middlewareHeaders);
       responseHeaders.set('content-type', 'text/html');
-      applyActionResponseHeaders(responseHeaders, request);
+      applyActionResponseHeaders(responseHeaders, request${pageCacheArg});
       return new Response(html, { headers: responseHeaders });
     }
   }
@@ -1860,7 +1928,7 @@ ${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
   // Merge middleware headers with response headers
   const responseHeaders = new Headers(middlewareHeaders);
   responseHeaders.set('content-type', 'text/html');
-  applyActionResponseHeaders(responseHeaders, request);
+  applyActionResponseHeaders(responseHeaders, request${pageCacheArg});
   return new Response(html, { headers: responseHeaders });
       })
     )
