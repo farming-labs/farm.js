@@ -331,10 +331,38 @@ export default defineConfig({
 ```
 
 Farm keeps the options it needs to produce its production output: `root`, `base`, `mode`,
-`appType`, `publicDir`, the build's entries and output (`build.outDir`, `build.emptyOutDir`,
-`build.ssr`, `build.ssrEmitAssets`, `build.write`, `build.lib`, `build.watch`,
-`build.rollupOptions.input`, and `build.rollupOptions.output`), and any `build`, `define`, or
-`esbuild` value Farm sets for that build. Use `basePath` and `publicDir` in Farm's config instead.
+`appType`, `publicDir`, the build's entries and output location (`build.outDir`,
+`build.emptyOutDir`, `build.ssr`, `build.ssrEmitAssets`, `build.write`, `build.lib`,
+`build.watch`, and `build.rollupOptions.input`), and any `build`, `define`, or `esbuild` value
+Farm sets for that build. Use `basePath` and `publicDir` in Farm's config instead.
+
+### Client output and chunking
+
+`vite.build.rolldownOptions.output` (or its older name `rollupOptions.output`) applies to the
+production client build, so an app can choose how the browser bundle is split into chunks:
+
+```ts
+export default defineConfig({
+  vite: {
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [{ name: "vendor", test: /node_modules/, minShareCount: 2, maxSize: 500_000 }],
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+Farm keeps the output options the server reads or that would publish private data: `dir`, `file`,
+`format`, `entryFileNames`, `chunkFileNames`, `assetFileNames`, `hashCharacters`, and every
+`sourcemap*` option (see `vite.build.sourcemap` below). Every other output option, such as
+`codeSplitting`, `manualChunks`, `minify`, `banner`, or `generatedCode`, is used as written. Set
+`output` to one object; an array of outputs fails the build. The server build keeps Farm's own
+output options.
 
 `vite.build.sourcemap` never publishes client source maps. A client map carries the original
 source of each module, including code Farm strips from the browser bundle such as
