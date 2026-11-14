@@ -147,4 +147,24 @@ describe("react production navigation history", () => {
     expect(router.currentPath).toBe("/meta");
     expect(window.history.pushState).toHaveBeenCalledTimes(1);
   });
+
+  it("saves the scroll position of the page being left when Back is pressed", async () => {
+    const { router, back } = setup();
+    router.swapContent = vi.fn(async () => true);
+    router.saveScrollPosition = vi.fn();
+    router.restoreScrollPosition = vi.fn();
+
+    await router.navigate("/server-query");
+    expect(router.saveScrollPosition).toHaveBeenLastCalledWith("/meta");
+
+    // The URL already names /meta when popstate fires; /server-query is still on screen.
+    back();
+    await router.navigate("https://example.test/meta", {
+      action: "pop",
+      scroll: false,
+      popState: null,
+    });
+    expect(router.saveScrollPosition).toHaveBeenLastCalledWith("/server-query");
+    expect(router.restoreScrollPosition).toHaveBeenCalledWith("/meta");
+  });
 });
