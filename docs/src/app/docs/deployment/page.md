@@ -124,6 +124,8 @@ Farm's browser error overlay and its source-map diagnostics are development-only
 
 Farm embeds a deployment ID in each HTML document and sends it with SPA data, RSC navigation, and server action requests. The server also stores the ID in an HttpOnly, `SameSite=Lax` cookie so a progressively enhanced form action carries the same protection before JavaScript loads.
 
+In apps built with `@farm.js/plugin/rsc`, only a `GET` page document that stays out of shared caches (`private` or `no-store`, with no CDN cache header) sets that cookie, in `farm dev` and in production. A page that `cache: "public"` middleware makes shareable, a prerendered page, a Flight payload, and a refused request are sent without it: a CDN does not cache a response that sets a cookie, and one that did would hand it to every visitor. Such a page still embeds its deployment ID, so navigations and JavaScript server actions from it are checked.
+
 During a rolling deployment, an open page can belong to release A while its next request reaches release B. Farm handles that mismatch according to whether replay is safe:
 
 | Request                                      | Mismatch behavior                                                              |

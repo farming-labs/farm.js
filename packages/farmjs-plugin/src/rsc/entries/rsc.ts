@@ -277,7 +277,7 @@ import {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
 } from '@farm.js/core/middleware';
-import { _withFarmGuardedResponseCache } from '@farm.js/core/internal/production-runtime';
+import { _withFarmGuardedResponseCache, _withFarmResponseHeaders } from '@farm.js/core/internal/production-runtime';
 ${ctx.mobileClient === "entry" ? "import { _applyFarmMobileShellClient, createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';\n" : ctx.mobileClient === "inline" ? "import { createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';\n" : ""}import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
@@ -509,19 +509,48 @@ function debug(...args) {
   ${debugLog}
 }
 
-function applyActionResponseHeaders(headers, request) {
-  // The same page URL serves HTML or Flight depending on Accept.
-  const vary = (headers.get('vary') || '').split(',').map(value => value.trim().toLowerCase());
-  if (!vary.includes('*') && !vary.includes('accept')) headers.append('vary', 'Accept');
-  headers.set('x-farm-deployment-id', farmDeploymentId);
-  const accept = request.headers.get('accept') || '';
-  if (request.method === 'GET' && !accept.includes('text/x-component')) {
+// Directives a CDN reads in place of Cache-Control, as core's CDN_CACHE_CONTROL_HEADERS lists them.
+const FARM_CDN_CACHE_CONTROL_HEADERS = [
+  'cdn-cache-control',
+  'vercel-cdn-cache-control',
+  'netlify-cdn-cache-control',
+  'cloudflare-cdn-cache-control',
+];
+const FARM_PRIVATE_CACHE_DIRECTIVE = /(?:^|,)\\s*(?:private|no-store)\\s*(?:[,=]|$)/i;
+
+/**
+ * Store the deployment ID in the deployment cookie on a page document a browser loads, so a form
+ * posted from it before JavaScript runs names its deployment. Only a GET page document that names
+ * this deployment and stays out of shared caches carries it: a CDN does not cache a response that
+ * sets a cookie (and one that does would hand it to every visitor), so a publicly cached page is
+ * sent as it was. A request naming another deployment keeps its cookie, so its forms stay refused.
+ *
+ * These are the rules of core's _withFarmDeploymentCookie for its production server (deployment
+ * skew protection); reuse that helper here once core exports it. A Flight payload is fetched by
+ * the client router, which names its deployment in a header, so it never carries the cookie.
+ */
+function withFarmDeploymentCookie(request, response) {
+  if (request.method.toUpperCase() !== 'GET') return response;
+  if ((request.headers.get('accept') || '').includes('text/x-component')) return response;
+  if (response.headers.get('x-farm-deployment-id') !== farmDeploymentId) return response;
+  if (!FARM_PRIVATE_CACHE_DIRECTIVE.test(response.headers.get('cache-control') || '')) return response;
+  if (FARM_CDN_CACHE_CONTROL_HEADERS.some((name) => response.headers.has(name))) return response;
+  if (getFarmDeploymentMismatch(request, farmDeploymentId)) return response;
+  return _withFarmResponseHeaders(response, (headers) => {
     headers.append('set-cookie', createFarmDeploymentCookie(
       farmDeploymentId,
       ${JSON.stringify(ctx.basePath)},
       new URL(request.url).protocol === 'https:',
     ));
-  }
+  });
+}
+
+function applyActionResponseHeaders(headers, request) {
+  // The same page URL serves HTML or Flight depending on Accept.
+  const vary = (headers.get('vary') || '').split(',').map(value => value.trim().toLowerCase());
+  if (!vary.includes('*') && !vary.includes('accept')) headers.append('vary', 'Accept');
+  // handler() sets the deployment cookie once the response's cache policy is final.
+  headers.set('x-farm-deployment-id', farmDeploymentId);
   if (${ctx.actionsEnabled ? "true" : "false"} && request.method === 'POST') {
     headers.set('cache-control', 'no-store');
     headers.set('x-content-type-options', 'nosniff');
@@ -2094,6 +2123,30 @@ async function handleFarmAppMetadataRoute(request, context) {
 `
       : ""
   }/**
+ * A Markdown request whose only cookie is the deployment cookie, without it. That cookie names a
+ * release, never a visitor, so a browser holding it may still read (and fill) a mirror md.cache
+ * shares; any other cookie keeps the mirror private. Core's withoutFarmDeploymentCookie applies
+ * the same rule inside createMarkdownMirrorResponse with deployment skew protection; drop this
+ * once that ships. The mirror renders the page with a GET, where the cookie is never read.
+ */
+function withoutLoneFarmDeploymentCookie(request) {
+  const cookie = request.headers.get('cookie');
+  if (!cookie || !cookie.includes('__farm_deployment')) return request;
+  if (!farmRequestWantsMarkdown(new URL(request.url).pathname, request.headers.get('accept'))) {
+    return request;
+  }
+  const otherCookie = cookie.split(';').some((part) => {
+    const separator = part.indexOf('=');
+    const name = (separator === -1 ? part : part.slice(0, separator)).trim();
+    return name !== '' && name !== '__farm_deployment';
+  });
+  if (otherCookie) return request;
+  const headers = new Headers(request.headers);
+  headers.delete('cookie');
+  return new Request(request, { headers });
+}
+
+/**
  * Serves a page's Markdown mirror (\`/page.md\` or \`Accept: text/markdown\`) by
  * rendering the page through the normal request path, so middleware and sign-in
  * gates apply; every other request renders as usual, and HTML pages advertise
@@ -2102,7 +2155,7 @@ async function handleFarmAppMetadataRoute(request, context) {
 async function handleFarmPageOrMarkdown(request, context) {
   if (!farmMarkdownConfig.enabled) return handleFarmRequest(request, context);
   const markdown = await createMarkdownMirrorResponse({
-    request,
+    request: withoutLoneFarmDeploymentCookie(request),
     config: farmMarkdownConfig,
     routePathname: getFarmRoutePathname,
     // The page the render below selects for the mirrored URL, below the basePath and locale.
@@ -2240,7 +2293,9 @@ ${
     headers.set('x-nitro-prerender', encodeURIComponent(farmPayloadPath(new URL(request.url).pathname)));
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
-  return ${ctx.mobileClient === "entry" ? "_applyFarmMobileShellClient(request, response, farmMobileShellClient)" : "response"};
+  const finalResponse = ${ctx.mobileClient === "entry" ? "_applyFarmMobileShellClient(request, response, farmMobileShellClient)" : "response"};
+  // A prerendered page is a file served to every visitor, so it never sets the cookie.
+  return prerendering ? finalResponse : withFarmDeploymentCookie(pageRequest, finalResponse);
 }
 ${
   ctx.mobileClient === "entry"

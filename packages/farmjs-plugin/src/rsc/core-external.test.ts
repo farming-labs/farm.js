@@ -946,6 +946,34 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           expect(handled.headers.get("x-config-middleware")).toBe("active");
         }
         if (name === "default") {
+          // A page that stays out of shared caches stores its deployment in the cookie, renewing
+          // another deployment's cookie a document load sends; one that names another deployment
+          // is refused and keeps its cookie.
+          const document = await fetch(origin + "/", {
+            headers: { accept: "text/html", cookie: "__farm_deployment=stale-release" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(document.status, logs).toBe(200);
+          expect(document.headers.get("cache-control")).toBe("private, no-store");
+          const deploymentId = document.headers.get("x-farm-deployment-id");
+          expect(deploymentId).toBeTruthy();
+          expect(document.headers.getSetCookie()).toEqual([
+            `__farm_deployment=${encodeURIComponent(deploymentId!)}; Path=/; HttpOnly; SameSite=Lax`,
+          ]);
+          const stale = await fetch(origin + "/", {
+            headers: { accept: "text/html", "x-farm-deployment-id": "stale-release" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(stale.status, logs).toBe(409);
+          expect(stale.headers.get("x-farm-deployment-id")).toBe(deploymentId);
+          expect(stale.headers.getSetCookie()).toEqual([]);
+          const navigation = await fetch(origin + "/", {
+            headers: { accept: "text/x-component" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(navigation.status, logs).toBe(200);
+          expect(navigation.headers.getSetCookie()).toEqual([]);
+
           for (const [pathname, expected, excluded] of [
             ["/accounts/new", "Route error rendered", "Dynamic account error rendered"],
             ["/accounts/alice", "Dynamic account error rendered", "Route error rendered"],
@@ -1099,6 +1127,9 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(page.headers.get("content-type")).toContain(accept);
             expect(await page.text(), logs).toContain("RSC root runtime fixture");
             expect(page.headers.get("cache-control")).toBe("public, max-age=60");
+            // A CDN may store this page, so it never sets the deployment cookie.
+            expect(page.headers.get("x-farm-deployment-id")).toBeTruthy();
+            expect(page.headers.getSetCookie()).toEqual([]);
             const fields = page.headers.get("vary")?.toLowerCase().split(/,\s*/);
             // Nitro only adds Accept-Encoding when it actually negotiates a
             // compressed representation; these are the app-owned variants.
@@ -1231,8 +1262,25 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(response.status, `${pathname} ${logs}`).toBe(308);
             expect(response.headers.get("location"), pathname).toBe(location);
           }
+          // A prerendered page is a file served to every visitor, without the deployment cookie;
+          // a page rendered on request sets it.
+          for (const pathname of ["/console/static/", "/console/about/"]) {
+            const response = await fetch(origin + pathname, {
+              headers: { accept: "text/html" },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            expect(response.headers.getSetCookie(), pathname).toEqual(
+              pathname === "/console/static/"
+                ? []
+                : [expect.stringMatching(/^__farm_deployment=[^;]+; Path=\/console; HttpOnly/)],
+            );
+          }
           // sitemap.xml lists each page at the URL it answers at, so none of them redirects.
-          const sitemapBody = await (await fetch(origin + "/console/sitemap.xml")).text();
+          const sitemapResponse = await fetch(origin + "/console/sitemap.xml");
+          // Agent files are not page documents, so they never set the deployment cookie.
+          expect(sitemapResponse.headers.getSetCookie()).toEqual([]);
+          const sitemapBody = await sitemapResponse.text();
           const listed = [...sitemapBody.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
           for (const url of ["/console/", "/console/about/", "/console/static/"]) {
             expect(listed, url).toContain(origin + url);
@@ -1243,6 +1291,7 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           // agent.crawlers serves a generated robots.txt below the basePath, as in core.
           const robots = await fetch(origin + "/console/robots.txt");
           expect(robots.status, logs).toBe(200);
+          expect(robots.headers.getSetCookie()).toEqual([]);
           expect(await robots.text()).toMatch(/User-agent: GPTBot\n[\s\S]*Disallow: \//);
           // The static page and its payload were written at the trailing-slash URL.
           for (const file of ["index.html", "index.rsc"]) {
@@ -1282,6 +1331,24 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           const full = await (await get("/console/llms-full.txt")).text();
           expect(full).toMatch(/^# Custom full\n/);
           expect(full).toContain("About from a route file app");
+          // Route files are not page documents, so only the page sets the deployment cookie.
+          for (const pathname of [
+            "/console/sitemap.xml",
+            "/sitemap.xml",
+            "/console/docs/guides/sitemap.xml",
+            "/console/robots.txt",
+            "/console/llms.txt",
+            "/console/llms-full.txt",
+            "/console/about",
+          ]) {
+            const response = await get(pathname);
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            expect(response.headers.getSetCookie(), pathname).toEqual(
+              pathname === "/console/about"
+                ? [expect.stringMatching(/^__farm_deployment=[^;]+; Path=\/console; HttpOnly/)]
+                : [],
+            );
+          }
         }
         if (name === "i18n") {
           const get = (pathname: string, headers: Record<string, string> = {}) =>

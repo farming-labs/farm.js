@@ -194,14 +194,24 @@ function prerenderHandler(staticPages: string[], render: (request: Request) => R
     "farmPayloadPath",
     "toFarmPayloadRequest",
     "handleFarmRequestWithRuntime",
+    "withFarmDeploymentCookie",
     `${slice(
       entry,
       "const FARM_PRERENDER_ROUTES_PATH",
       "async function handleFarmRequestWithRuntime(",
     )}; return handler;`,
-  )(async () => staticPages, farmPayloadPath, toFarmPayloadRequest, render) as (
-    request: Request,
-  ) => Promise<Response>;
+  )(
+    async () => staticPages,
+    farmPayloadPath,
+    toFarmPayloadRequest,
+    render,
+    // Marks where the server would set the deployment cookie (entries/deployment-cookie.test.ts).
+    (_request: Request, response: Response) => {
+      const headers = new Headers(response.headers);
+      headers.append("set-cookie", "__farm_deployment=prerender-test");
+      return new Response(response.body, { status: response.status, headers });
+    },
+  ) as (request: Request) => Promise<Response>;
 }
 
 afterEach(() => {
@@ -458,12 +468,15 @@ describe("RSC prerender pass", () => {
 
     const page = await handler(prerenderRequest("/about"));
     expect(page.headers.get("x-nitro-prerender")).toBe("%2Fabout.rsc");
+    // A prerendered file is served to every visitor, so it never sets the deployment cookie.
+    expect(page.headers.has("set-cookie")).toBe(false);
 
     render.mockImplementationOnce(
       () => new Response("0:{}", { headers: { "content-type": "text/x-component" } }),
     );
     const payload = await handler(prerenderRequest("/about.rsc"));
     expect(payload.headers.has("x-nitro-prerender")).toBe(false);
+    expect(payload.headers.has("set-cookie")).toBe(false);
     expect(new URL(render.mock.calls.at(-1)![0].url).pathname).toBe("/about");
   });
 
@@ -479,5 +492,6 @@ describe("RSC prerender pass", () => {
     render.mockImplementationOnce(html);
     const page = await handler(new Request("https://farm.test/about"));
     expect(page.headers.has("x-nitro-prerender")).toBe(false);
+    expect(page.headers.get("set-cookie")).toBe("__farm_deployment=prerender-test");
   });
 });
