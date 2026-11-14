@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +10,7 @@ import { build } from "../build";
 import { resolveConfig } from "../config";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots = new Set<string>();
@@ -390,35 +390,14 @@ describe("Hono, Elysia, Express, Koa, Fastify and Nest apps mounted on catch-all
     const config = await resolveConfig({ root, renderer: false }, "production");
     await build(config, { root, preset: "node-server" });
 
-    const output = path.join(root, ".farm", ".output");
-    const port = await getAvailablePort();
-    const processOutput: string[] = [];
-    const productionServer = spawn(process.execPath, [path.join(output, "server", "index.mjs")], {
-      cwd: path.join(output, "server"),
-      env: { ...process.env, NODE_PATH: "", HOST: "127.0.0.1", PORT: String(port) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    productionServer.stdout.on("data", (chunk) => processOutput.push(String(chunk)));
-    productionServer.stderr.on("data", (chunk) => processOutput.push(String(chunk)));
-    const exited = new Promise<void>((resolve) => productionServer.once("exit", () => resolve()));
-
+    const productionServer = await startProductionServer(
+      path.join(root, ".farm", ".output", "server"),
+      { env: { NODE_PATH: "" } },
+    );
     try {
-      const origin = `http://127.0.0.1:${port}`;
-      let ready = false;
-      for (let attempt = 0; attempt < 200 && !ready; attempt++) {
-        if (productionServer.exitCode !== null) break;
-        ready = await fetch(`${origin}/_farm/health/ready`).then(
-          (response) => response.ok,
-          () => false,
-        );
-        if (!ready) await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      expect(ready, processOutput.join("")).toBe(true);
-
-      await expectMountedRouterResponses(origin);
+      await expectMountedRouterResponses(productionServer.origin);
     } finally {
-      if (productionServer.exitCode === null) productionServer.kill();
-      await exited;
+      await productionServer.stop();
     }
   }, 180_000);
 });

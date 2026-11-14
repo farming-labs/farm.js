@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +9,7 @@ import { build } from "../build";
 import { resolveConfig } from "../config";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer, type ProductionServer } from "./production-server";
 
 // The same requests against a dev server and a node-server production build of one app: public
 // HTML and directory indexes, `//`-prefixed and empty-segment paths, malformed percent-encoding,
@@ -188,44 +188,19 @@ describe("development", () => {
 describe("production (node-server)", () => {
   let root: string;
   let origin = "";
-  let stop: (() => Promise<void>) | undefined;
+  let server: ProductionServer | undefined;
 
   beforeAll(async () => {
     root = await createFixture();
     const config = await resolveConfig({ root, images: { provider: "none" } }, "production");
     await build(config, { root, preset: "node-server" });
 
-    const serverDir = path.join(root, ".farm", ".output", "server");
-    const port = await getAvailablePort();
-    const output: string[] = [];
-    const child = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
-      cwd: serverDir,
-      env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    child.stdout.on("data", (chunk) => output.push(String(chunk)));
-    child.stderr.on("data", (chunk) => output.push(String(chunk)));
-    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-    stop = async () => {
-      if (child.exitCode === null) child.kill();
-      await exited;
-    };
-
-    origin = `http://127.0.0.1:${port}`;
-    let ready = false;
-    for (let attempt = 0; attempt < 200 && !ready; attempt++) {
-      if (child.exitCode !== null) break;
-      ready = await fetch(`${origin}/_farm/health/ready`).then(
-        (response) => response.ok,
-        () => false,
-      );
-      if (!ready) await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    if (!ready) throw new Error(`Production server did not start:\n${output.join("")}`);
+    server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+    origin = server.origin;
   }, 240_000);
 
   afterAll(async () => {
-    await stop?.();
+    await server?.stop();
     if (root) await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
 

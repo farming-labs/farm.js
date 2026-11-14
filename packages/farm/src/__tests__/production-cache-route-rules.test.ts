@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -8,15 +7,13 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
-import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer, type ProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 let root: string | undefined;
-let server: ChildProcess | undefined;
-let serverExited: Promise<unknown> | undefined;
+let server: ProductionServer | undefined;
 let port = 0;
-const output: string[] = [];
 
 interface RawResponse {
   status: number;
@@ -85,33 +82,13 @@ export default function News() { return <main data-at={String(Date.now() + Math.
   );
   await build(config, { root, preset: "node-server" });
 
-  const serverDirectory = path.join(root, ".farm", ".output", "server");
-  port = await getAvailablePort();
-  server = spawn(process.execPath, [path.join(serverDirectory, "index.mjs")], {
-    cwd: serverDirectory,
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  serverExited = new Promise((resolve) => server!.once("exit", resolve));
-  server.stdout?.on("data", (chunk) => output.push(String(chunk)));
-  server.stderr?.on("data", (chunk) => output.push(String(chunk)));
-  for (let attempt = 0; attempt < 120; attempt++) {
-    try {
-      await request("/api/live");
-      return;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  throw new Error(`Production server did not start\n${output.join("")}`);
+  server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+  port = server.port;
 }, 180_000);
 
 afterAll(async () => {
   // Windows refuses to remove the output while the server still holds it as its cwd.
-  if (server && server.exitCode === null && server.signalCode === null) {
-    server.kill();
-    await serverExited;
-  }
+  await server?.stop();
   if (root) await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
@@ -120,7 +97,7 @@ describe("swr route rules on a Node server", () => {
     const browser = { accept: "text/html", "accept-encoding": "gzip, br" };
     const first = await request("/news", browser);
     const second = await request("/news", browser);
-    expect(first.status, output.join("")).toBe(200);
+    expect(first.status, server?.output()).toBe(200);
     expect(second.headers["x-cache"]).toBe("HIT");
     expect(renderedAt(second.body)).toBe(renderedAt(first.body));
     // The stored body is sent as it is: never compressed bytes without a Content-Encoding.

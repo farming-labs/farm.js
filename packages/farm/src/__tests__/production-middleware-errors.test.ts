@@ -1,5 +1,4 @@
 // @vitest-environment node
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +8,7 @@ import { build } from "../build";
 import { loadConfig, resolveConfig, type FarmUserConfig } from "../config";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 // Thrown by middleware and checked against every response body: it must stay in server logs.
@@ -72,7 +72,7 @@ export default defineConfig({
 interface ProductionApp {
   origin: string;
   root: string;
-  output: string[];
+  output(): string;
   stop(): Promise<void>;
 }
 
@@ -113,38 +113,19 @@ async function startProductionApp(
   const config = await resolveConfig({ ...userConfig, root }, "production");
   await build(config, { root, preset: "node-server" });
 
-  const serverDirectory = path.join(root, ".farm", ".output", "server");
-  const port = await getAvailablePort();
-  const origin = `http://127.0.0.1:${port}`;
-  const output: string[] = [];
-  const server = spawn(process.execPath, [path.join(serverDirectory, "index.mjs")], {
-    cwd: serverDirectory,
-    env: { ...process.env, ...options.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
+  const removeRoot = () =>
+    fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  const server = await startProductionServer(path.join(root, ".farm", ".output", "server"), {
+    env: options.env,
+  }).catch(async (error: unknown) => {
+    await removeRoot();
+    throw error;
   });
-  server.stdout?.on("data", (chunk) => output.push(String(chunk)));
-  server.stderr?.on("data", (chunk) => output.push(String(chunk)));
-  const exited = new Promise<void>((resolve) => server.once("exit", () => resolve()));
   const stop = async () => {
-    if (server.exitCode === null && server.signalCode === null) server.kill();
-    await exited;
-    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await server.stop();
+    await removeRoot();
   };
-
-  let ready = false;
-  for (let attempt = 0; attempt < 200 && !ready; attempt++) {
-    if (server.exitCode !== null) break;
-    ready = await fetch(`${origin}/_farm/health/ready`).then(
-      (response) => response.ok,
-      () => false,
-    );
-    if (!ready) await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  if (!ready) {
-    await stop();
-    throw new Error(`Production server did not become ready\n${output.join("")}`);
-  }
-  return { origin, root, output, stop };
+  return { origin: server.origin, root, output: server.output, stop };
 }
 
 async function startDevelopmentApp(
@@ -729,7 +710,7 @@ describe("production middleware errors", () => {
       },
     ]);
     await expectSharedFailureTraces(app!.origin, logPath);
-    expect(app!.output.join("")).toContain(SECRET);
+    expect(app!.output()).toContain(SECRET);
   });
 
   // The same policy as the app without a headers() config (expectNoRuntimeHookFailureTraces): a
