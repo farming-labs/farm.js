@@ -5,9 +5,10 @@
  * names it; a key reaching several projects also needs `FARMJS_PROJECT_ID`.
  * `analytics: false` in farm.config turns it off. It never sends without a key.
  *
- * Only server-side metadata leaves the app: the route template (see route-label.ts), method,
- * status, duration, registered MCP tool outcomes and a self-reported agent
- * category. No URLs, query strings, headers, cookies, bodies, IPs or errors.
+ * Only server-side metadata leaves the app: the route template (see route-label.ts), the path
+ * that was requested below the base path, method, status, duration, registered MCP tool
+ * outcomes and a self-reported agent category. No query strings, fragments, origins,
+ * headers, cookies, bodies, IPs or errors.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { FarmPlugin, FarmPluginRuntimeAfterEvent } from "../plugin";
@@ -15,6 +16,7 @@ import { classifyFarmAgent, type FarmAgentIdentity } from "../agent-identity";
 import { onFarmEvent } from "../observability";
 import { getCurrentRequestOrNull } from "../server/request";
 import { getFarmRouteLabel } from "../route-label";
+import { stripFarmBasePath } from "../base-path";
 
 export type FarmInfraAnalyticsEnvironment = "production" | "staging" | "development";
 
@@ -47,6 +49,8 @@ interface EventBase {
   timestamp: string;
   durationMs: number;
   route: string;
+  /** `/products/42` for the route `/products/[id]`; absent when Farm Infra would refuse it. */
+  path?: string;
   requestId: string;
   agent: FarmInfraAgentIdentity;
 }
@@ -154,6 +158,17 @@ function routeTemplate(pattern: unknown): string {
     /^\/(?!\/)[a-zA-Z0-9_./:[\]()*-]*$/.test(pattern)
     ? pattern
     : "/[unmatched]";
+}
+
+// Farm Infra's rule for a path. One that fails it would reject the whole batch, so the event
+// goes without it instead. A URL parser's pathname only fails it with a leading `//` or
+// characters outside printable ASCII the parser left alone.
+const PATH = /^\/(?!\/)[\w!$%&'()*+,\-./:;=@[\]^|~]*$/;
+const MAX_PATH_LENGTH = 1024;
+
+function requestPath(request: Request): string | undefined {
+  const path = stripFarmBasePath(new URL(request.url).pathname);
+  return path.length <= MAX_PATH_LENGTH && PATH.test(path) ? path : undefined;
 }
 
 function duration(value: number): number {
@@ -375,6 +390,8 @@ interface State {
 interface RequestMetadata {
   id: string;
   agent: FarmInfraAgentIdentity;
+  /** Read from the request as it arrived, before a handler can rewrite it. */
+  path: string | undefined;
   /** Read when an event is made: a handler may label the route while it answers. */
   route: object | undefined;
   completed: boolean;
@@ -391,6 +408,7 @@ function beginRequest(
   return {
     id: uuid(),
     agent: classifyFarmInfraAgent(request.headers.get("user-agent")),
+    path: requestPath(request),
     route,
     completed: false,
     waitUntil,
@@ -408,6 +426,7 @@ function requestEvent(
     requestId: metadata.id,
     timestamp: new Date().toISOString(),
     route: routeTemplate(getFarmRouteLabel(metadata.route)),
+    ...(metadata.path ? { path: metadata.path } : {}),
     agent: metadata.agent,
     kind: "request",
     method,
@@ -425,6 +444,7 @@ function toolEvent(
     requestId: metadata.id,
     timestamp: new Date().toISOString(),
     route: routeTemplate(getFarmRouteLabel(metadata.route)),
+    ...(metadata.path ? { path: metadata.path } : {}),
     agent: metadata.agent,
     kind: "mcp.tool",
     tool: event.tool,
@@ -500,7 +520,7 @@ export function farmInfraAnalyticsPlugin(
 }
 
 export interface FarmInfraAnalyticsRecorder {
-  /** Runs one request, reporting its route template, method, status and duration. */
+  /** Runs one request, reporting its route template, path, method, status and duration. */
   record(
     request: Request,
     options: { kind?: string; route?: { pattern?: string } },

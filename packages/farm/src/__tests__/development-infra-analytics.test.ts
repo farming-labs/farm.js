@@ -94,9 +94,9 @@ describe("built-in Farm Infra analytics in development", () => {
       `FARMJS_API_KEY=${key}\nFARMJS_PROJECT_ID=${projectId}\nFARMJS_API_URL=http://127.0.0.1:${port}\n`,
     );
 
-    const response = await request(root, "/users/private-customer?secret=private-query");
+    const response = await request(root, "/users/ada-42?secret=private-query");
     expect(response.status).toBe(200);
-    await expect(response.text()).resolves.toContain("private-customer");
+    await expect(response.text()).resolves.toContain("ada-42");
 
     await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 5_000 });
     expect(received[0]!.headers).toMatchObject({
@@ -104,11 +104,13 @@ describe("built-in Farm Infra analytics in development", () => {
       "x-farm-project": projectId,
       "x-farm-environment": "development",
     });
+    // The path, never its query string.
     expect(received[0]!.body).not.toContain("private");
     expect(JSON.parse(received[0]!.body).events).toEqual([
       expect.objectContaining({
         kind: "request",
         route: "/users/[id]",
+        path: "/users/ada-42",
         method: "GET",
         status: 200,
       }),
@@ -162,7 +164,12 @@ describe("built-in Farm Infra analytics in development", () => {
     expect(requests.filter((line) => line.includes("/[unmatched]"))).toEqual([
       "GET /[unmatched] 404",
     ]);
-    expect(received.map(({ body }) => body).join("")).not.toContain("private");
+    // Templates never carry the request's own segments; each path is what was asked for.
+    const events = received.flatMap(({ body }) => JSON.parse(body).events);
+    expect(events.map(({ route }) => route).join(" ")).not.toContain("private");
+    expect(events.filter(({ kind }) => kind === "request").map(({ path }) => path)).toEqual(
+      expect.arrayContaining(["/users/private-customer.md", "/private-missing", "/mcp"]),
+    );
   }, 30_000);
 
   it("reports a localized home page's Markdown by the home page's template, as production does", async () => {
@@ -238,7 +245,10 @@ export default function Home() { return <main>home</main>; }`,
     expect(requests).toEqual(
       expect.arrayContaining(["GET /docs/routing 200", "GET /docs/cron 200"]),
     );
-    expect(received.map(({ body }) => body).join("")).not.toContain("private");
+    // A missing page keeps the docs catch-all as its route; only its path names it.
+    const events = received.flatMap(({ body }) => JSON.parse(body).events);
+    expect(events.map(({ route }) => route).join(" ")).not.toContain("private");
+    expect(events.find(({ status }) => status === 404)?.path).toBe("/docs/private-missing");
   }, 30_000);
 
   it("sends nothing when the config sets analytics to false", async () => {

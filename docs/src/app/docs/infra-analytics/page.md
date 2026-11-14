@@ -89,8 +89,8 @@ Removing `FARMJS_API_KEY` also turns it off.
 ## What is sent
 
 - For each request: a random ID, the matched route **template** (such as `/users/[id]`), or a
-  docs page's own path, the method, the response status and the time until Farm returned the
-  response.
+  docs page's own path, the **path** that was requested (such as `/users/42`), the method, the
+  response status and the time until Farm returned the response.
 - For each registered MCP tool call: the tool name, whether it succeeded, and its duration, linked
   to its request.
 - A self-reported agent category when the user-agent declares one of OpenAI's or Anthropic's
@@ -98,13 +98,24 @@ Removing `FARMJS_API_KEY` also turns it off.
   Claude-User). This is the user-agent's claim, not a verified identity. Anything else is
   `unknown`.
 
-Farm never sends URLs, query strings, route parameters, headers, cookies, IP addresses, full
+Farm never sends query strings, fragments, origins, headers, cookies, IP addresses, full
 user-agents, request or response bodies, tool arguments or results, or error messages.
+
+### What `path` contains
+
+`path` is the path the request asked for, below the app's `basePath`: `/users/42` for a request to
+`https://shop.example/users/42?ref=mail`. Farm Infra shows it in the request log and keeps the
+template for grouping, so Top routes still count `/users/[id]` once. Anything in your paths
+reaches Farm Infra and is kept for seven days. If your paths carry what shouldn't leave the app,
+such as a token in a reset link (`/reset/<token>`) or an email address, set `analytics: false`.
+
+A path longer than 1,024 characters, or one starting with `//`, is left out and the request is
+reported by its template alone. Farm.js versions before paths send no `path`.
 
 ### What `route` contains
 
-`route` is a template, never the requested path. The one exception is a docs page: its path is
-part of your docs, not something a visitor typed, so it's reported as itself:
+`route` is a template, never the requested path (that's `path`). The one exception is a docs page:
+its path is part of your docs, not something a visitor typed, so it's reported as itself:
 
 | Request                                                      | `route`                                                 |
 | ------------------------------------------------------------ | ------------------------------------------------------- |
