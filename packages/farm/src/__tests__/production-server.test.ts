@@ -68,6 +68,23 @@ describe("startProductionServer", () => {
     );
   });
 
+  it("waits for srvx's Listening on: banner, which it prints only while TEST is unset", async () => {
+    const directory = await createEntry();
+    // Nitro's own presets serve through srvx, whose banner differs from the entry's line.
+    await fs.writeFile(
+      path.join(directory, "index.mjs"),
+      ENTRY.replace(
+        'console.log("Listening on http://" + address + ":" + port);',
+        'if (!process.env.TEST) console.log("➜ Listening on: http://" + address + ":" + port + "/");',
+      ),
+    );
+
+    const production = await startProductionServer(directory, { env: { TEST: "" } });
+    cleanup.push(() => production.stop());
+
+    await expect((await fetch(`${production.origin}/rsc`)).text()).resolves.toBe("app /rsc");
+  });
+
   it("reports an entry that exits before it listens, with its output", async () => {
     const directory = await createEntry();
     await fs.writeFile(
@@ -113,8 +130,6 @@ const OWN_READINESS: Record<string, string> = {
   "development-ssr-prebundle.test.ts": "it spawns a development server script, not a built entry",
   "mobile-client-build.test.ts": "it waits for its child to print the port it listens on",
   "mobile-session-runtime.test.ts": "it waits for its child's own Listening on line",
-  "mobile-rsc-build.test.ts": "the RSC entry prints no listen line under vitest",
-  "rsc-server-plugins-build.test.ts": "the RSC entry prints no listen line under vitest",
 };
 
 describe("production server tests", () => {
