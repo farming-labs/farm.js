@@ -2872,8 +2872,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
           // The router and render hooks, as the production entry runs them for every request its
           // plugin runtime classes as a page (kind "page"): on the URL as requested (a config
-          // rewrite's source; the page handler passes the request runtime.before yielded, which
-          // it routes on), inside the runtime request, before the request is resolved. So
+          // rewrite's source, and the incoming URL when runtime.before returned a replacement
+          // Request), inside the runtime request, before the request is resolved. So
           // they run for a config redirect, the generated llms.txt, sitemap.xml and robots.txt,
           // a Markdown mirror, the app manifest, and the not-found page as for a page route, and
           // not for an app metadata route (sitemap.ts, robots.ts, a metadata image), which
@@ -2886,8 +2886,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           let pageHookRouteMatch:
             | { render: RenderLifecyclePayload & Record<string, unknown>; layoutPatterns: string[] }
             | undefined;
-          const pageHookRoute = (pathname: string) => {
-            if (pageHookRouteMatch?.render.pathname === pathname) return pageHookRouteMatch;
+          const pageHookRoute = () => {
+            if (pageHookRouteMatch) return pageHookRouteMatch;
+            const pathname = requestedPagePathname;
             const match = farmApp.getRouteManager().matchRoute(pathname);
             pageHookRouteMatch = {
               render: {
@@ -2900,7 +2901,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             };
             return pageHookRouteMatch;
           };
-          const runFarmDevPageHooks = async (pathname = requestedPagePathname): Promise<void> => {
+          const runFarmDevPageHooks = async (): Promise<void> => {
             if (
               !pm ||
               (!pm.hasHook("beforeRouteMatch") &&
@@ -2909,7 +2910,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             ) {
               return;
             }
-            const { render, layoutPatterns } = pageHookRoute(pathname);
+            const { render, layoutPatterns } = pageHookRoute();
             const routeManager = farmApp.getRouteManager();
             if (
               routeManager.matchMetadataRoute(render.pathname) ||
@@ -4709,8 +4710,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // to be routed on whatever the session yields: that is what
           // `runRuntimeRequest` does in the production entry, where the routed
           // request is the session's. So the session opens before the route is
-          // resolved. The session options still describe the requested route,
-          // because production computes them from the incoming request too.
+          // resolved. The session options, and the router and render hooks, still
+          // describe the requested route, because production computes them from the
+          // incoming request too.
           const requestedMatch = routeManager.matchRoute(requestedPathname);
           // What the renderer serves without a route (llms.txt, robots.txt, sitemap.xml, the
           // default MCP server) is reported by its fixed path; see route-label.ts.
@@ -4726,10 +4728,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           };
           let runtimeSession: FarmPluginRuntimeSession | undefined;
           let pathname = requestedPathname;
-          // The route the router and render hooks describe: the URL as requested for a config
-          // rewrite, as in production; otherwise the request runtime.before yields, which the
-          // page is routed on.
-          let pageHookPathname = requestedPagePathname;
           if (pm && opensRuntimeSession) {
             try {
               const sessionOptions = {
@@ -4750,15 +4748,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 sessionOptions,
               );
               // The router and render hooks run once runtime.before let the request through,
-              // and before a config rewrite's runtime.before, on its requested URL, as in
-              // production. A hook that throws fails the session below.
-              if (!runtimeSession.response) {
-                pageHookPathname =
-                  configRewriteSource === undefined
-                    ? new URL(runtimeSession.request.url).pathname
-                    : requestedPagePathname;
-                await runFarmDevPageHooks(pageHookPathname);
-              }
+              // and before a config rewrite's runtime.before. They describe the URL as
+              // requested even when runtime.before replaced the Request, as production takes
+              // their route from the incoming request; the page is still routed on the
+              // replacement below. A hook that throws fails the session below.
+              if (!runtimeSession.response) await runFarmDevPageHooks();
               const routedRequest =
                 runtimeSession.response ??
                 (configRewriteSource === undefined
@@ -4811,7 +4805,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // before app middleware, which may then answer the request itself.
           if (!runtimeSession) {
             try {
-              await runFarmDevPageHooks(pageHookPathname);
+              await runFarmDevPageHooks();
             } catch (error) {
               await failPageHook(error);
               return;
@@ -4837,7 +4831,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   hasAfterResponseHook,
                   hasHTMLTransformHook,
                   // render.html gets the render info render.before got.
-                  renderPayload: pageHookRoute(pageHookPathname).render,
+                  renderPayload: pageHookRoute().render,
                   method,
                   urlPath,
                   pathname,

@@ -285,7 +285,9 @@ destination), the generated `llms.txt`, `sitemap.xml`, and `robots.txt`, the app
 Markdown mirror (and the page it reads), and the not-found page. `render.before` runs before Farm
 resolves the request, so the response may be a redirect or a text file rather than a rendered
 page. Its `routePattern` and `params` describe the page route the requested URL matches;
-`routePattern` is `null` when none does, so check it before doing page-only work. Render hooks do
+`routePattern` is `null` when none does, so check it before doing page-only work. The router and
+render hooks describe the requested URL even when a `runtime.before` hook returns a replacement
+`Request`; Farm routes and renders the replacement, and `runtime.after` sees it. Render hooks do
 not run when a `runtime.before` hook answers the request, and `render.html` sees only HTML
 responses. The React Server Components pipeline does not run render hooks yet; see
 [Server rendering](/docs/server-rendering#react-server-components).

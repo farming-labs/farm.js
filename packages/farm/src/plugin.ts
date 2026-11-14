@@ -506,7 +506,9 @@ export interface FarmPluginRenderHooks<
    * (such as `sitemap.ts` or a metadata image) answers. That includes a config redirect, a config
    * rewrite (once, for the URL as requested), the generated `llms.txt`, `sitemap.xml` and
    * `robots.txt`, a Markdown mirror, and the not-found page, so the response may not be a
-   * rendered page. `render.routePattern` is `null` when no page route matches the URL. It does
+   * rendered page. `render.routePattern` is `null` when no page route matches the URL. It
+   * describes the requested URL even when `runtime.before` returned a replacement `Request`,
+   * which Farm routes and renders. It does
    * not run when a `runtime.before` hook answered the request.
    */
   before?(

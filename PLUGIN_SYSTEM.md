@@ -231,6 +231,8 @@ a `GET` or `HEAD` request that no API route, integration route, docs page, or ap
 config redirect, a config rewrite (once, for the URL as requested), the generated `llms.txt`,
 `sitemap.xml`, and `robots.txt`, the app manifest, a Markdown mirror, and the not-found page,
 before Farm answers them. `routePattern` is `null` when no page route matches the requested URL.
+The router and render hooks describe the requested URL even when `runtime.before` returns a
+replacement `Request`, which Farm then routes and renders.
 Neither hook runs when `runtime.before` answers the request, and `html` sees only HTML responses.
 The React Server Components pipeline does not run render hooks yet.
 

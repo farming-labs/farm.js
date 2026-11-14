@@ -30,7 +30,7 @@ afterEach(async () => {
 // The plugin records its runtime, router and render hooks for the paths under test, and serves
 // the record from its own endpoints, which run outside the request hooks, so a dev server and a
 // production server can be asked the same questions. `/__fail-render` makes the next
-// render.before throw.
+// render.before throw. runtime.before replaces the Request for `/swap` with one for `/hello`.
 const FILES: Record<string, string> = {
   "farm.config.ts": `import { definePlugin } from "@farm.js/core";
 const state = ((globalThis as any).__farmRenderHookTest ??= { trace: [], failRender: false });
@@ -65,6 +65,7 @@ export default {
         before({ request }) {
           const { pathname } = new URL(request.url);
           if (traced(pathname)) state.trace.push("before " + pathname);
+          if (pathname === "/swap") return new Request(new URL("/hello", request.url), request);
         },
         after({ request, response }) {
           const { pathname } = new URL(request.url);
@@ -95,6 +96,7 @@ export default {
   "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
   "src/app/page.tsx": `export default function Page() { return <h1>home</h1>; }`,
   "src/app/hello/page.tsx": `export default function Page() { return <h1>hello</h1>; }`,
+  "src/app/swap/page.tsx": `export default function Page() { return <h1>swap</h1>; }`,
   "src/app/api/ok/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
   "src/app/blog/sitemap.ts": `export default function sitemap() { return [{ url: "https://farm.test/blog" }]; }`,
 };
@@ -190,6 +192,23 @@ async function expectRenderHookContract(origin: string): Promise<void> {
     "/llms.txt": page("/llms.txt", null, 200),
     "/.well-known/farmjs.json": page("/.well-known/farmjs.json", null, 200),
     "/missing": page("/missing", null, 404),
+  });
+
+  // A Request runtime.before replaces is routed on the replacement, so /swap renders /hello, but
+  // the router and render hooks describe the URL as requested, as production takes their route
+  // from the incoming request. runtime.after sees the replacement.
+  const swapped = await fetch(`${origin}/swap`, { headers: { accept: "text/html" } });
+  const swappedHtml = await swapped.text();
+  expect({
+    status: swapped.status,
+    hello: swappedHtml.includes("<h1>hello</h1>"),
+    swap: swappedHtml.includes("<h1>swap</h1>"),
+    trace: await (await fetch(`${origin}/__trace`)).json(),
+  }).toEqual({
+    status: 200,
+    hello: true,
+    swap: false,
+    trace: ["before /swap", "router.before /swap", "render.before /swap /swap", "after /hello 200"],
   });
 
   // A Markdown mirror is a page request of its own, and renders its page through another. Farm
