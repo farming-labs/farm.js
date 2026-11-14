@@ -128,7 +128,7 @@ function createRuntime(options: {
     "getFarmI18nClientSnapshot",
     `${helper}
 ${slice(entry, "function mergeRouteModules(", "function collectRouteModuleEntries(")}
-${slice(entry, "const FARM_APP_METADATA_OUTPUTS = ", "/**\n * A Markdown request whose only cookie")}
+${slice(entry, "const FARM_APP_METADATA_OUTPUTS = ", "/**\n * Serves a page's Markdown mirror")}
 return { handleFarmAppMetadataRoute, handleFarmMetadataImageRequest, addFarmMetadataFileReferences };`,
   )(
     options.routes ?? {},

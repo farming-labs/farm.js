@@ -2935,10 +2935,13 @@ export class ServerRenderer {
       const { handleFarmDefaultMCPRequest } = await import("../agent-mcp-handler");
       const origin = new URL(request.url).origin;
       const i18n = this.i18nRuntime?.config;
+      // Pages are linked on metadataBase, as sitemap.xml and llms.txt link them.
+      const metadataBase = await this.getRootMetadataBase();
       const response = await handleFarmDefaultMCPRequest(request, {
         server,
         basePath: this.config.basePath,
         i18n,
+        metadataBase,
         listPages: async () => {
           const sources = await Promise.all(
             this.getAgentListedRoutes().map(async ([pattern, route]) => {
@@ -2957,6 +2960,7 @@ export class ServerRenderer {
             sources.filter((source) => source !== null),
             {
               origin,
+              metadataBase,
               basePath: this.config.basePath,
               markdown: resolveMarkdownConfig(this.config.md as any),
               trailingSlash: this.config.trailingSlash,
@@ -3060,18 +3064,20 @@ export class ServerRenderer {
   }
 
   /**
-   * The origin llms.txt and llms-full.txt link to: the root layout's `metadataBase`, else the
-   * request's origin, as for the sitemap and the production server.
+   * The origin llms.txt, llms-full.txt and list_pages link to: the root layout's
+   * `metadataBase`, else the request's origin, as for the sitemap and the production server.
    */
   private async getAgentOrigin(request: Request): Promise<string> {
+    return resolveFarmAgentOrigin(await this.getRootMetadataBase(), new URL(request.url).origin);
+  }
+
+  /** The root layout's `metadataBase`, which generated agent files and list_pages link to. */
+  private async getRootMetadataBase(): Promise<unknown> {
     const rootLayout = this.routeManager.getLayouts().get("/");
     const rootMetadata = rootLayout
       ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
       : undefined;
-    return resolveFarmAgentOrigin(
-      (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
-      new URL(request.url).origin,
-    );
+    return (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase;
   }
 
   /**
@@ -3275,9 +3281,10 @@ export class ServerRenderer {
 
       wrapped = await this.wrapWithIntegrationProviders(wrapped);
 
+      // The error document goes out whole: wait for the layouts' Suspense boundaries.
       const html = await _runWithMiddlewareData(options.middlewareMap, () =>
         _runWithMiddlewareContext(options.middlewareContext, () =>
-          this.rendererRuntime.renderToString(wrapped, rendererRenderOptions()),
+          this.renderElementToCompleteHTML(wrapped),
         ),
       );
       res.statusCode = options.statusCode;
@@ -4288,11 +4295,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     const NotFoundComponent = await this.loadNotFoundComponent();
     if (NotFoundComponent) {
       try {
-        content = await this.rendererRuntime.renderToString(
+        content = await this.renderElementToCompleteHTML(
           await this.wrapWithIntegrationProviders(
             this.rendererRuntime.createElement(NotFoundComponent, { pathname }),
           ),
-          rendererRenderOptions(),
         );
       } catch (error) {
         logger.warn(`not-found page could not render outside its layout, using Farm's: ${error}`);
@@ -4380,11 +4386,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 
           element = await this.wrapWithIntegrationProviders(element);
 
-          // Render to string
-          const content = await this.rendererRuntime.renderToString(
-            element,
-            rendererRenderOptions(),
-          );
+          // The not-found document goes out whole, with its 404: renderToString would throw
+          // on a layout that suspends (a lazy component or a use() read), so wait for every
+          // Suspense boundary as a buffered page render does.
+          const content = await this.renderElementToCompleteHTML(element);
 
           const { head, metadata } = await this.notFoundMetadataHead(layoutModule, notFoundModule);
           const html = this.createFullHTML(content, false, pathname, head, { req, metadata });

@@ -45,6 +45,10 @@ description: A markdown-first static page.
 
 This creates `/about` automatically. Because the route is source-authored markdown, Farm also serves the raw source at `/about.md` by default.
 
+Like any page, a Markdown page renders on each request. Add `export const dynamic = "force-static";`
+to its source to prerender it at build time, or `export const revalidate = 300;` to revalidate it, as
+described in [Static rendering](/docs/server-rendering#static-rendering).
+
 ## Override a React page
 
 Keep the visual page in React:

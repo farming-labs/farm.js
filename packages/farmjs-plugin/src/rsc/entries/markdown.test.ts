@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { withoutFarmDeploymentCookie } from "@farm.js/core/deployment";
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
   applyMarkdownNegotiationHeaders,
@@ -91,10 +90,9 @@ function createHandler(
 ) {
   const { pages = ["/pricing"], pageFiles, ...entryOptions } = options;
   const entry = generateRscEntry({ ...context, ...entryOptions, markdown: markdownConfig });
-  const start = entry.indexOf("function withoutLoneFarmDeploymentCookie(request)");
+  const start = entry.indexOf("async function handleFarmPageOrMarkdown(request, context)");
   const end = entry.indexOf("async function handler(request, context)", start);
   expect(start).toBeGreaterThan(-1);
-  expect(entry.indexOf("async function handleFarmPageOrMarkdown(", start)).toBeGreaterThan(start);
   const matchRoute = pageFiles
     ? createRouteMatcher(entry, pageFiles)
     : (pathname: string) => (pages.includes(pathname) ? { pattern: pathname } : null);
@@ -121,7 +119,6 @@ function createHandler(
     "handleFarmRequest",
     "farmApiBasePath",
     "normalizeFarmTrailingSlashPathname",
-    "withoutFarmDeploymentCookie",
     `${extractRoutePathname(entry)}\n${entry.slice(start, end)}; return handleFarmPageOrMarkdown;`,
   )(
     markdownConfig,
@@ -134,7 +131,6 @@ function createHandler(
     handleFarmRequest,
     "/api",
     normalizeFarmTrailingSlashPathname,
-    withoutFarmDeploymentCookie,
   ) as (request: Request, context?: unknown) => Promise<Response>;
   return { run, rendered, handleFarmRequest };
 }
@@ -357,19 +353,10 @@ describe("RSC Markdown mirrors", () => {
       );
       expect(response.status, cookie).toBe(200);
       expect(response.headers.get("cache-control"), cookie).toBe(cacheControl);
-      // The page render sees the cookies that keep the mirror private, as before.
-      expect(rendered[0]!.headers.get("cookie"), cookie).toBe(
-        cacheControl.startsWith("public") ? null : cookie,
-      );
+      // The page renders with the reader's cookies, the deployment cookie included, as in core:
+      // only the mirror's cache policy ignores that cookie. (Headers trim surrounding whitespace.)
+      expect(rendered[0]!.headers.get("cookie"), cookie).toBe(cookie?.trim() ?? null);
     }
-    // A page render keeps the deployment cookie; only the mirror's read drops it.
-    const { run, rendered } = createHandler(resolveMarkdownConfig({ cache: 300 }));
-    await run(
-      new Request("https://farm.test/pricing", {
-        headers: { cookie: "__farm_deployment=release-2" },
-      }),
-    );
-    expect(rendered[0]!.headers.get("cookie")).toBe("__farm_deployment=release-2");
   });
 
   it("preserves middleware cookies in the published core runtime", async () => {

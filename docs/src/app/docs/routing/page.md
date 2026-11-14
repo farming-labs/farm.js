@@ -1624,6 +1624,12 @@ export default defineConfig({
 });
 ```
 
+The not-found page renders inside the root layouts, and an `error.tsx` page inside its route's
+layouts. Neither streams: Farm sends each document whole, with its `404` or error status, after
+every lazy component, `use()` read, or other Suspense boundary in the page and its layouts has
+resolved, in development and production. A document that does not suspend renders in one
+synchronous pass.
+
 ## Catch-all routes
 
 Catch-all routes are useful for docs, CMS content, and nested marketing pages where the page is resolved from content instead of a fixed file for every URL.

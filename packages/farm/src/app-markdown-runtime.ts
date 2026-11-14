@@ -131,6 +131,45 @@ async function evaluateMdxSource(source: string, filePath: string) {
   });
 }
 
+type FarmMarkdownRouteConfig = Pick<RouteModule, "dynamic" | "revalidate" | "ssg">;
+
+const MARKDOWN_ROUTE_CONFIG_EXPORT =
+  /^export\s+const\s+(dynamic|revalidate|ssg)\s*=\s*("[^"\\]*"|'[^'\\]*'|\d+(?:\.\d+)?|true|false)\s*;?\s*$/;
+
+/**
+ * The route config a Markdown page declares the way a page module does, with a literal ESM export
+ * (`export const dynamic = "force-static";`). The page's MDX is evaluated only when it renders, so
+ * the build, the prerender pass and the server read these from the source instead. Lines inside a
+ * fenced code block are an example, not the page's config.
+ */
+export function readFarmMarkdownRouteConfig(body: string): FarmMarkdownRouteConfig {
+  const config: Record<string, unknown> = {};
+  let fence: string | undefined;
+  for (const line of body.split(/\r?\n/)) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)?.[1];
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = undefined;
+      continue;
+    }
+    if (marker) {
+      fence = marker;
+      continue;
+    }
+    const match = line.match(MARKDOWN_ROUTE_CONFIG_EXPORT);
+    if (!match) continue;
+    const literal = match[2];
+    config[match[1]] =
+      literal === "true"
+        ? true
+        : literal === "false"
+          ? false
+          : /^\d/.test(literal)
+            ? Number(literal)
+            : literal.slice(1, -1);
+  }
+  return config as FarmMarkdownRouteConfig;
+}
+
 export function createFarmMarkdownRouteModule(
   input: FarmMarkdownPageModuleInput,
 ): RouteModule & { source: string } {
@@ -175,6 +214,7 @@ export function createFarmMarkdownRouteModule(
   }
 
   return {
+    ...readFarmMarkdownRouteConfig(body),
     default: FarmMarkdownPage as unknown as RouteModule["default"],
     metadata: createMarkdownMetadata(input.source, input.filePath),
     source: input.source,

@@ -1427,6 +1427,7 @@ export class PluginManager {
    * Runs only `runtime.before` for a request Farm re-routed internally, such as
    * a configured rewrite, so guards also see the destination URL. The session
    * opened for `source` keeps its context; context and after hooks don't rerun.
+   * `options` describe the destination; the session keeps the source's route.
    */
   async runRuntimeBeforeForRewrite(
     source: Request,

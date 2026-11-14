@@ -1,9 +1,7 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
-import { createServer as createNetServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,6 +10,7 @@ import { createServer } from "../server/create-server";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
 import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer, type ProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots = new Set<string>();
@@ -92,72 +91,6 @@ export default function Page() { return <main>home</main>; }`,
     `# Private notes\n\nprivate-notes-source\n`,
   );
   await writeModule(root, "src/app/open/page.md", `# Open notes\n\nopen-notes-source\n`);
-}
-
-async function reservePort(): Promise<number> {
-  const server = createNetServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : 0;
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  if (port === 0) throw new Error("Could not reserve a free port.");
-  return port;
-}
-
-async function startProductionServer(
-  serverDir: string,
-  readinessPath = "/",
-): Promise<{ origin: string; stop: () => Promise<void> }> {
-  const port = await reservePort();
-  const output: string[] = [];
-  const child = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
-    cwd: serverDir,
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout.on("data", (chunk) => output.push(String(chunk)));
-  child.stderr.on("data", (chunk) => output.push(String(chunk)));
-  const origin = `http://127.0.0.1:${port}`;
-
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (child.exitCode !== null) {
-      throw new Error(`Production server exited before readiness:\n${output.join("")}`);
-    }
-    try {
-      await fetch(`${origin}${readinessPath}`);
-      return {
-        origin,
-        stop: async () => {
-          if (child.exitCode !== null) return;
-          child.kill("SIGTERM");
-          await new Promise<void>((resolve) => {
-            const timeout = setTimeout(() => {
-              child.kill("SIGKILL");
-              resolve();
-            }, 2_000);
-            child.once("exit", () => {
-              clearTimeout(timeout);
-              resolve();
-            });
-          });
-        },
-      };
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-
-  child.kill("SIGKILL");
-  throw new Error(
-    `Production server did not become ready: ${String(lastError)}\n${output.join("")}`,
-  );
 }
 
 describe("development markdown 404 runs app middleware before the 404 body", () => {
@@ -268,7 +201,7 @@ describe("production build gates a missing markdown 404 behind app middleware", 
     temporaryRoots.add(root);
     await createGuardedProject(root);
 
-    let production: { origin: string; stop: () => Promise<void> } | undefined;
+    let production: ProductionServer | undefined;
     try {
       const userConfig = await loadConfig(root, undefined, "production");
       const config = await resolveConfig({ ...userConfig, root }, "production");

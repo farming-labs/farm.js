@@ -1,6 +1,6 @@
 import { Transform } from "node:stream";
 import { Fragment as PreactFragment, h, type VNode } from "preact";
-import renderPreactToString from "preact-render-to-string";
+import { renderToStringAsync } from "preact-render-to-string";
 import { renderToPipeableStream as preactRenderToPipeableStream } from "preact-render-to-string/stream-node";
 import { renderToReadableStream as preactRenderToReadableStream } from "preact-render-to-string/stream";
 import PreactCompat, {
@@ -34,8 +34,13 @@ export function generateHydrationScript(): string {
   return "";
 }
 
-export function renderToString(element: unknown): string {
-  return renderPreactToString(element as VNode);
+/**
+ * Buffered render. The synchronous renderer throws when a lazy component or another Suspense
+ * read suspends; the async one waits for it, and renders a tree that does not suspend in the
+ * same single pass, so buffered documents (not-found and error pages) render either.
+ */
+export function renderToString(element: unknown): string | Promise<string> {
+  return renderToStringAsync(element as VNode);
 }
 
 /**
