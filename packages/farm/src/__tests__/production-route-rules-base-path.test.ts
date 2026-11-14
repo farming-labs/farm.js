@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
 import { nitroRouteRulesBelowBasePath } from "../route-rules";
-import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots: string[] = [];
@@ -98,25 +97,10 @@ export default function About() { return <main data-rendered-at={String(Date.now
     );
     await build(config, { root, preset: config.deploy.preset });
 
-    const outputDir = path.join(root, ".farm", ".output");
-    const port = await getAvailablePort();
-    const server = spawn(process.execPath, [path.join(outputDir, "server", "index.mjs")], {
-      cwd: path.join(outputDir, "server"),
-      env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-      stdio: "ignore",
-    });
-    const exited = new Promise<void>((resolve) => server.once("exit", () => resolve()));
+    const server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
     try {
-      const request = async (pathname: string): Promise<Response> => {
-        for (let attempt = 0; ; attempt++) {
-          try {
-            return await fetch(`http://127.0.0.1:${port}${pathname}`, { redirect: "manual" });
-          } catch (error) {
-            if (attempt >= 100 || server.exitCode !== null) throw error;
-            await new Promise((resolve) => setTimeout(resolve, 50));
-          }
-        }
-      };
+      const request = (pathname: string): Promise<Response> =>
+        fetch(`${server.origin}${pathname}`, { redirect: "manual" });
       // The page below the basePath goes through the same swr rule as the app path: Nitro's
       // cache handler answers it (x-cache) with the rule's cache-control, where it used to fall
       // through to an uncached render.
@@ -135,10 +119,7 @@ export default function About() { return <main data-rendered-at={String(Date.now
       expect(redirect.headers.get("location")).toBe("/console/about");
     } finally {
       // Windows refuses to remove the output while the server still holds it as its cwd.
-      if (server.exitCode === null) {
-        server.kill("SIGTERM");
-        await exited;
-      }
+      await server.stop();
     }
   }, 180_000);
 });
