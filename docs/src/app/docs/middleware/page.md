@@ -58,7 +58,8 @@ or stack to them. As for a throwing API route, the error reaches the `middleware
 plugin `runtime.error` hooks, and `onError` hooks with `phase: "runtime"`, and every
 `runtime.after` hook then sees the `500`. Development answers the same `private, no-store` JSON
 `500` under the API base path, and shows the error overlay for a page instead, also a
-`private, no-store` HTML `500`; the hooks run the same way for both.
+`private, no-store` HTML `500`. Neither keeps a header or cookie the failed run set, and the hooks
+run the same way for both.
 
 ## Route middleware
 

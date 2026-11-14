@@ -379,6 +379,20 @@ const fullDocumentRoutes = new Set<string>();
 /** Whether a root layout function returns its own `<html>` document. */
 const documentLayouts = new WeakMap<object, boolean>();
 
+/** The render error each request last reported to observability. */
+const reportedRenderErrors = new WeakMap<object, unknown>();
+
+/**
+ * Emit `render.error` once per thrown error. React reports a shell error to `onError` and then to
+ * `onShellError`, and the page's catch sees the same throw again; the production entry reports
+ * it once, where its render fails.
+ */
+function emitFarmRenderError(req: object, route: string, error: unknown): void {
+  if (reportedRenderErrors.has(req) && reportedRenderErrors.get(req) === error) return;
+  reportedRenderErrors.set(req, error);
+  emitFarmEvent({ type: "render.error", route, error });
+}
+
 function hasRequestHeader(req: FarmRequest, name: string): boolean {
   const value = req.headers[name.toLowerCase()];
   return Array.isArray(value) ? value.length > 0 : Boolean(value);
@@ -2372,7 +2386,7 @@ export class ServerRenderer {
         }
       }
 
-      emitFarmEvent({ type: "render.error", route: pathname, error });
+      emitFarmRenderError(req, pathname, error);
       const errorStatus = resolveDefaultErrorStatus(error);
       if (pprRefreshRoute) {
         emitFarmEvent({
@@ -3515,7 +3529,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         durationMs: Date.now() - startedAt,
       });
     } catch (error) {
-      emitFarmEvent({ type: "render.error", route, error });
+      emitFarmRenderError(req, route, error);
       throw error;
     } finally {
       clearMiddlewareData?.();
@@ -4116,11 +4130,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           didError = true;
           if (!isWebResponse(error) && !isFarmRedirectError(error) && !isFarmNotFoundError(error)) {
             logger.error(`SSR shell error: ${error}`);
-            emitFarmEvent({
-              type: "render.error",
-              route: observabilityRoute,
-              error,
-            });
+            emitFarmRenderError(req, observabilityRoute, error);
           }
 
           if (clearMiddlewareData) {
@@ -4138,11 +4148,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           }
           if (!isWebResponse(error)) {
             logger.error(`SSR streaming error: ${error}`);
-            emitFarmEvent({
-              type: "render.error",
-              route: observabilityRoute,
-              error,
-            });
+            emitFarmRenderError(req, observabilityRoute, error);
           }
         },
       });
