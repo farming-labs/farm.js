@@ -141,6 +141,17 @@ export function middleware(request, context) {
     expect(mirror.headers.get("cache-control")).toBe("public, max-age=300, s-maxage=300");
     expect(mirror.headers.getSetCookie()).toEqual([]);
 
+    // A browser that loaded a page holds the deployment cookie, which names a release, not a
+    // visitor; another cookie keeps the mirror private.
+    for (const [cookie, cacheControl] of [
+      ["__farm_deployment=dev-release", "public, max-age=300, s-maxage=300"],
+      ["session=abc; __farm_deployment=dev-release", "private, no-store"],
+    ]) {
+      const response = await get("/public.md", { accept: "text/markdown", cookie });
+      expect(response.status, cookie).toBe(200);
+      expect(response.headers.get("cache-control"), cookie).toBe(cacheControl);
+    }
+
     const home = await get("/index.md", { accept: "text/markdown" });
     expect(home.status).toBe(200);
     expect(home.headers.get("cache-control")).toBe("private, no-store");

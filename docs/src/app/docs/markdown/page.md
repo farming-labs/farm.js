@@ -422,8 +422,8 @@ lists route paths without the prefix, as described above.
 
 RSC pages default to `private, no-store`, so their mirrors do too. A page whose middleware declares
 `cache: "public"` and sets a shareable `Cache-Control` has a mirror that `md.cache` may cache when
-it is requested without a cookie or `Authorization` header. A mirror never carries the deployment
-cookie, and one that carries a cookie the page or its middleware set is sent with
+it is requested without an `Authorization` header or any cookie besides the deployment cookie,
+which names a release rather than a visitor. A mirror never sets the deployment cookie, and one that carries a cookie the page or its middleware set is sent with
 `private, no-store`, so caches never replay a response cookie to another reader.
 
 Set the same `md` options on the RSC config:

@@ -90,8 +90,10 @@ function createHandler(
 ) {
   const { pages = ["/pricing"], pageFiles, ...entryOptions } = options;
   const entry = generateRscEntry({ ...context, ...entryOptions, markdown: markdownConfig });
-  const start = entry.indexOf("async function handleFarmPageOrMarkdown(request, context)");
+  const start = entry.indexOf("function withoutLoneFarmDeploymentCookie(request)");
   const end = entry.indexOf("async function handler(request, context)", start);
+  expect(start).toBeGreaterThan(-1);
+  expect(entry.indexOf("async function handleFarmPageOrMarkdown(", start)).toBeGreaterThan(start);
   const matchRoute = pageFiles
     ? createRouteMatcher(entry, pageFiles)
     : (pathname: string) => (pages.includes(pathname) ? { pattern: pathname } : null);
@@ -110,6 +112,7 @@ function createHandler(
   const run = new Function(
     "farmMarkdownConfig",
     "createMarkdownMirrorResponse",
+    "farmRequestWantsMarkdown",
     "applyMarkdownNegotiationHeaders",
     "stripFarmBasePath",
     "stripFarmLocaleFromPathname",
@@ -121,6 +124,7 @@ function createHandler(
   )(
     markdownConfig,
     createMarkdownMirrorResponse,
+    farmRequestWantsMarkdown,
     applyMarkdownNegotiationHeaders,
     stripFarmBasePath,
     stripFarmLocaleFromPathname,
@@ -331,6 +335,37 @@ describe("RSC Markdown mirrors", () => {
       expect(handleFarmRequest).toHaveBeenCalledOnce();
     },
   );
+
+  it("lets md.cache share a mirror read with only the deployment cookie", async () => {
+    // The deployment cookie names a release, never a visitor, as core's withoutFarmDeploymentCookie.
+    for (const [cookie, cacheControl] of [
+      [undefined, "public, max-age=300, s-maxage=300"],
+      ["__farm_deployment=release-2", "public, max-age=300, s-maxage=300"],
+      [" __farm_deployment=release-2; ", "public, max-age=300, s-maxage=300"],
+      ["session=abc; __farm_deployment=release-2", "private, no-store"],
+      ["__farm_deployment_x=1", "private, no-store"],
+      ["session=abc", "private, no-store"],
+    ] as const) {
+      const { run, rendered } = createHandler(resolveMarkdownConfig({ cache: 300 }));
+      const response = await run(
+        new Request("https://farm.test/pricing.md", { headers: cookie ? { cookie } : {} }),
+      );
+      expect(response.status, cookie).toBe(200);
+      expect(response.headers.get("cache-control"), cookie).toBe(cacheControl);
+      // The page render sees the cookies that keep the mirror private, as before.
+      expect(rendered[0]!.headers.get("cookie"), cookie).toBe(
+        cacheControl.startsWith("public") ? null : cookie,
+      );
+    }
+    // A page render keeps the deployment cookie; only the mirror's read drops it.
+    const { run, rendered } = createHandler(resolveMarkdownConfig({ cache: 300 }));
+    await run(
+      new Request("https://farm.test/pricing", {
+        headers: { cookie: "__farm_deployment=release-2" },
+      }),
+    );
+    expect(rendered[0]!.headers.get("cookie")).toBe("__farm_deployment=release-2");
+  });
 
   it("preserves middleware cookies in the published core runtime", async () => {
     const runner = createProductionMiddlewareRunner({

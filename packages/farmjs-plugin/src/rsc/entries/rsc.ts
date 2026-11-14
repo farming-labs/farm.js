@@ -2123,6 +2123,30 @@ async function handleFarmAppMetadataRoute(request, context) {
 `
       : ""
   }/**
+ * A Markdown request whose only cookie is the deployment cookie, without it. That cookie names a
+ * release, never a visitor, so a browser holding it may still read (and fill) a mirror md.cache
+ * shares; any other cookie keeps the mirror private. Core's withoutFarmDeploymentCookie applies
+ * the same rule inside createMarkdownMirrorResponse with deployment skew protection; drop this
+ * once that ships. The mirror renders the page with a GET, where the cookie is never read.
+ */
+function withoutLoneFarmDeploymentCookie(request) {
+  const cookie = request.headers.get('cookie');
+  if (!cookie || !cookie.includes('__farm_deployment')) return request;
+  if (!farmRequestWantsMarkdown(new URL(request.url).pathname, request.headers.get('accept'))) {
+    return request;
+  }
+  const otherCookie = cookie.split(';').some((part) => {
+    const separator = part.indexOf('=');
+    const name = (separator === -1 ? part : part.slice(0, separator)).trim();
+    return name !== '' && name !== '__farm_deployment';
+  });
+  if (otherCookie) return request;
+  const headers = new Headers(request.headers);
+  headers.delete('cookie');
+  return new Request(request, { headers });
+}
+
+/**
  * Serves a page's Markdown mirror (\`/page.md\` or \`Accept: text/markdown\`) by
  * rendering the page through the normal request path, so middleware and sign-in
  * gates apply; every other request renders as usual, and HTML pages advertise
@@ -2131,7 +2155,7 @@ async function handleFarmAppMetadataRoute(request, context) {
 async function handleFarmPageOrMarkdown(request, context) {
   if (!farmMarkdownConfig.enabled) return handleFarmRequest(request, context);
   const markdown = await createMarkdownMirrorResponse({
-    request,
+    request: withoutLoneFarmDeploymentCookie(request),
     config: farmMarkdownConfig,
     routePathname: getFarmRoutePathname,
     // The page the render below selects for the mirrored URL, below the basePath and locale.
