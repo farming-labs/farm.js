@@ -353,21 +353,64 @@ export default function Page() { return <main>home {getLocale()}</main>; }`,
     expect(home.status).toBe(200);
   }, 120_000);
 
-  it("lists every page at a URL that answers without a redirect under i18n, as production does", async () => {
-    const messages = { "src/messages/en.json": "{}", "src/messages/fr.json": "{}" };
-    const expectCanonical = async (
+  it("lists default-locale URLs and answers each agent file unprefixed under i18n, as production does", async () => {
+    const files = {
+      // Route files answer the same way as the generated files.
+      "src/app/blog/sitemap.ts":
+        'export default function sitemap() { return [{ url: "https://acme.test/blog" }]; }',
+      "src/app/manifest.ts": 'export default function manifest() { return { name: "Acme" }; }',
+      "src/messages/en.json": "{}",
+      "src/messages/fr.json": "{}",
+    };
+    const expectAgentFiles = async (
       config: string,
       base: string,
       expected: { sitemap: string[]; llms: string[] },
     ) => {
       const origin = await startApp(
-        `md: { expose: ["/", "/about"] }, agent: { llmsTxt: true }, ${config}`,
-        messages,
+        `md: { expose: ["/", "/about"] }, agent: { crawlers: true, llmsTxt: true }, ${config}`,
+        files,
       );
-      const get = (pathname: string) => fetch(`${origin}${pathname}`, { redirect: "manual" });
+      const get = (pathname: string, headers: Record<string, string> = {}) =>
+        fetch(`${origin}${pathname}`, { redirect: "manual", headers });
+      // A French browser: request signals that would pick the 'fr' locale for a page.
+      const french = { "accept-language": "fr" };
       // URLs are on the root layout's metadataBase; read them back from this server.
       const pathOf = (url: string) => new URL(url).pathname;
 
+      // The agent files answer where they are asked for, unprefixed: no locale redirect, no
+      // locale cookie, and no Vary on request signals.
+      for (const pathname of [
+        "/robots.txt",
+        "/sitemap.xml",
+        "/llms.txt",
+        "/llms-full.txt",
+        "/manifest.webmanifest",
+        "/blog/sitemap.xml",
+        "/.well-known/farmjs.json",
+        "/.well-known/ai-catalog.json",
+        "/mcp/server-card",
+      ].map((file) => `${base}${file}`)) {
+        const response = await get(pathname, french);
+        expect({
+          pathname,
+          status: response.status,
+          location: response.headers.get("location"),
+          cookie: response.headers.get("set-cookie"),
+        }).toEqual({ pathname, status: 200, location: null, cookie: null });
+        expect(response.headers.get("vary") ?? "", pathname).not.toContain("Accept-Language");
+      }
+      expect(await (await get(`${base}/robots.txt`)).text()).toContain(
+        `Sitemap: https://acme.test${base}/sitemap.xml`,
+      );
+      const mcp = await fetch(`${origin}${base}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      });
+      expect(mcp.status).toBe(200);
+
+      // The pages they list are at the default locale's URL, each answering without a redirect.
       const sitemap = locs(await (await get(`${base}/sitemap.xml`)).text());
       expect(sitemap.map(pathOf)).toEqual(expected.sitemap);
       const llmsTxt = await (await get(`${base}/llms.txt`)).text();
@@ -382,19 +425,30 @@ export default function Page() { return <main>home {getLocale()}</main>; }`,
           status: 200,
         });
       }
-    };
 
-    // Every locale is prefixed: '/console/about/' answers with a 307 to '/console/en/about/'.
-    await expectCanonical(
-      'basePath: "/console", trailingSlash: true, i18n: { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-always" }',
-      "/console/en",
+      // Pages still redirect to the detected locale.
+      expect((await get(`${base}/about`, french)).headers.get("location")).toMatch(
+        new RegExp(`^${base}/fr/about/?$`),
+      );
+    };
+    const prefixAlways =
+      'i18n: { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-always" }';
+
+    // Every locale is prefixed: '/about' answers with a 307 to '/en/about'.
+    await expectAgentFiles(prefixAlways, "", {
+      sitemap: ["/en", "/en/about", "/en/team"],
+      llms: ["/en/index.md", "/en/about.md", "/en/team"],
+    });
+    await expectAgentFiles(
+      `basePath: "/console", trailingSlash: true, ${prefixAlways}`,
+      "/console",
       {
         sitemap: ["/console/en/", "/console/en/about/", "/console/en/team/"],
         llms: ["/console/en/index.md", "/console/en/about.md", "/console/en/team/"],
       },
     );
     // The default locale is unprefixed, so the URLs stay the plain ones.
-    await expectCanonical(
+    await expectAgentFiles(
       'basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" }',
       "/console",
       {
