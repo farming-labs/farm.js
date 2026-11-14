@@ -3281,9 +3281,10 @@ export class ServerRenderer {
 
       wrapped = await this.wrapWithIntegrationProviders(wrapped);
 
+      // The error document goes out whole: wait for the layouts' Suspense boundaries.
       const html = await _runWithMiddlewareData(options.middlewareMap, () =>
         _runWithMiddlewareContext(options.middlewareContext, () =>
-          this.rendererRuntime.renderToString(wrapped, rendererRenderOptions()),
+          this.renderElementToCompleteHTML(wrapped),
         ),
       );
       res.statusCode = options.statusCode;
@@ -4294,11 +4295,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     const NotFoundComponent = await this.loadNotFoundComponent();
     if (NotFoundComponent) {
       try {
-        content = await this.rendererRuntime.renderToString(
+        content = await this.renderElementToCompleteHTML(
           await this.wrapWithIntegrationProviders(
             this.rendererRuntime.createElement(NotFoundComponent, { pathname }),
           ),
-          rendererRenderOptions(),
         );
       } catch (error) {
         logger.warn(`not-found page could not render outside its layout, using Farm's: ${error}`);
@@ -4386,11 +4386,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 
           element = await this.wrapWithIntegrationProviders(element);
 
-          // Render to string
-          const content = await this.rendererRuntime.renderToString(
-            element,
-            rendererRenderOptions(),
-          );
+          // The not-found document goes out whole, with its 404: renderToString would throw
+          // on a layout that suspends (a lazy component or a use() read), so wait for every
+          // Suspense boundary as a buffered page render does.
+          const content = await this.renderElementToCompleteHTML(element);
 
           const { head, metadata } = await this.notFoundMetadataHead(layoutModule, notFoundModule);
           const html = this.createFullHTML(content, false, pathname, head, { req, metadata });
