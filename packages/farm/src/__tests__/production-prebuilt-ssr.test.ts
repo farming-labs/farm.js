@@ -2706,7 +2706,9 @@ export function CopyButton({ text }) {
           { FARMJS_API_KEY: key, FARMJS_API_URL: `http://127.0.0.1:${receiverPort}` },
         );
         expect(received[0]!.headers.authorization).toBe(`Bearer ${key}`);
-        expect(received[0]!.body).not.toContain("private");
+        // The path, never its query string or the request's cookies.
+        expect(received[0]!.body).not.toContain("private-query");
+        expect(received[0]!.body).not.toContain("private-cookie");
         expect(JSON.parse(received[0]!.body)).toEqual({
           schemaVersion: 1,
           events: [
@@ -2716,6 +2718,7 @@ export function CopyButton({ text }) {
               timestamp: expect.any(String),
               kind: "request",
               route: "/users/[id]",
+              path: "/users/private-customer",
               method: "GET",
               status: 200,
               durationMs: expect.any(Number),
@@ -2977,7 +2980,19 @@ export default {
       expect(requests().filter((line) => line.includes("/[unmatched]"))).toEqual([
         "GET /[unmatched] 404",
       ]);
-      expect(received.join("")).not.toContain("private");
+      // Templates never carry the request's own segments; each path is what was asked for.
+      const events = received.flatMap((body) => JSON.parse(body).events);
+      expect(events.map(({ route }) => route).join(" ")).not.toContain("private");
+      expect(events.filter(({ kind }) => kind === "request").map(({ path }) => path)).toEqual(
+        expect.arrayContaining([
+          "/blog/private-post.md",
+          "/docs/private-missing",
+          "/blog/private-post",
+          "/private-missing",
+          "/mcp",
+        ]),
+      );
+      expect(received.join("")).not.toContain("private-query");
     } finally {
       await new Promise((resolve) => receiver.close(resolve));
       await fs.rm(root, { recursive: true, force: true });

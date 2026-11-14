@@ -5,7 +5,7 @@ description: "What farmjs.dev collects, where it goes, and how to reach Farming 
 
 # Privacy
 
-This page describes what farmjs.dev, the Farm.js website and documentation run by [Farming Labs](https://farming-labs.dev), collects when you visit it and when you use its tools. It is written from the site's source code, which is public in the [`docs/`](https://github.com/farming-labs/farm.js/tree/main/docs) folder of the Farm.js repository. Last updated October 24, 2026.
+This page describes what farmjs.dev, the Farm.js website and documentation run by [Farming Labs](https://farming-labs.dev), collects when you visit it and when you use its tools. It is written from the site's source code, which is public in the [`docs/`](https://github.com/farming-labs/farm.js/tree/main/docs) folder of the Farm.js repository. Last updated November 13, 2026.
 
 ## In short
 
@@ -21,7 +21,7 @@ farmjs.dev is hosted on [Vercel](https://vercel.com). Like any web server, Verce
 
 **Databuddy.** The site pages outside `/docs` (the homepage, `/agents`, the blog, and pages like this one) load [Databuddy](https://www.databuddy.cc)'s script from `cdn.databuddy.cc`, which sends events to `basket.databuddy.cc`. It records the page path and title, the referring page, campaign (UTM) parameters, language, time zone, viewport size, time on the page, scroll depth, and page-load performance (Web Vitals). It keeps a random visitor identifier in `localStorage` (`did`) and a session identifier in `sessionStorage` (`did_session`). It sets no cookies.
 
-**Farm.js Infrastructure.** The server reports each request to Farm.js Infrastructure at `app.farmjs.dev`, run by Farming Labs: the matched route pattern rather than the full address, the method, the status code, the response time, and whether the request came from a known AI agent, worked out from the user agent. The user agent itself, your IP address, the full URL, query strings, headers, cookies, and request bodies are not sent.
+**Farm.js Infrastructure.** The server reports each request to Farm.js Infrastructure at `app.farmjs.dev`, run by Farming Labs: the matched route pattern and the path of the page you asked for (such as `/docs/routing`), the method, the status code, the response time, and whether the request came from a known AI agent, worked out from the user agent. The user agent itself, your IP address, the query string, headers, cookies, and request bodies are not sent.
 
 **Docs engine.** The documentation under `/docs` runs on the Farming Labs [docs engine](https://github.com/farming-labs/docs), which reports usage to `docs.farming-labs.dev`. Each docs page view sends the site address, the page path, the locale, and the docs engine version from your browser, without cookies. The server also reports when the docs search API, Markdown pages, `llms.txt`, or the docs MCP server are used, with the name of the feature or MCP tool. These reports carry no visitor identifier, though like any request, the browser-side report reaches that server with your IP address and user agent.
 

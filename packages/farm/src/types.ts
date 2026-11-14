@@ -239,7 +239,8 @@ export interface FarmConfig {
   /**
    * Request and MCP tool analytics for a Farm Infra project. On only when the server
    * environment sets `FARMJS_API_KEY` (plus `FARMJS_PROJECT_ID` for a key reaching several
-   * projects). Set to false to never send them.
+   * projects). Each request is reported with its route template and the path it asked for,
+   * never its query string. Set to false to never send them.
    */
   analytics?: boolean;
   /**
