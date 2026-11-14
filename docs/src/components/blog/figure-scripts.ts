@@ -1718,7 +1718,7 @@ const BACKEND_RUN = 0.5;
 const landingBackends: FigureSpec = {
   duration:
     BACKEND_START + (BACKEND_REQUESTS.length - 1) * BACKEND_GAP + PULSE + BACKEND_RUN + HOLD,
-  stage: { w: 440, h: 300 },
+  stage: { w: 440, h: 336 },
   label:
     "Requests to one Farm API route reach the app mounted behind it: any app with a fetch handler, such as Hono or Elysia, through mountFetchHandler, and any Node.js app, such as Express, Fastify, or NestJS, through mountNodeHandler",
   panels: [
@@ -1733,8 +1733,8 @@ const landingBackends: FigureSpec = {
       kicker: "One API route",
       label: "/api/[...path]",
     },
-    { id: "fetch", x: 0, y: 76, w: 205, h: 224, title: "Fetch" },
-    { id: "node", x: 235, y: 76, w: 205, h: 224, title: "Node" },
+    { id: "fetch", x: 0, y: 76, w: 205, h: 260, title: "Fetch" },
+    { id: "node", x: 235, y: 76, w: 205, h: 260, title: "Node" },
   ],
   wires: {
     fetch: [
