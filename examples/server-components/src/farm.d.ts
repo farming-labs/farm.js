@@ -64,6 +64,7 @@ export type RoutePath =
   | "/compat/tweet"
   | "/compat/workspace-ui"
   | "/context"
+  | `/context/${string}`
   | "/guarded"
   | "/hooks"
   | "/inline"
@@ -163,6 +164,7 @@ export type RoutePattern =
   | "/compat/tweet"
   | "/compat/workspace-ui"
   | "/context"
+  | "/context/[item]"
   | "/guarded"
   | "/hooks"
   | "/inline"
@@ -263,6 +265,7 @@ export type RouteModulePattern =
   | "/compat/tweet"
   | "/compat/workspace-ui"
   | "/context"
+  | "/context/[item]"
   | "/guarded"
   | "/hooks"
   | "/inline"

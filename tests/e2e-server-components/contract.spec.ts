@@ -1216,3 +1216,30 @@ test("a link still navigates when the client runtime fails to load", async ({ pa
   expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(false);
   expect(blocked.length).toBeGreaterThan(0);
 });
+
+test("the next page of a layout that hydrates as one root updates the page on screen in place, as React Server Components do", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/context/a");
+  await page.waitForLoadState("networkidle");
+  await page.getByTestId("clicker-item").click();
+  await expect(page.getByTestId("clicker-item")).toHaveText("item: 1");
+  await page.evaluate(() => {
+    (window as { __item?: Element | null }).__item = document.querySelector(
+      "[data-testid=clicker-item]",
+    );
+  });
+  await page.click("[data-next]");
+  await expect(page.locator("h1")).toHaveText("Item b");
+  // The same client component in the same place keeps its node and its state.
+  expect(
+    await page.evaluate(
+      () =>
+        (window as { __item?: Element | null }).__item ===
+        document.querySelector("[data-testid=clicker-item]"),
+    ),
+  ).toBe(true);
+  await expect(page.getByTestId("clicker-item")).toHaveText("item: 1");
+  expect(errors).toEqual([]);
+});
