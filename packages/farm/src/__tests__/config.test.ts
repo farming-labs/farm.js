@@ -916,6 +916,24 @@ describe("resolveConfig", () => {
     }
   });
 
+  it("names the one-catch-all rule and a fix for a route rule Nitro cannot match", async () => {
+    await expect(
+      resolveConfig({ routeRules: { "/*/docs/**": { swr: 3600 } } }, "production"),
+    ).rejects.toThrow(
+      'Route rule "/*/docs/**" has more than one catch-all. A route rule may use one "*", "**", ' +
+        '":name*" or ":name+", and "*" matches any number of segments, as "**" does. Match one ' +
+        'segment with a named parameter instead: "/:segment/docs/**".',
+    );
+    await expect(
+      resolveConfig({ routeRules: { "/docs/:path*/edit/**": { swr: 60 } } }, "production"),
+    ).rejects.toThrow('as in "/:locale/docs/**"');
+    for (const source of ["/:locale/docs/**", "/docs/*", "/docs/:path*", "/blog/**:slug"]) {
+      await expect(
+        resolveConfig({ routeRules: { [source]: { swr: 60 } } }, "production"),
+      ).resolves.toBeDefined();
+    }
+  });
+
   it("rejects OpenAPI routes that browsers reinterpret", async () => {
     for (const route of [
       "/docs/../reference",

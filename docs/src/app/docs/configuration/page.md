@@ -1350,6 +1350,21 @@ export default defineConfig({
 
 `render: "static"` maps to prerendering. `render: "dynamic"` forces a dynamic response. `swr` and `isr` accept `true` or a TTL in seconds. `cors: true` applies permissive API CORS headers; pass an object when you need a specific origin, methods, or headers.
 
+A pattern matches as Nitro's router does: `:name` matches one segment, and `*`, `**`, `:name*` or
+`:name+` match any number of segments. A pattern may have only one of these, so write
+`/:locale/docs/**` rather than `/*/docs/**`. Config resolution rejects a pattern with two and
+suggests the named form.
+
+On a production server, a `swr` or `cache` rule stores the pages it covers and serves later requests
+from that copy with `X-Cache: HIT`, including a page that renders on each request because it sets no
+`dynamic` or `revalidate`. Nitro renders such a page without the request's cookies, `Authorization`,
+query string, or any header the rule does not key on, so one render serves everyone. A page whose
+render is still one visitor's (it reads `cookies()`, `headers()` or the request, has middleware
+data, a request `context`, an error status, or streams a Suspense boundary) keeps
+`Cache-Control: private, no-store`, is never stored, and emits a `cache.bypass`
+[event](/docs/observability) naming the reason. A response that middleware let through stays
+private too, as in [Responses behind middleware](/docs/cache-ppr#responses-behind-middleware).
+
 On Netlify, an `isr` rule caches a response on Netlify's CDN only when Farm sends it with a shared
 `Cache-Control`. A response Farm marks `private` or `no-store` (a request with cookies or an
 `Authorization` header, middleware data, a render that read the request, an error, or a dynamic

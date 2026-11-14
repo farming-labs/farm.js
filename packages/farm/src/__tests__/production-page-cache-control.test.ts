@@ -8,6 +8,7 @@ type PageHeaderInputs = {
   hasRequestScopedRender: boolean;
   stream?: boolean;
   sharedCacheControl?: string | null;
+  routeRuleCached?: boolean;
 };
 
 /**
@@ -41,6 +42,7 @@ function createPageResponseHeaders(): (inputs: PageHeaderInputs) => Record<strin
     "hasRequestScopedRender",
     "farmFontPreloadHeader",
     "getRouteSharedCacheControl",
+    "farmRouteRuleCached",
     `${unescape(source.slice(pprStart, pprEnd))}\n${unescape(
       source.slice(blockStart, blockEnd),
     )}\nreturn responseHeaders;`,
@@ -58,6 +60,7 @@ function createPageResponseHeaders(): (inputs: PageHeaderInputs) => Record<strin
         inputs.sharedCacheControl === undefined
           ? "public, s-maxage=60, stale-while-revalidate=300"
           : inputs.sharedCacheControl,
+      inputs.routeRuleCached ?? false,
     );
 }
 
@@ -90,6 +93,32 @@ describe("production page Cache-Control", () => {
       hasRequestScopedRender: false,
     });
     expect(headers["Cache-Control"]).toBe("s-maxage=60, stale-while-revalidate");
+  });
+
+  it("leaves a dynamic page under a swr or cache route rule to the rule's policy", () => {
+    const off = { enabled: false };
+    const cached = (inputs: Partial<PageHeaderInputs>) =>
+      headersFor({
+        pprCanCache: false,
+        pprConfig: off,
+        hasRequestScopedRender: false,
+        sharedCacheControl: null,
+        routeRuleCached: true,
+        ...inputs,
+      });
+    // No Cache-Control of Farm's own: the rule's cache stores the page and sends the rule's.
+    expect(cached({})).not.toHaveProperty("Cache-Control");
+    // A route policy of its own is kept.
+    expect(cached({ sharedCacheControl: undefined })["Cache-Control"]).toBe(
+      "public, s-maxage=60, stale-while-revalidate=300",
+    );
+    // A render that read the request, or that streamed, stays private under the rule too.
+    expect(cached({ hasRequestScopedRender: true })["Cache-Control"]).toBe("private, no-store");
+    expect(cached({ stream: true })["Cache-Control"]).toBe("private, no-store");
+    // A PPR bypass keeps its private policy.
+    expect(cached({ pprConfig: ppr })["Cache-Control"]).toBe("private, no-store");
+    // Without the rule the dynamic page stays private.
+    expect(cached({ routeRuleCached: false })["Cache-Control"]).toBe("private, no-store");
   });
 
   it("uses the route policy when PPR is off and no-store when PPR bypasses", () => {
