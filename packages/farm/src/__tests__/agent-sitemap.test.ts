@@ -79,6 +79,45 @@ describe("createFarmDefaultSitemap", () => {
     expect(urls({})).toEqual(["https://acme.test/", "https://acme.test/about"]);
   });
 
+  it("lists each page in the default locale's URL, which answers without a redirect", () => {
+    const sources = [{ pattern: "/" }, { pattern: "/about" }];
+    const i18n = (routing: "prefix-always" | "prefix-except-default" | "none", enabled = true) => ({
+      enabled,
+      basePath: "/app",
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing,
+    });
+    const urls = (options: { trailingSlash?: boolean; i18n?: ReturnType<typeof i18n> }) =>
+      createFarmDefaultSitemap(sources, {
+        origin: "https://acme.test",
+        config,
+        basePath: "/app",
+        ...options,
+      }).map((entry) => entry.url);
+
+    // Every locale is prefixed: '/app/about' answers with a 307 to '/app/en/about'.
+    expect(urls({ i18n: i18n("prefix-always") })).toEqual([
+      "https://acme.test/app/en",
+      "https://acme.test/app/en/about",
+    ]);
+    expect(urls({ i18n: i18n("prefix-always"), trailingSlash: true })).toEqual([
+      "https://acme.test/app/en/",
+      "https://acme.test/app/en/about/",
+    ]);
+    // The default locale is unprefixed, routing "none" adds no prefix, and i18n may be off.
+    for (const config of [
+      i18n("prefix-except-default"),
+      i18n("none"),
+      i18n("prefix-always", false),
+    ]) {
+      expect(urls({ i18n: config })).toEqual([
+        "https://acme.test/app",
+        "https://acme.test/app/about",
+      ]);
+    }
+  });
+
   it("applies include and exclude route patterns", () => {
     const pages = ["/", "/admin", "/admin/users", "/blog", "/blog/hello"].map((pattern) => ({
       pattern,

@@ -353,6 +353,57 @@ export default function Page() { return <main>home {getLocale()}</main>; }`,
     expect(home.status).toBe(200);
   }, 120_000);
 
+  it("lists every page at a URL that answers without a redirect under i18n, as production does", async () => {
+    const messages = { "src/messages/en.json": "{}", "src/messages/fr.json": "{}" };
+    const expectCanonical = async (
+      config: string,
+      base: string,
+      expected: { sitemap: string[]; llms: string[] },
+    ) => {
+      const origin = await startApp(
+        `md: { expose: ["/", "/about"] }, agent: { llmsTxt: true }, ${config}`,
+        messages,
+      );
+      const get = (pathname: string) => fetch(`${origin}${pathname}`, { redirect: "manual" });
+      // URLs are on the root layout's metadataBase; read them back from this server.
+      const pathOf = (url: string) => new URL(url).pathname;
+
+      const sitemap = locs(await (await get(`${base}/sitemap.xml`)).text());
+      expect(sitemap.map(pathOf)).toEqual(expected.sitemap);
+      const llmsTxt = await (await get(`${base}/llms.txt`)).text();
+      const llms = [...llmsTxt.matchAll(/\]\((https:\/\/acme\.test[^)]*)\)/g)]
+        .map((match) => pathOf(match[1]))
+        // Pages only: the MCP section links the endpoint and the AI catalog.
+        .filter((pathname) => !/\/mcp$|\/\.well-known\//.test(pathname));
+      expect(llms).toEqual(expected.llms);
+      for (const pathname of [...expected.sitemap, ...expected.llms]) {
+        expect({ pathname, status: (await get(pathname)).status }).toEqual({
+          pathname,
+          status: 200,
+        });
+      }
+    };
+
+    // Every locale is prefixed: '/console/about/' answers with a 307 to '/console/en/about/'.
+    await expectCanonical(
+      'basePath: "/console", trailingSlash: true, i18n: { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-always" }',
+      "/console/en",
+      {
+        sitemap: ["/console/en/", "/console/en/about/", "/console/en/team/"],
+        llms: ["/console/en/index.md", "/console/en/about.md", "/console/en/team/"],
+      },
+    );
+    // The default locale is unprefixed, so the URLs stay the plain ones.
+    await expectCanonical(
+      'basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" }',
+      "/console",
+      {
+        sitemap: ["/console", "/console/about", "/console/team"],
+        llms: ["/console/index.md", "/console/about.md", "/console/team"],
+      },
+    );
+  }, 180_000);
+
   it("names the sitemap in the robots.txt agent.crawlers serves", async () => {
     const origin = await startApp("agent: { crawlers: true }");
     expect(await (await fetch(`${origin}/robots.txt`)).text()).toContain(
