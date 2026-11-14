@@ -27,14 +27,36 @@ import {
 } from "./package-client-boundary-cache";
 import { getFarmProjectSourceDir } from "./source-dir";
 
+// The source files read while `traceFarmSourceReads` runs, so a result can say what it depends on.
+let sourceReadTrace: Set<string> | undefined;
+
 function readIfExists(filePath: string): string | null {
   try {
     if (!filePath || !fs.existsSync(filePath)) {
       return null;
     }
-    return fs.readFileSync(filePath, "utf-8");
+    const content = fs.readFileSync(filePath, "utf-8");
+    sourceReadTrace?.add(filePath);
+    return content;
   } catch {
     return null;
+  }
+}
+
+/**
+ * @internal Runs `operation` (synchronous) and returns the source files the analysis in this module
+ * read while it ran, nested traces included, so a caller can cache the result while they are
+ * unchanged.
+ */
+export function traceFarmSourceReads<T>(operation: () => T): { result: T; files: string[] } {
+  const outer = sourceReadTrace;
+  const files = new Set<string>();
+  sourceReadTrace = files;
+  try {
+    return { result: operation(), files: [...files] };
+  } finally {
+    sourceReadTrace = outer;
+    if (outer) for (const file of files) outer.add(file);
   }
 }
 

@@ -291,7 +291,11 @@ import type { FarmRenderer } from "./renderer";
 import { createFarmReactRefreshPlugins, isFarmReactRefreshActive } from "./react-refresh";
 import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
-import { inferFarmIslandStrategy, resolveFarmRouteRootStrategy } from "./island-inference";
+import {
+  inferFarmIslandStrategy,
+  invalidateFarmRouteRootInferences,
+  resolveFarmRouteRootStrategy,
+} from "./island-inference";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
   createFarmRouteRenderPlan,
@@ -5805,6 +5809,7 @@ if (import.meta.hot) {
       // A module that gains or loses "use client", or an import, changes what client code reaches.
       invalidateFarmClientReachableModules();
       invalidateFarmClientOnlyScan();
+      invalidateFarmRouteRootInferences();
     },
     async handleHotUpdate(ctx: HmrContext) {
       // A file changed while a deferred setup still discovers routes: handle it against the result.
