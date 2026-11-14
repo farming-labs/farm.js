@@ -280,6 +280,7 @@ const sidebar = [
           { label: "Overview", slug: "integrations/jobs", icon: "activity" },
           { label: "Trigger.dev", slug: "integrations/trigger", icon: "brand-trigger" },
           { label: "Inngest", slug: "integrations/inngest", icon: "brand-inngest" },
+          { label: "Durable workflows", slug: "integrations/durable-workflows", icon: "timer" },
         ],
       },
       {
