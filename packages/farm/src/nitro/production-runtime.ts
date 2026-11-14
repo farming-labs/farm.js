@@ -175,6 +175,12 @@ export {
 } from "../trailing-slash";
 export { applyFarmBasePath, setFarmBasePath, stripFarmBasePath } from "../base-path";
 export { appendFarmRedirectQuery } from "../redirect-query";
+export {
+  applyConfigResponseHeaders,
+  createConfigHeadersMatcher,
+  createConfigRedirectMatcher,
+  createConfigRewriteMatcher,
+} from "../plugins/config-routes";
 export { isDeferred, prepareDeferredData, snapshotDeferredData } from "../deferred";
 export {
   applyFarmCspNonceToResponse,

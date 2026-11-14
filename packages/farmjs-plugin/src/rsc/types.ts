@@ -5,6 +5,14 @@ import type {
   ResolvedFarmLlmsTxtConfig,
 } from "@farm.js/core/internal/production-runtime";
 import type { FarmI18nCatalogs, ResolvedFarmI18nConfig } from "@farm.js/core/i18n";
+import type { createConfigRedirectMatcher } from "@farm.js/core/internal/production-runtime";
+import type { createConfigHeadersMatcher } from "@farm.js/core/internal/production-runtime";
+import type { createConfigRewriteMatcher } from "@farm.js/core/internal/production-runtime";
+
+/** Core's config `redirects()`, `rewrites()` and `headers()` entries. */
+export type RedirectConfig = Parameters<typeof createConfigRedirectMatcher>[0][number];
+export type RewriteConfig = Parameters<typeof createConfigRewriteMatcher>[0][number];
+export type HeaderConfig = Parameters<typeof createConfigHeadersMatcher>[0][number];
 import type {
   FarmServerActionsConfig,
   ResolvedFarmServerActionsConfig,
@@ -190,6 +198,17 @@ export interface EntryContext {
    * server needs no catalog files. Development reads them from disk instead.
    */
   i18nCatalogs?: FarmI18nCatalogs;
+
+  /**
+   * The config `redirects()`, `rewrites()` and `headers()`, resolved once as core resolves them.
+   * Set only when one of them has an entry, and applied by the production server; the dev server
+   * applies them ahead of Vite and the API routes, as core's does.
+   */
+  configRoutes?: {
+    redirects: RedirectConfig[];
+    rewrites: RewriteConfig[];
+    headers: HeaderConfig[];
+  };
 
   /**
    * Server settings the request path needs. `trustProxy` decides whether

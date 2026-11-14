@@ -523,11 +523,19 @@ test("reports whether experimental.serverComponents runs React Server Components
     }
 
     // Config RSC cannot run that decides what a request may receive stops it, as farm dev does.
-    await writeConfig(["  headers() { return []; },"]);
+    await writeConfig(['  routeRules: { "/admin/**": { headers: { "x-admin": "1" } } },']);
     const blocked = await runFarmDoctor({ root, offline: true });
     const blockedCheck = blocked.checks.find((entry) => entry.code === "SERVER_COMPONENTS_BLOCKED");
     assert.equal(blockedCheck?.status, "fail");
-    assert.match(blockedCheck?.message || "", /does not run `headers` yet/);
+    assert.match(blockedCheck?.message || "", /does not run `routeRules` yet/);
+
+    // Config headers(), redirects() and rewrites() run in RSC and no longer block it.
+    await writeConfig(["  headers() { return []; },"]);
+    const withHeaders = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      withHeaders.checks.find((entry) => entry.code === "SERVER_COMPONENTS_BLOCKED"),
+      undefined,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

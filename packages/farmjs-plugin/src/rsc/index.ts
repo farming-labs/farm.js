@@ -29,8 +29,17 @@ import {
   type ConfigEnv,
   type Plugin,
   type UserConfig,
+  type ViteDevServer,
 } from "vite";
 import { init as initModuleLexer, parse as parseModuleImports } from "es-module-lexer";
+import type { HeaderConfig, RedirectConfig, RewriteConfig } from "./types.js";
+import {
+  createRscConfigRouteMatchers,
+  createRscConfigRoutesMiddleware,
+  resolveRscConfigRoutes,
+  type RscConfigRouteList,
+  type RscDevConfigRoutes,
+} from "./config-routes.js";
 import type {
   FarmRscPluginOptions,
   EntryContext,
@@ -788,6 +797,32 @@ async function rewriteCoreRuntimeImports(code: string, id: string): Promise<stri
  * @param options - Plugin configuration options
  * @returns Array of Vite plugins
  */
+/**
+ * The RSC entry, loaded in the "rsc" environment so @vitejs/plugin-rsc transforms run with
+ * this.environment.name === "rsc". Never evaluate an RSC entry with SSR conditions or share its
+ * module cache.
+ */
+async function loadRscDevEntry(server: ViteDevServer): Promise<any> {
+  const rscEnv = server.environments.rsc;
+  if (!rscEnv) {
+    throw new FarmDevEnvironmentError(
+      '[Farm.js] The "rsc" development environment is missing. Enable @vitejs/plugin-rsc before serving RSC requests.',
+    );
+  }
+  const rscSource =
+    (rscEnv.config?.build as any)?.rollupOptions?.input?.index ??
+    "./.farm/rsc-entries/entry.rsc.tsx";
+  const root = server.config.root;
+  const importer = path.join(root, "vite.config.ts");
+  const absoluteRscEntry = path.resolve(root, ".farm", "rsc-entries", "entry.rsc.tsx");
+  const resolved =
+    (await rscEnv.pluginContainer.resolveId(rscSource, importer)) ??
+    (await rscEnv.pluginContainer.resolveId(rscSource)) ??
+    (await rscEnv.pluginContainer.resolveId(absoluteRscEntry));
+  const id = resolved?.id ?? pathToFileURL(absoluteRscEntry).href;
+  return loadFarmDevModule(server, id, "rsc");
+}
+
 export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   let rscEnabled = false;
   let actionsEnabled = false;
@@ -799,6 +834,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   let rscBuildRoot: string | undefined;
   /** The app root, when this build adds the mobile client entry. */
   let mobileClientRoot: string | undefined;
+  /** The config redirects(), rewrites() and headers() the dev server applies, when set. */
+  let devConfigRoutes: RscDevConfigRoutes | undefined;
   const middlewareConfigModules = new Map<string, string>();
   let mcpConfigCandidates: string[] | null = null;
 
@@ -1034,6 +1071,9 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           };
           mcp?: FarmMCPUserConfig;
           images?: FarmImageConfig;
+          redirects?: RscConfigRouteList<RedirectConfig>;
+          rewrites?: RscConfigRouteList<RewriteConfig>;
+          headers?: RscConfigRouteList<HeaderConfig>;
         };
         // Check if user enabled RSC in their config
         const serverComponents = c.experimental?.serverComponents;
@@ -1287,6 +1327,13 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           mode: env.command === "serve" ? "development" : "production",
           basePath: c.basePath ?? "/",
         });
+        // The config redirects(), rewrites() and headers(), called once and checked as core's
+        // config resolution checks them. An app without any generates the same entries as before.
+        const configRoutes = await resolveRscConfigRoutes(c);
+        const configRouteMatchers = configRoutes
+          ? createRscConfigRouteMatchers(configRoutes, { i18n, basePath: c.basePath ?? "/" })
+          : undefined;
+        devConfigRoutes = env.command === "serve" ? configRouteMatchers : undefined;
         // A build inlines the catalogs, read and validated as core's build reads them (a strict
         // mismatch fails the build), so the server needs no catalog files.
         let i18nCatalogs: EntryContext["i18nCatalogs"];
@@ -1341,6 +1388,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           ...(appMetadataRoutes ? { appMetadataRoutes } : {}),
           i18n,
           ...(i18nCatalogs ? { i18nCatalogs } : {}),
+          ...(configRoutes ? { configRoutes } : {}),
           server: { trustProxy: resolveFarmServerConfig(c.server).trustProxy },
           middlewareConfigPaths,
           pluginsConfigPaths,
@@ -1875,6 +1923,32 @@ if (document.readyState === 'loading') {
     // Middleware and API routes are handled by standalone plugins
     // ────────────────────────────────────────────────────────
     {
+      name: "@farm.js/plugin/rsc:config-routes",
+      // Ahead of the API and middleware plugins and Vite's own middleware, as core's dev server
+      // applies config routes before anything answers.
+      configureServer: {
+        order: "pre",
+        handler(server) {
+          if (!rscEnabled || !devConfigRoutes) return;
+          server.middlewares.use(
+            createRscConfigRoutesMiddleware({
+              routes: () => devConfigRoutes,
+              root: server.config.root,
+              publicDir: server.config.publicDir,
+              isApiPathname: (pathname) =>
+                isFarmAPIPathname(pathname, entryContext.apiBasePath) ||
+                isFarmAPIPathname(pathname),
+              hasLocalRoute: async (url) => {
+                const entry = await loadRscDevEntry(server);
+                return entry?.__farmHasLocalRequestRoute?.(url.href) === true;
+              },
+              bodySizeLimit,
+            }),
+          );
+        },
+      },
+    },
+    {
       name: "@farm.js/plugin/rsc:dev-server",
 
       configureServer(server) {
@@ -2011,34 +2085,7 @@ if (document.readyState === 'loading') {
                     : undefined,
               });
 
-              // Load the RSC entry in the "rsc" environment so @vitejs/plugin-rsc transforms run with this.environment.name === "rsc".
-              // Never evaluate an RSC entry with SSR conditions or share its module cache.
-              const rscEnv = server.environments.rsc;
-              if (!rscEnv) {
-                throw new FarmDevEnvironmentError(
-                  '[Farm.js] The "rsc" development environment is missing. Enable @vitejs/plugin-rsc before serving RSC requests.',
-                );
-              }
-              let rscEntry: any = null;
-              if (rscEnv) {
-                const rscSource =
-                  (rscEnv.config?.build as any)?.rollupOptions?.input?.index ??
-                  "./.farm/rsc-entries/entry.rsc.tsx";
-                const root = server.config.root;
-                const importer = path.join(root, "vite.config.ts");
-                const absoluteRscEntry = path.resolve(
-                  root,
-                  ".farm",
-                  "rsc-entries",
-                  "entry.rsc.tsx",
-                );
-                const resolved =
-                  (await rscEnv.pluginContainer.resolveId(rscSource, importer)) ??
-                  (await rscEnv.pluginContainer.resolveId(rscSource)) ??
-                  (await rscEnv.pluginContainer.resolveId(absoluteRscEntry));
-                const id = resolved?.id ?? pathToFileURL(absoluteRscEntry).href;
-                rscEntry = await loadFarmDevModule(server, id, "rsc");
-              }
+              const rscEntry = await loadRscDevEntry(server);
               if (!rscEntry?.default?.fetch)
                 throw new Error("[Farm.js] Could not load RSC entry in rsc environment");
               const response = await rscEntry.default.fetch(request, {

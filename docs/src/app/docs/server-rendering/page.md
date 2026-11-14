@@ -419,8 +419,8 @@ output directory, so `farm start` and platform deploys work unchanged.
 The RSC pipeline (`serverComponents: { mode: "rsc" }`) does not run every Farm feature
 yet:
 
-- `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, `context`, and
-  `security.csp` decide what a request may see or receive. Running the app without them could
+- `auth`, `integrations`, `routeRules`, `context`, and `security.csp` decide what a request may
+  see or receive. Running the app without them could
   expose what they protect, so `farm dev` and `farm build` stop with an error that names them,
   including when a layer (`extends`) or a plugin's `configure` sets them.
 - Farm `plugins` run only their `configure` hook, in `farm dev` and `farm build`, and their
@@ -504,6 +504,14 @@ Both setups follow the same route contract:
   `/about/index.rsc`. A payload request at the other spelling redirects to the canonical page's
   payload, a static page prerenders at its canonical URL, and `sitemap.xml` and `llms.txt` list
   each page at that URL.
+- **Redirects, rewrites and headers.** The config [`redirects()`, `rewrites()` and
+  `headers()`](/docs/configuration#route-rules) apply in `farm dev` and in production as in other
+  Farm apps: redirects answer before any route or middleware, a rewrite applies only where no page,
+  API route, route file (`sitemap.ts`, `robots.ts`, `llms.ts`, `llms-full.ts`) or generated agent
+  file (`llms.txt`, `sitemap.xml`, `robots.txt`) answers, and headers apply to whatever answers, API
+  routes, agent files and redirects included; a response middleware let through keeps `Cache-Control: private, no-store`. A payload
+  request matches as its page, so a client navigation follows a redirect to the destination's
+  payload. A static page any of them matches renders on each request instead of prerendering.
 
 A client that loaded an older deployment and fetches a prerendered payload from a newer one does not
 get the deployment-mismatch reload that a server-rendered payload triggers.

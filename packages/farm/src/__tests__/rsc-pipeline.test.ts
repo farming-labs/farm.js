@@ -324,22 +324,57 @@ describe("experimental.serverComponents from farm.config", () => {
 
   it("refuses config a plugin's `configure` adds that RSC would not run", async () => {
     const root = createApp();
-    const addsHeaders = {
-      name: "adds-headers",
+    const addsRouteRules = {
+      name: "adds-route-rules",
       configure: (config: Record<string, unknown>) => ({
         ...config,
-        headers: [{ source: "/(.*)", headers: [{ key: "x-frame-options", value: "DENY" }] }],
+        routeRules: { "/blog/**": { headers: { "x-frame-options": "DENY" } } },
       }),
     };
     await expect(
       createFarmRscViteConfig(
         {
           experimental: { serverComponents: { mode: "rsc" as const } },
-          plugins: [addsHeaders],
+          plugins: [addsRouteRules],
         },
         { root, command: "build", preset: "node-server" },
       ),
-    ).rejects.toThrow("does not run `headers` yet");
+    ).rejects.toThrow("does not run `routeRules` yet");
+  });
+
+  it("hands config redirects(), rewrites() and headers() to the RSC pipeline", async () => {
+    const redirects = () => [{ source: "/old", destination: "/new" }];
+    const rewrites = () => [{ source: "/alias", destination: "/about" }];
+    const addsHeaders = {
+      name: "adds-headers",
+      configure: (config: Record<string, unknown>) => ({
+        ...config,
+        headers: () => [
+          { source: "/:path*", headers: [{ key: "x-frame-options", value: "DENY" }] },
+        ],
+      }),
+    };
+    const config = (await createFarmRscViteConfig(
+      {
+        experimental: { serverComponents: { mode: "rsc" as const } },
+        redirects,
+        rewrites,
+        plugins: [addsHeaders],
+      },
+      { root: createApp(), command: "build", preset: "node-server" },
+    )) as Record<string, any>;
+    // Read by the pipeline's own config hook, which resolves them as core's config does.
+    expect(config.redirects).toBe(redirects);
+    expect(config.rewrites).toBe(rewrites);
+    expect(await config.headers()).toEqual([
+      { source: "/:path*", headers: [{ key: "x-frame-options", value: "DENY" }] },
+    ]);
+    expect(
+      farmAppUsesRscPipeline(
+        { redirects, rewrites, experimental: { serverComponents: { mode: "rsc" as const } } },
+        createApp(),
+      ),
+    ).toBe(true);
   });
 
   it("gives development Fast Refresh with core's plugin-react when the app has none", async () => {
