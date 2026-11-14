@@ -420,9 +420,11 @@ and sign-in gates apply, and a page that must not be shared keeps its private `C
 Under a `basePath` or locale prefix, a home page's mirror is `<prefix>/index.md` and `md.expose`
 lists route paths without the prefix, as described above.
 
-The RSC renderer currently sets a deployment cookie on HTML page renders. Its generated mirrors
-therefore use `private, no-store` too; setting `md.cache` does not enable shared caching while that
-cookie is present. This prevents caches from replaying response cookies to another reader.
+RSC pages default to `private, no-store`, so their mirrors do too. A page whose middleware declares
+`cache: "public"` and sets a shareable `Cache-Control` has a mirror that `md.cache` may cache when
+it is requested without a cookie or `Authorization` header. A mirror never carries the deployment
+cookie, and one that carries a cookie the page or its middleware set is sent with
+`private, no-store`, so caches never replay a response cookie to another reader.
 
 Set the same `md` options on the RSC config:
 

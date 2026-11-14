@@ -161,6 +161,7 @@ describe("generated server action security", () => {
       "handleFarmRequest",
       "farmApiBasePath",
       "farmMarkdownConfig",
+      "withFarmDeploymentCookie",
       `${entry.slice(start, end)}; return handler;`,
     )(
       _runWithAPIRequestRuntime,
@@ -170,6 +171,7 @@ describe("generated server action security", () => {
       async () => Response.json(await api.hello.get()),
       "/backend",
       { enabled: false },
+      (_request: Request, response: Response) => response,
     );
     const response = await handle(
       new Request("https://farm.test/page", { headers: { cookie: "session=rsc" } }),

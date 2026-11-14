@@ -888,6 +888,34 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           expect(handled.headers.get("x-config-middleware")).toBe("active");
         }
         if (name === "default") {
+          // A page that stays out of shared caches stores its deployment in the cookie, renewing
+          // another deployment's cookie a document load sends; one that names another deployment
+          // is refused and keeps its cookie.
+          const document = await fetch(origin + "/", {
+            headers: { accept: "text/html", cookie: "__farm_deployment=stale-release" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(document.status, logs).toBe(200);
+          expect(document.headers.get("cache-control")).toBe("private, no-store");
+          const deploymentId = document.headers.get("x-farm-deployment-id");
+          expect(deploymentId).toBeTruthy();
+          expect(document.headers.getSetCookie()).toEqual([
+            `__farm_deployment=${encodeURIComponent(deploymentId!)}; Path=/; HttpOnly; SameSite=Lax`,
+          ]);
+          const stale = await fetch(origin + "/", {
+            headers: { accept: "text/html", "x-farm-deployment-id": "stale-release" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(stale.status, logs).toBe(409);
+          expect(stale.headers.get("x-farm-deployment-id")).toBe(deploymentId);
+          expect(stale.headers.getSetCookie()).toEqual([]);
+          const navigation = await fetch(origin + "/", {
+            headers: { accept: "text/x-component" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(navigation.status, logs).toBe(200);
+          expect(navigation.headers.getSetCookie()).toEqual([]);
+
           for (const [pathname, expected, excluded] of [
             ["/accounts/new", "Route error rendered", "Dynamic account error rendered"],
             ["/accounts/alice", "Dynamic account error rendered", "Route error rendered"],
@@ -1041,6 +1069,9 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(page.headers.get("content-type")).toContain(accept);
             expect(await page.text(), logs).toContain("RSC root runtime fixture");
             expect(page.headers.get("cache-control")).toBe("public, max-age=60");
+            // A CDN may store this page, so it never sets the deployment cookie.
+            expect(page.headers.get("x-farm-deployment-id")).toBeTruthy();
+            expect(page.headers.getSetCookie()).toEqual([]);
             const fields = page.headers.get("vary")?.toLowerCase().split(/,\s*/);
             // Nitro only adds Accept-Encoding when it actually negotiates a
             // compressed representation; these are the app-owned variants.
@@ -1171,6 +1202,20 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             const response = await fetch(origin + pathname, { redirect: "manual" });
             expect(response.status, `${pathname} ${logs}`).toBe(308);
             expect(response.headers.get("location"), pathname).toBe(location);
+          }
+          // A prerendered page is a file served to every visitor, without the deployment cookie;
+          // a page rendered on request sets it.
+          for (const pathname of ["/console/static/", "/console/about/"]) {
+            const response = await fetch(origin + pathname, {
+              headers: { accept: "text/html" },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            expect(response.headers.getSetCookie(), pathname).toEqual(
+              pathname === "/console/static/"
+                ? []
+                : [expect.stringMatching(/^__farm_deployment=[^;]+; Path=\/console; HttpOnly/)],
+            );
           }
           // The static page and its payload were written at the trailing-slash URL.
           for (const file of ["index.html", "index.rsc"]) {
