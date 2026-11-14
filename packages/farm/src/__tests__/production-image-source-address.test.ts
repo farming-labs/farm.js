@@ -1,13 +1,12 @@
 // @vitest-environment node
 
-import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
-import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer, type ProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PNG =
@@ -38,9 +37,8 @@ const FILES: Record<string, string> = {
 };
 
 let root: string | undefined;
-let server: ChildProcess | undefined;
+let server: ProductionServer | undefined;
 let base = "";
-const output: string[] = [];
 
 beforeAll(async () => {
   root = await fs.mkdtemp(path.join(packageRoot, ".tmp-image-source-address-"));
@@ -57,33 +55,12 @@ beforeAll(async () => {
   );
   await build(config, { root, preset: "node-server" });
 
-  const serverDirectory = path.join(root, ".farm", ".output", "server");
-  const port = await getAvailablePort();
-  base = `http://127.0.0.1:${port}`;
-  server = spawn(process.execPath, [path.join(serverDirectory, "index.mjs")], {
-    cwd: serverDirectory,
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  server.stdout?.on("data", (chunk) => output.push(String(chunk)));
-  server.stderr?.on("data", (chunk) => output.push(String(chunk)));
-  for (let attempt = 0; attempt < 120; attempt++) {
-    try {
-      await fetch(`${base}/`);
-      return;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  throw new Error(`Production server did not start\n${output.join("")}`);
+  server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+  base = server.origin;
 }, 180_000);
 
 afterAll(async () => {
-  if (server && server.exitCode === null && server.signalCode === null) {
-    const exited = new Promise((resolve) => server?.once("exit", resolve));
-    server.kill();
-    await exited;
-  }
+  await server?.stop();
   if (root) await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
@@ -98,6 +75,6 @@ describe("the image optimizer's local source fetch", () => {
       headers: { accept: "image/webp" },
     });
     await optimized.arrayBuffer();
-    expect(optimized.status, output.join("")).toBe(502);
+    expect(optimized.status, server?.output()).toBe(502);
   });
 });
