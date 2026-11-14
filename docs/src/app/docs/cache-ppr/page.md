@@ -304,6 +304,11 @@ accumulate forever. Farm also deletes an entry it reads after `expiresAt`. Entri
 invalidated, except PPR shells: a shell without `revalidate` expires from the adapter after 24 hours
 and is rendered again on the next request.
 
+A PPR shell embeds the [deployment ID](/docs/deployment) and client assets of the deployment that
+rendered it, so its key includes that ID. A new deployment sharing the adapter renders its own shells
+instead of serving the previous deployment's, whose shells expire on the schedule above. Path and tag
+invalidation still reach every deployment's shells.
+
 For any Farm/unstorage-compatible client, `storageCacheAdapter(storage)` provides a portable
 baseline. It percent-encodes keys and tags before handing them to the storage client, because
 unstorage drops everything after `?` and folds `/`, `\` and `:` into one separator, and it stores

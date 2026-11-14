@@ -10334,12 +10334,15 @@ function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
 
 // origin is set when the shell carries hreflang alternates (i18n prefix
 // routing), so one host never serves a shell holding another host's URLs.
+// A shell embeds its deployment's ID and client assets, and a shared cache
+// adapter outlives a deployment, so each deployment keys its own shells.
 function getPPRShellCacheKey(url, locale, origin) {
   const key = [
     "ppr",
     locale || "",
     normalizeRevalidatePath(url.pathname),
     url.search,
+    farmDeploymentId,
   ];
   return createFarmCacheKey(origin ? key.concat(origin) : key);
 }
