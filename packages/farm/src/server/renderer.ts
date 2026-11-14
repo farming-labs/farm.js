@@ -2819,6 +2819,7 @@ export class ServerRenderer {
           config: this.getAgentSitemap(),
           metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
           basePath: this.config.basePath,
+          trailingSlash: this.config.trailingSlash,
         },
       );
       await sendWebResponse(
@@ -2985,6 +2986,7 @@ export class ServerRenderer {
         markdown: resolveMarkdownConfig(this.config.md as any),
         include: config.include,
         exclude: config.exclude,
+        trailingSlash: this.config.trailingSlash,
       },
     );
     return {

@@ -34,3 +34,42 @@ export function reconcileFarmDocumentHead(nextDocument: Document): void {
     .querySelectorAll(FARM_NAVIGATION_HEAD_SELECTOR)
     .forEach((node) => document.head.appendChild(document.importNode(node, true)));
 }
+
+/**
+ * Keep the head tags a server rendered from route metadata in step with client navigation when
+ * React renders the page's own elements (the RSC router), so React's nodes in `<head>` stay where
+ * React put them. Only the nodes Farm inserted are replaced: on creation, the ones of
+ * `initialMarkup` (the markup the server injected for the page the document loaded with), then
+ * the ones each call inserts. The tag set is the one `reconcileFarmDocumentHead` swaps; the title
+ * is left to the router.
+ */
+export function createFarmMetadataHeadReconciler(initialMarkup: string): (markup: string) => void {
+  const candidates = Array.from(
+    document.head.querySelectorAll(FARM_NAVIGATION_HEAD_SELECTOR),
+  ).reverse();
+  const claimed = new Set<Element>();
+  for (const node of parseFarmHeadMarkup(initialMarkup)) {
+    // The server injects its markup at the end of <head>, so search from the end.
+    const match = candidates.find(
+      (candidate) => !claimed.has(candidate) && candidate.isEqualNode(node),
+    );
+    if (match) claimed.add(match);
+  }
+  let current = initialMarkup;
+  let owned = Array.from(claimed);
+  return (markup) => {
+    if (markup === current) return;
+    current = markup;
+    for (const node of owned) node.remove();
+    owned = parseFarmHeadMarkup(markup).map((node) =>
+      document.head.appendChild(document.importNode(node, true)),
+    );
+  };
+}
+
+function parseFarmHeadMarkup(markup: string): Element[] {
+  if (!markup) return [];
+  const template = document.createElement("template");
+  template.innerHTML = markup;
+  return Array.from(template.content.querySelectorAll(FARM_NAVIGATION_HEAD_SELECTOR));
+}

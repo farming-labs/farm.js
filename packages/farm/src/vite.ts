@@ -91,6 +91,7 @@ import {
   resolveMarkdownMirrorTarget,
 } from "./markdown";
 import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
+import { toFarmTrailingSlashPageRequest } from "./trailing-slash";
 import { FARM_NATIVE_TREE_CONTENT_TYPE } from "./mobile/native-tree-type";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import { resolveFarmAgentCrawlers } from "./agent-crawlers";
@@ -3391,14 +3392,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 },
                 // The anonymous check goes through this server, so its guards and
                 // middleware see the page's own path, as in production. It connects to
-                // this server's own listener, never the host the caller's Host names.
+                // this server's own listener, never the host the caller's Host names. The
+                // page is asked for at the URL it answers at, not through the trailing-slash 308.
                 renderPage: async (request) =>
                   createFarmDevServerDispatch(server)(
-                    new Request(request, {
-                      signal: res.destroyed
-                        ? AbortSignal.abort()
-                        : createFarmNodeRequestAbortSignal(req, res),
-                    }),
+                    new Request(
+                      toFarmTrailingSlashPageRequest(
+                        request,
+                        farmApp.getConfig().trailingSlash === true,
+                      ),
+                      {
+                        signal: res.destroyed
+                          ? AbortSignal.abort()
+                          : createFarmNodeRequestAbortSignal(req, res),
+                      },
+                    ),
                   ),
               });
           if (markdownSourceResponse) {
@@ -3422,20 +3430,27 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
                 // The page is rendered by this server's own listener, never the host the
                 // caller's Host names. Redirects are not followed, so the mirror answers with
-                // the page's own (a sign-in gate, say), as production does.
+                // the page's own (a sign-in gate, say), as production does. The page is read
+                // at the URL it answers at ('/about/' with trailingSlash), not through the 308.
                 renderPage: async (request) => {
                   const headers = new Headers(request.headers);
                   // The mirror reads the HTML itself; the dispatch does not decompress.
                   headers.delete("accept-encoding");
                   return createFarmDevServerDispatch(server)(
-                    new Request(request, {
-                      headers,
-                      // Only accepted mirrors need disconnect listeners. An earlier
-                      // close (for example while the docs handler ran) must also abort.
-                      signal: res.destroyed
-                        ? AbortSignal.abort()
-                        : createFarmNodeRequestAbortSignal(req, res),
-                    }),
+                    new Request(
+                      toFarmTrailingSlashPageRequest(
+                        request,
+                        farmApp.getConfig().trailingSlash === true,
+                      ),
+                      {
+                        headers,
+                        // Only accepted mirrors need disconnect listeners. An earlier
+                        // close (for example while the docs handler ran) must also abort.
+                        signal: res.destroyed
+                          ? AbortSignal.abort()
+                          : createFarmNodeRequestAbortSignal(req, res),
+                      },
+                    ),
                   );
                 },
                 apiServerBasePath,

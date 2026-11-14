@@ -452,7 +452,9 @@ export default defineConfig({
 });
 ```
 
-`llms.ts` and `llms-full.ts` route files are not supported in RSC apps yet.
+`llms.ts` and `llms-full.ts` route files replace the generated files in RSC apps too, and receive
+the same `pages` and `defaults` (and, for `llms-full.ts`, `markdown`) as in other Farm apps; see
+[application metadata routes](/docs/routing#application-metadata-routes).
 
 ## Production notes
 
