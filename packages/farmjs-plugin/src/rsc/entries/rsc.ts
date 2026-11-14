@@ -399,7 +399,6 @@ import {
 import {
   createFarmDeploymentMismatchResponse,
   getFarmDeploymentMismatch,
-  withoutFarmDeploymentCookie,
 } from '@farm.js/core/deployment';
 import {
   _runWithMiddlewareContext,
@@ -2578,23 +2577,6 @@ function addFarmMetadataFileReferences(metadata, pathname) {
 `
       : ""
   }/**
- * A Markdown request whose only cookie is the deployment cookie, without it. That cookie names a
- * release, never a visitor (core's withoutFarmDeploymentCookie), so the mirror's page render sees
- * no cookie; createMarkdownMirrorResponse applies the same rule when md.cache decides whether to
- * share it. The mirror renders the page with a GET, where the cookie is never read.
- */
-function withoutLoneFarmDeploymentCookie(request) {
-  const cookie = request.headers.get('cookie');
-  if (!cookie || withoutFarmDeploymentCookie(cookie)) return request;
-  if (!farmRequestWantsMarkdown(new URL(request.url).pathname, request.headers.get('accept'))) {
-    return request;
-  }
-  const headers = new Headers(request.headers);
-  headers.delete('cookie');
-  return new Request(request, { headers });
-}
-
-/**
  * Serves a page's Markdown mirror (\`/page.md\` or \`Accept: text/markdown\`) by
  * rendering the page through the normal request path, so middleware and sign-in
  * gates apply; every other request renders as usual, and HTML pages advertise
@@ -2603,7 +2585,7 @@ function withoutLoneFarmDeploymentCookie(request) {
 async function handleFarmPageOrMarkdown(request, context) {
   if (!farmMarkdownConfig.enabled) return handleFarmRequest(request, context);
   const markdown = await createMarkdownMirrorResponse({
-    request: withoutLoneFarmDeploymentCookie(request),
+    request,
     config: farmMarkdownConfig,
     routePathname: getFarmRoutePathname,
     // The page the render below selects for the mirrored URL, below the basePath and locale.
