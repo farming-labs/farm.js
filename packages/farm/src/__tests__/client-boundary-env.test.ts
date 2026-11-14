@@ -202,7 +202,7 @@ describe("createClientBoundaryDiagnostic", () => {
       [
         "src/layout.tsx:10:13 - warning CLIENT_SERVER_ENV: process.env.DATABASE_URL is read at module scope in a module compiled for the browser, where it is undefined.",
         "  fix: Read it on the server (a server function, API route, or server component), or declare it in env.public in farm.config.ts and read it through publicEnv.",
-        "  docs: https://farmjs.dev/docs/environment-functions#client-boundary-diagnostics",
+        "  docs: https://farmjs.dev/docs/environment-functions#boundary-diagnostics",
       ].join("\n"),
     );
   });
