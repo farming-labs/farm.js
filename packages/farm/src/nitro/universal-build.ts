@@ -7181,9 +7181,13 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       // The module reads its literal route config exports; whether its source reads the request
       // is decided here, as for any page.
       const renderingDirective = readRouteRenderingDirectiveFromFile(route.modulePath);
-      // Below a hydrating layout, the MDX components' islands join its tree, as dev renders
-      // them and the client route table expects; as roots of their own they lost its context.
-      const markdownServerTree = usesFarmServerTree(pageHydrationPlans.get(route.modulePath));
+      // Islands mode: below a hydrating layout, the MDX components' islands join its islx tree,
+      // as dev renders them and the client route table expects; as roots of their own they lost
+      // its context. Without server components they stay isolated islands, each torn down to its
+      // server HTML when a navigation leaves the page, which the docs blog relies on.
+      const markdownServerTree =
+        pageHydrationPlanOptions.serverOwners &&
+        usesFarmServerTree(pageHydrationPlans.get(route.modulePath));
       pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},${
