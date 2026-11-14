@@ -8,6 +8,7 @@ import { applyFarmBasePath } from "./base-path";
 import { isFarmMetadataNoIndex, resolveFarmAgentOrigin } from "./llms-txt";
 import { matchesFarmMarkdownRoutePattern } from "./markdown";
 import type { MetadataRoute } from "./metadata-route";
+import { normalizeFarmTrailingSlashPathname } from "./trailing-slash";
 
 export interface FarmAgentSitemapUserConfig {
   /** Set to `false` to turn the sitemap off while keeping these options. */
@@ -68,7 +69,8 @@ export interface FarmSitemapPageSource {
  * The generated sitemap's entries. Dynamic routes have no single URL and are left out,
  * as are pages whose metadata says noindex and pages behind a route `guard`. URLs are
  * absolute, on the root layout's `metadataBase` when it has one and the request's
- * origin otherwise, the same origin the generated llms.txt links to.
+ * origin otherwise, the same origin the generated llms.txt links to. Each is the URL the
+ * page answers at, spelled as `trailingSlash` says, so none of them redirects.
  */
 export function createFarmDefaultSitemap(
   sources: Iterable<FarmSitemapPageSource>,
@@ -77,6 +79,8 @@ export function createFarmDefaultSitemap(
     config: ResolvedFarmAgentSitemap;
     metadataBase?: unknown;
     basePath?: string;
+    /** The app's `trailingSlash`: pages answer at `/about/`. */
+    trailingSlash?: boolean;
   },
 ): MetadataRoute.Sitemap {
   const { include, exclude } = options.config;
@@ -99,7 +103,13 @@ export function createFarmDefaultSitemap(
     if (module?.__farmRouteGuard) continue;
 
     entries.set(path, {
-      url: new URL(applyFarmBasePath(path, options.basePath), base).href,
+      url: new URL(
+        normalizeFarmTrailingSlashPathname(
+          applyFarmBasePath(path, options.basePath),
+          options.trailingSlash === true,
+        ),
+        base,
+      ).href,
       ...(source.lastModified ? { lastModified: source.lastModified } : {}),
     });
   }

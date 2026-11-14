@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import viteRsc from "@vitejs/plugin-rsc";
 import { createServer, type ViteDevServer } from "vite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import farmRsc from "./index.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -25,14 +25,14 @@ describe("RSC development server: trailingSlash and agent files", () => {
   let fixtureRoot: string;
   let server: ViteDevServer;
   let origin: string;
+  const writeRoute = (file: string, source: string) => {
+    const target = path.join(fixtureRoot, "src", file);
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, source);
+  };
 
   beforeAll(async () => {
     fixtureRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-dev-agent-files-"));
-    const writeRoute = (file: string, source: string) => {
-      const target = path.join(fixtureRoot, "src", file);
-      mkdirSync(path.dirname(target), { recursive: true });
-      writeFileSync(target, source);
-    };
     writeFileSync(
       path.join(fixtureRoot, "package.json"),
       JSON.stringify({ name: "rsc-dev-agent-files", private: true, type: "module" }),
@@ -85,6 +85,7 @@ export default function Page() { return <Link href="/about">About link</Link>; }
       srcDir: "src",
       basePath: "/console",
       trailingSlash: true,
+      agent: { crawlers: { training: "block" } },
       experimental: { serverComponents: true },
       server: { host: "127.0.0.1", port: 0, strictPort: false },
       plugins: [
@@ -149,9 +150,66 @@ export default function Page() { return <Link href="/about">About link</Link>; }
     const sitemap = await fetch(origin + "/console/sitemap.xml");
     expect(sitemap.status).toBe(200);
     const xml = await sitemap.text();
-    for (const url of ["/console/", "/console/about", "/console/legacy"]) {
+    // Each page at the URL it answers at, so none of them meets the trailing-slash 308.
+    for (const url of ["/console/", "/console/about/", "/console/legacy/"]) {
       expect(xml, url).toContain(`<loc>${origin}${url}</loc>`);
+      expect((await fetch(origin + url, { redirect: "manual" })).status, url).toBe(200);
     }
     expect(xml).toContain("<lastmod>");
+  }, 60_000);
+
+  it("serves the robots.txt agent.crawlers generates below the basePath, as core does", async () => {
+    for (const pathname of ["/console/robots.txt", "/robots.txt"]) {
+      const robots = await fetch(origin + pathname);
+      expect(robots.status, pathname).toBe(200);
+      expect(robots.headers.get("content-type"), pathname).toBe("text/plain; charset=utf-8");
+      const body = await robots.text();
+      expect(body, pathname).toMatch(/User-agent: GPTBot\n[\s\S]*Disallow: \//);
+      expect(body, pathname).toContain("User-agent: *\nAllow: /");
+    }
+  }, 60_000);
+
+  // Runs last: the route files it adds replace the generated files the tests above read.
+  it("serves sitemap.ts, robots.ts and llms.ts route files added while it runs", async () => {
+    writeRoute(
+      "sitemap.ts",
+      `export default function sitemap({ path }) { return [{ url: "https://shop.example/custom" + path }]; }`,
+    );
+    writeRoute(
+      "docs/[section]/sitemap.ts",
+      `export default ({ params, path }) => [{ url: "https://shop.example" + path + "#" + params.section }];`,
+    );
+    writeRoute(
+      "robots.ts",
+      `export default () => ({ rules: { userAgent: "*", disallow: "/private" } });`,
+    );
+    writeRoute(
+      "llms.ts",
+      `export default ({ pages, defaults }) => ({ ...defaults, title: "Dev index", details: pages.map((page) => page.url).join(" ") });`,
+    );
+    // The dev server watches the route files, as core's does; a new one replaces the generated file.
+    await vi.waitFor(
+      async () => {
+        const sitemap = await fetch(origin + "/console/sitemap.xml");
+        expect(await sitemap.text()).toContain("<loc>https://shop.example/custom/</loc>");
+      },
+      { timeout: 20_000, interval: 250 },
+    );
+    expect(await (await fetch(origin + "/console/docs/guides/sitemap.xml")).text()).toContain(
+      "<loc>https://shop.example/docs/guides#guides</loc>",
+    );
+    expect((await fetch(origin + "/console/sitemap.xml", { method: "POST" })).status).toBe(405);
+    await vi.waitFor(
+      async () => {
+        expect(await (await fetch(origin + "/console/robots.txt")).text()).toBe(
+          "User-agent: *\nDisallow: /private\n",
+        );
+        const llms = await (await fetch(origin + "/console/llms.txt")).text();
+        expect(llms).toMatch(/^# Dev index\n/);
+        // The pages the generated llms.txt lists, each at its public URL.
+        expect(llms).toContain(`${origin}/console/about.md`);
+      },
+      { timeout: 20_000, interval: 250 },
+    );
   }, 60_000);
 });

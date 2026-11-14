@@ -66,6 +66,9 @@ export default {
             throw new Error("integration failed");
           },
         },
+        // runtime.before and runtime.after throw on these paths.
+        { path: "/integration/before-fails", methods: ["GET"], handler: () => Response.json({}) },
+        { path: "/integration/after-fails", methods: ["GET"], handler: () => Response.json({}) },
       ],
     }),
   },
@@ -107,18 +110,18 @@ export default {
   "src/app/hello/render-fails/page.tsx": `export default function Page() { return <h1>render</h1>; }`,
   "src/app/hello/router-fails/page.tsx": `export default function Page() { return <h1>router</h1>; }`,
   "src/app/hello/render-before-fails/page.tsx": `export default function Page() { return <h1>render</h1>; }`,
+  "src/app/hello/guarded/page.tsx": `export default function Page() { return <h1>guarded</h1>; }`,
   "src/app/middleware.ts": `${TRACED}
 export function middleware(request: Request) {
   const pathname = traced(request);
-  // farm dev runs render.before after app middleware, production before it; this checks how
-  // its failure is reported, not that order.
-  if (!pathname || pathname === "/hello/render-before-fails") return;
+  if (!pathname) return;
   trace.push("middleware " + pathname);
   if (pathname === "/api/mw-fails" || new URL(request.url).searchParams.has("mw-fails")) {
     throw new Error("middleware failed");
   }
   if (
     pathname === "/api/guarded" ||
+    pathname === "/hello/guarded" ||
     (pathname === "/.well-known/farmjs.json" && !new URL(request.url).search)
   ) {
     return new Response("guarded", { status: 401 });
@@ -143,6 +146,7 @@ const HTML_TRANSFORM_PLUGIN = `
       },
       render: {
         before({ pathname }: { pathname: string }) {
+          if (pathname === "/hello" || pathname === "/hello/guarded") trace.push("render.before " + pathname);
           if (pathname === "/hello/render-before-fails") throw new Error("render.before failed");
         },
       },
@@ -249,6 +253,8 @@ async function expectRuntimeHookContract(
     "/api/after-fails",
     "/api/mw-fails",
     "/integration/boom",
+    "/integration/before-fails",
+    "/integration/after-fails",
     "/.well-known/farmjs.json",
     ...(pages ? ["/hello"] : []),
   ];
@@ -339,6 +345,24 @@ async function expectRuntimeHookContract(
         "after /integration/boom 500",
       ],
     },
+    // A throwing runtime hook on an integration route fails the request as on any route.
+    "/integration/before-fails": {
+      status: 500,
+      trace: [
+        "before integration /integration/before-fails",
+        "error /integration/before-fails before failed",
+        "onError runtime before failed",
+      ],
+    },
+    "/integration/after-fails": {
+      status: 500,
+      trace: [
+        "before integration /integration/after-fails",
+        "after /integration/after-fails 200",
+        "error /integration/after-fails after failed",
+        "onError runtime after failed",
+      ],
+    },
     // A built-in route (here the app manifest) app middleware answers: runtime.after sees
     // that response, as for an API route.
     "/.well-known/farmjs.json": {
@@ -361,17 +385,28 @@ async function expectRuntimeHookContract(
   });
   // A throwing API or integration route, and a throwing runtime hook on an API path, answer
   // Farm's generic 500 body in both modes, not the server's own error response. A middleware
-  // failure is kept out of shared caches, and a runtime hook failure sets no cache header.
+  // failure is kept out of shared caches, and a runtime hook failure sets no cache header. A
+  // runtime hook failure outside the API base path answers the runtime hook 500 for a page path,
+  // plain text, even on an integration route; a `renderer: false` app answers JSON.
   const internalServerError = {
     contentType: "application/json",
     body: '{"error":"Internal Server Error"}',
   };
+  const runtimeHookFailure = pages
+    ? {
+        contentType: "text/plain; charset=utf-8",
+        cacheControl: null,
+        body: "Internal Server Error",
+      }
+    : { ...internalServerError, cacheControl: null };
   expect(thrown).toEqual({
     "/api/boom": internalServerError,
     "/api/before-fails": { ...internalServerError, cacheControl: null },
     "/api/after-fails": { ...internalServerError, cacheControl: null },
     "/api/mw-fails": { ...internalServerError, cacheControl: "private, no-store" },
     "/integration/boom": internalServerError,
+    "/integration/before-fails": runtimeHookFailure,
+    "/integration/after-fails": runtimeHookFailure,
   });
 
   if (pages) {
@@ -632,6 +667,30 @@ async function expectRouterAndRenderHookFailures(origin: string): Promise<void> 
   });
 }
 
+// Router and render hooks run before app middleware, inside the runtime request, as the production
+// entry runs them before it hands the request to its handler: render.before sees a page app
+// middleware then renders, or answers itself.
+async function expectRenderHookOrder(origin: string): Promise<void> {
+  const accept = { headers: { accept: "text/html" } };
+  expect({
+    "/hello": (await request(origin, "/hello", accept)).trace,
+    "/hello/guarded": (await request(origin, "/hello/guarded", accept)).trace,
+  }).toEqual({
+    "/hello": [
+      "before page /hello",
+      "render.before /hello",
+      "middleware /hello",
+      "after /hello 200",
+    ],
+    "/hello/guarded": [
+      "before page /hello/guarded",
+      "render.before /hello/guarded",
+      "middleware /hello/guarded",
+      "after /hello/guarded 401",
+    ],
+  });
+}
+
 // A built-in route whose own handler throws (here the docs engine's layout wrap) fails the
 // request as a throwing runtime hook does: runtime.error observes it, onError gets it once as the
 // "runtime" phase, no runtime.after runs, and a page path answers the plain-text 500.
@@ -754,6 +813,7 @@ describe("plugin runtime, router, render, and HTML transform hook failures on a 
     await expectPageHookFailures(origin);
     await expectHTMLTransformFailures(origin);
     await expectRouterAndRenderHookFailures(origin);
+    await expectRenderHookOrder(origin);
   }, 120_000);
 
   it("in a node-server production build", async () => {
@@ -762,6 +822,7 @@ describe("plugin runtime, router, render, and HTML transform hook failures on a 
       await expectPageHookFailures(origin);
       await expectHTMLTransformFailures(origin);
       await expectRouterAndRenderHookFailures(origin);
+      await expectRenderHookOrder(origin);
     });
   }, 240_000);
 });

@@ -64,6 +64,7 @@ import {
 import { generateRscEntry } from "./entries/rsc.js";
 import { resolveMarkdownConfig, type FarmMarkdownUserConfig } from "@farm.js/core/markdown";
 import type {
+  FarmAgentCrawlers,
   FarmAgentSitemapUserConfig,
   FarmLlmsTxtUserConfig,
 } from "@farm.js/core/internal/production-runtime";
@@ -138,6 +139,7 @@ const {
   createDefaultErrorMarkup,
   resolveFarmLlmsTxtConfig,
   resolveFarmAgentSitemap,
+  resolveFarmAgentCrawlers,
 } = require_(
   "@farm.js/core/internal/production-runtime",
 ) as typeof import("@farm.js/core/internal/production-runtime");
@@ -157,6 +159,8 @@ export { default as nitro } from "./vite-plugin-nitro.js";
 export type { NitroPluginOptions } from "./vite-plugin-nitro.js";
 
 const PAGE_FILE = /^page\.(tsx|jsx|ts|js)$/;
+/** Core's metadata route files that RSC serves (`manifest.ts` is not served yet). */
+const METADATA_ROUTE_FILE = /^(sitemap|robots|llms|llms-full)\.(ts|js)$/;
 
 /** Packages the generated RSC entries import that belong to this plugin, not to the app. */
 const PLUGIN_OWNED_ENTRY_IMPORTS = ["rsc-html-stream/server", "rsc-html-stream/client"];
@@ -228,12 +232,15 @@ export interface FarmRscConfig {
    * static pages that links to their Markdown mirrors, and with `full: true`
    * also `/llms-full.txt`, which inlines them. `sitemap` serves `/sitemap.xml`
    * of the same pages. Same options as core's `agent.llmsTxt` and
-   * `agent.sitemap`; `false` turns each off.
+   * `agent.sitemap`; `false` turns each off. `crawlers` serves a generated
+   * `/robots.txt` for AI search and training crawlers, off by default, with the
+   * same options as core's `agent.crawlers`.
    * @default { llmsTxt: { full: false }, sitemap: true }
    */
   agent?: {
     llmsTxt?: boolean | FarmLlmsTxtUserConfig;
     sitemap?: boolean | FarmAgentSitemapUserConfig;
+    crawlers?: boolean | FarmAgentCrawlers;
   };
   /**
    * An MCP endpoint for agents, with the same options as core's top-level
@@ -1023,6 +1030,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           agent?: {
             llmsTxt?: boolean | FarmLlmsTxtUserConfig;
             sitemap?: boolean | FarmAgentSitemapUserConfig;
+            crawlers?: boolean | FarmAgentCrawlers;
           };
           mcp?: FarmMCPUserConfig;
           images?: FarmImageConfig;
@@ -1195,6 +1203,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         const pageRenderingDirectives: Record<string, unknown> = {};
         // Core's default for an app without docs, as for llms.txt: the sitemap is on.
         const sitemap = resolveFarmAgentSitemap(c.agent?.sitemap ?? true);
+        // Off by default, as in core: a generated robots.txt from agent.crawlers.
+        const crawlers = resolveFarmAgentCrawlers(c.agent?.crawlers);
         // Each page file's last change, for the sitemap's lastmod, as core's build reads it.
         const pageLastModified: Record<string, string> = {};
         for (const source of getFarmSourceRoots(c)) {
@@ -1213,6 +1223,17 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
               if (modified) pageLastModified[key] = modified;
               else delete pageLastModified[key];
             }
+          }
+        }
+        // sitemap.ts, robots.ts, llms.ts and llms-full.ts route files, as core serves them. A
+        // build bundles them only when the app has one; farm dev always looks, so a file added
+        // while it runs is served.
+        let appMetadataRoutes = env.command === "serve";
+        for (const source of appMetadataRoutes ? [] : getFarmSourceRoots(c)) {
+          const routesRoot = path.resolve(root, source.srcDir, configuredRoutesDir);
+          if ((await findRouteFiles(routesRoot, (name) => METADATA_ROUTE_FILE.test(name))).length) {
+            appMetadataRoutes = true;
+            break;
           }
         }
         // Root layouts that render <html> own the document (Next.js's root layout contract).
@@ -1316,6 +1337,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           llmsTxt: resolveFarmLlmsTxtConfig(c.agent?.llmsTxt ?? { full: false }),
           sitemap,
           ...(sitemap.enabled ? { pageLastModified } : {}),
+          ...(crawlers.enabled ? { crawlers } : {}),
+          ...(appMetadataRoutes ? { appMetadataRoutes } : {}),
           i18n,
           ...(i18nCatalogs ? { i18nCatalogs } : {}),
           server: { trustProxy: resolveFarmServerConfig(c.server).trustProxy },

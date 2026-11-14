@@ -91,6 +91,7 @@ import {
   resolveMarkdownMirrorTarget,
 } from "./markdown";
 import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
+import { toFarmTrailingSlashPageRequest } from "./trailing-slash";
 import { FARM_NATIVE_TREE_CONTENT_TYPE } from "./mobile/native-tree-type";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import { resolveFarmAgentCrawlers } from "./agent-crawlers";
@@ -3391,14 +3392,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 },
                 // The anonymous check goes through this server, so its guards and
                 // middleware see the page's own path, as in production. It connects to
-                // this server's own listener, never the host the caller's Host names.
+                // this server's own listener, never the host the caller's Host names. The
+                // page is asked for at the URL it answers at, not through the trailing-slash 308.
                 renderPage: async (request) =>
                   createFarmDevServerDispatch(server)(
-                    new Request(request, {
-                      signal: res.destroyed
-                        ? AbortSignal.abort()
-                        : createFarmNodeRequestAbortSignal(req, res),
-                    }),
+                    new Request(
+                      toFarmTrailingSlashPageRequest(
+                        request,
+                        farmApp.getConfig().trailingSlash === true,
+                      ),
+                      {
+                        signal: res.destroyed
+                          ? AbortSignal.abort()
+                          : createFarmNodeRequestAbortSignal(req, res),
+                      },
+                    ),
                   ),
               });
           if (markdownSourceResponse) {
@@ -3422,20 +3430,27 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
                 // The page is rendered by this server's own listener, never the host the
                 // caller's Host names. Redirects are not followed, so the mirror answers with
-                // the page's own (a sign-in gate, say), as production does.
+                // the page's own (a sign-in gate, say), as production does. The page is read
+                // at the URL it answers at ('/about/' with trailingSlash), not through the 308.
                 renderPage: async (request) => {
                   const headers = new Headers(request.headers);
                   // The mirror reads the HTML itself; the dispatch does not decompress.
                   headers.delete("accept-encoding");
                   return createFarmDevServerDispatch(server)(
-                    new Request(request, {
-                      headers,
-                      // Only accepted mirrors need disconnect listeners. An earlier
-                      // close (for example while the docs handler ran) must also abort.
-                      signal: res.destroyed
-                        ? AbortSignal.abort()
-                        : createFarmNodeRequestAbortSignal(req, res),
-                    }),
+                    new Request(
+                      toFarmTrailingSlashPageRequest(
+                        request,
+                        farmApp.getConfig().trailingSlash === true,
+                      ),
+                      {
+                        headers,
+                        // Only accepted mirrors need disconnect listeners. An earlier
+                        // close (for example while the docs handler ran) must also abort.
+                        signal: res.destroyed
+                          ? AbortSignal.abort()
+                          : createFarmNodeRequestAbortSignal(req, res),
+                      },
+                    ),
                   );
                 },
                 apiServerBasePath,
@@ -3659,7 +3674,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 });
               }
               logger.error(`Integration route error: ${error}`);
-              if (!res.writableEnded) {
+              if (runtimeReportsErrors) {
+                // A runtime hook failed the request: answer the runtime hook 500 for its path,
+                // plain text outside the API base path, as production does.
+                if (!res.headersSent) sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                else if (!res.writableEnded) res.end();
+              } else if (!res.writableEnded) {
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
                 res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
@@ -3935,6 +3955,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 route: apiRoutePattern,
                 method,
               });
+              // The route's outcome reaches observability once, when the route settles, as in
+              // production: a runtime.after hook that fails the request later does not turn a
+              // completed request into an api.error.
+              let apiOutcomeReported = false;
               try {
                 const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
                 const request = await createHandlerRequest();
@@ -3944,7 +3968,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   method,
                   routePath: apiRoutePattern,
                 };
-                let apiHandlerFailed = false;
                 const invokeAPIHandler = async (
                   runtimeRequest: Request,
                   runtime?: FarmPluginRuntimeRequestScope,
@@ -3960,10 +3983,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   let response: Response;
                   try {
                     response = await apiHandler(handledRequest);
+                    apiOutcomeReported = true;
+                    emitFarmEvent({
+                      type: "api.request.complete",
+                      pathname,
+                      route: apiRoutePattern,
+                      method,
+                      status: response.status,
+                      durationMs: Date.now() - startTime,
+                    });
                   } catch (error) {
                     // As in production, a throwing route answers 500: runtime.error observes
                     // the throw, and runtime.after still sees that response.
-                    apiHandlerFailed = true;
+                    apiOutcomeReported = true;
                     emitFarmEvent({
                       type: "api.error",
                       pathname,
@@ -3990,16 +4022,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 });
 
                 const duration = Date.now() - startTime;
-                if (!apiHandlerFailed) {
-                  emitFarmEvent({
-                    type: "api.request.complete",
-                    pathname,
-                    route: apiRoutePattern,
-                    method,
-                    status: handledResponse.status,
-                    durationMs: duration,
-                  });
-                }
                 logResponse(method, urlPath, handledResponse.status, duration, "API");
 
                 // Send response
@@ -4007,14 +4029,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 return;
               } catch (error) {
                 const duration = Date.now() - startTime;
-                emitFarmEvent({
-                  type: "api.error",
-                  pathname,
-                  route: apiRoutePattern,
-                  method,
-                  durationMs: duration,
-                  error,
-                });
+                if (!apiOutcomeReported) {
+                  emitFarmEvent({
+                    type: "api.error",
+                    pathname,
+                    route: apiRoutePattern,
+                    method,
+                    durationMs: duration,
+                    error,
+                  });
+                }
                 const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
                 if (bodyErrorResponse) {
                   logResponse(method, urlPath, bodyErrorResponse.status, duration, "API");
@@ -4655,11 +4679,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // as in production, where these hooks run inside the runtime request: runtime.error
           // observes it, onError gets it once as the "runtime" phase, no runtime.after runs,
           // and the page answers the runtime hook 500.
-          const failPageHook = async (
-            error: unknown,
-            interceptor?: { release(): void },
-          ): Promise<void> => {
-            interceptor?.release();
+          const failPageHook = async (error: unknown): Promise<void> => {
             logResponse(method, urlPath, 500, Date.now() - startTime, "PAGE");
             if (runtimeSession) {
               await pm!.failRuntimeRequest(runtimeSession, error);
@@ -4675,6 +4695,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (!res.headersSent) sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
           };
 
+          const renderPayload = {
+            pathname,
+            method,
+            routePattern: routeMatch?.route?.pattern || null,
+            params: routeMatch?.params || {},
+          };
           try {
             if (pm && hasBeforeRouteMatchHook) {
               await pm.runHookParallel("beforeRouteMatch", {
@@ -4691,16 +4717,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
               });
             }
+            // As in production, render.before runs before app middleware, which may then answer
+            // the request itself.
+            if (pm && hasBeforeRenderHook) {
+              await pm.runHookParallel("beforeRender", renderPayload);
+            }
           } catch (error) {
             await failPageHook(error);
             return;
           }
-          const renderPayload = {
-            pathname,
-            method,
-            routePattern: routeMatch?.route?.pattern || null,
-            params: routeMatch?.params || {},
-          };
 
           // Runtime response transforms need the complete byte stream, including
           // responses completed by middleware or beforeRequest hooks.
@@ -4777,14 +4802,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
 
             const renderer = farmApp.getServerRenderer();
-            if (pm && hasBeforeRenderHook) {
-              try {
-                await pm.runHookParallel("beforeRender", renderPayload);
-              } catch (error) {
-                await failPageHook(error, responseInterceptor);
-                return;
-              }
-            }
             await renderer.renderPage(req as any, res as any);
             if (!shouldInterceptResponse) {
               logResponse(method, urlPath, res.statusCode || 200, Date.now() - startTime, "PAGE");
@@ -4802,7 +4819,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               } else {
                 // The renderer answers a page that throws with its error page, a 500
                 // runtime.after sees, so what throws here is a hook around the render
-                // (beforeRender, say) or the renderer itself. Production runs both inside the
+                // (beforeRequest, say) or the renderer itself. Production runs both inside the
                 // runtime request, so the throw fails it: runtime.error and onError observe it
                 // once, as the "runtime" phase, runtime.after does not run, and the page answers
                 // the runtime hook 500.
@@ -5861,10 +5878,20 @@ function runFarmMiddlewareWithNavigation(
   execute: () => Promise<boolean>,
 ): Promise<boolean> {
   return renderer.runWithRequestContext(middlewareRequest, async () => {
+    // Middleware writes ctx.cookies to the response as it runs.
+    const headersBeforeMiddleware = res.getHeaders();
     try {
       return await execute();
     } catch (error) {
       if (await renderer.respondToNavigationError(req as any, res as any, error)) return true;
+      // As in production, the 500 a throwing middleware fails the request with carries nothing
+      // the failed run set: drop its headers and cookies.
+      if (!res.headersSent) {
+        for (const name of res.getHeaderNames()) res.removeHeader(name);
+        for (const [name, value] of Object.entries(headersBeforeMiddleware)) {
+          if (value !== undefined) res.setHeader(name, value);
+        }
+      }
       throw error;
     }
   });

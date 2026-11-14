@@ -1744,10 +1744,17 @@ function shouldBuildFarmMobileClient(config: ResolvedFarmConfig): boolean {
 }
 
 /**
- * Nitro's cache route rules (`swr`, `cache`) store a response by URL. A mobile shell's document
- * loads a different client, so with a mobile client the cache keys on `X-Farm-Shell` too.
+ * Nitro's cache route rules (`swr`, `cache`) store a response by URL, and refuse to store one
+ * whose `Vary` names a request header the rule does not key on. Farm's own responses vary on:
+ * `Accept` where a page negotiates its Markdown alternate, and `X-Farm-Shell` where a mobile
+ * shell's document loads a different client. The cache keys on those headers too, so it can store
+ * those responses and serve each request the variant it asked for.
  */
-function varyFarmNitroCacheRulesByShell(rules: Record<string, any>): Record<string, any> {
+function varyFarmNitroCacheRules(
+  rules: Record<string, any>,
+  headerNames: readonly string[],
+): Record<string, any> {
+  if (headerNames.length === 0) return rules;
   return Object.fromEntries(
     Object.entries(rules).map(([source, rule]) => {
       const cached =
@@ -1755,7 +1762,9 @@ function varyFarmNitroCacheRulesByShell(rules: Record<string, any>): Record<stri
         (rule?.cache !== undefined && rule.cache !== false);
       if (!cached || rule.cache === false) return [source, rule];
       const cache = rule.cache && typeof rule.cache === "object" ? rule.cache : {};
-      const varies = [...(Array.isArray(cache.varies) ? cache.varies : []), "x-farm-shell"];
+      const varies = [
+        ...new Set([...(Array.isArray(cache.varies) ? cache.varies : []), ...headerNames]),
+      ];
       return [source, { ...rule, cache: { ...cache, varies } }];
     }),
   );
@@ -7500,6 +7509,10 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   withFarmRouteContext,
   createLateNotFoundRecovery,
   createLateRedirectRecovery,${config.mobileClient ? "\n  createFarmNativeTreeResponse," : ""}${
+    config.trailingSlash && (config.md?.enabled || hasMarkdownPages)
+      ? "\n  toFarmTrailingSlashPageRequest,"
+      : ""
+  }${
     hasInfraAnalyticsRuntime
       ? "\n  resolveFarmDocsEngineRouteLabel,\n  resolveFarmDocsRouteLabel,\n  resolveFarmMarkdownRouteLabel,\n  resolveFarmMCPRouteLabel,\n  setFarmRouteLabel,"
       : ""
@@ -8059,7 +8072,17 @@ const farmImageHandler = ${
   onError(error) { console.error("[Farm Image]", error); },
 })`
   };
-const farmMarkdownConfig = ${JSON.stringify(config.md)};
+const farmMarkdownConfig = ${JSON.stringify(config.md)};${
+    config.md?.enabled || hasMarkdownPages
+      ? config.trailingSlash
+        ? `
+// A Markdown mirror, and a page.md source's page check, read the page at the URL it answers at
+// ('/about/'), so the trailing-slash 308 never answers in its place.
+const toFarmMarkdownPageRequest = (request) => toFarmTrailingSlashPageRequest(request, true);`
+        : `
+const toFarmMarkdownPageRequest = (request) => request;`
+      : ""
+  }
 const farmLlmsTxtConfig = ${JSON.stringify(config.agent?.llmsTxt ?? { enabled: false, include: [], exclude: [] })};
 ${
   config.agent?.llmsTxt?.enabled
@@ -9594,7 +9617,7 @@ function createFarmAgentSitemapResponse(request) {
         metadataBase: rootLayout && rootLayout.module && rootLayout.module.metadata
           ? rootLayout.module.metadata.metadataBase
           : undefined,
-        basePath: ${JSON.stringify(config.basePath)},
+        basePath: ${JSON.stringify(config.basePath)},${config.trailingSlash ? "\n        trailingSlash: true," : ""}
       },
     ),
     {},
@@ -9665,7 +9688,7 @@ function createFarmLlmsTxtContext(request, full) {
       origin,
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
-      exclude: farmLlmsTxtConfig.exclude,
+      exclude: farmLlmsTxtConfig.exclude,${config.trailingSlash ? "\n      trailingSlash: true," : ""}
     },
   );
   const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
@@ -10783,7 +10806,7 @@ ${
     clientAddress: adapterContext?.clientAddress,
     // An anonymous visitor's request: guards never see the caller's address.
     renderPage: (targetRequest) =>
-      fetchFarmInnerRequest(targetRequest, {
+      fetchFarmInnerRequest(toFarmMarkdownPageRequest(targetRequest), {
         ...adapterContext,
         clientAddress: FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
       }),
@@ -10838,7 +10861,8 @@ ${
       routePathname: getFarmRoutePathname,
       routeExists: (targetPathname) =>
         Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
-      renderPage: (targetRequest) => fetchFarmInnerRequest(targetRequest, adapterContext),
+      renderPage: (targetRequest) =>
+        fetchFarmInnerRequest(toFarmMarkdownPageRequest(targetRequest), adapterContext),
       apiServerBasePath: farmLocalAPIBasePath,
     });
     if (markdownResponse) {
@@ -12601,7 +12625,9 @@ async function handleFarmFetch(request, context) {
         const response = await _runWithCurrentRequest(request, () =>
           _runWithFarmCspNonce(cspNonce, () => _runWithAfterRequest(request, runRequest, context)),
         );
-        return ${hasCompressionRuntime && !hasPluginRuntime ? "compressFarmResponse(request, response, getFarmOwnedBufferedHtml(response), farmLazyBufferedHtml.has(response))" : "response"};
+        // A Nitro cache rule stores the response and strips its Content-Encoding, so a
+        // response it caches is sent as it is, with no Vary on an encoding it never saw.
+        return ${hasCompressionRuntime && !hasPluginRuntime ? "context?.routeRuleCache ? response : compressFarmResponse(request, response, getFarmOwnedBufferedHtml(response), farmLazyBufferedHtml.has(response))" : "response"};
       }),
     {
       onResponseFinished: typeof context?.onResponseFinished === "function"
@@ -13359,6 +13385,7 @@ ${hasNitroCacheRouteRules ? "  let farmGuardedResponse = false\n" : ""}  const r
     clientAddress: resolveFarmClientAddress(event),${
       hasNitroCacheRouteRules
         ? `
+    routeRuleCache: Boolean(event.context?.routeRules?.cache),
     onGuardedResponse: () => {
       farmGuardedResponse = true
     },`
@@ -13496,9 +13523,10 @@ function toFarmNodeResponse(request, response) {
     ssrEntryFile,
   );
   const configuredNitroRouteRules = nitroRouteRulesBelowBasePath(
-    shouldBuildFarmMobileClient(config)
-      ? varyFarmNitroCacheRulesByShell(routeRulesToNitroRouteRules(config.routeRules))
-      : routeRulesToNitroRouteRules(config.routeRules),
+    varyFarmNitroCacheRules(routeRulesToNitroRouteRules(config.routeRules), [
+      ...(config.md.enabled ? ["accept"] : []),
+      ...(shouldBuildFarmMobileClient(config) ? ["x-farm-shell"] : []),
+    ]),
     config.basePath,
     resolveFarmAPIServerBasePath(config.api),
   );
