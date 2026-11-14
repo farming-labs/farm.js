@@ -30,7 +30,8 @@ afterEach(async () => {
 // The plugin records its runtime, router and render hooks for the paths under test, and serves
 // the record from its own endpoints, which run outside the request hooks, so a dev server and a
 // production server can be asked the same questions. `/__fail-render` makes the next
-// render.before throw. runtime.before replaces the Request for `/swap` with one for `/hello`.
+// render.before throw. runtime.before replaces the Request for `/swap` with one for `/hello`, and
+// records the runtime kind (and an asset's route pattern) it sees.
 const FILES: Record<string, string> = {
   "farm.config.ts": `import { definePlugin } from "@farm.js/core";
 const state = ((globalThis as any).__farmRenderHookTest ??= { trace: [], failRender: false });
@@ -63,9 +64,10 @@ export default {
             },
           },
         ],
-        before({ request }) {
+        before({ request, kind, route }) {
           const { pathname } = new URL(request.url);
-          if (traced(pathname)) state.trace.push("before " + pathname);
+          const detail = kind === "asset" ? kind + " " + route?.pattern : kind;
+          if (traced(pathname)) state.trace.push("before " + pathname + " " + detail);
           if (pathname === "/swap") return new Request(new URL("/hello", request.url), request);
         },
         after({ request, response }) {
@@ -100,6 +102,7 @@ export default {
   "src/app/swap/page.tsx": `export default function Page() { return <h1>swap</h1>; }`,
   "src/app/api/ok/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
   "src/app/blog/sitemap.ts": `export default function sitemap() { return [{ url: "https://farm.test/blog" }]; }`,
+  "src/app/manifest.ts": `export default function manifest() { return { name: "Farm test" }; }`,
   "src/routes.ts": `import { defineRoutes } from "@farm.js/core";
 export default defineRoutes(({ redirect }) => [
   redirect("/moved", "/hello"),
@@ -147,12 +150,13 @@ async function request(origin: string, pathname: string) {
 // a page, on the URL as requested and before Farm resolves it: a config or route-file redirect, a
 // config rewrite's source, a generated agent file, a Markdown mirror, the app manifest and the
 // not-found page included. A redirect under the API base path and an app metadata route (here
-// blog/sitemap.ts) are not pages. runtime.before and runtime.after run for every one of them.
+// blog/sitemap.ts and manifest.ts, which the runtime classes as assets) are not pages.
+// runtime.before and runtime.after run for every one of them.
 async function expectRenderHookContract(origin: string): Promise<void> {
   const page = (pathname: string, routePattern: string | null, status: number) => ({
     status,
     trace: [
-      `before ${pathname}`,
+      `before ${pathname} page`,
       `router.before ${pathname}`,
       `render.before ${pathname} ${routePattern}`,
       `after ${pathname} ${status}`,
@@ -169,6 +173,7 @@ async function expectRenderHookContract(origin: string): Promise<void> {
     "/robots.txt",
     "/sitemap.xml",
     "/blog/sitemap.xml",
+    "/manifest.webmanifest",
     "/llms.txt",
     "/.well-known/farmjs.json",
     "/missing",
@@ -179,17 +184,17 @@ async function expectRenderHookContract(origin: string): Promise<void> {
   expect(results).toEqual({
     "/hello": page("/hello", "/hello", 200),
     "/old": page("/old", null, 307),
-    "/api/old": { status: 307, trace: ["before /api/old", "after /api/old 307"] },
+    "/api/old": { status: 307, trace: ["before /api/old api", "after /api/old 307"] },
     "/moved": page("/moved", null, 307),
-    "/api/moved": { status: 307, trace: ["before /api/moved", "after /api/moved 307"] },
+    "/api/moved": { status: 307, trace: ["before /api/moved api", "after /api/moved 307"] },
     // The hooks see the requested URL, before runtime.before runs again on the destination.
     "/alias": {
       status: 200,
       trace: [
-        "before /alias",
+        "before /alias page",
         "router.before /alias",
         "render.before /alias null",
-        "before /hello",
+        "before /hello page",
         "after /alias 200",
       ],
     },
@@ -197,7 +202,11 @@ async function expectRenderHookContract(origin: string): Promise<void> {
     "/sitemap.xml": page("/sitemap.xml", null, 200),
     "/blog/sitemap.xml": {
       status: 200,
-      trace: ["before /blog/sitemap.xml", "after /blog/sitemap.xml 200"],
+      trace: ["before /blog/sitemap.xml asset /blog", "after /blog/sitemap.xml 200"],
+    },
+    "/manifest.webmanifest": {
+      status: 200,
+      trace: ["before /manifest.webmanifest asset /", "after /manifest.webmanifest 200"],
     },
     "/llms.txt": page("/llms.txt", null, 200),
     "/.well-known/farmjs.json": page("/.well-known/farmjs.json", null, 200),
@@ -218,7 +227,12 @@ async function expectRenderHookContract(origin: string): Promise<void> {
     status: 200,
     hello: true,
     swap: false,
-    trace: ["before /swap", "router.before /swap", "render.before /swap /swap", "after /hello 200"],
+    trace: [
+      "before /swap page",
+      "router.before /swap",
+      "render.before /swap /swap",
+      "after /hello 200",
+    ],
   });
 
   // A route-file redirect is answered as production answers it: before routes, with the
@@ -252,7 +266,7 @@ async function expectRenderHookContract(origin: string): Promise<void> {
     status: 500,
     contentType: "text/plain; charset=utf-8",
     trace: [
-      `before ${pathname}`,
+      `before ${pathname} page`,
       `router.before ${pathname}`,
       `render.before ${pathname} ${routePattern}`,
       `error ${pathname} render.before failed`,

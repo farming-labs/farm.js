@@ -257,6 +257,9 @@ inside the current request; they do not create another plugin request lifecycle.
 | `waitUntil()` | Runtime request hooks                   | Registers non-blocking work with hosts that support background tasks.   |
 | `durationMs`  | After, error                            | Elapsed request time at that lifecycle phase.                           |
 
+An app metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, or a metadata image)
+is an `asset` request whose `route.pattern` is the metadata route's, in development and production.
+
 ### Router hooks
 
 | Hook                | Purpose                                                                   |

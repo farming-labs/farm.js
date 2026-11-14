@@ -2902,6 +2902,20 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             };
             return pageHookRouteMatch;
           };
+          // An app metadata route (sitemap.ts, robots.ts, manifest.ts, llms.ts, a metadata
+          // image) the path matches: production's plugin runtime classes its request as an asset,
+          // with the metadata route's pattern and params, whatever the method.
+          const matchAppMetadataRoute = (
+            pathname: string,
+          ): { pattern: string; params: Record<string, string> } | null => {
+            const routeManager = farmApp.getRouteManager();
+            const image = routeManager.matchMetadataImage(pathname);
+            if (image) return { pattern: image.image.pattern, params: image.params };
+            const metadata = routeManager.matchMetadataRoute(pathname);
+            return metadata
+              ? { pattern: metadata.metadata.pattern, params: metadata.params }
+              : null;
+          };
           const runFarmDevPageHooks = async (): Promise<void> => {
             if (
               !pm ||
@@ -2912,10 +2926,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               return;
             }
             const { render, layoutPatterns } = pageHookRoute();
-            const routeManager = farmApp.getRouteManager();
             if (
-              routeManager.matchMetadataRoute(render.pathname) ||
-              routeManager.matchMetadataImage(render.pathname) ||
+              matchAppMetadataRoute(render.pathname) ||
               // A path no page route matches is a page only for a GET or HEAD request.
               (!render.routePattern && requestMethod !== "GET" && requestMethod !== "HEAD")
             ) {
@@ -2980,12 +2992,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 const redirectResponse = response;
                 try {
                   // The session describes the request as production's does for a path no route
-                  // answers.
-                  const kind = isFarmAPIPathname(requestPathname, apiServerBasePath)
-                    ? "api"
-                    : requestMethod === "GET" || requestMethod === "HEAD"
-                      ? "page"
-                      : "request";
+                  // answers, or an app metadata route.
+                  const metadataRoute = matchAppMetadataRoute(requestPathname);
+                  const kind = metadataRoute
+                    ? "asset"
+                    : isFarmAPIPathname(requestPathname, apiServerBasePath)
+                      ? "api"
+                      : requestMethod === "GET" || requestMethod === "HEAD"
+                        ? "page"
+                        : "request";
                   response = await pm.runRuntimeRequest(
                     createRequestFromNodeRequest(req, parsedRequestUrl),
                     async () => {
@@ -2993,7 +3008,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                       if (kind === "page") await runFarmDevPageHooks();
                       return redirectResponse;
                     },
-                    { kind, route: { pathname: requestPathname } },
+                    { kind, route: { pathname: requestPathname, ...metadataRoute } },
                   );
                 } catch {
                   // The runtime reported the failure to runtime.error and onError.
@@ -4729,17 +4744,23 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           let pathname = requestedPathname;
           if (pm && opensRuntimeSession) {
             try {
-              const sessionOptions = {
-                kind: "page" as const,
-                route: setFarmRouteLabel(
-                  {
-                    pathname: requestedPathname,
-                    pattern: requestedMatch?.route?.pattern || null,
-                    params: requestedMatch?.params || {},
-                  },
-                  requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
-                ),
-              };
+              // The renderer answers an app metadata route here too; production classes it as
+              // an asset. A config rewrite never starts from one, since a local route wins.
+              const metadataRoute =
+                configRewriteSource === undefined ? matchAppMetadataRoute(requestedPathname) : null;
+              const sessionOptions: FarmPluginRuntimeRequestOptions = metadataRoute
+                ? { kind: "asset", route: { pathname: requestedPathname, ...metadataRoute } }
+                : {
+                    kind: "page",
+                    route: setFarmRouteLabel(
+                      {
+                        pathname: requestedPathname,
+                        pattern: requestedMatch?.route?.pattern || null,
+                        params: requestedMatch?.params || {},
+                      },
+                      requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
+                    ),
+                  };
               // A config rewrite's session opens on the requested URL, and runtime.before runs
               // again on the destination with the same ctx, as on production's re-entry.
               runtimeSession = await pm.beginRuntimeRequest(

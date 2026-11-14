@@ -188,6 +188,9 @@ and `isProd`. `before`, `after`, and `error` also get `ctx`, the merged context 
 `after` and `error` get `durationMs`; `after` gets `response`; `error` gets `error`. Endpoint
 handlers get `path`.
 
+An app metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, or a metadata image)
+is an `"asset"` request, with the metadata route's `pattern`, in `farm dev` and production.
+
 **`endpoints`** are exact application-relative paths such as `/status`, without parameters,
 wildcards, or query strings; Farm adds the configured `basePath`. They run before request context
 and routing, so check authorization inside the handler. Their responses still pass through
