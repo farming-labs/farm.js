@@ -69,8 +69,8 @@ _setDefaultFarmI18nRuntime(farmI18nRuntime);
  * visitor's cookie or Accept-Language picks is redirected to it (307), and a payload request to
  * that page's payload; a response that depends on those signals varies on them and stays out of
  * shared caches. API routes keep their URLs, as in core, and so does the image optimizer, which
- * this server answers only at its path. llms.txt and sitemap.xml answer at their localized URLs
- * too (they match the route path), so they redirect as in core.
+ * this server answers only at its path. Core's resolver answers site-level agent files
+ * (llms.txt, sitemap.xml, robots.txt) where they are asked for, without a redirect, as in core.
  */
 async function runFarmLocalizedRequest(request, payloadRequested, render) {
   const { pathname } = new URL(request.url);

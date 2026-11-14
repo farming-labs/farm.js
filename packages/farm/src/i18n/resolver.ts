@@ -16,6 +16,8 @@ export function getFarmLocaleVaryHeaders(
   resolution: FarmLocaleResolution,
 ): string[] {
   if (!config.enabled || resolution.source === "url") return [];
+  // A locale-neutral file is never resolved from request signals, so it does not vary on them.
+  if (isFarmLocaleNeutralPathname(resolution.pathname)) return [];
 
   const headers: string[] = [];
   if (config.detection.includes("cookie")) headers.push("Cookie");
@@ -60,6 +62,18 @@ export function resolveFarmLocaleRequest(
       redirect,
       // Locale-prefixed pages are canonical and can be cached publicly. Locale
       // switchers persist the same choice before navigating in the browser.
+      persist: false,
+    };
+  }
+
+  // Agents and crawlers fetch site-level files at fixed URLs, and robots.txt is only read at the
+  // origin root. They answer where they are asked for, in the default locale: no redirect to a
+  // detected locale, no cookie, and no Vary on request signals. A locale URL still selects it.
+  if (isFarmLocaleNeutralPathname(pathMatch.pathname)) {
+    return {
+      locale: config.defaultLocale,
+      source: "default",
+      pathname: pathMatch.pathname,
       persist: false,
     };
   }
@@ -201,6 +215,26 @@ function readCookie(header: string | null, name: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/** Application metadata route files, at the root or nested (`/blog/sitemap.xml`). */
+const FARM_LOCALE_NEUTRAL_FILE_NAMES = new Set([
+  "robots.txt",
+  "sitemap.xml",
+  "manifest.webmanifest",
+  "llms.txt",
+  "llms-full.txt",
+]);
+
+/**
+ * Whether a path below the base path and locale names a site-level file that does not vary by
+ * locale: an application metadata route (generated or a route file), an RFC 8615
+ * `/.well-known/` URI (the AI catalog and app manifest among them), or an MCP server card at
+ * `<endpoint>/server-card`, the suffix the AI catalog answers.
+ */
+function isFarmLocaleNeutralPathname(pathname: string): boolean {
+  if (pathname.startsWith("/.well-known/") || pathname.endsWith("/server-card")) return true;
+  return FARM_LOCALE_NEUTRAL_FILE_NAMES.has(pathname.slice(pathname.lastIndexOf("/") + 1));
 }
 
 function isInternalOrApiPath(pathname: string): boolean {

@@ -292,6 +292,85 @@ describe("production default sitemap", () => {
     }
   }, 180_000);
 
+  it("answers each agent file where it is asked for under i18n, without a locale redirect", async () => {
+    const files = {
+      "src/app/layout.tsx": [
+        'export const metadata = { title: "Console", metadataBase: new URL("https://acme.test") };',
+        "export default function Layout({ children }) { return <main>{children}</main>; }",
+      ].join("\n"),
+      "src/app/page.tsx": "export default function Page() { return <p>home body</p>; }",
+      "src/app/about/page.tsx": "export default function Page() { return <p>about body</p>; }",
+      // Route files answer the same way as the generated files.
+      "src/app/blog/sitemap.ts":
+        'export default function sitemap() { return [{ url: "https://acme.test/blog" }]; }',
+      "src/app/manifest.ts": 'export default function manifest() { return { name: "Console" }; }',
+      "src/messages/en.json": "{}",
+      "src/messages/fr.json": "{}",
+    };
+    const expectAnswered = async (options: Record<string, unknown>, base: string) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-agent-locale-"));
+      try {
+        await writeApp(root, files);
+        const handler = await buildApp(root, options);
+        // A French browser: request signals that would pick the 'fr' locale for a page.
+        const get = (pathname: string) =>
+          handler.fetch(
+            new Request(`https://acme.test${pathname}`, {
+              redirect: "manual",
+              headers: { "accept-language": "fr" },
+            }),
+          );
+        const paths = [
+          "/robots.txt",
+          "/sitemap.xml",
+          "/llms.txt",
+          "/llms-full.txt",
+          "/manifest.webmanifest",
+          "/blog/sitemap.xml",
+          "/.well-known/farmjs.json",
+          "/.well-known/ai-catalog.json",
+          "/mcp/server-card",
+        ].map((pathname) => `${base}${pathname}`);
+        // Crawlers read robots.txt at the origin root only.
+        if (base) paths.push("/robots.txt");
+        for (const pathname of paths) {
+          const response = await get(pathname);
+          expect({
+            pathname,
+            status: response.status,
+            location: response.headers.get("location"),
+            cookie: response.headers.get("set-cookie"),
+          }).toEqual({ pathname, status: 200, location: null, cookie: null });
+          expect(response.headers.get("vary") ?? "", pathname).not.toContain("Accept-Language");
+        }
+        // robots.txt names a sitemap that answers, and the default MCP server still answers.
+        const robots = await (await get(`${base}/robots.txt`)).text();
+        expect(robots).toContain(`Sitemap: https://acme.test${base}/sitemap.xml`);
+        const mcp = await handler.fetch(
+          new Request(`https://acme.test${base}/mcp`, {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+          }),
+        );
+        expect(mcp.status).toBe(200);
+        // Pages still redirect to the detected locale.
+        expect((await get(`${base}/about`)).headers.get("location")).toBe(`${base}/fr/about`);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    };
+    const locales = { locales: ["en", "fr"], defaultLocale: "en" };
+
+    await expectAnswered({ i18n: { ...locales, routing: "prefix-always" } }, "");
+    await expectAnswered(
+      { basePath: "/console", i18n: { ...locales, routing: "prefix-always" } },
+      "/console",
+    );
+    // Without a prefix for the default locale, a French browser was sent to '/fr/sitemap.xml'.
+    await expectAnswered({ i18n: locales }, "");
+  }, 240_000);
+
   describe("under trailingSlash and basePath", () => {
     let root: string;
     let get: (pathname: string) => Promise<Response>;

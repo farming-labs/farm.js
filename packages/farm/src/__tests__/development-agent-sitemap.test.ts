@@ -353,6 +353,61 @@ export default function Page() { return <main>home {getLocale()}</main>; }`,
     expect(home.status).toBe(200);
   }, 120_000);
 
+  it("answers each agent file where it is asked for under i18n, as production does", async () => {
+    const files = {
+      "src/app/blog/sitemap.ts":
+        'export default function sitemap() { return [{ url: "https://acme.test/blog" }]; }',
+      "src/app/manifest.ts": 'export default function manifest() { return { name: "Acme" }; }',
+      "src/messages/en.json": "{}",
+      "src/messages/fr.json": "{}",
+    };
+    const expectAnswered = async (config: string, base: string) => {
+      const origin = await startApp(`agent: { crawlers: true, llmsTxt: true }, ${config}`, files);
+      // A French browser: request signals that would pick the 'fr' locale for a page.
+      const get = (pathname: string) =>
+        fetch(`${origin}${pathname}`, {
+          redirect: "manual",
+          headers: { "accept-language": "fr" },
+        });
+      const paths = [
+        "/robots.txt",
+        "/sitemap.xml",
+        "/llms.txt",
+        "/llms-full.txt",
+        "/manifest.webmanifest",
+        "/blog/sitemap.xml",
+        "/.well-known/farmjs.json",
+        "/.well-known/ai-catalog.json",
+        "/mcp/server-card",
+      ].map((pathname) => `${base}${pathname}`);
+      for (const pathname of paths) {
+        const response = await get(pathname);
+        expect({
+          pathname,
+          status: response.status,
+          location: response.headers.get("location"),
+          cookie: response.headers.get("set-cookie"),
+        }).toEqual({ pathname, status: 200, location: null, cookie: null });
+        expect(response.headers.get("vary") ?? "", pathname).not.toContain("Accept-Language");
+      }
+      expect(await (await get(`${base}/robots.txt`)).text()).toContain(
+        `Sitemap: https://acme.test${base}/sitemap.xml`,
+      );
+      const mcp = await fetch(`${origin}${base}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      });
+      expect(mcp.status).toBe(200);
+      // Pages still redirect to the detected locale.
+      expect((await get(`${base}/about`)).headers.get("location")).toBe(`${base}/fr/about`);
+    };
+    const i18n = 'i18n: { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-always" }';
+
+    await expectAnswered(i18n, "");
+    await expectAnswered(`basePath: "/console", ${i18n}`, "/console");
+  }, 180_000);
+
   it("names the sitemap in the robots.txt agent.crawlers serves", async () => {
     const origin = await startApp("agent: { crawlers: true }");
     expect(await (await fetch(`${origin}/robots.txt`)).text()).toContain(

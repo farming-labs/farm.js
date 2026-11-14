@@ -305,6 +305,62 @@ describe("Farm locale request signals", () => {
     ).toBeUndefined();
   });
 
+  it("answers site-level agent files where they are asked for, in the default locale", () => {
+    const headers = { "accept-language": "am", cookie: "farm_locale=am" };
+    const files = [
+      "/robots.txt",
+      "/sitemap.xml",
+      "/blog/sitemap.xml",
+      "/manifest.webmanifest",
+      "/llms.txt",
+      "/llms-full.txt",
+      "/.well-known/farmjs.json",
+      "/.well-known/ai-catalog.json",
+      "/mcp/server-card",
+    ];
+    for (const routing of ["prefix-always", "prefix-except-default"] as const) {
+      for (const basePath of ["/", "/console"]) {
+        const localized = resolveFarmI18nConfig(
+          { locales: ["en", "am"], defaultLocale: "en", routing },
+          { basePath },
+        );
+        const prefix = basePath === "/" ? "" : basePath;
+        for (const file of files) {
+          const resolution = resolveFarmLocaleRequest(
+            new Request(`https://farm.test${prefix}${file}`, { headers }),
+            localized,
+          );
+          expect({ routing, file, ...resolution }).toEqual({
+            routing,
+            file,
+            locale: "en",
+            source: "default",
+            pathname: file,
+            persist: false,
+          });
+          expect(getFarmLocaleVaryHeaders(localized, resolution)).toEqual([]);
+        }
+        // Crawlers read robots.txt at the origin root, outside the basePath too.
+        expect(
+          resolveFarmLocaleRequest(new Request("https://farm.test/robots.txt"), localized).redirect,
+        ).toBeUndefined();
+        // A locale URL still selects its locale, and pages still redirect.
+        expect(
+          resolveFarmLocaleRequest(
+            new Request(`https://farm.test${prefix}/am/llms.txt`),
+            localized,
+          ),
+        ).toMatchObject({ locale: "am", source: "url" });
+        expect(
+          resolveFarmLocaleRequest(
+            new Request(`https://farm.test${prefix}/about`, { headers }),
+            localized,
+          ).redirect,
+        ).toBe(`${prefix}/am/about`);
+      }
+    }
+  });
+
   it("varies signal-resolved responses while keeping URL locales cacheable", () => {
     const detected = resolveFarmLocaleRequest(
       new Request("https://farm.test/", { headers: { "accept-language": "am" } }),
