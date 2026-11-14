@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { withoutFarmDeploymentCookie } from "@farm.js/core/deployment";
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
   applyMarkdownNegotiationHeaders,
@@ -120,6 +121,7 @@ function createHandler(
     "handleFarmRequest",
     "farmApiBasePath",
     "normalizeFarmTrailingSlashPathname",
+    "withoutFarmDeploymentCookie",
     `${extractRoutePathname(entry)}\n${entry.slice(start, end)}; return handleFarmPageOrMarkdown;`,
   )(
     markdownConfig,
@@ -132,6 +134,7 @@ function createHandler(
     handleFarmRequest,
     "/api",
     normalizeFarmTrailingSlashPathname,
+    withoutFarmDeploymentCookie,
   ) as (request: Request, context?: unknown) => Promise<Response>;
   return { run, rendered, handleFarmRequest };
 }
@@ -344,6 +347,8 @@ describe("RSC Markdown mirrors", () => {
       [" __farm_deployment=release-2; ", "public, max-age=300, s-maxage=300"],
       ["session=abc; __farm_deployment=release-2", "private, no-store"],
       ["__farm_deployment_x=1", "private, no-store"],
+      // A pair without a name is still another cookie, as core's servers and page cache read it.
+      ["__farm_deployment=release-2; =abc", "private, no-store"],
       ["session=abc", "private, no-store"],
     ] as const) {
       const { run, rendered } = createHandler(resolveMarkdownConfig({ cache: 300 }));
