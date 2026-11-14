@@ -244,6 +244,12 @@ agreement instead of treating an accidental export as support. FARMJS uses buffe
 `renderToString()` when neither capability is enabled. Descriptors without a `capabilities` field
 remain buffered for compatibility.
 
+Farm also uses `renderToString()` for documents it sends whole, such as the not-found and error
+pages with their layouts, so it may return a promise and should wait for the renderer's own async
+content instead of throwing: the official Preact renderer uses `renderToStringAsync()`, Solid uses
+`renderToStringAsync()`, and Vue's `renderToString()` is already async. React renders a document
+that suspends with its streaming renderer and waits for every boundary before sending it.
+
 ## Renderer-neutral server code
 
 Keep product and server behavior outside the component runtime whenever possible:

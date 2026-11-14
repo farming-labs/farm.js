@@ -8883,12 +8883,98 @@ async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken =
   return { html, head: "", shellHtml: html, streamErrors };
 }
 
-async function renderFarmElementToString(ReactDOMServer, element) {
-  const rendered = await renderFarmElement(ReactDOMServer, element);
-  if (rendered.html !== undefined) return rendered.html;
-  const html = await new Response(rendered.stream).text();
-  if (rendered.streamErrors.length > 0) throw rendered.streamErrors[0];
-  return html;
+// The not-found and error documents go out whole, with their status, so they never stream.
+// renderToString renders a tree that does not suspend in one synchronous pass, but throws "A
+// component suspended while responding to synchronous input" when a lazy component or a use()
+// read suspends outside a Suspense boundary, and leaves a boundary that suspends inside one to
+// the client (<!--$!-->). Such a document renders with the streaming renderer instead, which
+// sends nothing until every boundary is done, so the output is the resolved markup without
+// fallbacks or reveal scripts. A document that suspended once keeps that renderer for the rest
+// of this server process, as a page route that suspends keeps streaming. As for pages, a
+// response with a CSP nonce or a posted form state renders with the stream, which takes them.
+// Renderers other than React wait for their own async content in renderToString.
+const farmSuspendingDocuments = new Set();
+
+async function renderFarmCompleteDocument(ReactDOMServer, element, documentKey) {
+  if (!farmReactSyncRender || !canRenderFarmElementWhenAllReady(ReactDOMServer)) {
+    return await ReactDOMServer.renderToString(element, getFarmRendererRenderOptions());
+  }
+  if (!farmSuspendingDocuments.has(documentKey) &&
+      !_resolveCurrentCspNonce() &&
+      farmFormState() === undefined) {
+    let html;
+    try {
+      html = ReactDOMServer.renderToString(element, getFarmRendererRenderOptions());
+    } catch {
+      // A real render error fails the streaming render the same way.
+    }
+    if (typeof html === "string" && !html.includes("<!--$!-->")) return html;
+    farmSuspendingDocuments.add(documentKey);
+  }
+  return await renderFarmElementWhenAllReady(ReactDOMServer, element);
+}
+
+function canRenderFarmElementWhenAllReady(ReactDOMServer) {
+  return (farmRendererStreamingCapabilities.web &&
+      typeof ReactDOMServer.renderToReadableStream === "function") ||
+    (farmRendererStreamingCapabilities.node &&
+      typeof ReactDOMServer.renderToPipeableStream === "function");
+}
+
+async function renderFarmElementWhenAllReady(ReactDOMServer, element) {
+  const onError = function(error) {
+    // After the shell, a failed boundary is rendered by the client, as on a page.
+    if (isFarmRedirectError(error) || isFarmNotFoundError(error)) return;
+    console.error("[Farm SSR stream]", error);
+  };
+  // Completed boundaries larger than this would stream behind their fallback: keep them inline.
+  const progressiveChunkSize = Number.MAX_SAFE_INTEGER;
+  if (farmRendererStreamingCapabilities.web &&
+      typeof ReactDOMServer.renderToReadableStream === "function") {
+    const stream = await ReactDOMServer.renderToReadableStream(element, {
+      nonce: _resolveCurrentCspNonce(),
+      formState: farmFormState(),
+      progressiveChunkSize,
+      onError,
+    });
+    await stream.allReady;
+    return await new Response(stream).text();
+  }
+  return await new Promise(function(resolve, reject) {
+    const chunks = [];
+    const decoder = new TextDecoder();
+    const destination = {
+      write(chunk) {
+        chunks.push(typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true }));
+        return true;
+      },
+      flush() {},
+      end() {
+        chunks.push(decoder.decode());
+        resolve(chunks.join(""));
+      },
+      on() {
+        return destination;
+      },
+      destroy(error) {
+        reject(error || new Error("React server render stream was destroyed"));
+      },
+    };
+    const pipeableStream = ReactDOMServer.renderToPipeableStream(element, {
+      nonce: _resolveCurrentCspNonce(),
+      formState: farmFormState(),
+      progressiveChunkSize,
+      onAllReady() {
+        try {
+          pipeableStream.pipe(destination);
+        } catch (error) {
+          reject(error);
+        }
+      },
+      onShellError: reject,
+      onError,
+    });
+  });
 }
 
 // Most pages render without suspending. React's renderToString renders them in
@@ -11934,9 +12020,10 @@ ${
               }
               try {
                 return createLateNotFoundRecovery(
-                  await ReactDOMServer.renderToString(
+                  await renderFarmCompleteDocument(
+                    ReactDOMServer,
                     wrapWithFarmIntegrationProviders(createFarmNotFoundElement(pathname)),
-                    getFarmRendererRenderOptions()
+                    "not-found-recovery"
                   )
                 );
               } catch (error) {
@@ -12229,7 +12316,12 @@ ${
         errorElement = wrapWithFarmIntegrationProviders(errorElement);
 
         const renderErrorElement = () =>
-          renderFarmElementToString(ReactDOMServer, errorElement);
+          renderFarmCompleteDocument(
+            ReactDOMServer,
+            // Islands mode: the error document writes its islands' values, as a page does.
+            typeof farmIslandsRender === "function" ? farmIslandsRender(errorElement) : errorElement,
+            "error:" + errorBoundaryMatch.route.pattern
+          );
         const errorHtml = ${
           hasMiddlewareRuntime
             ? `await _runWithMiddlewareData(middlewareData, () =>
@@ -12382,7 +12474,7 @@ ${
     }
     notFoundElement = wrapWithFarmIntegrationProviders(notFoundElement);
     
-    const html = await ReactDOMServer.renderToString(notFoundElement, getFarmRendererRenderOptions());
+    const html = await renderFarmCompleteDocument(ReactDOMServer, notFoundElement, "not-found");
     // The layouts' and the not-found page's metadata, as the development renderer uses it.
     const notFoundMetadata = renderMetadataHead(
       await resolveFarmNotFoundMetadata(
