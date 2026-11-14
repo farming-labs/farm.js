@@ -225,6 +225,15 @@ Router hooks observe; their return values are ignored. Each also receives `{ sta
 `render.html` makes Farm buffer the whole document before sending it, which turns off streaming
 for that page. Use `render.before` when you don't need to rewrite HTML.
 
+Render hooks run for every page request, in `farm dev` and production: one a page route matches, or
+a `GET` or `HEAD` request that no API route, integration route, docs page, or app metadata route
+(`sitemap.ts`, `robots.ts`, `manifest.ts`, a metadata image) answers. So `before` also runs for a
+config redirect, a config rewrite (once, for the URL as requested), the generated `llms.txt`,
+`sitemap.xml`, and `robots.txt`, the app manifest, a Markdown mirror, and the not-found page,
+before Farm answers them. `routePattern` is `null` when no page route matches the requested URL.
+Neither hook runs when `runtime.before` answers the request, and `html` sees only HTML responses.
+The React Server Components pipeline does not run render hooks yet.
+
 ## `build`: production build hooks
 
 | Hook        | Receives                                          | Returns                                 |
