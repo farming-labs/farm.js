@@ -1835,6 +1835,13 @@ export function farmPlugin(
     publicDir: options.publicDir,
   });
   let farmApp: FarmApp;
+  // Files Farm writes under its output directory (client references, caches), as a POSIX path.
+  const isFarmGeneratedOutput = (file: string): boolean => {
+    const root = farmApp?.getConfig().root ?? options.root;
+    if (!root) return file.includes("/.farm/");
+    const output = toPosixPath(path.resolve(root, options.distDir || ".farm"));
+    return file === output || file.startsWith(`${output}/`);
+  };
   let serverFnTransformActive = false;
   // Islands mode runs server functions on islx's actions: no @farm.js/plugin/rsc needed.
   const islandsServerFns = () => {
@@ -2026,6 +2033,8 @@ export function farmPlugin(
             options.distDir || ".farm",
           ),
         );
+      // A replan after an edit reuses the plans of route modules that read no edited file.
+      farmApp.getRouteManager().trackSourceChanges();
 
       await farmApp.initialize();
 
@@ -5816,7 +5825,13 @@ if (import.meta.hot) {
       }
     },
 
-    watchChange() {
+    watchChange(id, change) {
+      // The next hydration plan replans only the route modules that read an edited source file.
+      // Generated output (client references, caches, Vite's deps) is not the app's source.
+      const watched = toPosixPath(id);
+      if (!watched.includes("/node_modules/") && !isFarmGeneratedOutput(watched)) {
+        farmApp?.getRouteManager().noteSourceChange(id, change.event);
+      }
       // A module that gains or loses "use client", or an import, changes what client code reaches.
       invalidateFarmClientReachableModules();
       invalidateFarmClientOnlyScan();
@@ -5926,13 +5941,16 @@ if (import.meta.hot) {
 
       const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
       const planRouteManager = farmApp?.getRouteManager();
+      // A source module outside src (a workspace package's) can be a client boundary too. A replan
+      // recomputes only the route modules that read the edited file, so it costs nothing for a
+      // module no plan read.
       const isHydrationPlanSource =
-        currentSrcRoot !== null &&
-        normalizedFile.startsWith(`${currentSrcRoot}/`) &&
-        /\.[cm]?[jt]sx?$/.test(normalizedFile);
+        /\.[cm]?[jt]sx?$/.test(normalizedFile) &&
+        !normalizedFile.includes("/node_modules/") &&
+        !isFarmGeneratedOutput(normalizedFile);
       // Any source module can become an async owner's client boundary. Replan
       // React source updates even when the previous plan had no islands, but
-      // keep CSS, generated output and files outside src off this static pass.
+      // keep CSS and generated output off this static pass.
       const tracksAsyncOwnerIslands =
         isReactRenderer(currentFarmConfig?.renderer) && planRouteManager !== undefined;
       // Set once the plan below is rebuilt from this edit, so it is not rebuilt again right after.
@@ -5945,6 +5963,9 @@ if (import.meta.hot) {
       ) {
         const routeManager = planRouteManager;
         if (routeManager) {
+          // Vite reported the change to watchChange first; say it again for a caller that runs
+          // this hook alone, so the replan recomputes every route module that read the file.
+          routeManager.noteSourceChange(file, "update");
           try {
             const previousPlan = JSON.stringify(
               routeManager.generateClientManifest(currentFarmConfig.root),

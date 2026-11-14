@@ -383,6 +383,98 @@ describe("package client-boundary cache", () => {
   });
 });
 
+describe("incremental dev replans", () => {
+  async function plannedProject() {
+    const project = createProject();
+    const config = await resolveConfig({ root: project.root, srcDir: "src" }, "development");
+    const fresh = async () => {
+      const manager = new RouteManager(config);
+      await manager.discoverRoutes();
+      return manager.generateClientManifest(project.root);
+    };
+    const routeManager = new RouteManager(config);
+    await routeManager.discoverRoutes();
+    routeManager.trackSourceChanges();
+    routeManager.generateClientManifest(project.root);
+    return { ...project, routeManager, fresh };
+  }
+
+  function countSourceReads(): string[] {
+    const reads: string[] = [];
+    const readFileSync = fs.readFileSync;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((
+      file: fs.PathOrFileDescriptor,
+      ...rest: []
+    ) => {
+      if (typeof file === "string") reads.push(file);
+      return readFileSync.call(fs, file, ...rest);
+    }) as typeof fs.readFileSync);
+    return reads;
+  }
+
+  it("replans only the route modules that read an edited file, as a full plan would", async () => {
+    const { root, routeManager, fresh } = await plannedProject();
+    const clientNav = path.join(root, "src", "components", "client-nav.tsx");
+    fs.writeFileSync(
+      clientNav,
+      '"use client";\nimport { Icon1 } from "ui-kit/icons";\nexport const island = "idle";\nexport function ClientNav() { return <Icon1 />; }\n',
+    );
+    routeManager.noteSourceChange(clientNav, "update");
+    const reads = countSourceReads();
+    const replanned = routeManager.regenerateClientManifest(root);
+    vi.restoreAllMocks();
+    expect(replanned).toEqual(await fresh());
+    expect(replanned.routes.find((route) => route.pattern === "/docs")).toMatchObject({
+      isolatedBoundaries: [expect.objectContaining({ islandStrategy: "idle" })],
+    });
+    // Every module the edit did not change is answered from the kept snapshot.
+    expect(new Set(reads.filter((file) => file.startsWith(path.join(root, "src"))))).toEqual(
+      new Set([clientNav]),
+    );
+  });
+
+  it("sees an edit the watcher did not report", async () => {
+    const { root, routeManager, fresh } = await plannedProject();
+    const clientNav = path.join(root, "src", "components", "client-nav.tsx");
+    fs.writeFileSync(
+      clientNav,
+      '"use client";\nimport { Icon1 } from "ui-kit/icons";\nexport const island = "visible";\nexport function ClientNav() { return <Icon1 />; }\n',
+    );
+    const future = new Date(Date.now() + 5_000);
+    fs.utimesSync(clientNav, future, future);
+    const replanned = routeManager.regenerateClientManifest(root);
+    expect(replanned).toEqual(await fresh());
+    expect(replanned.routes.find((route) => route.pattern === "/docs")).toMatchObject({
+      isolatedBoundaries: [expect.objectContaining({ islandStrategy: "visible" })],
+    });
+  });
+
+  it("replans every route module after a source file is added", async () => {
+    const { root, routeManager, fresh } = await plannedProject();
+    const added = path.join(root, "src", "components", "added.tsx");
+    fs.writeFileSync(added, "export const added = true;\n");
+    routeManager.noteSourceChange(added, "create");
+    const reads = countSourceReads();
+    const replanned = routeManager.regenerateClientManifest(root);
+    vi.restoreAllMocks();
+    expect(replanned).toEqual(await fresh());
+    expect(reads).toContain(path.join(root, "src", "app", "about", "page.tsx"));
+  });
+
+  it("replans every route module without tracking", async () => {
+    const { root, routeManager } = await plannedProject();
+    const config = await resolveConfig({ root, srcDir: "src" }, "development");
+    const untracked = new RouteManager(config);
+    await untracked.discoverRoutes();
+    untracked.generateClientManifest(root);
+    const reads = countSourceReads();
+    untracked.regenerateClientManifest(root);
+    vi.restoreAllMocks();
+    expect(reads).toContain(path.join(root, "src", "app", "about", "page.tsx"));
+    expect(routeManager).toBeDefined();
+  });
+});
+
 describe("source snapshot", () => {
   it("plans the same and reads each shared module once across a plan's routes", () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "farm-source-snapshot-")));

@@ -33,14 +33,24 @@ export { traceFarmSourceReads, withFarmSourceSnapshot } from "./source-snapshot"
 
 function readIfExists(filePath: string): string | null {
   // Client references are written while a plan runs, so they are read from disk every time.
-  const content = filePath.replace(/\\/g, "/").includes(FARM_CLIENT_REFERENCE_DIRECTORY)
-    ? readSourceFile(filePath)
-    : memoizeInFarmSourceSnapshot("source", filePath, () => readSourceFile(filePath));
+  if (filePath.replace(/\\/g, "/").includes(FARM_CLIENT_REFERENCE_DIRECTORY)) {
+    return readSourceFile(filePath);
+  }
+  return memoizeInFarmSourceSnapshot(
+    "source",
+    filePath,
+    () => readSourceFile(filePath),
+    (content) => content !== null,
+  );
+}
+
+function readSourceFile(filePath: string): string | null {
+  const content = readSourceFileContents(filePath);
   if (content !== null) noteFarmSourceRead(filePath);
   return content;
 }
 
-function readSourceFile(filePath: string): string | null {
+function readSourceFileContents(filePath: string): string | null {
   try {
     if (!filePath || !fs.existsSync(filePath)) {
       return null;
@@ -1149,6 +1159,40 @@ export function isIsolatableClientBoundarySource(content: string | null): boolea
   );
 }
 
+/**
+ * What a hydration plan reads from a client module: its directive, declared strategy, `hydrate`
+ * export, export shape and imports. A plan stops at a client module, so nothing else in it (its
+ * markup, state or handlers) can change a plan. Null for any other module, whose JSX plans read.
+ */
+function clientModulePlanSignature(content: string | null | undefined): string | null {
+  if (!content || !hasUseClientDirective(content)) return null;
+  try {
+    return JSON.stringify([
+      getIslandStrategyExport(content),
+      hasHydrateExport(content),
+      isIsolatableClientBoundarySource(content),
+      getImportSpecifiers(content).sort(),
+    ]);
+  } catch {
+    // An island export a plan rejects: replan, so the plan reports it.
+    return null;
+  }
+}
+
+/**
+ * @internal Whether `file`, a client module whose source was `previous`, still reads the same to
+ * every hydration plan, so route modules that render it can keep their plans after the edit.
+ */
+export function isFarmClientModulePlanUnchanged(
+  file: string,
+  previous: string | undefined,
+): boolean {
+  const signature = clientModulePlanSignature(previous);
+  return (
+    signature !== null && signature === clientModulePlanSignature(readSourceFileContents(file))
+  );
+}
+
 /** The exported names of `export { ... }` lists, re-exports included, type-only entries excluded. */
 function exportListNames(content: string): string[] {
   const names: string[] = [];
@@ -2112,6 +2156,8 @@ export function resolveImportedModule(
     "resolution",
     `${root ?? ""}\0${importerPath}\0${specifier}`,
     () => resolveImportedModuleUncached(importerPath, specifier, root),
+    // A file added later may resolve an import that does not resolve now.
+    (result) => result.path !== null,
   );
   // Callers may change the result they get.
   return { ...resolved };

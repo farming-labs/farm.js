@@ -61,8 +61,11 @@ import {
   getFarmClientHydrationPlanOptions,
   usesFarmServerTree,
   getClientModuleMetadata,
+  isFarmClientModulePlanUnchanged,
   resolveFarmIsolatedClientHydrationMode,
+  traceFarmSourceReads,
   withFarmSourceSnapshot,
+  type ClientModuleHydrationPlan,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
 import { getIntegrationProviders } from "../integrations";
@@ -99,6 +102,7 @@ import {
   runWithLatestPackageClientBoundaryCache,
   runWithPackageClientBoundaryCacheFile,
 } from "../utils/package-client-boundary-cache";
+import { FarmSourceSnapshotStore } from "../utils/source-snapshot";
 import {
   createRouteDirectoryPattern,
   formatRouteSegment,
@@ -272,6 +276,10 @@ function compareRouteEntries(left: RouteEntry, right: RouteEntry): number {
   return compareRouteSpecificity(getRouteSpecificity(left), getRouteSpecificity(right));
 }
 
+/** Files a hydration plan reads as modules (route modules of every renderer and their imports). */
+const PLAN_SOURCE = /\.(?:[cm]?[jt]sx?|vue|svelte)$/;
+const NODE_MODULES_SEGMENT = `${path.sep}node_modules${path.sep}`;
+
 /**
  * Manages route discovery and matching for the Farm.js application
  */
@@ -302,6 +310,19 @@ export class RouteManager {
     islandsErrors: string[];
   };
   private reportedIslandsErrors = new Set<string>();
+  // Each route module's hydration plan from the last plan, with the source files it read, so a dev
+  // replan recomputes only the modules that read an edited file. Every replan used to read and
+  // walk every route's import graph again, seconds on a large app, before an edit could update.
+  private ownerPlans = new Map<
+    string,
+    { plan: ClientModuleHydrationPlan; files: ReadonlySet<string> }
+  >();
+  private sourceChangeTracking = false;
+  private linkedSources = new Map<string, string | null>();
+  // What the plans read, parsed and resolved, kept between dev plans while the files are unchanged.
+  private sourceSnapshot?: FarmSourceSnapshotStore;
+  // Source files edited since the last plan; null when the next plan must recompute every module.
+  private editedSources: Set<string> | null = null;
 
   constructor(config: FarmRendererResolvedConfig, viteServer?: ViteDevServer) {
     this.config = config;
@@ -745,8 +766,86 @@ export class RouteManager {
     const cacheFile = this.packageClientBoundaryCacheFile;
     // One plan reads each shared module once, however many routes import it.
     const compute = () =>
-      withFarmSourceSnapshot(() => this.computeClientManifest(normalizedProjectRoot));
+      withFarmSourceSnapshot(
+        () => this.computeClientManifest(normalizedProjectRoot),
+        this.sourceSnapshot,
+      );
     return cacheFile ? runWithPackageClientBoundaryCacheFile(cacheFile, compute) : compute();
+  }
+
+  /**
+   * @internal The dev server reports every watched change (`noteSourceChange`), so a replan can
+   * reuse the plan of each route module that read none of the edited files. Without tracking,
+   * every plan recomputes every module.
+   */
+  trackSourceChanges(): void {
+    this.sourceChangeTracking = true;
+    this.sourceSnapshot ??= new FarmSourceSnapshotStore();
+  }
+
+  /**
+   * @internal A watched file changed. An edit to a script narrows the next replan to the route
+   * modules that read it; a script added or removed (where an import may now resolve), or a
+   * changed JSON file (a package manifest or tsconfig paths), replans everything. Other files
+   * (stylesheets, Markdown, assets) are not read by plans.
+   */
+  noteSourceChange(file: string, event: "create" | "update" | "delete"): void {
+    if (PLAN_SOURCE.test(file)) {
+      if (event === "update") {
+        this.editedSources?.add(path.resolve(file));
+        return;
+      }
+    } else if (!/\.jsonc?$/.test(file)) {
+      return;
+    }
+    this.editedSources = null;
+    this.sourceSnapshot?.clear();
+    this.linkedSources.clear();
+  }
+
+  /**
+   * A route module's plan: the last one when it read none of `edited`, recomputed otherwise.
+   * Callers get a copy, since the route budget rewrites a plan's fields in place.
+   */
+  private planRouteModule(
+    key: string,
+    edited: ReadonlySet<string> | null,
+    compute: () => ClientModuleHydrationPlan,
+  ): ClientModuleHydrationPlan {
+    const previous = this.ownerPlans.get(key);
+    if (previous && edited && ![...edited].some((file) => previous.files.has(file))) {
+      return { ...previous.plan };
+    }
+    const { result, files } = traceFarmSourceReads(compute);
+    // Installed packages do not change while the dev server runs (an install restarts it or
+    // changes a package.json, which replans everything), and an icon barrel alone is thousands of
+    // files per route module, so only source files are kept.
+    const sources = new Set<string>();
+    for (const file of files) {
+      const source = this.planSourcePath(file);
+      if (source) sources.add(source);
+    }
+    this.ownerPlans.set(key, { plan: result, files: sources });
+    return { ...result };
+  }
+
+  /**
+   * The path the watcher reports for a file a plan read: itself, or the real path of a workspace
+   * package's source read through its `node_modules` link. Null for an installed package's file.
+   */
+  private planSourcePath(file: string): string | null {
+    if (!file.includes(NODE_MODULES_SEGMENT)) return file;
+    let source = this.linkedSources.get(file);
+    if (source === undefined) {
+      try {
+        const real = realpathSync(file);
+        source = real.includes(NODE_MODULES_SEGMENT) ? null : real;
+      } catch {
+        source = null;
+      }
+      this.linkedSources.set(file, source);
+    }
+    return source;
   }
 
   /**
@@ -807,33 +906,57 @@ export class RouteManager {
     );
     const islandsMode =
       resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands";
+    // Reuse the plans of route modules that read no file edited since the last plan: the edits the
+    // watcher reported, and any file whose size or mtime changed (one outside its watch, such as
+    // a workspace package module no request has loaded yet).
+    const changed = this.sourceSnapshot?.refresh(this.editedSources ?? []);
+    let edited: Set<string> | null = null;
+    if (this.sourceChangeTracking && this.editedSources && this.ownerPlans.size > 0) {
+      edited = new Set();
+      for (const [file, previous] of changed ?? []) {
+        // An edit inside a client component (markup, state, handlers) leaves every plan as it was.
+        if (isFarmClientModulePlanUnchanged(file, previous)) continue;
+        const source = this.planSourcePath(file);
+        if (source) edited.add(source);
+      }
+    }
+    if (!edited) this.ownerPlans.clear();
     const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
       entry,
-      metadata: getClientModuleHydrationPlan(
-        entry.modulePath,
-        normalizedProjectRoot,
-        isolatedMode,
-        islandsMode ? { ...planOptions, serverTreeLayouts: true } : planOptions,
+      metadata: this.planRouteModule(`layout:${entry.modulePath}`, edited, () =>
+        getClientModuleHydrationPlan(
+          entry.modulePath,
+          normalizedProjectRoot,
+          isolatedMode,
+          islandsMode ? { ...planOptions, serverTreeLayouts: true } : planOptions,
+        ),
       ),
     }));
 
     // A Markdown page's client components come from the configured MDX components module.
-    const markdownPagePlan = createMarkdownPageHydrationPlanner(
+    const markdownComponentsPlan = createMarkdownPageHydrationPlanner(
       resolveFarmMdxComponentsModulePath(resolveMdxConfig(this.config.mdx), normalizedProjectRoot),
       normalizedProjectRoot,
       isolatedMode,
       { ...planOptions, packageReferences: islandsMode },
     );
+    // Planned once for every Markdown page; each page gets its own copy for the route budget.
+    let markdownPlan: ClientModuleHydrationPlan | undefined;
+    const markdownPagePlan = () => ({
+      ...(markdownPlan ??= this.planRouteModule("markdown", edited, markdownComponentsPlan)),
+    });
     const routeEntries = Array.from(this.routes.values()).map((entry) => ({
       entry,
       metadata: isFarmMarkdownPageFile(entry.modulePath)
         ? markdownPagePlan()
-        : getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode, {
-            ...planOptions,
-            serverOwners:
-              resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) ===
-              "islands",
-          }),
+        : this.planRouteModule(`page:${entry.modulePath}`, edited, () =>
+            getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode, {
+              ...planOptions,
+              serverOwners:
+                resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) ===
+                "islands",
+            }),
+          ),
     }));
     // Every Markdown page shares the components module, so one warning covers them all.
     const markdownFallback = routeEntries.find(
@@ -1020,6 +1143,8 @@ export class RouteManager {
     }
 
     const manifest = { routes, layouts, slots };
+    // The next replan starts from this one.
+    this.editedSources = this.sourceChangeTracking ? new Set() : null;
     this.clientManifestCache = {
       projectRoot: normalizedProjectRoot,
       manifest,
