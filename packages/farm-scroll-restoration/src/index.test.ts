@@ -23,6 +23,7 @@ describe("scrollRestoration Farm plugin", () => {
     });
     expect(typeof runtime.close).toBe("function");
     expect(typeof runtime.saveForNavigation).toBe("function");
+    expect(typeof runtime.enterForNavigation).toBe("function");
     expect(typeof runtime.restoreForNavigation).toBe("function");
 
     (plugin.client?.close as Function)?.({ state: runtime });
@@ -41,6 +42,7 @@ describe("scrollRestoration Farm plugin", () => {
     const plugin = scrollRestoration();
     const state = {
       saveForNavigation: vi.fn(),
+      enterForNavigation: vi.fn(),
       restoreForNavigation: vi.fn(),
       close: vi.fn(),
     };
@@ -56,6 +58,9 @@ describe("scrollRestoration Farm plugin", () => {
 
     (plugin.client?.navigation?.before as Function)?.(event);
     expect(state.saveForNavigation).toHaveBeenCalledWith(event);
+
+    (plugin.client?.navigation?.resolved as Function)?.(event);
+    expect(state.enterForNavigation).toHaveBeenCalledWith(event);
 
     (plugin.client?.navigation?.rendered as Function)?.(event);
     expect(state.restoreForNavigation).toHaveBeenCalledWith(event);

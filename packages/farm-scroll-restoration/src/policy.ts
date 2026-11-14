@@ -1,12 +1,7 @@
 /**
- * Pure, DOM-free decisions for the scroll-restoration runtime: scroll keys,
- * sessionStorage key building, and stored-position parsing.
+ * Pure, DOM-free decisions for the scroll-restoration runtime: history entry
+ * ids, sessionStorage key building, and stored-position parsing.
  */
-
-export interface ScrollLocation {
-  pathname: string;
-  search?: string;
-}
 
 export interface ScrollPosition {
   x: number;
@@ -20,17 +15,27 @@ export interface ScrollStorage {
   setItem(key: string, value: string): void;
 }
 
+/** The `history.state` field that names a history entry for this plugin. */
+export const SCROLL_ENTRY_STATE_KEY = "__farmScrollEntry";
+
 /**
- * The key a scroll position is saved under: the pathname plus the query
- * string, the same granularity core uses for its own `farm-scroll-*` keys.
- * `/search?q=a` and `/search?q=b` are different pages with different
- * positions. The hash is left out because it is a scroll target, not a page.
+ * The id stored in a history entry's state, or `undefined` when the entry
+ * has none. Positions are saved per history entry, like the browser and
+ * React Router do, so the same URL twice in history keeps two positions.
  */
-export function scrollKeyFor(location: ScrollLocation): string {
-  return location.pathname + (location.search ?? "");
+export function readScrollEntryId(state: unknown): string | undefined {
+  if (!state || typeof state !== "object") return undefined;
+  const id = (state as Record<string, unknown>)[SCROLL_ENTRY_STATE_KEY];
+  return typeof id === "string" && id.length > 0 && id.length <= 64 ? id : undefined;
 }
 
-/** The `sessionStorage` key for a scroll key. Kept in its own namespace
+/** A new history entry id. It includes the time so ids stay unique across
+ * reloads, which keep `sessionStorage`. */
+export function createScrollEntryId(random: () => number = Math.random): string {
+  return `${Date.now().toString(36)}-${random().toString(36).slice(2, 10)}`;
+}
+
+/** The `sessionStorage` key for a history entry id. Kept in its own namespace
  * (`farm-scroll-restore:*`) so this plugin never reads or overwrites
  * core's `farm-scroll-*` entries. */
 export function scrollStorageKey(prefix: string, key: string): string {

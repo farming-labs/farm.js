@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  createScrollEntryId,
   isValidScrollPosition,
   parseStoredScrollPosition,
+  readScrollEntryId,
   readStoredScrollPosition,
-  scrollKeyFor,
+  SCROLL_ENTRY_STATE_KEY,
   scrollStorageKey,
   writeStoredScrollPosition,
   type ScrollStorage,
@@ -24,27 +26,37 @@ function memoryStorage(initial: Record<string, string> = {}): ScrollStorage & {
   };
 }
 
-describe("scrollKeyFor", () => {
-  it("keys by pathname plus query string", () => {
-    expect(scrollKeyFor({ pathname: "/search", search: "?q=a" })).toBe("/search?q=a");
-    expect(scrollKeyFor({ pathname: "/search", search: "?q=b" })).toBe("/search?q=b");
+describe("readScrollEntryId", () => {
+  it("reads the id from a history entry's state", () => {
+    expect(readScrollEntryId({ path: "/", [SCROLL_ENTRY_STATE_KEY]: "abc" })).toBe("abc");
   });
 
-  it("keys by pathname alone without a query string", () => {
-    expect(scrollKeyFor({ pathname: "/posts/7", search: "" })).toBe("/posts/7");
-    expect(scrollKeyFor({ pathname: "/posts/7" })).toBe("/posts/7");
+  it("reads a missing, empty, oversized or non-string id as none", () => {
+    expect(readScrollEntryId(null)).toBeUndefined();
+    expect(readScrollEntryId("state")).toBeUndefined();
+    expect(readScrollEntryId({ path: "/" })).toBeUndefined();
+    expect(readScrollEntryId({ [SCROLL_ENTRY_STATE_KEY]: "" })).toBeUndefined();
+    expect(readScrollEntryId({ [SCROLL_ENTRY_STATE_KEY]: 7 })).toBeUndefined();
+    expect(readScrollEntryId({ [SCROLL_ENTRY_STATE_KEY]: "x".repeat(65) })).toBeUndefined();
+  });
+});
+
+describe("createScrollEntryId", () => {
+  it("creates ids a history entry can hold", () => {
+    const id = createScrollEntryId();
+    expect(readScrollEntryId({ [SCROLL_ENTRY_STATE_KEY]: id })).toBe(id);
   });
 
-  it("leaves the hash out of the key", () => {
-    const location = { pathname: "/posts/7", search: "", hash: "#top" };
-    expect(scrollKeyFor(location)).toBe("/posts/7");
+  it("creates a different id each time", () => {
+    const ids = new Set(Array.from({ length: 50 }, () => createScrollEntryId()));
+    expect(ids.size).toBe(50);
   });
 });
 
 describe("scrollStorageKey", () => {
   it("namespaces keys away from core's farm-scroll-* entries", () => {
-    expect(scrollStorageKey("farm-scroll-restore", "/posts/[id]")).toBe(
-      "farm-scroll-restore:/posts/[id]",
+    expect(scrollStorageKey("farm-scroll-restore", "mf3k2a-x7q9")).toBe(
+      "farm-scroll-restore:mf3k2a-x7q9",
     );
   });
 });

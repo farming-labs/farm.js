@@ -46,8 +46,10 @@ That is the whole setup.
 
 - Every client navigation saves the position of the page being left. Back and Forward restore the
   saved position of the page being entered. Pushes and replaces keep core's scroll-to-top.
-- Positions are keyed by pathname plus query string, like core's, so `/search?q=a` and
-  `/search?q=b` keep their own positions. They live in `sessionStorage` for the tab's lifetime.
+- Positions are saved per history entry, the way the browser and React Router keep them. The
+  plugin adds an id to each entry's `history.state` (`__farmScrollEntry`), so the same URL visited
+  twice keeps two positions. They live in `sessionStorage`, one small entry per history entry, for
+  the tab's lifetime.
 - A destination with a hash is left to core, which scrolls to the fragment.
 - A disabled or full storage never breaks a navigation.
 - Configure scroll restoration in one `scrollRestoration()` instance per app.
@@ -58,3 +60,5 @@ That is the whole setup.
   `useScrollRestoration` hook.
 - It does not change pushes. To keep the current scroll on a link click, use
   `<Link scroll={false}>`.
+- Core's own restore is still keyed by URL. When the same URL is in history twice, core can land
+  on the other entry's position first, and the plugin moves to the right one two frames later.

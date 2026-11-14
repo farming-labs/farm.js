@@ -17,10 +17,10 @@ export type {
  * Restore the window scroll position on Back/Forward once the page has
  * rendered.
  *
- * Saves the position of the page being left on `navigation.before` and
- * restores the saved position of the page being entered on
- * `navigation.rendered`, for `pop` navigations only; new pushes keep the
- * top. Positions are keyed by pathname plus query string and live in
+ * Saves the position of the page being left on `navigation.before`, notes
+ * the history entry entered on `navigation.resolved`, and restores its
+ * saved position on `navigation.rendered`, for `pop` navigations only; new
+ * pushes keep the top. Positions are saved per history entry and live in
  * `sessionStorage` for the tab's lifetime.
  */
 export function scrollRestoration(options: ScrollRestorationOptions = {}) {
@@ -59,6 +59,9 @@ export function scrollRestoration(options: ScrollRestorationOptions = {}) {
       navigation: {
         before(event) {
           event.state.saveForNavigation(event);
+        },
+        resolved(event) {
+          event.state.enterForNavigation(event);
         },
         rendered(event) {
           event.state.restoreForNavigation(event);

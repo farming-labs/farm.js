@@ -18,8 +18,11 @@ export interface ScrollRestorationRuntime {
   /** Save the current window scroll position for the page still on
    * screen. Called from the plugin's `navigation.before` hook. */
   saveForNavigation(event: ScrollRestorationNavigationEvent): void;
-  /** Record the page now on screen and, for a Back/Forward traversal,
-   * restore its saved window scroll position. Called from the plugin's
+  /** Record the history entry now on screen, giving a pushed or replaced
+   * entry a fresh id. Called from the plugin's `navigation.resolved` hook. */
+  enterForNavigation(event: ScrollRestorationNavigationEvent): void;
+  /** For a Back/Forward traversal, restore the saved window scroll position
+   * of the entry recorded for the same navigation. Called from the plugin's
    * `navigation.rendered` hook. */
   restoreForNavigation(event: ScrollRestorationNavigationEvent): void;
   close(): void;
