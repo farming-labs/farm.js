@@ -130,6 +130,18 @@ export default async function PricingPage() {
 }
 ```
 
+In production a page with `revalidate` is sent with
+`Cache-Control: public, s-maxage=<revalidate>, stale-while-revalidate=300`, so a CDN or reverse
+proxy serves it and refreshes it in the background; a static page the server renders on request
+gets `s-maxage=60`. A render that is one visitor's is sent with `Cache-Control: private, no-store`
+instead: a request with a cookie other than Farm's deployment cookie or with an `Authorization`
+header, middleware request data, a render that reads the request or suspends, and a response that
+middleware let through (see [Responses behind middleware](/docs/cache-ppr#responses-behind-middleware)). A
+`Cache-Control` that middleware sets with `ctx.headers` does not replace the page's. Shareable
+responses never set the deployment cookie. `farm dev` renders these pages on each request without
+a shared policy. React Server Components apps follow the same rules, except that a page streams
+with its policy set up front, as described under [React Server Components](#react-server-components).
+
 ## PPR with Suspense
 
 PPR is for pages with a stable shell and dynamic sections. Put dynamic work behind Suspense boundaries so the shell can be cached while the slower section resolves independently.
@@ -455,8 +467,19 @@ Both setups follow the same route contract:
   prerenders at each URL that names its locale (`/fr/about`, below the base path); a URL without a
   locale (the default locale's under `"prefix-except-default"`) redirects visitors whose cookie or
   `Accept-Language` picks another locale, so it stays server-rendered unless `detection` is off, and
-  `routing: "none"` prerenders nothing. Pages with `revalidate` also render on each request for
-  now; the pipeline has no revalidating cache yet. A page that asks to be static and fails to render fails the build.
+  `routing: "none"` prerenders nothing. A page that asks to be static and fails to render fails the build.
+- **Revalidation.** Pages with `revalidate` render on each request and get the same
+  `Cache-Control` as in other Farm apps (see [ISR-style revalidation](#isr-style-revalidation)),
+  on the HTML, on the Flight payload, and on `<page>.rsc` alike, so a CDN serves the page and its
+  client navigations; the pipeline keeps no revalidating cache of its own. So does a static page
+  that renders on request instead of prerendering. Unlike other Farm apps, which keep a render
+  that suspends private, the page streams with its policy set before it does, so Suspense content
+  and an error boundary that catches inside it are part of the shared response. A request read
+  in `generateMetadata` or in an `async` page or layout makes the page private, as in other Farm
+  apps, but a read in a component that renders while the page streams is not seen. A shared
+  request has no cookie or `Authorization` header to read (either makes it private), but its
+  other headers, such as `Accept-Language` or the client address, are one visitor's, so do not
+  render them in a page that revalidates.
 - **Metadata.** Layouts and pages resolve `metadata`, `generateMetadata()`, and viewport exports in
   the same order and with the same title templates as other Farm apps, and the server renders the
   same head tags. A client navigation sets the next page's title and replaces the tags Farm rendered

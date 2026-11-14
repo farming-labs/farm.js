@@ -7467,6 +7467,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   createFarmProductionLifecycle,
   createFarmNodeRequestAbortSignal,
   createProductionMiddlewareRunner,
+  _hasPrivateFarmRequestHeaders,
   _withFarmGuardedResponseCache,
   _farmPluginsKeepResponsesPrivate,
   getTheme as getFarmTheme,
@@ -7480,6 +7481,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   localizeFarmHref,
   manageFarmDocumentPreloads,
   mergeRouteRenderingDirectiveConfig,
+  resolveRouteSharedCacheControl,
   manageFarmLinkHeaderPreloads,
   mergeMetadata,
   mergeModuleViewport,
@@ -9275,39 +9277,14 @@ function applyFarmI18nResponse(response, resolution) {
   });
 }
 
-function hasOnlyValidFarmLocaleCookie(cookieHeader) {
-  if (!farmI18nRuntime || !cookieHeader) return false;
-  const parts = cookieHeader.split(";");
-  if (parts.length !== 1) return false;
-
-  const cookie = parts[0].trim();
-  const separator = cookie.indexOf("=");
-  if (separator <= 0) return false;
-
-  let name;
-  let value;
-  try {
-    name = decodeURIComponent(cookie.slice(0, separator).trim());
-    value = decodeURIComponent(cookie.slice(separator + 1).trim());
-  } catch {
-    return false;
-  }
-
-  return (
-    name === farmI18nConfig.cookie.name &&
-    farmI18nConfig.locales.includes(value)
-  );
-}
-
+// Credentials or a visitor's cookie; the deployment cookie, and a lone valid locale cookie when
+// the URL names the locale, keep shared caching. The RSC server decides with the same helper.
 function hasPrivateFarmRequestHeaders(request, farmLocaleResolution) {
-  if (request.headers.get("authorization")) return true;
-  // The deployment cookie names a release, not a visitor, so it alone keeps shared caching.
-  const cookieHeader = withoutFarmDeploymentCookie(request.headers.get("cookie"));
-  if (!cookieHeader) return false;
-
-  return !(
-    farmLocaleResolution?.source === "url" &&
-    hasOnlyValidFarmLocaleCookie(cookieHeader)
+  return _hasPrivateFarmRequestHeaders(
+    request,
+    farmI18nRuntime && farmLocaleResolution?.source === "url"
+      ? { name: farmI18nConfig.cookie.name, locales: farmI18nConfig.locales }
+      : undefined,
   );
 }
 
@@ -10388,22 +10365,13 @@ function hasFarmUnserializableRouteData(data) {
   return Boolean(data) && typeof data === "object" && Object.values(data).some(isPromise);
 }
 
+// Core's policy for the route, shared with the RSC server so both send the same Cache-Control.
 function getRouteSharedCacheControl(route, pprCanCache) {
   if (!route || !route.module) {
     return null;
   }
 
-  const view = resolveRouteRenderingView(route);
-  if (view.dynamic === "force-dynamic") {
-    return null;
-  }
-  if (!view.ssg && !pprCanCache) {
-    return null;
-  }
-
-  const revalidate =
-    typeof view.revalidate === "number" && view.revalidate > 0 ? view.revalidate : 60;
-  return "public, s-maxage=" + revalidate + ", stale-while-revalidate=300";
+  return resolveRouteSharedCacheControl(resolveRouteRenderingView(route), pprCanCache);
 }
 
 async function getCachedPPRShell(cacheKey) {

@@ -343,7 +343,10 @@ import. Reading `request.headers` in a server function or server query the rende
 calling one that leaves the request alone does not. Farm never stores that render as a PPR shell, in development or production. Production
 sends it with `X-Farm-PPR: bypass` and `Cache-Control: private, no-store`. The same applies to a `revalidate` route whose layout reads the
 request: it renders per request instead of advertising a shared `s-maxage`. Reads in middleware do
-not count, since they run before the page renders.
+not count, since they run before the page renders. A React Server Components app streams a
+`revalidate` page with its policy set up front, so only reads in `generateMetadata` and in `async`
+pages and layouts count there; see
+[React Server Components](/docs/server-rendering#react-server-components).
 
 `preloadQuery` from [`@farm.js/convex/server`](/docs/integrations/convex#caching) reads the request
 the same way, so a page that preloads live Convex data is never stored in the shared cache.
