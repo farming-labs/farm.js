@@ -1,13 +1,12 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
-import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 // A build loads route modules through its own Vite server while the bundles build (the route
 // runtime manifest, SSG). A module-entry package such as lucide-react loads there pre-bundled, as
@@ -70,35 +69,13 @@ export default function Page() { return <main><Icon3 /></main>; }
 }
 
 async function fetchFromProductionServer(serverDir: string, pathname: string): Promise<string> {
-  const port = await getAvailablePort();
-  const output: string[] = [];
-  const server = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
-    cwd: serverDir,
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  server.stdout.on("data", (chunk) => output.push(String(chunk)));
-  server.stderr.on("data", (chunk) => output.push(String(chunk)));
-  const exited = new Promise<void>((resolve) => server.once("exit", () => resolve()));
+  const server = await startProductionServer(serverDir);
   try {
-    for (let attempt = 0; ; attempt++) {
-      if (server.exitCode !== null) throw new Error(`Server exited:\n${output.join("")}`);
-      try {
-        const response = await fetch(`http://127.0.0.1:${port}${pathname}`);
-        expect(response.status).toBe(200);
-        return await response.text();
-      } catch (error) {
-        if (!(error instanceof TypeError) || attempt > 200) {
-          throw new Error(`Server never answered:\n${output.join("")}`, { cause: error });
-        }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    }
+    const response = await fetch(`${server.origin}${pathname}`);
+    expect(response.status, server.output()).toBe(200);
+    return await response.text();
   } finally {
-    if (server.exitCode === null) {
-      server.kill("SIGTERM");
-      await exited;
-    }
+    await server.stop();
   }
 }
 

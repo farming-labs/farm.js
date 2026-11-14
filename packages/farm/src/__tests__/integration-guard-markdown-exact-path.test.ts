@@ -1,13 +1,12 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
-import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 // An integration guard on an exact path (`protectedRoutes: ["/admin"]`
 // compiles to the matcher ["/admin"]) has to cover every way a built app
@@ -69,34 +68,11 @@ async function withProductionServer(
   serverDir: string,
   run: (baseUrl: string) => Promise<void>,
 ): Promise<void> {
-  const port = await getAvailablePort();
-  const output: string[] = [];
-  const server = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
-    cwd: serverDir,
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  server.stdout.on("data", (chunk) => output.push(String(chunk)));
-  server.stderr.on("data", (chunk) => output.push(String(chunk)));
-  const exited = new Promise<void>((resolve) => server.once("exit", () => resolve()));
-  const baseUrl = `http://127.0.0.1:${port}`;
+  const server = await startProductionServer(serverDir);
   try {
-    for (let attempt = 0; ; attempt++) {
-      if (server.exitCode !== null) throw new Error(`Server exited:\n${output.join("")}`);
-      try {
-        await fetch(baseUrl);
-        break;
-      } catch {
-        if (attempt > 200) throw new Error(`Server never answered:\n${output.join("")}`);
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    }
-    await run(baseUrl);
+    await run(server.origin);
   } finally {
-    if (server.exitCode === null) {
-      server.kill("SIGTERM");
-      await exited;
-    }
+    await server.stop();
   }
 }
 

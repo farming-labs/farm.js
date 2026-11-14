@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -9,22 +8,20 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
-import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer, type ProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 let root: string | undefined;
-let server: ChildProcess | undefined;
-let serverExited: Promise<unknown> | undefined;
+let server: ProductionServer | undefined;
 let port = 0;
 // Stands in for a host the attacker controls. It is on loopback only so the test needs no network,
 // which is why the app below allows local addresses.
 let attacker: http.Server | undefined;
 let attackerPort = 0;
 const attackerHits: string[] = [];
-const output: string[] = [];
 
 /** A request with a Host header of the client's choosing, as any client can send. */
 function request(pathname: string, host: string): Promise<{ status: number; type: string }> {
@@ -91,33 +88,13 @@ beforeAll(async () => {
   );
   await build(config, { root, preset: "node-server" });
 
-  const serverDirectory = path.join(root, ".farm", ".output", "server");
-  port = await getAvailablePort();
-  server = spawn(process.execPath, [path.join(serverDirectory, "index.mjs")], {
-    cwd: serverDirectory,
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  serverExited = new Promise((resolve) => server!.once("exit", resolve));
-  server.stdout?.on("data", (chunk) => output.push(String(chunk)));
-  server.stderr?.on("data", (chunk) => output.push(String(chunk)));
-  for (let attempt = 0; attempt < 120; attempt++) {
-    try {
-      await request("/", `127.0.0.1:${port}`);
-      return;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  throw new Error(`Production server did not start\n${output.join("")}`);
+  server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+  port = server.port;
 }, 180_000);
 
 afterAll(async () => {
   // Windows refuses to remove the output while the server still holds it as its cwd.
-  if (server && server.exitCode === null && server.signalCode === null) {
-    server.kill();
-    await serverExited;
-  }
+  await server?.stop();
   await new Promise((resolve) => attacker?.close(resolve));
   if (root) await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
@@ -129,18 +106,18 @@ describe("the image optimizer behind a Host header the client chose", () => {
 
     // An absolute source on the claimed host is remote, and remotePatterns does not allow it.
     const absolute = await request(optimized(`http://${attackerHost}/x.png`), attackerHost);
-    expect(absolute.status, output.join("")).toBe(400);
+    expect(absolute.status, server?.output()).toBe(400);
 
     // A relative source is read from this server, never from the claimed host.
     const relative = await request(optimized("/api/chart"), attackerHost);
-    expect(relative.status, output.join("")).toBe(200);
+    expect(relative.status, server?.output()).toBe(200);
 
     expect(attackerHits).toEqual([]);
   });
 
   it("still optimizes the app's own images behind a public Host", async () => {
     const response = await request(optimized("/api/chart"), "app.example.com");
-    expect(response.status, output.join("")).toBe(200);
+    expect(response.status, server?.output()).toBe(200);
     expect(response.type).toBe("image/webp");
   });
 });
