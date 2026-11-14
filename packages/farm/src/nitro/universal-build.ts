@@ -7506,6 +7506,10 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   FARM_DEPLOYMENT_ID_HEADER,
   getFarmDeploymentMismatch,
   withoutFarmDeploymentCookie,${config.mobileClient ? "\n  createFarmNativeTreeResponse," : ""}${
+    config.trailingSlash && (config.md?.enabled || hasMarkdownPages)
+      ? "\n  toFarmTrailingSlashPageRequest,"
+      : ""
+  }${
     hasInfraAnalyticsRuntime
       ? "\n  resolveFarmDocsEngineRouteLabel,\n  resolveFarmDocsRouteLabel,\n  resolveFarmMarkdownRouteLabel,\n  resolveFarmMCPRouteLabel,\n  setFarmRouteLabel,"
       : ""
@@ -8065,7 +8069,17 @@ const farmImageHandler = ${
   onError(error) { console.error("[Farm Image]", error); },
 })`
   };
-const farmMarkdownConfig = ${JSON.stringify(config.md)};
+const farmMarkdownConfig = ${JSON.stringify(config.md)};${
+    config.md?.enabled || hasMarkdownPages
+      ? config.trailingSlash
+        ? `
+// A Markdown mirror, and a page.md source's page check, read the page at the URL it answers at
+// ('/about/'), so the trailing-slash 308 never answers in its place.
+const toFarmMarkdownPageRequest = (request) => toFarmTrailingSlashPageRequest(request, true);`
+        : `
+const toFarmMarkdownPageRequest = (request) => request;`
+      : ""
+  }
 const farmLlmsTxtConfig = ${JSON.stringify(config.agent?.llmsTxt ?? { enabled: false, include: [], exclude: [] })};
 ${
   config.agent?.llmsTxt?.enabled
@@ -9606,7 +9620,7 @@ function createFarmAgentSitemapResponse(request) {
         metadataBase: rootLayout && rootLayout.module && rootLayout.module.metadata
           ? rootLayout.module.metadata.metadataBase
           : undefined,
-        basePath: ${JSON.stringify(config.basePath)},
+        basePath: ${JSON.stringify(config.basePath)},${config.trailingSlash ? "\n        trailingSlash: true," : ""}
       },
     ),
     {},
@@ -9677,7 +9691,7 @@ function createFarmLlmsTxtContext(request, full) {
       origin,
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
-      exclude: farmLlmsTxtConfig.exclude,
+      exclude: farmLlmsTxtConfig.exclude,${config.trailingSlash ? "\n      trailingSlash: true," : ""}
     },
   );
   const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
@@ -10801,7 +10815,7 @@ ${
     clientAddress: adapterContext?.clientAddress,
     // An anonymous visitor's request: guards never see the caller's address.
     renderPage: (targetRequest) =>
-      fetchFarmInnerRequest(targetRequest, {
+      fetchFarmInnerRequest(toFarmMarkdownPageRequest(targetRequest), {
         ...adapterContext,
         clientAddress: FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
       }),
@@ -10856,7 +10870,8 @@ ${
       routePathname: getFarmRoutePathname,
       routeExists: (targetPathname) =>
         Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
-      renderPage: (targetRequest) => fetchFarmInnerRequest(targetRequest, adapterContext),
+      renderPage: (targetRequest) =>
+        fetchFarmInnerRequest(toFarmMarkdownPageRequest(targetRequest), adapterContext),
       apiServerBasePath: farmLocalAPIBasePath,
     });
     if (markdownResponse) {
@@ -12781,6 +12796,18 @@ function withFarmEdgeGuardedPrerenderHeaders(
   };
 }
 
+/**
+ * Whether prerendering would render or write the page at a different URL than visitors request.
+ * A param can hold a character that only survives in a URL escaped: `#` (`%23`), `?` (`%3F`),
+ * `/` (`%2F`) and `%` (`%25`). Nitro's prerenderer does not keep those escapes: it renders the
+ * page for another URL or writes its file where it answers another URL, and drops some of them.
+ * Such a page is rendered on request instead, where its URL is kept as sent.
+ * Other escapes (a space, `+`, non-ASCII letters) round-trip and still prerender.
+ */
+function prerenderWouldChangePageUrl(pathname: string): boolean {
+  return /%(?:23|25|2F|3F)/i.test(pathname);
+}
+
 function getPhysicalPrerenderBypassReason(options: {
   config: ResolvedFarmConfig;
   middlewareRoutes: readonly UniversalMiddlewareRoute[];
@@ -12797,6 +12824,7 @@ function getPhysicalPrerenderBypassReason(options: {
     rewriteSources,
     pathname,
   } = options;
+  if (prerenderWouldChangePageUrl(pathname)) return "an escaped character in its URL";
   if (config.i18n.enabled) return "request-sensitive i18n";
   if (redirectSources.some((source) => middlewarePatternMatches(source, pathname))) {
     return "redirect";

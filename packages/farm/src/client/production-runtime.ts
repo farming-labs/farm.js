@@ -6,7 +6,7 @@ export { createFarmSearchParams, searchParamsToObject } from "../search-params";
 export { setFarmTrailingSlashPreference } from "../trailing-slash";
 export { setFarmBasePath, stripFarmBasePath } from "../base-path";
 export { getHashTargetElement } from "./hash-target";
-export { reconcileFarmDocumentHead } from "./document-head";
+export { createFarmMetadataHeadReconciler, reconcileFarmDocumentHead } from "./document-head";
 export { isFarmBlockedNavigationURL, isFarmExternalNavigationURL } from "./navigation-url";
 export { getFarmIslandValueHeaders } from "./island-value-protocol";
 export { createClientCancellation } from "../client-cancellation";

@@ -20,6 +20,18 @@ export function normalizeFarmTrailingSlashPathname(pathname: string, enabled: bo
   return pathname.replace(/\/+$/, "") || "/";
 }
 
+/**
+ * @internal The request for a page at the URL it answers at ('/about/' with `trailingSlash`),
+ * so a Markdown mirror or page check that names the page renders it rather than the 308.
+ */
+export function toFarmTrailingSlashPageRequest(request: Request, enabled: boolean): Request {
+  const url = new URL(request.url);
+  const pathname = normalizeFarmTrailingSlashPathname(url.pathname, enabled);
+  if (pathname === url.pathname) return request;
+  url.pathname = pathname;
+  return new Request(url, request);
+}
+
 export function resolveFarmTrailingSlashRedirect(url: URL, enabled: boolean): string | null {
   const pathname = normalizeFarmTrailingSlashPathname(url.pathname, enabled);
   if (pathname === url.pathname) return null;

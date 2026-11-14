@@ -366,14 +366,12 @@ describe("generated server action security", () => {
       { title: "Nearest" },
     ]);
 
-    expect(serverEntry).toContain("title: metadataTitle,");
-    expect(serverEntry).toContain("description: typeof metadata.description === 'string'");
-    expect(clientEntry).toContain("document.title = payload.metadata.title");
-    expect(clientEntry).toContain("document.title = ''");
+    expect(serverEntry).toContain("metadata: { title: metadataTitle },");
+    expect(serverEntry).toContain("    metadataHead,\n");
     expect(clientEntry).toContain(
-      "description.setAttribute('content', payload.metadata.description)",
+      "document.title = typeof payload.metadata?.title === 'string' ? payload.metadata.title : '';",
     );
-    expect(clientEntry).toContain("description?.remove()");
+    expect(clientEntry).toContain("applyMetadataHead(payload.metadataHead ?? '');");
   });
 
   it("rejects stale actions before decoding and only reloads safe navigation", () => {

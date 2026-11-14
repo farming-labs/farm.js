@@ -3116,7 +3116,8 @@ export interface CompilerBlockRuntime {
   KeyedRanges: React.ComponentType<CompilerKeyedRangesBlockProps>;
   MixedRanges: React.ComponentType<CompilerMixedRangesBlockProps>;
   Component: React.ComponentType<CompilerComponentBlockProps>;
-  target(id: number): React.RefCallback<Element>;
+  /** A binding target's ref, which also sets the element's useRef object when it has one. */
+  target(id: number, ref?: { current: unknown }): React.RefCallback<Element>;
 }
 
 export type CompilerBinding<Props> =
@@ -12428,7 +12429,7 @@ function createCompiledComponentRuntime<Props>(
         getDefinitionVersion: () => definitionReference.current,
       };
       const blockRuntime: Partial<CompilerBlockRuntime> = {
-        target: (id) => this.bindingTarget(id),
+        target: (id, ref) => this.bindingTarget(id, ref),
       };
       for (const feature of runtimeFeatures) {
         Object.assign(blockRuntime, feature.create(featureOwner));
@@ -12568,7 +12569,7 @@ function createCompiledComponentRuntime<Props>(
       if (this.mounted) this.forceUpdate();
     };
 
-    private bindingTarget(id: number): React.RefCallback<Element> {
+    private bindingTarget(id: number, ref?: { current: unknown }): React.RefCallback<Element> {
       const existing = this.bindingTargetRefs.get(id);
       if (existing) return existing;
       const capture: React.RefCallback<Element> = (element) => {
@@ -12577,6 +12578,7 @@ function createCompiledComponentRuntime<Props>(
         } else {
           this.bindingTargets.delete(id);
         }
+        if (ref) ref.current = element;
       };
       this.bindingTargetRefs.set(id, capture);
       return capture;

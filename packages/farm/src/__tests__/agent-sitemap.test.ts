@@ -57,6 +57,28 @@ describe("createFarmDefaultSitemap", () => {
     ).toEqual([{ url: "https://acme.test/" }]);
   });
 
+  it("lists each page at the URL it answers at, as trailingSlash spells it", () => {
+    const sources = [{ pattern: "/" }, { pattern: "/about" }];
+    const urls = (options: { basePath?: string; trailingSlash?: boolean }) =>
+      createFarmDefaultSitemap(sources, { origin: "https://acme.test", config, ...options }).map(
+        (entry) => entry.url,
+      );
+    expect(urls({ basePath: "/app", trailingSlash: true })).toEqual([
+      "https://acme.test/app/",
+      "https://acme.test/app/about/",
+    ]);
+    expect(urls({ basePath: "/app" })).toEqual([
+      "https://acme.test/app",
+      "https://acme.test/app/about",
+    ]);
+    // A root-mounted app's home page is '/' either way.
+    expect(urls({ trailingSlash: true })).toEqual([
+      "https://acme.test/",
+      "https://acme.test/about/",
+    ]);
+    expect(urls({})).toEqual(["https://acme.test/", "https://acme.test/about"]);
+  });
+
   it("applies include and exclude route patterns", () => {
     const pages = ["/", "/admin", "/admin/users", "/blog", "/blog/hello"].map((pattern) => ({
       pattern,

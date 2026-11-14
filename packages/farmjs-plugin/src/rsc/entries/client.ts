@@ -78,7 +78,11 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment';
-import { createFarmRouteAnnouncer, runFarmNavigationDelegates } from '@farm.js/core/internal/client-runtime';
+import {
+  createFarmMetadataHeadReconciler,
+  createFarmRouteAnnouncer,
+  runFarmNavigationDelegates,
+} from '@farm.js/core/internal/client-runtime';
 `;
   // <Link href="/about"> renders /console/about under basePath "/console", as the RSC server
   // rendered it, so the page hydrates with the same href.
@@ -355,6 +359,8 @@ async function main() {
 
   // The page the document loaded with is the baseline: it is never announced.
   const announceRoute = createFarmRouteAnnouncer();
+  // The head tags the server rendered from the page's metadata, which navigations replace.
+  const applyMetadataHead = createFarmMetadataHeadReconciler(initial.metadataHead ?? '');
 ${
   i18n
     ? `  // The locale the server rendered with, before anything hydrates (window.__FARM_I18N__).
@@ -379,25 +385,13 @@ ${
       }
     }, []);
 
-    // Keep document metadata in sync when an RSC navigation swaps only #root.
+    // Keep the document head in sync when an RSC navigation swaps only #root: the title, and the
+    // tags the server renders from the route's metadata (description, canonical, alternates,
+    // robots, Open Graph...), replaced as a page load of the route renders them.
     React.useEffect(() => {
-      if (typeof payload.metadata?.title === 'string') {
-        document.title = payload.metadata.title;
-      } else {
-        document.title = '';
-      }
-      let description = document.querySelector('meta[name="description"]');
-      if (typeof payload.metadata?.description === 'string') {
-        if (!description) {
-          description = document.createElement('meta');
-          description.setAttribute('name', 'description');
-          document.head.appendChild(description);
-        }
-        description.setAttribute('content', payload.metadata.description);
-      } else {
-        description?.remove();
-      }
-    }, [payload.metadata?.title, payload.metadata?.description]);
+      document.title = typeof payload.metadata?.title === 'string' ? payload.metadata.title : '';
+      applyMetadataHead(payload.metadataHead ?? '');
+    }, [payload]);
 ${
   i18n
     ? `
