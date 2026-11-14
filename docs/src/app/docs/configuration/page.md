@@ -384,7 +384,11 @@ export default defineConfig({
 
 The redirect uses status 308 and preserves the query string. The root URL remains `/`, and API,
 integration, image, and metadata routes keep their own URL contracts. A `<Link trailingSlash={false}>`
-or `<Link trailingSlash>` prop overrides the app default for that link.
+or `<Link trailingSlash>` prop overrides the app default for that link. The generated
+[`sitemap.xml`](#sitemap) and `llms.txt` list each page at its canonical URL, so none of their
+links redirect: `/console/about/` under `basePath: "/console"` with `trailingSlash: true`, and the
+home page at `/console` without it. A [Markdown mirror](/docs/markdown) such as `/about.md` keeps
+its URL and renders the page at the canonical one.
 
 ## API client base URL
 
@@ -708,6 +712,9 @@ The app's own file wins. Farm serves `/robots.txt` from, in order:
 2. A root [`robots.ts` metadata route](/docs/routing#application-metadata-routes) in `src/app`.
 3. The generated file from `agent.crawlers`.
 4. The [docs engine](/docs/docs-engine)'s robots.txt, when the docs engine is enabled.
+
+[React Server Components](/docs/server-rendering#react-server-components) apps serve the same
+generated file from `agent.crawlers`, after middleware and below a `basePath` as in other Farm apps.
 
 ### AI catalog
 

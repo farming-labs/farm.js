@@ -1,6 +1,9 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from "vitest";
-import { reconcileFarmDocumentHead } from "../client/document-head";
+import {
+  createFarmMetadataHeadReconciler,
+  reconcileFarmDocumentHead,
+} from "../client/document-head";
 
 afterEach(() => {
   document.head.innerHTML = "";
@@ -67,5 +70,67 @@ describe("reconcileFarmDocumentHead", () => {
       "/opensearch.xml",
     );
     expect(document.querySelector('link[rel="stylesheet"]')?.getAttribute("href")).toBe("/app.css");
+  });
+});
+
+describe("createFarmMetadataHeadReconciler", () => {
+  it("swaps only the metadata tags Farm injected, leaving other head nodes in place", () => {
+    const initialMarkup =
+      '<title>Home</title><meta name="description" content="Home page">' +
+      '<link rel="canonical" href="/">' +
+      '<link rel="alternate" hreflang="fr" href="https://example.test/fr">';
+    // React's own nodes come first (a page's <meta> hoisted by React, the charset); the server
+    // injects the route's markup at the end of <head>, followed by the stylesheet.
+    document.head.innerHTML =
+      '<meta charset="utf-8"><meta name="description" content="Home page" id="react-owned">' +
+      '<meta name="theme-color" content="#000">' +
+      initialMarkup +
+      '<link rel="stylesheet" href="/app.css">';
+    const reactOwned = Array.from(
+      document.head.querySelectorAll('meta[name="theme-color"], #react-owned, meta[charset]'),
+    );
+
+    const apply = createFarmMetadataHeadReconciler(initialMarkup);
+    apply(
+      '<title>About</title><meta name="description" content="About page">' +
+        '<link rel="canonical" href="/about">' +
+        '<link rel="alternate" hreflang="fr" href="https://example.test/fr/about">' +
+        '<meta name="robots" content="noindex">',
+    );
+
+    for (const node of reactOwned) expect(node.isConnected).toBe(true);
+    const farmDescriptions = Array.from(
+      document.head.querySelectorAll('meta[name="description"]:not(#react-owned)'),
+    );
+    expect(farmDescriptions.map((node) => node.getAttribute("content"))).toEqual(["About page"]);
+    expect(
+      Array.from(document.head.querySelectorAll('link[rel="canonical"]'), (node) =>
+        node.getAttribute("href"),
+      ),
+    ).toEqual(["/about"]);
+    expect(
+      Array.from(document.head.querySelectorAll("link[hreflang]"), (node) =>
+        node.getAttribute("href"),
+      ),
+    ).toEqual(["https://example.test/fr/about"]);
+    expect(document.querySelector('meta[name="robots"]')?.getAttribute("content")).toBe("noindex");
+    // The title is the router's; the stylesheet is not metadata.
+    expect(document.head.querySelectorAll("title")).toHaveLength(1);
+    expect(document.title).toBe("Home");
+    expect(document.querySelector('link[rel="stylesheet"]')?.getAttribute("href")).toBe("/app.css");
+
+    // The next navigation replaces the tags the last one inserted, and an empty head removes them.
+    apply('<meta name="description" content="Contact page">');
+    expect(document.querySelector('link[rel="canonical"]')).toBeNull();
+    expect(document.querySelector('meta[name="robots"]')).toBeNull();
+    expect(
+      Array.from(
+        document.head.querySelectorAll('meta[name="description"]:not(#react-owned)'),
+        (node) => node.getAttribute("content"),
+      ),
+    ).toEqual(["Contact page"]);
+    apply("");
+    expect(document.head.querySelectorAll('meta[name="description"]')).toHaveLength(1);
+    expect(document.getElementById("react-owned")?.isConnected).toBe(true);
   });
 });

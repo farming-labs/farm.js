@@ -1,5 +1,6 @@
 import type { FarmMarkdownResolvedConfig } from "@farm.js/core/markdown";
 import type {
+  ResolvedFarmAgentCrawlers,
   ResolvedFarmAgentSitemap,
   ResolvedFarmLlmsTxtConfig,
 } from "@farm.js/core/internal/production-runtime";
@@ -240,6 +241,15 @@ export interface EntryContext {
   /** Route-relative page keys to their file's last change (ISO), the sitemap's lastmod. */
   pageLastModified?: Record<string, string>;
 
+  /** Resolved `agent.crawlers`: the generated `/robots.txt`, set only when it is on. */
+  crawlers?: ResolvedFarmAgentCrawlers;
+
+  /**
+   * Serve `sitemap.ts`, `robots.ts`, `llms.ts` and `llms-full.ts` route files, as core does: set
+   * when the app has one, and always in development so a new file is picked up.
+   */
+  appMetadataRoutes?: boolean;
+
   /** Whether debug mode is enabled */
   debug: boolean;
 
@@ -280,11 +290,13 @@ export interface RscPayload {
   /** Content for div#root only (for client hydration to avoid double/repeated content) */
   rootContent?: React.ReactElement;
 
-  /** Serializable document metadata used during client-side navigation. */
+  /** The document title, which client-side navigation sets. */
   metadata?: {
     title?: string;
-    description?: string;
   };
+
+  /** The head tags rendered from the route's metadata, which client-side navigation swaps in. */
+  metadataHead?: string;
 
   /** Server action return value (if action was executed) */
   returnValue?: {

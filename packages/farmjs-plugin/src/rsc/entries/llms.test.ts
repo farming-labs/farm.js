@@ -50,12 +50,19 @@ function createLlmsHandler(
     /** Layouts below the root one, by the page file they wrap. */
     layouts?: Record<string, Array<Record<string, unknown>>>;
     markdown?: EntryContext["markdown"];
+    trailingSlash?: boolean;
   } = {},
 ) {
   const config = resolveFarmLlmsTxtConfig(llmsTxt);
   const basePath = options.basePath ?? context.basePath;
   const markdown = options.markdown ?? context.markdown;
-  const entry = generateRscEntry({ ...context, basePath, markdown, llmsTxt: config });
+  const entry = generateRscEntry({
+    ...context,
+    basePath,
+    markdown,
+    llmsTxt: config,
+    trailingSlash: options.trailingSlash,
+  });
   const start = entry.indexOf("function createFarmLlmsTxtContext(");
   const end = entry.indexOf("/**\n * Serves a page's Markdown mirror", start);
   const routeStart = entry.indexOf("function middlewarePathToRoute(");
@@ -361,6 +368,23 @@ describe("RSC llms.txt under a basePath", () => {
     // Without a mirror, the page itself is linked.
     expect(list).toContain("- [Pricing](https://shop.test/console/pricing)");
     expect(list).not.toContain("Admin");
+  });
+
+  it("links a page without a mirror at its trailing-slash URL under trailingSlash", async () => {
+    const { run } = createLlmsHandler(
+      { full: false },
+      {
+        pages,
+        basePath: "/console",
+        markdown: resolveMarkdownConfig({ expose: ["/legacy"] }),
+        trailingSlash: true,
+      },
+    );
+    const list = await (await run(new Request("https://shop.test/console/llms.txt/")))!.text();
+    // The URL each page answers at, so no link meets the trailing-slash 308; a mirror keeps its URL.
+    expect(list).toContain("- [Home](https://shop.test/console/)");
+    expect(list).toContain("- [Pricing](https://shop.test/console/pricing/)");
+    expect(list).toContain("- [Legacy](https://shop.test/console/legacy.md)");
   });
 
   it("lists a page nested under app/<basePath>/ once, where it answers", async () => {

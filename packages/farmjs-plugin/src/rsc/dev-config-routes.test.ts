@@ -59,6 +59,10 @@ describe("RSC config redirects, rewrites and headers under farm dev", () => {
 }`,
     );
     write(
+      "src/robots.ts",
+      `export default function robots() { return { rules: { userAgent: "*", disallow: "/private" } }; }`,
+    );
+    write(
       "src/api/hello/route.ts",
       `export function GET(request) { return Response.json({ hello: new URL(request.url).pathname }); }`,
     );
@@ -112,8 +116,11 @@ describe("RSC config redirects, rewrites and headers under farm dev", () => {
         { source: "/about", destination: "/" },
         { source: "/hello-alias", destination: "/api/hello" },
         { source: "/alias-guarded", destination: "/guarded" },
+        // robots.ts answers this, so it never applies.
+        { source: "/robots.txt", destination: "/about" },
       ],
       headers: () => [
+        { source: "/robots.txt", headers: [{ key: "x-config-header", value: "robots" }] },
         { source: "/about", headers: [{ key: "x-config-header", value: "about" }] },
         { source: "/api/:path*", headers: [{ key: "x-config-header", value: "api" }] },
         { source: "/old", headers: [{ key: "x-config-header", value: "old" }] },
@@ -196,6 +203,13 @@ describe("RSC config redirects, rewrites and headers under farm dev", () => {
     const api = await request("/api/hello");
     expect(api.status).toBe(200);
     expect(api.headers.get("x-config-header")).toBe("api");
+  }, 60_000);
+
+  it("leaves a route file's URL to it, with headers()", async () => {
+    const robots = await request("/console/robots.txt");
+    expect(robots.status).toBe(200);
+    expect(robots.headers.get("x-config-header")).toBe("robots");
+    expect(await robots.text()).toBe("User-agent: *\nDisallow: /private\n");
   }, 60_000);
 
   it("routes a navigation to a source file's path, and leaves Vite's own requests alone", async () => {

@@ -37,6 +37,8 @@ interface StateBinding {
   setterName: string;
   index: number;
   initialValue?: t.Expression;
+  /** A useRef object: a cell that is never set, read only by handlers and ref attributes. */
+  ref?: true;
 }
 
 interface HandlerBinding {
@@ -796,6 +798,97 @@ function isUseStateCall(
     reactNames.has(expression.callee.object.name) &&
     t.isIdentifier(expression.callee.property, { name: "useState" })
   );
+}
+
+type MemoHook = "useMemo" | "useCallback";
+type ReactHook = MemoHook | "useRef";
+
+/** The local hook name a call uses, whether imported from react or called on React. */
+function reactHookCall(
+  expression: t.Node | null | undefined,
+  hookNames: ReadonlyMap<string, ReactHook>,
+  reactNames: ReadonlySet<string>,
+): ReactHook | undefined {
+  if (!t.isCallExpression(expression)) return undefined;
+  const callee = expression.callee;
+  if (t.isIdentifier(callee)) return hookNames.get(callee.name);
+  return t.isMemberExpression(callee) &&
+    !callee.computed &&
+    t.isIdentifier(callee.object) &&
+    reactNames.has(callee.object.name) &&
+    t.isIdentifier(callee.property) &&
+    (callee.property.name === "useMemo" ||
+      callee.property.name === "useCallback" ||
+      callee.property.name === "useRef")
+    ? (callee.property.name as ReactHook)
+    : undefined;
+}
+
+/**
+ * The value a useMemo or useCallback call stands for, when a compiled component can use it in
+ * place of the call: useMemo's computed expression is read as a derived value, recomputed where
+ * it is read, and useCallback's function is a handler. Memoization is a performance hint, so this
+ * holds only when the dependency list names every reactive value the callback reads (checked by
+ * the caller); undefined means the declaration is not such a call.
+ */
+function memoHookValue(
+  expression: t.Expression,
+  hookNames: ReadonlyMap<string, ReactHook>,
+  reactNames: ReadonlySet<string>,
+): { hook: MemoHook; value: t.Expression; dependencies?: string[] } | string | undefined {
+  const hook = reactHookCall(expression, hookNames, reactNames);
+  if (hook !== "useMemo" && hook !== "useCallback") return undefined;
+  if (!t.isCallExpression(expression)) return undefined;
+  const [callback, dependencyList, ...rest] = expression.arguments;
+  if (
+    rest.length > 0 ||
+    (!t.isArrowFunctionExpression(callback) && !t.isFunctionExpression(callback)) ||
+    callback.async ||
+    callback.generator
+  ) {
+    return `${hook} needs one inline synchronous callback`;
+  }
+  let dependencies: string[] | undefined;
+  if (dependencyList) {
+    if (
+      !t.isArrayExpression(dependencyList) ||
+      !dependencyList.elements.every((element) => t.isIdentifier(element))
+    ) {
+      return `${hook} dependencies must be an array of names`;
+    }
+    dependencies = dependencyList.elements.map((element) => (element as t.Identifier).name);
+  }
+  if (hook === "useCallback") return { hook, value: callback, dependencies };
+  if (callback.params.length > 0) return "useMemo callbacks take no parameters";
+  const body = callback.body;
+  const value = t.isExpression(body)
+    ? body
+    : body.body.length === 1 && t.isReturnStatement(body.body[0]) && body.body[0].argument
+      ? body.body[0].argument
+      : undefined;
+  if (!value) return "useMemo callbacks must return one expression";
+  return { hook, value, dependencies };
+}
+
+/** A ref the JSX reads outside a handler or a ref attribute, if there is one. */
+function refReadDuringRender(
+  root: t.JSXElement,
+  refNames: ReadonlySet<string>,
+): string | undefined {
+  let read: string | undefined;
+  traverse(expressionFile(cloneExpression(root)), {
+    Identifier(path) {
+      if (read || !refNames.has(path.node.name) || !path.isReferencedIdentifier()) return;
+      if (path.findParent((parent) => parent.isFunction())) return;
+      const attribute = path.parentPath?.isJSXExpressionContainer()
+        ? path.parentPath.parentPath
+        : undefined;
+      if (attribute?.isJSXAttribute() && jsxAttributeName(attribute.node) === "ref") return;
+      read = path.node.name;
+      path.stop();
+    },
+  });
+  return read;
 }
 
 function cloneExpression<T extends t.Expression>(expression: T): T {
@@ -9457,13 +9550,26 @@ function lowerStableBindingTargets(
   const visit = (element: t.JSXElement, path: number[]): void => {
     const target = targetByPath.get(path.join("."));
     if (target !== undefined && path.length > 0) {
-      element.openingElement.attributes.push(
+      // A useRef object on the same element goes through the binding target's ref, which also
+      // sets it, since an element takes one ref.
+      const attributes = element.openingElement.attributes;
+      const userRefIndex = attributes.findIndex(
+        (attribute) => t.isJSXAttribute(attribute) && jsxAttributeName(attribute) === "ref",
+      );
+      const userRef =
+        userRefIndex >= 0
+          ? (
+              (attributes.splice(userRefIndex, 1)[0] as t.JSXAttribute)
+                .value as t.JSXExpressionContainer
+            ).expression
+          : undefined;
+      attributes.push(
         t.jsxAttribute(
           t.jsxIdentifier("ref"),
           t.jsxExpressionContainer(
             t.callExpression(
               t.memberExpression(t.cloneNode(blockRuntime), t.identifier("target")),
-              [t.numericLiteral(target)],
+              [t.numericLiteral(target), ...(userRef && t.isExpression(userRef) ? [userRef] : [])],
             ),
           ),
         ),
@@ -9540,9 +9646,18 @@ function analyzeHostTree(
       const name = jsxAttributeName(attribute);
       if (!name) return "namespaced JSX attributes are not supported yet";
       if (name === "is") return "customized built-in elements require React ownership";
-      if (name === "ref" || name === "dangerouslySetInnerHTML") {
-        return `${name} requires React ownership`;
+      if (name === "ref") {
+        // A useRef object on a static element below the root, which the component's own root
+        // ref replaces: React, or the compiled root, attaches it.
+        const value = t.isJSXExpressionContainer(attribute.value)
+          ? attribute.value.expression
+          : undefined;
+        if (path.length > 0 && t.isIdentifier(value) && statesByValue.get(value.name)?.ref) {
+          continue;
+        }
+        return "ref requires React ownership";
       }
+      if (name === "dangerouslySetInnerHTML") return `${name} requires React ownership`;
       if (
         !t.isJSXExpressionContainer(attribute.value) ||
         t.isJSXEmptyExpression(attribute.value.expression)
@@ -9878,6 +9993,7 @@ function compileCandidate(
     keyedArrayWindowReplaceHints: number;
   },
   useStateNames: ReadonlySet<string>,
+  hookNames: ReadonlyMap<string, ReactHook>,
   reactNames: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
   moduleId: string,
@@ -9901,6 +10017,12 @@ function compileCandidate(
 
   const states: StateBinding[] = [];
   const locals: LocalBinding[] = [];
+  const memoDeclarations: Array<{
+    name: string;
+    hook: MemoHook;
+    value: t.Expression;
+    dependencies?: string[];
+  }> = [];
   let returned: t.ReturnStatement | undefined;
   for (const statement of path.node.body.body) {
     if (t.isReturnStatement(statement)) {
@@ -9951,21 +10073,47 @@ function compileCandidate(
     if (!t.isIdentifier(declaration.id) || !t.isExpression(declaration.init)) {
       return "derived const values and event handlers must use one identifier and one expression";
     }
-    if (t.isArrowFunctionExpression(declaration.init) || t.isFunctionExpression(declaration.init)) {
-      if (declaration.init.generator) {
+    let init = declaration.init;
+    if (reactHookCall(init, hookNames, reactNames) === "useRef") {
+      const [initial, ...rest] = (init as t.CallExpression).arguments;
+      if (rest.length > 0 || (initial && !t.isExpression(initial))) {
+        return "useRef takes at most one initial value";
+      }
+      states.push({
+        valueName: declaration.id.name,
+        setterName: path.scope.generateUidIdentifier("farmRef").name,
+        index: states.length,
+        initialValue: t.objectExpression([
+          t.objectProperty(
+            t.identifier("current"),
+            initial ? (initial as t.Expression) : t.identifier("undefined"),
+          ),
+        ]),
+        ref: true,
+      });
+      continue;
+    }
+    const memo = memoHookValue(init, hookNames, reactNames);
+    if (typeof memo === "string") return memo;
+    if (memo) {
+      memoDeclarations.push({ name: declaration.id.name, ...memo });
+      init = memo.value;
+    }
+    if (t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)) {
+      if (init.generator) {
         return `event handler ${declaration.id.name} cannot be a generator`;
       }
       locals.push({
         kind: "handler",
         name: declaration.id.name,
-        value: declaration.init,
+        value: init,
         statesBefore: states.length,
       });
     } else {
       locals.push({
         kind: "derived",
         name: declaration.id.name,
-        value: declaration.init,
+        value: init,
         statesBefore: states.length,
       });
     }
@@ -9980,6 +10128,36 @@ function compileCandidate(
   const statesBySetter = new Map(states.map((state) => [state.setterName, state]));
   const localNames = new Set(locals.map((binding) => binding.name));
   if (localNames.size !== locals.length) return "local binding names must be unique";
+  // A memoized value read where it is used matches React only when its dependency list names
+  // every reactive value it reads; a shorter list keeps a stale value on purpose.
+  const reactiveNames = [
+    ...states.map((state) => state.valueName),
+    ...propsPlan.destructuredNames,
+    ...(propsPlan.wrapperProps ? [propsPlan.definitionParameter.name] : []),
+    ...localNames,
+  ];
+  for (const memo of memoDeclarations) {
+    if (!memo.dependencies) continue;
+    const listed = new Set(memo.dependencies);
+    const missing = reactiveNames.find(
+      (name) => name !== memo.name && !listed.has(name) && referencesIdentifier(memo.value, name),
+    );
+    if (missing) {
+      return `${memo.hook} ${memo.name} reads ${missing} without listing it as a dependency`;
+    }
+  }
+  // A ref changes without rendering, so React reads it only in handlers and attaches it through
+  // a ref attribute; a compiled binding that read it would never update.
+  const refNames = new Set(states.filter((state) => state.ref).map((state) => state.valueName));
+  if (refNames.size > 0) {
+    for (const binding of locals) {
+      if (binding.kind !== "derived") continue;
+      const ref = [...refNames].find((name) => referencesIdentifier(binding.value, name));
+      if (ref) return `derived local ${binding.name} cannot read the ref ${ref} during render`;
+    }
+    const ref = refReadDuringRender(returned.argument, refNames);
+    if (ref) return `the ref ${ref} cannot be read during render`;
+  }
   for (const state of states) {
     if (
       state.initialValue &&
@@ -11302,6 +11480,7 @@ export async function compileReactModule(
         const moduleDirectives = new Set(directiveValues(programPath.node));
         markForeignContent(programPath);
         const useStateNames = new Set<string>();
+        const hookNames = new Map<string, ReactHook>();
         const reactNames = new Set<string>();
         const listNames = new Set<string>();
         for (const statement of programPath.node.body) {
@@ -11326,6 +11505,14 @@ export async function compileReactModule(
               t.isIdentifier(specifier.imported, { name: "useState" })
             ) {
               useStateNames.add(specifier.local.name);
+            } else if (
+              t.isImportSpecifier(specifier) &&
+              t.isIdentifier(specifier.imported) &&
+              (specifier.imported.name === "useMemo" ||
+                specifier.imported.name === "useCallback" ||
+                specifier.imported.name === "useRef")
+            ) {
+              hookNames.set(specifier.local.name, specifier.imported.name);
             }
           }
         }
@@ -11458,6 +11645,7 @@ export async function compileReactModule(
             optimizationCounts,
             compilerUsage,
             useStateNames,
+            hookNames,
             reactNames,
             listNames,
             id,

@@ -296,6 +296,7 @@ export const schema = z.string();`;
     { name: "i18n", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "trailing-slash", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "config-routes", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "metadata-routes", api: undefined, baseURL: "/api", mount: "/api" },
     {
       name: "custom",
       api: {
@@ -597,6 +598,54 @@ export default function Page() { return <main>Static with config headers</main>;
             `export const dynamic = "force-static";
 export default function Page() { return <main>Prerendered page</main>; }`,
           );
+          // A route file is a local route: a config rewrite with its URL as source never applies.
+          writeRoute(
+            "docs/[section]/sitemap.ts",
+            `export default function sitemap({ params }) {
+  return [{ url: "https://shop.example/console/docs/" + params.section }];
+}`,
+          );
+        }
+        if (name === "metadata-routes") {
+          // basePath "/console" with sitemap.ts, robots.ts, llms.ts and llms-full.ts route files,
+          // which replace the generated files as in core, and a nested dynamic sitemap.ts.
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "about/page.tsx",
+            `export const metadata = { title: "About" };
+export default function Page() { return <main>About from a route file app</main>; }`,
+          );
+          writeRoute(
+            "sitemap.ts",
+            `export const revalidate = 60;
+export default function sitemap({ path }) {
+  return [{ url: "https://shop.example/console/custom", lastModified: "2026-01-02" }, { url: "https://shop.example/at" + path }];
+}`,
+          );
+          writeRoute(
+            "docs/[section]/sitemap.ts",
+            `export default function sitemap({ params, path }) {
+  return [{ url: "https://shop.example/console" + path + "?section=" + params.section }];
+}`,
+          );
+          writeRoute(
+            "robots.ts",
+            `export default function robots() { return { rules: { userAgent: "*", disallow: "/private" } }; }`,
+          );
+          writeRoute(
+            "llms.ts",
+            `export default function llms({ pages, defaults }) {
+  return { ...defaults, title: "Custom index", details: "Paths: " + pages.map((page) => page.path).join(", ") };
+}`,
+          );
+          writeRoute(
+            "llms-full.ts",
+            `export default function llmsFull({ defaults }) { return { ...defaults, title: "Custom full" }; }`,
+          );
         }
         if (name === "base-path") {
           // basePath "/console": a page at its route path, one nested under app/console/ as RSC
@@ -707,7 +756,7 @@ export function GET() { return Response.json({ locale: getLocale(), source: getL
           path.join(srcDir, "layout.tsx"),
           `${name === "nested-layouts" ? 'import { Provider } from "./components/provider";' : ""}
 export default function Layout({ children }) {
-  return ${name === "nested-layouts" ? "<section>Root layout marker <Provider>{children}</Provider></section>" : name === "i18n" ? "<section>{children}</section>" : "<html><body>{children}</body></html>"};
+  return ${name === "nested-layouts" ? "<section>Root layout marker <Provider>{children}</Provider></section>" : name === "i18n" ? '<html lang="en"><body>{children}</body></html>' : "<html><body>{children}</body></html>"};
 }`,
         );
         writeFileSync(
@@ -808,10 +857,21 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           ...(name === "i18n"
             ? { basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" } }
             : {}),
-          ...(name === "trailing-slash" ? { basePath: "/console", trailingSlash: true } : {}),
+          ...(name === "metadata-routes"
+            ? { basePath: "/console", agent: { crawlers: true, llmsTxt: true } }
+            : {}),
+          ...(name === "trailing-slash"
+            ? {
+                basePath: "/console",
+                trailingSlash: true,
+                agent: { crawlers: { training: "block" } },
+              }
+            : {}),
           ...(name === "config-routes"
             ? {
                 basePath: "/console",
+                // A generated robots.txt, which a config rewrite yields to as well.
+                agent: { crawlers: true },
                 redirects: async () => [
                   { source: "/old", destination: "/about", permanent: true },
                   { source: "/cfg/:slug", destination: "/:slug" },
@@ -822,8 +882,18 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
                   { source: "/about", destination: "/" },
                   { source: "/hello-alias", destination: "/api/hello" },
                   { source: "/alias-guarded", destination: "/guarded" },
+                  // Agent files and route files answer these, so they never apply.
+                  { source: "/robots.txt", destination: "/about" },
+                  { source: "/sitemap.xml", destination: "/about" },
+                  { source: "/llms.txt", destination: "/about" },
+                  { source: "/docs/:section/sitemap.xml", destination: "/about" },
                 ],
                 headers: () => [
+                  { source: "/robots.txt", headers: [{ key: "x-config-header", value: "robots" }] },
+                  {
+                    source: "/docs/:section/sitemap.xml",
+                    headers: [{ key: "x-config-header", value: "route-file" }],
+                  },
                   { source: "/about", headers: [{ key: "x-config-header", value: "about" }] },
                   { source: "/api/:path*", headers: [{ key: "x-config-header", value: "api" }] },
                   { source: "/old", headers: [{ key: "x-config-header", value: "old" }] },
@@ -883,9 +953,16 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           // A static page prerenders at the URL that names its locale. The default locale's URL
           // redirects visitors who prefer French, so it stays server-rendered.
           const publicDir = path.join(outputDir, "public", "console");
-          expect(
-            readFileSync(path.join(publicDir, "fr", "static", "index.html"), "utf8"),
-          ).toContain("Static fr");
+          const prerenderedHtml = readFileSync(
+            path.join(publicDir, "fr", "static", "index.html"),
+            "utf8",
+          );
+          expect(prerenderedHtml).toContain("Static fr");
+          // No visitor's request drives a prerender, so its hreflang links name paths only, as
+          // core's background regeneration renders them without a metadataBase.
+          expect(prerenderedHtml).toContain(
+            '<link rel="alternate" hreflang="fr" href="/console/fr/static">',
+          );
           expect(readFileSync(path.join(publicDir, "fr", "static.rsc"), "utf8")).toContain(
             "Static fr",
           );
@@ -1202,7 +1279,8 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           const sitemap = await fetch(origin + "/console/sitemap.xml");
           expect(sitemap.status, logs).toBe(200);
           const sitemapBody = await sitemap.text();
-          for (const url of ["/console/", "/console/about", "/console/legacy"]) {
+          // Each at the URL it answers at: '/console/' redirects to '/console'.
+          for (const url of ["/console", "/console/about", "/console/legacy"]) {
             expect(sitemapBody, url).toContain(`<loc>${origin}${url}</loc>`);
           }
           expect(sitemapBody).toContain("<lastmod>");
@@ -1247,6 +1325,19 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(response.status, `${pathname} ${logs}`).toBe(308);
             expect(response.headers.get("location"), pathname).toBe(location);
           }
+          // sitemap.xml lists each page at the URL it answers at, so none of them redirects.
+          const sitemapBody = await (await fetch(origin + "/console/sitemap.xml")).text();
+          const listed = [...sitemapBody.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+          for (const url of ["/console/", "/console/about/", "/console/static/"]) {
+            expect(listed, url).toContain(origin + url);
+            const response = await fetch(origin + url, { redirect: "manual" });
+            expect(response.status, `${url} ${logs}`).toBe(200);
+          }
+          expect(listed.filter((url) => !url.endsWith("/"))).toEqual([]);
+          // agent.crawlers serves a generated robots.txt below the basePath, as in core.
+          const robots = await fetch(origin + "/console/robots.txt");
+          expect(robots.status, logs).toBe(200);
+          expect(await robots.text()).toMatch(/User-agent: GPTBot\n[\s\S]*Disallow: \//);
           // The static page and its payload were written at the trailing-slash URL.
           for (const file of ["index.html", "index.rsc"]) {
             expect(
@@ -1313,6 +1404,56 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           expect(staticPage.status, logs).toBe(200);
           expect(staticPage.headers.get("x-config-header")).toBe("static");
           expect(await staticPage.text()).toContain("Static with config headers");
+
+          // Generated agent files and route files are local routes, which config rewrites yield
+          // to, and config headers apply to their responses.
+          const robots = await send("/console/robots.txt");
+          expect(robots.status, logs).toBe(200);
+          expect(robots.headers.get("x-config-header")).toBe("robots");
+          expect(await robots.text()).toContain("User-agent:");
+          const sitemap = await send("/console/sitemap.xml");
+          expect(sitemap.status, logs).toBe(200);
+          expect(await sitemap.text()).toContain("<urlset");
+          const llms = await send("/console/llms.txt");
+          expect(llms.status, logs).toBe(200);
+          expect(await llms.text()).not.toContain("About page");
+          const routeFile = await send("/console/docs/guides/sitemap.xml");
+          expect(routeFile.status, logs).toBe(200);
+          expect(routeFile.headers.get("x-config-header")).toBe("route-file");
+          expect(await routeFile.text()).toContain(
+            "<loc>https://shop.example/console/docs/guides</loc>",
+          );
+        }
+        if (name === "metadata-routes") {
+          const get = (pathname: string) =>
+            fetch(origin + pathname, { signal: AbortSignal.timeout(10_000) });
+          // sitemap.ts replaces the generated sitemap, below the basePath and at the origin root.
+          for (const pathname of ["/console/sitemap.xml", "/sitemap.xml"]) {
+            const sitemap = await get(pathname);
+            expect(sitemap.status, `${pathname} ${logs}`).toBe(200);
+            expect(sitemap.headers.get("content-type")).toBe("application/xml; charset=utf-8");
+            expect(sitemap.headers.get("cache-control")).toContain("s-maxage=60");
+            const xml = await sitemap.text();
+            expect(xml).toContain("<loc>https://shop.example/console/custom</loc>");
+            expect(xml).toContain("<loc>https://shop.example/at/</loc>");
+            expect(xml).not.toContain("/console/about");
+          }
+          // A nested dynamic sitemap.ts answers at its segment with its params.
+          expect(await (await get("/console/docs/guides/sitemap.xml")).text()).toContain(
+            "<loc>https://shop.example/console/docs/guides?section=guides</loc>",
+          );
+          // robots.ts wins over the robots.txt agent.crawlers generates.
+          const robots = await (await get("/console/robots.txt")).text();
+          expect(robots).toBe("User-agent: *\nDisallow: /private\n");
+          // llms.ts gets the generated pages and defaults to build on.
+          const llms = await (await get("/console/llms.txt")).text();
+          expect(llms).toMatch(/^# Custom index\n/);
+          expect(llms).toContain("Paths: /, /about");
+          expect(llms).toContain(`(${origin}/console/about.md)`);
+          // An llms-full.ts object inlines each page's Markdown.
+          const full = await (await get("/console/llms-full.txt")).text();
+          expect(full).toMatch(/^# Custom full\n/);
+          expect(full).toContain("About from a route file app");
         }
         if (name === "i18n") {
           const get = (pathname: string, headers: Record<string, string> = {}) =>
@@ -1322,9 +1463,18 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
               signal: AbortSignal.timeout(10_000),
             });
           for (const [pathname, accept, markers] of [
-            ["/console/fr/about", "text/html", ["Locale fr from url: Bonjour", '<html lang="fr"']],
+            // The root layout renders <html lang="en">: Farm sets the request's lang and dir on it.
+            [
+              "/console/fr/about",
+              "text/html",
+              ["Locale fr from url: Bonjour", '<html lang="fr" dir="ltr">'],
+            ],
             ["/console/fr/about.rsc", "*/*", ["Locale fr from url: Bonjour", '"locale":"fr"']],
-            ["/console/about", "text/html", ["Locale en from default: Hello", '<html lang="en"']],
+            [
+              "/console/about",
+              "text/html",
+              ["Locale en from default: Hello", '<html lang="en" dir="ltr">'],
+            ],
             ["/console/fr/legacy", "text/html", ["Legacy fr in fr"]],
             // Client components render and hydrate with the request's locale and catalog.
             ["/console/fr/links", "text/html", ['href="/console/fr/about"', "Client fr: Bonjour"]],
@@ -1335,6 +1485,24 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             const body = await response.text();
             for (const marker of markers) expect(body, `${pathname} ${logs}`).toContain(marker);
           }
+
+          // hreflang alternates name the page in each locale and x-default on the request's
+          // origin, in the document and in the payload client navigation reads.
+          const alternates = await (
+            await get("/console/fr/about", { "accept-language": "de" })
+          ).text();
+          for (const [hreflang, pathname] of [
+            ["en", "/console/about"],
+            ["fr", "/console/fr/about"],
+            ["x-default", "/console/about"],
+          ]) {
+            expect(alternates, logs).toContain(
+              `<link rel="alternate" hreflang="${hreflang}" href="${origin}${pathname}">`,
+            );
+          }
+          expect(
+            await (await get("/console/fr/about.rsc", { "accept-language": "de" })).text(),
+          ).toContain(`hreflang=\\"fr\\" href=\\"${origin}/console/fr/about\\"`);
 
           // A page URL without a locale goes to the visitor's, varying on the signal it used.
           const detected = await get("/console/about", { "accept-language": "fr" });

@@ -57,6 +57,8 @@ import {
   getFarmLocaleVaryHeaders,
   localizeFarmHref,
   localizeFarmPathname,
+  renderFarmLocaleAlternateLinks,
+  resolveFarmWebRequestOrigin as resolveFarmI18nRequestOrigin,
 } from '@farm.js/core/internal/production-runtime';
 ${catalogs}
 // createTranslator(locale) and runWithLocale() outside a request.
@@ -111,6 +113,43 @@ function localizeFarmRedirectUrl(url) {
     : url;
 }
 
+/**
+ * The page's \`<link rel="alternate" hreflang>\` tags, as core's servers render them: its URL in each
+ * locale and x-default, absolute on the route's metadataBase, else on the request's origin (under
+ * server.trustProxy). A prerendered page, which no visitor's request drives, uses metadataBase
+ * only, as core's background regeneration does.
+ */
+function renderFarmI18nAlternateLinks(request, pathname, metadata) {
+  const snapshot = getFarmI18nClientSnapshot();
+  if (!snapshot) return '';
+  return renderFarmLocaleAlternateLinks(pathname, snapshot, {
+    metadataBase: metadata.metadataBase,
+    origin: isFarmPrerenderRequest(request)
+      ? undefined
+      : resolveFarmI18nRequestOrigin(request, { trustProxy: ${JSON.stringify(ctx.server?.trustProxy === true)} }),
+  });
+}
+
+/**
+ * A root layout that renders \`<html>\` gets the request's \`lang\` and \`dir\` on it, replacing its
+ * own, as core's servers set them on any document. They go on the element the layout returns, so
+ * the browser hydrates the attributes the HTML has. FarmLocaleDocument renders a synchronous
+ * layout in its place, within the render, as React would.
+ */
+function FarmLocaleDocument({ Layout, layoutProps }) {
+  const element = Layout(layoutProps);
+  return element && typeof element.then === 'function'
+    ? element.then(withFarmDocumentLocale)
+    : withFarmDocumentLocale(element);
+}
+
+function withFarmDocumentLocale(element) {
+  const snapshot = getFarmI18nClientSnapshot();
+  return snapshot && React.isValidElement(element) && element.type === 'html'
+    ? React.cloneElement(element, { lang: snapshot.locale, dir: snapshot.direction })
+    : element;
+}
+
 function applyFarmI18nResponse(response, resolution) {
   const varyHeaders = getFarmLocaleVaryHeaders(farmRouteI18n, resolution);
   if (!resolution.persist && varyHeaders.length === 0) return response;
@@ -146,14 +185,20 @@ export function generateConfigRoutesRuntime(
   const llms = ctx.llmsTxt?.enabled === true;
   const localRoute = localRouteCheck
     ? `
-// Whether this server answers the URL itself: a page, an API route, the image optimizer, or an
-// agent file. A config rewrite applies only when none does, as in core's servers.
+// Whether this server answers the URL itself: a page, an API route, the image optimizer, a
+// metadata route file, or a generated agent file. A config rewrite applies only when none does,
+// as in core's servers.
 function farmHasLocalRequestRoute(url) {
   const pathname = url.pathname;
   if (matchRoute(pathname)) return true;
   if (matchAPIRouteAtBasePath(apiRouteMap, pathname, farmApiBasePath)) return true;
   if (farmImageHandler && pathname === farmImagePath) return true;
   const routePathname = getFarmRoutePathname(pathname.replace(/\\/+$/, '') || '/');${
+    ctx.appMetadataRoutes === true
+      ? `
+  if (matchFarmAppMetadataRoute(routePathname)) return true;`
+      : ""
+  }${
     llms
       ? `
   if (routePathname === '/llms.txt' || (farmLlmsTxtConfig.full && routePathname === '/llms-full.txt')) return true;`
@@ -162,6 +207,11 @@ function farmHasLocalRequestRoute(url) {
     ctx.sitemap?.enabled
       ? `
   if (routePathname === '/sitemap.xml') return true;`
+      : ""
+  }${
+    ctx.crawlers?.enabled === true
+      ? `
+  if (routePathname === '/robots.txt') return true;`
       : ""
   }
   return false;
@@ -452,18 +502,34 @@ function getFarmRoutePathname(pathname) {
     : stripFarmBasePath(pathname, farmRouteI18n.basePath);
 }
 ${i18n ? generateI18nRuntime(ctx, i18n) : ""}`;
+  // sitemap.ts, robots.ts, llms.ts and llms-full.ts route files, served as core serves them. An
+  // llms.ts receives the pages and defaults the generated llms.txt would list.
+  const servesAppMetadataRoutes = ctx.appMetadataRoutes === true;
+  const buildsLlmsTxt = ctx.llmsTxt?.enabled === true || servesAppMetadataRoutes;
   // The generated agent files list the app's static pages.
-  const listsAgentPages = ctx.llmsTxt?.enabled === true || ctx.sitemap?.enabled === true;
+  const listsAgentPages =
+    ctx.llmsTxt?.enabled === true || ctx.sitemap?.enabled === true || servesAppMetadataRoutes;
+  // agent.crawlers: a generated robots.txt, as core serves it.
+  const servesAgentRobots = ctx.crawlers?.enabled === true;
+  if (listsAgentPages || servesAgentRobots) {
+    code += `import { createFarmMetadataRouteResponse } from '@farm.js/core/internal/production-runtime';
+`;
+  }
+  if (servesAgentRobots) {
+    code += `import { createFarmAgentRobots } from '@farm.js/core/internal/production-runtime';
+
+const farmAgentCrawlers = ${JSON.stringify(ctx.crawlers)};
+`;
+  }
   if (listsAgentPages) {
     code += `import {
-  createFarmMetadataRouteResponse,
   farmPathGuardCoversPage,
   isFarmPageNoIndex,
   resolveFarmAgentOrigin,
 } from '@farm.js/core/internal/production-runtime';
 `;
   }
-  if (ctx.llmsTxt?.enabled) {
+  if (buildsLlmsTxt) {
     code += `import {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
@@ -473,7 +539,7 @@ ${i18n ? generateI18nRuntime(ctx, i18n) : ""}`;
 } from '@farm.js/core/internal/production-runtime';
 import { FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS } from '@farm.js/core/internal/app-markdown-runtime';
 
-const farmLlmsTxtConfig = ${JSON.stringify(ctx.llmsTxt)};
+const farmLlmsTxtConfig = ${JSON.stringify(ctx.llmsTxt ?? { enabled: false, include: [], exclude: [], full: false })};
 const farmLlmsFullRenderer = createFarmLlmsFullRenderer({ revalidate: farmLlmsTxtConfig.revalidate });
 `;
   }
@@ -597,7 +663,11 @@ const routeDefinitionModules${index} = import.meta.glob(${JSON.stringify(
             `${root.sourceGlob}/{farm.route,farm.routes,routes}.{tsx,jsx,ts,js}`,
             `${root.glob}/{farm.route,farm.routes,routes}.{tsx,jsx,ts,js}`,
           ],
-    )}, { eager: true });`,
+    )}, { eager: true });${
+      servesAppMetadataRoutes
+        ? `\nconst appMetadataRoutes${index} = ${uiRouteGlob(`${root.glob}/**/{sitemap,robots,llms,llms-full}.{ts,js}`)};`
+        : ""
+    }`,
   )
   .join("\n")}
 
@@ -1335,6 +1405,14 @@ ${
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
   ${
+    servesAppMetadataRoutes
+      ? `// sitemap.ts, robots.ts, llms.ts and llms-full.ts: answered after middleware, as in core's
+  // servers, and before the generated files they replace.
+  const appMetadataResponse = await handleFarmAppMetadataRoute(request, context);
+  if (appMetadataResponse) return applyProductionMiddlewareHeaders(appMetadataResponse, middlewareHeaders);
+  `
+      : ""
+  }${
     ctx.llmsTxt?.enabled
       ? `// agent.llmsTxt: answered after middleware, so its redirects and headers apply.
   const llmsResponse = await handleFarmLlmsTxtRequest(request, context);
@@ -1346,6 +1424,14 @@ ${
       ? `// agent.sitemap: answered after middleware, as in core's servers.
   if (getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/') === '/sitemap.xml') {
     return applyProductionMiddlewareHeaders(createFarmAgentSitemapResponse(request), middlewareHeaders);
+  }
+  `
+      : ""
+  }${
+    servesAgentRobots
+      ? `// agent.crawlers: answered after middleware, as in core's servers.
+  if (getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/') === '/robots.txt') {
+    return applyProductionMiddlewareHeaders(createFarmAgentRobotsResponse(request), middlewareHeaders);
   }
   `
       : ""
@@ -1565,11 +1651,12 @@ ${
       : "const metadata = await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps);"
   }
   const renderedHead = renderMetadataHead(metadata, { pathname: url.pathname });
-  // Injected into <head> by the SSR entry; React renders only the charset.
+  // Injected into <head> by the SSR entry (React renders only the charset), and swapped in by the
+  // browser entry on client navigation.
   const metadataHead =
     (renderedHead.hasExplicitTitle ? '<title>' + renderedHead.title + '</title>' : '') +
     renderedHead.viewport +
-    renderedHead.tags;
+    renderedHead.tags${i18n ? " + renderFarmI18nAlternateLinks(request, url.pathname, metadata)" : ""};
   const metadataTitle = resolveMetadataTitle(metadata.title);
   
   debug('Rendering page:', pattern, 'with props:', pageProps);
@@ -1616,9 +1703,24 @@ ${
     const Layout = LayoutModules[index].default;
     const layoutProps = { params: pageProps.params, children: layoutContent };
     if (Layout.constructor.name === 'AsyncFunction') {
-      layoutContent = await Layout(layoutProps);
+      layoutContent = await Layout(layoutProps);${
+        i18n
+          ? `
+      if (index === 0 && farmDocumentLayoutModules.has(LayoutModules[0])) {
+        layoutContent = withFarmDocumentLocale(layoutContent);
+      }`
+          : ""
+      }
     } else {
-      layoutContent = h(Layout, layoutProps);
+      layoutContent = ${
+        i18n
+          ? `index === 0 &&
+        farmDocumentLayoutModules.has(LayoutModules[0]) &&
+        Layout.$$typeof !== Symbol.for('react.client.reference')
+        ? h(FarmLocaleDocument, { Layout, layoutProps })
+        : `
+          : ""
+      }h(Layout, layoutProps);
     }
   }
   
@@ -1656,10 +1758,7 @@ ${
     ),
     rootContent: rootInner,
     metadataHead,
-    metadata: {
-      title: metadataTitle,
-      description: typeof metadata.description === 'string' ? metadata.description : undefined,
-    },
+    metadata: { title: metadataTitle },
 ${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
 
   // Include action results in payload if actions are enabled
@@ -1833,7 +1932,7 @@ ${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
 }
 
 ${
-  ctx.llmsTxt?.enabled
+  buildsLlmsTxt
     ? `/**
  * agent.llmsTxt, built the same way as core's production server: /llms.txt
  * lists the app's static pages and links to their Markdown mirrors, and
@@ -1853,12 +1952,13 @@ function createFarmLlmsTxtContext(request, context, full) {
       basePath: ${JSON.stringify(ctx.basePath)},
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
-      exclude: farmLlmsTxtConfig.exclude,
+      exclude: farmLlmsTxtConfig.exclude,${ctx.trailingSlash ? "\n      // A page without a mirror is linked at the URL it answers at ('/console/about/').\n      trailingSlash: true," : ""}
     },
   );
   const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
   return {
     origin,
+    pages,
     defaults: createFarmDefaultLlmsTxt({
       origin,
       pages,
@@ -1992,7 +2092,7 @@ function createFarmAgentSitemapResponse(request) {
         origin: new URL(request.url).origin,
         config: farmAgentSitemapConfig,
         metadataBase: rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
-        basePath: ${JSON.stringify(ctx.basePath)},
+        basePath: ${JSON.stringify(ctx.basePath)},${ctx.trailingSlash ? "\n        // Each page at the URL it answers at: '/console/about/'.\n        trailingSlash: true," : ""}
       },
     ),
     {},
@@ -2010,6 +2110,133 @@ function getFarmAgentOrigin(request) {
     rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
     new URL(request.url).origin,
   );
+}
+
+`
+      : ""
+  }${
+    servesAgentRobots
+      ? `/**
+ * agent.crawlers, built the same way as core's servers build it: rules for AI search and training
+ * crawlers, and a Sitemap line for the app's sitemap.xml below the basePath when the root layout
+ * has a metadataBase (the request's host is not trusted in a file crawlers and CDNs cache).
+ */
+function createFarmAgentRobotsResponse(request) {
+  const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
+  return createFarmMetadataRouteResponse(
+    'robots',
+    createFarmAgentRobots({
+      crawlers: farmAgentCrawlers,
+      sitemapPath: ${
+        ctx.sitemap?.enabled
+          ? "'/sitemap.xml'"
+          : servesAppMetadataRoutes
+            ? "farmAppMetadataRoutes.some((route) => route.kind === 'sitemap' && route.segments.length === 0)\n        ? '/sitemap.xml'\n        : undefined"
+            : "undefined"
+      },
+      metadataBase: rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
+      basePath: ${JSON.stringify(ctx.basePath)},
+    }),
+    {},
+    { method: request.method },
+  );
+}
+
+`
+      : ""
+  }${
+    servesAppMetadataRoutes
+      ? `const FARM_APP_METADATA_OUTPUTS = {
+  sitemap: 'sitemap.xml',
+  robots: 'robots.txt',
+  llms: 'llms.txt',
+  'llms-full': 'llms-full.txt',
+};
+
+// The app's metadata route files, most specific first, as core's router ranks them.
+const farmAppMetadataRoutes = Object.entries(
+  mergeRouteModules([${routeRoots
+    .map(
+      (root, index) => `{ base: ${JSON.stringify(root.base)}, modules: appMetadataRoutes${index} }`,
+    )
+    .join(", ")}]),
+)
+  .map(([filePath, module]) => {
+    const fileName = filePath.slice(filePath.lastIndexOf('/') + 1);
+    const kind = fileName.slice(0, fileName.lastIndexOf('.'));
+    return {
+      filePath,
+      module,
+      kind,
+      outputName: FARM_APP_METADATA_OUTPUTS[kind],
+      segments: parseRoutePath(filePath).segments,
+      specificity: getRoutePatternSpecificity(filePath.slice(0, filePath.lastIndexOf('/')) || '/'),
+    };
+  })
+  .sort((left, right) => compareRouteSpecificity(left.specificity, right.specificity));
+
+/**
+ * A sitemap.ts, robots.ts, llms.ts or llms-full.ts route file, served as core serves it: at
+ * '<segment>/<file>' on the route path (below the basePath and locale), from its default export,
+ * a value or a function given the request, params, search params and the segment's path. llms.ts
+ * and llms-full.ts also receive the pages and defaults the generated llms.txt would use, and
+ * llms-full.ts the Markdown reader; an llms-full.ts object inlines each page's Markdown.
+ */
+async function handleFarmAppMetadataRoute(request, context) {
+  const url = new URL(request.url);
+  const matched = matchFarmAppMetadataRoute(
+    getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/'),
+  );
+  if (matched) {
+    const { route, routePath, match } = matched;
+    const method = request.method.toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+      return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } });
+    }
+    try {
+      const routeModule = route.module;
+      if (!routeModule || routeModule.default === undefined) {
+        throw new Error('Metadata route module does not export a default value or handler');
+      }
+      const full = route.kind === 'llms-full';
+      const llms = route.kind === 'llms' || full
+        ? createFarmLlmsTxtContext(request, context, full)
+        : undefined;
+      const value = typeof routeModule.default === 'function'
+        ? await routeModule.default({
+            request,
+            params: match.params,
+            searchParams: url.searchParams,
+            path: routePath,
+            ...(llms ? { pages: llms.pages, defaults: llms.defaults } : {}),
+            ...(full ? { markdown: llms.markdown } : {}),
+          })
+        : routeModule.default;
+      const body = full && !(value instanceof Response)
+        ? await renderFarmLlmsFullTxt(value, { origin: llms.origin, readMarkdown: llms.markdown })
+        : value;
+      return createFarmMetadataRouteResponse(route.kind, body, routeModule, { method, request });
+    } catch (error) {
+      console.error('[Farm.js] Metadata route ' + route.filePath + ' failed:', error);
+      return new Response('Internal Server Error', {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    }
+  }
+  return null;
+}
+
+/** The route file that answers a route path ('<segment>/<file>'), most specific first, or null. */
+function matchFarmAppMetadataRoute(pathname) {
+  for (const route of farmAppMetadataRoutes) {
+    const suffix = '/' + route.outputName;
+    if (pathname !== suffix && !pathname.endsWith(suffix)) continue;
+    const routePath = pathname.slice(0, -suffix.length) || '/';
+    const match = matchFarmPageRoute(routePath, route.segments);
+    if (match.matches) return { route, routePath, match };
+  }
+  return null;
 }
 
 `
