@@ -16,6 +16,7 @@ import {
   isFarmDeploymentMismatchResponse,
   normalizeFarmDeploymentId,
   withFarmDeploymentResponse,
+  withoutFarmDeploymentCookie,
 } from "../deployment";
 import { _withFarmDeploymentCookie } from "../middleware/production-runtime";
 
@@ -163,5 +164,23 @@ describe("deployment skew protocol", () => {
     expect(cookieOf({}, { ...page, "cdn-cache-control": "max-age=60" })).toEqual([]);
     // A request from another deployment's page keeps that page's cookie.
     expect(cookieOf({ headers: { [FARM_DEPLOYMENT_ID_HEADER]: "release-1" } }, page)).toEqual([]);
+  });
+
+  it("leaves only the cookies that name a visitor", () => {
+    expect(withoutFarmDeploymentCookie(null)).toBeUndefined();
+    expect(withoutFarmDeploymentCookie("")).toBeUndefined();
+    expect(withoutFarmDeploymentCookie(`${FARM_DEPLOYMENT_COOKIE}=release-2`)).toBeUndefined();
+    expect(withoutFarmDeploymentCookie(` ${FARM_DEPLOYMENT_COOKIE}=release-2; `)).toBeUndefined();
+    expect(withoutFarmDeploymentCookie("session=abc")).toBe("session=abc");
+    expect(withoutFarmDeploymentCookie(`session=abc; ${FARM_DEPLOYMENT_COOKIE}=release-2`)).toBe(
+      "session=abc",
+    );
+    expect(
+      withoutFarmDeploymentCookie(`${FARM_DEPLOYMENT_COOKIE}=release-2; locale=fr; theme=dark`),
+    ).toBe("locale=fr; theme=dark");
+    // Only the exact name: a lookalike is a visitor cookie.
+    expect(withoutFarmDeploymentCookie(`${FARM_DEPLOYMENT_COOKIE}_x=1`)).toBe(
+      `${FARM_DEPLOYMENT_COOKIE}_x=1`,
+    );
   });
 });

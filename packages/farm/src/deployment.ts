@@ -197,6 +197,28 @@ export function createFarmDeploymentCookie(
     .join("; ");
 }
 
+/**
+ * A request's Cookie header without the deployment cookie, or undefined when no other cookie
+ * remains. The deployment cookie names a release, never a visitor, so a request carrying only it
+ * may still be answered from, and fill, a shared cache.
+ */
+export function withoutFarmDeploymentCookie(
+  cookieHeader: string | null | undefined,
+): string | undefined {
+  if (!cookieHeader) return undefined;
+  if (!cookieHeader.includes(FARM_DEPLOYMENT_COOKIE)) return cookieHeader;
+  const remaining = cookieHeader
+    .split(";")
+    .filter((part) => {
+      const separator = part.indexOf("=");
+      const name = (separator === -1 ? part : part.slice(0, separator)).trim();
+      return name !== FARM_DEPLOYMENT_COOKIE && part.trim() !== "";
+    })
+    .join(";")
+    .trim();
+  return remaining || undefined;
+}
+
 function readCookie(cookieHeader: string | null, name: string): string | undefined {
   if (!cookieHeader) return undefined;
 

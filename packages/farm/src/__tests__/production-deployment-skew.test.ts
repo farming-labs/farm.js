@@ -208,6 +208,35 @@ async function expectSharedCachePagesKeepCaching(origin: string): Promise<void> 
     "/console/swr/page": shared,
   });
 
+  // A browser that loaded a dynamic page holds the deployment cookie and sends it with every
+  // later request. It names a release, not a visitor, so on its own it keeps a shared page
+  // shared, as a request without cookies is; any other cookie still makes the page private.
+  const [deploymentCookie] = (
+    await fetch(`${origin}/console`, { headers: { accept: "text/html" } }).then(async (page) => {
+      await page.body?.cancel();
+      return page.headers.getSetCookie();
+    })
+  ).map((cookie) => cookie.split(";")[0]!);
+  expect(deploymentCookie).toBe(`__farm_deployment=${CURRENT}`);
+  const cacheControlWith = async (cookie: string) => {
+    const response = await fetch(`${origin}/console/report`, {
+      headers: { accept: "text/html", cookie },
+    });
+    await response.body?.cancel();
+    return response.headers.get("cache-control");
+  };
+  expect({
+    deploymentOnly: await cacheControlWith(deploymentCookie!),
+    staleDeploymentOnly: await cacheControlWith(`__farm_deployment=${STALE}`),
+    withVisitorCookie: await cacheControlWith(`${deploymentCookie}; session=abc`),
+    visitorCookieFirst: await cacheControlWith(`session=abc; ${deploymentCookie}`),
+  }).toEqual({
+    deploymentOnly: "public, s-maxage=60, stale-while-revalidate=300",
+    staleDeploymentOnly: "public, s-maxage=60, stale-while-revalidate=300",
+    withVisitorCookie: "private, no-store",
+    visitorCookieFirst: "private, no-store",
+  });
+
   // A prerendered page is a file: it embeds its deployment and sets no cookie.
   const prerendered = await fetch(`${origin}/console/static`, {
     headers: { accept: "text/html" },

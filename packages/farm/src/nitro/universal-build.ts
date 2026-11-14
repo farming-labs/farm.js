@@ -7504,7 +7504,8 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   _withFarmResponseHeaders,
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
-  getFarmDeploymentMismatch,${config.mobileClient ? "\n  createFarmNativeTreeResponse," : ""}${
+  getFarmDeploymentMismatch,
+  withoutFarmDeploymentCookie,${config.mobileClient ? "\n  createFarmNativeTreeResponse," : ""}${
     hasInfraAnalyticsRuntime
       ? "\n  resolveFarmDocsEngineRouteLabel,\n  resolveFarmDocsRouteLabel,\n  resolveFarmMarkdownRouteLabel,\n  resolveFarmMCPRouteLabel,\n  setFarmRouteLabel,"
       : ""
@@ -9277,7 +9278,8 @@ function hasOnlyValidFarmLocaleCookie(cookieHeader) {
 
 function hasPrivateFarmRequestHeaders(request, farmLocaleResolution) {
   if (request.headers.get("authorization")) return true;
-  const cookieHeader = request.headers.get("cookie");
+  // The deployment cookie names a release, not a visitor, so it alone keeps shared caching.
+  const cookieHeader = withoutFarmDeploymentCookie(request.headers.get("cookie"));
   if (!cookieHeader) return false;
 
   return !(
@@ -10316,7 +10318,7 @@ function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
   if (farmSecurityConfig.csp && farmSecurityConfig.csp.nonce) return "csp-nonce";
   const method = request.method.toUpperCase();
   if (method !== "GET" && method !== "HEAD") return "method";
-  if (request.headers.get("cookie")) return "cookie";
+  if (withoutFarmDeploymentCookie(request.headers.get("cookie"))) return "cookie";
   if (request.headers.get("authorization")) return "authorization";
   if (request.headers.get("x-farm-intercept-from")) return "route-interception";
   if (request.headers.get("x-farm-ppr-refresh")) return "refresh";

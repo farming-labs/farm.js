@@ -92,6 +92,7 @@ import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
   getFarmDeploymentMismatch,
+  withoutFarmDeploymentCookie,
 } from "../deployment";
 import type { StaticMetadataImageInfo } from "../static-metadata-image";
 import {
@@ -1252,7 +1253,8 @@ export class ServerRenderer {
       return "method";
     }
 
-    if (req.headers.cookie) {
+    // The deployment cookie names a release, not a visitor, so it alone keeps the shell shared.
+    if (withoutFarmDeploymentCookie(req.headers.cookie)) {
       return "cookie";
     }
 
