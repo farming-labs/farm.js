@@ -201,10 +201,12 @@ function createProductionPPRShellCacheKey() {
   return new Function(
     "createFarmCacheKey",
     "normalizeRevalidatePath",
+    "farmDeploymentId",
     `${source.slice(start, end)}\nreturn getPPRShellCacheKey;`,
   )(
     (parts: string[]) => JSON.stringify(parts),
     (value: string) => value,
+    "release-1",
   ) as (url: URL, locale: string, origin: string) => string;
 }
 
@@ -261,7 +263,7 @@ describe("production i18n document alternates", () => {
       getPPRShellCacheKey(url, "fr", "https://b.example"),
     );
     expect(getPPRShellCacheKey(url, "fr", "")).toBe(
-      JSON.stringify(["ppr", "fr", "/fr/pricing", ""]),
+      JSON.stringify(["ppr", "fr", "/fr/pricing", "", "release-1"]),
     );
   });
 });

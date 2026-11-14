@@ -1195,7 +1195,9 @@ export class ServerRenderer {
   }
 
   private getPPRCacheKey(pathname: string, search = "", locale = "", origin = ""): string {
-    const key = ["ppr", locale, normalizeRevalidatePath(pathname), search];
+    // A shell embeds its deployment's ID, and a shared cache adapter outlives a deployment, so
+    // each deployment keys its own shells, as in production.
+    const key = ["ppr", locale, normalizeRevalidatePath(pathname), search, this.getDeploymentId()];
     return createFarmCacheKey(origin ? [...key, origin] : key);
   }
 
