@@ -2930,9 +2930,11 @@ export class ServerRenderer {
     try {
       const { handleFarmDefaultMCPRequest } = await import("../agent-mcp-handler");
       const origin = new URL(request.url).origin;
+      const i18n = this.i18nRuntime?.config;
       const response = await handleFarmDefaultMCPRequest(request, {
         server,
         basePath: this.config.basePath,
+        i18n,
         listPages: async () => {
           const sources = await Promise.all(
             this.getAgentListedRoutes().map(async ([pattern, route]) => {
@@ -2953,6 +2955,8 @@ export class ServerRenderer {
               origin,
               basePath: this.config.basePath,
               markdown: resolveMarkdownConfig(this.config.md as any),
+              trailingSlash: this.config.trailingSlash,
+              i18n,
             },
           );
         },

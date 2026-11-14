@@ -645,7 +645,11 @@ Left unset, `mcp` serves a read-only [MCP](https://modelcontextprotocol.io) serv
 The pages are the static pages `llms.txt` and the sitemap list that have a Markdown mirror: dynamic
 routes, pages whose metadata says `robots: { index: false }` (or inherits it from a layout), and pages a path-specific guard
 covers (see [Sitemap](#sitemap)) are left out, and `read_page` answers only for a listed page; `md.expose`
-leaves out more. Pages are read the way `llms-full.txt` reads them, as a fresh request without the
+leaves out more. Each page's `url` is the one it answers at, without a redirect, as the sitemap
+lists it: below the app `basePath`, spelled as `trailingSlash` says, and with
+[i18n](/docs/internationalization) in the default locale (`/en/about` with `routing: "prefix-always"`, `/about`
+with the default `"prefix-except-default"`). `read_page` takes that URL as well as the `path`.
+Pages are read the way `llms-full.txt` reads them, as a fresh request without the
 caller's cookies or credentials, so a page a root middleware or plugin `runtime.before` hook keeps
 private answers as signed out. The server has no write tools and never reaches API routes, server functions, sessions, or
 environment values.

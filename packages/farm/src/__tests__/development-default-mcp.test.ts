@@ -331,6 +331,57 @@ export default async function Page() {
     ]);
   }, 120_000);
 
+  it("lists each page at a URL that answers without a redirect, as production does", async () => {
+    const files = {
+      "src/app/(marketing)/pricing/page.tsx": `import React from "react";
+export const metadata = { title: "Pricing" };
+export default function Page() { return <main>Plans for teams.</main>; }`,
+      "src/messages/en.json": "{}",
+      "src/messages/fr.json": "{}",
+    };
+    const expectCanonical = async (config: string, base: string, expected: string[]) => {
+      const origin = await startApp(config, files);
+      const call = async (name: string, args: Record<string, unknown> = {}) => {
+        const response = await fetch(`${origin}${base}/mcp`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name, arguments: args },
+          }),
+        });
+        return ((await response.json()) as { result: any }).result;
+      };
+      const pages = (await call("list_pages")).structuredContent.pages;
+      expect(pages.map((page: { url: string }) => page.url)).toEqual(
+        expected.map((pathname) => `${origin}${pathname}`),
+      );
+      for (const page of pages) {
+        const response = await fetch(page.url, { redirect: "manual" });
+        expect({ url: page.url, status: response.status }).toEqual({ url: page.url, status: 200 });
+        for (const path of [page.path, page.url]) {
+          const read = await call("read_page", { path });
+          expect({ path, isError: read.isError }).toEqual({ path, isError: undefined });
+        }
+      }
+      expect((await call("read_page", { path: "/pricing" })).content[0].text).toContain(
+        "Plans for teams.",
+      );
+    };
+
+    // '/base/' answers with a 308 to '/base'; a route group adds no URL segment.
+    await expectCanonical(`basePath: "/base"`, "/base", ["/base", "/base/about", "/base/pricing"]);
+    // trailingSlash: '/base/about' answers with a 308 to '/base/about/'. Every locale is
+    // prefixed: '/base/about/' answers with a 307 to '/base/en/about/'.
+    await expectCanonical(
+      `basePath: "/base", trailingSlash: true, i18n: { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-always" }`,
+      "/base",
+      ["/base/en/", "/base/en/about/", "/base/en/pricing/"],
+    );
+  }, 180_000);
+
   it("turns off with agent.mcp: false", async () => {
     const origin = await startApp("agent: { mcp: false }");
     expect((await mcp(origin, "ping")).status).toBe(404);
