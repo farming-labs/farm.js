@@ -7172,11 +7172,14 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   orderedPageRoutes.forEach((route, index) => {
     const varName = `pageRoute${index}`;
     if (isFarmMarkdownPageFile(route.modulePath)) {
+      // Below a hydrating layout, the MDX components' islands join its tree, as dev renders
+      // them and the client route table expects; as roots of their own they lost its context.
+      const markdownServerTree = usesFarmServerTree(pageHydrationPlans.get(route.modulePath));
       pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},${
       route.directory ? `\n    directory: ${JSON.stringify(route.directory)},` : ""
-    }
+    }${markdownServerTree ? "\n    serverTree: true," : ""}
     module: createFarmMarkdownRouteModule({
       source: ${JSON.stringify(route.source ?? "")},
       filePath: ${JSON.stringify(toBakedMarkdownSourcePath(config.root, route.modulePath))},

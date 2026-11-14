@@ -358,7 +358,9 @@ around server content, reaches the consumers in it) and keep their own state, an
 not render at first (a tab, a closed panel) is there when it does. `useId` returns the ids in the
 server HTML, unique across client components. A server page under a
 layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
-components read the provider's context. That layout, and the other server layouts on its pages,
+components read the provider's context. So do a Markdown page's MDX components, and client
+components that declare a deferred `island` strategy: inside the tree they hydrate with the
+layout instead of waiting. That layout, and the other server layouts on its pages,
 render as server trees too: the browser rebuilds them from the HTML, so their modules and their
 server-only imports never reach it, and a navigation keeps the provider's state. A provider
 imported straight from a package fails the build; render it from a local `"use client"` module

@@ -67,7 +67,9 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   islands all wait loads a 1.7 KB boot script instead of the runtime.
 - **Layouts.** A layout that needs one React root (a client provider around the pages) renders as
   an islx server tree: the browser rebuilds it from the HTML, so its module stays on the server,
-  and a navigation keeps the provider's state.
+  and a navigation keeps the provider's state. The pages below it, Markdown pages included, join
+  that tree, so every client component on them reads the provider, one that declares a deferred
+  `island` strategy too: it hydrates with the layout instead of waiting.
 - **Actions.** `"use server"` functions compile to islx action references. A form posts its action
   without a page load, or without JavaScript, and the page refreshes with its islands' state kept,
   including islands in Suspense content that streams in after the page.

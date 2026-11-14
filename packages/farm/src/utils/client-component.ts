@@ -932,17 +932,16 @@ function planClientModuleHydration(
 
 /**
  * An async page's client components hydrate inside its hydrating layout's React tree from a
- * serialized server tree, so they read the layout's context. Islands that declare a deferred
- * strategy keep hydrating as roots of their own on that schedule.
+ * serialized server tree, so they read the layout's context: a provider the layout renders, such
+ * as a theme or a sidebar's state. That holds for islands that declare a deferred strategy too:
+ * as roots of their own they hydrated outside every provider, so one deferred island made each
+ * client component on the page throw where it read a layout's context, and islx restored their
+ * server HTML. Inside the tree they hydrate with the layout's root.
  */
 export function usesFarmServerTree(
   plan: Pick<ClientModuleHydrationPlan, "asyncOwnerIslands" | "isolatedBoundaries"> | undefined,
 ): boolean {
-  return (
-    plan?.asyncOwnerIslands === true &&
-    plan.isolatedBoundaries.length > 0 &&
-    plan.isolatedBoundaries.every((boundary) => boundary.islandStrategy === "load")
-  );
+  return plan?.asyncOwnerIslands === true && plan.isolatedBoundaries.length > 0;
 }
 
 /**
