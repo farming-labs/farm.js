@@ -104,6 +104,8 @@ import {
   farmRequestWantsMarkdown,
   isFarmMarkdownPageFile,
   normalizeFarmMarkdownRoutePath,
+  resolveFarmMdxComponentsModulePath,
+  resolveMdxConfig,
 } from "./app-markdown";
 import {
   applyWebResponseHeaders,
@@ -1843,6 +1845,28 @@ export function farmPlugin(
     return file === output || file.startsWith(`${output}/`);
   };
   let serverFnTransformActive = false;
+  // The modules a page render evaluates on the server: route modules and the MDX components.
+  const getFarmRenderedServerModules = (): Set<string> => {
+    const routeManager = farmApp?.getRouteManager();
+    if (!routeManager) return new Set();
+    const files = new Set<string>();
+    for (const entries of [
+      routeManager.getRoutes(),
+      routeManager.getLayouts(),
+      routeManager.getLoadings(),
+      routeManager.getErrors(),
+      routeManager.getRouteSlots(),
+    ]) {
+      for (const entry of entries.values()) files.add(entry.modulePath);
+    }
+    const config = farmApp.getConfig();
+    const mdxComponents = resolveFarmMdxComponentsModulePath(
+      resolveMdxConfig(config.mdx),
+      config.root,
+    );
+    if (mdxComponents) files.add(mdxComponents);
+    return files;
+  };
   // Islands mode runs server functions on islx's actions: no @farm.js/plugin/rsc needed.
   const islandsServerFns = () => {
     const config = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
@@ -6057,6 +6081,20 @@ if (import.meta.hot) {
 
           return [];
         }
+      }
+
+      // A server component a page or layout renders, such as one imported only by server
+      // modules in islands mode: the browser holds none of its code, so no hot update reached
+      // the open page, which kept the old server output until a manual reload. Run the new code
+      // on the next render and reload the page, as an edit to the page itself does.
+      if (
+        /\.[cm]?[jt]sx?$/.test(normalizedFile) &&
+        !server.environments.client?.moduleGraph.getModulesByFile(normalizedFile)?.size &&
+        invalidateFarmDevDependents(server, file, getFarmRenderedServerModules()).length > 0
+      ) {
+        logUpdate("PAGE", `updated ${path.basename(file)}`);
+        server.ws.send({ type: "full-reload", path: "*" });
+        return [];
       }
 
       return modules;
