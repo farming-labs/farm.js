@@ -12748,6 +12748,18 @@ function withFarmEdgeGuardedPrerenderHeaders(
   };
 }
 
+/**
+ * Whether prerendering would render or write the page at a different URL than visitors request.
+ * A param can hold a character that only survives in a URL escaped: `#` (`%23`), `?` (`%3F`),
+ * `/` (`%2F`) and `%` (`%25`). Nitro's prerenderer does not keep those escapes: it renders the
+ * page for another URL or writes its file where it answers another URL, and drops some of them.
+ * Such a page is rendered on request instead, where its URL is kept as sent.
+ * Other escapes (a space, `+`, non-ASCII letters) round-trip and still prerender.
+ */
+function prerenderWouldChangePageUrl(pathname: string): boolean {
+  return /%(?:23|25|2F|3F)/i.test(pathname);
+}
+
 function getPhysicalPrerenderBypassReason(options: {
   config: ResolvedFarmConfig;
   middlewareRoutes: readonly UniversalMiddlewareRoute[];
@@ -12764,6 +12776,7 @@ function getPhysicalPrerenderBypassReason(options: {
     rewriteSources,
     pathname,
   } = options;
+  if (prerenderWouldChangePageUrl(pathname)) return "an escaped character in its URL";
   if (config.i18n.enabled) return "request-sensitive i18n";
   if (redirectSources.some((source) => middlewarePatternMatches(source, pathname))) {
     return "redirect";
