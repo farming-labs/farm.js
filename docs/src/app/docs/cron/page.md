@@ -441,11 +441,12 @@ Farm's local `--cron` runner prevents overlap inside one development process. Th
 
 ## Cron, Jobs, and Post-response Work
 
-| Need                                                                             | Use                                         |
-| -------------------------------------------------------------------------------- | ------------------------------------------- |
-| Run one API operation on a UTC schedule                                          | Framework Cron                              |
-| Run short best-effort work after an HTTP response                                | [`after()`](/docs/after)                    |
-| Durable retries, long-running steps, queues, status, cancellation, or dashboards | [Jobs Integration](/docs/integrations/jobs) |
+| Need                                                                                | Use                                                       |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Run one API operation on a UTC schedule                                             | Framework Cron                                            |
+| Run short best-effort work after an HTTP response                                   | [`after()`](/docs/after)                                  |
+| Durable retries, long-running steps, queues, status, cancellation, or dashboards    | [Jobs Integration](/docs/integrations/jobs)               |
+| Multi-step work that sleeps, waits for an event or a webhook, and survives restarts | [Durable Workflows](/docs/integrations/durable-workflows) |
 
 The older `defineCron()` workflow-module API remains available for compatibility. Its HTTP trigger
 parses `application/json` and `application/*+json` bodies as JSON, wraps other non-empty bodies as
