@@ -197,13 +197,75 @@ function mergeExternal(
   return Array.from(new Set([...farmValue, ...userValue]));
 }
 
+type ViteBundlerOptions = NonNullable<NonNullable<ViteUserConfig["build"]>["rollupOptions"]>;
+type ViteOutputOptions = Exclude<NonNullable<ViteBundlerOptions["output"]>, readonly unknown[]>;
+
+/**
+ * Output options of the production client build that Farm owns. The server reads the entry,
+ * stylesheet and chunk file names (`farm-client-h<hash>.js`, `farm-client.css`, `-h<hex>`
+ * hashes), and source maps stay private (see client-sourcemaps.ts), so an app value for any of
+ * these is ignored.
+ */
+export const FARM_CLIENT_OWNED_OUTPUT_OPTIONS = [
+  "dir",
+  "file",
+  "format",
+  "entryFileNames",
+  "chunkFileNames",
+  "assetFileNames",
+  "hashCharacters",
+] as const;
+
+function isFarmOwnedClientOutputOption(key: string): boolean {
+  return (
+    (FARM_CLIENT_OWNED_OUTPUT_OPTIONS as readonly string[]).includes(key) ||
+    key.startsWith("sourcemap")
+  );
+}
+
+/**
+ * The client build's output options: the app's `output` without the options Farm owns, then
+ * Farm's own output options on top.
+ */
+function mergeFarmClientOutputOptions(
+  farmOutput: ViteBundlerOptions["output"],
+  userOutput: ViteBundlerOptions["output"],
+): ViteBundlerOptions["output"] {
+  if (userOutput === undefined) return farmOutput;
+  if (Array.isArray(userOutput) || Array.isArray(farmOutput)) {
+    throw new Error(
+      "Farm builds one client output: set vite.build.rolldownOptions.output (or rollupOptions.output) to an object, not an array.",
+    );
+  }
+  const app = Object.fromEntries(
+    Object.entries(userOutput as ViteOutputOptions).filter(
+      ([key, value]) => value !== undefined && !isFarmOwnedClientOutputOption(key),
+    ),
+  );
+  return { ...app, ...(farmOutput as ViteOutputOptions | undefined) } as ViteOutputOptions;
+}
+
+export interface FarmProductionViteMergeOptions {
+  /**
+   * Keep the app's `build.rolldownOptions.output` / `build.rollupOptions.output`, under Farm's
+   * owned output options. Set for the browser client build; the server build keeps Farm's
+   * output only.
+   */
+  clientOutput?: boolean;
+}
+
 /**
  * Merge the app's `vite` config into a production client or server build the
  * way development merges it, keeping the options Farm owns for that build:
  * `root`, `base`, `mode`, `appType`, `publicDir`, the build's
  * output location and format (`outDir`, `emptyOutDir`, `ssr`, `ssrEmitAssets`,
- * `write`, `lib`, `watch`, `rollupOptions.input`, `rollupOptions.output`), and
- * every `build`, `define`, `esbuild`, and Rollup option Farm sets explicitly.
+ * `write`, `lib`, `watch`, `rollupOptions.input`), and every `build`, `define`,
+ * `esbuild`, and Rollup option Farm sets explicitly.
+ *
+ * The app's `output` reaches the client build with `clientOutput` (chunking,
+ * minification and other output options), except the file names, format and
+ * source map options in {@link FARM_CLIENT_OWNED_OUTPUT_OPTIONS}. The server
+ * build ignores it.
  *
  * App plugins are left out: the caller places `vite.plugins` among Farm's own
  * plugins so their order relative to Farm's transforms stays stable.
@@ -211,6 +273,7 @@ function mergeExternal(
 export function mergeFarmProductionViteConfig(
   farmConfig: ViteUserConfig,
   userConfig: ViteUserConfig = {},
+  options: FarmProductionViteMergeOptions = {},
 ): ViteUserConfig {
   const {
     plugins: _plugins,
@@ -239,13 +302,17 @@ export function mergeFarmProductionViteConfig(
   } = userBuild;
   const {
     input: _input,
-    output: _output,
+    output: userOutput,
     ...userBundlerOptions
   } = {
     ...userRollupOptions,
     ...userRolldownOptions,
-  } as NonNullable<ViteUserConfig["build"]>["rollupOptions"] & object;
+  } as ViteBundlerOptions;
   const merged = mergeFarmViteConfig(farmConfig, shared);
+  const farmBundlerOptions = farmConfig.build?.rollupOptions;
+  const output = options.clientOutput
+    ? mergeFarmClientOutputOptions(farmBundlerOptions?.output, userOutput)
+    : farmBundlerOptions?.output;
 
   return {
     ...merged,
@@ -254,7 +321,8 @@ export function mergeFarmProductionViteConfig(
       ...farmConfig.build,
       rollupOptions: {
         ...userBundlerOptions,
-        ...farmConfig.build?.rollupOptions,
+        ...farmBundlerOptions,
+        ...(output === undefined ? {} : { output }),
       },
     },
     css: farmConfig.css || userCss ? { ...farmConfig.css, ...userCss } : undefined,

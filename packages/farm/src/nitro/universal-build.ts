@@ -2590,8 +2590,11 @@ async function buildClient(
           ],
         },
       };
-      // The app's `vite` block applies to production as it does in development.
-      await viteBuild(mergeFarmProductionViteConfig(clientViteConfig, config.vite));
+      // The app's `vite` block applies to production as it does in development, including
+      // its client output options (chunking) under the file names Farm owns.
+      await viteBuild(
+        mergeFarmProductionViteConfig(clientViteConfig, config.vite, { clientOutput: true }),
+      );
       if (platform === "mobile") {
         // Documents keep the web stylesheet: CSS does not depend on platform().
         await fs.rm(path.join(outputDir, `${entryName}.css`), { force: true });
@@ -9181,8 +9184,9 @@ const farmClientEntryPreloadTags = farmClientModulePreloads
   ? farmClientModulePreloads.entry.map(renderFarmClientModulePreload).join("")
   : "";
 // The client modules a document's markup loads: its islands' boundaries and the
-// client references of its server tree.
-const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"|"r":"(\\/[^"]+)"/g;
+// client references of its server tree. An island with a deferred strategy loads its
+// module on its own trigger, so it is not preloaded.
+const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"([^>]*)>|"r":"(\\/[^"]+)"/g;
 
 function renderFarmClientModulePreload(index) {
   return '\\n  <link rel="modulepreload" href="/' +
@@ -9210,7 +9214,10 @@ function renderFarmClientModulePreloads(markup, pageModule) {
   };
   add(pageModule);
   if (typeof markup === "string") {
-    for (const match of markup.matchAll(FARM_CLIENT_MODULE_REFERENCE_PATTERN)) add(match[1] || match[2]);
+    for (const match of markup.matchAll(FARM_CLIENT_MODULE_REFERENCE_PATTERN)) {
+      if (match[1] && FARM_DEFERRED_ISLAND_STRATEGY.test(match[2])) continue;
+      add(match[1] || match[3]);
+    }
   }
   return tags;
 }

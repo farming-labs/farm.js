@@ -223,4 +223,76 @@ describe("mergeFarmProductionViteConfig", () => {
       },
     });
   });
+
+  describe("client output options", () => {
+    const farmOutput = {
+      entryFileNames: "[name]-h[hash].js",
+      chunkFileNames: "chunks/[name]-h[hash].js",
+      assetFileNames: "assets/[name]-h[hash][extname]",
+      hashCharacters: "hex" as const,
+    };
+    const clientConfig = {
+      ...farmConfig,
+      build: {
+        ...farmConfig.build,
+        rollupOptions: { ...farmConfig.build.rollupOptions, output: farmOutput },
+      },
+    };
+    const appGroups = { groups: [{ name: "vendor", test: /node_modules/, minShareCount: 2 }] };
+
+    it("keeps the app's chunking and output options under the names Farm owns", () => {
+      for (const key of ["rolldownOptions", "rollupOptions"] as const) {
+        const merged = mergeFarmProductionViteConfig(
+          clientConfig,
+          {
+            build: {
+              [key]: {
+                input: "/elsewhere/entry.js",
+                output: {
+                  codeSplitting: appGroups,
+                  minify: { compress: false },
+                  banner: "/* app */",
+                  format: "cjs",
+                  dir: "/elsewhere",
+                  entryFileNames: "app.js",
+                  chunkFileNames: "[name].js",
+                  assetFileNames: "[name][extname]",
+                  hashCharacters: "base36",
+                  sourcemap: true,
+                  sourcemapBaseUrl: "https://maps.invalid/",
+                },
+              },
+            },
+          },
+          { clientOutput: true },
+        );
+        expect(merged.build?.rollupOptions?.input).toEqual({
+          "farm-client": "/app/.farm/entry.js",
+        });
+        expect(merged.build?.rollupOptions?.output).toEqual({
+          ...farmOutput,
+          codeSplitting: appGroups,
+          minify: { compress: false },
+          banner: "/* app */",
+        });
+      }
+    });
+
+    it("keeps the server build's output Farm's own", () => {
+      const merged = mergeFarmProductionViteConfig(clientConfig, {
+        build: { rolldownOptions: { output: { codeSplitting: appGroups } } },
+      });
+      expect(merged.build?.rollupOptions?.output).toEqual(farmOutput);
+    });
+
+    it("rejects an array of outputs", () => {
+      expect(() =>
+        mergeFarmProductionViteConfig(
+          clientConfig,
+          { build: { rollupOptions: { output: [{}, {}] } } },
+          { clientOutput: true },
+        ),
+      ).toThrow(/one client output/);
+    });
+  });
 });
