@@ -1591,7 +1591,8 @@ export class ServerRenderer {
         completeRender(res.statusCode, match.route!.pattern);
         return;
       }
-      this.applyDeploymentHeaders(req, res);
+      // A miss renders the not-found page, which applies the same rules itself.
+      if (match.route) this.applyDeploymentHeaders(req, res);
 
       if (match.route) {
         const redirectLocation = resolveFarmTrailingSlashRedirect(url, this.config.trailingSlash);
@@ -1635,7 +1636,7 @@ export class ServerRenderer {
         }
         emitFarmEvent({ type: "route.notFound", pathname });
         await this.render404(req, res);
-        completeRender(404);
+        completeRender(res.statusCode);
         return;
       }
 
@@ -4304,6 +4305,18 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: "Not found", pathname }));
       return;
+    }
+
+    // The not-found page is a page document: it names this deployment, and a navigation from
+    // another deployment's page is refused, as for an app page. A page that threw notFound()
+    // has already passed that check and named it.
+    if (res.getHeader(FARM_DEPLOYMENT_ID_HEADER) === undefined) {
+      const deploymentMismatch = this.getDeploymentMismatch(req);
+      if (deploymentMismatch) {
+        await sendWebResponse(res, createFarmDeploymentMismatchResponse(deploymentMismatch));
+        return;
+      }
+      this.applyDeploymentHeaders(req, res);
     }
 
     // Agents that navigate in Markdown (a `.md` URL or `Accept: text/markdown`)
