@@ -12,9 +12,9 @@
  * The protocol handler lives in `agent-mcp-handler.ts`, loaded only when `/mcp` is asked for.
  * Kept free of Node built-ins: the production server runs on edge runtimes too.
  */
-import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
-import { localizeFarmPathname, type FarmLocalePathConfig } from "./i18n/routing";
-import { collectFarmLlmsTxtPages } from "./llms-txt";
+import { stripFarmBasePath } from "./base-path";
+import type { FarmLocalePathConfig } from "./i18n/routing";
+import { collectFarmLlmsTxtPages, getFarmAgentPagePublicPath } from "./llms-txt";
 import {
   getFarmMarkdownMirrorPath,
   isFarmMarkdownMirrorExposed,
@@ -173,13 +173,6 @@ export function collectFarmDefaultMCPPages(
     if (!isFarmMarkdownMirrorExposed(options.markdown, source.pattern)) continue;
     readable.push({ pattern: source.pattern, metadata: module?.metadata });
   }
-  const i18n = resolveFarmDefaultMCPI18n(options.i18n, options.basePath);
-  // The public path of a route path. With i18n, a path without a locale redirects to one
-  // unless the default locale is unprefixed, so pages are listed in the default locale.
-  const toPublicPath = (pathname: string) =>
-    i18n
-      ? localizeFarmPathname(pathname, i18n.defaultLocale, i18n)
-      : applyFarmBasePath(pathname, options.basePath);
   return collectFarmLlmsTxtPages(readable, {
     origin: options.origin,
     basePath: options.basePath,
@@ -189,12 +182,15 @@ export function collectFarmDefaultMCPPages(
     title: page.title,
     // As the sitemap lists it: '/base' without trailingSlash ('/base/' redirects there).
     url: `${options.origin}${normalizeFarmTrailingSlashPathname(
-      toPublicPath(page.path),
+      getFarmAgentPagePublicPath(page.path, options),
       options.trailingSlash === true,
     )}`,
     ...(page.description ? { description: page.description } : {}),
     // A mirror keeps its .md URL whatever trailingSlash says, as llms.txt links it.
-    markdownUrl: `${options.origin}${toPublicPath(getFarmMarkdownMirrorPath(page.path))}`,
+    markdownUrl: `${options.origin}${getFarmAgentPagePublicPath(
+      getFarmMarkdownMirrorPath(page.path),
+      options,
+    )}`,
   }));
 }
 
