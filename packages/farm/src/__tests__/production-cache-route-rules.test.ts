@@ -126,7 +126,7 @@ describe("swr route rules on a Node server", () => {
   it("stores a page that has no route config and reads nothing of the request", async () => {
     const first = await request("/docs", { accept: "text/html" });
     const second = await request("/docs", { accept: "text/html" });
-    expect(first.status, output.join("")).toBe(200);
+    expect(first.status, server?.output()).toBe(200);
     expect(first.headers["set-cookie"]).toBeUndefined();
     expect(second.headers["x-cache"]).toBe("HIT");
     expect(renderedAt(second.body)).toBe(renderedAt(first.body));
@@ -140,7 +140,7 @@ describe("swr route rules on a Node server", () => {
     const second = await request("/account", browser);
     const anonymous = await request("/account", { accept: "text/html" });
     for (const response of [first, second, anonymous]) {
-      expect(response.status, output.join("")).toBe(200);
+      expect(response.status, server?.output()).toBe(200);
       expect(response.headers["x-cache"]).not.toBe("HIT");
       // Farm's private policy reaches the client, not the rule's public one.
       expect(response.headers["cache-control"]).toBe("private, no-store");
