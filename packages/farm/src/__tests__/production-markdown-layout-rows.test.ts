@@ -1,5 +1,4 @@
 // @vitest-environment node
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,12 +6,12 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
-import { getAvailablePort } from "./dev-server-port";
 import {
   literalRouteExposure,
   literalRouteFiles,
   verifyLiteralRouteExposure,
 } from "./markdown-route-contract";
+import { startProductionServer, type ProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const labels = Array.from({ length: 1_000 }, (_, index) => `Item ${index}`);
@@ -21,8 +20,7 @@ const expected = `${labels.join(" ")}\n\nabc\n\nexample\n`;
 describe("production Markdown layout rows", () => {
   let root = "";
   let origin = "";
-  let server: ReturnType<typeof spawn> | undefined;
-  const output: string[] = [];
+  let server: ProductionServer | undefined;
 
   beforeAll(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-md-rows-"));
@@ -63,41 +61,12 @@ describe("production Markdown layout rows", () => {
       "production",
     );
     await build(config, { root, preset: "node-server" });
-    const serverDirectory = path.join(root, ".farm", ".output", "server");
-    const port = await getAvailablePort();
-    origin = `http://127.0.0.1:${port}`;
-    server = spawn(process.execPath, [path.join(serverDirectory, "index.mjs")], {
-      cwd: serverDirectory,
-      env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let launchError: Error | undefined;
-    server.on("error", (error) => {
-      launchError = error;
-    });
-    server.stdout?.on("data", (chunk) => output.push(String(chunk)));
-    server.stderr?.on("data", (chunk) => output.push(String(chunk)));
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (launchError) throw launchError;
-      if (server.exitCode !== null || server.signalCode !== null) break;
-      try {
-        const response = await fetch(origin);
-        const body = await response.text();
-        if (response.ok && body.includes("Item")) return;
-      } catch {
-        // The process has not bound its socket yet; readiness is a real response.
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    throw new Error(`Production server did not become ready\n${output.join("")}`);
+    server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+    origin = server.origin;
   }, 180_000);
 
   afterAll(async () => {
-    if (server?.pid && server.exitCode === null && server.signalCode === null) {
-      const exited = new Promise((resolve) => server!.once("exit", resolve));
-      server.kill();
-      await exited;
-    }
+    await server?.stop();
     if (root) await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
