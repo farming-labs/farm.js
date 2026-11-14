@@ -19,33 +19,53 @@ interface FarmDiagnosticRule {
   docs: string;
 }
 
-const CLIENT_BOUNDARY_DOCS = "/docs/environment-functions#client-boundary-diagnostics";
+const BOUNDARY_DOCS = "/docs/environment-functions#boundary-diagnostics";
 
 export const FARM_DIAGNOSTIC_RULES = {
   CLIENT_SERVER_ENV: {
     severity: "warning",
     fix: "Read it on the server (a server function, API route, or server component), or declare it in env.public in farm.config.ts and read it through publicEnv.",
-    docs: CLIENT_BOUNDARY_DOCS,
+    docs: BOUNDARY_DOCS,
   },
   CLIENT_PROCESS_ENV_PUBLIC: {
     severity: "warning",
     fix: 'Read it through publicEnv from "@farm.js/core/env".',
-    docs: CLIENT_BOUNDARY_DOCS,
+    docs: BOUNDARY_DOCS,
   },
   CLIENT_NODE_BUILTIN: {
     severity: "warning",
     fix: "Move the import into server-only code, or import it lazily inside a function that runs only on the server.",
-    docs: CLIENT_BOUNDARY_DOCS,
+    docs: BOUNDARY_DOCS,
   },
   CLIENT_SERVER_FUNCTION: {
     severity: "error",
     fix: "Add @farm.js/plugin/rsc and set experimental.serverActions: true so client imports become server references, or call it from server code, or expose an API route and call it with createAPIClient.",
-    docs: CLIENT_BOUNDARY_DOCS,
+    docs: BOUNDARY_DOCS,
   },
   CLIENT_SERVER_ONLY_IMPORT: {
     severity: "error",
     fix: "Move what the client needs out of that module, or call it from a server component, server function, or API route.",
-    docs: CLIENT_BOUNDARY_DOCS,
+    docs: BOUNDARY_DOCS,
+  },
+  CLIENT_SERVER_ONLY_ENTRY: {
+    severity: "error",
+    fix: "Use it from an API route or another server module.",
+    docs: BOUNDARY_DOCS,
+  },
+  CLIENT_ROUTES_FILE: {
+    severity: "error",
+    fix: "Import the component, server function, or helper from its own module instead of from the module that defines routes.",
+    docs: BOUNDARY_DOCS,
+  },
+  CLIENT_ROUTE_SERVER_IMPORT: {
+    severity: "error",
+    fix: "Keep server-only imports in the routes file, or in modules only its guard, data, and API handlers use.",
+    docs: BOUNDARY_DOCS,
+  },
+  SERVER_CLIENT_ONLY_IMPORT: {
+    severity: "error",
+    fix: 'Add "use client" to this module, or import the package from a "use client" module.',
+    docs: BOUNDARY_DOCS,
   },
 } as const satisfies Record<string, FarmDiagnosticRule>;
 

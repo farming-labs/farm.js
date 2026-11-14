@@ -59,6 +59,17 @@ describe("client-only reached from islands server code", () => {
     ).rejects.toThrow(/import of "aria-kit" reaches "client-only".*"use client"/s);
   });
 
+  it("names the code and the import's position in the source as written", async () => {
+    // TypeScript removes the interface, so the import is on line 1 of the code the check sees.
+    await expect(
+      buildIslands(
+        'interface Props {\n  size: number;\n}\n\nimport { Button } from "aria-kit";\nexport default Button;\n',
+      ),
+    ).rejects.toThrow(
+      /src\/page\.ts:5:24 - error SERVER_CLIENT_ONLY_IMPORT: This module is server code, but its import of "aria-kit" reaches "client-only" \(.*\)/,
+    );
+  });
+
   it("ignores an import TypeScript erases", async () => {
     await expect(
       buildIslands('import { Button } from "aria-kit";\nexport const size: Button = 1 as never;\n'),

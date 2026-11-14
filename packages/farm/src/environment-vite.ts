@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
+import { createFarmDiagnostic, createFarmSourceLocator, formatFarmDiagnostic } from "./diagnostics";
 import type { FarmEnvironment } from "./environment";
 import { findFarmClientOnlyImport } from "./islands-react-server-exports";
 import { getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
@@ -134,12 +135,21 @@ export function farmEnvironmentFunctionsPlugin(
     }
     return sources.files;
   };
+  // Only a path is relative to the root; a chain can end in a builtin id such as `node:fs`.
+  const relativeFile = (file: string) =>
+    path.isAbsolute(file) ? path.relative(projectRoot, file).replace(/\\/g, "/") || file : file;
   const routeSourceError = (file: string, importers: readonly string[] = []) =>
-    `[Farm.js] ${file} defines programmatic routes, but the browser bundle imports it` +
-    (importers.length > 0 ? ` (from ${importers.join(", ")})` : "") +
-    ". Routes files and the modules that define routes carry server-only guards, " +
-    "data hooks, and API handlers, so they never reach the browser. Import the component, " +
-    "server function, or helper from its own module instead.";
+    formatFarmDiagnostic(
+      createFarmDiagnostic(
+        "CLIENT_ROUTES_FILE",
+        file,
+        "This module defines programmatic routes, but the browser bundle imports it" +
+          (importers.length > 0 ? ` (from ${importers.map(relativeFile).join(", ")})` : "") +
+          ". Routes files and the modules that define routes carry server-only guards, " +
+          "data hooks, and API handlers, so they never reach the browser.",
+      ),
+      projectRoot,
+    );
 
   return {
     name: "farm:environment-functions",
@@ -194,9 +204,29 @@ export function farmEnvironmentFunctionsPlugin(
           (existsSync(file) && hasUseClientDirective(readFileSync(file, "utf8")));
         const reached = clientCode ? null : findFarmClientOnlyImport(code, file);
         if (reached) {
-          const chain = reached.chain.map((step) => path.relative(root, step)).join(" -> ");
+          const chain = reached.chain
+            .map((step) => path.relative(root, step).replace(/\\/g, "/"))
+            .join(" -> ");
+          // The position of the specifier string in the import that reaches the package.
+          const importMatch = new RegExp(
+            String.raw`\b(?:from|import)\s*["']` +
+              reached.specifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+              `["']`,
+          ).exec(code);
+          const importAt = importMatch
+            ? importMatch.index + importMatch[0].search(/["']/)
+            : undefined;
+          const locate = createFarmSourceLocator(code, () => this.getCombinedSourcemap());
           this.error(
-            `[Farm.js] ${path.relative(root, file)} is server code, but its import of "${reached.specifier}" reaches "client-only" (${chain}), so that package can only run in the browser. Add "use client" to this module, or import the package from a "use client" module.`,
+            formatFarmDiagnostic(
+              createFarmDiagnostic(
+                "SERVER_CLIENT_ONLY_IMPORT",
+                file,
+                `This module is server code, but its import of "${reached.specifier}" reaches "client-only" (${chain}), so that package can only run in the browser.`,
+                importAt === undefined ? undefined : locate(importAt),
+              ),
+              root,
+            ),
           );
         }
       }
@@ -218,10 +248,16 @@ export function farmEnvironmentFunctionsPlugin(
           });
           if (chain) {
             this.error(
-              `[Farm.js] The browser bundle reaches the server-only module "${chain.at(-1)}" ` +
-                `through the programmatic route module ${moduleFile(id)}: ${chain.map(moduleFile).join(" -> ")}. ` +
-                "Keep server-only imports in the routes file or in modules only its guard, " +
-                "data, and API handlers use.",
+              formatFarmDiagnostic(
+                createFarmDiagnostic(
+                  "CLIENT_ROUTE_SERVER_IMPORT",
+                  moduleFile(id),
+                  `The browser bundle reaches the server-only module "${chain.at(-1)}" through this programmatic route module: ${chain
+                    .map((step) => relativeFile(moduleFile(step)))
+                    .join(" -> ")}.`,
+                ),
+                projectRoot,
+              ),
             );
           }
           continue;

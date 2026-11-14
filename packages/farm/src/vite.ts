@@ -593,7 +593,14 @@ export function farmServerOnlyEntriesPlugin(
         const importedBy = importer ? ` (imported by ${importer})` : "";
         if (!options?.ssr) {
           this.error(
-            `${id} is server-only and cannot be imported into client code${importedBy}. Use it from an API route or another server module.`,
+            formatFarmDiagnostic(
+              createFarmDiagnostic(
+                "CLIENT_SERVER_ONLY_ENTRY",
+                importer ?? id,
+                `${id} is server-only and cannot be imported into client code.`,
+              ),
+              root,
+            ),
           );
         }
         vercelOgInstalled ||= isOptionalPeerInstalled(root, "@vercel/og");

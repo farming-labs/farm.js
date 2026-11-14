@@ -671,7 +671,7 @@ export function Nav() {
     const entry = path.join(root, "src", "components", "nav.tsx");
 
     await expect(buildClient(root, clientRoutes, [entry])).rejects.toThrow(
-      /admin\/pages\.ts defines programmatic routes, but the browser bundle imports it \(from .*nav\.tsx\)/,
+      /admin\/pages\.ts - error CLIENT_ROUTES_FILE: This module defines programmatic routes, but the browser bundle imports it \(from src\/components\/nav\.tsx\)/,
     );
   }, 60_000);
 
@@ -719,7 +719,7 @@ export function Nav() {
       expect(result?.code).toContain("/src/components/pages.tsx");
       expect(result?.code).not.toMatch(/routes\.tsx|db\.ts|guards\.ts|route-kit/);
       await expect(client.transformRequest("/src/admin/pages.ts")).rejects.toThrow(
-        /defines programmatic routes, but the browser bundle imports it/,
+        /admin\/pages\.ts - error CLIENT_ROUTES_FILE: This module defines programmatic routes, but the browser bundle imports it/,
       );
     } finally {
       await server.close();
@@ -879,7 +879,7 @@ export function Nav() {
     await expect(
       buildClient(root, clientRoutes, [path.join(root, "src", "components", "nav.tsx")]),
     ).rejects.toThrow(
-      /features\/admin\.ts defines programmatic routes, but the browser bundle imports it \(from .*nav\.tsx\)/,
+      /features\/admin\.ts - error CLIENT_ROUTES_FILE: This module defines programmatic routes, but the browser bundle imports it \(from src\/components\/nav\.tsx\)/,
     );
   }, 60_000);
 
@@ -899,7 +899,7 @@ export default defineRoutes([page("/admin", { component: AdminPage })]);
     await expect(
       buildClient(root, clientRoutes, [routeId(root, "page", "/admin")]),
     ).rejects.toThrow(
-      /reaches the server-only module ".*fs" through the programmatic route module/,
+      /- error CLIENT_ROUTE_SERVER_IMPORT: The browser bundle reaches the server-only module ".*fs" through this programmatic route module/,
     );
   }, 60_000);
 });
