@@ -17,6 +17,7 @@ import {
   matchesFarmMarkdownRoutePattern,
   type FarmMarkdownResolvedConfig,
 } from "./markdown";
+import { normalizeFarmTrailingSlashPathname } from "./trailing-slash";
 
 export interface FarmLlmsTxtLink {
   title: string;
@@ -155,6 +156,8 @@ export function collectFarmLlmsTxtPages(
     markdown?: FarmMarkdownResolvedConfig;
     include?: string[];
     exclude?: string[];
+    /** The app's `trailingSlash`: a page without a mirror is linked at `/about/`. */
+    trailingSlash?: boolean;
   },
 ): FarmLlmsTxtPage[] {
   const include = options.include ?? [];
@@ -175,15 +178,19 @@ export function collectFarmLlmsTxtPages(
     // A page its author keeps out of search stays out of the agent index too.
     if (isFarmMetadataNoIndex(source.metadata)) continue;
 
-    // llmstxt.org prefers links to Markdown; use the page's mirror when it has one.
+    // llmstxt.org prefers links to Markdown; use the page's mirror when it has one, and
+    // otherwise the URL the page answers at, so the link does not redirect.
     const target = isFarmMarkdownMirrorExposed(options.markdown, path)
-      ? getFarmMarkdownMirrorPath(path)
-      : path;
+      ? applyFarmBasePath(getFarmMarkdownMirrorPath(path), options.basePath)
+      : normalizeFarmTrailingSlashPathname(
+          applyFarmBasePath(path, options.basePath),
+          options.trailingSlash === true,
+        );
     const description = readMetadataString(source.metadata, "description");
     pages.set(path, {
       path,
       title: readMetadataTitle(source.metadata) ?? fallbackPageTitle(path),
-      url: `${options.origin}${applyFarmBasePath(target, options.basePath)}`,
+      url: `${options.origin}${target}`,
       ...(description ? { description } : {}),
     });
   }

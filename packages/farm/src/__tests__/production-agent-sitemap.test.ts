@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
 
@@ -191,9 +191,11 @@ describe("production default sitemap", () => {
         expect((await get(`/console${pathname}`)).status, `/console${pathname}`).toBe(200);
         expect((await get(pathname)).status, pathname).toBe(200);
       }
-      expect(locs(await (await get("/console/sitemap.xml")).text())).toContain(
-        "https://acme.test/console/about",
-      );
+      const listed = locs(await (await get("/console/sitemap.xml")).text());
+      expect(listed).toContain("https://acme.test/console/about");
+      // The home page answers at '/console'; '/console/' redirects there.
+      expect(listed).toContain("https://acme.test/console");
+      expect(listed).not.toContain("https://acme.test/console/");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -289,4 +291,78 @@ describe("production default sitemap", () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+
+  describe("under trailingSlash and basePath", () => {
+    let root: string;
+    let get: (pathname: string) => Promise<Response>;
+
+    beforeAll(async () => {
+      root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-trailing-slash-"));
+      await writeApp(root, {
+        "src/app/layout.tsx": [
+          'export const metadata = { title: "Console", metadataBase: new URL("https://acme.test") };',
+          "export default function Layout({ children }) { return <main>{children}</main>; }",
+        ].join("\n"),
+        "src/app/page.tsx": "export default function Page() { return <p>home body</p>; }",
+        "src/app/about/page.tsx": "export default function Page() { return <p>about body</p>; }",
+        "src/app/team/page.tsx": "export default function Page() { return <p>team body</p>; }",
+        "src/app/notes/page.md": "# Notes\n\nnotes-source\n",
+      });
+      const handler = await buildApp(root, {
+        basePath: "/console",
+        trailingSlash: true,
+        md: { expose: ["/", "/about", "/notes"] },
+      });
+      get = (pathname) =>
+        handler.fetch(new Request(`https://acme.test${pathname}`, { redirect: "manual" }));
+    }, 180_000);
+
+    afterAll(async () => {
+      if (root) await fs.rm(root, { recursive: true, force: true });
+    });
+
+    it("lists each page at its canonical URL", async () => {
+      // Pages answer at '/console/about/', so that is the URL the sitemap lists, the basePath
+      // home included, and each listed URL answers without the trailing-slash 308.
+      const listed = locs(await (await get("/console/sitemap.xml")).text());
+      expect(listed).toEqual([
+        "https://acme.test/console/",
+        "https://acme.test/console/about/",
+        "https://acme.test/console/notes/",
+        "https://acme.test/console/team/",
+      ]);
+      for (const url of listed) {
+        expect((await get(new URL(url).pathname)).status, url).toBe(200);
+      }
+
+      // llms.txt links a page without a mirror at its canonical URL, and a mirror at its .md URL.
+      const llms = await (await get("/console/llms.txt")).text();
+      expect(llms).toContain("[Home](https://acme.test/console/index.md)");
+      expect(llms).toContain("[About](https://acme.test/console/about.md)");
+      expect(llms).toContain("[Team](https://acme.test/console/team/)");
+      expect(await (await get("/console/robots.txt")).text()).toContain(
+        "Sitemap: https://acme.test/console/sitemap.xml",
+      );
+    });
+
+    it("renders a Markdown mirror's page at its canonical URL", async () => {
+      // A mirror renders its page at '/console/about/' rather than answering with the 308, and a
+      // Markdown page's source passes the anonymous page check made at that URL.
+      for (const [pathname, body] of [
+        ["/console/about.md", "about body"],
+        ["/console/index.md", "home body"],
+        ["/console/notes.md", "notes-source"],
+      ]) {
+        const markdown = await get(pathname);
+        expect(markdown.status, pathname).toBe(200);
+        const text = await markdown.text();
+        expect(text, pathname).not.toContain("# Redirected");
+        expect(text, pathname).toContain(body);
+      }
+      expect((await get("/console/notes.md")).headers.get("x-farm-markdown-source")).toBeTruthy();
+      expect(await (await get("/console/llms-full.txt")).text()).toContain(
+        "URL: https://acme.test/console/about.md\n\n# Console\n\nSource: /console/about\n\nabout body",
+      );
+    });
+  });
 });

@@ -287,6 +287,72 @@ export default function Page() { return <main>home {getLocale()}</main>; }`,
     expect((await get("/console/team")).headers.get("link")).toBeNull();
   }, 120_000);
 
+  it("lists each page at its canonical URL under trailingSlash, as production does", async () => {
+    const origin = await startApp(
+      'basePath: "/console", trailingSlash: true, md: { expose: ["/", "/about"] }, agent: { crawlers: true, llmsTxt: true }',
+    );
+    const get = (pathname: string) => fetch(`${origin}${pathname}`, { redirect: "manual" });
+
+    // Pages answer at '/console/about/', so that is the URL the sitemap lists, the basePath home
+    // included, and each listed URL answers without the trailing-slash 308.
+    const listed = locs(await (await get("/console/sitemap.xml")).text());
+    expect(listed).toEqual([
+      "https://acme.test/console/",
+      "https://acme.test/console/about/",
+      "https://acme.test/console/team/",
+    ]);
+    for (const url of listed) {
+      expect((await get(new URL(url).pathname)).status, url).toBe(200);
+    }
+
+    // llms.txt links a page without a mirror at its canonical URL, and a mirror at its .md URL.
+    const llms = await (await get("/console/llms.txt")).text();
+    expect(llms).toContain("[Home](https://acme.test/console/index.md)");
+    expect(llms).toContain("[About](https://acme.test/console/about.md)");
+    expect(llms).toContain("[Team](https://acme.test/console/team/)");
+    expect(await (await get("/console/robots.txt")).text()).toContain(
+      "Sitemap: https://acme.test/console/sitemap.xml",
+    );
+  }, 120_000);
+
+  it("renders a Markdown mirror's page at its canonical URL under trailingSlash", async () => {
+    const origin = await startApp(
+      'basePath: "/console", trailingSlash: true, agent: { llmsTxt: true }',
+      { "src/app/notes/page.md": "# Notes\n\nnotes-source\n" },
+    );
+    const get = (pathname: string) => fetch(`${origin}${pathname}`, { redirect: "manual" });
+
+    // A mirror renders its page at the canonical URL rather than answering with the 308, and a
+    // Markdown page's source passes the anonymous page check made at that URL.
+    for (const [pathname, body] of [
+      ["/console/about.md", "about"],
+      ["/console/index.md", "home"],
+      ["/console/notes.md", "notes-source"],
+    ]) {
+      const markdown = await get(pathname);
+      expect(markdown.status, pathname).toBe(200);
+      const text = await markdown.text();
+      expect(text, pathname).not.toContain("# Redirected");
+      expect(text, pathname).toContain(body);
+    }
+    expect((await get("/console/notes.md")).headers.get("x-farm-markdown-source")).toBeTruthy();
+    expect(await (await get("/console/llms-full.txt")).text()).toContain(
+      "URL: https://acme.test/console/about.md\n\n# Acme\n\nSource: /console/about\n\nabout",
+    );
+  }, 120_000);
+
+  it("lists the basePath home at the URL it answers at without trailingSlash", async () => {
+    const origin = await startApp('basePath: "/console", md: false, agent: { llmsTxt: true }');
+    const listed = locs(await (await fetch(`${origin}/console/sitemap.xml`)).text());
+    expect(listed).toContain("https://acme.test/console");
+    expect(listed).not.toContain("https://acme.test/console/");
+    expect(await (await fetch(`${origin}/console/llms.txt`)).text()).toContain(
+      "(https://acme.test/console)",
+    );
+    const home = await fetch(`${origin}/console`, { redirect: "manual" });
+    expect(home.status).toBe(200);
+  }, 120_000);
+
   it("names the sitemap in the robots.txt agent.crawlers serves", async () => {
     const origin = await startApp("agent: { crawlers: true }");
     expect(await (await fetch(`${origin}/robots.txt`)).text()).toContain(
