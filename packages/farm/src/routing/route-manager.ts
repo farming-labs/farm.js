@@ -287,6 +287,7 @@ export class RouteManager {
   private programmaticPages: Map<string, ProgrammaticPageRoute> = new Map();
   private programmaticLayouts: Map<string, ProgrammaticLayoutRoute> = new Map();
   private programmaticClientRoutes: ProgrammaticClientRoutes = mergeProgrammaticClientRoutes([]);
+  private discovery: Promise<void> = Promise.resolve();
   private rendererRuntime?: FarmServerRendererRuntime;
   private viteServer?: ViteDevServer;
   private packageClientBoundaryCacheFile?: string;
@@ -311,24 +312,41 @@ export class RouteManager {
   }
 
   /**
-   * Discover all routes in the app directory
+   * Discover all routes in the app directory.
+   *
+   * Requests keep matching the current routes until discovery finishes. Discovery awaits file and
+   * module reads, and a dev server runs it again for each page or layout a watcher reports, so
+   * clearing the tables first answered any request in between with a 404. Discoveries run one at
+   * a time, so an older scan never replaces a newer one.
    */
-  async discoverRoutes(): Promise<void> {
-    this.invalidateClientManifest();
-    this.routes.clear();
-    this.pageRouteShapes.clear();
-    this.layouts.clear();
-    this.orderedLayouts = [];
-    this.routeSlots.clear();
-    this.routeSlotOwnerSegments.clear();
-    this.loadings.clear();
-    this.errors.clear();
-    this.metadataImages.clear();
-    this.metadataRoutes.clear();
-    this.redirects.clear();
-    this.programmaticPages.clear();
-    this.programmaticLayouts.clear();
+  discoverRoutes(): Promise<void> {
+    const discovery = this.discovery
+      .catch(() => {})
+      .then(async () => {
+        const next = new RouteManager(this.config, this.viteServer);
+        await next.discoverInto();
+        this.invalidateClientManifest();
+        this.routes = next.routes;
+        this.pageRouteShapes = next.pageRouteShapes;
+        this.layouts = next.layouts;
+        this.orderedLayouts = next.orderedLayouts;
+        this.routeSlots = next.routeSlots;
+        this.routeSlotOwnerSegments = next.routeSlotOwnerSegments;
+        this.loadings = next.loadings;
+        this.errors = next.errors;
+        this.metadataImages = next.metadataImages;
+        this.metadataRoutes = next.metadataRoutes;
+        this.redirects = next.redirects;
+        this.programmaticPages = next.programmaticPages;
+        this.programmaticLayouts = next.programmaticLayouts;
+        this.programmaticClientRoutes = next.programmaticClientRoutes;
+      });
+    this.discovery = discovery;
+    return discovery;
+  }
 
+  /** Fill this manager's empty route tables. Only a fresh manager made by discoverRoutes runs it. */
+  private async discoverInto(): Promise<void> {
     const programmaticClientRoutes: ProgrammaticClientRoutes[] = [];
     for (const source of getFarmSourceRoots(this.config)) {
       await this.discoverFileRoutes(source);

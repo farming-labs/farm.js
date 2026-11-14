@@ -171,9 +171,11 @@ function loadedFiles(server: ViteDevServer): string[] {
 describe("development SSR pre-bundling", () => {
   it("loads a module-entry package as one pre-bundled module and renders it as before", async () => {
     const root = await createProject();
-    const server = await createServer({ root });
+    // The port goes in the server's config, not to listen(): a restart binds the configured port,
+    // which would otherwise be Farm's default 3000 and collide with any other server on it.
+    const server = await createServer({ root }, { port: await getAvailablePort() });
     servers.add(server);
-    await server.listen(await getAvailablePort());
+    await server.listen();
     const origin = originOf(server);
 
     const page = await fetch(`${origin}/`, { headers: { accept: "text/html" } });
@@ -206,8 +208,8 @@ describe("development SSR pre-bundling", () => {
     // A restart sets Farm up again with the SSR optimizer already running: the docs adapter and
     // the pre-bundled package still load.
     await server.restart();
-    // The restarted server listens on its configured port, not the one passed to listen().
     const restartedOrigin = originOf(server);
+    expect(restartedOrigin).toBe(origin);
     expect(await (await fetch(`${restartedOrigin}/docs-kit-probe`)).text()).toBe("docs-kit ok");
     const restarted = await fetch(`${restartedOrigin}/`, { headers: { accept: "text/html" } });
     expect(await restarted.text()).toMatch(/<svg data-icon="3"/);
