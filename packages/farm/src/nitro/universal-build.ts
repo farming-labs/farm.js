@@ -7171,11 +7171,14 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   orderedPageRoutes.forEach((route, index) => {
     const varName = `pageRoute${index}`;
     if (isFarmMarkdownPageFile(route.modulePath)) {
+      // The module reads its literal route config exports; whether its source reads the request
+      // is decided here, as for any page.
+      const renderingDirective = readRouteRenderingDirectiveFromFile(route.modulePath);
       pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},${
       route.directory ? `\n    directory: ${JSON.stringify(route.directory)},` : ""
-    }
+    }${renderingDirective ? `\n    rendering: ${JSON.stringify(renderingDirective)},` : ""}
     module: createFarmMarkdownRouteModule({
       source: ${JSON.stringify(route.source ?? "")},
       filePath: ${JSON.stringify(toBakedMarkdownSourcePath(config.root, route.modulePath))},

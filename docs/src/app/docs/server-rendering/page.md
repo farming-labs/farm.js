@@ -114,6 +114,24 @@ export default function AboutPage() {
 }
 ```
 
+A `page.md` or `page.mdx` page opts in the same way, with an ESM export at the top level of its
+source. Farm reads the literal value without evaluating the page, so write a string, number, or
+boolean; an export inside a fenced code block is part of the content, not the page's config.
+`dynamic`, `revalidate`, and `ssg` are read this way. Pages the
+[docs engine](/docs/docs-engine) renders ignore them and follow `docs.prerender`.
+
+**src/app/docs/installation/page.mdx**
+
+```mdx
+---
+title: Installation
+---
+
+export const dynamic = "force-static";
+
+# Installation
+```
+
 ## ISR-style revalidation
 
 `revalidate` caches a static response and refreshes it after the configured number of seconds.
