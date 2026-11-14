@@ -1,0 +1,192 @@
+.desk-computer {
+  position: relative;
+  max-width: 420px;
+  margin: 40px 0 0;
+}
+.desk-computer svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  cursor: text;
+  stroke-linejoin: round;
+}
+.desk-computer[data-power="off"] svg {
+  cursor: default;
+}
+.dc-shadow {
+  fill: rgb(255 255 255 / 0.025);
+}
+.dc-top,
+.dc-side,
+.dc-front {
+  stroke: rgb(255 255 255 / 0.32);
+  stroke-width: 0.4;
+}
+.dc-top {
+  fill: #171717;
+}
+.dc-side {
+  fill: #0c0c0c;
+}
+.dc-front {
+  fill: #121212;
+}
+.dc-vent {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.16);
+  stroke-width: 0.5;
+}
+.dc-bezel {
+  fill: #0a0a0a;
+  stroke: rgb(255 255 255 / 0.18);
+  stroke-width: 0.35;
+}
+.dc-slot {
+  fill: #000;
+  stroke: rgb(255 255 255 / 0.22);
+  stroke-width: 0.3;
+}
+.dc-switch {
+  fill: #1a1a1a;
+  stroke: rgb(255 255 255 / 0.4);
+  stroke-width: 0.3;
+  transition: fill 160ms;
+}
+.dc-led {
+  fill: #2a2a2a;
+  transition: fill 160ms;
+}
+.desk-computer[data-power="on"] .dc-led {
+  fill: #ededed;
+}
+.dc-cable {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.32);
+  stroke-width: 0.5;
+}
+.dc-glass {
+  fill: #050505;
+  stroke: rgb(255 255 255 / 0.12);
+  stroke-width: 0.3;
+  transition: stroke 160ms;
+}
+.desk-computer[data-focused] .dc-glass {
+  stroke: rgb(255 255 255 / 0.4);
+}
+.dc-screen {
+  fill: #e5e5e5;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+.dc-meta {
+  fill: #737373;
+  font-size: 2.2px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.dc-text {
+  font-size: 2.9px;
+}
+.dc-text [data-tone="dim"] {
+  fill: #737373;
+}
+.dc-text [data-tone="bright"] {
+  fill: #fff;
+}
+.dc-cursor {
+  animation: dc-blink 1s steps(1) infinite;
+}
+@keyframes dc-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.dc-badge {
+  fill: rgb(255 255 255 / 0.55);
+}
+.dc-off {
+  fill: #050505;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms;
+}
+.desk-computer[data-power="off"] .dc-off {
+  opacity: 1;
+}
+.dc-key {
+  fill: #1d1d1d;
+  stroke: rgb(255 255 255 / 0.22);
+  stroke-width: 0.25;
+  transition: fill 120ms;
+}
+.dc-key[data-pressed] {
+  fill: #ededed;
+  transition: none;
+}
+.dc-power {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+}
+.dc-power:focus-visible {
+  outline: 1px solid #ededed;
+  outline-offset: 2px;
+}
+.dc-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  /* Phones zoom into inputs smaller than 16px when they take focus. */
+  font-size: 16px;
+}
+.dc-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.desk-computer figcaption {
+  margin-top: 14px;
+  color: #737373;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dc-cursor {
+    animation: none;
+  }
+  .dc-off,
+  .dc-key,
+  .dc-led,
+  .dc-glass {
+    transition: none;
+  }
+}
+.dc-handle {
+  fill: #0b0b0b;
+  stroke: rgb(255 255 255 / 0.18);
+  stroke-width: 0.3;
+}
+.dc-glow {
+  pointer-events: none;
+  transition: opacity 220ms;
+}
+.desk-computer[data-power="off"] .dc-glow {
+  opacity: 0;
+}
