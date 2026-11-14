@@ -1,5 +1,4 @@
 // @vitest-environment node
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,6 +9,7 @@ import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 // The not-found and error documents go out whole, with their status. They rendered with React's
 // synchronous renderToString, which cannot wait for a Suspense boundary: a root layout holding a
@@ -172,34 +172,13 @@ describe("not-found and error documents under a suspending root layout", () => {
     );
     await build(config, { root, preset: "node-server" });
 
-    const output = path.join(root, ".farm", ".output");
-    const port = await getAvailablePort();
-    const processOutput: string[] = [];
-    const productionServer = spawn(process.execPath, [path.join(output, "server", "index.mjs")], {
-      cwd: path.join(output, "server"),
-      env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    productionServer.stdout.on("data", (chunk) => processOutput.push(String(chunk)));
-    productionServer.stderr.on("data", (chunk) => processOutput.push(String(chunk)));
-    const exited = new Promise<void>((resolve) => productionServer.once("exit", () => resolve()));
-
+    const productionServer = await startProductionServer(
+      path.join(root, ".farm", ".output", "server"),
+    );
     try {
-      const origin = `http://127.0.0.1:${port}`;
-      let ready = false;
-      for (let attempt = 0; attempt < 200 && !ready; attempt++) {
-        if (productionServer.exitCode !== null) break;
-        ready = await fetch(`${origin}/_farm/health/ready`).then(
-          (response) => response.ok,
-          () => false,
-        );
-        if (!ready) await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      expect(ready, processOutput.join("")).toBe(true);
-      await expectSuspendingLayoutDocuments(origin, () => processOutput.join(""));
+      await expectSuspendingLayoutDocuments(productionServer.origin, productionServer.output);
     } finally {
-      if (productionServer.exitCode === null) productionServer.kill();
-      await exited;
+      await productionServer.stop();
     }
   }, 240_000);
 });
