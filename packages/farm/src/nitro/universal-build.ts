@@ -12190,7 +12190,9 @@ ${
             pprCacheKey,
             { html: fullHtml },
             {
-              paths: [pathname],
+              // revalidatePath() takes the route path ("/pricing"), as the docs show, while the
+              // shell answers the public one ("/console/fr/pricing"): either clears it.
+              paths: [...new Set([pathname, getFarmRoutePathname(pathname)])],
               tags: ["ppr"],
               revalidate: pprConfig.revalidate ?? false,
             }
