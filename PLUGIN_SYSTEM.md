@@ -191,6 +191,10 @@ handlers get `path`.
 An app metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, or a metadata image)
 is an `"asset"` request, with the metadata route's `pattern`, in `farm dev` and production.
 
+When a config rewrite sends a request to an internal destination, `before` runs again with the
+destination `Request` and the destination's `route`; every other hook gets the `route` of the URL
+as requested.
+
 **`endpoints`** are exact application-relative paths such as `/status`, without parameters,
 wildcards, or query strings; Farm adds the configured `basePath`. They run before request context
 and routing, so check authorization inside the handler. Their responses still pass through

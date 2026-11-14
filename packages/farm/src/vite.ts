@@ -4727,7 +4727,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // resolved. The session options, and the router and render hooks, still
           // describe the requested route, because production computes them from the
           // incoming request too.
-          const requestedMatch = routeManager.matchRoute(requestedPathname);
           // What the renderer serves without a route (llms.txt, robots.txt, sitemap.xml, the
           // default MCP server) is reported by its fixed path; see route-label.ts.
           const pageBuiltInRouteLabel = (pathname: string) => {
@@ -4740,6 +4739,20 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               ? FARM_DEFAULT_MCP_PATH
               : null;
           };
+          const pageRuntimeOptions = (pathname: string): FarmPluginRuntimeRequestOptions => {
+            const match = routeManager.matchRoute(pathname);
+            return {
+              kind: "page",
+              route: setFarmRouteLabel(
+                {
+                  pathname,
+                  pattern: match?.route?.pattern || null,
+                  params: match?.params || {},
+                },
+                match?.route ? null : pageBuiltInRouteLabel(pathname),
+              ),
+            };
+          };
           let runtimeSession: FarmPluginRuntimeSession | undefined;
           let pathname = requestedPathname;
           if (pm && opensRuntimeSession) {
@@ -4748,21 +4761,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               // an asset. A config rewrite never starts from one, since a local route wins.
               const metadataRoute =
                 configRewriteSource === undefined ? matchAppMetadataRoute(requestedPathname) : null;
+              // A config rewrite's session opens on the requested URL, with the route that URL
+              // matches, and runtime.before runs again on the destination with the destination's
+              // route and the same ctx, as on production's re-entry. requestedPathname is the
+              // destination's here.
               const sessionOptions: FarmPluginRuntimeRequestOptions = metadataRoute
                 ? { kind: "asset", route: { pathname: requestedPathname, ...metadataRoute } }
-                : {
-                    kind: "page",
-                    route: setFarmRouteLabel(
-                      {
-                        pathname: requestedPathname,
-                        pattern: requestedMatch?.route?.pattern || null,
-                        params: requestedMatch?.params || {},
-                      },
-                      requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
-                    ),
-                  };
-              // A config rewrite's session opens on the requested URL, and runtime.before runs
-              // again on the destination with the same ctx, as on production's re-entry.
+                : pageRuntimeOptions(
+                    configRewriteSource === undefined ? requestedPathname : requestedPagePathname,
+                  );
               runtimeSession = await pm.beginRuntimeRequest(
                 createRequestFromNodeRequest(req, new URL(configRewriteSource ?? fullUrl)),
                 sessionOptions,
@@ -4780,7 +4787,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   : await pm.runRuntimeBeforeForRewrite(
                       runtimeSession.request,
                       createRequestFromNodeRequest(req, new URL(fullUrl)),
-                      sessionOptions,
+                      pageRuntimeOptions(requestedPathname),
                     ));
 
               if (routedRequest instanceof Response) {
