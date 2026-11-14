@@ -9659,18 +9659,22 @@ async function handleFarmDefaultMCP(request) {
   return handleFarmDefaultMCPRequest(request, {
     server: getFarmDefaultMCPServer(),
     basePath: ${JSON.stringify(config.basePath)},
+    i18n: farmI18nConfig,
+    // Each page at the URL it answers at, as in development and as the sitemap lists it.
     listPages: () =>
       collectFarmDefaultMCPPages(
         getFarmAgentListedPageRoutes().map((route) => ({ pattern: route.pattern, module: route.module })),
-        { origin, basePath: ${JSON.stringify(config.basePath)}, markdown: farmMarkdownConfig },
+        {
+          origin,
+          basePath: ${JSON.stringify(config.basePath)},
+          markdown: farmMarkdownConfig,${config.trailingSlash ? "\n          trailingSlash: true," : ""}
+          i18n: farmI18nConfig,
+        },
       ),
-    // A fresh request through this handler, so the caller's cookies never shape a page.
-    // The handler sees paths below the base path, as the server passes them in.
-    readMarkdown: (url) => {
-      const page = new URL(url);
-      page.pathname = stripFarmBasePath(page.pathname);
-      return farmDefaultMCPReadMarkdown(page.href);
-    },
+    // A fresh request through this handler, so the caller's cookies never shape a page. It
+    // reads the public URL, base path included, as llms-full.txt does: this handler sees
+    // public paths, and with i18n a mirror path without the base path answers with a redirect.
+    readMarkdown: farmDefaultMCPReadMarkdown,
   });
 }
 // \`fetch\` is this module's outer request entry: plugin runtime hooks run and the page
