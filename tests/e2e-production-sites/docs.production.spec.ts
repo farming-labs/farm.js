@@ -1010,6 +1010,57 @@ test("home keeps its agents link usable without JavaScript", async ({ browser, b
   }
 });
 
+// Figure panels are fixed boxes and their type has a legibility floor, so a layout without room
+// for its text spills out of its boxes. Without JavaScript each figure shows its final frame.
+for (const width of [360, 1440]) {
+  test(`native posts keep figure text inside its boxes at ${width}px`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const context = await browser.newContext({
+      baseURL,
+      viewport: { width, height: 900 },
+      javaScriptEnabled: false,
+      reducedMotion: "reduce",
+    });
+    const page = await context.newPage();
+    try {
+      for (const pathname of ["/blog/web-to-native", "/blog/native-internals"]) {
+        await page.goto(pathname);
+        await page.evaluate(() => document.fonts.ready);
+        const panels = page.locator(".blog-figure[data-figure] .bf-stage .bf-panel");
+        expect(await panels.count()).toBeGreaterThan(0);
+        const spills = await panels.evaluateAll((elements) =>
+          elements.flatMap((panel) => {
+            if (!panel.getClientRects().length) return [];
+            const box = panel.getBoundingClientRect();
+            const range = document.createRange();
+            const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
+            let right = 0;
+            let bottom = 0;
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              if (!node.textContent?.trim()) continue;
+              range.selectNodeContents(node);
+              for (const rect of range.getClientRects()) {
+                right = Math.max(right, rect.right - box.right);
+                bottom = Math.max(bottom, rect.bottom - box.bottom);
+              }
+            }
+            const body = panel.querySelector(".bf-body");
+            const clipped = body ? body.scrollWidth - body.clientWidth : 0;
+            if (right <= 0.5 && bottom <= 0.5 && clipped <= 0.5) return [];
+            const figure = panel.closest<HTMLElement>("[data-figure]")!.dataset.figure;
+            return [`${figure} ${(panel as HTMLElement).dataset.panel}`];
+          }),
+        );
+        expect(spills, pathname).toEqual([]);
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
+
 for (const width of [320, 390, 768]) {
   test(`blog navigation and reading stay usable at ${width}px without JavaScript`, async ({
     browser,
