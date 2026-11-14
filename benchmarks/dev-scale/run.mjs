@@ -81,6 +81,27 @@ async function fetchPage(origin, pathname, expected) {
   return { ms, bytes: html.length };
 }
 
+/**
+ * The first page a fresh server renders. A connection refused after the port opened is retried
+ * while the server runs, and counted: on a shared machine another process can take the port
+ * freePort returned, and a server that restarts closes its port too, so the count is reported.
+ */
+async function firstPage(dev, pathname) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fetchPage(dev.origin, pathname, "mdx body");
+      return attempt;
+    } catch (error) {
+      if (error?.cause?.code !== "ECONNREFUSED" || attempt >= 100 || !dev.running()) {
+        process.stderr.write(dev.output.join("").slice(-4000));
+        throw error;
+      }
+      process.stderr.write(`retrying ${pathname}: connection refused while farm dev runs\n`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
+
 async function startDev(variant, app) {
   const port = await freePort();
   const started = performance.now();
@@ -107,6 +128,7 @@ async function startDev(variant, app) {
     started,
     portOpenMs: performance.now() - started,
     output,
+    running: () => child.exitCode === null && child.signalCode === null,
     async stop() {
       if (child.exitCode === null) {
         child.kill("SIGTERM");
@@ -195,7 +217,7 @@ async function session(variant, fixture, round, browser) {
   let dev = await startDev(variant, app);
   try {
     result.coldPortOpenMs = dev.portOpenMs;
-    await fetchPage(dev.origin, fixture.mdx[0], "mdx body");
+    result.coldFirstPageRetries = await firstPage(dev, fixture.mdx[0]);
     result.coldFirstPageMs = performance.now() - dev.started;
 
     const newGuide = await fetchPage(dev.origin, guide(0), "guide body");
@@ -271,7 +293,7 @@ async function session(variant, fixture, round, browser) {
   dev = await startDev(variant, app);
   try {
     result.warmPortOpenMs = dev.portOpenMs;
-    await fetchPage(dev.origin, fixture.mdx[0], "mdx body");
+    result.warmFirstPageRetries = await firstPage(dev, fixture.mdx[0]);
     result.warmFirstPageMs = performance.now() - dev.started;
   } finally {
     await dev.stop();

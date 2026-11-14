@@ -27,7 +27,10 @@ The script generates a pnpm-style workspace in a temporary directory and links t
 Each session starts a server and measures, in order:
 
 - **Cold start** (`.farm` and `node_modules/.vite` removed): process spawn until the port accepts
-  connections (`coldPortOpenMs`) and until the first MDX page is read (`coldFirstPageMs`).
+  connections (`coldPortOpenMs`) and until the first MDX page is read (`coldFirstPageMs`). A
+  connection refused after the port opened is retried while the server runs and counted in
+  `coldFirstPageRetries` (on a shared machine another process can take the free port the script
+  picked; a server that restarted would show here too).
 - **First request to a new route:** the HTML of a TSX page (`newTsxRouteMs`) and an MDX page
   (`newMdxRouteMs`) the server has not rendered, then the same TSX page again
   (`revisitTsxHttpMs`). `htmlBytes` is that page's size.
