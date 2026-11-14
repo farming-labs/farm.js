@@ -24,3 +24,9 @@ export function linkRscFixtureDependencies(root: string): void {
     symlinkSync(realpathSync(source), target, process.platform === "win32" ? "junction" : "dir");
   }
 }
+
+/** A 1x1 PNG for metadata image fixtures: core reads its size and hash as for any static image. */
+export const METADATA_TEST_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+);

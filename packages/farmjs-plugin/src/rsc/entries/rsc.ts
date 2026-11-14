@@ -10,6 +10,12 @@ import {
 
 const require_ = createRequire(import.meta.url);
 
+/**
+ * The import query the entry globs static `opengraph-image`/`twitter-image` files with. The
+ * plugin's loader answers it with the file's info and bytes (index.ts).
+ */
+export const FARM_METADATA_IMAGE_QUERY = "?farm-metadata-image";
+
 /** Core's production source for the \`mcp\` plugin, so both servers merge config the same way. */
 function generateMCPPluginSource(): { importSource: string; registerSource: string } {
   const { generateNativeMCPPluginSource } = require_(
@@ -186,8 +192,8 @@ export function generateConfigRoutesRuntime(
   const localRoute = localRouteCheck
     ? `
 // Whether this server answers the URL itself: a page, an API route, the image optimizer, a
-// metadata route file, or a generated agent file. A config rewrite applies only when none does,
-// as in core's servers.
+// metadata route file or image, or a generated agent file. A config rewrite applies only when
+// none does, as in core's servers.
 function farmHasLocalRequestRoute(url) {
   const pathname = url.pathname;
   if (matchRoute(pathname)) return true;
@@ -197,6 +203,11 @@ function farmHasLocalRequestRoute(url) {
     ctx.appMetadataRoutes === true
       ? `
   if (matchFarmAppMetadataRoute(routePathname)) return true;`
+      : ""
+  }${
+    ctx.metadataImages?.static || ctx.metadataImages?.generated
+      ? `
+  if (matchFarmMetadataImageRequest(routePathname)) return true;`
       : ""
   }${
     llms
@@ -524,6 +535,21 @@ ${i18n ? generateI18nRuntime(ctx, i18n) : ""}`;
     ctx.llmsTxt?.enabled === true || ctx.sitemap?.enabled === true || servesAppMetadataRoutes;
   // agent.crawlers: a generated robots.txt, as core serves it.
   const servesAgentRobots = ctx.crawlers?.enabled === true;
+  // opengraph-image and twitter-image files: static images and generated modules, served and
+  // added to the page head as core does.
+  const staticMetadataImages = ctx.metadataImages?.static === true;
+  const generatedMetadataImages = ctx.metadataImages?.generated === true;
+  const servesMetadataImages = staticMetadataImages || generatedMetadataImages;
+  if (servesMetadataImages) {
+    code += `import { addMetadataImageReference, matchesFarmIfNoneMatch } from '@farm.js/core/internal/production-runtime';
+`;
+  }
+  if (generatedMetadataImages) {
+    // Loads @vercel/og only when a generated image renders, as in core's servers.
+    code += `import { createFarmSearchParams } from '@farm.js/core/internal/production-runtime';
+import { createFarmMetadataImageResponse } from '@farm.js/core/internal/metadata-image-runtime';
+`;
+  }
   if (listsAgentPages || servesAgentRobots) {
     code += `import { createFarmMetadataRouteResponse } from '@farm.js/core/internal/production-runtime';
 `;
@@ -710,7 +736,17 @@ const routeDefinitionModules${index} = import.meta.glob(${JSON.stringify(
           ],
     )}, { eager: true });${
       servesAppMetadataRoutes
-        ? `\nconst appMetadataRoutes${index} = ${uiRouteGlob(`${root.glob}/**/{sitemap,robots,llms,llms-full}.{ts,js}`)};`
+        ? `\nconst appMetadataRoutes${index} = ${uiRouteGlob(`${root.glob}/**/{sitemap,robots,manifest,llms,llms-full}.{ts,js}`)};`
+        : ""
+    }${
+      generatedMetadataImages
+        ? `\nconst metadataImageModules${index} = ${uiRouteGlob(`${root.glob}/**/{opengraph-image,twitter-image}.{tsx,jsx,ts,js}`)};`
+        : ""
+    }${
+      staticMetadataImages
+        ? // Each file's dimensions, alt text, hash and bytes, read by the plugin's loader as core's
+          // router reads them (and inlined by a build, as core's build inlines them).
+          `\nconst metadataImageFiles${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/{opengraph-image,twitter-image}.{png,jpg,jpeg,gif,webp}`)}, { query: ${JSON.stringify(FARM_METADATA_IMAGE_QUERY)}, import: 'default', eager: true });`
         : ""
     }`,
   )
@@ -1484,9 +1520,16 @@ ${
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
   ${
+    servesMetadataImages
+      ? `// opengraph-image and twitter-image: answered after middleware, as in core's servers.
+  const metadataImageResponse = await handleFarmMetadataImageRequest(request);
+  if (metadataImageResponse) return applyProductionMiddlewareHeaders(metadataImageResponse, middlewareHeaders);
+  `
+      : ""
+  }${
     servesAppMetadataRoutes
-      ? `// sitemap.ts, robots.ts, llms.ts and llms-full.ts: answered after middleware, as in core's
-  // servers, and before the generated files they replace.
+      ? `// sitemap.ts, robots.ts, manifest.ts, llms.ts and llms-full.ts: answered after middleware, as
+  // in core's servers, and before the generated files they replace.
   const appMetadataResponse = await handleFarmAppMetadataRoute(request, context);
   if (appMetadataResponse) return applyProductionMiddlewareHeaders(appMetadataResponse, middlewareHeaders);
   `
@@ -1678,6 +1721,11 @@ ${
 `;
   }
 
+  // The nearest manifest.ts and metadata images join the route's metadata, as in core's servers.
+  const routeMetadata =
+    servesAppMetadataRoutes || servesMetadataImages
+      ? "addFarmMetadataFileReferences(await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps), url.pathname)"
+      : "await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps)";
   // Route matching and rendering
   code += `
   // Match the URL to a page component
@@ -1731,10 +1779,10 @@ ${
     ctx.markdown?.enabled
       ? `// The head advertises the page's Markdown mirror as the Link header does, as in core's servers.
   const metadata = addMetadataMarkdownAlternate(
-    await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps),
+    ${routeMetadata},
     getFarmMarkdownAlternatePath(farmMarkdownConfig, url.pathname, { routePathname: getFarmRoutePathname }),
   );`
-      : "const metadata = await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps);"
+      : `const metadata = ${routeMetadata};`
   }
   const renderedHead = renderMetadataHead(metadata, { pathname: url.pathname });
   // Injected into <head> by the SSR entry (React renders only the charset), and swapped in by the
@@ -2246,6 +2294,7 @@ function createFarmAgentRobotsResponse(request) {
       ? `const FARM_APP_METADATA_OUTPUTS = {
   sitemap: 'sitemap.xml',
   robots: 'robots.txt',
+  manifest: 'manifest.webmanifest',
   llms: 'llms.txt',
   'llms-full': 'llms-full.txt',
 };
@@ -2273,10 +2322,10 @@ const farmAppMetadataRoutes = Object.entries(
   .sort((left, right) => compareRouteSpecificity(left.specificity, right.specificity));
 
 /**
- * A sitemap.ts, robots.ts, llms.ts or llms-full.ts route file, served as core serves it: at
- * '<segment>/<file>' on the route path (below the basePath and locale), from its default export,
- * a value or a function given the request, params, search params and the segment's path. llms.ts
- * and llms-full.ts also receive the pages and defaults the generated llms.txt would use, and
+ * A sitemap.ts, robots.ts, manifest.ts, llms.ts or llms-full.ts route file, served as core
+ * serves it: at '<segment>/<file>' on the route path (below the basePath and locale), from its
+ * default export, a value or a function given the request, params, search params and the
+ * segment's path. llms.ts and llms-full.ts also receive the pages and defaults the generated llms.txt would use, and
  * llms-full.ts the Markdown reader; an llms-full.ts object inlines each page's Markdown.
  */
 async function handleFarmAppMetadataRoute(request, context) {
@@ -2334,6 +2383,216 @@ function matchFarmAppMetadataRoute(pathname) {
     if (match.matches) return { route, routePath, match };
   }
   return null;
+}
+
+`
+      : ""
+  }${
+    servesMetadataImages
+      ? `const FARM_METADATA_IMAGE_KINDS = { 'opengraph-image': 'opengraph', 'twitter-image': 'twitter' };
+
+/** A metadata image route from its file path ('/products/[id]/opengraph-image.png'). */
+function createFarmMetadataImageRoute(filePath, image) {
+  const directory = filePath.slice(0, filePath.lastIndexOf('/'));
+  const baseName = filePath.slice(directory.length + 1);
+  const fileName = baseName.slice(0, baseName.indexOf('.'));
+  return {
+    ...image,
+    filePath,
+    kind: FARM_METADATA_IMAGE_KINDS[fileName],
+    fileName,
+    segments: parseRoutePath(filePath).segments,
+    specificity: getRoutePatternSpecificity(directory || '/'),
+  };
+}
+
+// The app's opengraph-image and twitter-image files, most specific first: generated modules and
+// static images, whose dimensions, alt text and hash were read as core's router reads them.
+const farmMetadataImages = [${
+          generatedMetadataImages
+            ? `
+  ...Object.entries(mergeRouteModules([${routeRoots
+    .map(
+      (root, index) =>
+        `{ base: ${JSON.stringify(root.base)}, modules: metadataImageModules${index} }`,
+    )
+    .join(
+      ", ",
+    )}])).map(([filePath, module]) => createFarmMetadataImageRoute(filePath, { sourceType: 'module', module })),`
+            : ""
+        }${
+          staticMetadataImages
+            ? `
+  ...Object.entries(mergeRouteModules([${routeRoots
+    .map(
+      (root, index) =>
+        `{ base: ${JSON.stringify(root.base)}, modules: metadataImageFiles${index} }`,
+    )
+    .join(
+      ", ",
+    )}])).map(([filePath, file]) => createFarmMetadataImageRoute(filePath, { sourceType: 'static', staticInfo: file.info, data: file.data })),`
+            : ""
+        }
+].sort((left, right) => compareRouteSpecificity(left.specificity, right.specificity));
+
+/**
+ * An opengraph-image or twitter-image request, served as core serves it: at '<segment>/<file>' on
+ * the route path (below the basePath and locale), GET and HEAD only. A static image answers with
+ * its bytes, an ETag, and immutable caching when the URL names its hash (the head's
+ * '?v=<hash>'); a generated module renders through core's metadata image response, given the
+ * segment's params, search params and path.
+ */
+async function handleFarmMetadataImageRequest(request) {
+  const url = new URL(request.url);
+  const matched = matchFarmMetadataImageRequest(
+    getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/'),
+  );
+  if (matched) {
+    const { image, match, pagePath } = matched;
+    const method = request.method.toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+      return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } });
+    }
+    if (image.sourceType === 'static') {
+      const etag = '"' + image.staticInfo.hash + '"';
+      const headers = new Headers({
+        'Content-Type': image.staticInfo.contentType,
+        'Content-Length': String(image.staticInfo.byteLength),
+        'Cache-Control': url.searchParams.get('v') === image.staticInfo.hash
+          ? 'public, max-age=31536000, immutable'
+          : 'public, max-age=0, must-revalidate',
+        ETag: etag,
+        'X-Content-Type-Options': 'nosniff',
+      });
+      if (matchesFarmIfNoneMatch(request.headers.get('if-none-match'), etag)) {
+        return new Response(null, { status: 304, headers });
+      }
+      if (!image.bytes) image.bytes = Uint8Array.from(atob(image.data), (char) => char.charCodeAt(0));
+      return new Response(method === 'HEAD' ? null : image.bytes, { status: 200, headers });
+    }
+    ${
+      generatedMetadataImages
+        ? `try {
+      const imageModule = image.module;
+      if (!imageModule || !imageModule.default) {
+        throw new Error('Metadata image module does not export a default component or handler');
+      }
+      const value = typeof imageModule.default === 'function'
+        ? await imageModule.default({
+            params: match.params,
+            searchParams: createFarmSearchParams(searchParamsToObject(url.searchParams)),
+            path: pagePath,
+          })
+        : imageModule.default;
+      return await createFarmMetadataImageResponse(value, imageModule, {
+        method,
+        ifNoneMatch: request.headers.get('if-none-match'),
+      });
+    } catch (error) {
+      console.error('[Farm.js] Metadata image ' + image.filePath + ' failed:', error);
+      return new Response('Internal Server Error', {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    }`
+        : ""
+    }
+  }
+  return null;
+}
+
+/** The image that answers a route path ('<segment>/opengraph-image'), most specific first, or null. */
+function matchFarmMetadataImageRequest(pathname) {
+  const fileName = ['opengraph-image', 'twitter-image'].find(
+    (candidate) => pathname === '/' + candidate || pathname.endsWith('/' + candidate),
+  );
+  if (!fileName) return null;
+  const pagePath = pathname.slice(0, -fileName.length - 1) || '/';
+  for (const image of farmMetadataImages) {
+    if (image.fileName !== fileName) continue;
+    const match = matchFarmPageRoute(pagePath, image.segments);
+    if (match.matches) return { image, match, pagePath };
+  }
+  return null;
+}
+
+`
+      : ""
+  }${
+    servesAppMetadataRoutes || servesMetadataImages
+      ? `/**
+ * The nearest file of a kind for a route path, as core's servers pick it for the head: the deepest
+ * segment whose path prefixes the route path, with that prefix's params.
+ */
+function findFarmNearestMetadataFile(files, routePathname) {
+  const segments = routePathname.split('/').filter(Boolean);
+  let nearest = null;
+  for (const file of files) {
+    const depth = file.segments.length;
+    if (depth > segments.length) continue;
+    const routePath = depth === 0 ? '/' : '/' + segments.slice(0, depth).join('/');
+    if (!matchFarmPageRoute(routePath, file.segments).matches) continue;
+    if (!nearest || depth > nearest.file.segments.length) nearest = { file, routePath };
+  }
+  return nearest;
+}
+
+/** A metadata file's URL in the head: below its segment, in the request's locale and basePath. */
+function farmMetadataFileHref(routePath, file) {
+  const href = (routePath === '/' ? '' : routePath) + '/' + file;${
+    i18n
+      ? `
+  const snapshot = getFarmI18nClientSnapshot();
+  const localized = snapshot ? localizeFarmHref(href, snapshot.locale, snapshot) : href;`
+      : `
+  const localized = href;`
+  }
+  return ${hasBasePath ? `applyFarmBasePath(localized, ${JSON.stringify(ctx.basePath)})` : "localized"};
+}
+
+/**
+ * The route's metadata with the nearest manifest.ts as its manifest and the nearest
+ * opengraph-image and twitter-image as Open Graph and Twitter images, unless the metadata sets
+ * them, as core's servers add them.
+ */
+function addFarmMetadataFileReferences(metadata, pathname) {
+  const routePathname = getFarmRoutePathname(pathname.replace(/\\/+$/, '') || '/');${
+    servesAppMetadataRoutes
+      ? `
+  if (!metadata.manifest) {
+    const manifest = findFarmNearestMetadataFile(
+      farmAppMetadataRoutes.filter((route) => route.kind === 'manifest'),
+      routePathname,
+    );
+    if (manifest) {
+      metadata = { ...metadata, manifest: farmMetadataFileHref(manifest.routePath, 'manifest.webmanifest') };
+    }
+  }`
+      : ""
+  }${
+    servesMetadataImages
+      ? `
+  for (const kind of ['opengraph', 'twitter']) {
+    const nearest = findFarmNearestMetadataFile(
+      farmMetadataImages.filter((image) => image.kind === kind),
+      routePathname,
+    );
+    if (!nearest) continue;
+    const image = nearest.file;
+    const info = image.sourceType === 'static' ? image.staticInfo : image.module;
+    const version = image.sourceType === 'static' ? '?v=' + image.staticInfo.hash : '';
+    metadata = addMetadataImageReference(metadata, {
+      kind,
+      href: farmMetadataFileHref(nearest.routePath, image.fileName + version),
+      width: info?.width ?? info?.size?.width,
+      height: info?.height ?? info?.size?.height,
+      alt: info?.alt,
+      contentType: info?.contentType,
+    });
+  }`
+      : ""
+  }
+  return metadata;
 }
 
 `
