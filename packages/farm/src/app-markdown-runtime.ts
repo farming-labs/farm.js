@@ -9,6 +9,7 @@ import {
   requestAcceptsMarkdown,
   type FarmMarkdownRoutePathname,
 } from "./markdown";
+import { withoutFarmDeploymentCookie } from "./deployment";
 import { createFarmMarkdownViewResponse } from "./markdown-view";
 import { FARM_ANONYMOUS_CLIENT_ADDRESS } from "./anonymous-client-address";
 import type { FarmMdxComponents, FarmMdxResolvedConfig } from "./app-markdown-config";
@@ -391,7 +392,10 @@ export async function createFarmMarkdownSourceResponse(options: {
       // request with credentials. A client address or proxy header is not one: proxies
       // add those to every request.
       let response = publicResponse;
-      if (options.request.headers.has("cookie") || options.request.headers.has("authorization")) {
+      if (
+        withoutFarmDeploymentCookie(options.request.headers.get("cookie")) ||
+        options.request.headers.has("authorization")
+      ) {
         const headers = new Headers(publicResponse.headers);
         headers.set("Cache-Control", "private, no-store");
         response = new Response(publicResponse.body, {

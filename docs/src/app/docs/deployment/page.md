@@ -136,6 +136,8 @@ During a rolling deployment, an open page can belong to release A while its next
 
 Mutation requests are rejected before their action body is decoded or the handler runs. This prevents a stale action from being replayed against a new release and accidentally creating duplicate writes. The user can refresh and deliberately submit again.
 
+Page responses carry the server's ID in the `x-farm-deployment-id` header, and the cookie's path is the app's `basePath`. A page request whose header, or for a form post whose cookie, names another deployment gets the `409` after app middleware and before the page renders or an action runs. Outside `@farm.js/plugin/rsc`, only page requests are checked; API routes answer as usual. A document load reads only the header, so a stale cookie never refuses opening the app in a new tab. Farm sets the cookie on `GET` page responses, never on a refused request, so the stale page's forms stay refused. In a production build, only a page response that stays out of shared caches (`private` or `no-store`, with no CDN cache header) sets it: a prerendered, ISR, PPR, or other publicly cached page is sent without the cookie, because CDNs do not cache a response that sets one. Such a page still embeds its deployment ID, so navigations from it are checked.
+
 Farm resolves the ID from explicit config, `FARM_DEPLOYMENT_ID`, `VERCEL_GIT_COMMIT_SHA`, or `CF_PAGES_COMMIT_SHA`. Otherwise, production uses `generateBuildId` and development uses `"development"`.
 
 ```ts

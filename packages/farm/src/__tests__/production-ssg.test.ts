@@ -456,6 +456,8 @@ async function createConcurrentPrerenderFixture(): Promise<string> {
 export default {
   srcDir: "src",
   images: { provider: "none" },
+  // Prerendered documents embed the deployment ID, which otherwise differs per build.
+  deploymentId: "concurrent-prerender-test",
   security: {
     csp: {
       policy: "script-src 'self'; object-src 'none'",

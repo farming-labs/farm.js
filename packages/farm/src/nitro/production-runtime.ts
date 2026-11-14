@@ -119,8 +119,15 @@ export {
 export {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
+  _withFarmDeploymentCookie,
   _withFarmGuardedResponseCache,
 } from "../middleware/production-runtime";
+export {
+  createFarmDeploymentMismatchResponse,
+  FARM_DEPLOYMENT_ID_HEADER,
+  getFarmDeploymentMismatch,
+  withoutFarmDeploymentCookie,
+} from "../deployment";
 export { _farmPluginsKeepResponsesPrivate } from "../plugin-runtime-endpoint";
 export { _runWithMiddlewareContext, _runWithMiddlewareData } from "../middleware/server";
 export {

@@ -1,3 +1,8 @@
+import {
+  createFarmDeploymentCookie,
+  FARM_DEPLOYMENT_ID_HEADER,
+  getFarmDeploymentMismatch,
+} from "../deployment";
 import { _withFarmResponseHeaders } from "../owned-response";
 import type {
   CookieJar,
@@ -936,5 +941,38 @@ export function _withFarmGuardedResponseCache(response: Response): Response {
   return _withFarmResponseHeaders(response, (headers) => {
     if (shareable) headers.set("Cache-Control", "private, no-store");
     for (const name of CDN_CACHE_CONTROL_HEADERS) headers.delete(name);
+  });
+}
+
+/**
+ * Store the deployment ID in the deployment cookie on a page document a browser loads, so a form
+ * posted from it before JavaScript runs names its deployment. Only a GET page response that names
+ * this deployment and stays out of shared caches carries it: a CDN does not cache a response that
+ * sets a cookie (and one that does would hand it to every visitor), so a prerendered, ISR, PPR, or
+ * otherwise public page is sent as it was.
+ *
+ * @internal
+ */
+export function _withFarmDeploymentCookie(
+  request: Request,
+  response: Response,
+  deploymentId: string,
+  cookiePath: string,
+): Response {
+  if (request.method.toUpperCase() !== "GET") return response;
+  if (response.headers.get(FARM_DEPLOYMENT_ID_HEADER) !== deploymentId) return response;
+  if (!PRIVATE_CACHE_DIRECTIVE.test(response.headers.get("cache-control") ?? "")) return response;
+  if (CDN_CACHE_CONTROL_HEADERS.some((name) => response.headers.has(name))) return response;
+  // A page of another deployment keeps its cookie, so its forms stay refused.
+  if (getFarmDeploymentMismatch(request, deploymentId)) return response;
+  return _withFarmResponseHeaders(response, (headers) => {
+    headers.append(
+      "Set-Cookie",
+      createFarmDeploymentCookie(
+        deploymentId,
+        cookiePath,
+        new URL(request.url).protocol === "https:",
+      ),
+    );
   });
 }
