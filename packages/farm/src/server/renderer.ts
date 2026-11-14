@@ -2852,6 +2852,7 @@ export class ServerRenderer {
           metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
           basePath: this.config.basePath,
           trailingSlash: this.config.trailingSlash,
+          i18n: this.i18nRuntime?.config,
         },
       );
       await sendWebResponse(
@@ -3023,6 +3024,7 @@ export class ServerRenderer {
         include: config.include,
         exclude: config.exclude,
         trailingSlash: this.config.trailingSlash,
+        i18n: this.i18nRuntime?.config,
       },
     );
     return {

@@ -2098,6 +2098,8 @@ function createFarmLlmsTxtContext(request, context, full) {
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
       exclude: farmLlmsTxtConfig.exclude,${ctx.trailingSlash ? "\n      // A page without a mirror is linked at the URL it answers at ('/console/about/').\n      trailingSlash: true," : ""}
+      // With i18n, in the default locale's URL ('/en/about.md' under routing "prefix-always").
+      i18n: farmRouteI18n,
     },
   );
   const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
@@ -2238,6 +2240,7 @@ function createFarmAgentSitemapResponse(request) {
         config: farmAgentSitemapConfig,
         metadataBase: rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
         basePath: ${JSON.stringify(ctx.basePath)},${ctx.trailingSlash ? "\n        // Each page at the URL it answers at: '/console/about/'.\n        trailingSlash: true," : ""}
+        i18n: farmRouteI18n,
       },
     ),
     {},

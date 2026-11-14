@@ -6,6 +6,7 @@ import {
   isFarmPageNoIndex,
   resolveFarmAgentOrigin,
   resolveFarmAgentSitemap,
+  resolveFarmI18nConfig,
   stripFarmBasePath,
   stripFarmLocaleFromPathname,
 } from "@farm.js/core/internal/production-runtime";
@@ -41,6 +42,7 @@ function createSitemap(
     rootMetadata?: Record<string, unknown>;
     lastModified?: Record<string, string>;
     trailingSlash?: boolean;
+    i18n?: EntryContext["i18n"];
   },
 ) {
   const basePath = options.basePath ?? "/";
@@ -48,6 +50,7 @@ function createSitemap(
     ...context,
     basePath,
     trailingSlash: options.trailingSlash,
+    i18n: options.i18n,
     sitemap: resolveFarmAgentSitemap(sitemap),
     pageLastModified: options.lastModified,
   });
@@ -176,6 +179,30 @@ describe("RSC sitemap.xml", () => {
       "https://www.shop.example/console/",
       "https://www.shop.example/console/about/",
       "https://www.shop.example/console/legacy/",
+    ]);
+  });
+
+  it("lists each page in the default locale's URL under i18n, as core does", async () => {
+    const sitemap = (routing?: "prefix-always") =>
+      createSitemap(true, {
+        basePath: "/console",
+        trailingSlash: true,
+        rootMetadata: { metadataBase: "https://www.shop.example" },
+        i18n: resolveFarmI18nConfig(
+          { locales: ["en", "fr"], defaultLocale: "en", ...(routing ? { routing } : {}) },
+          { basePath: "/console" },
+        ),
+        pages: { "/page.tsx": {}, "/about/page.tsx": {} },
+      })(new Request("http://127.0.0.1/console/en/sitemap.xml"));
+    // Every locale is prefixed: '/console/about/' answers with a 307 to '/console/en/about/'.
+    expect(await locs(sitemap("prefix-always"))).toEqual([
+      "https://www.shop.example/console/en/",
+      "https://www.shop.example/console/en/about/",
+    ]);
+    // The default locale is unprefixed.
+    expect(await locs(sitemap())).toEqual([
+      "https://www.shop.example/console/",
+      "https://www.shop.example/console/about/",
     ]);
   });
 });

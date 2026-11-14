@@ -388,7 +388,9 @@ or `<Link trailingSlash>` prop overrides the app default for that link. The gene
 [`sitemap.xml`](#sitemap) and `llms.txt` list each page at its canonical URL, so none of their
 links redirect: `/console/about/` under `basePath: "/console"` with `trailingSlash: true`, and the
 home page at `/console` without it. A [Markdown mirror](/docs/markdown) such as `/about.md` keeps
-its URL and renders the page at the canonical one.
+its URL and renders the page at the canonical one. With [i18n](/docs/internationalization), both
+list the default locale's URL: `/console/en/about/` and `/console/en/about.md` under
+`routing: "prefix-always"`, and the unprefixed URL under the default `"prefix-except-default"`.
 
 ## API client base URL
 

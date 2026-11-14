@@ -292,6 +292,99 @@ describe("production default sitemap", () => {
     }
   }, 180_000);
 
+  it("lists every page at a URL that answers without a redirect under i18n", async () => {
+    const files = {
+      "src/app/layout.tsx": [
+        'export const metadata = { title: "Console", metadataBase: new URL("https://acme.test") };',
+        "export default function Layout({ children }) { return <main>{children}</main>; }",
+      ].join("\n"),
+      "src/app/page.tsx": "export default function Page() { return <p>home body</p>; }",
+      "src/app/about/page.tsx": "export default function Page() { return <p>about body</p>; }",
+      "src/app/team/page.tsx": "export default function Page() { return <p>team body</p>; }",
+      "src/messages/en.json": "{}",
+      "src/messages/fr.json": "{}",
+    };
+    const expectCanonical = async (
+      options: Record<string, unknown>,
+      base: string,
+      expected: { sitemap: string[]; llms: string[] },
+    ) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-agent-i18n-"));
+      try {
+        await writeApp(root, files);
+        // '/team' has no mirror, so llms.txt links the page itself.
+        const handler = await buildApp(root, { md: { expose: ["/", "/about"] }, ...options });
+        const get = (pathname: string) =>
+          handler.fetch(new Request(`https://acme.test${pathname}`, { redirect: "manual" }));
+
+        const sitemap = locs(await (await get(`${base}/sitemap.xml`)).text());
+        expect(sitemap).toEqual(expected.sitemap);
+        const llmsTxt = await (await get(`${base}/llms.txt`)).text();
+        const llms = [...llmsTxt.matchAll(/\]\((https:\/\/acme\.test[^)]*)\)/g)]
+          .map((match) => match[1])
+          // Pages only: the MCP section links the endpoint and the AI catalog.
+          .filter((url) => !/\/mcp$|\/\.well-known\//.test(url));
+        expect(llms).toEqual(expected.llms);
+        for (const url of [...sitemap, ...llms]) {
+          const response = await handler.fetch(new Request(url, { redirect: "manual" }));
+          expect({ url, status: response.status }).toEqual({ url, status: 200 });
+        }
+        // llms-full.txt inlines each mirror, read in-process without following redirects.
+        const full = await (await get(`${base}/llms-full.txt`)).text();
+        for (const body of ["home body", "about body"]) {
+          expect(full, body).toContain(body);
+        }
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    };
+    const locales = { locales: ["en", "fr"], defaultLocale: "en" };
+
+    // Every locale is prefixed: '/console/about/' answers with a 307 to '/console/en/about/',
+    // and '/console/about.md' with a 307 to '/console/en/about.md'.
+    await expectCanonical(
+      {
+        basePath: "/console",
+        trailingSlash: true,
+        i18n: { ...locales, routing: "prefix-always" },
+      },
+      "/console/en",
+      {
+        sitemap: [
+          "https://acme.test/console/en/",
+          "https://acme.test/console/en/about/",
+          "https://acme.test/console/en/team/",
+        ],
+        llms: [
+          "https://acme.test/console/en/index.md",
+          "https://acme.test/console/en/about.md",
+          "https://acme.test/console/en/team/",
+        ],
+      },
+    );
+    await expectCanonical({ i18n: { ...locales, routing: "prefix-always" } }, "/en", {
+      sitemap: ["https://acme.test/en", "https://acme.test/en/about", "https://acme.test/en/team"],
+      llms: [
+        "https://acme.test/en/index.md",
+        "https://acme.test/en/about.md",
+        "https://acme.test/en/team",
+      ],
+    });
+    // The default locale is unprefixed, so the URLs stay the plain ones.
+    await expectCanonical({ basePath: "/console", i18n: locales }, "/console", {
+      sitemap: [
+        "https://acme.test/console",
+        "https://acme.test/console/about",
+        "https://acme.test/console/team",
+      ],
+      llms: [
+        "https://acme.test/console/index.md",
+        "https://acme.test/console/about.md",
+        "https://acme.test/console/team",
+      ],
+    });
+  }, 240_000);
+
   describe("under trailingSlash and basePath", () => {
     let root: string;
     let get: (pathname: string) => Promise<Response>;
