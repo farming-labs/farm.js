@@ -331,10 +331,45 @@ export default defineConfig({
 ```
 
 Farm keeps the options it needs to produce its production output: `root`, `base`, `mode`,
-`appType`, `publicDir`, the build's entries and output (`build.outDir`, `build.emptyOutDir`,
-`build.ssr`, `build.ssrEmitAssets`, `build.write`, `build.lib`, `build.watch`,
-`build.rollupOptions.input`, and `build.rollupOptions.output`), and any `build`, `define`, or
-`esbuild` value Farm sets for that build. Use `basePath` and `publicDir` in Farm's config instead.
+`appType`, `publicDir`, the build's entries and output location (`build.outDir`,
+`build.emptyOutDir`, `build.ssr`, `build.ssrEmitAssets`, `build.write`, `build.lib`,
+`build.watch`, and `build.rollupOptions.input`), and any `build`, `define`, or `esbuild` value
+Farm sets for that build. Use `basePath` and `publicDir` in Farm's config instead.
+
+### Client output and chunking
+
+`vite.build.rolldownOptions.output` (or its older name `rollupOptions.output`) applies to the
+production client build, so an app can choose how the browser bundle is split into chunks:
+
+```ts
+export default defineConfig({
+  vite: {
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [{ name: "vendor", test: /node_modules/, minShareCount: 2, maxSize: 500_000 }],
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+Farm keeps the output options the server reads or that would publish private data: `dir`, `file`,
+`format`, `entryFileNames`, `chunkFileNames`, `assetFileNames`, `hashCharacters`, and every
+`sourcemap*` option (see `vite.build.sourcemap` below). Every other output option, such as
+`codeSplitting`, `manualChunks`, `minify`, `banner`, or `generatedCode`, is used as written. Set
+`output` to one object; an array of outputs fails the build. The server build keeps Farm's own
+output options.
+
+A production document lists the chunks its page needs before it hydrates as
+`<link rel="modulepreload">`: the static imports of the client entry (Farm's runtime and the
+hydrating layouts), of the page's hydrating module, and of the islands that hydrate at load.
+Dynamically imported modules, other routes' chunks, and islands with a deferred strategy
+(`interaction`, `visible`, or `idle`) are not preloaded; they load when they are needed. Each
+chunk in that static closure is one request, which matters most over HTTP/1.1.
 
 Farm aliases `@/` to `srcDir`. Aliases in `vite.resolve.alias` come before Farm's in dev and in
 both builds, and Vite uses the first one that matches, so an app alias for part of `@/` wins for
@@ -1349,6 +1384,21 @@ export default defineConfig({
 ```
 
 `render: "static"` maps to prerendering. `render: "dynamic"` forces a dynamic response. `swr` and `isr` accept `true` or a TTL in seconds. `cors: true` applies permissive API CORS headers; pass an object when you need a specific origin, methods, or headers.
+
+A pattern matches as Nitro's router does: `:name` matches one segment, and `*`, `**`, `:name*` or
+`:name+` match any number of segments. A pattern may have only one of these, so write
+`/:locale/docs/**` rather than `/*/docs/**`. Config resolution rejects a pattern with two and
+suggests the named form.
+
+On a production server, a `swr` or `cache` rule stores the pages it covers and serves later requests
+from that copy with `X-Cache: HIT`, including a page that renders on each request because it sets no
+`dynamic` or `revalidate`. Nitro renders such a page without the request's cookies, `Authorization`,
+query string, or any header the rule does not key on, so one render serves everyone. A page whose
+render is still one visitor's (it reads `cookies()`, `headers()` or the request, has middleware
+data, a request `context`, an error status, or streams a Suspense boundary) keeps
+`Cache-Control: private, no-store`, is never stored, and emits a `cache.bypass`
+[event](/docs/observability) naming the reason. A response that middleware let through stays
+private too, as in [Responses behind middleware](/docs/cache-ppr#responses-behind-middleware).
 
 On Netlify, an `isr` rule caches a response on Netlify's CDN only when Farm sends it with a shared
 `Cache-Control`. A response Farm marks `private` or `no-store` (a request with cookies or an

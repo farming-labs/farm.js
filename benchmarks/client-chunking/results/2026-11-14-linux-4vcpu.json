@@ -1,0 +1,1209 @@
+{
+  "benchmark": "client-chunking",
+  "node": "v22.23.4",
+  "platform": "linux-x64",
+  "cpus": 4,
+  "loadAverage": [17.53, 16.58, 16.34],
+  "runs": 10,
+  "warmups": 2,
+  "builds": {
+    "before": {
+      "chunks": {
+        "count": 629,
+        "totalBytes": 947580,
+        "totalGzip": 406121,
+        "medianBytes": 842,
+        "p10Bytes": 697,
+        "p90Bytes": 2125.6000000000004,
+        "under2k": 562,
+        "under10k": 625
+      },
+      "entryClosureChunks": 2,
+      "missingPreloads": ["chunks/shared-2-h6f464f64.js", "chunks/shared-0-h6f464f64.js"],
+      "routes": {
+        "modulepreloads": {
+          "median": 62,
+          "p95": 80,
+          "max": 93
+        },
+        "staticChunks": {
+          "median": 62,
+          "p95": 79.19999999999999,
+          "max": 92
+        },
+        "staticJsGzip": {
+          "median": 193166,
+          "p95": 210166.4,
+          "max": 223951
+        },
+        "preloadsOutsideClosure": {
+          "median": 0,
+          "p95": 1,
+          "max": 2
+        },
+        "closureNotPreloaded": {
+          "median": 0,
+          "p95": 0,
+          "max": 0
+        }
+      }
+    },
+    "after": {
+      "chunks": {
+        "count": 629,
+        "totalBytes": 947580,
+        "totalGzip": 406121,
+        "medianBytes": 842,
+        "p10Bytes": 697,
+        "p90Bytes": 2125.6000000000004,
+        "under2k": 562,
+        "under10k": 625
+      },
+      "entryClosureChunks": 2,
+      "missingPreloads": [],
+      "routes": {
+        "modulepreloads": {
+          "median": 62,
+          "p95": 79.19999999999999,
+          "max": 92
+        },
+        "staticChunks": {
+          "median": 62,
+          "p95": 79.19999999999999,
+          "max": 92
+        },
+        "staticJsGzip": {
+          "median": 193166,
+          "p95": 210166.4,
+          "max": 223951
+        },
+        "preloadsOutsideClosure": {
+          "median": 0,
+          "p95": 0,
+          "max": 0
+        },
+        "closureNotPreloaded": {
+          "median": 0,
+          "p95": 0,
+          "max": 0
+        }
+      }
+    },
+    "after-app-groups": {
+      "chunks": {
+        "count": 345,
+        "totalBytes": 1048181,
+        "totalGzip": 323408,
+        "medianBytes": 695,
+        "p10Bytes": 640,
+        "p90Bytes": 750.6,
+        "under2k": 339,
+        "under10k": 339
+      },
+      "entryClosureChunks": 7,
+      "missingPreloads": [],
+      "routes": {
+        "modulepreloads": {
+          "median": 8,
+          "p95": 8,
+          "max": 8
+        },
+        "staticChunks": {
+          "median": 8,
+          "p95": 8,
+          "max": 8
+        },
+        "staticJsGzip": {
+          "median": 209098,
+          "p95": 209112,
+          "max": 209126
+        },
+        "preloadsOutsideClosure": {
+          "median": 0,
+          "p95": 0,
+          "max": 0
+        },
+        "closureNotPreloaded": {
+          "median": 0,
+          "p95": 0,
+          "max": 0
+        }
+      }
+    }
+  },
+  "perRouteGzipChange": {
+    "after": {
+      "routesIncreased": 0,
+      "routesDecreased": 0,
+      "routes": 337,
+      "maxIncreaseBytes": 0,
+      "medianChangeBytes": 0
+    },
+    "after-app-groups": {
+      "routesIncreased": 316,
+      "routesDecreased": 21,
+      "routes": 337,
+      "maxIncreaseBytes": 50650,
+      "medianChangeBytes": 15936
+    }
+  },
+  "timedRoutes": {
+    "/docs/s0/p12": {
+      "before": {
+        "modulepreloads": 93,
+        "staticJsGzip": 220043
+      },
+      "after": {
+        "modulepreloads": 92,
+        "staticJsGzip": 220043
+      },
+      "after-app-groups": {
+        "modulepreloads": 8,
+        "staticJsGzip": 209095
+      }
+    },
+    "/docs/s1/p27": {
+      "before": {
+        "modulepreloads": 62,
+        "staticJsGzip": 195091
+      },
+      "after": {
+        "modulepreloads": 62,
+        "staticJsGzip": 195091
+      },
+      "after-app-groups": {
+        "modulepreloads": 8,
+        "staticJsGzip": 209096
+      }
+    }
+  },
+  "correctness": {
+    "/": {
+      "sameContent": true,
+      "sameLazyContent": true,
+      "counterWorks": true,
+      "errors": {
+        "before": [
+          "Failed to load resource: the server responded with a status of 404 ()",
+          "Failed to load resource: the server responded with a status of 404 ()"
+        ],
+        "after": [],
+        "after-app-groups": [],
+        "before-aa": [
+          "Failed to load resource: the server responded with a status of 404 ()",
+          "Failed to load resource: the server responded with a status of 404 ()"
+        ]
+      },
+      "failedRequests": {
+        "before": [
+          "404 http://127.0.0.1:34489/chunks/shared-0-h6f464f64.js",
+          "404 http://127.0.0.1:34489/chunks/shared-0-h6f464f64.js"
+        ],
+        "after": [],
+        "after-app-groups": [],
+        "before-aa": [
+          "404 http://127.0.0.1:44087/chunks/shared-0-h6f464f64.js",
+          "404 http://127.0.0.1:44087/chunks/shared-0-h6f464f64.js"
+        ]
+      }
+    },
+    "/docs/s0/p12": {
+      "sameContent": true,
+      "sameLazyContent": true,
+      "counterWorks": true,
+      "errors": {
+        "before": [
+          "Failed to load resource: the server responded with a status of 404 ()",
+          "Failed to load resource: the server responded with a status of 404 ()"
+        ],
+        "after": [],
+        "after-app-groups": [],
+        "before-aa": [
+          "Failed to load resource: the server responded with a status of 404 ()",
+          "Failed to load resource: the server responded with a status of 404 ()"
+        ]
+      },
+      "failedRequests": {
+        "before": [
+          "404 http://127.0.0.1:34489/chunks/shared-0-h6f464f64.js",
+          "404 http://127.0.0.1:34489/chunks/shared-0-h6f464f64.js"
+        ],
+        "after": [],
+        "after-app-groups": [],
+        "before-aa": [
+          "404 http://127.0.0.1:44087/chunks/shared-0-h6f464f64.js",
+          "404 http://127.0.0.1:44087/chunks/shared-0-h6f464f64.js"
+        ]
+      }
+    },
+    "/docs/s1/p27": {
+      "sameContent": true,
+      "sameLazyContent": true,
+      "counterWorks": true,
+      "errors": {
+        "before": [],
+        "after": [],
+        "after-app-groups": [],
+        "before-aa": []
+      },
+      "failedRequests": {
+        "before": [],
+        "after": [],
+        "after-app-groups": [],
+        "before-aa": []
+      }
+    },
+    "/docs/s0/p0": {
+      "sameContent": true,
+      "sameLazyContent": true,
+      "counterWorks": true,
+      "errors": {
+        "before": ["Failed to load resource: the server responded with a status of 404 ()"],
+        "after": [],
+        "after-app-groups": [],
+        "before-aa": [
+          "Failed to load resource: the server responded with a status of 404 ()",
+          "Failed to load resource: the server responded with a status of 404 ()"
+        ]
+      },
+      "failedRequests": {
+        "before": ["404 http://127.0.0.1:34489/chunks/shared-0-h6f464f64.js"],
+        "after": [],
+        "after-app-groups": [],
+        "before-aa": [
+          "404 http://127.0.0.1:44087/chunks/shared-0-h6f464f64.js",
+          "404 http://127.0.0.1:44087/chunks/shared-0-h6f464f64.js"
+        ]
+      }
+    },
+    "/docs/s0/p2": {
+      "sameContent": true,
+      "sameLazyContent": true,
+      "counterWorks": true,
+      "errors": {
+        "before": [
+          "Failed to load resource: the server responded with a status of 404 ()",
+          "Failed to load resource: the server responded with a status of 404 ()"
+        ],
+        "after": [],
+        "after-app-groups": [],
+        "before-aa": [
+          "Failed to load resource: the server responded with a status of 404 ()",
+          "Failed to load resource: the server responded with a status of 404 ()"
+        ]
+      },
+      "failedRequests": {
+        "before": [
+          "404 http://127.0.0.1:34489/chunks/shared-0-h6f464f64.js",
+          "404 http://127.0.0.1:34489/chunks/shared-0-h6f464f64.js"
+        ],
+        "after": [],
+        "after-app-groups": [],
+        "before-aa": [
+          "404 http://127.0.0.1:44087/chunks/shared-0-h6f464f64.js",
+          "404 http://127.0.0.1:44087/chunks/shared-0-h6f464f64.js"
+        ]
+      }
+    }
+  },
+  "protocols": ["http/1.1"],
+  "pageLoad": {
+    "desktop /docs/s0/p12 before": {
+      "dcl": {
+        "median": 297,
+        "p95": 360,
+        "min": 263,
+        "max": 388
+      },
+      "load": {
+        "median": 297,
+        "p95": 360,
+        "min": 263,
+        "max": 388
+      },
+      "lcp": {
+        "median": 140,
+        "p95": 180,
+        "min": 120,
+        "max": 200
+      },
+      "tbt": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "hydrated": {
+        "median": 933,
+        "p95": 1011,
+        "min": 863,
+        "max": 1025
+      },
+      "jsRequests": {
+        "median": 93,
+        "p95": 93,
+        "min": 93,
+        "max": 93
+      },
+      "jsTransferBytes": {
+        "median": 253458,
+        "p95": 253458,
+        "min": 253458,
+        "max": 253458
+      },
+      "failed": {
+        "median": 2,
+        "p95": 2,
+        "min": 2,
+        "max": 2
+      },
+      "errors": {
+        "median": 2,
+        "p95": 2,
+        "min": 2,
+        "max": 2
+      }
+    },
+    "desktop /docs/s0/p12 after": {
+      "dcl": {
+        "median": 316,
+        "p95": 345,
+        "min": 287,
+        "max": 354
+      },
+      "load": {
+        "median": 316,
+        "p95": 345,
+        "min": 288,
+        "max": 354
+      },
+      "lcp": {
+        "median": 144,
+        "p95": 175,
+        "min": 132,
+        "max": 180
+      },
+      "tbt": {
+        "median": 0,
+        "p95": 6,
+        "min": 0,
+        "max": 8
+      },
+      "hydrated": {
+        "median": 927,
+        "p95": 1173,
+        "min": 859,
+        "max": 1219
+      },
+      "jsRequests": {
+        "median": 92,
+        "p95": 92,
+        "min": 92,
+        "max": 92
+      },
+      "jsTransferBytes": {
+        "median": 253158,
+        "p95": 253158,
+        "min": 253158,
+        "max": 253158
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "desktop /docs/s0/p12 after-app-groups": {
+      "dcl": {
+        "median": 325,
+        "p95": 384,
+        "min": 309,
+        "max": 403
+      },
+      "load": {
+        "median": 325,
+        "p95": 385,
+        "min": 309,
+        "max": 404
+      },
+      "lcp": {
+        "median": 146,
+        "p95": 204,
+        "min": 124,
+        "max": 240
+      },
+      "tbt": {
+        "median": 0,
+        "p95": 10,
+        "min": 0,
+        "max": 18
+      },
+      "hydrated": {
+        "median": 368,
+        "p95": 430,
+        "min": 343,
+        "max": 431
+      },
+      "jsRequests": {
+        "median": 8,
+        "p95": 8,
+        "min": 8,
+        "max": 8
+      },
+      "jsTransferBytes": {
+        "median": 212980,
+        "p95": 212980,
+        "min": 212980,
+        "max": 212980
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "desktop /docs/s0/p12 before-aa": {
+      "dcl": {
+        "median": 306,
+        "p95": 339,
+        "min": 282,
+        "max": 347
+      },
+      "load": {
+        "median": 306,
+        "p95": 339,
+        "min": 282,
+        "max": 347
+      },
+      "lcp": {
+        "median": 136,
+        "p95": 176,
+        "min": 128,
+        "max": 176
+      },
+      "tbt": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "hydrated": {
+        "median": 922,
+        "p95": 1011,
+        "min": 881,
+        "max": 1054
+      },
+      "jsRequests": {
+        "median": 93,
+        "p95": 93,
+        "min": 93,
+        "max": 93
+      },
+      "jsTransferBytes": {
+        "median": 253458,
+        "p95": 253458,
+        "min": 253458,
+        "max": 253458
+      },
+      "failed": {
+        "median": 2,
+        "p95": 2,
+        "min": 2,
+        "max": 2
+      },
+      "errors": {
+        "median": 2,
+        "p95": 2,
+        "min": 2,
+        "max": 2
+      }
+    },
+    "desktop /docs/s1/p27 before": {
+      "dcl": {
+        "median": 301,
+        "p95": 333,
+        "min": 272,
+        "max": 343
+      },
+      "load": {
+        "median": 301,
+        "p95": 333,
+        "min": 272,
+        "max": 343
+      },
+      "lcp": {
+        "median": 150,
+        "p95": 169,
+        "min": 120,
+        "max": 180
+      },
+      "tbt": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "hydrated": {
+        "median": 641,
+        "p95": 675,
+        "min": 614,
+        "max": 678
+      },
+      "jsRequests": {
+        "median": 62,
+        "p95": 62,
+        "min": 62,
+        "max": 62
+      },
+      "jsTransferBytes": {
+        "median": 216819,
+        "p95": 216819,
+        "min": 216819,
+        "max": 216819
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "desktop /docs/s1/p27 after": {
+      "dcl": {
+        "median": 298,
+        "p95": 338,
+        "min": 280,
+        "max": 351
+      },
+      "load": {
+        "median": 298,
+        "p95": 338,
+        "min": 280,
+        "max": 351
+      },
+      "lcp": {
+        "median": 134,
+        "p95": 194,
+        "min": 120,
+        "max": 228
+      },
+      "tbt": {
+        "median": 0,
+        "p95": 4,
+        "min": 0,
+        "max": 5
+      },
+      "hydrated": {
+        "median": 652,
+        "p95": 692,
+        "min": 612,
+        "max": 700
+      },
+      "jsRequests": {
+        "median": 62,
+        "p95": 62,
+        "min": 62,
+        "max": 62
+      },
+      "jsTransferBytes": {
+        "median": 216819,
+        "p95": 216819,
+        "min": 216819,
+        "max": 216819
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "desktop /docs/s1/p27 after-app-groups": {
+      "dcl": {
+        "median": 311,
+        "p95": 398,
+        "min": 295,
+        "max": 427
+      },
+      "load": {
+        "median": 311,
+        "p95": 398,
+        "min": 295,
+        "max": 428
+      },
+      "lcp": {
+        "median": 140,
+        "p95": 242,
+        "min": 116,
+        "max": 280
+      },
+      "tbt": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "hydrated": {
+        "median": 335,
+        "p95": 417,
+        "min": 316,
+        "max": 450
+      },
+      "jsRequests": {
+        "median": 8,
+        "p95": 8,
+        "min": 8,
+        "max": 8
+      },
+      "jsTransferBytes": {
+        "median": 212881,
+        "p95": 212881,
+        "min": 212881,
+        "max": 212881
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "desktop /docs/s1/p27 before-aa": {
+      "dcl": {
+        "median": 290,
+        "p95": 342,
+        "min": 276,
+        "max": 354
+      },
+      "load": {
+        "median": 290,
+        "p95": 342,
+        "min": 276,
+        "max": 354
+      },
+      "lcp": {
+        "median": 134,
+        "p95": 170,
+        "min": 120,
+        "max": 172
+      },
+      "tbt": {
+        "median": 0,
+        "p95": 3,
+        "min": 0,
+        "max": 6
+      },
+      "hydrated": {
+        "median": 653,
+        "p95": 700,
+        "min": 621,
+        "max": 702
+      },
+      "jsRequests": {
+        "median": 62,
+        "p95": 62,
+        "min": 62,
+        "max": 62
+      },
+      "jsTransferBytes": {
+        "median": 216819,
+        "p95": 216819,
+        "min": 216819,
+        "max": 216819
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "mobile /docs/s0/p12 before": {
+      "dcl": {
+        "median": 1379,
+        "p95": 1490,
+        "min": 1345,
+        "max": 1558
+      },
+      "load": {
+        "median": 1379,
+        "p95": 1490,
+        "min": 1346,
+        "max": 1558
+      },
+      "lcp": {
+        "median": 414,
+        "p95": 457,
+        "min": 400,
+        "max": 464
+      },
+      "tbt": {
+        "median": 31,
+        "p95": 56,
+        "min": 0,
+        "max": 61
+      },
+      "hydrated": {
+        "median": 3233,
+        "p95": 3383,
+        "min": 3191,
+        "max": 3461
+      },
+      "jsRequests": {
+        "median": 93,
+        "p95": 93,
+        "min": 93,
+        "max": 93
+      },
+      "jsTransferBytes": {
+        "median": 253458,
+        "p95": 253458,
+        "min": 253458,
+        "max": 253458
+      },
+      "failed": {
+        "median": 2,
+        "p95": 2,
+        "min": 2,
+        "max": 2
+      },
+      "errors": {
+        "median": 2,
+        "p95": 2,
+        "min": 2,
+        "max": 2
+      }
+    },
+    "mobile /docs/s0/p12 after": {
+      "dcl": {
+        "median": 1465,
+        "p95": 1584,
+        "min": 1379,
+        "max": 1649
+      },
+      "load": {
+        "median": 1466,
+        "p95": 1586,
+        "min": 1379,
+        "max": 1652
+      },
+      "lcp": {
+        "median": 432,
+        "p95": 577,
+        "min": 384,
+        "max": 644
+      },
+      "tbt": {
+        "median": 122,
+        "p95": 184,
+        "min": 50,
+        "max": 203
+      },
+      "hydrated": {
+        "median": 3220,
+        "p95": 3323,
+        "min": 3155,
+        "max": 3376
+      },
+      "jsRequests": {
+        "median": 92,
+        "p95": 92,
+        "min": 92,
+        "max": 92
+      },
+      "jsTransferBytes": {
+        "median": 253158,
+        "p95": 253158,
+        "min": 253158,
+        "max": 253158
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "mobile /docs/s0/p12 after-app-groups": {
+      "dcl": {
+        "median": 1576,
+        "p95": 1637,
+        "min": 1534,
+        "max": 1668
+      },
+      "load": {
+        "median": 1576,
+        "p95": 1637,
+        "min": 1534,
+        "max": 1669
+      },
+      "lcp": {
+        "median": 440,
+        "p95": 487,
+        "min": 404,
+        "max": 496
+      },
+      "tbt": {
+        "median": 100,
+        "p95": 171,
+        "min": 33,
+        "max": 173
+      },
+      "hydrated": {
+        "median": 1708,
+        "p95": 1810,
+        "min": 1621,
+        "max": 1815
+      },
+      "jsRequests": {
+        "median": 8,
+        "p95": 8,
+        "min": 8,
+        "max": 8
+      },
+      "jsTransferBytes": {
+        "median": 212980,
+        "p95": 212980,
+        "min": 212980,
+        "max": 212980
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "mobile /docs/s0/p12 before-aa": {
+      "dcl": {
+        "median": 1366,
+        "p95": 1448,
+        "min": 1337,
+        "max": 1481
+      },
+      "load": {
+        "median": 1368,
+        "p95": 1450,
+        "min": 1337,
+        "max": 1483
+      },
+      "lcp": {
+        "median": 408,
+        "p95": 468,
+        "min": 384,
+        "max": 484
+      },
+      "tbt": {
+        "median": 27,
+        "p95": 54,
+        "min": 0,
+        "max": 55
+      },
+      "hydrated": {
+        "median": 3215,
+        "p95": 3369,
+        "min": 3180,
+        "max": 3396
+      },
+      "jsRequests": {
+        "median": 93,
+        "p95": 93,
+        "min": 93,
+        "max": 93
+      },
+      "jsTransferBytes": {
+        "median": 253458,
+        "p95": 253458,
+        "min": 253458,
+        "max": 253458
+      },
+      "failed": {
+        "median": 2,
+        "p95": 2,
+        "min": 2,
+        "max": 2
+      },
+      "errors": {
+        "median": 2,
+        "p95": 2,
+        "min": 2,
+        "max": 2
+      }
+    },
+    "mobile /docs/s1/p27 before": {
+      "dcl": {
+        "median": 1423,
+        "p95": 1519,
+        "min": 1329,
+        "max": 1519
+      },
+      "load": {
+        "median": 1423,
+        "p95": 1519,
+        "min": 1329,
+        "max": 1520
+      },
+      "lcp": {
+        "median": 458,
+        "p95": 523,
+        "min": 388,
+        "max": 536
+      },
+      "tbt": {
+        "median": 107,
+        "p95": 148,
+        "min": 0,
+        "max": 151
+      },
+      "hydrated": {
+        "median": 2388,
+        "p95": 2434,
+        "min": 2306,
+        "max": 2440
+      },
+      "jsRequests": {
+        "median": 62,
+        "p95": 62,
+        "min": 62,
+        "max": 62
+      },
+      "jsTransferBytes": {
+        "median": 216819,
+        "p95": 216819,
+        "min": 216819,
+        "max": 216819
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "mobile /docs/s1/p27 after": {
+      "dcl": {
+        "median": 1450,
+        "p95": 1572,
+        "min": 1358,
+        "max": 1574
+      },
+      "load": {
+        "median": 1450,
+        "p95": 1575,
+        "min": 1358,
+        "max": 1578
+      },
+      "lcp": {
+        "median": 428,
+        "p95": 586,
+        "min": 372,
+        "max": 656
+      },
+      "tbt": {
+        "median": 93,
+        "p95": 208,
+        "min": 31,
+        "max": 265
+      },
+      "hydrated": {
+        "median": 2351,
+        "p95": 2457,
+        "min": 2291,
+        "max": 2484
+      },
+      "jsRequests": {
+        "median": 62,
+        "p95": 62,
+        "min": 62,
+        "max": 62
+      },
+      "jsTransferBytes": {
+        "median": 216819,
+        "p95": 216819,
+        "min": 216819,
+        "max": 216819
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "mobile /docs/s1/p27 after-app-groups": {
+      "dcl": {
+        "median": 1609,
+        "p95": 1676,
+        "min": 1539,
+        "max": 1678
+      },
+      "load": {
+        "median": 1610,
+        "p95": 1677,
+        "min": 1539,
+        "max": 1679
+      },
+      "lcp": {
+        "median": 450,
+        "p95": 521,
+        "min": 384,
+        "max": 532
+      },
+      "tbt": {
+        "median": 85,
+        "p95": 206,
+        "min": 32,
+        "max": 209
+      },
+      "hydrated": {
+        "median": 1724,
+        "p95": 1814,
+        "min": 1558,
+        "max": 1833
+      },
+      "jsRequests": {
+        "median": 8,
+        "p95": 8,
+        "min": 8,
+        "max": 8
+      },
+      "jsTransferBytes": {
+        "median": 212881,
+        "p95": 212881,
+        "min": 212881,
+        "max": 212881
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "mobile /docs/s1/p27 before-aa": {
+      "dcl": {
+        "median": 1454,
+        "p95": 1499,
+        "min": 1413,
+        "max": 1505
+      },
+      "load": {
+        "median": 1454,
+        "p95": 1499,
+        "min": 1413,
+        "max": 1505
+      },
+      "lcp": {
+        "median": 416,
+        "p95": 462,
+        "min": 384,
+        "max": 480
+      },
+      "tbt": {
+        "median": 92,
+        "p95": 163,
+        "min": 73,
+        "max": 184
+      },
+      "hydrated": {
+        "median": 2354,
+        "p95": 2432,
+        "min": 2302,
+        "max": 2438
+      },
+      "jsRequests": {
+        "median": 62,
+        "p95": 62,
+        "min": 62,
+        "max": 62
+      },
+      "jsTransferBytes": {
+        "median": 216819,
+        "p95": 216819,
+        "min": 216819,
+        "max": 216819
+      },
+      "failed": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      },
+      "errors": {
+        "median": 0,
+        "p95": 0,
+        "min": 0,
+        "max": 0
+      }
+    }
+  },
+  "loadAverageAfter": [7.04, 11.69, 14.89]
+}

@@ -200,6 +200,7 @@ import {
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes, createFarmVercelCanonicalSlashRoutes } from "./vercel-assets";
+import { listFarmClientOutputFiles, planFarmImmutableAssets } from "./immutable-assets";
 import {
   assertServerReadSSRAssetsSupported,
   collectServerOnlySSRAssets,
@@ -1745,9 +1746,11 @@ function shouldBuildFarmMobileClient(config: ResolvedFarmConfig): boolean {
 /**
  * Nitro's cache route rules (`swr`, `cache`) store a response by URL, and refuse to store one
  * whose `Vary` names a request header the rule does not key on. Farm's own responses vary on:
- * `Accept` where a page negotiates its Markdown alternate, and `X-Farm-Shell` where a mobile
- * shell's document loads a different client. The cache keys on those headers too, so it can store
- * those responses and serve each request the variant it asked for.
+ * `Accept` where a page negotiates its Markdown alternate, `X-Farm-Shell` where a mobile
+ * shell's document loads a different client, and `F-Layouts` where an islands-mode navigation
+ * names the layouts it keeps (that render is private, the whole page is shared). The cache keys
+ * on those headers too, so it can store those responses and serve each request the variant it
+ * asked for.
  */
 function varyFarmNitroCacheRules(
   rules: Record<string, any>,
@@ -2588,8 +2591,11 @@ async function buildClient(
           ],
         },
       };
-      // The app's `vite` block applies to production as it does in development.
-      await viteBuild(mergeFarmProductionViteConfig(clientViteConfig, config.vite));
+      // The app's `vite` block applies to production as it does in development, including
+      // its client output options (chunking) under the file names Farm owns.
+      await viteBuild(
+        mergeFarmProductionViteConfig(clientViteConfig, config.vite, { clientOutput: true }),
+      );
       if (platform === "mobile") {
         // Documents keep the web stylesheet: CSS does not depend on platform().
         await fs.rm(path.join(outputDir, `${entryName}.css`), { force: true });
@@ -7172,6 +7178,9 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   orderedPageRoutes.forEach((route, index) => {
     const varName = `pageRoute${index}`;
     if (isFarmMarkdownPageFile(route.modulePath)) {
+      // The module reads its literal route config exports; whether its source reads the request
+      // is decided here, as for any page.
+      const renderingDirective = readRouteRenderingDirectiveFromFile(route.modulePath);
       // Below a hydrating layout, the MDX components' islands join its tree, as dev renders
       // them and the client route table expects; as roots of their own they lost its context.
       const markdownServerTree = usesFarmServerTree(pageHydrationPlans.get(route.modulePath));
@@ -7179,7 +7188,9 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   {
     pattern: ${JSON.stringify(route.pattern)},${
       route.directory ? `\n    directory: ${JSON.stringify(route.directory)},` : ""
-    }${markdownServerTree ? "\n    serverTree: true," : ""}
+    }${renderingDirective ? `\n    rendering: ${JSON.stringify(renderingDirective)},` : ""}${
+      markdownServerTree ? "\n    serverTree: true," : ""
+    }
     module: createFarmMarkdownRouteModule({
       source: ${JSON.stringify(route.source ?? "")},
       filePath: ${JSON.stringify(toBakedMarkdownSourcePath(config.root, route.modulePath))},
@@ -9179,8 +9190,9 @@ const farmClientEntryPreloadTags = farmClientModulePreloads
   ? farmClientModulePreloads.entry.map(renderFarmClientModulePreload).join("")
   : "";
 // The client modules a document's markup loads: its islands' boundaries and the
-// client references of its server tree.
-const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"|"r":"(\\/[^"]+)"/g;
+// client references of its server tree. An island with a deferred strategy loads its
+// module on its own trigger, so it is not preloaded.
+const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"([^>]*)>|"r":"(\\/[^"]+)"/g;
 
 function renderFarmClientModulePreload(index) {
   return '\\n  <link rel="modulepreload" href="/' +
@@ -9208,7 +9220,10 @@ function renderFarmClientModulePreloads(markup, pageModule) {
   };
   add(pageModule);
   if (typeof markup === "string") {
-    for (const match of markup.matchAll(FARM_CLIENT_MODULE_REFERENCE_PATTERN)) add(match[1] || match[2]);
+    for (const match of markup.matchAll(FARM_CLIENT_MODULE_REFERENCE_PATTERN)) {
+      if (match[1] && FARM_DEFERRED_ISLAND_STRATEGY.test(match[2])) continue;
+      add(match[1] || match[3]);
+    }
   }
   return tags;
 }
@@ -11238,6 +11253,12 @@ ${
 
       // Reads from here on belong to the page render, not to middleware.
       const requestReadsBeforeRender = _getRequestReadCount();
+      // A swr or cache route rule stores this page by URL for every visitor. Nitro hands Farm the
+      // request without its cookies, Authorization, or any header the rule does not key on, so a
+      // render that reads nothing of the request is that shared page, whatever its route config.
+      const farmRouteRuleCached =
+        Boolean(adapterContext?.routeRuleCache) &&
+        (request.method === "GET" || request.method === "HEAD");
 
       // Get the page component and metadata
       let PageComponent = route.module.default;
@@ -11473,7 +11494,8 @@ ${
             ? `// Islands mode: a route a shared cache may store (a PPR shell, a static page) renders
         // whole for every request, so a cache hit stays a hit. Other routes leave out what the
         // navigating browser keeps: the layouts it shows and the values it holds.
-        const farmSharedCacheableRoute = Boolean(getRouteSharedCacheControl(route, pprCanCache));
+        const farmSharedCacheableRoute =
+          farmRouteRuleCached || Boolean(getRouteSharedCacheControl(route, pprCanCache));
         if (farmSharedCacheableRoute) ignoreFarmHeldValues();
         const farmLayoutKeyOf = getFarmLayoutKey;
         // A navigation the browser renders in its layout's React root rebuilds a server-tree page
@@ -11748,6 +11770,24 @@ ${
           middlewareData?.size ||
           middlewareContext?.size
         );
+        if (farmRouteRuleCached && (renderedPage.stream || hasRequestScopedRender)) {
+          // The route rule's cache refuses a private page: say why it renders on every request.
+          emitFarmEvent({
+            type: "cache.bypass",
+            route: pathname,
+            reason: pageStatus >= 400
+              ? "error-status"
+              : renderReadRequest
+                ? "request-read"
+                : middlewareData?.size || middlewareContext?.size
+                  ? "middleware-data"
+                  : hasConfiguredRouteContext
+                    ? "route-context"
+                    : renderedPage.stream
+                      ? "suspense-stream"
+                      : "request-scoped",
+          });
+        }
         const sharedCacheControl = getRouteSharedCacheControl(route, pprCanCache);
         const responseHeaders = {
           "Content-Type": "text/html; charset=utf-8",
@@ -11757,8 +11797,16 @@ ${
         };
         // An error status or a request-scoped render is never shareable, even when
         // the PPR shell headers would otherwise grant a shared max-age.
-        if (renderedPage.stream || hasRequestScopedRender || !sharedCacheControl) {
+        if (
+          renderedPage.stream ||
+          hasRequestScopedRender ||
+          (!sharedCacheControl && !farmRouteRuleCached)
+        ) {
           responseHeaders["Cache-Control"] = "private, no-store";
+        } else if (responseHeaders["Cache-Control"] == null) {
+          // A page with no policy of its own under a swr or cache route rule: the rule's cache
+          // stores it and sends the rule's Cache-Control.
+          delete responseHeaders["Cache-Control"];
         }
         const farmI18nSnapshot = getFarmI18nSnapshot();${
           farmIslandsMode
@@ -13436,7 +13484,9 @@ ${hasNitroCacheRouteRules ? "  let farmGuardedResponse = false\n" : ""}  const r
       ? `
   const farmCacheControl = response.headers.get('cache-control')
   if (
-    farmGuardedResponse &&
+    // A guarded response, or any response Farm kept private under a swr or cache rule: the
+    // rule's cache does not store it, and the rule's public Cache-Control must not reach a CDN.
+    (farmGuardedResponse || event.context?.routeRules?.cache) &&
     farmCacheControl &&
     FARM_PRIVATE_CACHE_DIRECTIVE.test(farmCacheControl)
   ) {
@@ -13556,6 +13606,9 @@ function toFarmNodeResponse(request, response) {
     varyFarmNitroCacheRules(routeRulesToNitroRouteRules(config.routeRules), [
       ...(config.md.enabled ? ["accept"] : []),
       ...(shouldBuildFarmMobileClient(config) ? ["x-farm-shell"] : []),
+      ...(resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands"
+        ? ["f-layouts"]
+        : []),
     ]),
     config.basePath,
     resolveFarmAPIServerBasePath(config.api),
@@ -13590,6 +13643,23 @@ function toFarmNodeResponse(request, response) {
     }),
   );
 
+  // Content-hashed client files never change, so they are cached for a year. Vercel gets the same
+  // policy from the immutable route postProcessVercelOutput writes, which replaces Nitro's routes.
+  const immutableAssets = isVercel
+    ? { publicAssets: [], routeRules: {} }
+    : planFarmImmutableAssets({
+        clientOutputDir,
+        files: await listFarmClientOutputFiles(clientOutputDir),
+        routeRules: configuredNitroRouteRules,
+        routePaths: [
+          ...[...routeManager.getRoutes().keys()].map((pattern) =>
+            applyFarmBasePath(pattern, config.basePath),
+          ),
+          ...apiRouteManager.getRoutes().keys(),
+          resolveFarmAPIServerBasePath(config.api),
+        ],
+      });
+
   let nitroConfig: NitroConfig = {
     preset,
     ...(farmNodeServerEntryPath ? { entry: farmNodeServerEntryPath } : {}),
@@ -13608,13 +13678,9 @@ function toFarmNodeResponse(request, response) {
     alias: resolveNitroInternalRuntimeAliases(root),
     compatibilityDate: "2024-12-01",
     output: resolveFarmNitroOutputConfig(preset, outputDir),
-    publicAssets: [
-      {
-        dir: clientOutputDir,
-        maxAge: 31536000,
-        baseURL: "/",
-      },
-    ],
+    // Nitro gives the root directory no Cache-Control on any preset (it falls through to the
+    // app), so public files keep revalidating; the hashed directories carry their own maxAge.
+    publicAssets: [{ dir: clientOutputDir, baseURL: "/" }, ...immutableAssets.publicAssets],
     // A self-hosted Node server sends static files itself, so precompress them
     // with gzip and let Nitro serve that by Accept-Encoding. Brotli at Nitro's
     // fixed top quality cost a docs app ~20 s of build CPU for a small further
@@ -13678,6 +13744,7 @@ function toFarmNodeResponse(request, response) {
       "/**": {
         prerender: false,
       },
+      ...immutableAssets.routeRules,
       ...configuredNitroRouteRules,
       // Exact user rules must retain their runtime settings without replacing
       // the headers and prerender marker generated for a safe physical page.

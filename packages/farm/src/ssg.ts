@@ -51,6 +51,7 @@
 
 import { readFileSync } from "fs";
 import { readFile } from "fs/promises";
+import { isFarmMarkdownPageFile } from "./app-markdown-runtime";
 import {
   mergeRouteRenderingDirectiveConfig,
   type DirectiveRenderingConfig,
@@ -622,6 +623,18 @@ export async function collectSSGPages(
       }
 
       const source = await readFile(route.filePath, "utf8").catch(() => undefined);
+      // The docs runtime answers its Markdown pages before any page route, so their route config
+      // does not apply to them: `docs.prerender` decides whether they are written as files.
+      if (options.docsAdapterRoutes?.owns(route.path) && isFarmMarkdownPageFile(route.filePath)) {
+        ssrRoutes.push(route.path);
+        if (
+          options.suggestStaticRendering !== false &&
+          analyzeStaticRouteCandidate(null, source, { isDynamic: route.isDynamic }).candidate
+        ) {
+          staticCandidateDocsPages += 1;
+        }
+        continue;
+      }
       const configuredRendering = resolveConfiguredRouteRenderingConfig(mod, source);
       const rendering = resolveRouteRenderingConfig(mod, source);
 
