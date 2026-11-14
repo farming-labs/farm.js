@@ -1012,8 +1012,8 @@ test("home keeps its agents link usable without JavaScript", async ({ browser, b
 
 // Figure panels are fixed boxes and their type has a legibility floor, so a layout without room
 // for its text spills out of its boxes. Without JavaScript each figure shows its final frame.
-for (const width of [360, 1440]) {
-  test(`native posts keep figure text inside its boxes at ${width}px`, async ({
+for (const width of [320, 360, 1440]) {
+  test(`native posts and their cards keep figure text inside its boxes at ${width}px`, async ({
     browser,
     baseURL,
   }) => {
@@ -1025,7 +1025,7 @@ for (const width of [360, 1440]) {
     });
     const page = await context.newPage();
     try {
-      for (const pathname of ["/blog/web-to-native", "/blog/native-internals"]) {
+      for (const pathname of ["/blog/web-to-native", "/blog/native-internals", "/blog"]) {
         await page.goto(pathname);
         await page.evaluate(() => document.fonts.ready);
         const panels = page.locator(".blog-figure[data-figure] .bf-stage .bf-panel");
