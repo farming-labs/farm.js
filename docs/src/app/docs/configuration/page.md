@@ -663,9 +663,11 @@ the page's file last changed, read when the server builds. Dynamic routes, pages
 says `robots: { index: false }` (their own, or a layout's when the page sets no `robots`), pages
 behind a route [`guard`](/docs/routing#route-guards), and
 pages a guard written for their path covers are left out: a `middleware.ts` in the page's folder or
-a parent below the root, a config middleware `matcher` that names the path, or an integration's
-`protectedRoutes`. Guards that cover every path (a root `middleware.ts`, middleware without a
-matcher or with a catch-all or function matcher, a plugin's `runtime.before` hook) hide nothing,
+a parent below the root, a root `middleware.ts` whose own `config.matcher` names the path (such as
+`matcher: ["/dashboard/:path*"]`), a config middleware `matcher` that names the path, or an
+integration's `protectedRoutes`. Guards that cover every path (a root `middleware.ts` without such a
+matcher, middleware without a matcher or with a catch-all or function matcher, a plugin's
+`runtime.before` hook) hide nothing,
 since they name no page; the content behind them stays private, because pages are read as a
 signed-out visitor. URLs use the root layout's `metadataBase`, or the request's origin when it has
 none, the same origin the generated `llms.txt` links to; set `metadataBase` so crawlers and caches

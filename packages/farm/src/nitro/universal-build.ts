@@ -5943,17 +5943,16 @@ async function buildSSRInMemory(
       specRoute: config.openapi.specRoute || null,
     };
   }
-  const discoveredMiddlewareRoutes = await discoverMiddlewareRoutes(appDirs);
-  // On a target that runs `runtime: "edge"` middleware in front of static files, the server
-  // learns which files those are, so the build's own prerender requests skip them.
-  const middlewareRoutes = farmTargetRunsEdgeMiddleware(preset)
-    ? await Promise.all(
-        discoveredMiddlewareRoutes.map(async (route) => ({
-          ...route,
-          config: await readMiddlewareFileConfig(route.filePath),
-        })),
-      )
-    : discoveredMiddlewareRoutes;
+  // Each file's literal `config`: on a target that runs `runtime: "edge"` middleware in front of
+  // static files the server learns which files those are, so the build's own prerender
+  // requests skip them; and a root file's `matcher` names the pages it guards, which public
+  // listings (sitemap.xml, llms.txt, MCP) then leave out.
+  const middlewareRoutes = await Promise.all(
+    (await discoverMiddlewareRoutes(appDirs)).map(async (route) => ({
+      ...route,
+      config: await readMiddlewareFileConfig(route.filePath),
+    })),
+  );
   const instrumentationPath = resolveFarmInstrumentationFile(root, config.srcDir || "src");
 
   // Check for custom not-found page
