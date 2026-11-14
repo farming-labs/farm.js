@@ -292,10 +292,11 @@ test("a prop holding </script> and line separators reaches the client unchanged 
 test("a meta tag a client component renders is hoisted into the head and follows its state, as React 19 hoists it", async ({
   page,
 }) => {
-  test.fail(
-    mode === "islands",
-    "an island's React root is its <f-island>, not the document, so React keeps the meta tag in the island",
-  );
+  // The server sends it in the head, before any JavaScript runs.
+  const html = await (await page.request.get("/battle/shapes")).text();
+  const head = html.slice(0, html.indexOf("</head>"));
+  expect(head).toContain('<meta name="battle-island" content="count 0"/>');
+  expect(html.indexOf('name="battle-island"')).toBe(html.lastIndexOf('name="battle-island"'));
   const errors = collectErrors(page);
   await page.goto("/battle/shapes");
   await page.waitForLoadState("networkidle");
