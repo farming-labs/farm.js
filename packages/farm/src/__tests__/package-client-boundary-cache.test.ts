@@ -6,10 +6,13 @@ import {
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
   getMarkdownPageHydrationPlan,
+  isFarmPackageClientBoundary,
+  withFarmSourceSnapshot,
 } from "../utils/client-component";
 import { resolveConfig } from "../config";
 import { RouteManager } from "../routing/route-manager";
 import {
+  dropLatestPackageClientBoundaryCache,
   runWithPackageClientBoundaryCacheFile,
   usePackageClientBoundaryCacheFile,
   withPackageClientBoundaryCache,
@@ -19,6 +22,7 @@ const tempDirs: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  dropLatestPackageClientBoundaryCache();
   while (tempDirs.length > 0) {
     fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
   }
@@ -348,5 +352,84 @@ describe("package client-boundary cache", () => {
     const { reads } = countPackageReads();
     expect(routeManager.regenerateClientManifest(root)).toEqual(uncached);
     expect(reads).toEqual([]);
+  });
+
+  it("reuses the latest dev plan's inspections in transforms until a watched change", async () => {
+    const { root, cacheFile, modules } = createProject();
+    const config = await resolveConfig({ root, srcDir: "src" }, "development");
+    const routeManager = new RouteManager(config);
+    await routeManager.discoverRoutes();
+    routeManager.usePackageClientBoundaryCacheFile(cacheFile);
+    routeManager.generateClientManifest(root);
+
+    // A transform asks whether each package a module imports is a client boundary.
+    const toolbar = path.join(root, "src", "components", "toolbar.tsx");
+    const inspect = () =>
+      routeManager.inspectPackages(() => isFarmPackageClientBoundary(toolbar, "ui-kit", root));
+    const { reads } = countPackageReads();
+    expect(inspect()).toBe(true);
+    expect(inspect()).toBe(true);
+    expect(reads).toEqual([]);
+    vi.restoreAllMocks();
+
+    // A dependency reinstalled while the dev server runs, then the change the watcher reports.
+    fs.writeFileSync(
+      path.join(root, "node_modules", "ui-kit", "dist", "button.js"),
+      "export function Button() { return null; }\n",
+    );
+    dropLatestPackageClientBoundaryCache();
+    expect(inspect()).toBe(isFarmPackageClientBoundary(toolbar, "ui-kit", root));
+    expect(modules.length).toBeGreaterThan(0);
+  });
+});
+
+describe("source snapshot", () => {
+  it("plans the same and reads each shared module once across a plan's routes", () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "farm-source-snapshot-")));
+    tempDirs.push(root);
+    const files: Record<string, string> = {
+      "src/ui/index.ts": Array.from(
+        { length: 8 },
+        (_, index) => `export { Part${index} } from "./part-${index}";`,
+      ).join("\n"),
+      "src/ui/counter.tsx":
+        '"use client";\nimport { useState } from "react";\nexport function Counter() { const [n, setN] = useState(0); return <button onClick={() => setN(n + 1)}>{n}</button>; }\n',
+    };
+    for (let index = 0; index < 8; index++) {
+      files[`src/ui/part-${index}.tsx`] =
+        `export function Part${index}({ children }) { return <div>{children}</div>; }\n`;
+    }
+    const pages: string[] = [];
+    for (let index = 0; index < 12; index++) {
+      const page = `src/app/page-${index}/page.tsx`;
+      files[page] =
+        `import { Part${index % 8} } from "../../ui";\nimport { Counter } from "../../ui/counter";\nexport default async function Page() { return <Part${index % 8}><Counter /></Part${index % 8}>; }\n`;
+      pages.push(path.join(root, page));
+    }
+    writeFiles(root, files);
+    const plan = () =>
+      pages.map((page) =>
+        getClientModuleHydrationPlan(page, root, "off", {
+          asyncOwnerIslands: true,
+          serverOwners: true,
+        }),
+      );
+    const expected = plan();
+    expect(expected.every((entry) => entry.isolatedBoundaries.length === 1)).toBe(true);
+
+    const reads: string[] = [];
+    const readFileSync = fs.readFileSync;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((
+      file: fs.PathOrFileDescriptor,
+      ...rest: []
+    ) => {
+      if (typeof file === "string") reads.push(file);
+      return readFileSync.call(fs, file, ...rest);
+    }) as typeof fs.readFileSync);
+    expect(withFarmSourceSnapshot(plan)).toEqual(expected);
+    const barrel = path.join(root, "src", "ui", "index.ts");
+    const counter = path.join(root, "src", "ui", "counter.tsx");
+    expect(reads.filter((file) => file === barrel)).toHaveLength(1);
+    expect(reads.filter((file) => file === counter)).toHaveLength(1);
   });
 });

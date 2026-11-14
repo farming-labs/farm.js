@@ -62,6 +62,7 @@ import {
   usesFarmServerTree,
   getClientModuleMetadata,
   resolveFarmIsolatedClientHydrationMode,
+  withFarmSourceSnapshot,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
 import { getIntegrationProviders } from "../integrations";
@@ -94,7 +95,10 @@ import { applyFarmBasePath, stripFarmBasePath } from "../base-path";
 import { appendFarmRedirectQuery } from "../redirect-query";
 import { encodeConfigRouteSegment } from "../plugins/route-pattern";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
-import { runWithPackageClientBoundaryCacheFile } from "../utils/package-client-boundary-cache";
+import {
+  runWithLatestPackageClientBoundaryCache,
+  runWithPackageClientBoundaryCacheFile,
+} from "../utils/package-client-boundary-cache";
 import {
   createRouteDirectoryPattern,
   formatRouteSegment,
@@ -739,11 +743,10 @@ export class RouteManager {
       return this.clientManifestCache.manifest;
     }
     const cacheFile = this.packageClientBoundaryCacheFile;
-    return cacheFile
-      ? runWithPackageClientBoundaryCacheFile(cacheFile, () =>
-          this.computeClientManifest(normalizedProjectRoot),
-        )
-      : this.computeClientManifest(normalizedProjectRoot);
+    // One plan reads each shared module once, however many routes import it.
+    const compute = () =>
+      withFarmSourceSnapshot(() => this.computeClientManifest(normalizedProjectRoot));
+    return cacheFile ? runWithPackageClientBoundaryCacheFile(cacheFile, compute) : compute();
   }
 
   /**
@@ -752,6 +755,16 @@ export class RouteManager {
    */
   usePackageClientBoundaryCacheFile(file: string): void {
     this.packageClientBoundaryCacheFile = file;
+  }
+
+  /**
+   * @internal Run `operation` (synchronous) with the package inspections of the latest plan, as
+   * the dev server's transforms and renders inspect the packages a module imports. Without a cache
+   * file (outside the dev server), it runs as it is.
+   */
+  inspectPackages<T>(operation: () => T): T {
+    const file = this.packageClientBoundaryCacheFile;
+    return file ? runWithLatestPackageClientBoundaryCache(file, operation) : operation();
   }
 
   private computeClientManifest(normalizedProjectRoot: string): FarmClientRouteManifest {

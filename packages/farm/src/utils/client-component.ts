@@ -5,6 +5,7 @@ import {
   ensureFarmInternalClientReference,
   ensureFarmPackageClientReference,
   farmPackageClientImportExports,
+  FARM_CLIENT_REFERENCE_DIRECTORY,
   FARM_CLIENT_REFERENCE_PRAGMA,
   findFarmPackageClientImports,
   parseFarmResolveFrom,
@@ -26,37 +27,27 @@ import {
   PackageInspectionTrace,
 } from "./package-client-boundary-cache";
 import { getFarmProjectSourceDir } from "./source-dir";
+import { memoizeInFarmSourceSnapshot, noteFarmSourceRead } from "./source-snapshot";
 
-// The source files read while `traceFarmSourceReads` runs, so a result can say what it depends on.
-let sourceReadTrace: Set<string> | undefined;
+export { traceFarmSourceReads, withFarmSourceSnapshot } from "./source-snapshot";
 
 function readIfExists(filePath: string): string | null {
+  // Client references are written while a plan runs, so they are read from disk every time.
+  const content = filePath.replace(/\\/g, "/").includes(FARM_CLIENT_REFERENCE_DIRECTORY)
+    ? readSourceFile(filePath)
+    : memoizeInFarmSourceSnapshot("source", filePath, () => readSourceFile(filePath));
+  if (content !== null) noteFarmSourceRead(filePath);
+  return content;
+}
+
+function readSourceFile(filePath: string): string | null {
   try {
     if (!filePath || !fs.existsSync(filePath)) {
       return null;
     }
-    const content = fs.readFileSync(filePath, "utf-8");
-    sourceReadTrace?.add(filePath);
-    return content;
+    return fs.readFileSync(filePath, "utf-8");
   } catch {
     return null;
-  }
-}
-
-/**
- * @internal Runs `operation` (synchronous) and returns the source files the analysis in this module
- * read while it ran, nested traces included, so a caller can cache the result while they are
- * unchanged.
- */
-export function traceFarmSourceReads<T>(operation: () => T): { result: T; files: string[] } {
-  const outer = sourceReadTrace;
-  const files = new Set<string>();
-  sourceReadTrace = files;
-  try {
-    return { result: operation(), files: [...files] };
-  } finally {
-    sourceReadTrace = outer;
-    if (outer) for (const file of files) outer.add(file);
   }
 }
 
@@ -400,6 +391,10 @@ const TOKENIZED_MODULE_CACHE_SIZE = 32;
 
 /** The module's tokens. Several helpers inspect the same file in a row, so recent results are kept. */
 function tokenizeModuleSource(content: string): readonly ModuleSourceToken[] {
+  return memoizeInFarmSourceSnapshot("tokens", content, () => tokenizeRecentModuleSource(content));
+}
+
+function tokenizeRecentModuleSource(content: string): readonly ModuleSourceToken[] {
   const cached = tokenizedModules.get(content);
   if (cached) return cached;
   const tokens = scanModuleSourceTokens(content);
@@ -1913,7 +1908,11 @@ function inspectPackageClientBoundary(
   const key = `${root ?? ""}\0${resolvedPath}`;
   const cached = cache.find(key, visited);
   if (cached) {
-    for (const file of cached.files) visited.add(file);
+    for (const file of cached.files) {
+      visited.add(file);
+      // The inspection read them, so a traced result depends on them as on its own reads.
+      noteFarmSourceRead(file);
+    }
     return { ...cached.result };
   }
   const trace = new PackageInspectionTrace();
@@ -1988,10 +1987,22 @@ function traversePackageClientBoundary(
 
 function getImportSpecifiers(
   content: string | null,
-  { reexportsOnly = false, dynamic = false }: { reexportsOnly?: boolean; dynamic?: boolean } = {},
+  options: { reexportsOnly?: boolean; dynamic?: boolean } = {},
 ): string[] {
   if (!content) return [];
+  const specifiers = memoizeInFarmSourceSnapshot(
+    `specifiers:${options.reexportsOnly === true}:${options.dynamic === true}`,
+    content,
+    () => scanImportSpecifiers(content, options),
+  );
+  // Callers may change the list they get.
+  return [...specifiers];
+}
 
+function scanImportSpecifiers(
+  content: string,
+  { reexportsOnly = false, dynamic = false }: { reexportsOnly?: boolean; dynamic?: boolean },
+): string[] {
   const tokens = tokenizeModuleSource(content);
   const matches = new Set<string>();
   let braceDepth = 0;
@@ -2093,6 +2104,20 @@ function isTypeOnlyNamedClause(
  */
 /** Resolves an import to its source file; `local` when it is the app's own code (or an alias). */
 export function resolveImportedModule(
+  importerPath: string,
+  specifier: string,
+  root?: string,
+): { path: string | null; local: boolean } {
+  const resolved = memoizeInFarmSourceSnapshot(
+    "resolution",
+    `${root ?? ""}\0${importerPath}\0${specifier}`,
+    () => resolveImportedModuleUncached(importerPath, specifier, root),
+  );
+  // Callers may change the result they get.
+  return { ...resolved };
+}
+
+function resolveImportedModuleUncached(
   importerPath: string,
   specifier: string,
   root?: string,

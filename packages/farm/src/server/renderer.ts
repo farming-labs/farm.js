@@ -920,6 +920,16 @@ export class ServerRenderer {
   }
 
   /** The page a hydrating layout keeps as server HTML: islands again, or a server tree. */
+  /** The route root's strategy, inspecting packages with the dev server's latest plan's cache. */
+  private resolveRouteRootStrategy(
+    ...args: Parameters<typeof resolveFarmRouteRootStrategy>
+  ): ReturnType<typeof resolveFarmRouteRootStrategy> {
+    const resolve = () => resolveFarmRouteRootStrategy(...args);
+    return typeof this.routeManager.inspectPackages === "function"
+      ? this.routeManager.inspectPackages(resolve)
+      : resolve();
+  }
+
   private async isolateServerPage(element: unknown, serverTree: boolean): Promise<unknown> {
     if (islands && this.islandValues()) {
       const runtime = islands;
@@ -2009,7 +2019,7 @@ export class ServerRenderer {
       // Islands mode resolves the root's strategy as production does: declared, or inferred when
       // every client component in the root can wait for an interaction (RFC 0003, section 11).
       const hydrationIslandStrategy = this.islandValues()
-        ? resolveFarmRouteRootStrategy(
+        ? this.resolveRouteRootStrategy(
             route,
             { shouldHydrate, islandStrategy: moduleMetadata.islandStrategy ?? null },
             layouts.map((layout, index) => ({

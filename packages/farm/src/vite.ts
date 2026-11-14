@@ -155,7 +155,10 @@ import {
   resolveFarmIsolatedClientHydrationMode,
   stripUseClientDirective,
 } from "./utils/client-component";
-import { resolvePackageClientBoundaryCacheFile } from "./utils/package-client-boundary-cache";
+import {
+  dropLatestPackageClientBoundaryCache,
+  resolvePackageClientBoundaryCacheFile,
+} from "./utils/package-client-boundary-cache";
 import {
   dispatchIntegrationRequest,
   getFarmIntegrationPluginOwner,
@@ -5392,12 +5395,20 @@ export const manifest = getManifest();
             rewrotePackageImports = true;
           }
         }
-        const referenced = rewriteFarmPackageClientImports({
-          code,
-          file,
-          root: projectRoot,
-          isClientPackage: (specifier) => isFarmPackageClientBoundary(file, specifier, projectRoot),
-        });
+        const rewritePackageImports = (source: string) =>
+          rewriteFarmPackageClientImports({
+            code: source,
+            file,
+            root: projectRoot,
+            isClientPackage: (specifier) =>
+              isFarmPackageClientBoundary(file, specifier, projectRoot),
+          });
+        // Each module that imports a package would otherwise read the package's whole entry graph.
+        const routeManager = farmApp?.getRouteManager();
+        const source = code;
+        const referenced = routeManager
+          ? routeManager.inspectPackages(() => rewritePackageImports(source))
+          : rewritePackageImports(source);
         if (referenced !== null) {
           code = referenced;
           rewrotePackageImports = true;
@@ -5810,6 +5821,7 @@ if (import.meta.hot) {
       invalidateFarmClientReachableModules();
       invalidateFarmClientOnlyScan();
       invalidateFarmRouteRootInferences();
+      dropLatestPackageClientBoundaryCache();
     },
     async handleHotUpdate(ctx: HmrContext) {
       // A file changed while a deferred setup still discovers routes: handle it against the result.
