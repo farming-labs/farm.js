@@ -3118,6 +3118,11 @@ export interface CompilerBlockRuntime {
   Component: React.ComponentType<CompilerComponentBlockProps>;
   /** A binding target's ref, which also sets the element's useRef object when it has one. */
   target(id: number, ref?: { current: unknown }): React.RefCallback<Element>;
+  /**
+   * Runs a component's changed effects after a commit (given its effect list), or cleans them all
+   * up (without one). Only components with effects carry this runtime.
+   */
+  effects?(component: object, effects?: CompilerEffectList): void;
 }
 
 export type CompilerBinding<Props> =
@@ -3146,6 +3151,22 @@ export interface CompiledComponentDefinition<Props> {
     blocks: CompilerBlockRuntime,
   ): React.ReactElement;
   bindings: readonly CompilerBinding<Props>[];
+  /**
+   * The component's useEffect and useLayoutEffect calls, evaluated in its render scope after each
+   * committed update: each callback with its dependency values (undefined runs it every time) and
+   * whether it is a layout effect.
+   */
+  effects?(props: Props, state: readonly CompilerCell[]): CompilerEffectList;
+}
+
+type CompilerEffectList = ReadonlyArray<
+  readonly [() => unknown, readonly unknown[] | undefined, boolean?]
+>;
+
+interface CompilerEffectState {
+  dependencies: readonly unknown[] | undefined;
+  cleanup: (() => void) | undefined;
+  layout: boolean;
 }
 
 interface CompiledDefinitionReference<Props> {
@@ -12264,6 +12285,58 @@ export const mixedRangesRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+/**
+ * Runs effects whose dependencies changed, after their previous cleanups, as React does: layout
+ * effects first. Without an effect list, runs every cleanup, as on unmount.
+ */
+const compilerEffectStates = /* @__PURE__ */ new WeakMap<
+  object,
+  Array<CompilerEffectState | undefined>
+>();
+
+function runCompilerEffects(component: object, effects?: CompilerEffectList): void {
+  let states = compilerEffectStates.get(component);
+  if (!effects) {
+    const mounted = states?.splice(0) ?? [];
+    for (const layout of [true, false]) {
+      for (const state of mounted) if (state?.layout === layout) state.cleanup?.();
+    }
+    return;
+  }
+  if (!states) compilerEffectStates.set(component, (states = []));
+  const changed: number[] = [];
+  for (let index = 0; index < effects.length; index += 1) {
+    const dependencies = effects[index][1];
+    const previous = states[index];
+    if (
+      !previous ||
+      !dependencies ||
+      !previous.dependencies ||
+      dependencies.length !== previous.dependencies.length ||
+      dependencies.some((value, position) => !Object.is(value, previous.dependencies![position]))
+    ) {
+      changed.push(index);
+    }
+  }
+  for (const layout of [true, false]) {
+    const phase = changed.filter((index) => Boolean(effects[index][2]) === layout);
+    for (const index of phase) states[index]?.cleanup?.();
+    for (const index of phase) {
+      const cleanup = effects[index][0]();
+      states[index] = {
+        dependencies: effects[index][1],
+        cleanup: typeof cleanup === "function" ? (cleanup as () => void) : undefined,
+        layout,
+      };
+    }
+  }
+}
+
+export const effectsRuntimeFeature: CompilerRuntimeFeature = {
+  name: "effects",
+  create: () => ({ effects: runCompilerEffects }),
+};
+
 export const componentRuntimeFeature: CompilerRuntimeFeature = {
   name: "component",
   create: (owner) => ({
@@ -12602,15 +12675,24 @@ function createCompiledComponentRuntime<Props>(
       };
     }
 
-    private restoreInputSelection(snapshot: InputSelectionSnapshot | null): void {
+    /**
+     * Runs once compiled DOM updates have committed: restores the focused field's selection, then
+     * runs the effects.
+     */
+    private afterCommit(snapshot: InputSelectionSnapshot | null): void {
       if (
-        !snapshot ||
-        !snapshot.element.isConnected ||
-        snapshot.element.ownerDocument.activeElement !== snapshot.element
+        snapshot &&
+        snapshot.element.isConnected &&
+        snapshot.element.ownerDocument.activeElement === snapshot.element
       ) {
-        return;
+        snapshot.element.setSelectionRange(snapshot.start, snapshot.end, snapshot.direction);
       }
-      snapshot.element.setSelectionRange(snapshot.start, snapshot.end, snapshot.direction);
+      if (this.mounted) {
+        this.blockRuntime.effects?.(
+          this,
+          definitionReference.current.effects?.(this.props, this.cells),
+        );
+      }
     }
 
     private setBlockRoot(id: number, root: Element | null, expectedRoot?: Element | null): void {
@@ -12645,7 +12727,8 @@ function createCompiledComponentRuntime<Props>(
       });
     }
 
-    private flushBindingUpdates(): void {
+    /** Returns true when it committed an update, after which it has run the effects. */
+    private flushBindingUpdates(): true | undefined {
       const inputSelection = this.inputSelection;
       this.inputSelection = null;
       if (!this.mounted) return;
@@ -12695,15 +12778,16 @@ function createCompiledComponentRuntime<Props>(
         for (const refresh of blockRefreshes) {
           refresh(() => {
             pendingBlockCommits -= 1;
-            if (pendingBlockCommits === 0) this.restoreInputSelection(inputSelection);
+            if (pendingBlockCommits === 0) this.afterCommit(inputSelection);
           }, dirty);
         }
-        if (blockRefreshes.length === 0) this.restoreInputSelection(inputSelection);
+        if (blockRefreshes.length === 0) this.afterCommit(inputSelection);
       } catch (error) {
         this.bindingError = error;
         this.hasBindingError = true;
         this.forceUpdate();
       }
+      return true;
     }
 
     private applyBinding(binding: CompilerBinding<Props>, force = false): void {
@@ -12796,10 +12880,13 @@ function createCompiledComponentRuntime<Props>(
           this.applyBinding(binding, true);
         }
       }
-      if (this.dirtyState.size) this.flushBindingUpdates();
+      if (!(this.dirtyState.size && this.flushBindingUpdates())) this.afterCommit(null);
     }
 
     componentWillUnmount(): void {
+      // Hiding also calls this lifecycle; React cleans up effects when it hides a component too,
+      // and the next mount runs them again.
+      this.blockRuntime.effects?.(this);
       this.mounted = false;
       this.inputSelection = null;
       this.blockRefreshListeners.clear();
@@ -12888,6 +12975,7 @@ const COMPLETE_RUNTIME_FEATURES: readonly CompilerRuntimeFeature[] = [
   keyedRangesRuntimeFeature,
   mixedRangesRuntimeFeature,
   componentRuntimeFeature,
+  effectsRuntimeFeature,
 ];
 
 /**
