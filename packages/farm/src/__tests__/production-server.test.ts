@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { getAvailablePort } from "./dev-server-port";
 import { startProductionServer } from "./production-server";
@@ -102,5 +103,34 @@ describe("getAvailablePort", () => {
     for (let attempt = 0; attempt < 20; attempt++) {
       expect(await getAvailablePort()).toBeLessThan(32_768);
     }
+  });
+});
+
+// A test that polls a spawned production entry with fetch can read another test's server on its
+// port. These files start a server the helper cannot wait for, or wait for their child's output.
+const OWN_READINESS: Record<string, string> = {
+  "desktop-runtime.test.ts": "a desktop server binds its own ephemeral port and ignores PORT",
+  "development-ssr-prebundle.test.ts": "it spawns a development server script, not a built entry",
+  "mobile-client-build.test.ts": "it waits for its child to print the port it listens on",
+  "mobile-session-runtime.test.ts": "it waits for its child's own Listening on line",
+  "mobile-rsc-build.test.ts": "the RSC entry prints no listen line under vitest",
+  "rsc-server-plugins-build.test.ts": "the RSC entry prints no listen line under vitest",
+};
+
+describe("production server tests", () => {
+  it("start a built entry through startProductionServer", async () => {
+    const directory = path.dirname(fileURLToPath(import.meta.url));
+    const files = (await fs.readdir(directory)).sort();
+    for (const file of Object.keys(OWN_READINESS)) expect(files).toContain(file);
+    const polling: string[] = [];
+    for (const file of files) {
+      if (!/\.tsx?$/.test(file) || file in OWN_READINESS || file.startsWith("production-server.")) {
+        continue;
+      }
+      const source = await fs.readFile(path.join(directory, file), "utf8");
+      const startsEntry = /\bspawn\(/.test(source) && /["'`/]index\.mjs["'`]/.test(source);
+      if (startsEntry && !source.includes('from "./production-server"')) polling.push(file);
+    }
+    expect(polling).toEqual([]);
   });
 });

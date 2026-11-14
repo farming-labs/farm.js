@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -22,6 +21,7 @@ import * as noRenderer from "../renderer/none/server";
 import { createServer } from "../server/create-server";
 import { createFarmClientOptimizeDepsConfig } from "../server/vite-config";
 import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots = new Set<string>();
@@ -254,35 +254,15 @@ describe("renderer: false", () => {
       );
     }
 
-    const port = await getAvailablePort();
-    const processOutput: string[] = [];
-    const productionServer = spawn(process.execPath, [path.join(output, "server", "index.mjs")], {
-      cwd: path.join(output, "server"),
+    const productionServer = await startProductionServer(path.join(output, "server"), {
       // No NODE_PATH: the server must not find React (or anything) outside its own output.
-      env: { ...process.env, NODE_PATH: "", HOST: "127.0.0.1", PORT: String(port) },
-      stdio: ["ignore", "pipe", "pipe"],
+      env: { NODE_PATH: "" },
     });
-    productionServer.stdout.on("data", (chunk) => processOutput.push(String(chunk)));
-    productionServer.stderr.on("data", (chunk) => processOutput.push(String(chunk)));
-    const exited = new Promise<void>((resolve) => productionServer.once("exit", () => resolve()));
 
     try {
-      const origin = `http://127.0.0.1:${port}`;
-      let ready = false;
-      for (let attempt = 0; attempt < 200 && !ready; attempt++) {
-        if (productionServer.exitCode !== null) break;
-        ready = await fetch(`${origin}/_farm/health/ready`).then(
-          (response) => response.ok,
-          () => false,
-        );
-        if (!ready) await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      expect(ready, processOutput.join("")).toBe(true);
-
-      await expectBackendResponses(origin);
+      await expectBackendResponses(productionServer.origin);
     } finally {
-      if (productionServer.exitCode === null) productionServer.kill();
-      await exited;
+      await productionServer.stop();
     }
   }, 180_000);
 
