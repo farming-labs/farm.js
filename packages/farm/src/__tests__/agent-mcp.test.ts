@@ -176,6 +176,26 @@ describe("default MCP pages", () => {
         expect(urls({ basePath: "/base", i18n: config })).toEqual(urls({ basePath: "/base" }));
       }
     });
+
+    it("links pages on metadataBase, as the sitemap does, and keeps reads on this server", () => {
+      for (const metadataBase of [
+        "https://www.acme.example/blog",
+        new URL("https://www.acme.example"),
+      ]) {
+        expect(urls({ basePath: "/base", metadataBase })).toEqual([
+          ["https://www.acme.example/base", "https://acme.test/base/index.md"],
+          ["https://www.acme.example/base/about", "https://acme.test/base/about.md"],
+        ]);
+      }
+      // Unset, or not an absolute http(s) URL: the request's origin.
+      for (const metadataBase of [undefined, "/relative", "ftp://acme.example", "not a url", 42]) {
+        expect(urls({ basePath: "/base", metadataBase })).toEqual(urls({ basePath: "/base" }));
+      }
+      expect(urls({ basePath: "/base" })[1]).toEqual([
+        "https://acme.test/base/about",
+        "https://acme.test/base/about.md",
+      ]);
+    });
   });
 });
 
@@ -304,6 +324,48 @@ describe("default MCP protocol", () => {
     ]);
     // Pages are listed in the default locale, so another locale's URL names no listed page.
     expect((await read("/base/fr/about")).content[0].text).toContain("No public page");
+  });
+
+  it("reads a page by its metadataBase URL from this server, and no other origin", async () => {
+    const metadataBase = "https://www.acme.example";
+    const linked = collectFarmDefaultMCPPages(
+      [{ pattern: "/about", module: { metadata: { title: "About us" } } }],
+      { origin: ORIGIN, metadataBase, markdown: resolveMarkdownConfig(undefined) },
+    );
+    const call = async (name: string, args: Record<string, unknown>, options = {}) => {
+      const response = await handleFarmDefaultMCPRequest(
+        post({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+        { ...context, listPages: () => linked, ...options },
+      );
+      return ((await response.json()) as { result: any }).result;
+    };
+
+    const listed = (await call("list_pages", {}, { metadataBase })).structuredContent.pages;
+    expect(listed).toEqual([
+      { path: "/about", title: "About us", url: "https://www.acme.example/about" },
+    ]);
+    for (const path of [listed[0].url, "https://www.acme.example/about.md", `${ORIGIN}/about`]) {
+      const read = await call("read_page", { path }, { metadataBase });
+      expect(read.content[0].text, path).toBe("# About us\n\nWe ship.\n");
+    }
+    // Every read goes to this server, never to the metadataBase host.
+    expect(reads.length).toBe(3);
+    expect(reads.every((url) => url === "https://acme.test/about.md")).toBe(true);
+
+    reads.length = 0;
+    for (const [path, options] of [
+      ["https://evil.test/about", { metadataBase }],
+      ["http://www.acme.example/about", { metadataBase }],
+      ["https://www.acme.example.evil.test/about", { metadataBase }],
+      // Without metadataBase its URLs name no page here.
+      ["https://www.acme.example/about", {}],
+      ["https://www.acme.example/about", { metadataBase: "/relative" }],
+    ] as const) {
+      const read = await call("read_page", { path }, options);
+      expect({ path, isError: read.isError }).toEqual({ path, isError: true });
+      expect(read.content[0].text).toContain("No public page");
+    }
+    expect(reads).toEqual([]);
   });
 
   it("reports bad arguments as tool errors and unknown tools as JSON-RPC errors", async () => {

@@ -9633,16 +9633,20 @@ function getFarmDefaultMCPServer() {
 }
 async function handleFarmDefaultMCP(request) {
   const origin = new URL(request.url).origin;
+  // Pages are linked on metadataBase, as sitemap.xml and llms.txt link them.
+  const metadataBase = getFarmRootMetadataBase();
   return handleFarmDefaultMCPRequest(request, {
     server: getFarmDefaultMCPServer(),
     basePath: ${JSON.stringify(config.basePath)},
     i18n: farmI18nConfig,
+    metadataBase,
     // Each page at the URL it answers at, as in development and as the sitemap lists it.
     listPages: () =>
       collectFarmDefaultMCPPages(
         getFarmAgentListedPageRoutes().map((route) => ({ pattern: route.pattern, module: route.module })),
         {
           origin,
+          metadataBase,
           basePath: ${JSON.stringify(config.basePath)},
           markdown: farmMarkdownConfig,${config.trailingSlash ? "\n          trailingSlash: true," : ""}
           i18n: farmI18nConfig,
@@ -9660,16 +9664,16 @@ const farmDefaultMCPReadMarkdown = createFarmLlmsMarkdownReader((page) => fetch(
 `
     : ""
 }
-// The origin llms.txt and llms-full.txt link to: the root layout's metadataBase, else the
-// request's origin, as for the sitemap and in development.
+// The origin llms.txt, llms-full.txt and list_pages link to: the root layout's metadataBase,
+// else the request's origin, as for the sitemap and in development.
 function getFarmAgentOrigin(request) {
+  return resolveFarmAgentOrigin(getFarmRootMetadataBase(), new URL(request.url).origin);
+}
+function getFarmRootMetadataBase() {
   const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
-  return resolveFarmAgentOrigin(
-    rootLayout && rootLayout.module && rootLayout.module.metadata
-      ? rootLayout.module.metadata.metadataBase
-      : undefined,
-    new URL(request.url).origin,
-  );
+  return rootLayout && rootLayout.module && rootLayout.module.metadata
+    ? rootLayout.module.metadata.metadataBase
+    : undefined;
 }
 
 // Static pages and root metadata for llms.txt, built the same way as in development.

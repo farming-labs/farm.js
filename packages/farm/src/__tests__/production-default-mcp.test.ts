@@ -139,6 +139,11 @@ describe("production default MCP server", () => {
         "/",
         "/about",
       ]);
+      // Without a metadataBase, URLs use the request's origin.
+      expect(listed.structuredContent.pages.map((page: { url: string }) => page.url)).toEqual([
+        "https://acme.test/",
+        "https://acme.test/about",
+      ]);
       expect((await call("read_page", { path: "/about" })).content[0].text).toContain(
         "We ship tools.",
       );
@@ -293,6 +298,51 @@ describe("production default MCP server", () => {
       "https://acme.test",
       ["https://acme.test/", "https://acme.test/about", "https://acme.test/pricing"],
     );
+  }, 240_000);
+
+  it("links pages on the root layout's metadataBase, as the sitemap and llms.txt do", async () => {
+    await withRoot(async (root) => {
+      const handler = await buildApp(
+        root,
+        { basePath: "/base" },
+        {
+          "src/app/layout.tsx": [
+            'export const metadata = { title: "Acme", metadataBase: new URL("https://www.acme.example") };',
+            "export default function Layout({ children }) { return <main>{children}</main>; }",
+          ].join("\n"),
+        },
+      );
+      const call = async (name: string, args: Record<string, unknown> = {}) =>
+        (
+          (await (
+            await handler.fetch(
+              mcp("tools/call", { name, arguments: args }, "https://acme.test/base"),
+            )
+          ).json()) as any
+        ).result;
+
+      const pages = (await call("list_pages")).structuredContent.pages;
+      expect(pages.map((page: { url: string }) => page.url)).toEqual([
+        "https://www.acme.example/base",
+        "https://www.acme.example/base/about",
+      ]);
+      const sitemap = await (
+        await handler.fetch(new Request("https://acme.test/base/sitemap.xml"))
+      ).text();
+      for (const page of pages) expect(sitemap).toContain(`<loc>${page.url}</loc>`);
+      const llms = await handler.fetch(new Request("https://acme.test/base/llms.txt"));
+      expect(await llms.text()).toContain("(https://www.acme.example/base/about.md)");
+
+      // read_page takes those URLs and reads the page from this server.
+      for (const path of ["https://www.acme.example/base/about", "https://acme.test/base/about"]) {
+        expect((await call("read_page", { path })).content[0].text, path).toContain(
+          "We ship tools.",
+        );
+      }
+      const elsewhere = await call("read_page", { path: "https://evil.test/base/about" });
+      expect(elsewhere.isError).toBe(true);
+      expect(elsewhere.content[0].text).toContain("No public page");
+    });
   }, 240_000);
 
   it("leaves pages a path-specific guard covers out of every public listing", async () => {

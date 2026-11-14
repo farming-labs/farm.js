@@ -650,7 +650,11 @@ covers (see [Sitemap](#sitemap)) are left out, and `read_page` answers only for 
 leaves out more. Each page's `url` is the one it answers at, without a redirect, as the sitemap
 lists it: below the app `basePath`, spelled as `trailingSlash` says, and with
 [i18n](/docs/internationalization) in the default locale (`/en/about` with `routing: "prefix-always"`, `/about`
-with the default `"prefix-except-default"`). `read_page` takes that URL as well as the `path`.
+with the default `"prefix-except-default"`). URLs use the root layout's `metadataBase`, or the
+request's origin when it has none, the same origin the sitemap and `llms.txt` link to.
+`read_page` takes that URL as well as the `path`, and accepts a URL only on the request's origin or
+the `metadataBase` origin; it reads the page from the server that answered, never from the URL's
+host.
 Pages are read the way `llms-full.txt` reads them, as a fresh request without the
 caller's cookies or credentials, so a page a root middleware or plugin `runtime.before` hook keeps
 private answers as signed out. The server has no write tools and never reaches API routes, server functions, sessions, or

@@ -16,6 +16,7 @@ import {
 } from "./agent-mcp";
 import { stripFarmBasePath } from "./base-path";
 import { resolveFarmLocalePath, type FarmLocalePathConfig } from "./i18n/routing";
+import { resolveFarmAgentOrigin } from "./llms-txt";
 
 const INSTRUCTIONS =
   "This server reads the site's public pages. Call list_pages or search_pages to find a page, " +
@@ -34,6 +35,11 @@ export interface FarmDefaultMCPContext {
   basePath?: string;
   /** The app's i18n routing, so a listed page's localized URL reads that page. */
   i18n?: FarmDefaultMCPI18n;
+  /**
+   * The root layout's `metadataBase`, which `listPages` links to, so `read_page` also takes a
+   * URL on its origin. Only the path is read from it; pages are always read from this server.
+   */
+  metadataBase?: unknown;
 }
 
 type JSONRPCId = string | number | null;
@@ -227,6 +233,7 @@ async function callTool(
   const pagePath = toPagePath(
     path,
     request.url,
+    context.metadataBase,
     context.basePath,
     resolveFarmDefaultMCPI18n(context.i18n, context.basePath),
   );
@@ -290,13 +297,15 @@ function searchPages(
 }
 
 /**
- * A page path from what an agent passes: a path, a `.md` mirror path, or a same-origin URL,
- * such as a URL list_pages gave. Pages are listed in the default locale, so another locale's
- * URL names no listed page.
+ * A page path from what an agent passes: a path, a `.md` mirror path, or a URL on this
+ * request's origin or on the `metadataBase` origin list_pages links to. Any other origin names
+ * no page. Only the path is kept: a listed page is read from this server, never from the URL's
+ * origin. Pages are listed in the default locale, so another locale's URL names no listed page.
  */
 function toPagePath(
   input: string,
   requestUrl: string,
+  metadataBase: unknown,
   basePath?: string,
   i18n?: FarmLocalePathConfig,
 ): string | null {
@@ -306,7 +315,13 @@ function toPagePath(
   } catch {
     return null;
   }
-  if (url.origin !== new URL(requestUrl).origin) return null;
+  const requestOrigin = new URL(requestUrl).origin;
+  if (
+    url.origin !== requestOrigin &&
+    url.origin !== resolveFarmAgentOrigin(metadataBase, requestOrigin)
+  ) {
+    return null;
+  }
   let path = url.pathname;
   try {
     path = decodeURI(path);
