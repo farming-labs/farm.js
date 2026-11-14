@@ -114,6 +114,69 @@ describe("default MCP pages", () => {
       }),
     ).toEqual([]);
   });
+
+  describe("at the URL each page answers at", () => {
+    const sources = [{ pattern: "/" }, { pattern: "/about" }, { pattern: "/blog/[slug]" }];
+    const urls = (options: Omit<Parameters<typeof collectFarmDefaultMCPPages>[1], "origin">) =>
+      collectFarmDefaultMCPPages(sources, {
+        origin: ORIGIN,
+        markdown: resolveMarkdownConfig(undefined),
+        ...options,
+      }).map(({ url, markdownUrl }) => [url, markdownUrl]);
+    const i18n = (routing: "prefix-always" | "prefix-except-default" | "none", enabled = true) => ({
+      enabled,
+      basePath: "/",
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing,
+    });
+
+    it("lists the basePath home without the trailing slash it redirects from", () => {
+      // '/base/' answers with a 308 to '/base', so '/base' is the URL to list, as the sitemap does.
+      expect(urls({ basePath: "/base" })).toEqual([
+        ["https://acme.test/base", "https://acme.test/base/index.md"],
+        ["https://acme.test/base/about", "https://acme.test/base/about.md"],
+      ]);
+      // A basePath spelled with a trailing slash names the same mount.
+      expect(urls({ basePath: "/base/" })).toEqual(urls({ basePath: "/base" }));
+      expect(urls({})).toEqual([
+        ["https://acme.test/", "https://acme.test/index.md"],
+        ["https://acme.test/about", "https://acme.test/about.md"],
+      ]);
+    });
+
+    it("spells page URLs as trailingSlash says and keeps each mirror's .md URL", () => {
+      expect(urls({ basePath: "/base", trailingSlash: true })).toEqual([
+        ["https://acme.test/base/", "https://acme.test/base/index.md"],
+        ["https://acme.test/base/about/", "https://acme.test/base/about.md"],
+      ]);
+      expect(urls({ trailingSlash: true })).toEqual([
+        ["https://acme.test/", "https://acme.test/index.md"],
+        ["https://acme.test/about/", "https://acme.test/about.md"],
+      ]);
+    });
+
+    it("lists pages in the default locale's URL", () => {
+      // Every locale is prefixed: '/about' redirects to '/en/about'.
+      expect(urls({ basePath: "/base", i18n: i18n("prefix-always") })).toEqual([
+        ["https://acme.test/base/en", "https://acme.test/base/en/index.md"],
+        ["https://acme.test/base/en/about", "https://acme.test/base/en/about.md"],
+      ]);
+      expect(urls({ i18n: i18n("prefix-always"), trailingSlash: true })).toEqual([
+        ["https://acme.test/en/", "https://acme.test/en/index.md"],
+        ["https://acme.test/en/about/", "https://acme.test/en/about.md"],
+      ]);
+      // The default locale is unprefixed ('/en/about' redirects to '/about'), and without
+      // locale routing or with i18n off the URLs are the plain ones.
+      for (const config of [
+        i18n("prefix-except-default"),
+        i18n("none"),
+        i18n("prefix-always", false),
+      ]) {
+        expect(urls({ basePath: "/base", i18n: config })).toEqual(urls({ basePath: "/base" }));
+      }
+    });
+  });
 });
 
 describe("default MCP protocol", () => {
@@ -193,6 +256,54 @@ describe("default MCP protocol", () => {
     const unreadable = await rpc("tools/call", { name: "read_page", arguments: { path: "/" } });
     expect(unreadable.result).toMatchObject({ isError: true });
     expect(unreadable.result.content[0].text).toContain("did not answer with Markdown");
+  });
+
+  it("reads a page by the URL list_pages gave, below the base path and in the default locale", async () => {
+    const i18n = {
+      basePath: "/",
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing: "prefix-always" as const,
+    };
+    const options = { basePath: "/base", trailingSlash: true, i18n };
+    const localized = collectFarmDefaultMCPPages(
+      [{ pattern: "/" }, { pattern: "/about", module: { metadata: { title: "About us" } } }],
+      { origin: ORIGIN, markdown: resolveMarkdownConfig(undefined), ...options },
+    );
+    const read = async (path: string) => {
+      const response = await handleFarmDefaultMCPRequest(
+        new Request(`${ORIGIN}/base/mcp`, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "read_page", arguments: { path } },
+          }),
+        }),
+        { ...context, ...options, listPages: () => localized },
+      );
+      return ((await response.json()) as { result: any }).result;
+    };
+
+    const about = localized.find((page) => page.path === "/about")!;
+    expect(about.url).toBe("https://acme.test/base/en/about/");
+    for (const path of ["/about", about.url, "/base/en/about.md", "/base/en/about"]) {
+      expect((await read(path)).content[0].text, path).toBe("# About us\n\nWe ship.\n");
+    }
+    expect(reads.every((url) => url === "https://acme.test/base/en/about.md")).toBe(true);
+    // The home page is listed at '/base/en/', and its mirror is '/base/en/index.md'.
+    reads.length = 0;
+    for (const path of ["https://acme.test/base/en/", "/base/en/index.md"]) {
+      expect((await read(path)).content[0].text, path).toContain("did not answer with Markdown");
+    }
+    expect(reads).toEqual([
+      "https://acme.test/base/en/index.md",
+      "https://acme.test/base/en/index.md",
+    ]);
+    // Pages are listed in the default locale, so another locale's URL names no listed page.
+    expect((await read("/base/fr/about")).content[0].text).toContain("No public page");
   });
 
   it("reports bad arguments as tool errors and unknown tools as JSON-RPC errors", async () => {

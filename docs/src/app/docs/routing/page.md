@@ -1331,9 +1331,10 @@ Farm automatically adds the nearest discovered manifest to rendered page heads u
 With the [docs engine](/docs/docs-engine) enabled, a root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` takes its path from the docs engine, which keeps serving the ones the app does not define. An app sitemap replaces the docs engine's instead of extending it, so list the docs pages in it when crawlers should find them there.
 
 [React Server Components](/docs/server-rendering#react-server-components) apps serve `sitemap.ts`,
-`robots.ts`, `llms.ts`, and `llms-full.ts` the same way, after middleware and below a `basePath`,
-in place of the generated files. They do not serve `manifest.ts` yet. A production build bundles
-these files only when the app has one; `farm dev` serves a file added while it runs.
+`robots.ts`, `manifest.ts`, `llms.ts`, and `llms-full.ts` the same way, after middleware and below
+a `basePath`, in place of the generated files, and add the nearest manifest to the page head. A
+production build bundles these files only when the app has one; `farm dev` serves a file added
+while it runs.
 
 Generated metadata routes accept `GET` and `HEAD` and return `405` for other methods. They revalidate by default. Export `revalidate = 300` for shared CDN caching or `revalidate = false` only for permanently immutable output. A returned `Response` is an escape hatch for custom XML, headers, or status codes.
 
@@ -1393,6 +1394,12 @@ Farm serves the file through the extensionless `/products/opengraph-image` endpo
 Use `twitter-image.png` when X/Twitter needs a different image. Otherwise, social platforms can use the Open Graph image. An explicit `metadata.openGraph.images` or `metadata.twitter.images` value always wins over a matching file.
 
 Static images inside a dynamic segment are shared by every concrete route. Use a generated image when the preview must depend on route params.
+
+[React Server Components](/docs/server-rendering#react-server-components) apps serve static and
+generated `opengraph-image` and `twitter-image` files the same way, at the same URLs, with the same
+caching and head tags, after middleware and below a `basePath` and locale prefix. A production
+build inlines static images and bundles generated ones only when the app has them; `farm dev`
+serves a file added while it runs.
 
 ### Generated metadata images
 

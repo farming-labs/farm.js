@@ -9606,7 +9606,7 @@ function createFarmAgentSitemapResponse(request) {
         metadataBase: rootLayout && rootLayout.module && rootLayout.module.metadata
           ? rootLayout.module.metadata.metadataBase
           : undefined,
-        basePath: ${JSON.stringify(config.basePath)},${config.trailingSlash ? "\n        trailingSlash: true," : ""}
+        basePath: ${JSON.stringify(config.basePath)},${config.trailingSlash ? "\n        trailingSlash: true," : ""}${config.i18n.enabled ? "\n        i18n: farmI18nConfig," : ""}
       },
     ),
     {},
@@ -9636,18 +9636,22 @@ async function handleFarmDefaultMCP(request) {
   return handleFarmDefaultMCPRequest(request, {
     server: getFarmDefaultMCPServer(),
     basePath: ${JSON.stringify(config.basePath)},
+    i18n: farmI18nConfig,
+    // Each page at the URL it answers at, as in development and as the sitemap lists it.
     listPages: () =>
       collectFarmDefaultMCPPages(
         getFarmAgentListedPageRoutes().map((route) => ({ pattern: route.pattern, module: route.module })),
-        { origin, basePath: ${JSON.stringify(config.basePath)}, markdown: farmMarkdownConfig },
+        {
+          origin,
+          basePath: ${JSON.stringify(config.basePath)},
+          markdown: farmMarkdownConfig,${config.trailingSlash ? "\n          trailingSlash: true," : ""}
+          i18n: farmI18nConfig,
+        },
       ),
-    // A fresh request through this handler, so the caller's cookies never shape a page.
-    // The handler sees paths below the base path, as the server passes them in.
-    readMarkdown: (url) => {
-      const page = new URL(url);
-      page.pathname = stripFarmBasePath(page.pathname);
-      return farmDefaultMCPReadMarkdown(page.href);
-    },
+    // A fresh request through this handler, so the caller's cookies never shape a page. It
+    // reads the public URL, base path included, as llms-full.txt does: this handler sees
+    // public paths, and with i18n a mirror path without the base path answers with a redirect.
+    readMarkdown: farmDefaultMCPReadMarkdown,
   });
 }
 // \`fetch\` is this module's outer request entry: plugin runtime hooks run and the page
@@ -9677,7 +9681,7 @@ function createFarmLlmsTxtContext(request, full) {
       origin,
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
-      exclude: farmLlmsTxtConfig.exclude,${config.trailingSlash ? "\n      trailingSlash: true," : ""}
+      exclude: farmLlmsTxtConfig.exclude,${config.trailingSlash ? "\n      trailingSlash: true," : ""}${config.i18n.enabled ? "\n      i18n: farmI18nConfig," : ""}
     },
   );
   const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
@@ -10330,12 +10334,15 @@ function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
 
 // origin is set when the shell carries hreflang alternates (i18n prefix
 // routing), so one host never serves a shell holding another host's URLs.
+// A shell embeds its deployment's ID and client assets, and a shared cache
+// adapter outlives a deployment, so each deployment keys its own shells.
 function getPPRShellCacheKey(url, locale, origin) {
   const key = [
     "ppr",
     locale || "",
     normalizeRevalidatePath(url.pathname),
     url.search,
+    farmDeploymentId,
   ];
   return createFarmCacheKey(origin ? key.concat(origin) : key);
 }
@@ -10757,6 +10764,14 @@ ${
           middlewareHeaders,
         );
       }
+      // A docs page is a page document: it names this deployment, and a navigation from
+      // another deployment's page is refused, as for an app page.
+      const farmDocsDeploymentMismatch = getFarmDeploymentMismatch(request, farmDeploymentId);
+      if (farmDocsDeploymentMismatch) {
+        await docsResponse.body?.cancel();
+        return createFarmDeploymentMismatchResponse(farmDocsDeploymentMismatch);
+      }
+      farmCacheGuard.deploymentPage = true;
       const wrappedDocsResponse = withFarmDocsRequestCache(
         await wrapFarmDocsResponseWithLayouts(request, docsResponse),
         request,
@@ -12271,6 +12286,13 @@ ${
 `
     : ""
 }
+  // The not-found page is a page document: it names this deployment, and a navigation from
+  // another deployment's page is refused, as for an app page.
+  const farmNotFoundDeploymentMismatch = getFarmDeploymentMismatch(request, farmDeploymentId);
+  if (farmNotFoundDeploymentMismatch) {
+    return createFarmDeploymentMismatchResponse(farmNotFoundDeploymentMismatch);
+  }
+  farmCacheGuard.deploymentPage = true;
   // Agents that navigate in Markdown (a \`.md\` URL or \`Accept: text/markdown\`)
   // get a Markdown error body instead of the HTML not-found shell.
   if (farmRequestWantsMarkdown(pathname, request.headers.get("accept"))) {

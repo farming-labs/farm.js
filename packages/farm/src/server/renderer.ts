@@ -1195,7 +1195,9 @@ export class ServerRenderer {
   }
 
   private getPPRCacheKey(pathname: string, search = "", locale = "", origin = ""): string {
-    const key = ["ppr", locale, normalizeRevalidatePath(pathname), search];
+    // A shell embeds its deployment's ID, and a shared cache adapter outlives a deployment, so
+    // each deployment keys its own shells, as in production.
+    const key = ["ppr", locale, normalizeRevalidatePath(pathname), search, this.getDeploymentId()];
     return createFarmCacheKey(origin ? [...key, origin] : key);
   }
 
@@ -1591,7 +1593,8 @@ export class ServerRenderer {
         completeRender(res.statusCode, match.route!.pattern);
         return;
       }
-      this.applyDeploymentHeaders(req, res);
+      // A miss renders the not-found page, which applies the same rules itself.
+      if (match.route) this.applyDeploymentHeaders(req, res);
 
       if (match.route) {
         const redirectLocation = resolveFarmTrailingSlashRedirect(url, this.config.trailingSlash);
@@ -1635,7 +1638,7 @@ export class ServerRenderer {
         }
         emitFarmEvent({ type: "route.notFound", pathname });
         await this.render404(req, res);
-        completeRender(404);
+        completeRender(res.statusCode);
         return;
       }
 
@@ -2849,6 +2852,7 @@ export class ServerRenderer {
           metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
           basePath: this.config.basePath,
           trailingSlash: this.config.trailingSlash,
+          i18n: this.i18nRuntime?.config,
         },
       );
       await sendWebResponse(
@@ -2930,9 +2934,11 @@ export class ServerRenderer {
     try {
       const { handleFarmDefaultMCPRequest } = await import("../agent-mcp-handler");
       const origin = new URL(request.url).origin;
+      const i18n = this.i18nRuntime?.config;
       const response = await handleFarmDefaultMCPRequest(request, {
         server,
         basePath: this.config.basePath,
+        i18n,
         listPages: async () => {
           const sources = await Promise.all(
             this.getAgentListedRoutes().map(async ([pattern, route]) => {
@@ -2953,6 +2959,8 @@ export class ServerRenderer {
               origin,
               basePath: this.config.basePath,
               markdown: resolveMarkdownConfig(this.config.md as any),
+              trailingSlash: this.config.trailingSlash,
+              i18n,
             },
           );
         },
@@ -3016,6 +3024,7 @@ export class ServerRenderer {
         include: config.include,
         exclude: config.exclude,
         trailingSlash: this.config.trailingSlash,
+        i18n: this.i18nRuntime?.config,
       },
     );
     return {
@@ -4304,6 +4313,18 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: "Not found", pathname }));
       return;
+    }
+
+    // The not-found page is a page document: it names this deployment, and a navigation from
+    // another deployment's page is refused, as for an app page. A page that threw notFound()
+    // has already passed that check and named it.
+    if (res.getHeader(FARM_DEPLOYMENT_ID_HEADER) === undefined) {
+      const deploymentMismatch = this.getDeploymentMismatch(req);
+      if (deploymentMismatch) {
+        await sendWebResponse(res, createFarmDeploymentMismatchResponse(deploymentMismatch));
+        return;
+      }
+      this.applyDeploymentHeaders(req, res);
     }
 
     // Agents that navigate in Markdown (a `.md` URL or `Accept: text/markdown`)

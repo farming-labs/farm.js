@@ -11,6 +11,7 @@
  */
 import { FARM_INTERNAL_READ_HEADER } from "./agent-identity";
 import { applyFarmBasePath } from "./base-path";
+import { localizeFarmPathname, type FarmLocalePathConfig } from "./i18n/routing";
 import {
   getFarmMarkdownMirrorPath,
   isFarmMarkdownMirrorExposed,
@@ -158,6 +159,8 @@ export function collectFarmLlmsTxtPages(
     exclude?: string[];
     /** The app's `trailingSlash`: a page without a mirror is linked at `/about/`. */
     trailingSlash?: boolean;
+    /** The app's resolved i18n config: pages are linked in the default locale's URL. */
+    i18n?: FarmAgentPageI18n;
   },
 ): FarmLlmsTxtPage[] {
   const include = options.include ?? [];
@@ -181,9 +184,9 @@ export function collectFarmLlmsTxtPages(
     // llmstxt.org prefers links to Markdown; use the page's mirror when it has one, and
     // otherwise the URL the page answers at, so the link does not redirect.
     const target = isFarmMarkdownMirrorExposed(options.markdown, path)
-      ? applyFarmBasePath(getFarmMarkdownMirrorPath(path), options.basePath)
+      ? getFarmAgentPagePublicPath(getFarmMarkdownMirrorPath(path), options)
       : normalizeFarmTrailingSlashPathname(
-          applyFarmBasePath(path, options.basePath),
+          getFarmAgentPagePublicPath(path, options),
           options.trailingSlash === true,
         );
     const description = readMetadataString(source.metadata, "description");
@@ -196,6 +199,27 @@ export function collectFarmLlmsTxtPages(
   }
 
   return [...pages.values()].sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/** The app's resolved i18n config (`config.i18n`); ignored when `enabled` is false. */
+export type FarmAgentPageI18n = FarmLocalePathConfig & { enabled?: boolean };
+
+/**
+ * The public path of a static page or its mirror in generated agent files: below the base
+ * path and, with i18n, in the default locale. Under `routing: "prefix-always"` a path without
+ * a locale answers with a redirect to one; the default `"prefix-except-default"` leaves the
+ * default locale unprefixed, and routing `"none"` adds no prefix, so those paths are unchanged.
+ */
+export function getFarmAgentPagePublicPath(
+  pathname: string,
+  options: { basePath?: string; i18n?: FarmAgentPageI18n },
+): string {
+  const { i18n } = options;
+  if (!i18n || i18n.enabled === false) return applyFarmBasePath(pathname, options.basePath);
+  return localizeFarmPathname(pathname, i18n.defaultLocale, {
+    ...i18n,
+    basePath: options.basePath ?? i18n.basePath,
+  });
 }
 
 /**

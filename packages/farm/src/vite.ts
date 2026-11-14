@@ -46,6 +46,7 @@ import {
   type FarmPluginRuntimeRequestScope,
   type FarmPluginRuntimeSession,
   type PluginManager,
+  type RenderLifecyclePayload,
 } from "./plugin";
 import { hasFarmServerRuntimePlugins } from "./plugin-server-runtime";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
@@ -2868,6 +2869,70 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // API path or with `renderer: false`, and plain text on a page, as in production.
           const runtimeHookErrorAnswersJSON =
             rendererDisabled || isFarmAPIPathname(requestPathname, apiServerBasePath);
+
+          // The router and render hooks, as the production entry runs them for every request its
+          // plugin runtime classes as a page (kind "page"): on the URL as requested (a config
+          // rewrite's source; the page handler passes the request runtime.before yielded, which
+          // it routes on), inside the runtime request, before the request is resolved. So
+          // they run for a config redirect, the generated llms.txt, sitemap.xml and robots.txt,
+          // a Markdown mirror, the app manifest, and the not-found page as for a page route, and
+          // not for an app metadata route (sitemap.ts, robots.ts, a metadata image), which
+          // production classes as an asset. A hook that throws rejects; the caller fails the
+          // request as it fails a throwing runtime hook.
+          const requestedPagePathname =
+            configRewriteSource === undefined
+              ? requestPathname
+              : new URL(configRewriteSource).pathname;
+          let pageHookRouteMatch:
+            | { render: RenderLifecyclePayload & Record<string, unknown>; layoutPatterns: string[] }
+            | undefined;
+          const pageHookRoute = (pathname: string) => {
+            if (pageHookRouteMatch?.render.pathname === pathname) return pageHookRouteMatch;
+            const match = farmApp.getRouteManager().matchRoute(pathname);
+            pageHookRouteMatch = {
+              render: {
+                pathname,
+                method: requestMethod,
+                routePattern: match?.route?.pattern || null,
+                params: match?.params || {},
+              },
+              layoutPatterns: (match?.layouts || []).map((layout) => layout.pattern),
+            };
+            return pageHookRouteMatch;
+          };
+          const runFarmDevPageHooks = async (pathname = requestedPagePathname): Promise<void> => {
+            if (
+              !pm ||
+              (!pm.hasHook("beforeRouteMatch") &&
+                !pm.hasHook("afterRouteMatch") &&
+                !pm.hasHook("beforeRender"))
+            ) {
+              return;
+            }
+            const { render, layoutPatterns } = pageHookRoute(pathname);
+            const routeManager = farmApp.getRouteManager();
+            if (
+              routeManager.matchMetadataRoute(render.pathname) ||
+              routeManager.matchMetadataImage(render.pathname) ||
+              // A path no page route matches is a page only for a GET or HEAD request.
+              (!render.routePattern && requestMethod !== "GET" && requestMethod !== "HEAD")
+            ) {
+              return;
+            }
+            await pm.runHookParallel("beforeRouteMatch", {
+              pathname: render.pathname,
+              method: requestMethod,
+            });
+            await pm.runHookParallel("afterRouteMatch", {
+              pathname: render.pathname,
+              matched: Boolean(render.routePattern),
+              routePattern: render.routePattern,
+              params: render.params,
+              layoutPatterns,
+            });
+            await pm.runHookParallel("beforeRender", render);
+          };
+
           if (
             pm &&
             configRewriteSource === undefined &&
@@ -2906,17 +2971,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 try {
                   // The session describes the request as production's does for a path no route
                   // answers.
+                  const kind = isFarmAPIPathname(requestPathname, apiServerBasePath)
+                    ? "api"
+                    : requestMethod === "GET" || requestMethod === "HEAD"
+                      ? "page"
+                      : "request";
                   response = await pm.runRuntimeRequest(
                     createRequestFromNodeRequest(req, parsedRequestUrl),
-                    () => redirectResponse,
-                    {
-                      kind: isFarmAPIPathname(requestPathname, apiServerBasePath)
-                        ? "api"
-                        : requestMethod === "GET" || requestMethod === "HEAD"
-                          ? "page"
-                          : "request",
-                      route: { pathname: requestPathname },
+                    async () => {
+                      // Production runs the page hooks before it answers the redirect.
+                      if (kind === "page") await runFarmDevPageHooks();
+                      return redirectResponse;
                     },
+                    { kind, route: { pathname: requestPathname } },
                   );
                 } catch {
                   // The runtime reported the failure to runtime.error and onError.
@@ -3110,6 +3177,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               }
               pm.copyRequestContext(runtimeSession.request, req);
               applyWebRequestToNodeRequest(runtimeSession.request, req);
+              if (kind === "page") {
+                try {
+                  await runFarmDevPageHooks();
+                } catch (error) {
+                  // A throwing router or render hook fails the request as a runtime hook does.
+                  await discard();
+                  await pm.failRuntimeRequest(runtimeSession, error);
+                  sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                  return;
+                }
+              }
             }
             let response: Response | void;
             let responding = false;
@@ -3304,8 +3382,33 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 : { body: createFarmNodeRequestBodyStream(req), duplex: "half" };
             const docsResponse = await farmDocsHandler(new Request(docsRequest, docsBodyInit));
             if (docsResponse) {
+              const docsPage = docsResponse.headers
+                .get("content-type")
+                ?.toLowerCase()
+                .includes("text/html");
               await serveBuiltInRoute(
-                () => wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
+                async (request) => {
+                  if (!docsPage) return wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse);
+                  // A docs page is a page document: it names this deployment, and a navigation
+                  // from another deployment's page is refused, as for an app page.
+                  const deploymentMismatch = getFarmDeploymentMismatch(
+                    request,
+                    farmConfig.deploymentId,
+                  );
+                  if (deploymentMismatch) {
+                    await docsResponse.body?.cancel();
+                    return createFarmDeploymentMismatchResponse(deploymentMismatch);
+                  }
+                  return withFarmDeploymentResponse(
+                    await wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
+                    farmConfig.deploymentId,
+                    {
+                      setCookie: request.method.toUpperCase() === "GET",
+                      cookiePath: farmConfig.basePath || "/",
+                      secureCookie: new URL(request.url).protocol === "https:",
+                    },
+                  );
+                },
                 {
                   kind: "docs",
                   computed: docsResponse,
@@ -4595,10 +4698,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             trustProxy: currentServerConfig.trustProxy,
           }).pathname;
           const routeManager = farmApp.getRouteManager();
-          const hasBeforeRouteMatchHook = pm?.hasHook("beforeRouteMatch") ?? false;
-          const hasAfterRouteMatchHook = pm?.hasHook("afterRouteMatch") ?? false;
           const hasBeforeRequestHook = pm?.hasHook("beforeRequest") ?? false;
-          const hasBeforeRenderHook = pm?.hasHook("beforeRender") ?? false;
           const hasAfterResponseHook = pm?.hasHook("afterResponse") ?? false;
           const hasHTMLTransformHook =
             (pm?.hasHook("transformHTML") ?? false) || (pm?.hasHook("afterRender") ?? false);
@@ -4626,6 +4726,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           };
           let runtimeSession: FarmPluginRuntimeSession | undefined;
           let pathname = requestedPathname;
+          // The route the router and render hooks describe: the URL as requested for a config
+          // rewrite, as in production; otherwise the request runtime.before yields, which the
+          // page is routed on.
+          let pageHookPathname = requestedPagePathname;
           if (pm && opensRuntimeSession) {
             try {
               const sessionOptions = {
@@ -4645,6 +4749,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 createRequestFromNodeRequest(req, new URL(configRewriteSource ?? fullUrl)),
                 sessionOptions,
               );
+              // The router and render hooks run once runtime.before let the request through,
+              // and before a config rewrite's runtime.before, on its requested URL, as in
+              // production. A hook that throws fails the session below.
+              if (!runtimeSession.response) {
+                pageHookPathname =
+                  configRewriteSource === undefined
+                    ? new URL(runtimeSession.request.url).pathname
+                    : requestedPagePathname;
+                await runFarmDevPageHooks(pageHookPathname);
+              }
               const routedRequest =
                 runtimeSession.response ??
                 (configRewriteSource === undefined
@@ -4665,19 +4779,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               pathname = new URL(routedRequest.url).pathname;
             } catch (error) {
               // runtime.error and onError observe a hook failure once: the runtime reported a
-              // throw from opening or ending the session, and a rewrite's runtime.before fails
-              // the session here.
+              // throw from opening or ending the session, and a router or render hook, or a
+              // rewrite's runtime.before, fails the session here.
               if (runtimeSession) await pm.failRuntimeRequest(runtimeSession, error);
               sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
               return;
             }
           }
-
-          // A replacement request is matched on its own pathname, including when
-          // it matches nothing and has to 404 on the rewritten path. An ordinary
-          // request is not re-matched, so the common path still matches once.
-          const routeMatch =
-            pathname === requestedPathname ? requestedMatch : routeManager.matchRoute(pathname);
 
           // A router or render hook that throws fails the page as a throwing runtime hook does,
           // as in production, where these hooks run inside the runtime request: runtime.error
@@ -4699,36 +4807,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (!res.headersSent) sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
           };
 
-          const renderPayload = {
-            pathname,
-            method,
-            routePattern: routeMatch?.route?.pattern || null,
-            params: routeMatch?.params || {},
-          };
-          try {
-            if (pm && hasBeforeRouteMatchHook) {
-              await pm.runHookParallel("beforeRouteMatch", {
-                pathname,
-                method,
-              });
+          // Without a runtime session the hooks have not run yet. As in production, they run
+          // before app middleware, which may then answer the request itself.
+          if (!runtimeSession) {
+            try {
+              await runFarmDevPageHooks(pageHookPathname);
+            } catch (error) {
+              await failPageHook(error);
+              return;
             }
-            if (pm && hasAfterRouteMatchHook) {
-              await pm.runHookParallel("afterRouteMatch", {
-                pathname,
-                matched: !!routeMatch?.route,
-                routePattern: routeMatch?.route?.pattern || null,
-                params: routeMatch?.params || {},
-                layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
-              });
-            }
-            // As in production, render.before runs before app middleware, which may then answer
-            // the request itself.
-            if (pm && hasBeforeRenderHook) {
-              await pm.runHookParallel("beforeRender", renderPayload);
-            }
-          } catch (error) {
-            await failPageHook(error);
-            return;
           }
 
           // Runtime response transforms need the complete byte stream, including
@@ -4749,7 +4836,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   hasRuntimeAfterHook,
                   hasAfterResponseHook,
                   hasHTMLTransformHook,
-                  renderPayload,
+                  // render.html gets the render info render.before got.
+                  renderPayload: pageHookRoute(pageHookPathname).render,
                   method,
                   urlPath,
                   pathname,

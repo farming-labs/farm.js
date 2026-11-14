@@ -226,6 +226,75 @@ describe("production default MCP server", () => {
     });
   }, 240_000);
 
+  it("lists each page at a URL that answers without a redirect, and reads it", async () => {
+    const files = {
+      "src/app/(marketing)/pricing/page.tsx": [
+        'export const metadata = { title: "Pricing" };',
+        "export default function Page() { return <p>Plans for teams.</p>; }",
+      ].join("\n"),
+      "src/messages/en.json": "{}",
+      "src/messages/fr.json": "{}",
+    };
+    const expectCanonical = async (
+      config: Partial<FarmConfig>,
+      endpoint: string,
+      expected: string[],
+    ) =>
+      withRoot(async (root) => {
+        const handler = await buildApp(root, config, files);
+        const call = async (name: string, args: Record<string, unknown> = {}) =>
+          (
+            (await (
+              await handler.fetch(mcp("tools/call", { name, arguments: args }, endpoint))
+            ).json()) as any
+          ).result;
+        const pages = (await call("list_pages")).structuredContent.pages;
+        expect(pages.map((page: { url: string }) => page.url)).toEqual(expected);
+        for (const page of pages) {
+          const response = await handler.fetch(new Request(page.url, { redirect: "manual" }));
+          expect({ url: page.url, status: response.status }).toEqual({
+            url: page.url,
+            status: 200,
+          });
+          for (const path of [page.path, page.url]) {
+            const read = await call("read_page", { path });
+            expect({ path, isError: read.isError }).toEqual({ path, isError: undefined });
+          }
+        }
+        expect((await call("read_page", { path: "/pricing" })).content[0].text).toContain(
+          "Plans for teams.",
+        );
+      });
+
+    // '/base/' answers with a 308 to '/base'; a route group adds no URL segment.
+    await expectCanonical({ basePath: "/base" }, "https://acme.test/base", [
+      "https://acme.test/base",
+      "https://acme.test/base/about",
+      "https://acme.test/base/pricing",
+    ]);
+    // trailingSlash: '/base/about' answers with a 308 to '/base/about/'. Every locale is
+    // prefixed: '/base/about/' answers with a 307 to '/base/en/about/', and so does its mirror.
+    await expectCanonical(
+      {
+        basePath: "/base",
+        trailingSlash: true,
+        i18n: { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-always" },
+      },
+      "https://acme.test/base",
+      [
+        "https://acme.test/base/en/",
+        "https://acme.test/base/en/about/",
+        "https://acme.test/base/en/pricing/",
+      ],
+    );
+    // The default locale is unprefixed, so its pages keep their plain URLs.
+    await expectCanonical(
+      { i18n: { locales: ["en", "fr"], defaultLocale: "en" } },
+      "https://acme.test",
+      ["https://acme.test/", "https://acme.test/about", "https://acme.test/pricing"],
+    );
+  }, 240_000);
+
   it("leaves pages a path-specific guard covers out of every public listing", async () => {
     await withRoot(async (root) => {
       const handler = await buildApp(

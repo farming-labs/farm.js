@@ -6,6 +6,7 @@ import {
   isFarmPageNoIndex,
   resolveFarmAgentOrigin,
   resolveFarmAgentSitemap,
+  resolveFarmI18nConfig,
   stripFarmBasePath,
   stripFarmLocaleFromPathname,
 } from "@farm.js/core/internal/production-runtime";
@@ -41,6 +42,7 @@ function createSitemap(
     rootMetadata?: Record<string, unknown>;
     lastModified?: Record<string, string>;
     trailingSlash?: boolean;
+    i18n?: EntryContext["i18n"];
   },
 ) {
   const basePath = options.basePath ?? "/";
@@ -48,6 +50,7 @@ function createSitemap(
     ...context,
     basePath,
     trailingSlash: options.trailingSlash,
+    i18n: options.i18n,
     sitemap: resolveFarmAgentSitemap(sitemap),
     pageLastModified: options.lastModified,
   });
@@ -178,13 +181,37 @@ describe("RSC sitemap.xml", () => {
       "https://www.shop.example/console/legacy/",
     ]);
   });
+
+  it("lists each page in the default locale's URL under i18n, as core does", async () => {
+    const sitemap = (routing?: "prefix-always") =>
+      createSitemap(true, {
+        basePath: "/console",
+        trailingSlash: true,
+        rootMetadata: { metadataBase: "https://www.shop.example" },
+        i18n: resolveFarmI18nConfig(
+          { locales: ["en", "fr"], defaultLocale: "en", ...(routing ? { routing } : {}) },
+          { basePath: "/console" },
+        ),
+        pages: { "/page.tsx": {}, "/about/page.tsx": {} },
+      })(new Request("http://127.0.0.1/console/en/sitemap.xml"));
+    // Every locale is prefixed: '/console/about/' answers with a 307 to '/console/en/about/'.
+    expect(await locs(sitemap("prefix-always"))).toEqual([
+      "https://www.shop.example/console/en/",
+      "https://www.shop.example/console/en/about/",
+    ]);
+    // The default locale is unprefixed.
+    expect(await locs(sitemap())).toEqual([
+      "https://www.shop.example/console/",
+      "https://www.shop.example/console/about/",
+    ]);
+  });
 });
 
 describe("RSC sitemap.ts, robots.ts and llms.ts route files", () => {
   it("emits no route file code for a build without them", () => {
     const entry = generateRscEntry({ ...context, sitemap: resolveFarmAgentSitemap(true) });
     expect(entry).not.toContain("handleFarmAppMetadataRoute");
-    expect(entry).not.toContain("{sitemap,robots,llms,llms-full}");
+    expect(entry).not.toContain("{sitemap,robots,manifest,llms,llms-full}");
   });
 
   it("answers them after middleware and API routes, before the generated files", () => {
@@ -194,7 +221,7 @@ describe("RSC sitemap.ts, robots.ts and llms.ts route files", () => {
       sitemap: resolveFarmAgentSitemap(true),
     });
     expect(entry).toContain(
-      'import.meta.glob("/src/app/**/{sitemap,robots,llms,llms-full}.{ts,js}", { eager: true })',
+      'import.meta.glob("/src/app/**/{sitemap,robots,manifest,llms,llms-full}.{ts,js}", { eager: true })',
     );
     const api = entry.indexOf("await handleAPIRequest(cloneFarmRequestWithContext(request))");
     const routeFiles = entry.indexOf("await handleFarmAppMetadataRoute(request, context)");
