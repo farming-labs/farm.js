@@ -828,7 +828,7 @@ async function proxyFarmExternalRewrite(
   let request = createRequestFromNodeRequest(req, new URL(destination));
   if (request.method !== "GET" && request.method !== "HEAD") {
     const body = await readNodeRequestBody(req as any, bodySizeLimit);
-    request = new Request(request, { body: toRequestBody(body) });
+    request = new Request(request, { method: request.method, body: toRequestBody(body) });
   }
   await sendWebResponse(res, await fetchFarmExternalRewrite(request));
   return true;
