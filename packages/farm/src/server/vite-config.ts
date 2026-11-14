@@ -98,14 +98,27 @@ function mergeNoExternal(
   return Array.from(new Set([...normalize(farmValue), ...normalize(userValue)]));
 }
 
-function mergeAlias(farmValue: ViteAlias | undefined, userValue: ViteAlias | undefined): ViteAlias {
+/**
+ * Farm's aliases after the app's. Vite uses the first alias that matches, in order, so an app
+ * alias such as `@/components/ui/*` overrides Farm's `@` for the paths it covers. Development
+ * (Farm's Vite plugin) and production builds both merge this way. A Farm alias whose name the app
+ * also uses is dropped, as an object spread would drop it.
+ */
+export function mergeFarmViteAlias(
+  farmValue: ViteAlias | undefined,
+  userValue: ViteAlias | undefined,
+): ViteAlias {
   if (!farmValue) return userValue || {};
   if (!userValue) return farmValue;
 
   if (!Array.isArray(farmValue) && !Array.isArray(userValue)) {
     return {
-      ...farmValue,
       ...userValue,
+      ...Object.fromEntries(
+        Object.entries(farmValue).filter(
+          ([find]) => !Object.prototype.hasOwnProperty.call(userValue, find),
+        ),
+      ),
     };
   }
 
@@ -114,9 +127,9 @@ function mergeAlias(farmValue: ViteAlias | undefined, userValue: ViteAlias | und
       ? [...value]
       : Object.entries(value).map(([find, replacement]) => ({ find, replacement }));
 
-  // Vite uses the first matching array entry. Put application entries first
-  // so an explicit user alias can intentionally override a Farm default.
-  return [...normalize(userValue), ...normalize(farmValue)];
+  const userEntries = normalize(userValue);
+  const userNames = new Set(userEntries.map((entry) => entry.find));
+  return [...userEntries, ...normalize(farmValue).filter((entry) => !userNames.has(entry.find))];
 }
 
 export function mergeFarmViteConfig(
@@ -141,7 +154,7 @@ export function mergeFarmViteConfig(
     resolve: {
       ...farmConfig.resolve,
       ...userConfig.resolve,
-      alias: mergeAlias(farmConfig.resolve?.alias, userConfig.resolve?.alias),
+      alias: mergeFarmViteAlias(farmConfig.resolve?.alias, userConfig.resolve?.alias),
       dedupe: Array.from(
         new Set([...(farmConfig.resolve?.dedupe || []), ...(userConfig.resolve?.dedupe || [])]),
       ),

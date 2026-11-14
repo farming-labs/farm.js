@@ -392,9 +392,12 @@ describe("Farm layers", () => {
     });
     const configHook = plugin.config as (...args: any[]) => any;
 
-    const viteConfig = await configHook({}, { command: "serve", mode: "development" });
+    // Farm merges its aliases after the app's into the config itself: Vite would put returned
+    // aliases first.
+    const userConfig: { resolve?: { alias?: unknown } } = {};
+    const viteConfig = await configHook(userConfig, { command: "serve", mode: "development" });
 
-    expect(viteConfig.resolve.alias).toEqual({
+    expect(userConfig.resolve?.alias).toEqual({
       "#layers/commerce": path.join(layerRoot, "src"),
       // `@/` resolves to the app's source directory, as in production builds.
       "@": path.resolve(root, "src"),

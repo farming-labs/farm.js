@@ -251,6 +251,7 @@ import {
   createFarmClientOptimizeDepsConfig,
   createFarmClientOptimizeDepsEntries,
   createFarmSourceAlias,
+  mergeFarmViteAlias,
 } from "./server/vite-config";
 import {
   generateFarmDocsAdapterClientRuntime,
@@ -1748,11 +1749,39 @@ export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer | false): bo
   return getFarmRendererCapabilities(resolveFarmRenderer(renderer)).reconcilesRerenders;
 }
 
-function hasViteAlias(alias: AliasOptions | undefined, find: string): boolean {
+// `@/` imports an app alias must answer to stand in for Farm's own `@`: shallow and nested paths,
+// with and without an extension, and a directory no app would alias by name.
+const FARM_SOURCE_ALIAS_PROBES = [
+  "@/x",
+  "@/index.ts",
+  "@/components/button",
+  "@/lib/utils/format.ts",
+  "@/__farm__/probe",
+];
+
+/** Whether a Vite alias `find` matches a specifier, as Vite matches it. */
+function matchesViteAlias(find: string | RegExp, specifier: string): boolean {
+  if (typeof find === "string") return specifier === find || specifier.startsWith(`${find}/`);
+  // A global or sticky pattern carries `lastIndex` from one test to the next.
+  find.lastIndex = 0;
+  const matched = find.test(specifier);
+  find.lastIndex = 0;
+  return matched;
+}
+
+/**
+ * Whether one of the app's aliases answers every `@/…` import, so Farm's `@` alias would never be
+ * reached: `"@"` itself, or a pattern such as `/^@\/(.*)$/`. One that answers only some, such as
+ * `/^@\/components\/ui\/(.*)$/`, narrows `@` for those paths; Farm's `@`, merged after the app's
+ * aliases, still serves the rest.
+ */
+function hasFarmSourceAliasOverride(alias: AliasOptions | undefined): boolean {
   if (!alias) return false;
-  if (!Array.isArray(alias)) return Object.prototype.hasOwnProperty.call(alias, find);
-  return alias.some((entry) =>
-    typeof entry.find === "string" ? entry.find === find : entry.find.test(`${find}/`),
+  const finds = Array.isArray(alias)
+    ? alias.map((entry: { find: string | RegExp }) => entry.find)
+    : Object.keys(alias);
+  return finds.some((find) =>
+    FARM_SOURCE_ALIAS_PROBES.every((probe) => matchesViteAlias(find, probe)),
   );
 }
 
@@ -1829,12 +1858,22 @@ export function farmPlugin(
 
     config(userConfig, configEnv) {
       isBuild = configEnv.command === "build";
-      const layerAliases = getFarmLayerAliases(options.layers);
       // `@/` resolves to the source directory in development as it does in production
-      // builds. An `@` alias in the app's own Vite config wins.
-      const sourceAlias = hasViteAlias(userConfig.resolve?.alias, "@")
-        ? {}
-        : createFarmSourceAlias(options.root || process.cwd(), options.srcDir);
+      // builds. An app alias that answers every `@/` import replaces it.
+      const farmAliases = {
+        ...getFarmLayerAliases(options.layers),
+        ...(hasFarmSourceAliasOverride(userConfig.resolve?.alias)
+          ? {}
+          : createFarmSourceAlias(options.root || process.cwd(), options.srcDir)),
+      };
+      // Vite puts the aliases a plugin's config hook returns ahead of the app's, and uses the
+      // first that matches, so an app alias for `@/components/ui/*` lost to Farm's `@` in
+      // development while production builds, which merge the app's first, honored it. Merge
+      // Farm's after the app's here too.
+      if (Object.keys(farmAliases).length > 0) {
+        userConfig.resolve ??= {};
+        userConfig.resolve.alias = mergeFarmViteAlias(farmAliases, userConfig.resolve.alias);
+      }
       const layerRoots = (options.layers ?? []).map((layer) => layer.root);
       // Vite's CORS middleware runs ahead of every plugin's and ends each OPTIONS request with a
       // 204, so route OPTIONS exports, app middleware, and routeRules CORS never saw one, and app
@@ -1849,9 +1888,6 @@ export function farmPlugin(
         // Keep development module ownership explicit; the RSC plugin adds its
         // environment only when enabled. Production environment setup is unchanged.
         ...(!isBuild ? { environments: { client: {}, ssr: {} } } : {}),
-        resolve: {
-          alias: { ...layerAliases, ...sourceAlias },
-        },
         server: {
           ...(farmOwnsDevCors ? { cors: false } : {}),
           fs: {
