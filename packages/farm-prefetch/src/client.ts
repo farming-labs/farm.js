@@ -47,7 +47,7 @@ export function startPrefetchRuntime(
     await prefetch(href);
   }, options.maxConcurrent);
   const attached = new WeakSet<Element>();
-  const hoverTimers = new Map<Element, ReturnType<typeof setTimeout>>();
+  const hoverTimers = new Map<Element, ReturnType<Window["setTimeout"]>>();
   let viewportObserver: IntersectionObserver | null = null;
   let mutationObserver: MutationObserver | null = null;
 
