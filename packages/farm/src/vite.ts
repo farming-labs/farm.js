@@ -2857,11 +2857,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 (isViteDevClientRequest(parsedRequestUrl, req.headers) &&
                   devServableFileExists(requestPathname, [server.config.root]))));
 
-          // Config headers() and redirects() see the requested URL before any route or app
-          // middleware does, as in the production entry: headers() then apply to whatever
-          // answers, a redirect or a middleware response included, and a redirect passes through
-          // the plugin runtime like any response. A request a config rewrite re-entered this
-          // handler with, or a dotted path back from Vite's file serving, has passed them already.
+          // Config headers() and redirects(), and route-file redirects, see the requested URL
+          // before any route or app middleware does, as in the production entry: headers() then
+          // apply to whatever answers, a redirect or a middleware response included, and a
+          // redirect passes through the plugin runtime like any response. A request a config
+          // rewrite re-entered this handler with, or a dotted path back from Vite's file
+          // serving, has passed them already.
           const configRewriteSource = (req as FarmDevConfigRewriteRequest)[
             FARM_DEV_CONFIG_REWRITE_SOURCE
           ];
@@ -2934,22 +2935,30 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             await pm.runHookParallel("beforeRender", render);
           };
 
+          const meetsRequestedURLRoutes =
+            configRewriteSource === undefined && !deferredDottedRequests.has(req);
+          // Production lists route-file redirects before config redirects, so they win.
+          const routeRedirect = meetsRequestedURLRoutes
+            ? farmApp.getRouteManager().matchRedirect(requestPathname, parsedRequestUrl.search)
+            : null;
           if (
-            pm &&
-            configRewriteSource === undefined &&
-            !deferredDottedRequests.has(req) &&
-            (configRoutePlugins.has(FARM_CONFIG_HEADERS_PLUGIN_NAME) ||
-              configRedirectMatchers.length > 0) &&
+            meetsRequestedURLRoutes &&
+            (routeRedirect ||
+              (pm &&
+                (configRoutePlugins.has(FARM_CONFIG_HEADERS_PLUGIN_NAME) ||
+                  configRedirectMatchers.length > 0))) &&
             !isViteOwnedRequest()
           ) {
-            let redirect: ReturnType<(typeof configRedirectMatchers)[number]> = null;
+            let redirect: { destination: string; statusCode: number } | null = routeRedirect;
             try {
-              await pm.runHookParallelFiltered(
-                "beforeRequest",
-                (plugin) => plugin.name === FARM_CONFIG_HEADERS_PLUGIN_NAME,
-                req,
-                res,
-              );
+              if (pm) {
+                await pm.runHookParallelFiltered(
+                  "beforeRequest",
+                  (plugin) => plugin.name === FARM_CONFIG_HEADERS_PLUGIN_NAME,
+                  req,
+                  res,
+                );
+              }
               for (const matchRedirect of configRedirectMatchers) {
                 redirect ??= matchRedirect(parsedRequestUrl);
               }
@@ -2967,7 +2976,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 status: redirect.statusCode,
                 headers: { Location: redirect.destination },
               });
-              if (opensFarmDevRuntimeSession(pm)) {
+              if (pm && opensFarmDevRuntimeSession(pm)) {
                 const redirectResponse = response;
                 try {
                   // The session describes the request as production's does for a path no route
@@ -3848,16 +3857,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
 
           if (await tryConfiguredIntegrationRoute()) {
-            return;
-          }
-
-          const redirectMatch = farmApp
-            .getRouteManager()
-            .matchRedirect(requestPathname, parsedRequestUrl.search);
-          if (redirectMatch) {
-            res.statusCode = redirectMatch.statusCode;
-            res.setHeader("Location", redirectMatch.destination);
-            res.end(`Redirecting to ${redirectMatch.destination}`);
             return;
           }
 

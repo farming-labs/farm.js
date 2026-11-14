@@ -45,6 +45,7 @@ export default {
     { source: "/api/old", destination: "/api/ok" },
   ],
   rewrites: () => [{ source: "/alias", destination: "/hello" }],
+  headers: () => [{ source: "/moved", headers: [{ key: "x-moved", value: "1" }] }],
   plugins: [
     definePlugin({
       name: "acme:render-trace",
@@ -99,6 +100,11 @@ export default {
   "src/app/swap/page.tsx": `export default function Page() { return <h1>swap</h1>; }`,
   "src/app/api/ok/route.ts": `export function GET() { return Response.json({ ok: true }); }`,
   "src/app/blog/sitemap.ts": `export default function sitemap() { return [{ url: "https://farm.test/blog" }]; }`,
+  "src/routes.ts": `import { defineRoutes } from "@farm.js/core";
+export default defineRoutes(({ redirect }) => [
+  redirect("/moved", "/hello"),
+  redirect("/api/moved", "/api/ok"),
+]);`,
 };
 
 async function createApp(prefix: string): Promise<string> {
@@ -138,9 +144,9 @@ async function request(origin: string, pathname: string) {
 }
 
 // render.before (and the router hooks) run for every request the production runtime classes as
-// a page, on the URL as requested and before Farm resolves it: a config redirect, a config
-// rewrite's source, a generated agent file, a Markdown mirror, the app manifest and the not-found
-// page included. A config redirect under the API base path and an app metadata route (here
+// a page, on the URL as requested and before Farm resolves it: a config or route-file redirect, a
+// config rewrite's source, a generated agent file, a Markdown mirror, the app manifest and the
+// not-found page included. A redirect under the API base path and an app metadata route (here
 // blog/sitemap.ts) are not pages. runtime.before and runtime.after run for every one of them.
 async function expectRenderHookContract(origin: string): Promise<void> {
   const page = (pathname: string, routePattern: string | null, status: number) => ({
@@ -157,6 +163,8 @@ async function expectRenderHookContract(origin: string): Promise<void> {
     "/hello",
     "/old",
     "/api/old",
+    "/moved",
+    "/api/moved",
     "/alias",
     "/robots.txt",
     "/sitemap.xml",
@@ -172,6 +180,8 @@ async function expectRenderHookContract(origin: string): Promise<void> {
     "/hello": page("/hello", "/hello", 200),
     "/old": page("/old", null, 307),
     "/api/old": { status: 307, trace: ["before /api/old", "after /api/old 307"] },
+    "/moved": page("/moved", null, 307),
+    "/api/moved": { status: 307, trace: ["before /api/moved", "after /api/moved 307"] },
     // The hooks see the requested URL, before runtime.before runs again on the destination.
     "/alias": {
       status: 200,
@@ -211,6 +221,17 @@ async function expectRenderHookContract(origin: string): Promise<void> {
     trace: ["before /swap", "router.before /swap", "render.before /swap /swap", "after /hello 200"],
   });
 
+  // A route-file redirect is answered as production answers it: before routes, with the
+  // headers() config, and as text.
+  const moved = await fetch(`${origin}/moved`, { redirect: "manual" });
+  expect({
+    status: moved.status,
+    location: moved.headers.get("location"),
+    header: moved.headers.get("x-moved"),
+    body: await moved.text(),
+  }).toEqual({ status: 307, location: "/hello", header: "1", body: "Redirecting to /hello" });
+  await fetch(`${origin}/__trace`);
+
   // A Markdown mirror is a page request of its own, and renders its page through another. Farm
   // dev renders that page before the mirror's own request starts, so only the events compare.
   const mirror = await request(origin, "/hello.md");
@@ -223,7 +244,7 @@ async function expectRenderHookContract(origin: string): Promise<void> {
   // page: runtime.error and onError observe it once, no runtime.after runs, and the request
   // answers the plain-text runtime hook 500.
   const failures: Record<string, unknown> = {};
-  for (const pathname of ["/old", "/alias", "/.well-known/farmjs.json", "/hello"]) {
+  for (const pathname of ["/old", "/moved", "/alias", "/.well-known/farmjs.json", "/hello"]) {
     await fetch(`${origin}/__fail-render`);
     failures[pathname] = await request(origin, pathname);
   }
@@ -240,6 +261,7 @@ async function expectRenderHookContract(origin: string): Promise<void> {
   });
   expect(failures).toEqual({
     "/old": failure("/old", null),
+    "/moved": failure("/moved", null),
     "/alias": failure("/alias", null),
     "/.well-known/farmjs.json": failure("/.well-known/farmjs.json", null),
     "/hello": failure("/hello", "/hello"),

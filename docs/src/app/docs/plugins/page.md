@@ -279,17 +279,17 @@ Adding `render.html` requires Farm to buffer the final document. Prefer `render.
 
 Render hooks run for every page request, in development and production: a request a page route
 matches, or a `GET` or `HEAD` request that no API route, integration route, docs page, or app
-metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, a metadata image) answers. That includes
-a config redirect, a config rewrite (once, for the URL as requested, not again for its
-destination), the generated `llms.txt`, `sitemap.xml`, and `robots.txt`, the app manifest, a
-Markdown mirror (and the page it reads), and the not-found page. `render.before` runs before Farm
-resolves the request, so the response may be a redirect or a text file rather than a rendered
-page. Its `routePattern` and `params` describe the page route the requested URL matches;
-`routePattern` is `null` when none does, so check it before doing page-only work. The router and
-render hooks describe the requested URL even when a `runtime.before` hook returns a replacement
-`Request`; Farm routes and renders the replacement, and `runtime.after` sees it. Render hooks do
-not run when a `runtime.before` hook answers the request, and `render.html` sees only HTML
-responses. The React Server Components pipeline does not run render hooks yet; see
+metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, a metadata image) answers. That includes a
+config redirect, a route-file `redirect()` from `defineRoutes`, a config rewrite (once, for the URL
+as requested, not again for its destination), the generated `llms.txt`, `sitemap.xml`, and
+`robots.txt`, the app manifest, a Markdown mirror (and the page it reads), and the not-found page.
+`render.before` runs before Farm resolves the request, so the response may be a redirect or a text
+file rather than a rendered page. Its `routePattern` and `params` describe the page route the
+requested URL matches; `routePattern` is `null` when none does, so check it before doing page-only
+work. The router and render hooks describe the requested URL even when a `runtime.before` hook
+returns a replacement `Request`; Farm routes and renders the replacement, and `runtime.after` sees
+it. Render hooks do not run when a `runtime.before` hook answers the request, and `render.html` sees
+only HTML responses. The React Server Components pipeline does not run render hooks yet; see
 [Server rendering](/docs/server-rendering#react-server-components).
 
 ### Build hooks
