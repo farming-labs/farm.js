@@ -200,6 +200,7 @@ import {
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes, createFarmVercelCanonicalSlashRoutes } from "./vercel-assets";
+import { listFarmClientOutputFiles, planFarmImmutableAssets } from "./immutable-assets";
 import {
   assertServerReadSSRAssetsSupported,
   collectServerOnlySSRAssets,
@@ -13637,6 +13638,23 @@ function toFarmNodeResponse(request, response) {
     }),
   );
 
+  // Content-hashed client files never change, so they are cached for a year. Vercel gets the same
+  // policy from the immutable route postProcessVercelOutput writes, which replaces Nitro's routes.
+  const immutableAssets = isVercel
+    ? { publicAssets: [], routeRules: {} }
+    : planFarmImmutableAssets({
+        clientOutputDir,
+        files: await listFarmClientOutputFiles(clientOutputDir),
+        routeRules: configuredNitroRouteRules,
+        routePaths: [
+          ...[...routeManager.getRoutes().keys()].map((pattern) =>
+            applyFarmBasePath(pattern, config.basePath),
+          ),
+          ...apiRouteManager.getRoutes().keys(),
+          resolveFarmAPIServerBasePath(config.api),
+        ],
+      });
+
   let nitroConfig: NitroConfig = {
     preset,
     ...(farmNodeServerEntryPath ? { entry: farmNodeServerEntryPath } : {}),
@@ -13655,13 +13673,9 @@ function toFarmNodeResponse(request, response) {
     alias: resolveNitroInternalRuntimeAliases(root),
     compatibilityDate: "2024-12-01",
     output: resolveFarmNitroOutputConfig(preset, outputDir),
-    publicAssets: [
-      {
-        dir: clientOutputDir,
-        maxAge: 31536000,
-        baseURL: "/",
-      },
-    ],
+    // Nitro gives the root directory no Cache-Control on any preset (it falls through to the
+    // app), so public files keep revalidating; the hashed directories carry their own maxAge.
+    publicAssets: [{ dir: clientOutputDir, baseURL: "/" }, ...immutableAssets.publicAssets],
     // A self-hosted Node server sends static files itself, so precompress them
     // with gzip and let Nitro serve that by Accept-Encoding. Brotli at Nitro's
     // fixed top quality cost a docs app ~20 s of build CPU for a small further
@@ -13725,6 +13739,7 @@ function toFarmNodeResponse(request, response) {
       "/**": {
         prerender: false,
       },
+      ...immutableAssets.routeRules,
       ...configuredNitroRouteRules,
       // Exact user rules must retain their runtime settings without replacing
       // the headers and prerender marker generated for a safe physical page.
