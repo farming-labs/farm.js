@@ -1,9 +1,12 @@
+// Subpath entries only: the package root also loads Farm's React client, which a backend-only
+// app (`renderer: false`) does not install.
 import {
-  definePlugin,
   describeIntegrationOriginRejection,
   resolveIntegrationAllowedOrigins,
   validateIntegrationRequestOrigin,
-} from "@farm.js/core";
+} from "@farm.js/core/integrations";
+import { definePlugin } from "@farm.js/core/plugin";
+// Types only, so the root entry is never loaded at runtime.
 import type { FarmSchema, FarmSqlDialect } from "@farm.js/core";
 import {
   executeSyncOperation,
@@ -404,7 +407,7 @@ async function resolveSyncClient(
 
 /** Let the orm runtime detect the driver and build the model client. */
 async function buildOrm(schema: FarmSchema, client: unknown): Promise<SyncOrmClient> {
-  const { createIntegrationOrm } = await import("@farm.js/core");
+  const { createIntegrationOrm } = await import("@farm.js/core/integrations/orm");
   return (await createIntegrationOrm({ schema, client })) as unknown as SyncOrmClient;
 }
 

@@ -1,4 +1,6 @@
-import { createElement, type ReactElement } from "react";
+// Type only: `page()` loads React when called, so API tests run in apps without React
+// (`renderer: false`).
+import type { ReactElement } from "react";
 import { invokeAPIRouteEndpoint, matchAPIRoute, type APIRouteParams } from "./api/route-manager";
 import { getFarmDataCache } from "./cache";
 import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
@@ -232,6 +234,7 @@ export function createFarmTestHarness<TContext = unknown>(
         : { ...rawProps, search, searchParams: createFarmSearchParams(search) };
       const canonicalPath = readCanonicalPath(resolvedProps);
       const componentProps = stripInternalRouteProps(resolvedProps) as FarmTestRouteProps<TRoute>;
+      const { createElement } = await import("react");
 
       return {
         route,

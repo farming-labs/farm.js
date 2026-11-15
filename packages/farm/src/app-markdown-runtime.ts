@@ -4,8 +4,12 @@ import type { Metadata, RouteModule } from "./types";
 import {
   FARM_MARKDOWN_PAGE_CHECK_HEADER,
   _getFarmMarkdownPageCheckToken,
+  _getFarmMarkdownPath,
+  _resolveFarmMarkdownIndexAlias,
   requestAcceptsMarkdown,
+  type FarmMarkdownRoutePathname,
 } from "./markdown";
+import { withoutFarmDeploymentCookie } from "./deployment";
 import { createFarmMarkdownViewResponse } from "./markdown-view";
 import { FARM_ANONYMOUS_CLIENT_ADDRESS } from "./anonymous-client-address";
 import type { FarmMdxComponents, FarmMdxResolvedConfig } from "./app-markdown-config";
@@ -24,7 +28,12 @@ export interface FarmMarkdownPageSource {
 }
 
 export interface FarmMarkdownPageModuleInput extends FarmMarkdownPageSource {
-  components?: FarmMdxComponents;
+  /**
+   * The page's MDX components, or a function that loads them. The function runs once, when the
+   * page first renders, so loading the route module for its metadata or rendering config does not
+   * evaluate the components' module graph.
+   */
+  components?: FarmMdxComponents | (() => Promise<FarmMdxComponents>);
   config?: FarmMdxResolvedConfig;
 }
 
@@ -32,10 +41,17 @@ export function isFarmMarkdownPageFile(filePath: string): boolean {
   return /(^|[/\\])page\.mdx?$/i.test(filePath);
 }
 
-export function normalizeFarmMarkdownRoutePath(pathname: string): string {
+/**
+ * The page a Markdown request names. With `routePathname`, `<prefix>/index.md` names the home
+ * page under a `basePath` or locale prefix as `/index.md` does at the root.
+ */
+export function normalizeFarmMarkdownRoutePath(
+  pathname: string,
+  routePathname?: FarmMarkdownRoutePathname,
+): string {
   const withoutExtension = pathname.replace(/\.md$/i, "");
   const normalized = withoutExtension.startsWith("/") ? withoutExtension : `/${withoutExtension}`;
-  return normalized === "/index" ? "/" : normalized.replace(/\/+$/g, "") || "/";
+  return _resolveFarmMarkdownIndexAlias(normalized.replace(/\/+$/g, "") || "/", routePathname);
 }
 
 export function parseMarkdownFrontmatter(source: string): {
@@ -115,13 +131,52 @@ async function evaluateMdxSource(source: string, filePath: string) {
   });
 }
 
+type FarmMarkdownRouteConfig = Pick<RouteModule, "dynamic" | "revalidate" | "ssg">;
+
+const MARKDOWN_ROUTE_CONFIG_EXPORT =
+  /^export\s+const\s+(dynamic|revalidate|ssg)\s*=\s*("[^"\\]*"|'[^'\\]*'|\d+(?:\.\d+)?|true|false)\s*;?\s*$/;
+
+/**
+ * The route config a Markdown page declares the way a page module does, with a literal ESM export
+ * (`export const dynamic = "force-static";`). The page's MDX is evaluated only when it renders, so
+ * the build, the prerender pass and the server read these from the source instead. Lines inside a
+ * fenced code block are an example, not the page's config.
+ */
+export function readFarmMarkdownRouteConfig(body: string): FarmMarkdownRouteConfig {
+  const config: Record<string, unknown> = {};
+  let fence: string | undefined;
+  for (const line of body.split(/\r?\n/)) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)?.[1];
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = undefined;
+      continue;
+    }
+    if (marker) {
+      fence = marker;
+      continue;
+    }
+    const match = line.match(MARKDOWN_ROUTE_CONFIG_EXPORT);
+    if (!match) continue;
+    const literal = match[2];
+    config[match[1]] =
+      literal === "true"
+        ? true
+        : literal === "false"
+          ? false
+          : /^\d/.test(literal)
+            ? Number(literal)
+            : literal.slice(1, -1);
+  }
+  return config as FarmMarkdownRouteConfig;
+}
+
 export function createFarmMarkdownRouteModule(
   input: FarmMarkdownPageModuleInput,
 ): RouteModule & { source: string } {
   const { body } = parseMarkdownFrontmatter(input.source);
-  const components = input.components || {};
   const className = input.config?.className || "farm-markdown";
   let evaluatedPromise: Promise<{ default: ComponentType<any> }> | undefined;
+  let componentsPromise: Promise<FarmMdxComponents> | undefined;
 
   const loadContent = async () => {
     evaluatedPromise ??= evaluateMdxSource(body, input.filePath) as Promise<{
@@ -130,9 +185,20 @@ export function createFarmMarkdownRouteModule(
     return evaluatedPromise;
   };
 
+  const loadComponents = () => {
+    const configured = input.components;
+    if (typeof configured !== "function") return configured || {};
+    // A failed load is retried on the next render, as a failed route module load is.
+    componentsPromise ??= configured().catch((error: unknown) => {
+      componentsPromise = undefined;
+      throw error;
+    });
+    return componentsPromise;
+  };
+
   async function FarmMarkdownPage(props: any) {
     const { createElement } = await import("react");
-    const evaluated = await loadContent();
+    const [evaluated, components] = await Promise.all([loadContent(), loadComponents()]);
     const MDXContent = evaluated.default;
     return createElement(
       "article",
@@ -148,6 +214,7 @@ export function createFarmMarkdownRouteModule(
   }
 
   return {
+    ...readFarmMarkdownRouteConfig(body),
     default: FarmMarkdownPage as unknown as RouteModule["default"],
     metadata: createMarkdownMetadata(input.source, input.filePath),
     source: input.source,
@@ -291,6 +358,11 @@ export async function createFarmMarkdownSourceResponse(options: {
     pathname: string,
   ) => Promise<FarmMarkdownPageSource | null> | FarmMarkdownPageSource | null;
   /**
+   * A request pathname as routes see it, without the `basePath` and locale prefix, so
+   * `<prefix>/index.md` names that prefix's home page as `/index.md` does.
+   */
+  routePathname?: FarmMarkdownRoutePathname;
+  /**
    * Runs a request through the app's full pipeline, guards and page rendering
    * included, without following redirects. With it, a page's source is only
    * served when an anonymous visitor's request for the page's HTML succeeds.
@@ -318,7 +390,7 @@ export async function createFarmMarkdownSourceResponse(options: {
     return null;
   }
 
-  const targetPathname = normalizeFarmMarkdownRoutePath(url.pathname);
+  const targetPathname = normalizeFarmMarkdownRoutePath(url.pathname, options.routePathname);
   const source = await options.resolveSource(targetPathname);
   if (!source) {
     return null;
@@ -360,7 +432,10 @@ export async function createFarmMarkdownSourceResponse(options: {
       // request with credentials. A client address or proxy header is not one: proxies
       // add those to every request.
       let response = publicResponse;
-      if (options.request.headers.has("cookie") || options.request.headers.has("authorization")) {
+      if (
+        withoutFarmDeploymentCookie(options.request.headers.get("cookie")) ||
+        options.request.headers.has("authorization")
+      ) {
         const headers = new Headers(publicResponse.headers);
         headers.set("Cache-Control", "private, no-store");
         response = new Response(publicResponse.body, {
@@ -395,7 +470,10 @@ export async function createFarmMarkdownSourceResponse(options: {
 
   const headers = new Headers({
     "Content-Type": "text/markdown; charset=utf-8",
-    "Content-Location": targetPathname === "/" ? "/index.md" : `${targetPathname}.md`,
+    "Content-Location": _getFarmMarkdownPath(
+      targetPathname,
+      options.routePathname?.(targetPathname),
+    ),
     "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
     "X-Farm-Markdown-Route": targetPathname,
     "X-Farm-Markdown-Source": source.filePath,

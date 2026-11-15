@@ -33,6 +33,8 @@ interface FarmShellModule {
   session?(): Promise<{ appId: string; accessToken: string | null } | null>;
   refreshSession?(failedToken: string): Promise<string | null>;
   signOut?(): Promise<void>;
+  /** Native sign-in (`@farm.js/native/internal`): status and body, never cookies or tokens. */
+  signIn?(path: string, body: string): Promise<{ status: number; body: string }>;
 }
 
 export const FarmScreenContext = createContext<FarmScreenState | null>(null);

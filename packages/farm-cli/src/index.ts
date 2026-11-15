@@ -14,6 +14,7 @@ export {
   FarmDeployError,
   formatFarmDeployPlan,
   resolveCloudflareAgentDeployPlan,
+  resolveDeployCliCommand,
   resolveDeployCliExecutable,
   type CloudflareAgentDeployPlan,
   type FarmDeployCommand,
@@ -120,6 +121,12 @@ export {
   type FarmCronSchedulerEntry,
   type RunFarmCronOptions,
 } from "./cron";
+export {
+  syncFarmCronJobs,
+  FarmCronSyncError,
+  type SyncFarmCronOptions,
+  type FarmCronSyncResult,
+} from "./cron-sync";
 export {
   createFrameworkMigrationPlan,
   inspectFrameworkMigrations,

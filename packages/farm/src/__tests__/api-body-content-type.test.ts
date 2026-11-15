@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createEndpoint } from "../api/endpoint";
+import { multipart } from "../api/transport";
 import { invokeAPIRouteEndpoint } from "../api/runtime";
 
 function deleteAccount(handler = vi.fn(async () => ({ deleted: true }))) {
@@ -198,5 +199,162 @@ describe("API route body content types", () => {
       message: "The request body is not valid multipart form data.",
     });
     expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe("cross-site bodies on endpoints with a JSON body schema", () => {
+  const crossSite = { origin: "https://evil.example", "sec-fetch-site": "cross-site" };
+
+  function createTodo(handler = vi.fn(async (_title: string) => ({ created: true }))) {
+    return {
+      handler,
+      endpoint: createEndpoint(
+        { method: "POST", body: z.object({ title: z.string() }) },
+        async ({ body }) => handler(body.title),
+      ),
+    };
+  }
+
+  function post(headers: Record<string, string>, body: BodyInit) {
+    return new Request("https://farm.test/api/todos", { method: "POST", headers, body });
+  }
+
+  // urlencoded, multipart, and text/plain are CORS "simple" types: a page on another site sends
+  // them with the visitor's cookies and without a preflight, and a string-only schema accepts
+  // the parsed form as valid input.
+  it.each([
+    ["application/x-www-form-urlencoded", "title=pwned"],
+    ["text/plain", '{"title":"pwned"}'],
+  ])("refuses a cross-site %s body before the handler runs", async (contentType, body) => {
+    const { endpoint, handler } = createTodo();
+
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      post({ ...crossSite, "content-type": contentType }, body),
+    );
+
+    expect(response.status).toBe(415);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unsupported Media Type",
+      message: expect.stringContaining("multipart()"),
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("refuses a cross-site multipart body before the handler runs", async () => {
+    const { endpoint, handler } = createTodo();
+    const form = new FormData();
+    form.set("title", "pwned");
+
+    const response = await invokeAPIRouteEndpoint(endpoint, post(crossSite, form));
+
+    expect(response.status).toBe(415);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("refuses a form post that names another site only in its Referer", async () => {
+    const { endpoint, handler } = createTodo();
+
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      post(
+        {
+          referer: "https://evil.example/attack",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        "title=pwned",
+      ),
+    );
+
+    expect(response.status).toBe(415);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("refuses a cross-site text/plain body when the schema allows no body", async () => {
+    const handler = vi.fn(async () => ({ deleted: true }));
+    const endpoint = createEndpoint(
+      { method: "POST", body: z.object({ reason: z.string() }).optional() },
+      async () => handler(),
+    );
+
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      post({ ...crossSite, "content-type": "text/plain" }, "anything"),
+    );
+
+    expect(response.status).toBe(415);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("still accepts a native form submission from the app's own page", async () => {
+    const { endpoint, handler } = createTodo();
+
+    // `<fetcher.Form>` falls back to a native POST to this URL before hydration.
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      post(
+        {
+          origin: "https://farm.test",
+          "sec-fetch-site": "same-origin",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        "title=native",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledWith("native");
+  });
+
+  it("still accepts a form body from a server caller that sends no Origin", async () => {
+    const { endpoint, handler } = createTodo();
+
+    // Webhooks such as Slack and Twilio post urlencoded bodies server to server.
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      post({ "content-type": "application/x-www-form-urlencoded" }, "title=webhook"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledWith("webhook");
+  });
+
+  it("still accepts a cross-site JSON body, which a browser sends only after a CORS preflight", async () => {
+    const { endpoint, handler } = createTodo();
+
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      post(
+        { origin: "https://partner.example", "content-type": "application/json" },
+        JSON.stringify({ title: "partner" }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledWith("partner");
+  });
+
+  it("still accepts a cross-site form post to an endpoint that declares form input", async () => {
+    const handler = vi.fn(async (_code: string) => ({ signedIn: true }));
+    // An OAuth `response_mode=form_post` callback: the provider's page posts the form.
+    const endpoint = createEndpoint(
+      { method: "POST", body: multipart(z.object({ code: z.string(), state: z.string() })) },
+      async ({ body }) => handler(body.code),
+    );
+
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      post(
+        {
+          origin: "https://appleid.apple.com",
+          "sec-fetch-site": "cross-site",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        "code=abc&state=xyz",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledWith("abc");
   });
 });

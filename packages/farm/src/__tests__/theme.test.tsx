@@ -1,6 +1,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pluginHook } from "./plugin-hook";
 import { resolveConfig } from "../config";
 import { _runWithCurrentRequest } from "../server/request";
 import { getTheme as getClientTheme, setTheme, useTheme } from "../theme/client";
@@ -103,12 +104,12 @@ describe("FARMJS theme document runtime", () => {
 
   it("adds a selector-driven Tailwind dark variant without replacing a custom one", async () => {
     const plugin = createFarmThemeCssPlugin({ default: "system" });
-    const transform = plugin.transform as any;
-    const generated = await transform.call({}, '@import "tailwindcss";\n', "/app/globals.css");
+    const transform = pluginHook<[string, string], { code: string }>(plugin, "transform");
+    const generated = (await transform('@import "tailwindcss";\n', "/app/globals.css"))!;
     const custom = '@import "tailwindcss";\n@custom-variant dark (&:where(.night *));\n';
 
     expect(generated.code).toContain('[data-theme="dark"]');
-    expect(await transform.call({}, custom, "/app/globals.css")).toBeNull();
+    expect(await transform(custom, "/app/globals.css")).toBeNull();
   });
 });
 

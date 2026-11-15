@@ -1,6 +1,7 @@
 import { parseSync } from "vite";
 import { describe, expect, it, vi } from "vitest";
 import { notFound, redirect } from "../navigation-errors";
+import { ServerFnFailure } from "../server-fn-error";
 import {
   FARM_FORM_ACTION_HEADER,
   handleFarmFormActionRequest,
@@ -79,6 +80,42 @@ describe("islands-mode server actions (run by islx)", () => {
     ).toBeNull();
     // An action this deploy does not know: the page loads again.
     expect((await handleFarmFormActionRequest(formPost("missing", {}), config))?.status).toBe(303);
+  });
+
+  it("sends a form post back to the URL the browser posted to when a rewrite served it", async () => {
+    registerFarmFormAction(async () => {}, "form-rewritten");
+    const response = await handleFarmFormActionRequest(
+      formPost("form-rewritten", {}),
+      config,
+      "https://app.test/alias?view=all",
+    );
+    expect(response?.status).toBe(303);
+    expect(response?.headers.get("location")).toBe("/alias?view=all");
+    // A redirect() the action chose stays where it points.
+    registerFarmFormAction(async () => redirect("/todos?view=all"), "form-rewritten-redirect");
+    const redirected = await handleFarmFormActionRequest(
+      formPost("form-rewritten-redirect", {}),
+      config,
+      "https://app.test/alias?view=all",
+    );
+    expect(redirected?.headers.get("location")).toBe("/todos?view=all");
+  });
+
+  it("answers a declared failure from a form post with its own status, without logging it", async () => {
+    registerFarmFormAction(async () => {
+      throw new ServerFnFailure("sold_out", null, { status: 409, message: "Sold out" });
+    }, "form-declared-failure");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await handleFarmFormActionRequest(
+        formPost("form-declared-failure", {}),
+        config,
+      );
+      expect(response?.status).toBe(409);
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it("rejects a cross-origin form post before running anything", async () => {

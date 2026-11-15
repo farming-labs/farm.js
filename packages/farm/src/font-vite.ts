@@ -145,7 +145,13 @@ export function farmFontImportsPlugin(
       );
       registry.production = false;
       server.middlewares.use(async (req, res, next) => {
-        const pathname = new URL(req.url || "/", "http://farm.local").pathname;
+        // A path is joined, not resolved: `//` would parse as a URL with an empty host and throw.
+        const target = req.url || "/";
+        const pathname = (
+          target.startsWith("/")
+            ? new URL(`http://farm.local${target}`)
+            : new URL(target, "http://farm.local")
+        ).pathname;
 
         if (pathname === "/@farm/fonts.css") {
           res.statusCode = 200;
@@ -1251,8 +1257,11 @@ function isFontLoaderKind(value: unknown): value is FontLoaderKind {
   return typeof value === "string" && FONT_FUNCTIONS.has(value as FontLoaderKind);
 }
 
+/** Whether the code could call a font loader: it names one and imports from a font module. */
 function containsFontFunction(code: string): boolean {
-  return Array.from(FONT_FUNCTIONS).some((name) => code.includes(name));
+  return (
+    code.includes("@farm.js/core") && Array.from(FONT_FUNCTIONS).some((name) => code.includes(name))
+  );
 }
 
 function requireString(value: unknown, id: string, label: string): string {

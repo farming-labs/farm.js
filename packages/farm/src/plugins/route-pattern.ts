@@ -1,3 +1,4 @@
+import { applyFarmBasePath, stripFarmBasePath } from "../base-path";
 import { localizeFarmHref, resolveFarmLocalePath } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { assertBrowserStableRoutePath } from "../routing/specificity";
@@ -38,11 +39,19 @@ export function validateConfigRouteSource(source: string, field = "Config route 
   return source;
 }
 
+/**
+ * The app-relative pathname config sources match, as the production entry's
+ * `getFarmRoutePathname` computes it: the basePath (removed by the locale step
+ * when i18n is enabled) and any locale prefix are stripped first.
+ */
 export function resolveConfigRoutePathname(
   pathname: string,
   i18n?: ResolvedFarmI18nConfig,
+  basePath?: string,
 ): { pathname: string; locale?: string } {
-  const localizedPathname = i18n?.enabled ? resolveFarmLocalePath(pathname, i18n) : { pathname };
+  const localizedPathname = i18n?.enabled
+    ? resolveFarmLocalePath(pathname, i18n)
+    : { pathname: basePath ? stripFarmBasePath(pathname, basePath) : pathname };
   return {
     pathname: normalizeConfigRoutePathname(canonicalizeRequestPathname(localizedPathname.pathname)),
     ...(i18n?.enabled && "locale" in localizedPathname ? { locale: localizedPathname.locale } : {}),
@@ -65,6 +74,22 @@ export function localizeConfigRouteDestination(
   i18n?: ResolvedFarmI18nConfig,
 ): string {
   return locale && i18n?.enabled ? localizeFarmHref(destination, locale, i18n) : destination;
+}
+
+/**
+ * The public URL an app-relative redirect destination sends the browser to. A
+ * localized destination already carries the basePath; any other one gets it
+ * here, so a redirect never leaves the app mount. Already-prefixed and
+ * external destinations are kept.
+ */
+export function resolveConfigRedirectDestination(
+  destination: string,
+  locale: string | undefined,
+  i18n?: ResolvedFarmI18nConfig,
+  basePath?: string,
+): string {
+  if (locale && i18n?.enabled) return localizeFarmHref(destination, locale, i18n);
+  return basePath ? applyFarmBasePath(destination, basePath) : destination;
 }
 
 /**
@@ -193,7 +218,11 @@ function decodeConfigRouteSegment(segment: string): string {
   }
 }
 
-function encodeConfigRouteSegment(segment: string): string {
+/**
+ * Encode one decoded path segment for a redirect or rewrite destination, as
+ * `encodeRuntimePathSegment` does in the generated production server.
+ */
+export function encodeConfigRouteSegment(segment: string): string {
   return encodeURIComponent(segment).replace(
     /[!'()*]/g,
     (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,

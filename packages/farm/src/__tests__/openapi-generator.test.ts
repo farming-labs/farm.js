@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 import * as z3 from "zod/v3";
+import { createEndpoint } from "../api/endpoint";
 import { OpenAPIGenerator } from "../openapi/generator";
 
 function toSchema(schema: unknown): any {
@@ -591,5 +592,217 @@ describe("OpenAPIGenerator schema conversion", () => {
     expect(schema.properties.optionalValue).not.toHaveProperty("nullable");
     expect(schema.properties.nullableValue).toMatchObject({ type: "string", nullable: true });
     expect(schema.required).toEqual(["nullableValue"]);
+  });
+});
+
+describe("OpenAPIGenerator transformed request schemas", () => {
+  const toStatus = (value: string) => value.toUpperCase();
+
+  async function specFor(module: Record<string, unknown>, methods: string[]) {
+    const generator = new OpenAPIGenerator(
+      os.tmpdir(),
+      { title: "Transform API" },
+      { loadModule: async () => module },
+    );
+    const spec = await generator.generateSpec([
+      {
+        path: "/api/tasks",
+        methods,
+        filePath: path.join(os.tmpdir(), "tasks-route.ts"),
+        relativePath: "api/tasks/route.ts",
+      },
+    ]);
+    return spec.paths["/tasks"];
+  }
+
+  it("documents the input enum of a transformed enum", () => {
+    expect(toSchema(z.enum(["open", "done"]).transform(toStatus))).toMatchObject({
+      type: "string",
+      enum: ["open", "done"],
+    });
+    expect(toSchema(z3.enum(["open", "done"]).transform(toStatus))).toMatchObject({
+      type: "string",
+      enum: ["open", "done"],
+    });
+  });
+
+  it("keeps an optional field optional and non-nullable through a transform", () => {
+    for (const status of [
+      z
+        .enum(["open", "done"])
+        .optional()
+        .transform((value) => value ?? "open"),
+      z3
+        .enum(["open", "done"])
+        .optional()
+        .transform((value) => value ?? "open"),
+    ]) {
+      const schema = toSchema(z.object({ status }));
+      expect(schema.properties.status).toMatchObject({ type: "string", enum: ["open", "done"] });
+      expect(schema.properties.status).not.toHaveProperty("nullable");
+      expect(schema).not.toHaveProperty("required");
+    }
+
+    const nullable = toSchema(z.enum(["open", "done"]).nullable().transform(String));
+    expect(nullable).toMatchObject({ type: "string", enum: ["open", "done"], nullable: true });
+  });
+
+  it("documents the input side of a pipe", () => {
+    expect(toSchema(z.string().min(1).transform(Number).pipe(z.number().int()))).toEqual({
+      type: "string",
+      minLength: 1,
+    });
+    expect(toSchema(z3.string().min(1).pipe(z3.coerce.number()))).toMatchObject({
+      type: "string",
+      minLength: 1,
+    });
+  });
+
+  it("documents the target schema of a preprocess step", () => {
+    const toLower = (value: unknown) => String(value).toLowerCase();
+    expect(toSchema(z.preprocess(toLower, z.enum(["open", "done"])))).toMatchObject({
+      type: "string",
+      enum: ["open", "done"],
+    });
+    expect(toSchema(z3.preprocess(toLower, z3.enum(["open", "done"])))).toMatchObject({
+      type: "string",
+      enum: ["open", "done"],
+    });
+  });
+
+  it("does not require a defaulted field behind a transform", () => {
+    for (const status of [
+      z.enum(["open", "done"]).default("open").transform(toStatus),
+      z3.enum(["open", "done"]).default("open").transform(toStatus),
+    ]) {
+      const schema = toSchema(z.object({ title: z.string(), status }));
+      expect(schema.properties.status).toMatchObject({ type: "string", enum: ["open", "done"] });
+      expect(schema.required).toEqual(["title"]);
+    }
+  });
+
+  it("keeps the description declared on a transformed field", () => {
+    expect(
+      toSchema(z.enum(["open", "done"]).transform(toStatus).describe("Task status")),
+    ).toMatchObject({ type: "string", enum: ["open", "done"], description: "Task status" });
+    expect(
+      toSchema(z3.enum(["open", "done"]).transform(toStatus).describe("Task status")),
+    ).toMatchObject({ type: "string", enum: ["open", "done"], description: "Task status" });
+  });
+
+  it("documents transformed fields of a nested object", () => {
+    const schema = toSchema(
+      z.object({
+        filter: z.object({
+          status: z.enum(["open", "done"]).transform(toStatus),
+          tags: z
+            .array(z.enum(["bug", "docs"]))
+            .optional()
+            .transform((tags) => tags ?? []),
+        }),
+      }),
+    );
+    expect(schema).toMatchObject({
+      type: "object",
+      required: ["filter"],
+      properties: {
+        filter: {
+          type: "object",
+          required: ["status"],
+          properties: {
+            status: { type: "string", enum: ["open", "done"] },
+            tags: { type: "array", items: { type: "string", enum: ["bug", "docs"] } },
+          },
+        },
+      },
+    });
+  });
+
+  it("documents transformed query parameters and request bodies of an endpoint", async () => {
+    const paths = await specFor(
+      {
+        GET: createEndpoint(
+          {
+            query: z.object({
+              status: z.enum(["open", "done"]).transform(toStatus),
+              done: z
+                .enum(["true", "false"])
+                .transform((value) => value === "true")
+                .optional(),
+              sort: z
+                .enum(["asc", "desc"])
+                .optional()
+                .transform((value) => value ?? "asc"),
+            }),
+          },
+          async () => ({}),
+        ),
+        POST: createEndpoint(
+          {
+            body: z
+              .object({ status: z.enum(["open", "done"]).default("open").transform(toStatus) })
+              .transform((body) => ({ ...body, createdAt: Date.now() })),
+          },
+          async () => ({}),
+        ),
+      },
+      ["GET", "POST"],
+    );
+
+    expect(paths.get.parameters).toEqual([
+      {
+        name: "status",
+        in: "query",
+        required: true,
+        schema: expect.objectContaining({ type: "string", enum: ["open", "done"] }),
+      },
+      {
+        name: "done",
+        in: "query",
+        required: false,
+        schema: expect.objectContaining({ type: "string", enum: ["true", "false"] }),
+      },
+      {
+        name: "sort",
+        in: "query",
+        required: false,
+        schema: expect.objectContaining({ type: "string", enum: ["asc", "desc"] }),
+      },
+    ]);
+    expect(paths.post.requestBody).toMatchObject({
+      required: true,
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            properties: { status: { type: "string", enum: ["open", "done"] } },
+          },
+        },
+      },
+    });
+    expect(paths.post.requestBody.content["application/json"].schema).not.toHaveProperty(
+      "required",
+    );
+  });
+
+  it("lists the parameters of a transformed query object", async () => {
+    const paths = await specFor(
+      {
+        GET: createEndpoint(
+          {
+            query: z
+              .object({ status: z.enum(["open", "done"]), page: z.coerce.number().optional() })
+              .transform((query) => ({ ...query, page: query.page ?? 1 })),
+          },
+          async () => ({}),
+        ),
+      },
+      ["GET"],
+    );
+
+    expect(paths.get.parameters).toMatchObject([
+      { name: "status", required: true, schema: { type: "string", enum: ["open", "done"] } },
+      { name: "page", required: false, schema: { type: "number" } },
+    ]);
   });
 });

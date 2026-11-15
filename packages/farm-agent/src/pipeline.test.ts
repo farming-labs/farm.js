@@ -31,7 +31,7 @@ beforeAll(() => {
 
 // Guards an app might put on its API: config middleware, a plugin's runtime.before, and an
 // integration's middleware (what protectedRoutes compiles to).
-const config = (dataDir: string, agentOptions = "") => `import { agent } from "@farm.js/agent";
+const config = (dataDir: string, agentOptions: string) => `import { agent } from "@farm.js/agent";
 import { defineConfig, defineIntegration } from "@farm.js/core";
 import { definePlugin } from "@farm.js/core/plugin";
 
@@ -81,7 +81,7 @@ export default defineConfig({
         },
       ],
     }),
-    agent: agent({ storage: { driver: "fs-lite", base: ${JSON.stringify(dataDir)} }${agentOptions} }),
+    agent: agent({ ${agentOptions} }),
   },
 });
 `;
@@ -97,7 +97,11 @@ export default defineAgent(async (input: { orderId: string }, run) => {
 });`,
 };
 
-async function createApp(prefix: string, agentOptions = ""): Promise<string> {
+async function createApp(
+  prefix: string,
+  agentOptions = "",
+  { storage = true }: { storage?: boolean } = {},
+): Promise<string> {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
   cleanups.push(() =>
     fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
@@ -122,7 +126,16 @@ async function createApp(prefix: string, agentOptions = ""): Promise<string> {
   );
   await fs.writeFile(
     path.join(root, "farm.config.ts"),
-    config(path.join(root, ".data"), agentOptions),
+    config(
+      path.join(root, ".data"),
+      [
+        storage &&
+          `storage: { driver: "fs-lite", base: ${JSON.stringify(path.join(root, ".data"))} }`,
+        agentOptions,
+      ]
+        .filter(Boolean)
+        .join(", "),
+    ),
   );
   for (const [file, source] of Object.entries(FILES)) {
     await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
@@ -175,14 +188,22 @@ async function expectGuardedAgentAPI(origin: string) {
   }
 }
 
+// Statuses a run stays in until it is answered, woken or deleted.
+const SETTLED = new Set(["interrupted", "sleeping", "completed", "failed", "cancelled"]);
+
 async function readRun(origin: string, id: string, status: string) {
-  // The run settles in the background; read it until it reaches `status`.
+  // The run settles in the background; read it until it reaches `status`. A run that settles
+  // anywhere else will not get there, so report what it did (a failed run carries its error).
+  let last: { status?: string; error?: { message?: string } } = {};
   for (let attempt = 0; attempt < 100; attempt++) {
     const run = await (await fetch(`${origin}/api/agent/runs/${id}`, { headers: PASS })).json();
     if (run.status === status) return run;
+    last = run;
+    if (SETTLED.has(run.status)) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`run ${id} never reached ${status}`);
+  const error = last.error?.message ? `: ${last.error.message}` : "";
+  throw new Error(`run ${id} is ${last.status ?? "unreadable"}, not ${status}${error}`);
 }
 
 async function expectRunsThroughGuards(origin: string) {
@@ -193,7 +214,9 @@ async function expectRunsThroughGuards(origin: string) {
   });
   expect(started.status).toBe(202);
   const { id } = await started.json();
-  expect((await readRun(origin, id, "interrupted")).interrupt?.name).toBe("approve-refund");
+  const interrupted = await readRun(origin, id, "interrupted");
+  expect(interrupted.input, "input stored before resume").toEqual({ orderId: "A1" });
+  expect(interrupted.interrupt?.name).toBe("approve-refund");
 
   const listed = await (
     await fetch(`${origin}/api/agent/runs?status=interrupted`, { headers: PASS })
@@ -242,7 +265,7 @@ describe("the agent API runs through Farm's request pipeline", () => {
     await expectRunsThroughGuards(origin);
   }, 120_000);
 
-  it("in a production node server", async () => {
+  it("in a production node server", async ({ onTestFailed }) => {
     const root = await createApp("farm-agent-prod-");
     const resolved = await resolveConfig(
       {
@@ -262,6 +285,8 @@ describe("the agent API runs through Farm's request pipeline", () => {
       { cwd: root, env: { ...process.env, PORT: String(port) }, stdio: "pipe" },
     );
     let output = "";
+    // The engine reports a run it could not execute on the server's stderr.
+    onTestFailed(() => console.error(`The production server's output:\n${output}`));
     const listening = new Promise<void>((resolve, reject) => {
       const onData = (chunk: Buffer) => {
         output += chunk;
@@ -285,13 +310,54 @@ describe("the agent API runs through Farm's request pipeline", () => {
   }, 240_000);
 });
 
+async function buildForVercel(root: string): Promise<void> {
+  const resolved = await resolveConfig(
+    {
+      ...(await loadConfig(root, undefined, "production")),
+      root,
+      srcDir: "src",
+      deploy: { target: "vercel" },
+    },
+    "production",
+  );
+  await build(resolved, { root, preset: "vercel" });
+}
+
+/** The built Vercel function's entry, as a file URL to import. */
+async function vercelEntry(root: string): Promise<string> {
+  const functions = path.join(root, ".vercel/output/functions");
+  const functionDir = (await fs.readdir(functions)).find((name) =>
+    existsSync(path.join(functions, name, "index.mjs")),
+  );
+  if (!functionDir) throw new Error("The Vercel build has no server function");
+  return pathToFileURL(path.join(functions, functionDir, "index.mjs")).href;
+}
+
+/** Runs `script` as an ES module in a production process of its own; resolves with its output. */
+function runScript(root: string, script: string, env: NodeJS.ProcessEnv): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+      cwd: root,
+      env,
+      stdio: "pipe",
+    });
+    let out = "";
+    child.stdout?.on("data", (chunk) => (out += chunk));
+    child.stderr?.on("data", (chunk) => (out += chunk));
+    child.once("error", reject);
+    child.once("exit", (code) =>
+      code === 0 ? resolve(out) : reject(new Error(`exit ${code}\n${out}`)),
+    );
+  });
+}
+
 // Vercel Cron calls the Nitro route that runs agent-unit's sweep and the app's tasks over public
 // HTTP. Nitro checks CRON_SECRET there only when it is set, so the route ran them for anyone.
 describe("the agent's Vercel cron route", () => {
   it("runs the scheduled tasks only for a caller with CRON_SECRET", async () => {
     const root = await createApp(
       "farm-agent-vercel-",
-      `, tasks: { ping: { schedule: "* * * * *", handler: "src/tasks/ping.ts" } }`,
+      `tasks: { ping: { schedule: "* * * * *", handler: "src/tasks/ping.ts" } }`,
     );
     const marker = path.join(root, "ping-ran");
     await fs.mkdir(path.join(root, "src/tasks"), { recursive: true });
@@ -300,28 +366,14 @@ describe("the agent's Vercel cron route", () => {
       `import { writeFileSync } from "node:fs";
 export default async () => { writeFileSync(${JSON.stringify(marker)}, "ran"); };`,
     );
-    const resolved = await resolveConfig(
-      {
-        ...(await loadConfig(root, undefined, "production")),
-        root,
-        srcDir: "src",
-        deploy: { target: "vercel" },
-      },
-      "production",
-    );
-    await build(resolved, { root, preset: "vercel" });
+    await buildForVercel(root);
 
     const output = path.join(root, ".vercel/output");
     const vercelConfig = JSON.parse(await fs.readFile(path.join(output, "config.json"), "utf8"));
     expect(vercelConfig.crons).toContainEqual({ path: "/_vercel/cron", schedule: "* * * * *" });
 
     // The built function as Vercel invokes it, in a production process of its own.
-    const functions = path.join(output, "functions");
-    const functionDir = (await fs.readdir(functions)).find((name) =>
-      existsSync(path.join(functions, name, "index.mjs")),
-    );
-    if (!functionDir) throw new Error("The Vercel build has no server function");
-    const entry = pathToFileURL(path.join(functions, functionDir, "index.mjs")).href;
+    const entry = await vercelEntry(root);
     const script = `
 import { existsSync, rmSync } from "node:fs";
 const { default: server } = await import(${JSON.stringify(entry)});
@@ -350,20 +402,7 @@ console.log("RESULTS " + JSON.stringify(results));
 `;
     const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "production" };
     delete env.CRON_SECRET;
-    const stdout = await new Promise<string>((resolve, reject) => {
-      const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
-        cwd: root,
-        env,
-        stdio: "pipe",
-      });
-      let out = "";
-      child.stdout?.on("data", (chunk) => (out += chunk));
-      child.stderr?.on("data", (chunk) => (out += chunk));
-      child.once("error", reject);
-      child.once("exit", (code) =>
-        code === 0 ? resolve(out) : reject(new Error(`exit ${code}\n${out}`)),
-      );
-    });
+    const stdout = await runScript(root, script, env);
     const line = stdout.split("\n").find((value) => value.startsWith("RESULTS "));
     if (!line) throw new Error(`No results\n${stdout}`);
     expect(JSON.parse(line.slice("RESULTS ".length))).toEqual([
@@ -372,5 +411,53 @@ console.log("RESULTS " + JSON.stringify(results));
       { name: "wrong bearer", status: 401, ran: false },
       { name: "bearer", status: 200, ran: true },
     ]);
+  }, 240_000);
+});
+
+// Without `storage`, agent-unit keeps runs in Farm.js storage when the build has FARMJS_API_KEY,
+// and stops a build for a host without a durable disk that has neither, rather than keeping runs
+// in memory, where a serverless function loses them between requests.
+describe("the agent's run storage on a serverless target", () => {
+  /** Sets FARMJS_API_KEY for this test's build, and puts back what the process had after it. */
+  function buildKey(value: string | undefined) {
+    const previous = process.env.FARMJS_API_KEY;
+    if (value === undefined) delete process.env.FARMJS_API_KEY;
+    else process.env.FARMJS_API_KEY = value;
+    cleanups.push(async () => {
+      if (previous === undefined) delete process.env.FARMJS_API_KEY;
+      else process.env.FARMJS_API_KEY = previous;
+    });
+  }
+
+  it("stops the build, saying what to set, without storage or FARMJS_API_KEY", async () => {
+    const root = await createApp("farm-agent-no-storage-", "", { storage: false });
+    buildKey(undefined);
+    await expect(buildForVercel(root)).rejects.toThrow(
+      /runs on vercel need storage that outlives a request[\s\S]*add FARMJS_API_KEY/,
+    );
+  }, 240_000);
+
+  it("keeps runs in Farm.js storage when the build has FARMJS_API_KEY", async () => {
+    const root = await createApp("farm-agent-farmjs-storage-", "", { storage: false });
+    buildKey("fk_build_only_not_a_real_key");
+    await buildForVercel(root);
+
+    // Run where the key is missing, a run request fails and names it: proof the function keeps
+    // runs in Farm.js storage, with no call to Farm.js.
+    const script = `
+const { default: server } = await import(${JSON.stringify(await vercelEntry(root))});
+const response = await server.fetch(
+  new Request("https://app.example/api/agent/runs", { headers: ${JSON.stringify(PASS)} }),
+  { waitUntil() {} },
+);
+console.log("STATUS " + response.status);
+`;
+    const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "production" };
+    delete env.FARMJS_API_KEY;
+    const output = await runScript(root, script, env);
+    expect(output).toContain("STATUS 500");
+    expect(output).toContain(
+      "runs are kept in Farm.js storage here, but FARMJS_API_KEY is not set",
+    );
   }, 240_000);
 });

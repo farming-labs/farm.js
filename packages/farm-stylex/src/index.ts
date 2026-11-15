@@ -1,4 +1,5 @@
 import { definePlugin } from "@farm.js/core/plugin";
+import { isFarmRendererDisabled } from "@farm.js/core/renderer";
 import type { UserOptions } from "@stylexjs/unplugin";
 import { resolveStylexOptions, type StyleXOptions } from "./config.js";
 import { injectStylexDevelopmentAssets, stripStylexDevelopmentBasePath } from "./html.js";
@@ -16,6 +17,13 @@ export function stylex(options: StyleXOptions = {}) {
     enforce: "pre",
 
     configure(config, context) {
+      // A backend-only app renders no components to style.
+      if (isFarmRendererDisabled(config.renderer)) {
+        throw new Error(
+          "[farm:stylex] StyleX styles rendered components, but this app sets `renderer: false` and has no pages. " +
+            "Remove stylex(), or remove `renderer: false` to render pages.",
+        );
+      }
       if (
         (config.plugins ?? []).filter((candidate) => candidate.name === "farm:stylex").length > 1
       ) {

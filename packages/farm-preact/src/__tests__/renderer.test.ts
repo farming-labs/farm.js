@@ -3,13 +3,16 @@
 import { Writable } from "node:stream";
 import {
   defineRendererDescriptorConformance,
+  defineRendererNativeTreeConformance,
   defineRendererServerConformance,
 } from "@farm.js/renderer-tests";
+import { createFarmNativeTreeResponse } from "@farm.js/core/internal/production-runtime";
 import { lazy } from "preact/compat";
 import { describe, expect, it } from "vitest";
 import { preact } from "../index";
 import * as serverRuntime from "../server";
 import {
+  ErrorBoundary,
   Suspense,
   createElement,
   generateHydrationScript,
@@ -33,6 +36,21 @@ defineRendererDescriptorConformance({
 });
 
 defineRendererServerConformance(serverRuntime);
+defineRendererNativeTreeConformance(serverRuntime, async (html) => {
+  // As a mobile app's server answers a native-tier screen: the page's HTML read into a tree.
+  const response = await createFarmNativeTreeResponse({
+    request: new Request("https://app.example/trails", {
+      headers: { accept: "application/vnd.farm.native+json" },
+    }),
+    renderPage: () =>
+      new Response(
+        `<!DOCTYPE html><html><head><title>Trails</title></head><body><div id="__farm_page__">${html}</div></body></html>`,
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      ),
+    loadStylesheet: () => "",
+  });
+  return response.json();
+});
 
 describe("Preact renderer", () => {
   it("streams FARMJS elements through Preact's Node renderer", async () => {
@@ -120,6 +138,62 @@ describe("Preact renderer", () => {
     );
     const unsecured = await new Response(renderToReadableStream(suspended())).text();
     expect(unsecured).toContain("<script>(function(){class e extends HTMLElement");
+  });
+
+  it("fails the shell when a page throws under the route error boundary", async () => {
+    // Farm wraps a route with an error.tsx this way and renders the error page
+    // itself, with its status, once the shell fails.
+    const Page = () => {
+      throw new Error("page failed");
+    };
+    const Layout = (props: { children?: unknown }) => createElement("body", null, props.children);
+    const Fallback = () => createElement("p", null, "fallback");
+    const route = createElement(
+      ErrorBoundary,
+      { Fallback },
+      createElement(
+        "div",
+        { "data-farm-layout-boundary": "true" },
+        createElement(Layout, null, createElement(Page, null)),
+      ),
+    );
+
+    const outcome = await new Promise<string>((resolve) => {
+      renderToPipeableStream(route, {
+        onShellReady: () => resolve("shell ready"),
+        onShellError: (error) => resolve(`shell error: ${(error as Error).message}`),
+        onError() {},
+      });
+    });
+
+    expect(outcome).toBe("shell error: page failed");
+  });
+
+  it("waits for a suspended lazy component in a buffered render", async () => {
+    // Farm renders the not-found and error documents with renderToString, layouts included. A
+    // layout holding a lazy component made Preact's synchronous renderer throw.
+    const Nav = lazy(
+      () =>
+        new Promise<{ default: () => unknown }>((resolve) =>
+          setTimeout(() => resolve({ default: () => createElement("nav", null, "lazy nav") }), 5),
+        ),
+    );
+    const html = await serverRuntime.renderToString(
+      createElement(
+        "body",
+        null,
+        createElement(
+          Suspense,
+          { fallback: createElement("p", null, "waiting") },
+          createElement(Nav, null),
+        ),
+        createElement("main", null, "not found"),
+      ),
+    );
+
+    expect(html).toContain("<nav>lazy nav</nav>");
+    expect(html).toContain("<main>not found</main>");
+    expect(html).not.toContain("waiting");
   });
 
   it("does not require a renderer-specific hydration bootstrap", () => {

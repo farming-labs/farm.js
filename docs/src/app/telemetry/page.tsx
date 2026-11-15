@@ -359,7 +359,7 @@ function GroupTable({ title, rows }: { title: string; rows: GroupCount[] }) {
               <th className="w-44 px-4 py-2 text-right font-normal">Last seen</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/10">
+          <tbody className="*:not-first:border-t *:not-first:border-white/10">
             {rows.length ? (
               rows.map((row) => (
                 <tr key={row.key}>
@@ -417,7 +417,7 @@ function ProductionSitesTable({ sites }: { sites: ProductionSite[] }) {
               <th className="px-4 py-2 text-right font-normal">Last seen</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/10">
+          <tbody className="*:not-first:border-t *:not-first:border-white/10">
             {sites.length ? (
               sites.map((site) => (
                 <tr key={site.id}>
@@ -472,7 +472,7 @@ function StatusPanel({ data }: { data: Exclude<TelemetryData, { status: "ready" 
           </p>
         </div>
         <h1 className="mt-5 text-2xl font-medium tracking-[-0.035em]">Farm.js telemetry</h1>
-        <p className="mt-3 max-w-xl text-sm leading-6 text-white/55">{data.message}</p>
+        <p className="mt-3 max-w-xl text-sm text-white/55">{data.message}</p>
       </section>
     </main>
   );
@@ -496,7 +496,7 @@ function AccessPanel({ error }: { error?: string }) {
           </p>
         </div>
         <h1 className="mt-5 text-2xl font-medium tracking-[-0.035em]">Farm.js telemetry</h1>
-        <p className="mt-3 text-sm leading-6 text-white/55">
+        <p className="mt-3 text-sm text-white/55">
           Enter the server-side dashboard token to open anonymous product-health metrics.
         </p>
         <form action="/api/telemetry/dashboard/session" method="post" className="mt-6">
@@ -515,7 +515,7 @@ function AccessPanel({ error }: { error?: string }) {
             className="mt-2 h-11 w-full border border-white/15 bg-black px-3 font-mono text-sm text-white outline-none transition-colors focus:border-white/45"
           />
           {message ? (
-            <p role="alert" className="mt-3 text-xs leading-5 text-red-300/80">
+            <p role="alert" className="mt-3 text-xs text-[#fca5a5]/80">
               {message}
             </p>
           ) : null}
@@ -526,7 +526,7 @@ function AccessPanel({ error }: { error?: string }) {
             Open dashboard
           </button>
         </form>
-        <p className="mt-4 text-xs leading-5 text-white/35">
+        <p className="mt-4 text-xs text-white/35">
           The token is exchanged server-side for a 12-hour HttpOnly cookie and is never stored in
           the page URL.
         </p>
@@ -556,7 +556,7 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
               <h1 className="mt-4 text-3xl font-medium tracking-[-0.045em] sm:text-4xl">
                 Farm.js telemetry
               </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-white/50">
+              <p className="mt-3 max-w-2xl text-sm text-white/50">
                 Coarse, anonymous CLI signals plus public origins automatically detected by Farm
                 production server runtimes. No request paths, repositories, source, credentials,
                 visitor identities, IP addresses, or user-agent strings are stored.
@@ -641,7 +641,7 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
                   <th className="px-4 py-2 font-normal">Runtime</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/10">
+              <tbody className="*:not-first:border-t *:not-first:border-white/10">
                 {data.recentEvents.length ? (
                   data.recentEvents.map((event) => {
                     const detail = event.command || event.template || event.renderer || "-";

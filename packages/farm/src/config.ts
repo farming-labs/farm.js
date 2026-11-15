@@ -26,7 +26,7 @@ import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveWorkflowsConfig } from "./workflows";
-import { resolveCronConfig } from "./cron";
+import { resolveProjectCronJobs } from "./cron-scan";
 import { resolveEnv, setEnv } from "./env";
 import {
   resolveMdxConfig,
@@ -113,7 +113,7 @@ import type {
 import type { FarmMobileConfigInput } from "./mobile/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import type { OpenAPISecurityMode } from "./openapi/types";
-import { isReactRenderer, resolveFarmRenderer } from "./renderer";
+import { isFarmRendererDisabled, isReactRenderer, resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
 import { applyFarmDocsFrameworkAutoDetection } from "./docs/framework-detect";
 import { resolveFarmAPIConfig, type ResolvedFarmAPIConfig } from "./api/config";
@@ -170,7 +170,13 @@ export type {
   FarmMobileTab,
   FarmMobileUserConfig,
 } from "./mobile/config";
-export type { FarmCronJobConfig, FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
+export type {
+  FarmCronConfig,
+  FarmCronProvider,
+  FarmCronJobConfig,
+  FarmCronResolvedConfig,
+  FarmCronUserConfig,
+} from "./cron";
 export type {
   FarmRouteRule,
   FarmRouteRuleCors,
@@ -332,12 +338,28 @@ export interface NotFoundConfig {
   component?: string;
 }
 
+/**
+ * Farm's first-class deploy targets and the Nitro preset each builds with. This is the closed
+ * set `deploy.target` accepts; `deploy.preset` passes any other Nitro preset through to Nitro.
+ */
+const FARM_DEPLOY_TARGET_PRESETS = {
+  vercel: "vercel",
+  cloudflare: "cloudflare-pages",
+  netlify: "netlify",
+  node: "node-server",
+} as const;
+
+/**
+ * Any string type-checks, so a target read from the environment works; config resolution
+ * rejects a name outside the first-class targets.
+ */
 export type FarmDeployTarget = "vercel" | "cloudflare" | "netlify" | "node" | string;
 
 export interface FarmDeployConfig {
   /**
-   * Deployment platform. When present, Farm picks the matching Nitro preset and
-   * output directory unless explicitly overridden.
+   * Deployment platform: `"vercel"`, `"cloudflare"`, `"netlify"`, or `"node"`. When present,
+   * Farm picks the matching Nitro preset and output directory unless explicitly overridden.
+   * Config resolution rejects any other name; use `preset` for other Nitro presets.
    */
   target?: FarmDeployTarget;
   /** Nitro preset override. Usually inferred from target. */
@@ -401,8 +423,10 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   /**
    * Preview: the native mobile app (RFC 0004), as a block or a function of
    * `{ os, mode, command, profile, env, root }`, for `farm dev|build --mobile`. Web builds never
-   * call the function or check the block, and ship neither. A server of an app with the block
-   * serves `/__farm/mobile/session` so the app's native screens can sign in with device tokens.
+   * call the function or check the block, and ship neither; they also build the mobile client,
+   * which pages load when a mobile shell asks for them. A server of an app with the block
+   * serves `/__farm/mobile/session` so the app's native screens can sign in with device tokens,
+   * and answers the app's native-tier screen requests.
    */
   mobile?: FarmMobileConfigInput;
   docs?: FarmDocsUserConfig;
@@ -507,6 +531,18 @@ export interface ResolvedFarmConfig extends Required<
   agent: ResolvedFarmAgentConfig;
   /** Set only in a desktop dev session or build (`--desktop`); `null` on the web. */
   desktop: ResolvedFarmDesktopConfig | null;
+  /**
+   * @internal True when farm.config has a `mobile` block. A production build then also builds the
+   * mobile client, which documents use when a mobile shell asks for them (RFC 0004, 7.2). The
+   * block itself is never called or checked here.
+   */
+  mobileClient?: boolean;
+  /**
+   * @internal Set only by `farm build --mobile` with `mobile.shells`: the random token its server
+   * renders page shells for (`mobile/shell-render.ts`). A web build has none, so its server has no
+   * shell mode.
+   */
+  mobileShells?: { token: string };
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
   [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
   root: string;
@@ -572,23 +608,15 @@ export function normalizeDeployTarget(target?: FarmDeployTarget): FarmDeployTarg
 export function getPresetForDeployTarget(
   target?: FarmDeployTarget,
 ): BaseFarmConfig["preset"] | undefined {
-  switch (normalizeDeployTarget(target)) {
-    case "vercel":
-      return "vercel";
-    case "cloudflare":
-      return "cloudflare-pages";
-    case "netlify":
-      return "netlify";
-    case "node":
-      return "node-server";
-    default:
-      return undefined;
-  }
+  const normalized = normalizeDeployTarget(target);
+  return normalized && Object.prototype.hasOwnProperty.call(FARM_DEPLOY_TARGET_PRESETS, normalized)
+    ? FARM_DEPLOY_TARGET_PRESETS[normalized as keyof typeof FARM_DEPLOY_TARGET_PRESETS]
+    : undefined;
 }
 
 export function getDeployTargetForPreset(preset?: string): FarmDeployTarget | undefined {
   if (!preset) return undefined;
-  if (preset === "vercel" || preset === "vercel-edge") return "vercel";
+  if (preset === "vercel") return "vercel";
   if (preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module") {
     return "cloudflare";
   }
@@ -641,6 +669,35 @@ export function detectPlatformDeployTarget(
 
 const warnedPlatformMismatches = new Set<string>();
 
+/**
+ * Nitro 3 has no `vercel-edge` preset; its migration guide replaces it with `vercel` on Fluid
+ * compute. Rejecting the name here, as a preset or a target, replaces a build that either fails
+ * deep inside Nitro ("Nitro entry is missing!") or silently falls back to `node-server`.
+ */
+function assertFarmDeployNameSupported(kind: "preset" | "target", name: string | undefined): void {
+  if (name !== "vercel-edge") return;
+  throw new Error(
+    `Deploy ${kind} "vercel-edge" is not supported: Farm's Nitro version has no vercel-edge ` +
+      `preset. Use the "vercel" ${kind} instead, which deploys Vercel Functions on Fluid compute.`,
+  );
+}
+
+/**
+ * `deploy.target` is a closed set: an unknown name used to fall back to the `node-server`
+ * preset and build a Node server instead of the platform that was asked for.
+ */
+function assertFarmDeployTargetSupported(target: FarmDeployTarget | undefined): void {
+  if (!target || getPresetForDeployTarget(target)) return;
+  assertFarmDeployNameSupported("target", target);
+  const targets = Object.keys(FARM_DEPLOY_TARGET_PRESETS)
+    .map((name) => `"${name}"`)
+    .join(", ");
+  throw new Error(
+    `Unknown deploy target "${String(target)}". Farm's deploy targets are ${targets}. ` +
+      `To build with another Nitro preset, set deploy.preset instead.`,
+  );
+}
+
 export function resolveDeployConfig(
   config: Pick<FarmUserConfig, "deploy" | "preset" | "distDir">,
   overrides: {
@@ -652,6 +709,8 @@ export function resolveDeployConfig(
   } = {},
 ): ResolvedFarmDeployConfig {
   const deploy = config.deploy || {};
+  assertFarmDeployTargetSupported(deploy.target);
+  assertFarmDeployTargetSupported(overrides.target);
   const distDir = config.distDir || ".farm";
   // An explicit preset override replaces the deployment plan, so the
   // configured platform target must not keep steering the output. Otherwise
@@ -701,6 +760,7 @@ export function resolveDeployConfig(
     getPresetForDeployTarget(target) ||
     "node-server";
   const resolvedTarget = target || getDeployTargetForPreset(preset);
+  assertFarmDeployNameSupported("preset", preset);
   if (detectedTarget && resolvedTarget !== detectedTarget) {
     const mismatchKey = `mismatch:${resolvedTarget}:${detectedTarget}`;
     if (!warnedPlatformMismatches.has(mismatchKey)) {
@@ -1270,6 +1330,10 @@ export async function resolveConfig(
   const env = resolveEnv(userConfig.env, process.env);
   setEnv(env);
   const api = await resolveFarmAPIConfig(userConfig.api, { root, mode, env });
+  // Route-level `cronRoute()` schedules merge with `cron` config here, so every consumer of the
+  // resolved config (build outputs, the manifest, `farm cron list|run`, `farm dev --cron`) sees
+  // one job list.
+  const cron = await resolveProjectCronJobs({ root, srcDir, cron: userConfig.cron });
   const auth = resolveFarmAuthConfig(userConfig.auth);
   const mcp = resolveFarmMCPConfig(userConfig.mcp);
   if (auth.enabled && userConfig.integrations?.auth) {
@@ -1308,6 +1372,17 @@ export async function resolveConfig(
           integrations: () => integrations,
         })
       : null;
+  // Server functions that the app's native screens import, called over HTTP (dev: loaded by the
+  // dev server; a production build generates its own list).
+  let nativeServerFnAppDirs: readonly string[] = [];
+  const nativeServerFnPlugin =
+    userConfig.mobile !== undefined && userConfig.mobile !== null
+      ? (await import("./mobile/native-server-fn-handler")).createFarmNativeServerFnPlugin({
+          resolve: (await import("./mobile/native-server-fns")).createFarmDevNativeServerFnResolver(
+            { root, srcDir, appDirs: () => nativeServerFnAppDirs },
+          ),
+        })
+      : null;
   const openapi = {
     enabled: false,
     route: "/docs/reference",
@@ -1335,7 +1410,7 @@ export async function resolveConfig(
     md,
     mdx,
     migrations: resolveMigrationsConfig(userConfig.migrations),
-    cron: resolveCronConfig(userConfig.cron),
+    cron,
     workflows: resolveWorkflowsConfig(userConfig.workflows),
     api,
     observability: userConfig.observability ?? false,
@@ -1360,10 +1435,15 @@ export async function resolveConfig(
       ppr: false,
       ...userConfig.experimental,
     },
-    agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled }),
+    agent: resolveFarmAgentConfig(userConfig.agent, {
+      docs: docs.enabled,
+      pages: !isFarmRendererDisabled(userConfig.renderer),
+    }),
     desktop: desktopSetup?.desktop ?? null,
+    ...(userConfig.mobile !== undefined ? { mobileClient: true } : {}),
     plugins: [
       ...(mobileSessionPlugin ? [mobileSessionPlugin] : []),
+      ...(nativeServerFnPlugin ? [nativeServerFnPlugin] : []),
       ...resolveIntegrationPlugins(integrations),
       ...(nativeMCPPlugin ? [nativeMCPPlugin] : []),
       ...(userConfig.plugins || []),
@@ -1378,11 +1458,19 @@ export async function resolveConfig(
       ...(securityHeader ? [{ source: "/*", headers: [securityHeader] }] : []),
     ],
     routeRules,
-    images: resolveFarmImageConfig(userConfig.images),
+    images: resolveFarmImageConfig(
+      userConfig.images,
+      isFarmRendererDisabled(userConfig.renderer) ? "none" : undefined,
+    ),
     performance: resolveFarmPerformanceConfig(userConfig.performance),
     theme: resolveFarmThemeConfig(userConfig.theme, basePath),
     publicDir: userConfig.publicDir || "public",
-    i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode, basePath }),
+    i18n: resolveFarmI18nConfig(userConfig.i18n, {
+      root,
+      mode,
+      basePath,
+      trailingSlash: userConfig.trailingSlash ?? false,
+    }),
     openapi,
     middleware: validateMiddlewareConfig(userConfig.middleware) || {},
     notFound: userConfig.notFound || {},
@@ -1403,6 +1491,9 @@ export async function resolveConfig(
 
   // Every plugin is known now, including those integrations contribute.
   assertPluginDependencies(resolved.plugins, resolved.integrations as never);
+  if (nativeServerFnPlugin) {
+    nativeServerFnAppDirs = (await import("./layers")).getFarmAppDirectories(resolved);
+  }
 
   return resolved;
 }

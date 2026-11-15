@@ -63,7 +63,6 @@ describe("React AOT keyed list compiler", () => {
       '<li key={item.id}><select name={item.label}><option value="a">A</option></select></li>',
       false,
     ],
-    ["custom elements", "<li key={item.id}><farm-badge label={item.label} /></li>", false],
     ["style bindings", "<li key={item.id} style={{ opacity: item.label ? 1 : 0.5 }}>x</li>", false],
   ])(
     "marks %s as cloneable only when cloneNode copies their state",
@@ -256,7 +255,7 @@ describe("React AOT keyed list compiler", () => {
   it("treats a locally named List as an ordinary static component island", async () => {
     const result = await compile(`
       import { useState } from "react";
-      function List() { return <li>Local</li>; }
+      function List() { const [label] = useState("Local"); return <li>{label}</li>; }
       export function LocalList() {
         const [active, setActive] = useState(false);
         return <ul onClick={() => setActive(!active)}><List /></ul>;

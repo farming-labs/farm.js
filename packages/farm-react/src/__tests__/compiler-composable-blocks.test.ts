@@ -17,13 +17,7 @@ describe("React AOT composable block compiler", () => {
       import { useState } from "react";
       import { List } from "@farm.js/react/list";
 
-      function Summary({ total }: { total: number }) {
-        return <output data-summary>{total}</output>;
-      }
-
-      function Row({ item }: { item: { id: string; label: string } }) {
-        return <li>{item.label}</li>;
-      }
+      import { Row, Summary } from "./dashboard-parts";
 
       export function ComposableDashboard() {
         const [open, setOpen] = useState(true);

@@ -87,9 +87,54 @@ export const agentNativeSections = [
   ["try-it-on-farm-js", "Try it"],
 ] as const satisfies BlogSections;
 
-/** Every post, newest first. The index features the first and lists the rest. */
+export const nativePost: BlogPost = {
+  href: "/blog/web-to-native",
+  title: "Your web app, native",
+  description:
+    "Farm's analyzer reads each page and picks a tier: a native screen with no JavaScript, a React Native screen, or a web screen.",
+  ...AUTHOR,
+  date: "Nov 2026",
+  dateTime: "2026-11-04",
+  category: "Engineering",
+};
+
+export const nativeSections = [
+  ["the-three-tiers", "The three tiers"],
+  ["how-the-analyzer-decides", "How the analyzer decides"],
+  ["on-the-device", "On the device"],
+  ["try-it", "Try it"],
+] as const satisfies BlogSections;
+
+export const nativeInternalsPost: BlogPost = {
+  href: "/blog/native-internals",
+  title: "How Farm draws a page natively, and when it bails out",
+  description:
+    "The server reads page.tsx into a tree of native views, three layers of bailout fall back to the web page, and why it is not React Native's old bridge.",
+  ...AUTHOR,
+  date: "Nov 2026",
+  dateTime: "2026-11-08",
+  category: "Engineering",
+};
+
+export const nativeInternalsSections = [
+  ["one-page-three-screens", "Three kinds of screen", "One page, three kinds of screen"],
+  ["drawing-a-page-without-javascript", "Drawing without JavaScript"],
+  [
+    "interactivity-without-javascript",
+    "Forms and server actions",
+    "Interactivity without JavaScript",
+  ],
+  ["three-layers-of-bailout", "Three layers of bailout"],
+  ["isnt-this-the-bridge", "The bridge question", "Isn't this the bridge React Native removed?"],
+  ["why-this-shape", "Why this shape"],
+  ["try-it", "Try it"],
+] as const satisfies BlogSections;
+
+/** Every post. The index features the first and lists the rest. */
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
+  { post: nativeInternalsPost, sections: nativeInternalsSections },
   { post: agentNativePost, sections: agentNativeSections },
+  { post: nativePost, sections: nativeSections },
   { post: launchPost, sections: launchSections },
 ];
 

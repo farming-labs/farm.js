@@ -25,9 +25,9 @@ export interface ListProps<T> {
   keyExtractor?: (item: T, index: number) => string | number;
   /** Shown when `items` is empty. */
   empty?: ReactNode;
-  /** Reserved: native pull-to-refresh. No effect on the web yet. */
+  /** Reserved for native pull-to-refresh. No effect yet, on the web or on native screens. */
   refreshable?: boolean;
-  /** Reserved: a native search bar. No effect on the web yet. */
+  /** Reserved for a native search bar. No effect yet, on the web or on native screens. */
   searchable?: boolean;
   className?: string;
 }

@@ -1,4 +1,5 @@
 import { definePlugin } from "@farm.js/core/plugin";
+import { isFarmRendererDisabled } from "@farm.js/core/renderer";
 
 export type { FarmWebMCPRuntime } from "./types.js";
 export type { WebMCPUnsupportedBehavior } from "./client.js";
@@ -16,6 +17,15 @@ export function webmcp(options: WebMCPPluginOptions = {}) {
 
   return definePlugin({
     name: "farm:webmcp",
+    configure(config) {
+      // A backend-only app loads no page to register tools from.
+      if (isFarmRendererDisabled(config.renderer)) {
+        throw new Error(
+          "[farm:webmcp] WebMCP registers tools from rendered pages, but this app sets `renderer: false` and has no pages. " +
+            "Remove webmcp(), or remove `renderer: false` to render pages.",
+        );
+      }
+    },
     client: {
       public: {
         unsupported: options.unsupported ?? null,

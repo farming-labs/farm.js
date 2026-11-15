@@ -1,5 +1,5 @@
 import { defineConfig, definePlugin } from '@farm.js/core';
-import { createLoggerPlugin, createEnvPlugin } from '@farm.js/core/plugin/server';
+import { createEnvPlugin } from '@farm.js/core/plugin/server';
 import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
 import { integrationLab } from './src/lib/integration-lab.ts';
@@ -128,15 +128,19 @@ export default defineConfig({
     },
   },
   cron: {
-    dailyCleanup: {
-      schedule: '0 2 * * *',
-      path: '/api/maintenance/cleanup',
-      description: 'Delete expired sessions every night.',
+    provider: 'host',
+    jobs: {
+      dailyCleanup: {
+        schedule: '0 2 * * *',
+        path: '/api/maintenance/cleanup',
+        description: 'Delete expired sessions every night.',
+      },
     },
   },
   experimental: {
-    // Route-level loading.tsx/error.tsx in this example rely on streamed server rendering.
-    serverComponents: true,
+    // This example is the framework suite's fixture for Farm's classic pipeline (no server
+    // components); examples/server-components covers islands and RSC.
+    serverComponents: false,
     // Required for the /ppr-demo static-shell route; per-route ppr exports are inert without it.
     ppr: true,
   },
@@ -304,7 +308,6 @@ export default defineConfig({
   plugins: [
     projectRoutes,
     runtimeLifecyclePlugin,
-    createLoggerPlugin({}),
     createEnvPlugin({
         FARM_API_URL: 'https://api.example-to-something.com',
         API_URL: 'https://api.example.com',

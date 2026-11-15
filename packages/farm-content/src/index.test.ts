@@ -88,8 +88,12 @@ describe("content plugin", () => {
           listener = callback;
         },
       },
+      // Like Vite's module graph, keyed by forward-slash paths (Windows paths are not).
       moduleGraph: {
-        getModulesByFile: () => new Set([{}]),
+        getModulesByFile: (file: string) =>
+          file === path.join(root, ".farm", "content", "server.mjs").replace(/\\/g, "/")
+            ? new Set([{}])
+            : undefined,
         invalidateModule,
       },
       ws: { send },
@@ -175,7 +179,9 @@ describe("content plugin", () => {
     const vitePlugin = (configured as any).vite.plugins[0];
     let listener: ((event: string, file: string) => void) | undefined;
     const send = vi.fn();
+    const logError = vi.fn();
     vitePlugin.configureServer({
+      config: { logger: { error: logError } },
       watcher: {
         on: (_event: string, callback: typeof listener) => {
           listener = callback;
@@ -194,6 +200,11 @@ describe("content plugin", () => {
     listener?.("add", addedFile);
     await vi.waitFor(() =>
       expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "error" })),
+    );
+    // Also in the terminal: a backend-only app (renderer: false) has no browser overlay.
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[farm:content\] /),
+      expect.anything(),
     );
 
     send.mockClear();

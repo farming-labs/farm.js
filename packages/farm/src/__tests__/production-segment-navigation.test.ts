@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { getSharedLayoutPrefixLength, parseFarmLayoutChainHeader } from "../navigation/render-plan";
+import * as devServer from "../navigation/segment-navigation";
 import { FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME } from "../nitro/universal-build";
 
 // The production server code islands mode ships for segment navigation.
@@ -97,5 +98,40 @@ describe("islands segment navigation", () => {
     expect(fits(root(boundary("/blog")), segment)).toBe(false);
     // A whole document fits anywhere.
     expect(fits(root(boundary("/blog")), root(boundary("/docs", "<nav></nav>")))).toBe(true);
+  });
+
+  it("runs the same in farm dev as on the production server", () => {
+    const layouts = [{ pattern: "/" }, { pattern: "/docs" }, { pattern: "/docs/[section]" }];
+    const keyCases: Array<[string, Record<string, string | string[] | undefined>]> = [
+      ["/docs", {}],
+      ["/docs/[section]", { section: "guides" }],
+      ["/files/[...path]", { path: ["a", "b c"] }],
+      ["/shop/[[...rest]]", {}],
+      ["/[lang]/docs/[section]", { lang: "en", section: "a/b" }],
+    ];
+    for (const [pattern, params] of keyCases) {
+      expect(devServer.getFarmLayoutKey(pattern, params)).toBe(
+        server.getFarmLayoutKey(pattern, params),
+      );
+    }
+    const headers = [
+      undefined,
+      "not json",
+      JSON.stringify(["/docs", "/docs/guides"]),
+      JSON.stringify(["/", "/docs"]),
+      JSON.stringify(["/docs", "/docs/api"]),
+      JSON.stringify(["/blog"]),
+      JSON.stringify(["/", "/docs", "/docs/guides"]),
+    ];
+    for (const header of headers) {
+      const request = new Request("http://localhost/", {
+        headers: header === undefined ? {} : { "f-layouts": header },
+      });
+      expect(devServer.countFarmKeptLayouts(header, layouts, { section: "guides" })).toBe(
+        server.countFarmKeptLayouts(request, layouts, { section: "guides" }),
+      );
+    }
+    expect(devServer.createFarmFlushToken()).toMatch(/^[0-9a-f]{32}$/);
+    expect(devServer.farmFlushMarker("ab")).toBe("<!--farm-flush:ab-->");
   });
 });

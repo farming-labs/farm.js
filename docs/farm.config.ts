@@ -1,12 +1,20 @@
 import { defineConfig } from "@farm.js/core";
 import { devtools } from "@farm.js/devtools";
+import { webmcp } from "@farm.js/webmcp";
 import { farmDocsRuntimeAdapter } from "@farming-labs/farmjs/runtime";
+import { agentSupportInvitation } from "./src/lib/agent-support";
 
 const siteDescription =
   "Farm.js is the full-stack framework for the web and agents: apps are agent-ready by default and run any agent runtime you bring. Built on Vite and Nitro.";
 
 export default defineConfig({
-  plugins: [devtools()],
+  // webmcp() lists the docs search tool in /.well-known/farmjs.json and starts the browser
+  // runtime that src/client.ts registers it with.
+  plugins: [devtools(), webmcp()],
+  // Moved pages keep their shared links working.
+  redirects: () => [
+    { source: "/docs/mobile/auth", destination: "/docs/auth#mobile-apps", permanent: true },
+  ],
   mdx: {
     components: "./src/markdown-components.tsx",
   },
@@ -24,6 +32,8 @@ export default defineConfig({
       title: "Farm.js",
       summary: siteDescription,
       details: [
+        agentSupportInvitation,
+        "",
         "## Agent Discovery",
         "",
         "- [Agent manifest](/.well-known/agent.json): Farming Labs discovery manifest",
@@ -65,7 +75,7 @@ export default defineConfig({
           sameAs: [
             "https://github.com/farming-labs",
             "https://www.npmjs.com/org/farm.js",
-            "https://x.com/KinfishT",
+            "https://x.com/farming_labs",
           ],
         },
       },
@@ -85,4 +95,7 @@ export default defineConfig({
   deploy: {
     target: "vercel",
   },
+  // Route-local schedules (`cronRoute(..., { schedule })`) run on Farm.js Infra; after a
+  // production deploy, `farm cron sync --url https://farmjs.dev --apply` registers them.
+  cron: { provider: "farmjs" },
 });

@@ -4,9 +4,12 @@ import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { defineMobileShell, type MobileShellContext } from "@farm.js/core/mobile";
+import { createSpawnCommand } from "../shared/windows-command.js";
 import { createAndroidProject, MAIN_ACTIVITY } from "./templates.js";
 
 export {
+  BUNDLED_ASSETS_DIR,
+  BUNDLED_ASSETS_MANIFEST,
   createAndroidProject,
   createAppBuildGradle,
   createNativeResources,
@@ -14,9 +17,12 @@ export {
   createRootBuildGradle,
   createStrings,
   createTabIcons,
+  DEBUG_CA_RESOURCE,
+  readDebugCa,
   resolveTabIcon,
   MAIN_ACTIVITY,
   NATIVE_BUNDLE_ASSET,
+  PAGE_SHELLS_DIR,
   SHELL_NAMESPACE,
 } from "./templates.js";
 
@@ -63,12 +69,13 @@ function exec(
   options: { cwd?: string; env?: NodeJS.ProcessEnv; capture?: boolean } = {},
 ): Promise<{ code: number; stdout: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    // gradlew.bat is a batch file, which Windows runs only through cmd.exe, quoted for it.
+    const run = createSpawnCommand(command, args);
+    const child = spawn(run.file, run.args, {
       cwd: options.cwd,
       env: options.env ?? process.env,
       stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
-      // gradlew.bat is a batch file, which Node runs only through the shell.
-      shell: isWindows && command.endsWith(".bat"),
+      shell: run.shell,
     });
     let stdout = "";
     child.stdout?.on("data", (chunk) => (stdout += chunk));

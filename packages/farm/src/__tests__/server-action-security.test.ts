@@ -117,6 +117,68 @@ describe("validateServerActionRequest", () => {
     ).toThrow(expect.objectContaining({ code: "INVALID_ORIGIN", status: 403 }));
   });
 
+  it("accepts the forwarded origin of a trusted TLS-terminating proxy", () => {
+    // The adapter rebuilds an http:// URL; the browser posts from https://.
+    const proxied = (headers: Record<string, string>) =>
+      new Request("http://127.0.0.1:3000/action", {
+        method: "POST",
+        headers: { "content-type": "text/plain", ...headers },
+        body: "[]",
+      });
+    const sameHost = proxied({
+      host: "app.example.com",
+      origin: "https://app.example.com",
+      "x-forwarded-proto": "https",
+    });
+    const forwardedHost = proxied({
+      host: "127.0.0.1:3000",
+      origin: "https://app.example.com",
+      "x-forwarded-host": "app.example.com",
+      "x-forwarded-proto": "https",
+    });
+
+    for (const request of [sameHost, forwardedHost]) {
+      expect(() =>
+        validateServerActionRequest(request, defaultConfig, { trustProxy: true }),
+      ).not.toThrow();
+      // Without trustProxy the forwarded headers are not trusted.
+      expect(() => validateServerActionRequest(request, defaultConfig)).toThrow(
+        expect.objectContaining({ code: "INVALID_ORIGIN", status: 403 }),
+      );
+    }
+
+    // A trusted proxy's origin is still the only one that matches.
+    expect(() =>
+      validateServerActionRequest(
+        proxied({
+          host: "127.0.0.1:3000",
+          origin: "https://attacker.example",
+          "x-forwarded-host": "app.example.com",
+          "x-forwarded-proto": "https",
+        }),
+        defaultConfig,
+        { trustProxy: true },
+      ),
+    ).toThrow(expect.objectContaining({ code: "INVALID_ORIGIN", status: 403 }));
+  });
+
+  it("passes trustProxy through prepareServerActionRequest", async () => {
+    const request = new Request("http://127.0.0.1:3000/page", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        host: "app.example.com",
+        origin: "https://app.example.com",
+        "x-forwarded-proto": "https",
+      },
+      body: "name=farm",
+    });
+    const prepared = await prepareServerActionRequest(request, defaultConfig, "form", null, {
+      trustProxy: true,
+    });
+    expect((prepared.body as FormData).get("name")).toBe("farm");
+  });
+
   it("uses Referer when Origin is unavailable", () => {
     const request = createActionRequest({
       origin: null,

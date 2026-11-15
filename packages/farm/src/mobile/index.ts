@@ -4,6 +4,7 @@
  * identity helper only; nothing here runs in a web build.
  */
 import type { FarmMobileOS, ResolvedFarmMobileConfig } from "./config";
+import type { FarmMobileAppModules } from "./modules";
 import type { FarmMobileRouteManifest } from "./routes";
 
 export type {
@@ -19,12 +20,29 @@ export type {
   FarmMobilePrefetch,
   FarmMobilePresentation,
   FarmMobileRouteConfig,
+  FarmMobileRouteScreen,
   FarmMobileScreen,
   FarmMobileTab,
   FarmMobileUserConfig,
   ResolvedFarmMobileConfig,
 } from "./config";
-export type { FarmMobileRouteManifest, FarmMobileRouteRule } from "./routes";
+export type {
+  FarmMobileAppModules,
+  FarmMobileAppModuleSpec,
+  FarmMobileModuleConfig,
+  ResolvedFarmMobileModuleConfig,
+} from "./modules";
+export type {
+  FarmNativeMethod,
+  FarmNativeProperty,
+  FarmNativeType,
+  FarmNativeWebSpec,
+} from "./native-specs";
+export type {
+  FarmMobileRouteManifest,
+  FarmMobileRouteRule,
+  FarmMobileShellManifest,
+} from "./routes";
 
 /** A file a mobile shell generates, relative to the native project directory. */
 export interface MobileGeneratedFile {
@@ -49,12 +67,47 @@ export interface MobileNativeScreens {
   modules: string[];
   /** `farm build --mobile`: the screens' Hermes bytecode, bundled into the app. */
   bundle?: string;
+  /**
+   * `farm build --mobile`: the directory of images and other files the screens `require()`, as
+   * Metro laid them out for the OS, copied into the app next to the bytecode. Absent when they
+   * import none; under `farm dev --mobile` Metro serves them.
+   */
+  assetsDir?: string;
   /** `farm dev --mobile`: the Metro server the debug app loads the screens from. */
   devServer?: {
     port: number;
     /** The entry's path from the app root without `.js`, such as `.farm/output/mobile/native/index`. */
     mainModule: string;
   };
+}
+
+/**
+ * The mobile client's content-hashed files, which a shell answers from the app instead of the
+ * network (RFC 0004, 7.2). Documents still come from `mobile.server`, which decides which client
+ * they load; a newer deployment references names the app does not have, and those load from
+ * the network.
+ */
+export interface MobileBundledAssets {
+  /** The build's client output; each file is read from here. */
+  dir: string;
+  /** URL paths at the server origin, such as `/farm-mobile-client-h1a2b3c4d.js`, sorted. */
+  files: string[];
+  /** The mobile client entry among them. */
+  entry: string;
+}
+
+/**
+ * The page shells of `farm build --mobile` with `mobile.shells` (RFC 0004, 7.2): per route, the
+ * layouts around its `loading.tsx` as HTML with no scripts. `manifest.shells` maps routes to
+ * these files. Absent in dev, without `mobile.shells`, or when no route has one.
+ */
+export interface MobilePageShells {
+  /** The mobile client entry they were rendered with; also `manifest.shells.client`. */
+  client: string;
+  /** Shell file per page route; also `manifest.shells.routes`. */
+  routes: Record<string, string>;
+  /** HTML by file name, such as `1a2b3c4d5e6f7a8b.html`. On iOS each stylesheet is inlined. */
+  files: Record<string, string>;
 }
 
 export interface MobileShellContext {
@@ -66,12 +119,23 @@ export interface MobileShellContext {
   mobile: ResolvedFarmMobileConfig;
   /** The app's basePath ("" or "/base"). */
   basePath: string;
+  /**
+   * `auth.basePath` (such as `/api/auth`) when the app's top-level `auth` is enabled. Native
+   * screens sign in only to routes under it; without it the shell has no native sign-in.
+   */
+  authBasePath?: string;
   /** The navigator manifest, also written to `.farm/output/mobile/farm-routes.json`. */
   manifest: FarmMobileRouteManifest;
   /** Directory the native project is written to, such as `.farm/output/mobile/android`. */
   projectDir: string;
   /** React Native screens, when at least one route resolves to one on this OS. */
   native?: MobileNativeScreens;
+  /** `farm build --mobile`: the mobile client's files to bundle. Absent in dev. */
+  assets?: MobileBundledAssets;
+  /** `farm build --mobile` with `mobile.shells`: the page shells to bundle. */
+  shells?: MobilePageShells;
+  /** The app's own native modules in `src/native/`, when it has any. */
+  appModules?: FarmMobileAppModules;
 }
 
 export interface MobilePackageContext extends MobileShellContext {

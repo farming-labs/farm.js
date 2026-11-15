@@ -11,6 +11,13 @@ export interface FarmDocsAdapterDescriptor {
    * serializable edge manifest. Older Farm releases safely ignore it.
    */
   edgeCompiler?: string;
+  /**
+   * What the adapter does beyond the protocol; Farm ignores names it does not know.
+   * `guarded-pages`: the runtime handler takes `isPathGuarded` and keeps a page a path guard
+   * covers off every surface that answers without running the guard, so Farm serves docs pages
+   * behind a guard with it on Node and serverless targets.
+   */
+  capabilities?: readonly string[];
 }
 
 export interface FarmDocsSidebarItem {
@@ -36,7 +43,10 @@ export interface FarmDocsSocialImageConfig {
   siteName?: string;
   /** Short brand label drawn in the image header. Defaults to siteName. */
   brand?: string;
-  /** Optional WOFF2 URLs or data URLs embedded into the generated SVG. */
+  /**
+   * Optional WOFF2 URLs or data URLs embedded into the generated SVG. The PNG
+   * that social networks receive (rendered with `sharp`) uses system fonts.
+   */
   fonts?: FarmDocsSocialImageFonts;
 }
 

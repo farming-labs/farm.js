@@ -33,11 +33,29 @@ describe("server action redirect reaches the browser", () => {
   it("answers a no-JS form submission with a real redirect response", () => {
     const entry = generateRscEntry(context);
 
-    expect(entry).toContain("const formRedirect = getFarmRedirectError(e);");
-    expect(entry).toContain("status: formRedirect.status,");
-    expect(entry).toContain(
+    const start = entry.indexOf("const formRedirect = getFarmRedirectError(e);");
+    const end = entry.indexOf(
       "headers: { location: formRedirect.url, 'Cache-Control': 'no-store' },",
     );
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    // 303, so the browser follows it with a GET instead of posting the form again.
+    expect(entry.slice(start, end)).toContain("status: 303,");
+  });
+
+  it("answers a no-JS form submission whose action calls notFound() with a 404", () => {
+    const entry = generateRscEntry(context);
+
+    const formCatch = entry.indexOf("const formRedirect = getFarmRedirectError(e);");
+    const notFound = entry.indexOf("if (isFarmNotFoundError(e)) {", formCatch);
+    const sanitized = entry.indexOf("const actionError = sanitizeServerActionError(e);", formCatch);
+    expect(notFound).toBeGreaterThan(formCatch);
+    // Recognised before the sanitizer, which would answer a 500 and log it as a crash.
+    expect(notFound).toBeLessThan(sanitized);
+    const handled = entry.slice(notFound, sanitized);
+    expect(handled).toContain("return new Response('Not Found', {");
+    expect(handled).toContain("status: 404,");
+    expect(handled).toContain("'Cache-Control': 'no-store',");
   });
 
   it("navigates through the client router when the action redirected", async () => {
@@ -73,8 +91,9 @@ describe("server action redirect reaches the browser", () => {
         "act",
       ),
     ).resolves.toBeUndefined();
-    expect(history.pushState).toHaveBeenCalledWith(null, "", "/dashboard");
-    expect(navigate).toHaveBeenCalledTimes(1);
+    // navigate() offers it to navigation delegates, then writes history and renders.
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/dashboard", "push");
+    expect(history.pushState).not.toHaveBeenCalled();
     expect(transportError).not.toHaveBeenCalled();
 
     // A genuine failure still throws, and does not navigate.
@@ -110,7 +129,7 @@ describe("server action redirect reaches the browser", () => {
     // Every free identifier the redirect branch relies on must be declared
     // before main(), not inside it.
     expect(moduleScope).toContain("const farmNavigateRef = { current: null };");
-    expect(entry).toContain("farmNavigateRef.current = (url) => refetch(url);");
-    expect(entry).not.toContain("await refetch(location.href);");
+    expect(entry).toContain("farmNavigateRef.current = navigate;");
+    expect(entry.slice(actionStart, actionEnd)).not.toContain("refetch(");
   });
 });

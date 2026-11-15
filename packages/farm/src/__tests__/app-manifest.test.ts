@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, createHmac } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveFarmAgentConfig } from "../agent-config";
 import {
   createFarmAppManifest,
@@ -51,6 +51,15 @@ const listOrders = {
 const inputSchema = { type: "object", properties: { query: { type: "string" } } };
 const unpublish: (() => void)[] = [];
 afterEach(() => unpublish.splice(0).forEach((remove) => remove()));
+// Where the manifest reads the site URL; cleared so the machine's environment never leaks in.
+const SITE_ENV = [
+  "FARM_SITE_URL",
+  "VERCEL_PROJECT_PRODUCTION_URL",
+  "RENDER_EXTERNAL_URL",
+  "RAILWAY_PUBLIC_DOMAIN",
+];
+beforeEach(() => SITE_ENV.forEach((name) => vi.stubEnv(name, undefined)));
+afterEach(() => vi.unstubAllEnvs());
 
 function publishStore({ isPublic = true } = {}) {
   unpublish.push(
@@ -122,6 +131,7 @@ describe("app manifest", () => {
         openapi: "/api/openapi.json",
       },
       plugins: ["farm:api-mcp", "farm:webmcp"],
+      site: { url: null },
     });
   });
 
@@ -395,6 +405,7 @@ describe("agent.manifest sections", () => {
       "integrations",
       "agent",
       "plugins",
+      "site",
     ] as const) {
       const manifest = manifestFor({ [section]: false });
       expect(manifest).toHaveProperty(section, null);
@@ -516,6 +527,7 @@ describe("agent.manifest sections", () => {
       integrations: true,
       agent: true,
       plugins: false,
+      site: true,
     });
     // Resolved config passes through unchanged.
     expect(
@@ -534,10 +546,76 @@ describe("agent.manifest sections", () => {
       [{ webmcp: { hide: [1] } }, /agent\.manifest\.webmcp\.hide must be an array/],
       [{ webmcp: { schemas: false } }, /agent\.manifest\.webmcp has an unknown option/],
       [{ plugins: "names" }, /agent\.manifest\.plugins must be a boolean/],
+      [{ site: { url: "https://example.com" } }, /agent\.manifest\.site must be a boolean/],
     ];
     for (const [manifest, message] of cases) {
       expect(() => resolveFarmAgentConfig({ manifest } as never)).toThrow(message);
     }
+  });
+});
+
+describe("site URL", () => {
+  const site = () => createFarmAppManifest(input).site;
+
+  it("names FARM_SITE_URL, else the host's production address, read per request", () => {
+    expect(site()).toEqual({ url: null });
+    // Railway and Vercel give a bare domain; Render a URL.
+    vi.stubEnv("RAILWAY_PUBLIC_DOMAIN", "shop-production.up.railway.app");
+    expect(site()).toEqual({ url: "https://shop-production.up.railway.app" });
+    vi.stubEnv("RENDER_EXTERNAL_URL", "https://shop.onrender.com");
+    expect(site()).toEqual({ url: "https://shop.onrender.com" });
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "shop.example.com");
+    expect(site()).toEqual({ url: "https://shop.example.com" });
+    vi.stubEnv("FARM_SITE_URL", " https://www.example.com/ ");
+    expect(site()).toEqual({ url: "https://www.example.com" });
+  });
+
+  it("reads FARM_SITE_URL from a Workers binding", () => {
+    const runtime = globalThis as { __env__?: Record<string, unknown> };
+    const previous = runtime.__env__;
+    runtime.__env__ = { FARM_SITE_URL: "https://edge.example.com" };
+    try {
+      expect(site()).toEqual({ url: "https://edge.example.com" });
+    } finally {
+      if (previous === undefined) delete runtime.__env__;
+      else runtime.__env__ = previous;
+    }
+  });
+
+  it("names only a public https origin, and never guesses past an invalid FARM_SITE_URL", () => {
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "shop.example.com");
+    for (const value of [
+      "example.com",
+      "http://example.com",
+      "https://example.com/docs",
+      "https://example.com/?ref=1",
+      "https://user:pass@example.com",
+      "https://localhost:3000",
+      "https://10.0.0.1",
+      "https://intranet",
+    ]) {
+      vi.stubEnv("FARM_SITE_URL", value);
+      expect(site(), value).toEqual({ url: null });
+    }
+    // An unusable host value falls through to the next one.
+    vi.stubEnv("FARM_SITE_URL", undefined);
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "http://shop.example.com");
+    vi.stubEnv("RENDER_EXTERNAL_URL", "https://shop.onrender.com");
+    expect(site()).toEqual({ url: "https://shop.onrender.com" });
+  });
+
+  it("serves the site URL in the document, and site: null when hidden", async () => {
+    vi.stubEnv("FARM_SITE_URL", "https://www.example.com");
+    const response = await createFarmAppManifestResponse(
+      new Request("https://www.example.com/.well-known/farmjs.json"),
+      input,
+    );
+    expect((await response.json()).site).toEqual({ url: "https://www.example.com" });
+    const hidden = resolveFarmAppManifestInput(
+      { agent: { manifest: { site: false } } },
+      { build: "x", packages: {} },
+    );
+    expect(createFarmAppManifest(hidden).site).toBeNull();
   });
 });
 

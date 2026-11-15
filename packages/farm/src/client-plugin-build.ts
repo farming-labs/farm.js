@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { FarmClientPlugin } from "./client/plugin";
 import { resolveFarmPlatform } from "./desktop/config";
+import type { FarmPlatform } from "./platform";
 import type { FarmPlugin, FarmPluginClientConfig } from "./plugin";
 
 export interface ResolvedFarmClientPlugin {
@@ -13,6 +14,8 @@ export interface ResolvedFarmClientPlugin {
 }
 
 export interface FarmClientPluginEntryCode {
+  /** No plugin and no app client entry: the entry can skip the plugin manager. */
+  empty: boolean;
   imports: string;
   registrations: string;
   plugins: ResolvedFarmClientPlugin[];
@@ -79,14 +82,16 @@ export function generateFarmClientPluginEntryCode(
   root?: string,
   srcDir = "src",
   appPublicData?: unknown,
+  /** The client build's platform; a web build's mobile client passes `"mobile"`. */
+  platform: FarmPlatform = resolveFarmPlatform(),
 ): FarmClientPluginEntryCode {
   const resolved = resolveFarmClientPlugins(plugins, root);
   const appClientEntry = root ? resolveFarmAppClientEntry(root, srcDir) : undefined;
   const appImport = appClientEntry
     ? `import farmAppClientDefinition from ${JSON.stringify(appClientEntry.replace(/\\/g, "/"))};`
     : "";
-  // `farm dev|build --mobile`: hand in-app navigations to the native shell. Web builds add nothing.
-  const mobileShell = resolveFarmPlatform() === "mobile";
+  // The mobile client hands in-app navigations to the native shell. Web clients add nothing.
+  const mobileShell = platform === "mobile";
   const imports = mobileShell
     ? [MOBILE_SHELL_CLIENT_IMPORT, appImport].filter(Boolean).join("\n")
     : appImport;
@@ -115,7 +120,7 @@ export function generateFarmClientPluginEntryCode(
 ${serializedPlugins.join(",\n")}
 ]`;
 
-  return { imports, registrations, plugins: resolved };
+  return { imports, registrations, plugins: resolved, empty: serializedPlugins.length === 0 };
 }
 
 function assertClientLifecycle(client: FarmPluginClientConfig, pluginName: string): void {
@@ -238,14 +243,21 @@ function functionSource(value: unknown, pluginName: string, location: string): s
     return `(${source})`;
   }
 
-  const method = source.match(/^(async\s+)?(\*\s*)?[$A-Z_a-z][$\w]*\s*(\([\s\S]*)$/);
-  if (method) {
-    const asyncPrefix = method[1] ?? "";
-    const generator = method[2] ? "*" : "";
-    return `(${asyncPrefix}function${generator}${method[3]})`;
-  }
+  if (!/^class\b/.test(source)) {
+    // `async (x) => {}` and a method named `async` share a prefix. A method is
+    // named after its key, so only the method has this source and that name.
+    // This runs per request in production too, so it must not compile code.
+    if (/^async\s*\(/.test(source) && value.name !== "async") return `(${source})`;
 
-  if (source.includes("=>")) return `(${source})`;
+    const method = source.match(/^(async\s+)?(\*\s*)?[$A-Z_a-z][$\w]*\s*(\([\s\S]*)$/);
+    if (method) {
+      const asyncPrefix = method[1] ?? "";
+      const generator = method[2] ? "*" : "";
+      return `(${asyncPrefix}function${generator}${method[3]})`;
+    }
+
+    if (source.includes("=>")) return `(${source})`;
+  }
 
   throw new TypeError(
     `Client plugin "${pluginName}" ${location} must use a function, method, or arrow function`,

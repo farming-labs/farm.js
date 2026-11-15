@@ -4,6 +4,7 @@ import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/co
 import { FARM_VERSION } from "@farm.js/core/version";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { agentSupportInvitation } from "./src/lib/agent-support";
 import {
   siCloudflare,
   siConvex,
@@ -203,6 +204,7 @@ const sidebar = [
       { label: "Internationalization", slug: "internationalization", icon: "languages" },
       { label: "Layouts", slug: "layouts", icon: "layout" },
       { label: "Rendering Model", slug: "server-rendering", icon: "monitor" },
+      { label: "Islands and islx", slug: "server-rendering/islands", icon: "network" },
       { label: "Built-in Authentication", slug: "auth", icon: "lock" },
       { label: "Images", slug: "images", icon: "image" },
       { label: "Fonts", slug: "fonts", icon: "file" },
@@ -218,6 +220,7 @@ const sidebar = [
       { label: "Query and Params", slug: "query", icon: "search" },
       { label: "API Routes", slug: "api-routes", icon: "server" },
       { label: "API Client", slug: "api-client", icon: "terminal" },
+      { label: "Backend-Only Apps", slug: "backend", icon: "server" },
       { label: "Server Queries", slug: "server-queries", icon: "database" },
       { label: "Local-First Patterns", slug: "local-first", icon: "zap" },
       { label: "KV Storage", slug: "storage", icon: "database" },
@@ -277,6 +280,7 @@ const sidebar = [
           { label: "Overview", slug: "integrations/jobs", icon: "activity" },
           { label: "Trigger.dev", slug: "integrations/trigger", icon: "brand-trigger" },
           { label: "Inngest", slug: "integrations/inngest", icon: "brand-inngest" },
+          { label: "Durable workflows", slug: "integrations/durable-workflows", icon: "timer" },
         ],
       },
       {
@@ -342,7 +346,16 @@ const sidebar = [
       { label: "Instant Preview", slug: "preview", icon: "terminal" },
       { label: "Deployment", slug: "deployment", icon: "cloud" },
       { label: "Desktop Apps", slug: "desktop", icon: "monitor" },
-      { label: "Mobile Apps", slug: "mobile", icon: "smartphone" },
+      {
+        label: "Mobile Apps",
+        icon: "smartphone",
+        children: [
+          { label: "Overview", slug: "mobile", icon: "smartphone" },
+          { label: "The Web Shell", slug: "mobile/shell", icon: "layout" },
+          { label: "Native Screens", slug: "mobile/native-screens", icon: "layers" },
+          { label: "Device Features", slug: "mobile/modules", icon: "plug" },
+        ],
+      },
     ],
   },
   {
@@ -365,6 +378,7 @@ const sidebar = [
         children: [
           { label: "Analyzer", slug: "plugins/analyzer", icon: "gauge" },
           { label: "API MCP", slug: "plugins/mcp", icon: "sparkles" },
+          { label: "Bot Protection", slug: "plugins/bot", icon: "shield" },
           { label: "Content", slug: "plugins/content", icon: "file" },
           { label: "DevTools", slug: "plugins/devtools", icon: "monitor" },
           { label: "Federation", slug: "plugins/federation", icon: "network" },
@@ -373,8 +387,10 @@ const sidebar = [
           { label: "MSW", slug: "plugins/msw", icon: "shield" },
           { label: "Partytown", slug: "plugins/partytown", icon: "zap" },
           { label: "PWA", slug: "plugins/pwa", icon: "smartphone" },
+          { label: "Progress", slug: "plugins/progress", icon: "activity" },
           { label: "Search", slug: "plugins/search", icon: "search" },
           { label: "Scripts", slug: "plugins/scripts", icon: "code" },
+          { label: "Scroll Restoration", slug: "plugins/scroll-restoration", icon: "layout" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
           { label: "Sync", slug: "plugins/sync", icon: "network" },
           { label: "StyleX", slug: "plugins/stylex", icon: "braces" },
@@ -461,7 +477,9 @@ const config = {
   llmsTxt: {
     enabled: true,
     siteTitle: "Farm.js Docs",
-    siteDescription: "Complete Farm.js framework documentation.",
+    siteDescription: ["Complete Farm.js framework documentation.", agentSupportInvitation].join(
+      "\n\n",
+    ),
   },
   sitemap: true,
   robots: true,

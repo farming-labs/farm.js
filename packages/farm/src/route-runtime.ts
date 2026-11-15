@@ -189,7 +189,8 @@ export function farmRouteRuleMatches(pattern: string, pathname: string): boolean
   return new RegExp(`^/${expression}/?$`).test(normalizedPathname);
 }
 
-function compareFarmRouteRuleSpecificity(left: string, right: string): number {
+/** Orders route rule patterns from broadest to most specific, the order their options merge in. */
+export function compareFarmRouteRuleSpecificity(left: string, right: string): number {
   const leftScore = getFarmRouteRuleSpecificity(left);
   const rightScore = getFarmRouteRuleSpecificity(right);
   return leftScore - rightScore || left.localeCompare(right);

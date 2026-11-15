@@ -12,3 +12,7 @@ pnpm build:islands   # { mode: "islands" }: Farm's islands engine (RFC 0003)
 
 Each page covers one part of the server components contract, and
 `tests/e2e-server-components` checks all of them in both modes.
+
+From the repository root, `pnpm test:packed-islands` installs this app with locally packed Farm
+packages outside the checkout, type-checks it, and runs the production islands contract. Build the
+packages with `pnpm build` first and install Google Chrome for the shared browser configuration.

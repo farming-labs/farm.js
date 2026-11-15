@@ -50,6 +50,19 @@ describe("generated server action security", () => {
     );
   });
 
+  it("hands API routes a clone that cannot cancel the action's request body", () => {
+    const entry = generateRscEntry(context);
+
+    // A plain clone, once collected, cancels the original's unread body on the undici in
+    // Node 22.13 to 22.20, so the server action that reads the original after a declined API
+    // match would see an empty or already-used body.
+    expect(entry).toContain("await handleAPIRequest(cloneFarmRequestWithContext(request))");
+    expect(entry).toMatch(
+      /import \{[^}]*\bcloneFarmRequestWithContext\b[^}]*\} from '@farm\.js\/core\/internal\/production-runtime'/,
+    );
+    expect(entry).not.toContain("request.clone()");
+  });
+
   it("validates and bounds requests before decoding or executing actions", () => {
     const entry = generateRscEntry(context);
 
@@ -78,6 +91,20 @@ describe("generated server action security", () => {
       "if (request.method === 'POST')",
     );
     expect(entry).not.toContain("returnValue = { ok: false, data: e }");
+  });
+
+  it("checks an action's origin against a trusted proxy's forwarded origin under trustProxy", () => {
+    const untrusted = generateRscEntry(context);
+    expect(untrusted).toContain("const serverActionRequestOptions = { trustProxy: false };");
+
+    const trusted = generateRscEntry({ ...context, server: { trustProxy: true } });
+    expect(trusted).toContain("const serverActionRequestOptions = { trustProxy: true };");
+    expect(trusted).toContain(
+      "validateServerActionRequest(request, serverActionSecurity, serverActionRequestOptions);",
+    );
+    expect(trusted).toMatch(
+      /prepareServerActionRequest\(\s*request,\s*serverActionSecurity,[^;]*actionId,\s*serverActionRequestOptions,\s*\)/,
+    );
   });
 
   it("keeps browser action requests same-origin and turns failures into Errors", () => {
@@ -148,6 +175,7 @@ describe("generated server action security", () => {
       "handleFarmRequest",
       "farmApiBasePath",
       "farmMarkdownConfig",
+      "withFarmDeploymentCookie",
       `${entry.slice(start, end)}; return handler;`,
     )(
       _runWithAPIRequestRuntime,
@@ -157,6 +185,7 @@ describe("generated server action security", () => {
       async () => Response.json(await api.hello.get()),
       "/backend",
       { enabled: false },
+      (_request: Request, response: Response) => response,
     );
     const response = await handle(
       new Request("https://farm.test/page", { headers: { cookie: "session=rsc" } }),
@@ -186,7 +215,7 @@ describe("generated server action security", () => {
     const actionValidation = entry.indexOf("validateServerActionRequest(request");
     const middleware = entry.indexOf("const middlewareResult = await executeMiddleware(request");
     const apiDispatch = entry.indexOf(
-      "const apiResponse = await handleAPIRequest(request.clone())",
+      "const apiResponse = await handleAPIRequest(cloneFarmRequestWithContext(request))",
     );
     const actionDecode = entry.indexOf("await prepareServerActionRequest(");
     expect(apiClassification).toBeGreaterThan(-1);
@@ -353,14 +382,12 @@ describe("generated server action security", () => {
       { title: "Nearest" },
     ]);
 
-    expect(serverEntry).toContain("title: metadataTitle,");
-    expect(serverEntry).toContain("description: typeof metadata.description === 'string'");
-    expect(clientEntry).toContain("document.title = payload.metadata.title");
-    expect(clientEntry).toContain("document.title = ''");
+    expect(serverEntry).toContain("metadata: { title: metadataTitle },");
+    expect(serverEntry).toContain("    metadataHead,\n");
     expect(clientEntry).toContain(
-      "description.setAttribute('content', payload.metadata.description)",
+      "document.title = typeof payload.metadata?.title === 'string' ? payload.metadata.title : '';",
     );
-    expect(clientEntry).toContain("description?.remove()");
+    expect(clientEntry).toContain("applyMetadataHead(payload.metadataHead ?? '');");
   });
 
   it("rejects stale actions before decoding and only reloads safe navigation", () => {
@@ -368,7 +395,7 @@ describe("generated server action security", () => {
     const clientEntry = generateClientEntry(context);
 
     expect(serverEntry).toContain('const farmDeploymentId = "release-2"');
-    expect(serverEntry).toContain("createFarmDeploymentCookie(");
+    expect(serverEntry).toContain("_withFarmDeploymentCookie(request, response, farmDeploymentId");
     expect(serverEntry.indexOf("getFarmDeploymentMismatch(request")).toBeLessThan(
       serverEntry.indexOf("validateServerActionRequest(request"),
     );
@@ -669,7 +696,7 @@ describe("RSC client link interceptor respects modified and non-primary clicks",
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const slice = entry.slice(start, end);
-    return new Function("location", "history", "nav", `${slice} return handleClick;`) as (
+    return new Function("location", "history", "navigate", `${slice} return handleClick;`) as (
       location: any,
       history: any,
       nav: any,
@@ -719,8 +746,9 @@ describe("RSC client link interceptor respects modified and non-primary clicks",
     const e = makeEvent(makeLink());
     handleClick(e);
     expect(e.preventDefault).toHaveBeenCalledOnce();
-    expect(history.pushState).toHaveBeenCalledWith(null, "", `${origin}/page`);
-    expect(nav).toHaveBeenCalledOnce();
+    // The router's navigate() offers it to delegates, then writes history.
+    expect(nav).toHaveBeenCalledExactlyOnceWith(`${origin}/page`, "push");
+    expect(history.pushState).not.toHaveBeenCalled();
   });
 
   it.each([

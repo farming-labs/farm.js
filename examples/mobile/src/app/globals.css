@@ -46,8 +46,9 @@ body {
   background: var(--surface);
 }
 
-/* The Android shell draws native tabs; hide the web ones there. */
-html[data-farm-shell] .web-tabs {
+/* The Android shell draws native tabs; hide the web ones there and in page shells. */
+html[data-farm-shell] .web-tabs,
+html[data-farm-page-shell] .web-tabs {
   display: none;
 }
 
@@ -169,4 +170,25 @@ textarea {
 
 .error {
   color: #c0392b;
+}
+
+.skeleton {
+  display: grid;
+  gap: 12px;
+  margin: 8px 0 16px;
+}
+
+.skeleton-title,
+.skeleton-row {
+  border-radius: 8px;
+  background: var(--border);
+}
+
+.skeleton-title {
+  width: 40%;
+  height: 30px;
+}
+
+.skeleton-row {
+  height: 56px;
 }

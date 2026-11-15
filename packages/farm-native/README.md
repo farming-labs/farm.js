@@ -74,4 +74,4 @@ as `app/map failed to load: ReferenceError: stations is not defined`. In a build
 its web twin and the shell logs that reason (`adb logcat -s FarmShell`). In dev, React Native's
 error screen shows the original error instead, so it is not hidden behind the web page.
 
-See the [Mobile Apps](https://farmjs.dev/docs/mobile#react-native-screens) docs.
+See the [Mobile Apps](https://farmjs.dev/docs/mobile/native-screens#react-native-screens) docs.

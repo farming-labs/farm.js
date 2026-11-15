@@ -196,7 +196,7 @@ process.send?.("farm:test:ready");
 
       const apiResponse = await request("/api/failure");
       expect(apiResponse.status).toBe(500);
-      await expect(apiResponse.json()).resolves.toEqual({ error: "Internal server error" });
+      await expect(apiResponse.json()).resolves.toEqual({ error: "Internal Server Error" });
 
       developmentServer.kill("SIGTERM");
       await new Promise<void>((resolve, reject) => {

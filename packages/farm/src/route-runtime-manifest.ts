@@ -141,7 +141,7 @@ export function validateFarmRouteRuntimeDeployment(
       );
     }
 
-    if (route.regions?.length && preset !== "vercel" && preset !== "vercel-edge") {
+    if (route.regions?.length && preset !== "vercel") {
       warnings.add(
         `Preset "${preset}" does not map per-route regions; Farm kept them in ${FARM_ROUTE_RUNTIME_MANIFEST} for deployment adapters.`,
       );

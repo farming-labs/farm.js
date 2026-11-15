@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViteDevServer } from "vite";
 import { _publishFarmMCPCatalog } from "../mcp-catalog";
 import { createServer } from "../server/create-server";
@@ -31,18 +31,20 @@ async function writeModule(root: string, relativePath: string, source: string): 
   await fs.writeFile(filePath, source);
 }
 
-async function startApp(config = ""): Promise<string> {
+async function startApp(config = "", files: Record<string, string> = {}): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-openapi-"));
   temporaryRoots.add(root);
 
   await fs.mkdir(path.join(root, "node_modules"), { recursive: true });
-  for (const pkg of ["react", "react-dom"]) {
+  for (const pkg of ["react", "react-dom", "zod"]) {
     await fs.symlink(
       await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
       path.join(root, "node_modules", pkg),
       "junction",
     );
   }
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
   await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
   // Use a real farm.config.ts so the OpenAPI config (and its specRoute
   // default of /openapi.json) is resolved, matching how `farm dev` runs.
@@ -66,6 +68,9 @@ export default function Layout({ children }) { return <>{children}</>; }`,
     "src/app/api/health/route.ts",
     `export function GET() { return Response.json({ ok: true }); }`,
   );
+  for (const [relativePath, source] of Object.entries(files)) {
+    await writeModule(root, relativePath, source);
+  }
 
   const server = await createServer({ root });
   servers.add(server);
@@ -89,6 +94,60 @@ describe("development OpenAPI spec route", () => {
     const post = await fetch(`${origin}/openapi.json`, { method: "POST" });
     expect(post.status).toBe(405);
     expect(post.headers.get("allow")).toBe("GET, HEAD");
+  }, 30_000);
+
+  it("documents routes that import app modules the way the dev server resolves them", async () => {
+    const warn = vi.spyOn(console, "warn");
+    const evaluations = "__farmOpenAPILocalImportRouteEvaluations";
+    delete (globalThis as Record<string, unknown>)[evaluations];
+    try {
+      const origin = await startApp("", {
+        "src/lib/todos.ts": `export const todos = [{ id: "1", title: "Write tests", done: false }];`,
+        "src/lib/schemas.ts": `import { z } from "zod";
+export const titleSchema = z.string();`,
+        // Extensionless relative and \`@/\` imports, as apps and examples write them.
+        "src/app/api/todos/route.ts": `import { createEndpoint } from "@farm.js/core/api";
+import { z } from "zod";
+import { todos } from "../../../lib/todos";
+import { titleSchema } from "@/lib/schemas";
+
+globalThis.${evaluations} = (globalThis.${evaluations} ?? 0) + 1;
+
+export const GET = createEndpoint(
+  { query: z.object({ done: z.enum(["true", "false"]).optional() }) },
+  async () => ({ todos }),
+);
+
+export const POST = createEndpoint(
+  { body: z.object({ title: titleSchema }) },
+  async ({ body }) => Response.json({ id: "2", title: body.title }, { status: 201 }),
+);`,
+      });
+
+      expect(await (await fetch(`${origin}/api/todos`)).json()).toEqual({
+        todos: [{ id: "1", title: "Write tests", done: false }],
+      });
+      const spec = await (await fetch(`${origin}/openapi.json`)).json();
+      expect(spec.paths["/todos"].get.parameters).toEqual([
+        expect.objectContaining({ name: "done", in: "query", required: false }),
+      ]);
+      expect(spec.paths["/todos"].post.requestBody).toMatchObject({
+        required: true,
+        content: {
+          "application/json": {
+            schema: { type: "object", properties: { title: { type: "string" } } },
+          },
+        },
+      });
+      expect(
+        warn.mock.calls.filter(([message]) => String(message).startsWith("Could not extract")),
+      ).toEqual([]);
+      // The spec reads the module instance that serves requests rather than evaluating it again.
+      expect((globalThis as Record<string, unknown>)[evaluations]).toBe(1);
+    } finally {
+      warn.mockRestore();
+      delete (globalThis as Record<string, unknown>)[evaluations];
+    }
   }, 30_000);
 
   it("serves the OpenAPI reference and spec beneath the configured basePath", async () => {

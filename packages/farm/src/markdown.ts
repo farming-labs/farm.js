@@ -1,5 +1,6 @@
 import { _withFarmResponseHeaders } from "./owned-response";
 import { stripFarmBasePath } from "./base-path";
+import { withoutFarmDeploymentCookie } from "./deployment";
 import { _findFarmMCPEndpointTool, type FarmMCPEndpointTool } from "./mcp-catalog";
 import { createFarmMarkdownViewResponse, FARM_MARKDOWN_VIEW_PARAMS } from "./markdown-view";
 
@@ -89,12 +90,27 @@ export interface FarmMarkdownResolvedConfig {
 }
 
 export interface FarmMarkdownMirrorTarget {
+  /** The page's public pathname, with the app's `basePath` and locale prefix. */
   pathname: string;
   route: FarmMarkdownResolvedRoute | null;
+  /** The page's canonical `.md` URL: `<prefix>/index.md` for a home page. */
+  markdownPath: string;
 }
+
+/**
+ * A request pathname as routes see it: without the app's `basePath` and, with i18n, the locale
+ * prefix. `/console/fr/about` is `/about` under basePath "/console" with a `fr` locale.
+ */
+export type FarmMarkdownRoutePathname = (pathname: string) => string;
 
 export interface ResolveMarkdownMirrorTargetOptions {
   accept?: string | null;
+  /**
+   * Strips the app's `basePath` and locale prefix, so `<prefix>/index.md` names that prefix's
+   * home page as `/index.md` does, and that is the `.md` URL the home page advertises.
+   * `md.expose` is matched against the stripped path, as llms.txt reads it.
+   */
+  routePathname?: FarmMarkdownRoutePathname;
 }
 
 export interface CreateMarkdownMirrorResponseOptions {
@@ -106,11 +122,15 @@ export interface CreateMarkdownMirrorResponseOptions {
   renderPage: (request: Request) => Response | Promise<Response>;
   /** The app's public API path, so a form posting to an API route can be matched to its MCP tool. */
   apiServerBasePath?: string;
+  /** See {@link ResolveMarkdownMirrorTargetOptions.routePathname}. */
+  routePathname?: FarmMarkdownRoutePathname;
 }
 
 export interface ApplyMarkdownNegotiationHeadersOptions {
   config?: FarmMarkdownResolvedConfig;
   pathname: string;
+  /** See {@link ResolveMarkdownMirrorTargetOptions.routePathname}. */
+  routePathname?: FarmMarkdownRoutePathname;
 }
 
 export function resolveMarkdownConfig(
@@ -160,10 +180,15 @@ export function resolveMarkdownMirrorTarget(
     return null;
   }
 
-  const targetPathname = normalizeMarkdownRoute(
-    hasMarkdownExtension ? pathname.slice(0, -".md".length) || "/" : pathname,
+  const targetPathname = _resolveFarmMarkdownIndexAlias(
+    normalizeMarkdownRoute(
+      hasMarkdownExtension ? pathname.slice(0, -".md".length) || "/" : pathname,
+    ),
+    options.routePathname,
   );
-  const route = findExposedMarkdownRoute(config, targetPathname);
+  // `md.expose` lists route paths, as llms.txt and the default MCP server read them.
+  const routePathname = options.routePathname?.(targetPathname) ?? targetPathname;
+  const route = findExposedMarkdownRoute(config, routePathname);
   if (!route && config.expose !== true) {
     return null;
   }
@@ -171,6 +196,7 @@ export function resolveMarkdownMirrorTarget(
   return {
     pathname: targetPathname,
     route,
+    markdownPath: _getFarmMarkdownPath(targetPathname, routePathname),
   };
 }
 
@@ -188,6 +214,7 @@ export async function createMarkdownMirrorResponse(
   const hasMarkdownExtension = requestUrl.pathname.toLowerCase().endsWith(".md");
   const target = resolveMarkdownMirrorTarget(options.config, requestUrl.pathname, {
     accept: options.request.headers.get("accept"),
+    routePathname: options.routePathname,
   });
   if (!target) {
     return null;
@@ -259,7 +286,7 @@ export async function createMarkdownMirrorResponse(
   }
 
   const html = await pageResponse.text();
-  const markdownPath = target.pathname === "/" ? "/index.md" : `${target.pathname}.md`;
+  const markdownPath = target.markdownPath;
   // Forms and Markdown read the same prepared content. Keep it request-local,
   // and keep the no-form actions view free of content preparation altogether.
   // Error responses are read in full, not as action/partial views.
@@ -313,7 +340,7 @@ export async function createMarkdownMirrorResponse(
     "Cache-Control",
     pageCacheControl && isPrivateCacheControl(pageCacheControl)
       ? pageCacheControl
-      : headers.has("cookie") || headers.has("authorization")
+      : withoutFarmDeploymentCookie(headers.get("cookie")) || headers.has("authorization")
         ? "private, no-store"
         : createMarkdownCacheHeader(cache),
   );
@@ -344,6 +371,7 @@ export async function createMarkdownMirrorResponse(
     status: pageResponse.status,
     headers: headersOut,
     markdownPath,
+    pagePath: target.pathname,
     actions,
   });
 }
@@ -417,7 +445,9 @@ export function applyMarkdownNegotiationHeaders(
     return response;
   }
 
-  const alternatePath = getFarmMarkdownAlternatePath(options.config, options.pathname);
+  const alternatePath = getFarmMarkdownAlternatePath(options.config, options.pathname, {
+    routePathname: options.routePathname,
+  });
   if (!alternatePath) {
     return response;
   }
@@ -671,6 +701,31 @@ function normalizeMarkdownRouteInput(input: FarmMarkdownRouteInput): FarmMarkdow
   };
 }
 
+/**
+ * @internal `<prefix>/index` names the page at `<prefix>` when that is a home page: `/index` at
+ * the app's root, `/console/index` under basePath "/console", `/fr/index` for the `fr` locale,
+ * and `/console/fr/index` for both. Request paths still carry the prefix at this point.
+ */
+export function _resolveFarmMarkdownIndexAlias(
+  pathname: string,
+  routePathname?: FarmMarkdownRoutePathname,
+): string {
+  if (pathname === "/index") return "/";
+  if (!routePathname || !pathname.endsWith("/index")) return pathname;
+  const prefix = pathname.slice(0, -"/index".length);
+  return routePathname(prefix) === "/" ? prefix : pathname;
+}
+
+/**
+ * @internal A page's canonical `.md` URL. A home page's is `<prefix>/index.md`, as llms.txt, the
+ * default MCP server, and other pages' `<prefix>/<page>.md` URLs name it; `<prefix>.md` still
+ * serves it. `routePathname` is `pathname` as routes see it.
+ */
+export function _getFarmMarkdownPath(pathname: string, routePathname = pathname): string {
+  if (routePathname !== "/") return `${pathname}.md`;
+  return pathname === "/" ? "/index.md" : `${pathname.replace(/\/+$/, "")}/index.md`;
+}
+
 function normalizeMarkdownRoute(route: string): string {
   const withoutMarkdownExtension = route.toLowerCase().endsWith(".md") ? route.slice(0, -3) : route;
   const withSlash = withoutMarkdownExtension.startsWith("/")
@@ -759,9 +814,13 @@ export function getFarmMarkdownMirrorPath(pathname: string): string {
 export function getFarmMarkdownAlternatePath(
   config: FarmMarkdownResolvedConfig | undefined,
   pathname: string,
+  options: Pick<ResolveMarkdownMirrorTargetOptions, "routePathname"> = {},
 ): string | null {
-  const target = resolveMarkdownMirrorTarget(config, pathname, { accept: "text/markdown" });
-  return target ? getMarkdownAlternatePath(target.pathname) : null;
+  const target = resolveMarkdownMirrorTarget(config, pathname, {
+    accept: "text/markdown",
+    routePathname: options.routePathname,
+  });
+  return target ? target.markdownPath : null;
 }
 
 /** @internal Whether `pathname` has a Markdown mirror under `config`. */
@@ -864,17 +923,32 @@ function extractHtmlTitle(html: string): string | undefined {
  * first, while its hidden segments and boundary comments are still there.
  */
 function readHtmlContentRegion(html: string): string {
+  return extractHtmlBody(_readFarmRenderedHtml(html));
+}
+
+/**
+ * @internal A rendered page as a reader sees it, whole: streamed Suspense content in place, and
+ * scripts, styles, comments, and hidden elements removed. The native tier reads pages this way too.
+ */
+/**
+ * The rendered page's markup: streamed boundaries in place, without scripts, styles, comments, or
+ * hidden elements. `aria-hidden` content goes too unless `keepAriaHidden`: the Markdown mirror
+ * reads what a screen reader gets, while the native tree draws what a browser shows.
+ */
+export function _readFarmRenderedHtml(
+  html: string,
+  options: { keepAriaHidden?: boolean } = {},
+): string {
   const streamed = readStreamedBoundaryInstructions(html);
-  return extractHtmlBody(
-    removeHiddenElements(
-      resolveStreamedBoundaries(
-        html
-          .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-          .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-          .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ""),
-        streamed,
-      ).replace(/<!--[\s\S]*?-->/g, ""),
-    ),
+  return removeHiddenElements(
+    resolveStreamedBoundaries(
+      html
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ""),
+      streamed,
+    ).replace(/<!--[\s\S]*?-->/g, ""),
+    options.keepAriaHidden,
   );
 }
 
@@ -1337,7 +1411,7 @@ const VOID_TAGS = new Set([
  * Markdown mirror should get what a screen reader gets. `hidden="until-found"`
  * stays, since that content can still be found and revealed.
  */
-function removeHiddenElements(html: string): string {
+function removeHiddenElements(html: string, keepAriaHidden = false): string {
   // Both supported attribute names contain "hidden". Only prove absence here;
   // any occurrence (including text or quoted values) uses the complete parser.
   if (!/hidden/i.test(html)) return html;
@@ -1348,7 +1422,7 @@ function removeHiddenElements(html: string): string {
   let match: RegExpExecArray | null;
   while ((match = openingTag.exec(html))) {
     const [tag, name, attributes] = match;
-    if (!isHiddenElement(attributes)) continue;
+    if (!isHiddenElement(attributes, keepAriaHidden)) continue;
     const start = match.index;
     let end = start + tag.length;
     if (!VOID_TAGS.has(name.toLowerCase()) && !isSelfClosingTag(tag)) {
@@ -1366,13 +1440,13 @@ function removeHiddenElements(html: string): string {
   return result + html.slice(cursor);
 }
 
-function isHiddenElement(attributes: string): boolean {
+function isHiddenElement(attributes: string, keepAriaHidden = false): boolean {
   const attribute = /([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
   let match: RegExpExecArray | null;
   while ((match = attribute.exec(attributes))) {
     const name = match[1]!.toLowerCase();
     const value = (match[2] ?? match[3] ?? match[4] ?? "").trim().toLowerCase();
-    if (name === "aria-hidden" && value === "true") return true;
+    if (name === "aria-hidden" && value === "true" && !keepAriaHidden) return true;
     if (name === "hidden" && value !== "until-found") return true;
   }
   return false;

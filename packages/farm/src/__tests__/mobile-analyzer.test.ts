@@ -218,10 +218,10 @@ export default function Effect({ icon: Icon }) {
     const result = await report(root);
     expect(rules(routeOf(result, "/chart"))).toEqual([
       "src/app/chart/page.tsx:4:7 unmapped-element <canvas> has no native mapping",
-      "src/app/chart/page.tsx:5:7 unmapped-element <table> has no native mapping",
-      "src/app/chart/page.tsx:5:14 unmapped-element <tbody> has no native mapping",
-      "src/app/chart/page.tsx:5:21 unmapped-element <tr> has no native mapping",
-      "src/app/chart/page.tsx:5:25 unmapped-element <td> has no native mapping",
+      "src/app/chart/page.tsx:5:7 unmapped-element <table> has no React Native port",
+      "src/app/chart/page.tsx:5:14 unmapped-element <tbody> has no React Native port",
+      "src/app/chart/page.tsx:5:21 unmapped-element <tr> has no React Native port",
+      "src/app/chart/page.tsx:5:25 unmapped-element <td> has no React Native port",
       "src/app/chart/page.tsx:6:12 dangerously-set-inner-html dangerouslySetInnerHTML",
       'src/app/chart/page.tsx:7:12 class-name "grid" uses grid layout',
       'src/app/chart/page.tsx:7:12 class-name "grid-cols-2" uses grid layout',
@@ -229,7 +229,6 @@ export default function Effect({ icon: Icon }) {
       'src/app/chart/page.tsx:7:12 class-name "hover:bg-gray-100" needs the CSS hover: selector',
       'src/app/chart/page.tsx:7:12 class-name "shadow-lg" is a visual effect with no native mapping',
       'src/app/chart/page.tsx:7:12 class-name "w-[37px]" is an arbitrary value',
-      'src/app/chart/page.tsx:7:12 class-name class "card" is not in the native Tailwind subset',
       "src/app/chart/page.tsx:8:12 runtime-class-name <div> builds its class names at runtime",
       'src/app/chart/page.tsx:8:42 style style.display "grid" has no native mapping',
       "src/app/chart/page.tsx:8:59 style style.transform has no native mapping",
@@ -259,7 +258,7 @@ export default function Effect({ icon: Icon }) {
       "src/app/effect/page.tsx:10:25 dynamic-component <Icon> is a value the analyzer cannot resolve to a component",
     ]);
     expect(result.table).toMatch(
-      /\/chart\s+web\s+web\s+web\s+5\/10\s+50%\s+src\/app\/chart\/page\.tsx:4:7 <canvas> has no native mapping \(\+18 more\)/,
+      /\/chart\s+web\s+web\s+web\s+5\/10\s+50%\s+src\/app\/chart\/page\.tsx:4:7 <canvas> has no native mapping \(\+14 more\)/,
     );
   });
 
@@ -313,15 +312,17 @@ export const getNote = createServerFn({ handler: async ({ id }) => JSON.parse(aw
     expect(rules(routeOf(result, "/drafts"))).toEqual([
       "src/components/widget.tsx:2:16 runtime-class-name <span> builds its class names at runtime",
     ]);
-    // The root layout's stylesheet blocks a route without a native layout to replace it.
+    // A plain stylesheet is the app's CSS, which ports apply; a Sass file is not plain CSS.
     await fs.rm(path.join(root, "src/app/layout.native.tsx"));
-    const again = await report(root);
-    expect(rules(routeOf(again, "/web"))).toEqual([
-      'src/app/layout.tsx:1:1 css-import import "./globals.css" is a stylesheet',
-    ]);
-    expect(routeOf(again, "/notes/[id]").analysis!.blockers.map((blocker) => blocker.file)).toEqual(
-      ["src/app/layout.tsx"],
+    expect(rules(routeOf(await report(root), "/web"))).toEqual([]);
+    await fs.writeFile(
+      path.join(root, "src/app/layout.tsx"),
+      `import "./globals.scss";\n${LAYOUT}`,
     );
+    await fs.writeFile(path.join(root, "src/app/globals.scss"), "");
+    expect(rules(routeOf(await report(root), "/web"))).toEqual([
+      'src/app/layout.tsx:1:1 css-import import "./globals.scss" is a stylesheet',
+    ]);
   });
 
   it("skips routes decided by files, the page, or config, and feeds config ports", async () => {
@@ -352,7 +353,7 @@ export const getNote = createServerFn({ handler: async ({ id }) => JSON.parse(aw
       analysis: { decision: "web", portable: false },
     });
     expect(result.warnings).toEqual([
-      'native.routes["/asked"].screen is "native", but "/asked" has no page.native.tsx and Farm cannot port pages yet, so it stays web. The analyzer would keep it web: src/app/asked/page.tsx:1:42 <video> has no native mapping. This fails the build once native screens ship.',
+      'native.routes["/asked"].screen is "native", but "/asked" has no page.native.tsx and Farm cannot port it yet, so it stays web. The analyzer would keep it web: src/app/asked/page.tsx:1:42 <video> has no native mapping. This fails the build once native screens ship.',
     ]);
     expect(rules(routeOf(result, "/docs"))).toEqual([
       "src/app/docs/page.md:1:1 markdown-page a Markdown page renders HTML from Markdown",
@@ -455,11 +456,15 @@ export default function Chart() { return <Sparkline data={[1, 2]} />; }
       root: passing,
       userConfig: userConfig({ auto: "off" }),
     });
+    // Proven: the shell draws it from the page the server renders.
     expect(routeOf(result, "/")).toMatchObject({
-      screen: "web",
+      screen: "server",
       source: "page",
-      requested: "native",
       analysis: { tier: "native", nativeBlockers: [] },
+    });
+    expect(result.manifest.rules.find((rule) => rule.route === "/")).toMatchObject({
+      screen: "server",
+      module: "app",
     });
 
     const failing = await createApp({
@@ -476,6 +481,330 @@ export default function Home() {
       'mobile (os: android): src/app/page.tsx sets mobile.native to true, but "/" cannot render as a native screen:\n' +
         "  - src/app/page.tsx:4:19 useState() runs on the device\n" +
         "It needs JavaScript on the device: add page.native.tsx next to the page, or remove mobile.native.",
+    );
+  });
+
+  it("keeps a boxed inline element inside text off the native tier, as the tree draws it", async () => {
+    const root = await createApp({
+      "src/app/page.tsx": `export default function Home() {
+  return <p>Tagged <span className="rounded bg-gray-100 px-1">home</span></p>;
+}
+`,
+      // A flex item is a box of its own: the tree draws it.
+      "src/app/pill/page.tsx": `export default function Pill() {
+  return <a href="/" className="flex flex-col"><span className="rounded-full bg-gray-100 px-2">home</span></a>;
+}
+`,
+    });
+    const result = await report(root);
+    expect(routeOf(result, "/").analysis!.nativeBlockers.map((blocker) => blocker.message)).toEqual(
+      ["<span> with a background, border, padding, or size inside text has no native-tier layout"],
+    );
+    expect(routeOf(result, "/pill").analysis!.tier).toBe("native");
+  });
+
+  it("draws a table on the native tier, but not in a React Native port", async () => {
+    const root = await createApp({
+      "src/app/page.tsx": `export default function Plans() {
+  return (
+    <table className="w-full table-fixed">
+      <thead><tr><th>Plan</th><th colSpan={2}>Price</th></tr></thead>
+      <tbody style={{ borderCollapse: "collapse" }}><tr><td>Free</td></tr></tbody>
+    </table>
+  );
+}
+`,
+      "src/app/grid/page.tsx": `export default function Grid() {
+  return <div className="table">cells</div>;
+}
+`,
+    });
+    const result = await report(root);
+    const home = routeOf(result, "/").analysis!;
+    expect(home).toMatchObject({ tier: "native", nativeBlockers: [], portable: false });
+    expect(home.blockers.map((blocker) => blocker.message)).toEqual([
+      "<table> has no React Native port",
+      "<thead> has no React Native port",
+      "<tr> has no React Native port",
+      "<th> has no React Native port",
+      "<th> has no React Native port",
+      "<tbody> has no React Native port",
+      "style.borderCollapse has no React Native port",
+      "<tr> has no React Native port",
+      "<td> has no React Native port",
+    ]);
+    // `display: table` on another element is still a layout the native tier does not have.
+    expect(routeOf(result, "/grid").analysis!.tier).toBe("web");
+  });
+
+  it("keeps a button or field nothing submits off the native tier, as the tree draws it", async () => {
+    const root = await createApp({
+      "src/app/page.tsx": `export default function Home() {
+  return <div><input placeholder="Title" /><button className="px-4">Save</button></div>;
+}
+`,
+      "src/app/link/page.tsx": `export default function Link() {
+  return <a href="/" className="px-4">Home</a>;
+}
+`,
+    });
+    const result = await report(root);
+    const home = routeOf(result, "/").analysis!;
+    expect(home.nativeBlockers.map((blocker) => `${blocker.rule} ${blocker.message}`)).toEqual([
+      "inert-control <input> has no link or form to submit on a native-tier screen",
+      "inert-control <button> has no link or form to submit on a native-tier screen",
+    ]);
+    // A React Native port could still wire them up; only the server-drawn tier is out.
+    expect(home.tier).toBe("react-native");
+    expect(routeOf(result, "/link").analysis!.tier).toBe("native");
+  });
+
+  it("keeps a form a browser can submit on the native tier", async () => {
+    const root = await createApp({
+      "src/app/page.tsx": `export default function Guestbook() {
+  return (
+    <form method="post" action="/api/guestbook">
+      <input type="hidden" name="list" value="main" />
+      <label>Name <input name="name" required /></label>
+      <textarea name="message" />
+      <button>Sign</button>
+      <input type="submit" value="Send" />
+    </form>
+  );
+}
+`,
+      "src/app/search/page.tsx": `export default function Search() {
+  return <form><input type="search" name="q" /><button type="button">Clear</button></form>;
+}
+`,
+      "src/app/client/page.tsx": `async function save(data: FormData) {}
+export default function Client() {
+  return <form action={save}><button>Save</button></form>;
+}
+`,
+      "src/app/dialog/page.tsx": `export default function Dialog() {
+  return <form method="dialog"><button>Close</button></form>;
+}
+`,
+    });
+    const result = await report(root);
+    const native = (route: string) =>
+      routeOf(result, route).analysis!.nativeBlockers.map(
+        (blocker) => `${blocker.rule} ${blocker.message}`,
+      );
+    expect(routeOf(result, "/").analysis!.tier).toBe("native");
+    expect(native("/")).toEqual([]);
+    expect(native("/search")).toEqual([
+      'inert-control <button type="button"> does nothing on a native-tier screen',
+    ]);
+    // A function action needs React on the page to call it.
+    expect(native("/client")).toEqual(["form-action action on <form>"]);
+    expect(native("/dialog")).toEqual(['form-action <form method="dialog">']);
+  });
+
+  it("reads Vue and Svelte pages, whose scripts run on the server unless they hydrate", async () => {
+    const renderer = (name: "vue" | "svelte") => ({
+      name,
+      vite: `@farm.js/${name}/vite`,
+      server: `@farm.js/${name}/server`,
+      client: `@farm.js/${name}/client`,
+      componentExtensions: [`.${name}`],
+    });
+    const vue = await createApp({
+      "src/app/layout.vue": `<template><slot /></template>`,
+      "src/app/page.vue": `<script lang="ts">
+export const mobile = { native: true };
+</script>
+
+<script setup lang="ts">
+import TrailCard from "../components/trail-card.vue";
+import { useRoute } from "vue-router";
+const route = useRoute();
+</script>
+
+<template>
+  <main class="flex flex-col gap-2">
+    <h1 class="text-2xl">Trails</h1>
+    <template v-if="route">
+      <TrailCard name="Creek" />
+    </template>
+    <form method="post" action="/api/reports">
+      <input type="hidden" name="trail" value="creek" />
+      <textarea name="text" required></textarea>
+      <button>Post</button>
+    </form>
+  </main>
+</template>
+`,
+      "src/components/trail-card.vue": `<script setup lang="ts">
+defineProps<{ name: string }>();
+</script>
+
+<template>
+  <a href="/trails/creek" class="card">{{ name }}</a>
+</template>
+
+<style scoped>
+.card { padding: 8px; border-radius: 8px; }
+</style>
+`,
+      "src/app/counter/page.vue": `<script lang="ts">
+export const hydrate = true;
+</script>
+
+<template><button type="button" @click="count++">{{ count }}</button></template>
+`,
+      "src/app/raw/page.vue": `<template>
+  <div :class="tone"><div v-html="html" /><GlobalWidget /><component :is="tag" /></div>
+</template>
+`,
+    });
+    const vueResult = await report(vue, {
+      ...userConfig({ auto: "on" }),
+      renderer: renderer("vue"),
+    } as never);
+    const vueBlockers = (route: string) =>
+      routeOf(vueResult, route).analysis!.nativeBlockers.map(
+        (blocker) => `${blocker.file}:${blocker.line} ${blocker.rule} ${blocker.message}`,
+      );
+    // A page whose scripts run on the server only, in a component's own CSS: the native tier.
+    expect(vueBlockers("/")).toEqual([]);
+    expect(routeOf(vueResult, "/").analysis!.tier).toBe("native");
+    expect(vueResult.screens["/"]).toMatchObject({ screen: "server", source: "page" });
+    // React Native ports are React only: a Vue page is native or web.
+    expect(routeOf(vueResult, "/").analysis!.blockers.map((blocker) => blocker.rule)).toContain(
+      "renderer-component",
+    );
+    expect(vueBlockers("/counter")).toEqual([
+      "src/app/counter/page.vue:2 client-logic it exports hydrate = true, which hydrates the page in the browser",
+      "src/app/counter/page.vue:5 inert-control <button> has no link or form to submit on a native-tier screen",
+    ]);
+    expect(routeOf(vueResult, "/counter").analysis!.tier).toBe("web");
+    expect(vueBlockers("/raw")).toEqual([
+      "src/app/raw/page.vue:2 runtime-class-name <div> builds its class names at runtime",
+      "src/app/raw/page.vue:2 dangerously-set-inner-html v-html renders raw HTML",
+      "src/app/raw/page.vue:2 dynamic-component <GlobalWidget> is not a component this file imports",
+      "src/app/raw/page.vue:2 dynamic-component <component> picks what it renders at runtime",
+    ]);
+
+    const svelte = await createApp({
+      "src/app/layout.svelte": `<slot />`,
+      "src/app/page.svelte": `<script module lang="ts">
+  export const mobile = { native: true };
+</script>
+
+<script lang="ts">
+  import Card from "../components/card.svelte";
+  const trails = ["creek", "ridge"];
+</script>
+
+<main class="flex flex-col gap-2">
+  {#each trails as trail}
+    <Card {trail} />
+  {/each}
+  {#if trails.length > 1 && trails.length < 3}<p>Two trails</p>{/if}
+</main>
+`,
+      "src/components/card.svelte": `<script lang="ts">
+  let { trail }: { trail: string } = $props();
+</script>
+
+<a href={"/trails/" + trail} class="p-2">{trail}</a>
+`,
+      "src/app/counter/page.svelte": `<script module>
+  export const hydrate = true;
+</script>
+
+<button onclick={() => count++}>{count}</button>
+`,
+      "src/app/raw/page.svelte": `<div class:active={on}>{@html html}<svelte:element this={tag} /></div>
+`,
+    });
+    const svelteResult = await report(svelte, {
+      ...userConfig({ auto: "on" }),
+      renderer: renderer("svelte"),
+    } as never);
+    const svelteBlockers = (route: string) =>
+      routeOf(svelteResult, route).analysis!.nativeBlockers.map(
+        (blocker) => `${blocker.rule} ${blocker.message}`,
+      );
+    expect(svelteBlockers("/")).toEqual([]);
+    expect(svelteResult.screens["/"]).toMatchObject({ screen: "server", source: "page" });
+    expect(svelteBlockers("/counter")).toEqual([
+      "client-logic it exports hydrate = true, which hydrates the page in the browser",
+      "inert-control <button> has no link or form to submit on a native-tier screen",
+    ]);
+    expect(svelteBlockers("/raw")).toEqual([
+      "runtime-class-name <div> builds its class names at runtime",
+      "dangerously-set-inner-html {@html} renders raw HTML",
+      "dynamic-component <svelte:element> picks what it renders at runtime",
+    ]);
+  });
+
+  it("never reads as a page that opts into hydration when core's bundle includes it", async () => {
+    // Core's main entry loads the analyzer's chunk, and the hydration planner reads the modules a
+    // page imports for an `export const hydrate` opt-in as text: a message spelling it would make
+    // every page that imports @farm.js/core hydrate.
+    const { hasHydrateExport } = await import("../utils/client-component");
+    for (const file of ["analyzer.ts", "component-blocks.ts", "runtime.ts", "screens.ts"]) {
+      const source = await fs.readFile(new URL(`../mobile/${file}`, import.meta.url), "utf8");
+      expect(hasHydrateExport(source), file).toBe(false);
+    }
+  });
+
+  it("keeps a server action's form on the native tier in a server components app", async () => {
+    const root = await createApp({
+      "src/app/actions.ts": `"use server";
+export async function addNote(formData: FormData) {}
+`,
+      "src/app/fns.ts": `import { createServerFn } from "@farm.js/core/server-fn";
+export const renameNote = createServerFn(async (input: FormData) => input);
+`,
+      "src/app/page.tsx": `import { addNote } from "./actions";
+import * as actions from "./actions";
+import { renameNote } from "./fns";
+export default function Notes() {
+  async function archive(formData: FormData) {
+    "use server";
+  }
+  return (
+    <div>
+      <form action={addNote}><input name="title" /><button>Add</button></form>
+      <form action={actions.addNote}><button>Again</button></form>
+      <form action={archive}><button>Archive</button></form>
+      <form action={renameNote}><button>Rename</button></form>
+      <form><button formAction={addNote}>Save</button></form>
+    </div>
+  );
+}
+`,
+      "src/app/local/page.tsx": `import { track } from "./track";
+export default function Local() {
+  async function save(formData: FormData) {}
+  return <div><form action={save}><button>Save</button></form><form action={track}><button>Go</button></form></div>;
+}
+`,
+      "src/app/local/track.ts": `export async function track(formData: FormData) {}
+`,
+    });
+    const native = (result: Awaited<ReturnType<typeof report>>, route: string) =>
+      routeOf(result, route).analysis!.nativeBlockers.map(
+        (blocker) => `${blocker.rule} ${blocker.message}`,
+      );
+    const rsc = await report(root, userConfig({}, { experimental: { serverComponents: true } }));
+    expect(native(rsc, "/")).toEqual([]);
+    expect(routeOf(rsc, "/").analysis!.tier).toBe("native");
+    // A plain function, local or imported from a module that is not "use server", needs React.
+    expect(native(rsc, "/local")).toEqual([
+      "form-action action on <form>",
+      "form-action action on <form>",
+    ]);
+    // Without server components there are no server actions to render.
+    const ssr = await report(root);
+    expect(native(ssr, "/")).toEqual(
+      Array(5)
+        .fill("form-action action on <form>")
+        .map((message, index) => (index === 4 ? "form-action formAction on <button>" : message)),
     );
   });
 

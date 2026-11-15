@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { pluginHook } from "./plugin-hook";
 import { parseAst } from "rolldown/parseAst";
 import { resolveConfig, type FarmUserConfig, type ResolvedFarmConfig } from "../config";
 import { loadFarmMobileRuntime } from "../config-runtime";
@@ -17,6 +18,7 @@ import {
   type FarmMobileContext,
   type ResolvedFarmMobileNativeConfig,
 } from "../mobile/config";
+import { scanFarmMobileAppModules } from "../mobile/modules";
 import { createFarmMobileRouteManifest, createFarmMobileRoutePattern } from "../mobile/routes";
 import { platform } from "../platform";
 import { createFarmRouter } from "../router";
@@ -254,7 +256,13 @@ describe("mobile config", () => {
       tabs: [],
       routes: {},
       native: NATIVE,
+      shells: false,
+      modules: {},
     });
+    expect(resolve({ shells: true }).shells).toBe(true);
+    expect(() => resolve({ shells: "yes" as never })).toThrow(
+      /mobile \(os: android\): shells must be true or false\./,
+    );
     // A default id from an app named like a Java keyword says to set one.
     expect(() => resolve({ name: "Class" })).toThrow(
       /"class" is a Java keyword.*set mobile\.id, such as "com\.example\.notes"/,
@@ -358,6 +366,218 @@ describe("mobile config", () => {
     ).rejects.toThrow(/^mobile \(os: android\): server must use https:\/\/ in a build/);
     await expect(resolveFarmMobileBlock(async () => null as never, buildContext)).rejects.toThrow(
       /mobile \(os: android\): the function must return an object/,
+    );
+  });
+});
+
+describe("mobile modules", () => {
+  const SPEC = (name: string) =>
+    `import { TurboModuleRegistry, type TurboModule } from "react-native";\n\n` +
+    `export interface Spec extends TurboModule {\n  model(): Promise<string>;\n}\n\n` +
+    `export default TurboModuleRegistry.getEnforcing<Spec>(${JSON.stringify(name)});\n`;
+
+  /** An app with a community module (camera), a plain dependency (zod), and a dev dependency. */
+  async function createModuleApp(extra: Record<string, string> = {}): Promise<string> {
+    return createApp({
+      "package.json": JSON.stringify({
+        name: "notes",
+        dependencies: {
+          "react-native-camera-kit": "1.0.0",
+          zod: "4.0.0",
+          "react-native-gone": "1",
+        },
+        devDependencies: { "react-native-dev-only": "1.0.0" },
+      }),
+      "node_modules/react-native-camera-kit/package.json": JSON.stringify({
+        name: "react-native-camera-kit",
+        codegenConfig: { name: "CameraKitSpec", type: "all" },
+      }),
+      "node_modules/zod/package.json": JSON.stringify({ name: "zod" }),
+      "node_modules/react-native-dev-only/package.json": JSON.stringify({
+        name: "react-native-dev-only",
+        codegenConfig: { name: "DevOnlySpec", type: "modules" },
+      }),
+      ...extra,
+    });
+  }
+
+  it("finds the app's specs, Kotlin, and iOS files in src/native", async () => {
+    const root = await createModuleApp({
+      "src/native/NativeDevice.ts": SPEC("Device"),
+      "src/native/NativeHaptics.ts": SPEC("Haptics"),
+      "src/native/DeviceModule.kt": "package com.example.notes\n",
+      "src/native/DeviceModule.swift": "import Foundation\n",
+      "src/native/DeviceModule.mm": "#import <Foundation/Foundation.h>\n",
+      "src/native/DeviceModule.h": "#import <Foundation/Foundation.h>\n",
+      "src/native/helpers.ts": "export const x = 1;\n",
+      "src/native/nested/NativeIgnored.ts": SPEC("Ignored"),
+    });
+    const dir = path.join(root, "src/native");
+    expect(scanFarmMobileAppModules({ root })).toEqual({
+      dir,
+      specs: [
+        { name: "Device", file: path.join(dir, "NativeDevice.ts") },
+        { name: "Haptics", file: path.join(dir, "NativeHaptics.ts") },
+      ],
+      android: [path.join(dir, "DeviceModule.kt")],
+      ios: [
+        path.join(dir, "DeviceModule.h"),
+        path.join(dir, "DeviceModule.mm"),
+        path.join(dir, "DeviceModule.swift"),
+      ],
+    });
+    // An app without src/native, and an app whose srcDir is the root.
+    expect(scanFarmMobileAppModules({ root: await createModuleApp() })).toBeUndefined();
+    const flat = await createModuleApp({ "native/NativeDevice.ts": SPEC("Device") });
+    expect(scanFarmMobileAppModules({ root: flat, srcDir: "." })?.specs).toEqual([
+      { name: "Device", file: path.join(flat, "native/NativeDevice.ts") },
+    ]);
+  });
+
+  it("names the spec file when a spec registers no name or a taken one", async () => {
+    const unnamed = await createModuleApp({
+      "src/native/NativeDevice.ts": "export default {};\n",
+    });
+    expect(() => scanFarmMobileAppModules({ root: unnamed })).toThrow(
+      /src\/native\/NativeDevice\.ts is a native module spec \(Native\*\.ts\) without a registered name\. Export TurboModuleRegistry\.getEnforcing<Spec>\("Device"\)/,
+    );
+    const taken = await createModuleApp({
+      "src/native/NativeDevice.ts": SPEC("Device"),
+      "src/native/NativePhone.ts": SPEC("Device"),
+    });
+    expect(() => scanFarmMobileAppModules({ root: taken })).toThrow(
+      /src\/native\/NativePhone\.ts and src\/native\/NativeDevice\.ts both register the native module "Device"/,
+    );
+  });
+
+  it("resolves permissions and usage strings for app and installed modules", async () => {
+    const root = await createModuleApp();
+    const resolve = (modules: unknown) =>
+      resolveFarmMobileConfig(
+        { modules } as never,
+        { root, routes: ROUTES, appModules: ["Device"] },
+        build,
+      ).modules;
+    expect(resolve(undefined)).toEqual({});
+    expect(
+      resolve({
+        Device: {
+          permissions: ["android.permission.VIBRATE", "android.permission.VIBRATE"],
+        },
+        "react-native-camera-kit": {
+          permissions: ["android.permission.CAMERA"],
+          usage: { NSCameraUsageDescription: "  Scans receipts. " },
+        },
+      }),
+    ).toEqual({
+      Device: { permissions: ["android.permission.VIBRATE"], usage: {}, web: false },
+      "react-native-camera-kit": {
+        permissions: ["android.permission.CAMERA"],
+        usage: { NSCameraUsageDescription: "Scans receipts." },
+        web: false,
+      },
+    });
+    expect(() => validateFarmMobileConfig({ modules: [] } as never)).toThrow(
+      /^mobile: modules must be an object keyed by module name/,
+    );
+  });
+
+  it("lets web screens reach an app module only when it opts in", async () => {
+    const root = await createModuleApp();
+    const resolve = (modules: unknown) =>
+      resolveFarmMobileConfig(
+        { modules } as never,
+        { root, routes: ROUTES, appModules: ["Device", "Haptics"] },
+        build,
+      ).modules;
+    expect(
+      resolve({
+        Device: { web: true },
+        Haptics: { web: false },
+        "react-native-camera-kit": { permissions: ["android.permission.CAMERA"] },
+      }),
+    ).toEqual({
+      Device: { permissions: [], usage: {}, web: true },
+      Haptics: { permissions: [], usage: {}, web: false },
+      "react-native-camera-kit": {
+        permissions: ["android.permission.CAMERA"],
+        usage: {},
+        web: false,
+      },
+    });
+    // Community modules run on the React Native JS runtime, which web screens do not have.
+    expect(() => resolve({ "react-native-camera-kit": { web: true } })).toThrow(
+      /^mobile \(os: android\): modules\["react-native-camera-kit"\]\.web is true, but web screens reach only the app's own modules in src\/native\. "react-native-camera-kit" needs the React Native JS runtime, which web screens do not have\. Remove web, and call the module from a native screen \(page\.native\.tsx\)\.$/,
+    );
+    expect(() => resolve({ Device: { web: 1 } })).toThrow(
+      /modules\["Device"\]\.web must be true or false\./,
+    );
+  });
+
+  it("reports every module problem at once, with the key and the fix", async () => {
+    const root = await createModuleApp();
+    let message = "";
+    try {
+      resolveFarmMobileConfig(
+        {
+          modules: {
+            Device: { permissions: ["VIBRATE", "vibrate now"], usage: { Camera: "Scans." } },
+            Haptics: {},
+            zod: { permissions: [], web: "yes" },
+            "react-native-gone": {},
+            "react-native-dev-only": {},
+            "react-native-camera-kit": {
+              usage: { NSCameraUsageDescription: " " },
+              web: true,
+            },
+            Camera: "on",
+          },
+        } as never,
+        { root, routes: ROUTES, appModules: ["Device"] },
+        build,
+      );
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message.split("\n")).toEqual([
+      "mobile (os: android): modules has 12 problems:",
+      '  - modules["Camera"] is not one of the app\'s native modules or an installed React Native module. Use the name a src/native/Native*.ts spec registers, or a package in dependencies in package.json.',
+      '  - modules["Camera"] must be an object, such as { permissions: ["android.permission.VIBRATE"] }.',
+      '  - modules["Device"].permissions[0] must be a full Android permission name such as "android.permission.VIBRATE", got "VIBRATE". Use "android.permission.VIBRATE".',
+      '  - modules["Device"].permissions[1] must be a full Android permission name such as "android.permission.VIBRATE", got "vibrate now".',
+      '  - modules["Device"].usage.Camera is not an iOS usage-description key. Keys are NS...UsageDescription, such as NSCameraUsageDescription.',
+      '  - modules["Haptics"] is not one of the app\'s native modules or an installed React Native module. Use the name a src/native/Native*.ts spec registers, or a package in dependencies in package.json.',
+      '  - modules["react-native-camera-kit"].usage.NSCameraUsageDescription must be a non-empty string: the sentence iOS shows when it asks for access.',
+      '  - modules["react-native-camera-kit"].web is true, but web screens reach only the app\'s own modules in src/native. "react-native-camera-kit" needs the React Native JS runtime, which web screens do not have. Remove web, and call the module from a native screen (page.native.tsx).',
+      '  - modules["react-native-dev-only"] is not one of the app\'s native modules or an installed React Native module. Use the name a src/native/Native*.ts spec registers, or a package in dependencies in package.json.',
+      '  - modules["react-native-gone"] is in dependencies but not installed. Install the app\'s dependencies, then run the command again.',
+      '  - modules["zod"] names a package with no "codegenConfig" in its package.json, so it is not a React Native module for the new architecture. Remove the entry, or upgrade the package.',
+      '  - modules["zod"].web must be true or false.',
+    ]);
+    // One problem is one line.
+    expect(() =>
+      resolveFarmMobileConfig(
+        { modules: { Device: { permissions: ["CAMERA"] } } },
+        { root, routes: ROUTES, appModules: ["Device"] },
+        build,
+      ),
+    ).toThrow(
+      /^mobile \(os: android\): modules\["Device"\]\.permissions\[0\] must be a full Android permission name such as "android\.permission\.VIBRATE", got "CAMERA"\. Use "android\.permission\.CAMERA"\.$/,
+    );
+    // Info.plist has one string per key.
+    expect(() =>
+      resolveFarmMobileConfig(
+        {
+          modules: {
+            Device: { usage: { NSCameraUsageDescription: "Scans receipts." } },
+            "react-native-camera-kit": { usage: { NSCameraUsageDescription: "Takes photos." } },
+          },
+        },
+        { root, routes: ROUTES, appModules: ["Device"] },
+        build,
+      ),
+    ).toThrow(
+      /modules\["react-native-camera-kit"\]\.usage\.NSCameraUsageDescription and modules\["Device"\]\.usage\.NSCameraUsageDescription set different strings/,
     );
   });
 });
@@ -656,7 +876,7 @@ describe("mobile screens", () => {
     });
     expect(ios.warnings).toEqual([
       ...android.warnings,
-      'native.routes["/shop/[[...filters]]"].ios is "native", but "/shop/[[...filters]]" has no page.native.tsx and Farm cannot port pages yet, so it stays web. This fails the build once native screens ship.',
+      'native.routes["/shop/[[...filters]]"].ios is "native", but "/shop/[[...filters]]" has no page.native.tsx and Farm cannot port it yet, so it stays web. This fails the build once native screens ship.',
     ]);
 
     const manifest = android.manifest.rules;
@@ -672,6 +892,26 @@ describe("mobile screens", () => {
       screen: "web",
       source: "config",
     });
+  });
+
+  it("warns about reserved options nothing acts on yet", async () => {
+    const root = await createApp({
+      "src/app/feed/page.tsx": `export const mobile = { prefetch: "intent" } as const;\n${PAGE}`,
+      "src/app/(tabs)/layout.native.tsx": PAGE,
+    });
+    const quiet = await appFor(root, userConfig());
+    // The default prefetch and an explicit "off" ask for nothing, so they stay quiet.
+    expect(quiet.warnings.filter((warning) => /islands|budgets/.test(warning))).toEqual([]);
+    const app = await appFor(
+      root,
+      userConfig({ islands: ["Map"], budgets: { screenOpenMs: 300 }, prefetch: "off" }),
+    );
+    expect(app.warnings).toEqual([
+      "mobile.native.islands is reserved: no native islands render yet, so these stay web components: Map.",
+      "mobile.native.budgets is reserved: nothing measures app size, screen open time, or dropped frames yet.",
+      'src/app/feed/page.tsx: mobile.prefetch "intent" has no effect yet: the shell does not prefetch a route\'s data.',
+      "src/app/(tabs)/layout.native.tsx: layout.native files are reserved: nothing renders them yet, though the analyzer reads one in place of that folder's layout.",
+    ]);
   });
 
   it("checks platform screens and the engine", async () => {
@@ -704,7 +944,7 @@ describe("mobile screens", () => {
     const ios = await appFor(platformApp, platform, "ios");
     expect(ios.screens["/feed"]).toMatchObject({ screen: "platform", source: "config" });
     expect(ios.screens["/notes"]).toMatchObject({ screen: "web", requested: "platform" });
-    expect(ios.warnings[0]).toMatch(/has no page\.swift and Farm cannot port pages yet/);
+    expect(ios.warnings[0]).toMatch(/has no page\.swift and Farm cannot port it yet/);
   });
 
   it("reads a page's mobile export without running it", async () => {
@@ -774,10 +1014,31 @@ ${PAGE}`,
     ).rejects.toThrow(/src\/app\/notes\/page\.tsx: mobile\.presentation does not apply to a tab/);
   });
 
-  it("needs a web page next to every native page and one file per platform", async () => {
-    const lonely = await createApp({ "src/app/inbox/page.native.tsx": PAGE });
-    await expect(screensOf(lonely, userConfig())).rejects.toThrow(
-      /src\/app\/inbox\/page\.native\.tsx has no web page next to it\. Add src\/app\/inbox\/page\.tsx/,
+  it("accepts native-only routes from page.native.tsx, on both OSes, off the web", async () => {
+    const root = await createApp({ "src/app/inbox/page.native.tsx": PAGE });
+    for (const os of ["android", "ios"] as const) {
+      expect((await screensOf(root, userConfig(), os))["/inbox"]).toMatchObject({
+        screen: "native",
+        source: "file",
+        file: "src/app/inbox/page.native.tsx",
+        module: "app/inbox",
+        nativeOnly: true,
+      });
+    }
+    // The web route scan never sees the route: no web page, no web route types.
+    const web = await scanRoutePatterns({ root });
+    expect(web.pages.has("/inbox")).toBe(false);
+    // Demoting a native-only route to web would point at a page that does not exist.
+    await expect(
+      screensOf(root, userConfig({ routes: { "/inbox": { screen: "web" } } })),
+    ).rejects.toThrow(/"\/inbox" is native-only/);
+  });
+
+  it("still needs a web page next to lone OS and platform files, and one file per platform", async () => {
+    // page.ios.tsx or page.swift alone would leave the route missing on the other OS.
+    const ios = await createApp({ "src/app/inbox/page.ios.tsx": PAGE });
+    await expect(screensOf(ios, userConfig())).rejects.toThrow(
+      /src\/app\/inbox\/page\.ios\.tsx has no web page next to it\. Add src\/app\/inbox\/page\.tsx .*or src\/app\/inbox\/page\.native\.tsx to make the route native-only/,
     );
     const swift = await createApp({ "src/app/inbox/page.swift": "" });
     await expect(screensOf(swift, userConfig())).rejects.toThrow(
@@ -826,12 +1087,14 @@ function fingerprint(config: ResolvedFarmConfig): string {
 }
 
 describe("mobile on the web", () => {
-  it("resolves the same web config with or without a mobile block, plus the session plugin, and never calls the function", async () => {
+  it("resolves the same web config with or without a mobile block, apart from the mobile client flag and its plugins, and never calls the function", async () => {
     const root = await createApp();
     const base: FarmUserConfig = { root, deploymentId: "fixed" };
     const without = await resolveConfig(base, "production");
-    // Zero cost: no mobile block, no mobile session plugin, hook, or route.
+    // Zero cost: no mobile block, no mobile client and no mobile session plugin, hook, or route.
+    expect(without).not.toHaveProperty("mobileClient");
     expect(without.plugins.map((plugin) => plugin.name)).not.toContain("farm:mobile-session");
+    expect(without.plugins.map((plugin) => plugin.name)).not.toContain("farm:native-server-fns");
     let calls = 0;
     for (const mobile of [
       // Malformed on purpose: a web build does not check the block.
@@ -841,17 +1104,27 @@ describe("mobile on the web", () => {
         return { id: "com.example.notes" };
       },
     ]) {
-      const withMobile = await resolveConfig({ ...base, mobile } as FarmUserConfig, "production");
-      // The web server of a mobile app serves the native screens' session tokens.
+      const { mobileClient, ...withMobile } = await resolveConfig(
+        { ...base, mobile } as FarmUserConfig,
+        "production",
+      );
+      // A production build adds the mobile client for it; the block itself is not resolved.
+      expect(mobileClient).toBe(true);
+      // The web server of a mobile app serves the native screens' session tokens and the server
+      // functions they call.
       expect(withMobile.plugins.map((plugin) => plugin.name)).toEqual([
         "farm:mobile-session",
+        "farm:native-server-fns",
         ...without.plugins.map((plugin) => plugin.name),
       ]);
       expect(
         fingerprint({
           ...withMobile,
-          plugins: withMobile.plugins.filter((plugin) => plugin.name !== "farm:mobile-session"),
-        }),
+          plugins: withMobile.plugins.filter(
+            (plugin) =>
+              plugin.name !== "farm:mobile-session" && plugin.name !== "farm:native-server-fns",
+          ),
+        } as typeof without),
       ).toBe(fingerprint(without));
       expect(withMobile).not.toHaveProperty("mobile");
     }
@@ -889,9 +1162,13 @@ describe("mobile on the web", () => {
     expect(platform()).toBe("web");
     setPlatform("mobile");
     expect(platform()).toBe("mobile");
-    const plugin = farmServerOnlyEntriesPlugin() as any;
-    const id = plugin.resolveId("@farm.js/core/platform", "/app/page.tsx", { ssr: false });
-    expect(plugin.load(id)).toContain('return "mobile";');
+    const plugin = farmServerOnlyEntriesPlugin();
+    const id = pluginHook<[string, string, { ssr: boolean }], string>(plugin, "resolveId")(
+      "@farm.js/core/platform",
+      "/app/page.tsx",
+      { ssr: false },
+    )!;
+    expect(pluginHook<[string], string>(plugin, "load")(id)).toContain('return "mobile";');
     setPlatform("other");
     expect(platform()).toBe("web");
   });

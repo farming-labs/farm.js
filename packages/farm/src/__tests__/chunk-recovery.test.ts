@@ -127,6 +127,21 @@ describe("chunk error recovery", () => {
     cleanup();
   });
 
+  it("leaves a failed lazy router chunk to its own fallback", () => {
+    const reload = vi.fn();
+    const dispose = installChunkErrorRecovery({ reload, storage: new MemoryStorage() });
+    const link = document.createElement("link");
+    link.rel = "modulepreload";
+    link.href = "/chunks/farm-client-router-hc7ecd88e.js";
+    const event = new Event("error");
+    Object.defineProperty(event, "target", { value: link });
+
+    window.dispatchEvent(event);
+
+    expect(reload).not.toHaveBeenCalled();
+    dispose();
+  });
+
   it("reloads once for a chunk failure on the current page", () => {
     const storage = new MemoryStorage();
     const reload = vi.fn();

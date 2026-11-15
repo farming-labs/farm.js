@@ -379,10 +379,7 @@ function normalizePathname(pathname) {
 }
 
 export function resolvePwaPublicDir(outputDir: string, preset: string): string {
-  return path.join(
-    outputDir,
-    preset === "vercel" || preset === "vercel-edge" ? "static" : "public",
-  );
+  return path.join(outputDir, preset === "vercel" ? "static" : "public");
 }
 
 async function assertWorkerPathInsidePublicDir(

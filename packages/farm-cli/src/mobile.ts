@@ -1,10 +1,19 @@
+import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createServer } from "node:net";
-import type { MobileNativeScreens, MobileShell, MobileShellContext } from "@farm.js/core/mobile";
+import type {
+  MobileBundledAssets,
+  MobileNativeScreens,
+  MobilePageShells,
+  MobileShell,
+  MobileShellContext,
+} from "@farm.js/core/mobile";
 import { withProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
 import { formatDesktopShellInstallCommand, setFarmPlatform, writeShellFiles } from "./desktop";
+import { renderMobilePageShells } from "./mobile-shells";
+import { ensureFarmRscPackages } from "./rsc-packages";
 
 /** An expected failure with its own fix; the CLI prints it without a stack. */
 export class FarmMobileError extends Error {
@@ -128,10 +137,13 @@ const NATIVE_PACKAGE = "@farm.js/native";
 
 interface NativeScreensOptions {
   root: string;
+  srcDir?: string;
   outDir: string;
   screens: FarmMobileNativeScreen[];
   basePath: string;
   locales?: string[];
+  /** Metro's platform: `.ios.tsx` and `.android.tsx` files and React Native's own platform code. */
+  platform?: FarmMobileShellOS;
 }
 
 interface ReactNativeInfo {
@@ -144,6 +156,8 @@ interface NativeBuildModule {
   buildFarmNativeScreens(options: NativeScreensOptions): Promise<{
     reactNative: ReactNativeInfo;
     bundle: string;
+    /** Metro's output for the images the screens import; older builds do not report it. */
+    assets?: string;
     jsBytes: number;
     bytecodeBytes: number;
     bundleMs: number;
@@ -183,18 +197,17 @@ export interface FarmMobileNativeScreen {
 }
 
 /**
- * The routes that render as React Native screens on this OS. Empty for apps without any, and on
- * iOS, whose shell does not host React Native yet and shows a placeholder; those load nothing of
- * React Native and generate the same project as before.
+ * The routes that render as React Native screens on this OS. Empty for apps without any; those
+ * load nothing of React Native and generate the same project as before.
  */
 export function listFarmMobileNativeScreens(
   app: {
     config: { root: string };
     screens: Record<string, { screen: string; module?: string; file?: string }>;
   },
-  os: FarmMobileShellOS = "android",
+  // The decisions are already per OS (`mobile.native.routes[...].ios` and `page.ios.tsx`).
+  _os: FarmMobileShellOS = "android",
 ): FarmMobileNativeScreen[] {
-  if (os !== "android") return [];
   return Object.entries(app.screens)
     .filter(([, decision]) => decision.screen === "native" && decision.module && decision.file)
     .map(([route, decision]) => ({
@@ -238,6 +251,8 @@ async function writeMobileProject(
   command: "dev" | "build",
   runtime: MobileRuntime,
   native?: MobileNativeScreens,
+  assets?: MobileBundledAssets,
+  shells?: MobilePageShells,
 ): Promise<MobileShellContext> {
   const { config } = app;
   const context: MobileShellContext = {
@@ -246,12 +261,16 @@ async function writeMobileProject(
     command,
     mobile: app.mobile,
     basePath: config.basePath === "/" ? "" : config.basePath,
+    ...(config.auth?.enabled ? { authBasePath: config.auth.basePath } : {}),
     manifest: app.manifest,
     projectDir: path.resolve(
       config.root,
       runtime.getFarmMobileOutputDirs(config.distDir)[app.context.os],
     ),
     ...(native ? { native } : {}),
+    ...(assets ? { assets } : {}),
+    ...(shells ? { shells } : {}),
+    ...(app.appModules ? { appModules: app.appModules } : {}),
   };
   await writeShellFiles(
     context.projectDir,
@@ -323,6 +342,7 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
       nativeBuild ??= await loadFarmNativeBuild(root);
       const metro = await nativeBuild.startFarmNativeDevServer({
         root,
+        srcDir: app.config.srcDir,
         outDir: path.resolve(
           root,
           mobileRuntime.getFarmMobileOutputDirs(app.config.distDir).root,
@@ -331,6 +351,7 @@ export async function devFarmMobile(options: FarmMobileDevOptions = {}) {
         screens,
         basePath: app.config.basePath === "/" ? "" : app.config.basePath,
         locales: nativeLocales(app.config),
+        platform: os,
         port: await findMetroPort(),
       });
       // Metro stops with the dev server.
@@ -374,8 +395,9 @@ export interface FarmMobileBuildOptions {
 }
 
 /**
- * `farm build --mobile`: the `--mobile` client build, farm-routes.json with `mobile.server`, and
- * the generated native project for `--os`. The web build's output is left alone. On iOS it also
+ * `farm build --mobile`: the production build a web deployment of the app makes, which includes
+ * the mobile client, written apart from the web output; farm-routes.json with `mobile.server`; and
+ * the generated native project for `--os` with the mobile client's files bundled. On iOS it also
  * builds the simulator app when Xcode is installed, and says what to install when it is not.
  */
 export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Promise<string[]> {
@@ -385,7 +407,9 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     throw new FarmMobileError("--apk builds the Android app; it is not available with --os ios.");
   }
   return withProductionNodeEnv(async () => {
-    setFarmPlatform("mobile");
+    // The same build as the web deployment's, so the mobile client's content-hashed names match
+    // the ones its documents reference. That build adds the mobile client itself.
+    setFarmPlatform("web");
     const runtime = await import("@farm.js/core/internal/config-runtime");
     const productionVite = await runtime.loadFarmProductionVite();
     const userConfig = await runtime.loadConfig(
@@ -417,21 +441,96 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
       "production",
     );
     const dirs = mobileRuntime.getFarmMobileOutputDirs(config.distDir);
-    // The mobile client build goes next to the native project, never over the web output.
+    // The build goes next to the native project, never over the web output.
     config.preset = "node-server";
     config.deploy = runtime.resolveDeployConfig(userConfig ?? {}, {
       preset: "node-server",
       outputDir: dirs.www,
       env: {},
     });
-    const { build } = await import("@farm.js/core/internal/build-runtime");
-    await build(config, { preset: "node-server", root, productionVite });
+    const { build, buildFarmRsc, farmAppUsesRscPipeline, resolveFarmRscCheckConfig } =
+      await import("@farm.js/core/internal/build-runtime");
+    // experimental.serverComponents: the RSC pipeline makes the deployment's build, as in
+    // `farm build`, and adds its own mobile entry.
+    await ensureFarmRscPackages(userConfig, root);
+    if (
+      farmAppUsesRscPipeline(await resolveFarmRscCheckConfig(userConfig, root, "production"), root)
+    ) {
+      // The RSC server has no page shell mode, so these apps bundle no shells yet.
+      if (preflight.mobile.shells)
+        runtime.logger.warn(
+          "mobile.shells: apps with experimental.serverComponents get no page shells yet.",
+        );
+      await buildFarmRsc(userConfig ?? {}, { root, preset: "node-server", outputDir: dirs.www });
+    } else {
+      // mobile.shells: this build's server, and only it, renders page shells for a random token.
+      if (preflight.mobile.shells)
+        config.mobileShells = { token: randomBytes(32).toString("base64url") };
+      await build(config, { preset: "node-server", root, productionVite });
+    }
+    const assets = await readBundledAssets(root, config.distDir, mobileRuntime);
+    if (assets) {
+      // WKWebView cannot answer https requests from the app, so iOS loads the files from the
+      // server, where WebKit's cache keeps them (RFC 0004, decisions).
+      runtime.logger.info(
+        os === "android"
+          ? `Mobile client ${assets.entry}: ${assets.files.length} files bundled into the app`
+          : `Mobile client ${assets.entry}: loaded from the server (iOS does not bundle it yet)`,
+      );
+    } else {
+      runtime.logger.warn(
+        "This build has no mobile client, so the app loads its client from the server and " +
+          "navigations stay in the page.",
+      );
+    }
+
+    let shells: MobilePageShells | undefined;
+    if (config.mobileShells && !assets) {
+      runtime.logger.warn(
+        "mobile.shells: this build has no mobile client, so the app bundles no page shells.",
+      );
+    } else if (config.mobileShells && assets) {
+      const basePath = config.basePath === "/" ? "" : config.basePath;
+      const rendered = await renderMobilePageShells({
+        root,
+        os,
+        runtime: mobileRuntime,
+        outputDir: path.resolve(root, dirs.www),
+        clientDir: assets.dir,
+        token: config.mobileShells.token,
+        basePath,
+        routes: preflight.manifest.rules.flatMap((rule) => (rule.route ? [rule.route] : [])),
+        client: assets.entry,
+        files: assets.files,
+      });
+      const count = Object.keys(rendered.shells.routes).length;
+      // Most routes have no loading file; name only the ones that have one and still get no shell.
+      for (const { route, reason } of rendered.skipped) {
+        if (reason !== "it has no loading file") {
+          runtime.logger.info(`Page shell ${route}: none, ${reason}`);
+        }
+      }
+      if (count > 0) {
+        shells = rendered.shells;
+        const files = Object.keys(shells.files).length;
+        runtime.logger.info(
+          `Page shells: ${count} route${count === 1 ? "" : "s"} in ${files} file${files === 1 ? "" : "s"}` +
+            (rendered.skipped.length > 0 ? ` (${rendered.skipped.length} without one)` : ""),
+        );
+      } else {
+        runtime.logger.warn(
+          "mobile.shells: no route has a page shell. A route gets one from its loading.tsx " +
+            "when that file and every layout around the page sit in folders without [params].",
+        );
+      }
+    }
 
     // The analyzer runs unless mobile.native.auto is "off"; it only reports.
     const app = await mobileRuntime.generateFarmMobileRoutes({
       ...appOptions,
       config,
       analyze: true,
+      ...(shells ? { shells: { client: shells.client, routes: shells.routes } } : {}),
     });
     if (app.table) console.log(app.table);
     // Unused native files and config ports nothing builds yet: the same as config inspect.
@@ -442,10 +541,12 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
       nativeBuild ??= await loadFarmNativeBuild(root);
       const built = await nativeBuild.buildFarmNativeScreens({
         root,
+        srcDir: config.srcDir,
         outDir: path.resolve(root, dirs.root, "native"),
         screens,
         basePath: config.basePath === "/" ? "" : config.basePath,
         locales: nativeLocales(config),
+        platform: os,
       });
       native = {
         engine: "react-native",
@@ -453,6 +554,7 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
         hermesVersion: built.reactNative.hermesVersion,
         modules: screens.map((screen) => screen.module),
         bundle: built.bundle,
+        ...(built.assets ? { assetsDir: built.assets } : {}),
       };
       const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
       runtime.logger.info(
@@ -462,7 +564,15 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
           `${Math.round(built.hermesMs)} ms)`,
       );
     }
-    const context = await writeMobileProject(shell, app, "build", mobileRuntime, native);
+    const context = await writeMobileProject(
+      shell,
+      app,
+      "build",
+      mobileRuntime,
+      native,
+      assets,
+      shells,
+    );
     runtime.logger.info(`📱 ${shownPath(root, context.projectDir)} (${shell.os} project)`);
     if (os === "android" && !options.apk) {
       runtime.logger.info("Run farm build --mobile --apk to build the debug app.");
@@ -476,6 +586,23 @@ export async function buildFarmMobile(options: FarmMobileBuildOptions = {}): Pro
     if (message) runtime.logger.info(message);
     return files.length > 0 ? files : [context.projectDir];
   });
+}
+
+/** The finished build's mobile client, as the shell bundles it; undefined when it has none. */
+async function readBundledAssets(
+  root: string,
+  distDir: string,
+  runtime: MobileRuntime,
+): Promise<MobileBundledAssets | undefined> {
+  const buildDir = path.resolve(root, distDir);
+  const manifest = await runtime.readFarmMobileClientManifest(buildDir);
+  if (!manifest) return undefined;
+  return {
+    // The RSC pipeline names the client output it built from; core builds into `client/`.
+    dir: path.resolve(root, manifest.clientDir ?? runtime.getFarmMobileOutputDirs(distDir).client),
+    files: manifest.files,
+    entry: manifest.entry,
+  };
 }
 
 /**

@@ -1,10 +1,10 @@
-import { defineWebMCPTool, registerWebMCPTool, startWebMCPRuntime } from "@farm.js/webmcp/client";
+import { defineWebMCPTool, registerWebMCPTool } from "@farm.js/webmcp/client";
 import { SITE_URL } from "./site";
 
 /**
  * A WebMCP tool that searches the Farm.js docs from any farmjs.dev page, through the same
- * `/api/docs?query=` endpoint the docs search box uses. components/webmcp-docs-search.tsx loads
- * this module only in browsers that expose a model context, so other visitors never download it.
+ * `/api/docs?query=` endpoint the docs search box uses. src/client.ts loads this module only in
+ * browsers that expose a model context, so other visitors never download it.
  */
 
 const DEFAULT_LIMIT = 8;
@@ -71,11 +71,13 @@ export const searchDocsTool = defineWebMCPTool({
         minLength: 1,
         description: "What to look for, such as a feature, an API, or an error message.",
       },
+      // Literal numbers rather than MAX_LIMIT and DEFAULT_LIMIT, so the app manifest can read
+      // the schema from source.
       limit: {
         type: "integer",
         minimum: 1,
-        maximum: MAX_LIMIT,
-        description: `How many results to return. Defaults to ${DEFAULT_LIMIT}.`,
+        maximum: 20,
+        description: "How many results to return. Defaults to 8.",
       },
     },
     required: ["query"],
@@ -91,18 +93,12 @@ interface ModelContextLike {
 }
 
 /**
- * Register the tool and return its cleanup. `document.modelContext` goes through Farm's WebMCP
- * adapter; browsers that only expose the older `navigator.modelContext` get the same tool there.
+ * Register the tool and return its cleanup. `document.modelContext` goes through the runtime the
+ * webmcp() plugin starts; browsers that only expose the older `navigator.modelContext` get the
+ * same tool there.
  */
 export async function startDocsSearchTool(): Promise<() => void> {
-  if ("modelContext" in document) {
-    const runtime = await startWebMCPRuntime({ unsupported: "ignore" });
-    const unregister = registerWebMCPTool(searchDocsTool);
-    return () => {
-      unregister();
-      runtime.close();
-    };
-  }
+  if ("modelContext" in document) return registerWebMCPTool(searchDocsTool);
   const modelContext = (navigator as Navigator & { modelContext?: ModelContextLike }).modelContext;
   const controller = new AbortController();
   await modelContext?.registerTool(

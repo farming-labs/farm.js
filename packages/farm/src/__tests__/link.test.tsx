@@ -258,6 +258,12 @@ describe("Link", () => {
       expect(hashLink?.getAttribute("href")).toBe("/console#activity");
     });
 
+    it("leaves a hash-only href on the current page, under a base path too", () => {
+      setFarmBasePath("/console");
+      const el = render(createElement(Link, { href: "#bottom" as any }));
+      expect(el?.getAttribute("href")).toBe("#bottom");
+    });
+
     it("inherits the app trailing-slash preference", () => {
       setFarmTrailingSlashPreference(true);
       const el = render(

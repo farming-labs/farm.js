@@ -11,9 +11,10 @@
  * 4. the analyzer, with `mobile.native.auto: "on"` (`"analyzer"`);
  * 5. web (`"default"`).
  *
- * No native engine or analyzer emitter ships yet, so a route that asks for a port with no file
- * to show (config `screen: "native"` without `page.native.tsx`, or an analyzer port) stays web
- * and records the tier it asked for in `requested`.
+ * A route the analyzer puts in the native tier, asked for by the page export, the config, or
+ * `native.auto: "on"`, becomes a `"server"` screen: the shell draws it from the page the server
+ * renders. No React Native emitter ships yet, so any other route that asks for a port with no file
+ * to show stays web and records the tier it asked for in `requested`.
  */
 import * as path from "node:path";
 
@@ -25,6 +26,7 @@ import {
   type FarmMobilePageConfig,
   type FarmMobilePrefetch,
   type FarmMobilePresentation,
+  type FarmMobileRouteScreen,
   type FarmMobileScreen,
   type ResolvedFarmMobileConfig,
 } from "./config";
@@ -32,7 +34,7 @@ import {
 export type FarmMobileScreenSource = "page" | "config" | "file" | "analyzer" | "default";
 
 export interface FarmMobileScreenDecision {
-  screen: FarmMobileScreen;
+  screen: FarmMobileRouteScreen;
   source: FarmMobileScreenSource;
   /** App-root-relative file that decided (`"page"`), or the screen's file. */
   file?: string;
@@ -40,6 +42,8 @@ export interface FarmMobileScreenDecision {
   module?: string;
   /** The tier a config route or the analyzer asked for, while nothing can build it yet. */
   requested?: Exclude<FarmMobileScreen, "web">;
+  /** The route has no `page.tsx` (RFC 0004, 7.3): mobile only, no web screen, no web fallback. */
+  nativeOnly?: boolean;
   presentation: FarmMobilePresentation;
   prefetch: FarmMobilePrefetch;
 }
@@ -58,6 +62,8 @@ export interface FarmMobileScreensOptions {
   mobile: Pick<ResolvedFarmMobileConfig, "routes" | "native">;
   /** Absolute screen files per route. */
   nativePages?: ReadonlyMap<string, PlatformRouteFiles>;
+  /** Routes with screen files and no `page.tsx`; always a subset of `nativePages`' keys. */
+  nativeOnlyRoutes?: ReadonlySet<string>;
   pageExports?: ReadonlyMap<string, FarmMobilePageExport>;
   /** Routes the analyzer would port; used only with `native.auto: "on"`. */
   analyzerPorts?: ReadonlySet<string>;
@@ -65,6 +71,10 @@ export interface FarmMobileScreensOptions {
   analyzerBlockers?: ReadonlyMap<string, readonly string[]>;
   /** Each analyzed route's tier, and what rules out the native tier. */
   analyzerTiers?: ReadonlyMap<string, { tier: FarmMobileTier; nativeBlockers: readonly string[] }>;
+  /** The generated React Native port of each route Farm ported, as an absolute screen file. */
+  portFiles?: ReadonlyMap<string, string>;
+  /** Why Farm could not emit the port of a portable route. */
+  portProblems?: ReadonlyMap<string, readonly string[]>;
 }
 
 export interface FarmMobileScreens {
@@ -136,6 +146,33 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
       prefetch: page?.config.prefetch ?? native.prefetch,
     };
 
+    if (options.nativeOnlyRoutes?.has(route)) {
+      // No page.tsx: the screen file is the route (RFC 0004, 7.3). There is no web screen to
+      // demote to and no analyzer input, so the file decides, and `"web"` in the config is the
+      // one thing to reject rather than silently point at a page that does not exist.
+      if (tier === "web") {
+        throw new TypeError(
+          `${prefix}: ${where}.${tierKey} is "web", but "${route}" is native-only: it has ` +
+            `${relativeFile(root, (reactFile ?? platformFile)!)} and no page.tsx, so there is ` +
+            "no web screen. Add the page, or remove the config route.",
+        );
+      }
+      const file = reactFile ?? platformFile;
+      if (!file) {
+        // native-only needs page.native.tsx (the scan enforces it), so both OSes land here.
+        throw new TypeError(`${prefix}: "${route}" is native-only but has no screen file.`);
+      }
+      screens[route] = {
+        screen: reactFile ? "native" : "platform",
+        source: "file",
+        file: relativeFile(root, file),
+        module,
+        nativeOnly: true,
+        ...base,
+      };
+      continue;
+    }
+
     if (page?.config.native === false) {
       if (tier !== undefined && tier !== "web") {
         warnings.push(
@@ -180,14 +217,11 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
             "remove mobile.native.",
         );
       }
-      // The shell cannot draw a server-rendered native screen yet, so the route stays web.
-      screens[route] = {
-        screen: "web",
-        source: "page",
-        file: page.file,
-        requested: "native",
-        ...base,
-      };
+      // Before the analyzer runs, ask for it; once it proves the native tier, the shell draws
+      // the screen from the page the server renders.
+      screens[route] = analysis
+        ? { screen: "server", source: "page", file: page.file, module, ...base }
+        : { screen: "web", source: "page", file: page.file, requested: "native", ...base };
       continue;
     }
 
@@ -222,12 +256,29 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
         };
         continue;
       }
+      if (options.analyzerTiers?.get(route)?.tier === "native") {
+        screens[route] = { screen: "server", source: "config", module, ...base };
+        continue;
+      }
+      const portFile = options.portFiles?.get(route);
+      if (nativeTier === "native" && portFile) {
+        screens[route] = {
+          screen: "native",
+          source: "config",
+          file: relativeFile(root, portFile),
+          module,
+          ...base,
+        };
+        continue;
+      }
       const blockers = options.analyzerBlockers?.get(route);
+      const problems = options.portProblems?.get(route);
       warnings.push(
         `${where}.${tierKey} is "native", but "${route}" has no ` +
           `${nativeTier === "native" ? "page.native.tsx" : platformFileName} and Farm cannot ` +
-          "port pages yet, so it stays web" +
+          "port it yet, so it stays web" +
           (blockers?.length ? `. The analyzer would keep it web: ${blockers.join("; ")}` : "") +
+          (problems?.length ? `. The port would need: ${problems.join("; ")}` : "") +
           ". This fails the build once native screens ship.",
       );
       screens[route] = { screen: "web", source: "config", requested: nativeTier, ...base };
@@ -245,7 +296,29 @@ export function resolveFarmMobileScreens(options: FarmMobileScreensOptions): Far
       };
       continue;
     }
+    if (native.auto === "on" && options.analyzerTiers?.get(route)?.tier === "native") {
+      screens[route] = { screen: "server", source: "analyzer", module, ...base };
+      continue;
+    }
     if (native.auto === "on" && options.analyzerPorts?.has(route)) {
+      const portFile = options.portFiles?.get(route);
+      if (nativeTier === "native" && portFile) {
+        screens[route] = {
+          screen: "native",
+          source: "analyzer",
+          file: relativeFile(root, portFile),
+          module,
+          ...base,
+        };
+        continue;
+      }
+      const problems = options.portProblems?.get(route);
+      if (problems?.length) {
+        warnings.push(
+          `${prefix}: "${route}" is portable, but Farm cannot port it yet, so it stays web: ` +
+            `${problems.join("; ")}.`,
+        );
+      }
       screens[route] = { screen: "web", source: "analyzer", requested: nativeTier, ...base };
       continue;
     }

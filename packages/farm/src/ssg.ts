@@ -51,6 +51,7 @@
 
 import { readFileSync } from "fs";
 import { readFile } from "fs/promises";
+import { isFarmMarkdownPageFile } from "./app-markdown-runtime";
 import {
   mergeRouteRenderingDirectiveConfig,
   type DirectiveRenderingConfig,
@@ -304,27 +305,28 @@ function stripComments(source: string): string {
 }
 
 function sanitizeSource(source: string, maskLiterals: boolean): string {
-  const output = [...source];
-  const mask = (index: number) => {
-    if (output[index] !== "\n" && output[index] !== "\r") output[index] = " ";
+  // Masked [start, end) UTF-16 ranges, in source order. Indexing code units keeps masks aligned
+  // with `source[index]` when the file contains characters outside the BMP, such as emoji.
+  const ranges: number[] = [];
+  const mask = (start: number, end: number) => {
+    end = Math.min(end, source.length);
+    if (end <= start) return;
+    if (ranges[ranges.length - 1] === start) ranges[ranges.length - 1] = end;
+    else ranges.push(start, end);
   };
 
   const scanQuoted = (start: number, quote: "'" | '"'): number => {
-    let index = start;
-    if (maskLiterals) mask(index);
-    index += 1;
+    let index = start + 1;
     while (index < source.length) {
       if (source[index] === "\\") {
-        if (maskLiterals) mask(index);
-        if (index + 1 < source.length && maskLiterals) mask(index + 1);
         index += 2;
         continue;
       }
       const character = source[index];
-      if (maskLiterals) mask(index);
       index += 1;
       if (character === quote) break;
     }
+    if (maskLiterals) mask(start, index);
     return index;
   };
 
@@ -335,22 +337,17 @@ function sanitizeSource(source: string, maskLiterals: boolean): string {
       const character = source[index];
       const next = source[index + 1];
       if (character === "/" && next === "/") {
-        while (index < source.length && source[index] !== "\n" && source[index] !== "\r") {
-          mask(index++);
-        }
+        let end = index;
+        while (end < source.length && source[end] !== "\n" && source[end] !== "\r") end += 1;
+        mask(index, end);
+        index = end;
         continue;
       }
       if (character === "/" && next === "*") {
-        mask(index++);
-        mask(index++);
-        while (index < source.length) {
-          const closesComment = source[index] === "*" && source[index + 1] === "/";
-          mask(index++);
-          if (closesComment) {
-            mask(index++);
-            break;
-          }
-        }
+        const close = source.indexOf("*/", index + 2);
+        const end = close === -1 ? source.length : close + 2;
+        mask(index, end);
+        index = end;
         continue;
       }
       if (character === "'" || character === '"') {
@@ -358,35 +355,30 @@ function sanitizeSource(source: string, maskLiterals: boolean): string {
         continue;
       }
       if (character === "`") {
-        if (maskLiterals) mask(index);
+        let segmentStart = index;
         index += 1;
         while (index < source.length) {
           if (source[index] === "\\") {
-            if (maskLiterals) mask(index);
-            if (index + 1 < source.length && maskLiterals) mask(index + 1);
             index += 2;
           } else if (source[index] === "`") {
-            if (maskLiterals) mask(index);
             index += 1;
             break;
           } else if (source[index] === "$" && source[index + 1] === "{") {
-            if (maskLiterals) {
-              mask(index);
-              mask(index + 1);
-            }
+            if (maskLiterals) mask(segmentStart, index + 2);
             index = scanCode(index + 2, true);
+            segmentStart = index;
           } else {
-            if (maskLiterals) mask(index);
             index += 1;
           }
         }
+        if (maskLiterals) mask(segmentStart, index);
         continue;
       }
       if (character === "{") {
         braceDepth += 1;
       } else if (character === "}") {
         if (stopAtTemplateBrace && braceDepth === 0) {
-          if (maskLiterals) mask(index);
+          if (maskLiterals) mask(index, index + 1);
           return index + 1;
         }
         braceDepth = Math.max(0, braceDepth - 1);
@@ -397,7 +389,17 @@ function sanitizeSource(source: string, maskLiterals: boolean): string {
   };
 
   scanCode(0, false);
-  return output.join("");
+  let output = "";
+  let cursor = 0;
+  for (let index = 0; index < ranges.length; index += 2) {
+    const start = ranges[index]!;
+    const end = ranges[index + 1]!;
+    output +=
+      source.slice(cursor, start) +
+      source.slice(start, end).replace(/[^\r\n]+/g, (run) => " ".repeat(run.length));
+    cursor = end;
+  }
+  return output + source.slice(cursor);
 }
 
 function escapeRegExp(value: string): string {
@@ -622,6 +624,18 @@ export async function collectSSGPages(
       }
 
       const source = await readFile(route.filePath, "utf8").catch(() => undefined);
+      // The docs runtime answers its Markdown pages before any page route, so their route config
+      // does not apply to them: `docs.prerender` decides whether they are written as files.
+      if (options.docsAdapterRoutes?.owns(route.path) && isFarmMarkdownPageFile(route.filePath)) {
+        ssrRoutes.push(route.path);
+        if (
+          options.suggestStaticRendering !== false &&
+          analyzeStaticRouteCandidate(null, source, { isDynamic: route.isDynamic }).candidate
+        ) {
+          staticCandidateDocsPages += 1;
+        }
+        continue;
+      }
       const configuredRendering = resolveConfiguredRouteRenderingConfig(mod, source);
       const rendering = resolveRouteRenderingConfig(mod, source);
 

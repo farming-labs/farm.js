@@ -54,3 +54,40 @@ export async function withProductionNodeEnv<T>(operation: () => T | PromiseLike<
     }
   }
 }
+
+// React's packages, and the copy of React's Flight runtime that @vitejs/plugin-rsc vendors.
+const REACT_RUNTIME_DIRECTORIES = [
+  "/node_modules/react/",
+  "/node_modules/react-dom/",
+  "/node_modules/react-server-dom-webpack/",
+  "/node_modules/@vitejs/plugin-rsc/dist/vendor/react-server-dom/",
+];
+
+/**
+ * Replaces React's `process.env.NODE_ENV` checks with "production", so a bundle
+ * that includes React keeps only its production builds. React's entry files pick
+ * the development or production build at runtime from that check; left in place,
+ * both builds ship.
+ *
+ * @internal
+ */
+export function createReactProductionModePlugin() {
+  const nodeEnvExpression = ["process", "env", "NODE_ENV"].join(".");
+  return {
+    name: "farm-react-production-mode",
+    transform: {
+      filter: {
+        id: /\/node_modules\/(?:react(?:-dom|-server-dom-webpack)?|@vitejs\/plugin-rsc\/dist\/vendor\/react-server-dom)\//,
+        code: new RegExp(nodeEnvExpression.replace(/\./g, "\\.")),
+      },
+      handler(code: string, id: string) {
+        const normalizedId = id.replace(/\\/g, "/");
+        const isReactRuntime = REACT_RUNTIME_DIRECTORIES.some((directory) =>
+          normalizedId.includes(directory),
+        );
+        if (!isReactRuntime || !code.includes(nodeEnvExpression)) return null;
+        return { code: code.split(nodeEnvExpression).join('"production"'), map: null };
+      },
+    },
+  };
+}

@@ -495,8 +495,11 @@ async function validateImageSourceUrl(
     throw new FarmImageRequestError("DISALLOWED_SOURCE", 400, "Unsafe image source URL");
   }
 
-  const isLocalSource =
-    sourceUrl.origin === requestOrigin || sourceUrl.origin === trustedLocalOrigin;
+  // The request's origin comes from its Host header, which the client chooses. Where the adapter
+  // knows this server's own origin, only that origin is local: a source that merely matches the
+  // Host it was sent is remote and must match remotePatterns. Without one (a platform that routes
+  // by Host), the request origin stands in for it.
+  const isLocalSource = sourceUrl.origin === (trustedLocalOrigin ?? requestOrigin);
   if (isLocalSource) {
     if (
       sourceUrl.pathname === config.path ||

@@ -27,6 +27,10 @@ import javax.crypto.spec.GCMParameterSpec
  * never leaves it; only the ciphertext is in SharedPreferences. React Native screens get the
  * access token through the `FarmShell` module; the refresh token stays here.
  *
+ * A React Native screen signs in through [signIn]: native code sends the credentials to the auth
+ * route, puts the session cookie it gets into the WebView's cookie store, and issues the device
+ * token from it the same way. So a native sign-in signs in every web screen too.
+ *
  * Signing out on a web screen makes the server revoke the device and clear its `farm_mobile`
  * marker cookie; the next sync sees the marker gone and deletes the tokens. A refresh the server
  * refuses deletes them too.
@@ -40,6 +44,8 @@ class MobileSession private constructor(
     /** The `X-Farm-Mobile` header: `mobile.id`, the application id. */
     val appId: String = context.packageName
     private val basePath = context.getString(R.string.farm_base_path)
+    /** `auth.basePath`, or empty when the app has no `auth`: the routes [signIn] may call. */
+    private val authBasePath = context.getString(R.string.farm_auth_base_path)
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val io = Executors.newSingleThreadExecutor { Thread(it, "farm-mobile-session") }
     private val lock = Any()
@@ -103,6 +109,88 @@ class MobileSession private constructor(
         }
     }
 
+    /** What [signIn] hands back to JS: the auth route's status and body, never its cookies. */
+    class SignInReply(val status: Int, val body: String)
+
+    /**
+     * Sign in from a React Native screen (`signIn`/`signUp` from `@farm.js/auth/client`): POST the
+     * JSON [body] to [path], which must be a route under `auth.basePath`, on `mobile.server` only,
+     * with no cookies and without following redirects. A success's cookies go into the WebView's
+     * cookie store, as a web sign-in's would, and the device token is issued from them with the
+     * same challenge and exchange; any earlier device token is revoked first. A failure keeps no
+     * cookie and issues nothing. [done] gets the reply once the token is stored, or an error: an
+     * unreachable server, or a sign-in whose device token was not issued.
+     */
+    fun signIn(path: String, body: String, done: (SignInReply?, String?) -> Unit) {
+        if (!isAuthRoute(path, authBasePath)) {
+            return done(null, "Native sign-in posts only to routes under auth.basePath; $path is not one.")
+        }
+        io.execute {
+            try {
+                val reply = signInNow(path, body)
+                done(reply.first, reply.second)
+            } catch (error: Exception) {
+                Log.w(TAG, "native sign-in failed: ${error.message}")
+                done(null, "The server could not be reached: ${error.message}")
+            }
+        }
+    }
+
+    private fun signInNow(path: String, body: String): Pair<SignInReply?, String?> {
+        val connection = URL(config.url("$basePath$path")).openConnection() as HttpURLConnection
+        val code: Int
+        val text: String
+        val cookies: List<String>
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = TIMEOUT_MS
+            connection.readTimeout = TIMEOUT_MS
+            // A redirect, even to the same server, is answered to JS as it is, never followed.
+            connection.instanceFollowRedirects = false
+            connection.useCaches = false
+            // No Cookie and no Origin: a fresh sign-in, the request any non-browser client sends.
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            val bytes = body.toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(bytes.size)
+            connection.doOutput = true
+            connection.outputStream.use { it.write(bytes) }
+            code = connection.responseCode
+            cookies = connection.headerFields.entries
+                .filter { it.key.equals("Set-Cookie", ignoreCase = true) }
+                .flatMap { it.value }
+            val stream = if (code < 400) connection.inputStream else connection.errorStream
+            text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        } finally {
+            connection.disconnect()
+        }
+        val reply = SignInReply(code, text)
+        // A refused sign-in (or a redirect) keeps no cookie. A success without one, such as a
+        // sign-up that waits for email verification, signs nobody in: nothing to issue.
+        if (code !in 200..299 || cookies.isEmpty()) return reply to null
+
+        // This sign-in replaces any earlier device session.
+        val previous = synchronized(lock) {
+            val current = current()
+            clear()
+            current
+        }
+        if (previous != null) {
+            runCatching { post("/__farm/mobile/session/revoke", bearer = previous.refresh) }
+        }
+        val manager = CookieManager.getInstance()
+        cookies.forEach { manager.setCookie(serverUrl, it) }
+        manager.flush()
+        val jar = manager.getCookie(serverUrl).orEmpty()
+        attempted = jar
+        val issued = issue(jar)
+        return if (issued == 200) {
+            reply to null
+        } else {
+            null to "Signed in, but the device token was not issued (HTTP $issued)."
+        }
+    }
+
     private fun syncNow() {
         val cookies = CookieManager.getInstance().getCookie(serverUrl).orEmpty()
         val hasMarker = cookies.split(';').any { it.trim().startsWith("$MARKER=") }
@@ -118,14 +206,24 @@ class MobileSession private constructor(
         val session = cookies.split(';').map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("$MARKER=") }
         if (session.isEmpty() || cookies == attempted) return
         attempted = cookies
+        issue(cookies)
+    }
+
+    /**
+     * Trade the WebView's cookie session for a device token: a one-time nonce, then the exchange
+     * with the same cookies. The status of the step that answered last: 200 once stored.
+     */
+    private fun issue(cookies: String): Int {
         val challenge = post("/__farm/mobile/session/challenge", cookies = cookies)
         val nonce = challenge.body?.optString("nonce").orEmpty()
-        if (challenge.code != 200 || nonce.isEmpty()) return
+        if (challenge.code != 200 || nonce.isEmpty()) return challenge.code
         val issued = post("/__farm/mobile/session", cookies = cookies, nonce = nonce)
         if (issued.code == 200 && issued.body != null) {
             synchronized(lock) { save(issued.body) }
             Log.i(TAG, "device session issued")
+            return 200
         }
+        return issued.code
     }
 
     private class Reply(val code: Int, val body: JSONObject?)
@@ -242,6 +340,14 @@ class MobileSession private constructor(
         private const val KEY_ALIAS = "farm_mobile_session"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val TIMEOUT_MS = 10_000
+
+        /** A route under [authBasePath], such as `/api/auth/sign-in/email`: no query, dot, or escape. */
+        internal fun isAuthRoute(path: String, authBasePath: String): Boolean =
+            authBasePath.startsWith("/") &&
+                path.startsWith("$authBasePath/") &&
+                AUTH_ROUTE.matches(path.substring(authBasePath.length))
+
+        private val AUTH_ROUTE = Regex("(/[A-Za-z0-9_-]+)+")
 
         private fun encode(bytes: ByteArray) = Base64.encodeToString(bytes, Base64.NO_WRAP or Base64.URL_SAFE)
         private fun decode(text: String) = Base64.decode(text, Base64.NO_WRAP or Base64.URL_SAFE)

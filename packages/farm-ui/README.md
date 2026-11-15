@@ -20,14 +20,33 @@ export default function Notes({ notes }) {
 }
 ```
 
+## `PhotoPicker`
+
+An unstyled control that picks one photo and hands `onPick` a URL `Image` can show. It takes the
+same token props as `Pressable` and adds no visuals of its own.
+
+```tsx
+<PhotoPicker onPick={setPhoto} padding="sm" radius="md">
+  Choose a photo
+</PhotoPicker>
+```
+
+On the web it is a label around an `accept="image/*"` file input and gives an object URL, revoked
+on the next pick and on unmount. Pass `pick`, an app module's method that resolves a photo's URL
+or null, to pick natively instead: `native.Device.pickPhoto` on a web screen in the Android app
+(the photo comes back by reference, as `/__farm/files/<id>`), or `Device.pickPhoto` on a native
+screen (a `file://` URI). Without `pick` the native build is disabled, since React Native has no
+file input.
+
 ## Status
 
 - **Web rendering ships today.** Every primitive renders semantic HTML with
   token styling, so it works on the web and on a mobile **web** screen now.
-- **Native rendering is designed, not built yet.** On a mobile **native**
-  screen these components will render native views once the native screen
-  engine lands. Until then, native screens are a preview (see the
-  [Mobile Apps](https://farmjs.dev/docs/mobile) docs).
+- **Native rendering is unreleased.** On a React Native screen, Metro resolves
+  `@farm.js/ui` to its React Native build (from `@farm.js/native`, which apps
+  with native screens install): native views, `List` as a recycling
+  `FlatList`, and tokens resolved to the web defaults. It runs in tests, not
+  yet on a device (see the [Mobile Apps](https://farmjs.dev/docs/mobile) docs).
 
 ## Why these components
 
@@ -38,6 +57,10 @@ can port to a native screen automatically.
 
 Raw values still pass through (`padding={10}`, `background="#fff"`), and every
 box-like primitive takes a `style` escape hatch merged last.
+
+On native screens, literal strings and numbers inside `View` or `Pressable`, including
+fragments, list empty states and badges, are wrapped in native `Text`. Use `Text` explicitly
+when you need text tokens such as `size`, `weight` or `color`.
 
 ## Theming
 

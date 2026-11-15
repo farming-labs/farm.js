@@ -10,6 +10,7 @@ import type { MobileShellContext } from "@farm.js/core/mobile";
 import shell, {
   createIosProject,
   IOS_DEPLOYMENT_TARGET,
+  IOS_PAGE_SHELLS_DIR,
   listBootedSimulators,
   resolveTabSymbol,
 } from "./index";
@@ -237,14 +238,18 @@ describe("@farm.js/mobile/ios", () => {
       "App/Assets.xcassets/LaunchBackground.colorset/Contents.json",
       "App/FarmBridge.swift",
       "App/FarmBuild.swift",
+      "App/FarmFiles.swift",
       "App/Info.plist",
       "App/MobileSession.swift",
+      "App/NativeEngine.swift",
       "App/NativeScreens.swift",
       "App/Navigator.swift",
       "App/Page.swift",
+      "App/PageShells.swift",
       "App/RouteConfig.swift",
       "App/SceneDelegate.swift",
       "App/ScreenViewController.swift",
+      "App/ServerScreens.swift",
       "App/Theme.swift",
       "App/WebViewPool.swift",
       "App/farm-bridge.js",
@@ -293,6 +298,18 @@ describe("@farm.js/mobile/ios", () => {
     const baseFiles = await generated(base);
     expect(baseFiles["App/FarmBuild.swift"]).toContain('static let startPath = "/docs"');
     expect(baseFiles["App/FarmBuild.swift"]).toContain("static let tabIcons: [String] = []");
+  });
+
+  it("titles the navigation bar from the page, leaving the tab's configured title", async () => {
+    const files = await generated(context());
+    const screen = files["App/ScreenViewController.swift"]!;
+    // UIViewController.title also renames the tab bar item of a tab's root screen.
+    expect(screen).not.toMatch(/\bself\.title = /);
+    expect(screen).not.toMatch(/^\s*(if .*\{ )?title = /m);
+    expect(screen).toContain("navigationItem.title = title");
+    expect(files["App/Navigator.swift"]).toContain(
+      "stack.tabBarItem = UITabBarItem(title: tab.title, image: image, tag: index)",
+    );
   });
 
   it("writes a project file whose objects all resolve, with every source and resource built", async () => {
@@ -365,6 +382,63 @@ describe("@farm.js/mobile/ios", () => {
     expect(build).not.toContain("NSLocalNetworkUsageDescription");
   });
 
+  it("adds the usage strings mobile.modules sets to Info.plist", async () => {
+    const base = buildContext();
+    const plist = (
+      await generated({
+        ...base,
+        mobile: {
+          ...base.mobile,
+          modules: {
+            Device: { permissions: ["android.permission.VIBRATE"], usage: {} },
+            "react-native-camera-kit": {
+              permissions: [],
+              usage: { NSCameraUsageDescription: 'Scans "receipts" & notes.' },
+            },
+            Contacts: {
+              permissions: [],
+              usage: { NSContactsUsageDescription: "Finds people to share notes with." },
+            },
+          },
+        },
+      })
+    )["App/Info.plist"]!;
+    expect(plist).toContain(
+      "\t<key>NSCameraUsageDescription</key>\n\t<string>Scans &quot;receipts&quot; &amp; notes.</string>",
+    );
+    expect(plist).toContain(
+      "\t<key>NSContactsUsageDescription</key>\n\t<string>Finds people to share notes with.</string>",
+    );
+    expect(plist).not.toContain("VIBRATE");
+    // Without mobile.modules, no usage strings.
+    expect((await generated(base))["App/Info.plist"]).not.toContain("UsageDescription");
+  });
+
+  it("copies the app's Swift module classes next to the project, outside the built target", async () => {
+    const root = await tempDir();
+    const dir = path.join(root, "src/native");
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "DeviceModule.swift"), "import Foundation\n");
+    await writeFile(path.join(dir, "DeviceModule.kt"), "package com.example\n");
+    const files = await generated(
+      context({
+        appModules: {
+          dir,
+          specs: [{ name: "Device", file: path.join(dir, "NativeDevice.ts") }],
+          android: [path.join(dir, "DeviceModule.kt")],
+          ios: [path.join(dir, "DeviceModule.swift")],
+        },
+      }),
+    );
+    expect(files["FarmAppModules/DeviceModule.swift"]).toBe("import Foundation\n");
+    expect(Object.keys(files).filter((file) => file.endsWith(".kt"))).toEqual([]);
+    // iOS does not host React Native yet, so the project neither builds nor lists the class.
+    expect(files["App.xcodeproj/project.pbxproj"]).not.toContain("DeviceModule");
+    expect(files["App.xcodeproj/project.pbxproj"]).toBe(
+      (await generated(context()))["App.xcodeproj/project.pbxproj"],
+    );
+  });
+
   it("registers the bridge only with origin and main-frame checks, and evaluates only into the app", async () => {
     const files = await generated(context());
     const registration = /addScriptMessageHandler|\.add\([^)]*\bname:/;
@@ -428,6 +502,68 @@ describe("@farm.js/mobile/ios", () => {
     expect(files["App/Page.swift"]!.match(/MobileSession\.shared\?\.sync\(\)/g)).toHaveLength(2);
   });
 
+  it("signs native screens in only under auth.basePath on mobile.server, with no cookie or redirect", async () => {
+    const files = await generated(context({ authBasePath: "/api/auth" }));
+    expect(files["App/FarmBuild.swift"]).toContain('static let authBasePath = "/api/auth"');
+    expect((await generated(context()))["App/FarmBuild.swift"]).toContain(
+      'static let authBasePath = ""',
+    );
+    const session = files["App/MobileSession.swift"]!;
+    const signIn = session.slice(
+      session.indexOf("    func signIn(path: String, body: String)"),
+      session.indexOf("    nonisolated static func isAuthRoute("),
+    );
+    // The path is checked before anything is sent, and the URL is always mobile.server's.
+    expect(signIn).toContain(
+      "guard Self.isAuthRoute(path, authBasePath: FarmBuild.authBasePath) else {",
+    );
+    expect(signIn).toContain(
+      "var request = URLRequest(url: config.url(FarmBuild.basePath + path))",
+    );
+    expect(signIn).toContain('request.httpMethod = "POST"');
+    expect(signIn).toContain("request.httpShouldHandleCookies = false");
+    const sent = signIn.slice(0, signIn.indexOf("let reply = SignInReply("));
+    expect(sent).toContain("try await http.data(for: request)");
+    expect(sent).not.toMatch(/"Cookie"|"Origin"|X-Farm-Mobile/);
+    // The session's URLSession refuses every redirect, so a 3xx comes back as it is.
+    expect(session).toContain(
+      "http = URLSession(configuration: configuration, delegate: RefuseRedirects(), delegateQueue: nil)",
+    );
+    expect(session).toMatch(
+      /willPerformHTTPRedirection response: HTTPURLResponse,\n\s+newRequest request: URLRequest\n\s+\) async -> URLRequest\? \{\n\s+nil\n/,
+    );
+    // A refused sign-in or a redirect keeps no cookie and issues nothing; a success issues the
+    // device token through the same challenge and exchange a web sign-in uses.
+    const refused = signIn.indexOf(
+      "guard (200..<300).contains(response.statusCode), !cookies.isEmpty else { return reply }",
+    );
+    expect(refused).toBeGreaterThan(0);
+    expect(signIn.indexOf("await store.setCookie(cookie)")).toBeGreaterThan(refused);
+    expect(signIn.indexOf("await issue(cookieHeader: header)")).toBeGreaterThan(refused);
+    expect(session.match(/post\("\/__farm\/mobile\/session\/challenge"/g)).toHaveLength(1);
+  });
+
+  it("reaches native sign-in only from native code, never from a WebView page", async () => {
+    const files = await generated(context({ authBasePath: "/api/auth" }));
+    // WebView pages reach native code only through FarmBridge's message handler, which never
+    // touches the device session, and the scene registers no plugins.
+    expect(files["App/FarmBridge.swift"]).not.toMatch(/MobileSession|signIn|session/i);
+    expect(files["App/SceneDelegate.swift"]).toContain("let plugins: [String: FarmPlugin] = [:]");
+    expect(files["App/farm-bridge.js"]).not.toMatch(/signIn|session/i);
+    for (const [file, source] of swiftFiles(files)) {
+      // No type adopts FarmPlugin, so a page's `__farmBridge.call` reaches no native code.
+      expect(source, file).not.toMatch(
+        /(?:class|struct|enum|extension)\s+\w+\s*:[^{]*\bFarmPlugin\b/,
+      );
+      // iOS has no React Native host yet, so nothing calls it; the method waits for that module.
+      if (file !== "App/MobileSession.swift") expect(source, file).not.toMatch(/\.signIn\(/);
+    }
+    expect(files["App/Page.swift"]!.match(/MobileSession\.shared\?\.\w+/g)).toEqual([
+      "MobileSession.shared?.sync",
+      "MobileSession.shared?.sync",
+    ]);
+  });
+
   it("sets FarmBuild.dev only under farm dev, and reads launch overrides only when it is set", async () => {
     const farmBuild = async (ctx: MobileShellContext) =>
       (await generated(ctx))["App/FarmBuild.swift"];
@@ -442,9 +578,11 @@ describe("@farm.js/mobile/ios", () => {
         expect(source).not.toContain("UserDefaults");
       }
     }
-    expect(scene).toContain(
-      "LaunchOptions.read(arguments: ProcessInfo.processInfo.arguments, dev: FarmBuild.dev)",
-    );
+    expect(scene).toContain("let arguments = ProcessInfo.processInfo.arguments");
+    expect(scene).toContain("LaunchOptions.read(arguments: arguments, dev: FarmBuild.dev)");
+    // -FarmOpen, the one option every build reads, only visits a path of the app's own server.
+    expect(scene).toContain("LaunchOpen.read(arguments: arguments)");
+    expect(scene).toContain('path.hasPrefix("/"), !path.hasPrefix("//")');
     expect(scene.match(/ProcessInfo\.processInfo\.arguments/g)).toHaveLength(1);
     // The first statement of read() returns the defaults outside dev builds.
     const read = scene.slice(scene.indexOf("static func read("));
@@ -461,8 +599,40 @@ describe("@farm.js/mobile/ios", () => {
     const files = await generated(context());
     const routes = files["App/RouteConfig.swift"];
     expect(routes).toContain(
-      'private static let screens: Set<String> = [web, "native", "platform"]',
+      'private static let screens: Set<String> = [web, "native", "platform", "server"]',
     );
+    // "server" rules draw the page the server renders, and fall back to the web screen.
+    expect(files["App/Navigator.swift"]).toContain('if rule.screen == "server" {');
+    expect(files["App/Navigator.swift"]).toContain(
+      "self.showWeb(replacing: screen, url: url, reason: reason)",
+    );
+    expect(files["App/ServerScreens.swift"]).toContain(
+      'static let contentType = "application/vnd.farm.native+json"',
+    );
+    // A server screen titles the navigation bar only: UIViewController.title would also rename
+    // the tab bar item when the screen is a tab's root.
+    expect(files["App/ServerScreens.swift"]).toContain("parent?.navigationItem.title = title");
+    expect(files["App/ServerScreens.swift"]).not.toMatch(/parent\?\.title = /);
+    // An info-level selection log does not prove the tree loaded and is not persisted by log show.
+    const server = files["App/ServerScreens.swift"];
+    const completion =
+      'Navigator.log.notice("server screen ready: \\(self.url.path, privacy: .public)")';
+    expect(server).toContain(completion);
+    expect(server.indexOf(completion)).toBeGreaterThan(
+      server.indexOf("scroll.addSubview(content)"),
+    );
+    expect(server.indexOf(completion)).toBeGreaterThan(server.indexOf("loaded = true"));
+    // A redraw replaces only the previous tree: the scroll view also holds the refresh control,
+    // and pull to refresh stops working once that leaves the view.
+    expect(server).toContain("scroll.refreshControl = refresher");
+    expect(server).not.toContain("scroll.subviews");
+    expect(server).toContain("drawn?.removeFromSuperview()");
+    // Table cells (`flex: <colspan> 1 0`) split a row's width by their grow, so columns line up:
+    // a stack's hugging priority alone gives the free width to one of them.
+    expect(server).toContain(
+      "other.widthAnchor.constraint(equalTo: first.widthAnchor, multiplier: grow / firstGrow)",
+    );
+    expect(files["App/Navigator.swift"]).toContain('screen.navigationItem.title = ""');
     expect(routes).toContain(
       'let screen = (json["screen"] as? String).flatMap { screens.contains($0) ? $0 : nil } ?? web',
     );
@@ -482,10 +652,38 @@ describe("@farm.js/mobile/ios", () => {
     );
     const screens = files["App/NativeScreens.swift"];
     expect(screens).toContain("Farm does not build page.swift screens yet.");
-    expect(screens).toContain("Farm does not build page.native.tsx screens yet.");
+    expect(screens).toContain("The native screen \\(module) is not in this build.");
     expect(files["App/Page.swift"]).toContain(
       "func webViewWebContentProcessDidTerminate(_ webView: WKWebView)",
     );
+  });
+
+  it("loads every app document with the shell header, so it keeps the mobile client", async () => {
+    // WKWebView cannot answer https requests from the app, so the iOS project bundles no client
+    // files: the mobile client loads from the server and stays in WebKit's cache.
+    const assets = {
+      dir: "/app/.farm/client",
+      entry: "/farm-mobile-client-h1a2b3c4d.js",
+      files: ["/farm-mobile-client-h1a2b3c4d.js"],
+    };
+    const withAssets = await generated({ ...buildContext(), assets });
+    expect(Object.keys(withAssets)).toEqual(Object.keys(await generated(buildContext())));
+    expect(
+      Object.keys(withAssets).some((file) => /farm-www|farm-assets|farm-mobile-client/.test(file)),
+    ).toBe(false);
+
+    const page = withAssets["App/Page.swift"];
+    expect(page).toContain('request.setValue("ios", forHTTPHeaderField: Page.shellHeader)');
+    expect(page).toContain('static let shellHeader = "X-Farm-Shell"');
+    // The one place documents load from, and the policy that sends header-less app documents
+    // (redirects, router fallbacks, reloads) through it.
+    expect(page.match(/webView\.load\(/g)).toHaveLength(1);
+    expect(page).toMatch(
+      /if decision == \.allow, let url = navigationAction\.request\.url, needsShellHeader\(navigationAction, url\) \{\n\s+decisionHandler\(\.cancel\)\n\s+load\(url\)/,
+    );
+    expect(page).toContain("action.navigationType != .backForward");
+    expect(page).toContain('(action.request.httpMethod ?? "GET").uppercased() == "GET"');
+    expect(page).toContain("action.request.value(forHTTPHeaderField: Page.shellHeader) == nil");
   });
 
   it("uses the Android shell's colors", async () => {
@@ -577,7 +775,119 @@ async function uikitSdk(): Promise<string[] | undefined> {
 
 const sdkFlags = await uikitSdk();
 
+describe("page shells", () => {
+  const html =
+    "<!DOCTYPE html><html data-farm-page-shell><head><style>p{color:red}</style></head><body><p>Loading</p></body></html>";
+  const shells = {
+    client: "/farm-mobile-client-h1a2b3c4d.js",
+    routes: { "/notes": "0123456789abcdef.html" },
+    files: { "0123456789abcdef.html": html },
+  };
+  const withShells = () => {
+    const base = context({ command: "build" });
+    return context({
+      command: "build",
+      shells,
+      manifest: { ...base.manifest, shells: { client: shells.client, routes: shells.routes } },
+    });
+  };
+
+  it("bundles the shells as a folder resource and maps routes to them in farm-routes.json", async () => {
+    const files = await generated(withShells());
+    expect(files[`App/${IOS_PAGE_SHELLS_DIR}/0123456789abcdef.html`]).toBe(html);
+    expect(JSON.parse(files["App/farm-routes.json"]).shells).toEqual({
+      client: "/farm-mobile-client-h1a2b3c4d.js",
+      routes: { "/notes": "0123456789abcdef.html" },
+    });
+    const { objects, ofType } = parseProject(files);
+    const [[, target]] = ofType("PBXNativeTarget") as [[string, PbxObject]];
+    const resources = target.buildPhases
+      .map((id: string) => objects[id])
+      .find((object: PbxObject) => object.isa === "PBXResourcesBuildPhase")
+      .files.map((id: string) => objects[objects[id]!.fileRef]!);
+    expect(resources.find((file: PbxObject) => file.path === IOS_PAGE_SHELLS_DIR)).toMatchObject({
+      isa: "PBXFileReference",
+      lastKnownFileType: "folder",
+    });
+    // Without shells the project has no such folder.
+    const plain = await generated(context({ command: "build" }));
+    expect(Object.keys(plain).some((file) => file.includes(IOS_PAGE_SHELLS_DIR))).toBe(false);
+    expect(plain["App.xcodeproj/project.pbxproj"]).not.toContain(IOS_PAGE_SHELLS_DIR);
+  });
+
+  it("shows a shell with loadHTMLString before a cold document load, never on a warm render", async () => {
+    const files = await generated(context());
+    const navigator = files["App/Navigator.swift"];
+    const warm = navigator.slice(
+      navigator.indexOf("if warm {"),
+      navigator.indexOf("} else {", navigator.indexOf("if warm {")),
+    );
+    expect(warm).toContain("screen.render(url)");
+    expect(warm).not.toContain("shell");
+    expect(navigator).toContain("screen.load(url, shell: shell)");
+    const page = files["App/Page.swift"];
+    expect(page).toContain("shellNavigation = webView.loadHTMLString(shell, baseURL: url)");
+    // The document loads once the shell has finished, with the shell header.
+    expect(page).toContain("if navigation === shellNavigation {\n            loadShellTarget()");
+    expect(page).toContain("shells?.observe(client)");
+    expect(files["App/PageShells.swift"]).toContain("subdirectory: PageShells.directory");
+    expect(files["App/SceneDelegate.swift"]).toContain(
+      "let shells = PageShells.load(config: config)",
+    );
+  });
+});
+
 describe("generated files on this machine's tools", () => {
+  it.skipIf(!hasSwiftc || process.platform !== "darwin")(
+    "sends server screens only cookies valid for the request URL",
+    async () => {
+      const source = (await generated(context()))["App/ServerScreens.swift"]!;
+      const match = /    nonisolated static func matchingCookies\([\s\S]*?\n    \}\n/.exec(
+        source,
+      )![0];
+      const program = `import Foundation
+enum ScreenCookies {
+${match}
+}
+func cookie(_ name: String, _ domain: String, _ path: String = "/", secure: Bool = false, expired: Bool = false) -> HTTPCookie {
+    var properties: [HTTPCookiePropertyKey: Any] = [.name: name, .value: "value", .domain: domain, .path: path]
+    if secure { properties[.secure] = "TRUE" }
+    if expired { properties[.expires] = Date(timeIntervalSince1970: 1) }
+    return HTTPCookie(properties: properties)!
+}
+let cookies = [
+    cookie("host", "notes.example.com"),
+    cookie("domain", ".notes.example.com"),
+    cookie("secure", "notes.example.com", secure: true),
+    cookie("admin", "notes.example.com", "/admin"),
+    cookie("expired", "notes.example.com", expired: true),
+    cookie("other", "other.example.com"),
+]
+let cases: [(String, [String])] = [
+    ("http://notes.example.com/", ["domain", "host"]),
+    ("https://notes.example.com/admin", ["admin", "domain", "host", "secure"]),
+    ("https://notes.example.com/admin/notes", ["admin", "domain", "host", "secure"]),
+    ("https://notes.example.com/administrator", ["domain", "host", "secure"]),
+    ("https://sub.notes.example.com/", ["domain"]),
+    ("https://notes.example.com.evil.test/", []),
+]
+for (address, expected) in cases {
+    let actual = ScreenCookies.matchingCookies(cookies, for: URL(string: address)!).map(\\.name).sorted()
+    precondition(actual == expected, "\\(address): \\(actual) != \\(expected)")
+}
+print("Cookie scope checks passed.")
+`;
+      const dir = await tempDir();
+      const entry = path.join(dir, "cookies.swift");
+      const binary = path.join(dir, "cookies");
+      await writeFile(entry, program);
+      await execFileAsync("swiftc", [entry, "-o", binary]);
+      const { stdout } = await execFileAsync(binary);
+      expect(stdout).toContain("Cookie scope checks passed.");
+    },
+    60_000,
+  );
+
   it.skipIf(!hasPlutil)(
     "passes plutil: Info.plist lints, the project file converts",
     async () => {
@@ -605,6 +915,49 @@ describe("generated files on this machine's tools", () => {
       const files = swiftFiles(await generated(context())).map(([file]) => path.join(dir, file));
       expect(files.length).toBeGreaterThan(5);
       for (const file of files) await execFileAsync("swiftc", ["-parse", file]);
+    },
+    120_000,
+  );
+
+  it.skipIf(!hasSwiftc || process.platform !== "darwin")(
+    "runs the shell's auth route check: only safe paths under auth.basePath",
+    async () => {
+      const session = (await generated(context()))["App/MobileSession.swift"]!;
+      const check = /    nonisolated static func isAuthRoute\([\s\S]*?\n    \}\n/.exec(session)![0];
+      const accepted = ["/api/auth/sign-in/email", "/api/auth/sign-up/email"];
+      const refused = [
+        "/api/auth",
+        "/api/auth/",
+        "/api/authx/sign-in/email",
+        "/api/notes",
+        "/api/auth/../notes",
+        "/api/auth/%2e%2e/notes",
+        "/api/auth/sign-in/email?callbackURL=https://evil.example",
+        "/api/auth/sign-in/email#x",
+        "/api/auth//evil.example/sign-in",
+        "//evil.example/api/auth/sign-in/email",
+        "https://evil.example/api/auth/sign-in/email",
+        "/api/auth/sign-in/email\n",
+        "/api/auth/sign-\u00e9/email",
+      ];
+      const dir = await tempDir();
+      const cases = [
+        ...accepted.map((path) => [path, "/api/auth"]),
+        ...refused.map((path) => [path, "/api/auth"]),
+        ["/api/auth/sign-in/email", ""],
+      ];
+      const main = `import Foundation
+enum Check {
+${check.replace("nonisolated ", "")}}
+let cases: [(String, String)] = [${cases.map(([p, base]) => `(${JSON.stringify(p)}, ${JSON.stringify(base)})`).join(", ")}]
+print(cases.map { Check.isAuthRoute($0.0, authBasePath: $0.1) ? "1" : "0" }.joined())
+`;
+      await writeFile(path.join(dir, "main.swift"), main);
+      await execFileAsync("swiftc", ["-o", path.join(dir, "check"), path.join(dir, "main.swift")], {
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      const { stdout } = await execFileAsync(path.join(dir, "check"));
+      expect(stdout.trim()).toBe(`${"1".repeat(accepted.length)}${"0".repeat(refused.length)}0`);
     },
     120_000,
   );
@@ -645,7 +998,7 @@ describe("generated files on this machine's tools", () => {
 });
 
 describe("the bridge script on iOS", () => {
-  async function loadBridge(origin = "http://localhost:3000") {
+  async function loadBridge(origin = "http://localhost:3000", client: string | null = null) {
     const files = await generated(context());
     const source = files["App/farm-bridge.js"].replace("__FARM_PLUGINS__", "[]");
     // What FarmBridge.swift installs: the script inside an origin check.
@@ -671,7 +1024,10 @@ describe("the bridge script on iOS", () => {
       document: {
         title: "Notes",
         addEventListener() {},
-        querySelector: () => null,
+        querySelector: (selector: string) =>
+          client !== null && selector.includes("farm-mobile-client-")
+            ? { getAttribute: (name: string) => (name === "src" ? client : null) }
+            : null,
         documentElement: {
           attributes: {} as Record<string, string>,
           setAttribute(name: string, value: string) {
@@ -682,6 +1038,10 @@ describe("the bridge script on iOS", () => {
       performance: { now: () => 0 },
       requestAnimationFrame: (callback: () => void) => callback(),
       URL,
+      Blob,
+      Uint8Array,
+      atob,
+      Array,
       Promise,
       Map,
       JSON,
@@ -692,6 +1052,14 @@ describe("the bridge script on iOS", () => {
     vm.runInNewContext(scoped, sandbox);
     return { bridge: window.__farmBridge, window, posted, root: sandbox.document.documentElement };
   }
+
+  it("reports the mobile client a document loaded, for page shells", async () => {
+    const { window, posted } = await loadBridge(undefined, "/farm-mobile-client-h1a2b3c4d.js");
+    window.__FARM_SPA_ROUTER__ = { navigate: async () => {} };
+    expect(posted).toContainEqual(
+      expect.objectContaining({ type: "router-ready", client: "/farm-mobile-client-h1a2b3c4d.js" }),
+    );
+  });
 
   it("is the shared bridge with the iOS name and message port", async () => {
     const files = await generated(context());
@@ -713,6 +1081,61 @@ describe("the bridge script on iOS", () => {
         )
         .replace("window.FarmNative", "<port>");
     expect(normalize(script)).toBe(normalize(androidScript));
+  });
+
+  it("shares farm-files with web screens by reference, scoped to the page", async () => {
+    const files = await generated(context());
+    const bridge = files["App/FarmBridge.swift"];
+    // Arguments go to the module with references resolved; answers come back with them shared.
+    expect(bridge).toContain('let args = try files.resolve(message["args"])');
+    expect(bridge).toContain("let shared = try files.share(value)");
+    expect(bridge).toContain("_resolve(\\(id), \\(ok), \\(payload), \\(document), \\(bytes))");
+    // A closed page's files are deleted, and an earlier run's at launch.
+    expect(bridge.slice(bridge.indexOf("func detach()"))).toMatch(
+      /^func detach\(\) \{\n\s+files\.close\(\)/,
+    );
+    expect(files["App/SceneDelegate.swift"]).toContain("FarmFiles.clearStale()");
+    const store = files["App/FarmFiles.swift"];
+    expect(store).toContain('.appendingPathComponent("farm-files", isDirectory: true)');
+    expect(store).toContain("guard file.path.hasPrefix(root)");
+    expect(store).toContain('code: "invalid_args"');
+  });
+
+  it("turns files an answer carries into blob: URLs, and sends them back as references", async () => {
+    const { bridge, posted } = await loadBridge();
+    const created: Blob[] = [];
+    const createObjectURL = URL.createObjectURL;
+    URL.createObjectURL = (blob: Blob) => {
+      created.push(blob);
+      return `blob:http://localhost:3000/${created.length}`;
+    };
+    try {
+      const reference = "/__farm/files/AAAAAAAAAAAAAAAAAAAAAA";
+      const picked = bridge.call("Device", "pickPhoto", []);
+      const call = posted.at(-1)!;
+      // What FarmBridge.swift evaluates: the value with references, the document, then the bytes.
+      bridge._resolve(call.id, true, { uri: reference, size: 3 }, call.doc, {
+        [reference]: { type: "image/png", data: Buffer.from([1, 2, 3]).toString("base64") },
+      });
+      const value = await picked;
+      expect(value).toEqual({ uri: "blob:http://localhost:3000/1", size: 3 });
+      expect(created[0]!.type).toBe("image/png");
+      expect([...new Uint8Array(await created[0]!.arrayBuffer())]).toEqual([1, 2, 3]);
+
+      // The page passes the blob: URL back; the module gets the reference, which native resolves.
+      void bridge.call("Device", "upload", [value.uri, { nested: [value.uri] }, "other"]);
+      expect(posted.at(-1)!.args).toEqual([reference, { nested: [reference] }, "other"]);
+
+      // An answer meant for another document settles nothing here.
+      const other = bridge.call("Device", "model", []);
+      let settled = false;
+      void other.then(() => (settled = true));
+      bridge._resolve(posted.at(-1)!.id, true, "Pixel", "another-document");
+      await Promise.resolve();
+      expect(settled).toBe(false);
+    } finally {
+      URL.createObjectURL = createObjectURL;
+    }
   });
 
   it("marks the page as running in the iOS shell", async () => {
@@ -743,6 +1166,7 @@ describe("the bridge script on iOS", () => {
       type: "router-ready",
       url: "http://localhost:3000/notes",
       title: "Notes",
+      client: null,
     });
     expect(delegate({ url: "http://localhost:3000/notes/1", action: "push" })).toBe(true);
     expect(posted.filter((message) => message.type === "visit")).toEqual([
@@ -758,9 +1182,11 @@ describe("the bridge script on iOS", () => {
     const ok = bridge.call("haptics", "impact", { style: "light" });
     const failed = bridge.call("camera", "takePhoto");
     const calls = posted.filter((message) => message.type === "call");
+    // Each carries the document's id; the iOS shell answers without it.
+    const doc = expect.stringMatching(/^[a-z0-9]{1,16}$/);
     expect(calls).toEqual([
-      { type: "call", id: 1, plugin: "haptics", method: "impact", args: { style: "light" } },
-      { type: "call", id: 2, plugin: "camera", method: "takePhoto", args: {} },
+      { type: "call", id: 1, plugin: "haptics", method: "impact", args: { style: "light" }, doc },
+      { type: "call", id: 2, plugin: "camera", method: "takePhoto", args: {}, doc },
     ]);
     bridge._resolve(1, true, null);
     bridge._resolve(2, false, {

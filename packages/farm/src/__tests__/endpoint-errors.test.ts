@@ -257,4 +257,43 @@ describe("typed endpoint errors", () => {
       { path: ["slug"], code: "custom", message: "Slug is taken" },
     ]);
   });
+
+  it("serializes a failure raised by another copy of the endpoint module", async () => {
+    // A linked app's route loads its own copy of @farm.js/core/api under Vite's SSR runner.
+    vi.resetModules();
+    const routeCopy = await import("../api/endpoint");
+    expect(routeCopy.EndpointFailure).not.toBe(EndpointFailure);
+    const lookup = routeCopy.createEndpoint(
+      "/api/products/:id",
+      {
+        errors: { notFound: { status: 404, message: "Nope", data: z.object({ id: z.string() }) } },
+      },
+      async ({ error }) => error("notFound", { id: "1" }),
+    );
+
+    const response = await invokeAPIRouteEndpoint(
+      lookup,
+      new Request("https://farm.test/api/products/1"),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "notFound", message: "Nope", data: { id: "1" } },
+    });
+  });
+
+  it("keeps an error that only looks like a typed failure private", async () => {
+    const lookalike = createEndpoint("/api/lookalike", {}, async () => {
+      throw Object.assign(new Error("secret detail"), {
+        name: "EndpointFailure",
+        code: "notFound",
+        status: 404,
+        data: { leaked: true },
+      });
+    });
+
+    await expect(
+      invokeAPIRouteEndpoint(lookalike, new Request("https://farm.test/api/lookalike")),
+    ).rejects.toThrow("secret detail");
+  });
 });

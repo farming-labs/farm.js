@@ -5,6 +5,7 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Link } from "../client/link";
+import { useRouter } from "../client/router";
 import {
   delegateNavigation,
   type FarmNavigationDelegateContext,
@@ -169,6 +170,65 @@ describe("navigation delegates", () => {
       ["/notes/7", "push"],
     ]);
     expect(fetchPageData).not.toHaveBeenCalled();
+    act(() => root.unmount());
+    container.remove();
+    delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it("take router push and replace without Farm's SPA router, as in a server components app", async () => {
+    // The RSC router renders on the history change useRouter announces; nothing is installed here.
+    let router: ReturnType<typeof useRouter> | undefined;
+    function Probe() {
+      router = useRouter();
+      return null;
+    }
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    act(() => root.render(createElement(Probe)));
+    const popstate = vi.fn();
+    window.addEventListener("popstate", popstate);
+
+    let take = true;
+    const seen = delegate(() => take);
+    router!.push("/notes/7?tab=1");
+    router!.replace("/settings");
+    await settle(() => expect(seen).toHaveLength(2));
+    expect(seen).toEqual([
+      {
+        url: `${window.location.origin}/notes/7?tab=1`,
+        from: "/notes?sort=new",
+        to: "/notes/7?tab=1",
+        action: "push",
+      },
+      {
+        url: `${window.location.origin}/settings`,
+        from: "/notes?sort=new",
+        to: "/settings",
+        action: "replace",
+      },
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(window.location.pathname + window.location.search).toBe("/notes?sort=new");
+    expect(popstate).not.toHaveBeenCalled();
+
+    // Declined: the history write and its announcement happen as before.
+    take = false;
+    router!.push("/notes/8");
+    await settle(() => expect(window.location.pathname).toBe("/notes/8"));
+    await settle(() => expect(popstate).toHaveBeenCalledTimes(1));
+    // A same-page hash is never offered.
+    router!.push("/notes/8#comments");
+    await settle(() => expect(window.location.hash).toBe("#comments"));
+    expect(seen).toHaveLength(3);
+
+    // Without a delegate, push writes history synchronously.
+    removers.pop()!();
+    router!.push("/notes/9");
+    expect(window.location.pathname).toBe("/notes/9");
+
+    window.removeEventListener("popstate", popstate);
     act(() => root.unmount());
     container.remove();
     delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;

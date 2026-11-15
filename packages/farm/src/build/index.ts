@@ -26,6 +26,11 @@ import { getFarmRendererComponentExtensions, loadFarmRendererVitePlugins } from 
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "./production-vite";
 import { withProductionNodeEnv } from "./production-node-env";
 import { createFarmProjectModuleSsrEnvironment } from "./project-module-runner";
+import {
+  resolvePackageClientBoundaryCacheFile,
+  usePackageClientBoundaryCacheFile,
+  withPackageClientBoundaryCache,
+} from "../utils/package-client-boundary-cache";
 
 interface BuildOptions {
   preset?: string;
@@ -46,7 +51,9 @@ interface BuildTargetBaseline {
  * Build Farm.js application for production
  */
 export async function build(config: ResolvedFarmConfig, options: BuildOptions = {}) {
-  return withProductionNodeEnv(() => buildWithProductionNodeEnv(config, options));
+  return withProductionNodeEnv(() =>
+    withPackageClientBoundaryCache(() => buildWithProductionNodeEnv(config, options)),
+  );
 }
 
 /** Every build path derived from config, recomputed once plugins have transformed it. */
@@ -144,6 +151,7 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
     if (config.docs?.enabled) await loadFarmDocsEngine();
     pluginManager.updateContext({ config });
     const { root, preset, srcDir, distDir, deployOutputDir } = targets;
+    usePackageClientBoundaryCacheFile(resolvePackageClientBoundaryCacheFile(root, distDir));
 
     logger.info(`🚜 Building Farm.js application with preset: ${preset}...`);
 
@@ -303,6 +311,7 @@ async function createProjectModuleServer(
   root: string,
   buildLifetime: AbortSignal,
 ): Promise<ViteDevServer> {
+  const { farmServerOnlyEntriesPlugin } = await import("../vite");
   const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
     ssr: true,
     buildLifetime,
@@ -325,6 +334,11 @@ async function createProjectModuleServer(
           publicDir: config.publicDir,
         }),
         farmEnvironmentFunctionsPlugin(),
+        // Route modules load here at build time (rendering config, prerendering): `server-only`
+        // resolves as it does in the server build. Module-entry packages load pre-bundled, as in
+        // `farm dev`: unbundled, lucide-react alone is ~1,750 modules through the module runner,
+        // which a docs build waited on after its bundles.
+        farmServerOnlyEntriesPlugin({ prebundleServerPackages: true }),
       ],
       server: {
         middlewareMode: true,
@@ -345,6 +359,12 @@ async function createProjectModuleServer(
   return createViteServer({
     ...viteConfig,
     root,
+    // Vite keys its pre-bundled dependencies on the config, mode included, so this server and
+    // `farm dev` sharing one cache would each rebuild it after the other ran.
+    cacheDir: path.join(
+      path.resolve(root, viteConfig.cacheDir ?? path.join("node_modules", ".vite")),
+      "farm-build",
+    ),
     configFile: false,
     appType: "custom",
     mode: "production",
@@ -387,8 +407,12 @@ async function buildClient(
   srcDir: string,
   outputDir: string,
 ) {
-  const { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } =
-    await import("../vite");
+  const {
+    farmI18nClientBridgePlugin,
+    farmIslandContainersPlugin,
+    farmPlugin,
+    farmServerOnlyEntriesPlugin,
+  } = await import("../vite");
   const { PluginManager } = await import("../plugin");
 
   const pluginManager = new PluginManager({
@@ -410,6 +434,7 @@ async function buildClient(
     plugins: [
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),
+      farmIslandContainersPlugin(config),
       farmPlugin(config, pluginManager),
       farmEnvironmentFunctionsPlugin(config),
     ],
@@ -427,7 +452,8 @@ async function buildSSR(
   srcDir: string,
   outputDir: string,
 ) {
-  const { farmI18nClientBridgePlugin, farmPlugin } = await import("../vite");
+  const { farmI18nClientBridgePlugin, farmIslandContainersPlugin, farmPlugin } =
+    await import("../vite");
   const { PluginManager } = await import("../plugin");
 
   const pluginManager = new PluginManager({
@@ -456,6 +482,7 @@ async function buildSSR(
     },
     plugins: [
       farmI18nClientBridgePlugin(),
+      farmIslandContainersPlugin(config),
       farmPlugin(config, pluginManager),
       farmEnvironmentFunctionsPlugin(config),
     ],

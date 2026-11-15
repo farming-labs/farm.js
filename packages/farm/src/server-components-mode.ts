@@ -1,10 +1,11 @@
 /**
  * `experimental.serverComponents`: which engine renders server components.
  *
+ * - `"islands"`: Farm's own engine (RFC 0003), on Farm's pipeline. Experimental. The default.
  * - `"rsc"`: React's Flight pipeline (`@farm.js/plugin/rsc` on `@vitejs/plugin-rsc`).
- * - `"islands"`: Farm's own engine (RFC 0003), on Farm's pipeline. Experimental.
  *
- * `true` means `{ mode: "rsc" }`. Both modes share one authoring contract.
+ * `true` means `{ mode: "islands" }`; `{ mode: "rsc" }` opts into React's pipeline. Both modes share
+ * one authoring contract.
  */
 export type FarmServerComponentsMode = "rsc" | "islands";
 
@@ -19,7 +20,7 @@ export function resolveFarmServerComponentsMode(
   value: unknown,
 ): FarmServerComponentsMode | undefined {
   if (value === undefined || value === null || value === false) return undefined;
-  if (value === true) return "rsc";
+  if (value === true) return "islands";
   const mode = typeof value === "object" ? (value as { mode?: unknown }).mode : undefined;
   if (mode === "rsc" || mode === "islands") return mode;
   throw new TypeError(

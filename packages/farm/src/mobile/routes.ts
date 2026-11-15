@@ -5,7 +5,7 @@ import type {
   FarmMobileOS,
   FarmMobilePrefetch,
   FarmMobilePresentation,
-  FarmMobileScreen,
+  FarmMobileRouteScreen,
   FarmMobileTab,
   ResolvedFarmMobileConfig,
 } from "./config";
@@ -26,13 +26,31 @@ export interface FarmMobileRouteRule {
   /** `"tab"` switches to tab `tab` instead of presenting a screen. */
   presentation: FarmMobilePresentation | "tab";
   tab?: number;
-  screen: FarmMobileScreen;
+  screen: FarmMobileRouteScreen;
   /** What decided `screen`: the page export, config, a screen file, the analyzer, or the default. */
   source?: FarmMobileScreenSource;
   /** Native module id derived from the route, such as `"app/notes/[id]"`. Not on web screens. */
   module?: string;
+  /** The route has no web page (RFC 0004, 7.3): shells must not fall back to a web screen. */
+  nativeOnly?: true;
   /** Only when the page overrides the manifest's `prefetch`. */
   prefetch?: FarmMobilePrefetch;
+}
+
+/**
+ * The page shells bundled into the app (`mobile.shells`). A rule's `route` picks its shell; a
+ * route without one loads its document with no shell.
+ */
+export interface FarmMobileShellManifest {
+  /**
+   * The mobile client entry the shells were rendered with, such as
+   * `/farm-mobile-client-h1a2b3c4d.js`. A document that loads another entry comes from a
+   * different client build, whose layouts the shells may not match, so the app stops showing
+   * them until a document loads this entry again.
+   */
+  client: string;
+  /** Shell file per page route, relative to the app's shell directory, such as `"1a2b3c4d5e6f7a8b.html"`. */
+  routes: Record<string, string>;
 }
 
 /** `.farm/output/mobile/farm-routes.json` (RFC 0004, 7.2). */
@@ -44,6 +62,8 @@ export interface FarmMobileRouteManifest {
   /** Default for every rule; a rule's own `prefetch` wins. */
   prefetch: FarmMobilePrefetch;
   rules: FarmMobileRouteRule[];
+  /** Only in `farm build --mobile` with `mobile.shells`, when at least one route has a shell. */
+  shells?: FarmMobileShellManifest;
 }
 
 export interface FarmMobileRouteManifestOptions {
@@ -57,6 +77,8 @@ export interface FarmMobileRouteManifestOptions {
   screens?: Readonly<Record<string, FarmMobileScreenDecision>>;
   /** The OS for the config-only fallback; defaults to `"android"`. */
   os?: FarmMobileOS;
+  /** The page shells `farm build --mobile` rendered; written as `shells` when any route has one. */
+  shells?: FarmMobileShellManifest;
 }
 
 const REGEX_SPECIAL = /[\\^$.|?*+()[\]{}]/g;
@@ -158,6 +180,7 @@ export function createFarmMobileRouteManifest(
       screen: decision.screen,
       source: decision.source,
       ...(decision.module ? { module: decision.module } : {}),
+      ...(decision.nativeOnly ? { nativeOnly: true as const } : {}),
       ...(decision.prefetch !== mobile.native.prefetch ? { prefetch: decision.prefetch } : {}),
     };
   });
@@ -172,5 +195,8 @@ export function createFarmMobileRouteManifest(
     })),
     prefetch: mobile.native.prefetch,
     rules,
+    ...(options.shells && Object.keys(options.shells.routes).length > 0
+      ? { shells: { client: options.shells.client, routes: { ...options.shells.routes } } }
+      : {}),
   };
 }

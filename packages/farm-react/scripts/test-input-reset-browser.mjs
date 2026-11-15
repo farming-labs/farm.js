@@ -39,8 +39,8 @@ export function InputReset() {
 }
 createRoot(document.querySelector('#app')).render(<StrictMode><InputReset /></StrictMode>);
 `;
-const html = (production) =>
-  `<!doctype html><html><head><link rel="icon" href="data:,"></head><body><div id="app"></div>${production ? "" : '<script type="module" src="/@vite/client"></script>'}<script type="module" src="${production ? "/bundle.js" : "/fixtures/runtime-size/direct.tsx"}"></script></body></html>`;
+const html = (production, entryFile = "") =>
+  `<!doctype html><html><head><link rel="icon" href="data:,"></head><body><div id="app"></div>${production ? "" : '<script type="module" src="/@vite/client"></script>'}<script type="module" src="${production ? `/${entryFile}` : "/fixtures/runtime-size/direct.tsx"}"></script></body></html>`;
 
 const results = [];
 let browser;
@@ -49,7 +49,13 @@ try {
   for (const production of [false, true]) {
     for (const reactivity of ["static", "hybrid"]) {
       const stories = [];
-      for (const compiled of [false, true]) {
+      // React DOM without the compiler, compiled under React DOM, and compiled under the
+      // compiled root (the compiler's default), which falls back to a lazily loaded React DOM.
+      for (const [compiled, compiledRoot] of [
+        [false, false],
+        [true, false],
+        [true, true],
+      ]) {
         const config = {
           configFile: false,
           root: packageRoot,
@@ -78,7 +84,7 @@ try {
             },
             ...createFarmRendererPlugin({
               rendererOptions: {
-                compiler: compiled ? { reactivity, onUnsupported: "error" } : false,
+                compiler: compiled ? { reactivity, onUnsupported: "error", compiledRoot } : false,
               },
             }),
             {
@@ -104,18 +110,19 @@ try {
               .flat()
               .flatMap((result) => result.output)
               .filter((output) => output.type === "chunk");
-            assert.equal(chunks.length, 1);
+            const entryChunk = chunks.find((chunk) => chunk.isEntry);
+            assert.ok(entryChunk);
+            // The compiled root moves React DOM into a lazily loaded chunk.
+            assert.equal(chunks.length, compiledRoot ? 2 : 1);
+            const files = new Map(chunks.map((chunk) => [`/${chunk.fileName}`, chunk.code]));
             server = createHttpServer((req, res) => {
-              if (req.url !== "/" && req.url !== "/bundle.js") {
+              if (req.url !== "/" && !files.has(req.url)) {
                 res.writeHead(404);
                 res.end();
                 return;
               }
-              res.setHeader(
-                "content-type",
-                req.url === "/bundle.js" ? "text/javascript" : "text/html",
-              );
-              res.end(req.url === "/bundle.js" ? chunks[0].code : html(true));
+              res.setHeader("content-type", req.url === "/" ? "text/html" : "text/javascript");
+              res.end(req.url === "/" ? html(true, entryChunk.fileName) : files.get(req.url));
             });
             await new Promise((resolve, reject) => {
               server.once("error", reject);
@@ -207,7 +214,14 @@ try {
           await snapshot("selection");
           assert.deepEqual(errors, []);
           stories.push(snapshots);
-          results.push({ production, reactivity, compiled, steps: snapshots.length, errors });
+          results.push({
+            production,
+            reactivity,
+            compiled,
+            compiledRoot,
+            steps: snapshots.length,
+            errors,
+          });
         } finally {
           try {
             await page?.close();
@@ -216,11 +230,16 @@ try {
           }
         }
       }
-      assert.deepEqual(
-        stories[1],
-        stories[0],
-        `${production ? "production" : "development"} ${reactivity} input reset parity`,
-      );
+      for (const [index, root] of [
+        [1, "React DOM"],
+        [2, "compiled root"],
+      ]) {
+        assert.deepEqual(
+          stories[index],
+          stories[0],
+          `${production ? "production" : "development"} ${reactivity} ${root} input reset parity`,
+        );
+      }
     }
   }
   console.log(JSON.stringify({ browser: browser.version(), results }, null, 2));

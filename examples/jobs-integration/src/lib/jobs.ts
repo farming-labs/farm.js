@@ -40,6 +40,27 @@ export const triggerTasks = defineTasks({
   }),
 });
 
+export const localTasks = defineTasks({
+  sendWelcomeEmail: task({
+    description: "Runs in this app: retried up to 3 times, one run per user.",
+    defaults: {
+      retry: {
+        attempts: 3,
+      },
+      tags: ["email"],
+      idempotencyKey(input: { userId: string }) {
+        return `welcome:${input.userId}`;
+      },
+    },
+    async run(input: { userId: string }, context) {
+      context.logger.info(`Sending the welcome email for ${input.userId}.`);
+      return {
+        messageId: `msg_${input.userId}`,
+      };
+    },
+  }),
+});
+
 export const inngestTasks = defineTasks({
   importCsv: task({
     id: "import-csv",

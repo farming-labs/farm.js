@@ -10,6 +10,7 @@ import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -18,14 +19,36 @@ interface FarmPlugin {
     val name: String
 
     /** Runs on the main thread. Return the resolved value or throw to reject. */
-    fun call(method: String, args: JSONObject, webView: WebView): Any?
+    fun call(method: String, args: JSONObject, webView: WebView): Any? =
+        throw FarmCallException("unknown_method", "$name has no method \"$method\".")
+
+    /**
+     * The completion form, for plugins that answer later. Runs on the main thread; answer through
+     * [result] once, from any thread, or throw to reject. [args] is the message's `args` as sent:
+     * an object, or an array of positional arguments for app native modules. The default answers
+     * with [call] at once.
+     */
+    fun callAsync(method: String, args: Any?, webView: WebView, result: FarmCallResult) {
+        result.resolve(call(method, args as? JSONObject ?: JSONObject(), webView))
+    }
 }
+
+/** How a plugin answers one call. The first answer wins; later ones are dropped. Any thread. */
+interface FarmCallResult {
+    fun resolve(value: Any?)
+
+    fun reject(code: String, message: String)
+}
+
+/** Rejects a call with a stable code, such as `invalid_args`, instead of `native_error`. */
+class FarmCallException(val code: String, message: String) : Exception(message)
 
 /** Messages a page sends to whoever currently owns its WebView. */
 interface BridgeListener {
     fun onVisit(bridge: FarmBridge, url: Uri, replace: Boolean)
     fun onRendered(bridge: FarmBridge, token: Int, title: String, pageMs: Double)
-    fun onRouterReady(bridge: FarmBridge, title: String)
+    /** [client] is the mobile client entry the document loaded, when it loaded one. */
+    fun onRouterReady(bridge: FarmBridge, title: String, client: String?)
     fun onTitle(bridge: FarmBridge, title: String)
     fun onRenderError(bridge: FarmBridge, token: Int, url: String, message: String)
 }
@@ -46,6 +69,9 @@ class FarmBridge(
     script: String,
 ) {
     var listener: BridgeListener? = null
+
+    /** Files this page received by reference; served by [Page] and closed with it. */
+    val files = FarmFiles(webView.context, config)
     private val main = Handler(Looper.getMainLooper())
     private val fallbackScript: String?
 
@@ -111,7 +137,12 @@ class FarmBridge(
                     message.optString("title"),
                     message.optDouble("ms"),
                 )
-                "router-ready" -> listener?.onRouterReady(this, message.optString("title"))
+                "router-ready" -> listener?.onRouterReady(
+                    this,
+                    message.optString("title"),
+                    // optString turns a JSON null into "null".
+                    if (message.isNull("client")) null else message.optString("client").ifEmpty { null },
+                )
                 "title" -> listener?.onTitle(this, message.optString("title"))
                 "error" -> {
                     Log.w(TAG, "render error: ${message.optString("message")}")
@@ -127,30 +158,63 @@ class FarmBridge(
         val id = message.optInt("id")
         val pluginName = message.optString("plugin")
         val method = message.optString("method")
+        val args = message.opt("args")
+        // The document that asked. A later answer goes to that document only, never to the next
+        // one this WebView loads, whose call ids start again at 1.
+        val doc = message.optString("doc").takeIf { DOCUMENT_ID.matches(it) }
         val started = System.nanoTime()
-        val plugin = plugins[pluginName]
-        val (ok, value) = if (plugin == null) {
-            false to JSONObject().put("code", "native_unavailable").put("message", "No native plugin \"$pluginName\".")
-        } else {
-            try {
-                true to plugin.call(method, message.optJSONObject("args") ?: JSONObject(), webView)
-            } catch (error: Exception) {
-                false to JSONObject().put("code", "native_error").put("message", error.message ?: error.toString())
+        val result = object : FarmCallResult {
+            private val answered = AtomicBoolean(false)
+
+            override fun resolve(value: Any?) = answer(true, value)
+
+            override fun reject(code: String, message: String) =
+                answer(false, JSONObject().put("code", code).put("message", message))
+
+            private fun answer(ok: Boolean, value: Any?) {
+                if (!answered.compareAndSet(false, true)) return
+                if (Looper.myLooper() == Looper.getMainLooper()) {
+                    respond(id, doc, "$pluginName.$method", args, started, ok, value)
+                } else {
+                    main.post { respond(id, doc, "$pluginName.$method", args, started, ok, value) }
+                }
             }
         }
+        val plugin = plugins[pluginName]
+        if (plugin == null) {
+            result.reject("native_unavailable", "No native plugin \"$pluginName\".")
+            return
+        }
+        try {
+            // File references this page received go back to the module as its own file:// URIs.
+            plugin.callAsync(method, files.resolve(args), webView, result)
+        } catch (error: FarmCallException) {
+            result.reject(error.code, error.message ?: error.code)
+        } catch (error: Exception) {
+            result.reject("native_error", error.message ?: error.toString())
+        }
+    }
+
+    private fun respond(id: Int, doc: String?, call: String, args: Any?, started: Long, ok: Boolean, answer: Any?) {
         val ms = (System.nanoTime() - started) / 1e6
-        if (dev) Log.i(TAG, "call #$id $pluginName.$method(${message.optJSONObject("args")}) ok=$ok -> $value (${"%.2f".format(ms)} ms native)")
+        // A file:// URI in farm-files reaches the page as a /__farm/files/<id> reference.
+        val value = if (ok) files.share(answer) else answer
+        if (dev) Log.i(TAG, "call #$id $call($args) ok=$ok -> $value (${"%.2f".format(ms)} ms native)")
         val payload = when (value) {
             null -> "null"
             is JSONObject, is JSONArray -> value.toString()
             is String -> JSONObject.quote(value)
             else -> value.toString()
         }
-        evaluate("window.__farmBridge._resolve($id, $ok, $payload)")
+        val document = if (doc == null) "" else ", ${JSONObject.quote(doc)}"
+        evaluate("window.__farmBridge && window.__farmBridge._resolve($id, $ok, $payload$document)")
     }
 
     companion object {
         const val TAG = "FarmBridge"
+
+        /** The per-document id farm-bridge.js sends with each call. */
+        private val DOCUMENT_ID = Regex("^[a-z0-9]{1,16}$")
 
         /** Main thread only: one warning per process, not one per pooled WebView. */
         private var warnedUnsupported = false

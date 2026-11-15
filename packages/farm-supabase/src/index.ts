@@ -1,16 +1,13 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import type { FarmIntegrationHandlerContext, FarmIntegrationLogger } from "@farm.js/core";
 import {
+  api as clientApi,
   defineIntegration,
-  forwardIntegrationSetCookies,
-  type FarmIntegrationHandlerContext,
-  type FarmIntegrationLogger,
-} from "@farm.js/core";
-import {
   describeIntegrationOriginRejection,
+  forwardIntegrationSetCookies,
   resolveIntegrationAllowedOrigins,
   validateIntegrationRequestOrigin,
 } from "@farm.js/core/integrations";
-import { api as clientApi } from "@farm.js/core/client";
 import {
   createPathInferredClientApi,
   createDocumentNavigationMatchers,

@@ -13,10 +13,13 @@ struct RouteConfig {
         let pattern: NSRegularExpression
         let presentation: String
         let tab: Int?
-        /// `"web"`, `"native"` (React Native, `page.native.tsx`), or `"platform"` (`page.swift`).
+        /// `"web"`, `"native"` (React Native, `page.native.tsx`), `"platform"` (`page.swift`), or
+        /// `"server"` (drawn from the page the server renders, `FarmServerScreen`).
         let screen: String
         /// The screen's module id, derived from the route, such as `app/notes/[id]`.
         let module: String?
+        /// A `page.native.tsx` with no `page.tsx`: there is no web twin to fall back to.
+        var nativeOnly = false
 
         /// Shown as a native view instead of a WebView, on any rule, including tab roots.
         var isNative: Bool { screen != RouteConfig.web }
@@ -32,19 +35,28 @@ struct RouteConfig {
     }
 
     static let web = "web"
-    private static let screens: Set<String> = [web, "native", "platform"]
+    private static let screens: Set<String> = [web, "native", "platform", "server"]
+
+    /// The mobile client entry the page shells were rendered with, and each route's shell file.
+    struct Shells {
+        let client: String
+        let routes: [String: String]
+    }
 
     let server: URL
     let tabs: [Tab]
     let rules: [Rule]
+    /// Page shells, only in farm build --mobile with mobile.shells.
+    let shells: Shells?
 
     /// scheme://host[:port], the only origin the bridge and link interception trust.
     let origin: String
 
-    init(server: URL, tabs: [Tab], rules: [Rule]) {
+    init(server: URL, tabs: [Tab], rules: [Rule], shells: Shells? = nil) {
         self.server = server
         self.tabs = tabs
         self.rules = rules
+        self.shells = shells
         origin = RouteConfig.origin(of: server) ?? ""
     }
 
@@ -68,7 +80,8 @@ struct RouteConfig {
         return rules.first { $0.matches(path) } ?? RouteConfig.fallback
     }
 
-    private static let fallback = Rule(
+    /// A push of a web screen: unmatched paths, and a server screen that falls back.
+    static let fallback = Rule(
         route: nil,
         pattern: NSRegularExpression.farmMatchAll,
         presentation: "push",
@@ -111,7 +124,8 @@ struct RouteConfig {
             presentation: presentation,
             tab: (json["tab"] as? NSNumber)?.intValue,
             screen: screen,
-            module: screen == web ? nil : module
+            module: screen == web ? nil : module,
+            nativeOnly: screen != web && (json["nativeOnly"] as? Bool ?? false)
         )
     }
 
@@ -134,7 +148,12 @@ struct RouteConfig {
             )
         }
         let rules = try (json["rules"] as? [[String: Any]] ?? []).map(rule)
-        return RouteConfig(server: server, tabs: tabs, rules: rules)
+        var shells: Shells?
+        if let entry = json["shells"] as? [String: Any], let client = entry["client"] as? String,
+           !client.isEmpty, let routes = entry["routes"] as? [String: String] {
+            shells = Shells(client: client, routes: routes)
+        }
+        return RouteConfig(server: server, tabs: tabs, rules: rules, shells: shells)
     }
 }
 

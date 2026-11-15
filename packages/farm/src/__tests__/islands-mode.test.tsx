@@ -1,13 +1,19 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
-import { getClientModuleHydrationPlan, usesFarmServerTree } from "../utils/client-component";
+import {
+  collectFarmServerStylesheets,
+  enforceFarmIsolatedHydrationRouteBudget,
+  getClientModuleHydrationPlan,
+  usesFarmServerTree,
+} from "../utils/client-component";
 import { getFarmServerTreeLayoutPatterns } from "../routing/layout-selector";
 import { transformIsolatedClientBoundaryModule } from "../vite";
+import { wrapFarmIslandContainers } from "../islands-containers";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -45,7 +51,7 @@ describe("islands mode", () => {
       /<f-slot name="[^"]+s0" style="display:contents"><p>Server comment<\/p><\/f-slot>/,
     );
     const props = JSON.parse(
-      /<script type="f\/props" for="[^"]+">([^<]*)<\/script>/.exec(html)![1]!,
+      /<script type="f\/props" for="[^"]+"[^>]*>([^<]*)<\/script>/.exec(html)![1]!,
     );
     expect(props.title).toBe("Comments");
     expect(props.children).toEqual({ $: "s", v: expect.stringMatching(/s0$/) });
@@ -112,20 +118,45 @@ describe("islands mode", () => {
       "row.tsx": '"use client";\nexport function Row() { return <tr><td>row</td></tr>; }\n',
     };
 
-    it("never hydrates the server page whole, which would ship its server code", () => {
-      const page = plan(
-        'import { Row } from "../row";\nimport { secret } from "../secret";\nexport default function Page() { return <table><tbody><Row />{secret()}</tbody></table>; }\n',
-        row,
-      );
-      expect(page).toMatchObject({
-        shouldHydrate: false,
-        islandStrategy: null,
-        hasIsolatedClientBoundaries: false,
-        isolatedBoundaries: [],
-      });
-      expect(page.islandsError).toBe(
-        'the client boundary imported from ../row renders inside <table>, where the HTML parser relocates its hydration marker. Move "use client" up to a component that renders the whole <table>, or render it inside a <td>, <th> or <caption>',
-      );
+    it("grows the island to the element that can hold it (RFC 0006)", () => {
+      for (const [body, files] of [
+        ["<table><tbody><Row /></tbody></table>", row],
+        [
+          "<ul><Item /></ul>",
+          { "item.tsx": '"use client";\nexport function Item() { return <li>item</li>; }\n' },
+        ],
+        [
+          "<select><Option /></select>",
+          {
+            "option.tsx":
+              '"use client";\nexport function Option() { return <option>one</option>; }\n',
+          },
+        ],
+        [
+          "<svg><Shape /></svg>",
+          { "shape.tsx": '"use client";\nexport function Shape() { return <circle r={1} />; }\n' },
+        ],
+      ] as const) {
+        const name = /<(Row|Item|Option|Shape)/.exec(body)![1]!;
+        const file = Object.keys(files)[0]!;
+        const page = plan(
+          `import { ${name} } from "../${file.replace(".tsx", "")}";\nimport { secret } from "../secret";\nexport default function Page() { return <main>${body}{secret()}</main>; }\n`,
+          files,
+        );
+        const own = page.isolatedBoundaries.find((boundary) =>
+          boundary.modulePath.endsWith(path.join("src", file)),
+        );
+        expect(own, body).toBeDefined();
+        const root = path.dirname(path.dirname(own!.modulePath));
+        expect(page.islandsError, body).toBeUndefined();
+        expect(page.asyncOwnerIslands, body).toBe(true);
+        expect(page.isolatedBoundaries.map((boundary) => boundary.modulePath).sort(), body).toEqual(
+          [
+            path.join(root, ".farm/client-references/farm.js+core/__island-container.tsx"),
+            path.join(root, "src", file),
+          ].sort(),
+        );
+      }
     });
 
     it("reports `export *`, whose names live in another module", () => {
@@ -178,6 +209,44 @@ describe("islands mode", () => {
     ]);
   });
 
+  it("points useFormStatus at islx's in islands mode, so a server form around the island reports to it", async () => {
+    const { parseSync } = await import("vite");
+    const transform = (slots: boolean) =>
+      transformIsolatedClientBoundaryModule({
+        code: [
+          '"use client";',
+          'import { createPortal, useFormStatus } from "react-dom";',
+          "export function Submit() { return useFormStatus().pending ? null : createPortal(null, document.body); }",
+        ].join("\n"),
+        moduleReference: "/src/submit.tsx",
+        islandStrategy: "load",
+        parse: (code) => (parseSync("submit.tsx", code) as { program: unknown }).program as never,
+        slots,
+      })!;
+    const islands = transform(true);
+    expect(islands).toContain('import { createPortal } from "react-dom";');
+    expect(islands).toContain(
+      'import { useFormStatus as useFormStatus } from "@farm.js/core/internal/islx-react";',
+    );
+    // Isolated hydration without islands keeps React's hook: its forms are React's.
+    expect(transform(false)).toContain('import { createPortal, useFormStatus } from "react-dom";');
+  });
+
+  it("keeps islx's server wrapper out of the browser build", async () => {
+    const { parseSync } = await import("vite");
+    const transform = (browser: boolean) =>
+      transformIsolatedClientBoundaryModule({
+        code: '"use client";\nexport function Counter() { return null; }\n',
+        moduleReference: "/src/counter.tsx",
+        islandStrategy: "load",
+        parse: (code) => (parseSync("counter.tsx", code) as { program: unknown }).program as never,
+        slots: true,
+        browser,
+      })!;
+    expect(transform(true)).not.toContain("createIsland");
+    expect(transform(false)).toContain("createIsland");
+  });
+
   it("wraps export-list and re-exported components as islands", async () => {
     const { parseSync } = await import("vite");
     const output = transformIsolatedClientBoundaryModule({
@@ -210,6 +279,130 @@ describe("islands mode", () => {
     expect(output).toContain("export { __farm_isolated_reexport_1__ as format };");
     expect(output).toContain('export type { Props } from "./types";');
     expect(output).not.toMatch(/export \{ Counter, helper/);
+  });
+
+  it("keeps uppercase exports that are not components as they are", async () => {
+    // A client module that a server module imports is one module in islands mode, so client
+    // modules importing its constants get the server build's exports.
+    const { parseSync } = await import("vite");
+    const output = transformIsolatedClientBoundaryModule({
+      code: [
+        '"use client";',
+        'export const SURFACES = ["react", "react-native"];',
+        "export const LABELS = { react: 'React' };",
+        "export function Tabs() { return null; }",
+        "export const Memo = { $$typeof: Symbol.for('react.memo'), type: Tabs };",
+        "export const ThemeContext = { $$typeof: Symbol.for('react.context') };",
+      ].join("\n"),
+      moduleReference: "/src/platform.tsx",
+      islandStrategy: "load",
+      parse: (code) => (parseSync("platform.js", code) as { program: unknown }).program as never,
+      slots: true,
+    })!;
+    // islx's createIsland, stubbed so the module runs on its own.
+    const runnable = output.replace(
+      /import \{ createIsland as (\w+) \} from "@farm\.js\/core\/internal\/islx-react";/,
+      "const $1 = (component) => ({ island: component });",
+    );
+    expect(runnable).not.toContain("@farm.js/core/internal/islx-react");
+    const module = await import(
+      /* @vite-ignore */ `data:text/javascript,${encodeURIComponent(runnable)}`
+    );
+    expect(module.SURFACES).toEqual(["react", "react-native"]);
+    expect(module.LABELS).toEqual({ react: "React" });
+    expect(module.ThemeContext).toEqual({ $$typeof: Symbol.for("react.context") });
+    expect(module.Tabs).toEqual({ island: module.__farm_client_boundary_originals__.Tabs });
+    expect(module.Memo).toEqual({ island: module.__farm_client_boundary_originals__.Memo });
+  });
+
+  it("wraps a generated client reference's export as an island whatever its name", async () => {
+    // `import * as motion from "motion/react-client"` renders `motion.div`: a lowercase export.
+    const { parseSync } = await import("vite");
+    const output = transformIsolatedClientBoundaryModule({
+      code: '"use client";\nexport { div } from "motion/react-client";\n',
+      moduleReference: "/.farm/client-references/motion+react-client/div.tsx",
+      islandStrategy: "load",
+      parse: (code) => (parseSync("div.tsx", code) as { program: unknown }).program as never,
+      slots: true,
+    })!;
+    expect(output).toContain(
+      'const __farm_isolated_boundary_div__ = __farm_islx_island__(__farm_isolated_reexport_0__, "/.farm/client-references/motion+react-client/div.tsx", "div", "load");',
+    );
+  });
+
+  it("keeps every island of a page above the root budget, so the page never ships", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-islands-budget-"));
+    roots.push(root);
+    mkdirSync(path.join(root, "src/app"), { recursive: true });
+    writeFileSync(
+      path.join(root, "src/copy.tsx"),
+      '"use client";\nexport function Copy({ text }) { return <button>{text}</button>; }\n',
+    );
+    const pageFile = path.join(root, "src/app/page.tsx");
+    writeFileSync(
+      pageFile,
+      'import { Copy } from "../copy";\nimport { secret } from "../secret";\nexport default function Page() { return <main><p>{secret()}</p><Copy text="1" /><Copy text="2" /><Copy text="3" /><Copy text="4" /><Copy text="5" /></main>; }\n',
+    );
+    const plan = (serverOwners: boolean) => {
+      const metadata = getClientModuleHydrationPlan(pageFile, root, "enabled", {
+        asyncOwnerIslands: true,
+        serverOwners,
+      });
+      enforceFarmIsolatedHydrationRouteBudget(
+        [],
+        [{ pattern: "/", depth: 0, metadata }],
+        () => true,
+        { serverOwners },
+      );
+      return metadata;
+    };
+
+    // Islands mode: five islands, and the page module stays on the server.
+    expect(plan(true)).toMatchObject({ shouldHydrate: false, hasIsolatedClientBoundaries: true });
+    expect(plan(true).isolatedBoundaries).toHaveLength(1);
+    expect(plan(true).fallbackReason).toBeUndefined();
+    // Isolated hydration without islands mode can still hydrate the page whole instead.
+    expect(plan(false)).toMatchObject({ shouldHydrate: true, hasIsolatedClientBoundaries: false });
+  });
+
+  it("skips the root budget wherever the build and the route manager plan routes", () => {
+    // The client build, the server entry and the route manager each plan every route; one call
+    // without the option ships that output's pages whole.
+    const calls = ["nitro/universal-build.ts", "routing/route-manager.ts"].flatMap((file) => {
+      const source = readFileSync(path.join(__dirname, "..", file), "utf-8");
+      return [...source.matchAll(/\n\s*enforceFarmIsolatedHydrationRouteBudget\(/g)].map(
+        (match) => /^[^]*?\n\s*\);/.exec(source.slice(match.index))![0],
+      );
+    });
+    expect(calls).toHaveLength(3);
+    for (const call of calls) expect(call).toContain("{ serverOwners: ");
+  });
+
+  it("lists the stylesheets server pages import, through server modules but not client ones", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-islands-styles-"));
+    roots.push(root);
+    const files: Record<string, string> = {
+      "src/app/page.tsx":
+        'import "./page.css";\nimport { Card } from "../card";\nimport { Button } from "../button";\nimport logo from "./logo.svg?url";\nimport raw from "./raw.css?inline";\nexport default function Page() { return <Card><Button /></Card>; }\n',
+      "src/app/page.css": ".page {}\n",
+      "src/card.tsx":
+        'import styles from "./card.module.css";\nexport function Card({ children }) { return <div className={styles.card}>{children}</div>; }\n',
+      "src/card.module.css": ".card {}\n",
+      "src/button.tsx":
+        '"use client";\nimport "./button.css";\nexport function Button() { return <button />; }\n',
+      "src/button.css": ".button {}\n",
+      "src/app/raw.css": ".raw {}\n",
+      "src/app/logo.svg": "<svg />",
+    };
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), content);
+    }
+
+    expect(collectFarmServerStylesheets([path.join(root, "src/app/page.tsx")], root)).toEqual([
+      path.join(root, "src/app/page.css"),
+      path.join(root, "src/card.module.css"),
+    ]);
   });
 
   describe("a server layout around a client provider", () => {
@@ -263,19 +456,82 @@ describe("islands mode", () => {
       expect(plan.serverTreeLayout).toBeUndefined();
     });
 
-    it("reports a provider imported from a package, with the local-wrapper fix", () => {
-      const { plan } = planLayout(
-        'import { ThemeProvider } from "acme-theme";\nexport default function Layout({ children }) { return <ThemeProvider>{children}</ThemeProvider>; }\n',
+    const reference = (root: string, specifier: string, exportName: string) =>
+      path.join(root, ".farm/client-references", specifier, `${exportName}.tsx`);
+
+    it("renders a provider imported from a package through its client reference, as RSC does", () => {
+      const { root, plan } = planLayout(
+        // The same layout as the local provider's above, with the provider from a package.
+        'import { ThemeProvider } from "acme-theme";\nimport { secret } from "../secret";\nexport default function Layout({ children }) { return <ThemeProvider><p>{secret()}</p>{children}</ThemeProvider>; }\n',
         {
           "../node_modules/acme-theme/package.json": '{"name":"acme-theme","main":"index.js"}',
           "../node_modules/acme-theme/index.js":
             '"use client";\nexport function ThemeProvider({ children }) { return children; }\n',
         },
       );
-      expect(plan.shouldHydrate).toBe(false);
-      expect(plan.islandsError).toMatch(
-        /package client boundary acme-theme cannot yet be isolated\. Render it from a local "use client" module/,
+      expect(plan.islandsError).toBeUndefined();
+      expect(plan).toMatchObject({ shouldHydrate: true, serverTreeLayout: true });
+      const file = reference(root, "acme-theme", "ThemeProvider");
+      expect(plan.isolatedBoundaries).toEqual([{ modulePath: file, islandStrategy: "load" }]);
+      expect(readFileSync(file, "utf8")).toContain(
+        '"use client";\nimport { ThemeProvider as __farm_reference__ } from "acme-theme";\nexport { __farm_reference__ as ThemeProvider };',
       );
+    });
+
+    const iconKit = {
+      "../node_modules/icon-kit/package.json": '{"name":"icon-kit","main":"index.js"}',
+      "../node_modules/icon-kit/index.js":
+        '"use client";\nexport function Github() { return null; }\nexport function ThemeProvider({ children }) { return children; }\n',
+    };
+
+    it("renders a package's leaf components as islands through their client reference", () => {
+      const { root, plan } = planLayout(
+        'import { Github } from "icon-kit";\nexport default function Layout({ children }) { return <main><a href="/"><Github size={16} /></a>{children}</main>; }\n',
+        iconKit,
+      );
+      expect(plan.islandsError).toBeUndefined();
+      expect(plan.staticPackageBoundaries).toBeUndefined();
+      expect(plan).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+        isolatedBoundaries: [{ modulePath: reference(root, "icon-kit", "Github") }],
+      });
+      expect(plan.serverTreeLayout).toBeUndefined();
+    });
+
+    it("keeps a layout's islands beside the package components it renders", () => {
+      const { root, plan } = planLayout(
+        'import { Nav } from "../nav";\nexport default function Layout({ children }) { return <main><Nav />{children}</main>; }\n',
+        {
+          ...iconKit,
+          "nav.tsx":
+            'import { Github } from "icon-kit";\nimport { Counter } from "./counter";\nexport function Nav() { return <nav><Github /><Counter /></nav>; }\n',
+          "counter.tsx":
+            '"use client";\nexport function Counter() { return <button>1</button>; }\n',
+        },
+      );
+      expect(plan).toMatchObject({ shouldHydrate: false, hasIsolatedClientBoundaries: true });
+      expect(plan.isolatedBoundaries?.map((boundary) => boundary.modulePath).sort()).toEqual(
+        [reference(root, "icon-kit", "Github"), path.join(root, "src/counter.tsx")].sort(),
+      );
+      expect(plan.serverTreeLayout).toBeUndefined();
+    });
+
+    it("renders a package component that wraps content, or takes an element prop, through its reference", () => {
+      for (const [body, exportName] of [
+        ["<ThemeProvider>{children}</ThemeProvider>", "ThemeProvider"],
+        ["<main><Github label={<b>x</b>} />{children}</main>", "Github"],
+      ] as const) {
+        const { root, plan } = planLayout(
+          `import { ${exportName} } from "icon-kit";\nexport default function Layout({ children }) { return ${body}; }\n`,
+          iconKit,
+        );
+        expect(plan.islandsError, body).toBeUndefined();
+        expect(
+          plan.isolatedBoundaries?.map((boundary) => boundary.modulePath),
+          body,
+        ).toEqual([reference(root, "icon-kit", exportName)]);
+      }
     });
 
     it("renders the server layouts on the same pages as trees too", () => {
@@ -289,5 +545,48 @@ describe("islands mode", () => {
       ]);
       expect([...patterns].sort()).toEqual(["/", "/shop", "/shop/[id]"]);
     });
+  });
+});
+
+describe("islands containers (RFC 0006)", () => {
+  const wrap = (code: string, bindings: string[] = ["Row"]) =>
+    wrapFarmIslandContainers({
+      code,
+      file: "/app/src/app/page.tsx",
+      bindings,
+      reference: "/c.tsx",
+    });
+
+  it("wraps the outermost element the parser or CSS ties the component to", () => {
+    expect(
+      wrap(
+        'import { Row } from "../row";\nexport default function Page() { return <main><table><tbody>{rows.map((r) => <Row key={r} />)}</tbody></table></main>; }\n',
+      ),
+    ).toBe(
+      'import { FarmIslandContainer as __FarmIslandContainer__ } from "/c.tsx";\nimport { Row } from "../row";\nexport default function Page() { return <main><__FarmIslandContainer__><table><tbody>{rows.map((r) => <Row key={r} />)}</tbody></table></__FarmIslandContainer__></main>; }\n',
+    );
+  });
+
+  it("leaves components in flow content (a cell, an li, a foreignObject) as islands of their own", () => {
+    for (const body of [
+      "<table><tbody><tr><td><Row /></td></tr></tbody></table>",
+      "<ul><li><Row /></li></ul>",
+      "<svg><foreignObject><Row /></foreignObject></svg>",
+      "<main><Row /></main>",
+    ]) {
+      expect(wrap(`export default function Page() { return ${body}; }\n`), body).toBeNull();
+    }
+  });
+
+  it("keeps the directive prologue first and wraps each container once", () => {
+    const code = wrap(
+      '"use cache";\nexport default function Page() { return <><ul><Row /><Row /></ul><ol><Row /></ol></>; }\n',
+    )!;
+    expect(code.startsWith('"use cache";\nimport { FarmIslandContainer')).toBe(true);
+    expect(code.match(/<__FarmIslandContainer__>/g)).toHaveLength(2);
+  });
+
+  it("does not wrap a container around components that are not client components", () => {
+    expect(wrap("export default function Page() { return <ul><Item /></ul>; }\n")).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -123,6 +124,8 @@ test("farm config inspect --mobile prints the block and farm-routes.json for an 
       prefetch: "intent",
       budgets: {},
     },
+    shells: false,
+    modules: {},
   });
   // Every route's tier on this OS and what decided it.
   assert.deepEqual(printed.screens, {
@@ -224,12 +227,17 @@ export default {
       { path: "context.json", contents: JSON.stringify({
         command: context.command,
         basePath: context.basePath,
+        authBasePath: context.authBasePath ?? null,
         id: context.mobile.id,
         server: context.manifest.server,
         projectDir: path.relative(context.root, context.projectDir),
         native: context.native ?? null,
+        assets: context.assets
+          ? { dir: path.relative(context.root, context.assets.dir), entry: context.assets.entry, files: context.assets.files }
+          : null,
       }) },
       { path: "gradlew", contents: "#!/bin/sh\\n", executable: true },
+      ...(context.shells ? [{ path: "shells.json", contents: JSON.stringify(context.shells) }] : []),
       ...(process.env.FAKE_SHELL_ESCAPE ? [{ path: "../escape.txt", contents: "x" }] : []),
     ];
   },
@@ -262,13 +270,14 @@ async function record(options, name) {
   await writeFile(path.join(options.root, name), JSON.stringify({
     outDir: path.relative(options.root, options.outDir),
     basePath: options.basePath,
+    platform: options.platform,
     screens: options.screens.map((screen) => ({ ...screen, file: path.relative(options.root, screen.file) })),
   }));
 }
 
 export async function buildFarmNativeScreens(options) {
   await record(options, "native-build.json");
-  const bundle = path.join(options.outDir, "index.android.hbc");
+  const bundle = path.join(options.outDir, \`index.\${options.platform ?? "android"}.hbc\`);
   await writeFile(bundle, "hbc");
   return { reactNative, bundle, jsBytes: 2048, bytecodeBytes: 3072, bundleMs: 1, hermesMs: 1 };
 }
@@ -326,16 +335,6 @@ const BUILD_CONFIG = `export default {
     native: { routes: { "/notes": { screen: "native" } } },
   }),
 };`;
-
-async function clientSources(dir) {
-  const sources = [];
-  for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith(".js")) {
-      sources.push(await readFile(path.join(entry.parentPath, entry.name), "utf8"));
-    }
-  }
-  return sources.join("\n");
-}
 
 test("--mobile excludes --desktop and --web, and --apk needs --mobile", async () => {
   const both = await runFarm(["build", "--mobile", "--desktop", "--root", testDir]);
@@ -397,8 +396,10 @@ test("farm build --mobile builds the mobile client apart from the web output and
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /\.farm\/output\/mobile\/android \(android project\)/);
   assert.match(result.output, /farm build --mobile --apk/);
-  // Screen warnings print as they do for farm config inspect --mobile.
-  assert.match(result.output, /"\/notes" has no page\.native\.tsx and Farm cannot port pages yet/);
+  // The config asks for a native "/notes"; the analyzer proves the page needs no JavaScript, so
+  // the shell draws it from the page the server renders, with no warning.
+  assert.match(result.output, /\/notes\s+server\s+native\s/);
+  assert.doesNotMatch(result.output, /Farm cannot port it yet/);
   // native.auto defaults to "report": the build prints the analyzer table and writes the report.
   assert.match(result.output, /route\s+screen\s+tier\s+decision\s+mapped\s+portable\s+reason/);
   assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
@@ -409,11 +410,23 @@ test("farm build --mobile builds the mobile client apart from the web output and
 
   const routes = JSON.parse(await readFile(path.join(mobileDir, "farm-routes.json"), "utf8"));
   assert.equal(routes.server, "https://notes.example.com");
+  // The mobile client the build added, for the shell to bundle.
+  const mobileClient = JSON.parse(
+    await readFile(path.join(root, ".farm", "mobile-client.json"), "utf8"),
+  );
+  assert.match(mobileClient.entry, /^\/farm-mobile-client-h[0-9a-f]{8,}\.js$/);
+  assert.match(
+    result.output,
+    new RegExp(
+      `Mobile client ${mobileClient.entry.replace(/[.]/g, "\\.")}: \\d+ files bundled into the app`,
+    ),
+  );
   assert.deepEqual(
     JSON.parse(await readFile(path.join(mobileDir, "android", "context.json"), "utf8")),
     {
       command: "build",
       basePath: "",
+      authBasePath: null,
       id: "com.example.notes",
       server: "https://notes.example.com",
       projectDir: path.join(".farm", "output", "mobile", "android"),
@@ -425,11 +438,24 @@ test("farm build --mobile builds the mobile client apart from the web output and
         modules: ["app/feed"],
         bundle: path.join(mobileDir, "native", "index.android.hbc"),
       },
+      assets: {
+        dir: path.join(".farm", "client"),
+        entry: mobileClient.entry,
+        files: mobileClient.files,
+      },
     },
   );
+  assert.ok(mobileClient.files.includes(mobileClient.entry));
+  for (const file of mobileClient.files) {
+    await stat(path.join(root, ".farm", "client", file));
+    // Deployed like any client file.
+    await stat(path.join(mobileDir, "www", "public", file));
+  }
   assert.deepEqual(JSON.parse(await readFile(path.join(root, "native-build.json"), "utf8")), {
     outDir: path.join(".farm", "output", "mobile", "native"),
     basePath: "",
+    // Metro bundles for the shell's OS.
+    platform: "android",
     screens: [
       {
         module: "app/feed",
@@ -445,28 +471,157 @@ test("farm build --mobile builds the mobile client apart from the web output and
   if (process.platform !== "win32") {
     assert.equal((await stat(path.join(mobileDir, "android", "gradlew"))).mode & 0o111, 0o111);
   }
-  // The client build hands navigations to the shell; the web output was never written.
-  const mobileClient = await clientSources(path.join(mobileDir, "www", "public"));
-  assert.match(mobileClient, /farm:mobile-shell/);
-  assert.match(mobileClient, /offerNavigation/);
+  // The mobile client hands navigations to the shell, the web client does not; the web output
+  // was never written.
+  const split = async (dir) => {
+    const mobile = [];
+    const web = [];
+    for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
+      const file = path.join(entry.parentPath, entry.name);
+      const url = `/${path.relative(dir, file).split(path.sep).join("/")}`;
+      (mobileClient.files.includes(url) ? mobile : web).push(await readFile(file, "utf8"));
+    }
+    return { mobile: mobile.join("\n"), web: web.join("\n") };
+  };
+  const built = await split(path.join(mobileDir, "www", "public"));
+  assert.match(built.mobile, /farm:mobile-shell/);
+  assert.match(built.mobile, /offerNavigation/);
+  assert.doesNotMatch(built.web, /farm:mobile-shell|offerNavigation/);
   await assert.rejects(stat(path.join(root, ".farm", ".output")));
   await assert.rejects(stat(path.join(root, ".vercel")));
 
   const web = await runFarm(["build", "--root", root], { FARM_PLATFORM: "mobile" });
   assert.equal(web.code, 0, web.output);
-  // A stale FARM_PLATFORM does not make a web build mobile.
-  const webClient = await clientSources(path.join(root, ".farm", ".output", "public"));
-  assert.doesNotMatch(webClient, /farm:mobile-shell|offerNavigation/);
+  // A web deployment has the same mobile client, and a stale FARM_PLATFORM does not make its web
+  // client mobile.
+  assert.deepEqual(
+    JSON.parse(await readFile(path.join(root, ".farm", "mobile-client.json"), "utf8")),
+    mobileClient,
+  );
+  const deployed = await split(path.join(root, ".farm", ".output", "public"));
+  assert.match(deployed.mobile, /farm:mobile-shell/);
+  assert.doesNotMatch(deployed.web, /farm:mobile-shell|offerNavigation/);
 
   const apk = await runFarm(["build", "--mobile", "--apk", "--root", root]);
   assert.equal(apk.code, 0, apk.output);
   assert.match(apk.output, /📦 \.farm\/output\/mobile\/dist\/com\.example\.notes-debug\.apk/);
 });
 
+/**
+ * Every file of a Node build output by its path, as a content hash. Nitro's build date and the
+ * dates in its public asset table differ from build to build, so those two files count by name.
+ * The asset table lives in the built server, which `node-server` emits beside the compile-cache
+ * launcher; `server/index.mjs` is that launcher and is hashed, so a build stays reproducible.
+ * The text of the app's own code is kept to show where two builds differ.
+ */
+async function snapshot(dir) {
+  const files = {};
+  const texts = {};
+  for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    const name = path.relative(dir, file).split(path.sep).join("/");
+    if (["nitro.json", "server/farm-server.mjs"].includes(name)) {
+      files[name] = "dated";
+      continue;
+    }
+    const bytes = await readFile(file);
+    files[name] = createHash("sha256").update(bytes).digest("hex");
+    if (!name.includes("node_modules/") && /\.(?:m?js|json)$/.test(name)) {
+      texts[name] = bytes.toString("utf8");
+    }
+  }
+  return { files, texts };
+}
+
+/** Where two builds' files first differ, with some text around it. */
+function describeBuildDifference(actual, expected) {
+  const names = new Set([...Object.keys(actual.files), ...Object.keys(expected.files)]);
+  const lines = [];
+  for (const name of [...names].sort()) {
+    if (actual.files[name] === expected.files[name]) continue;
+    const a = actual.texts[name];
+    const b = expected.texts[name];
+    if (a === undefined || b === undefined) {
+      lines.push(
+        `${name}: ${actual.files[name] ?? "missing"} vs ${expected.files[name] ?? "missing"}`,
+      );
+      continue;
+    }
+    let at = 0;
+    while (at < a.length && a[at] === b[at]) at++;
+    const around = (text) => JSON.stringify(text.slice(Math.max(0, at - 160), at + 160));
+    lines.push(`${name} differs at ${at}:\n  with:    ${around(a)}\n  without: ${around(b)}`);
+  }
+  return lines.join("\n");
+}
+
+test("mobile.shells renders page shells in farm build --mobile and leaves farm build as it was", async (t) => {
+  const root = await createApp(t, BUILD_CONFIG);
+  await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
+  await writeFile(
+    path.join(root, "src/app/notes/loading.tsx"),
+    'export default function Loading() { return <p className="skeleton">Loading notes</p>; }',
+  );
+  await installFakeShell(root);
+  await installFakeNativeBuild(root);
+  // A fixed build id: a web build is otherwise only ever new by its id and Nitro's dates.
+  const config = (shells) =>
+    BUILD_CONFIG.replace(
+      "telemetry: false,",
+      'telemetry: false,\n  generateBuildId: () => "fixed",',
+    ).replace('server: command === "dev"', `shells: ${shells},\n    server: command === "dev"`);
+
+  // The web build: the same bytes with and without shells.
+  await writeFile(path.join(root, "farm.config.ts"), config(false));
+  const plain = await runFarm(["build", "--root", root]);
+  assert.equal(plain.code, 0, plain.output);
+  const without = await snapshot(path.join(root, ".farm", ".output"));
+  await writeFile(path.join(root, "farm.config.ts"), config(true));
+  const withShells = await runFarm(["build", "--root", root]);
+  assert.equal(withShells.code, 0, withShells.output);
+  const withShellsBuild = await snapshot(path.join(root, ".farm", ".output"));
+  assert.deepEqual(
+    withShellsBuild.files,
+    without.files,
+    describeBuildDifference(withShellsBuild, without),
+  );
+  assert.doesNotMatch(withShells.output, /Page shells/);
+
+  const mobile = await runFarm(["build", "--mobile", "--root", root]);
+  assert.equal(mobile.code, 0, mobile.output);
+  // The /notes routes share notes/loading.tsx and one file; the other routes have no loading file
+  // and are not named.
+  assert.match(mobile.output, /Page shells: 3 routes in 1 file \(3 without one\)/);
+  assert.doesNotMatch(mobile.output, /Page shell \//);
+  const mobileDir = path.join(root, ".farm", "output", "mobile");
+  const routes = JSON.parse(await readFile(path.join(mobileDir, "farm-routes.json"), "utf8"));
+  const mobileClient = JSON.parse(
+    await readFile(path.join(root, ".farm", "mobile-client.json"), "utf8"),
+  );
+  const [file] = Object.values(routes.shells.routes);
+  assert.match(file, /^[0-9a-f]{16}\.html$/);
+  assert.deepEqual(routes.shells, {
+    client: mobileClient.entry,
+    routes: { "/notes": file, "/notes/[id]": file, "/notes/new": file },
+  });
+  // The shell package gets the files, named by their content: no scripts, the layout around the
+  // loading state, and the marker app CSS can use.
+  const shells = JSON.parse(await readFile(path.join(mobileDir, "android", "shells.json"), "utf8"));
+  assert.deepEqual(Object.keys(shells.files), [file]);
+  const html = shells.files[file];
+  assert.equal(`${createHash("sha256").update(html).digest("hex").slice(0, 16)}.html`, file);
+  assert.match(html, /<html data-farm-page-shell>/);
+  assert.match(html, /<p class="skeleton">Loading notes<\/p>/);
+  assert.doesNotMatch(html, /<script|modulepreload|127\.0\.0\.1|canonical/i);
+});
+
 test("farm build --mobile --os ios generates the iOS project and reports what the shell could not build", async (t) => {
   const root = await createApp(t, BUILD_CONFIG);
   await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
   await installFakeShell(root);
+  await installFakeNativeBuild(root);
   const mobileDir = path.join(root, ".farm", "output", "mobile");
 
   const result = await runFarm(["build", "--mobile", "--os", "ios", "--root", root]);
@@ -480,12 +635,31 @@ test("farm build --mobile --os ios generates the iOS project and reports what th
     {
       command: "build",
       basePath: "",
+      authBasePath: null,
       id: "com.example.notes",
       server: "https://notes.example.com",
       projectDir: path.join(".farm", "output", "mobile", "ios"),
-      // The iOS shell has no React Native host yet, so /feed is a placeholder there.
-      native: null,
+      // /feed is a React Native screen on iOS too, from page.native.tsx, bundled for ios.
+      native: {
+        engine: "react-native",
+        reactNativeVersion: "0.88.1",
+        hermesVersion: "260318099.0.5",
+        modules: ["app/feed"],
+        bundle: path.join(mobileDir, "native", "index.ios.hbc"),
+      },
+      // The shell decides what to bundle; the real iOS shell loads them from the server.
+      assets: {
+        dir: path.join(".farm", "client"),
+        entry: JSON.parse(await readFile(path.join(root, ".farm", "mobile-client.json"), "utf8"))
+          .entry,
+        files: JSON.parse(await readFile(path.join(root, ".farm", "mobile-client.json"), "utf8"))
+          .files,
+      },
     },
+  );
+  assert.match(
+    result.output,
+    /Mobile client \/farm-mobile-client-h[0-9a-f]+\.js: loaded from the server/,
   );
   await assert.rejects(stat(path.join(mobileDir, "android")));
   // Resolved for iOS: page.android.tsx is not the /feed screen there.
@@ -520,7 +694,31 @@ test("an app without native screens never loads @farm.js/native and gets no Reac
     await readFile(path.join(root, ".farm", "output", "mobile", "android", "context.json"), "utf8"),
   );
   assert.equal(context.native, null);
+  assert.equal(context.authBasePath, null);
   await assert.rejects(stat(path.join(root, ".farm", "output", "mobile", "native")));
+});
+
+test("the shell gets auth.basePath, the only routes native screens sign in to, when auth is on", async (t) => {
+  const config = BUILD_CONFIG.replace(
+    "telemetry: false,",
+    'telemetry: false,\n  auth: { basePath: "/account/auth" },',
+  );
+  const root = await createApp(t, config);
+  await writeFile(path.join(root, "src/app/layout.tsx"), LAYOUT);
+  await rm(path.join(root, "src/app/feed/page.native.tsx"));
+  await rm(path.join(root, "src/app/feed/page.android.tsx"));
+  await symlink(
+    await realpath(path.resolve(cliRoot, "..", "farm-auth")),
+    path.join(root, "node_modules", "@farm.js", "auth"),
+    "junction",
+  );
+  await installFakeShell(root);
+  const result = await runFarm(["build", "--mobile", "--root", root]);
+  assert.equal(result.code, 0, result.output);
+  const context = JSON.parse(
+    await readFile(path.join(root, ".farm", "output", "mobile", "android", "context.json"), "utf8"),
+  );
+  assert.equal(context.authBasePath, "/account/auth");
 });
 
 test("a native screen without @farm.js/native prints the install command", async (t) => {
@@ -621,23 +819,17 @@ async function checkMobileDev(child, root, port, os) {
   const native = JSON.parse(
     await readFile(path.join(root, ".farm", "output", "mobile", os, "context.json"), "utf8"),
   ).native;
-  if (os === "ios") {
-    // No React Native host on iOS yet: Metro never starts and /feed stays a placeholder.
-    assert.equal(native, null);
-    assert.doesNotMatch(output, /React Native/);
-    await assert.rejects(stat(path.join(root, "native-dev.json")));
-  } else {
-    // Native screens load from Metro in dev, never from a bundled file.
-    assert.equal(native.bundle, undefined);
-    assert.equal(native.devServer.mainModule, ".farm/output/mobile/native/index");
-    assert.ok(native.devServer.port >= 8081, JSON.stringify(native));
-    assert.deepEqual(
-      JSON.parse(await readFile(path.join(root, "native-dev.json"), "utf8")).screens.map(
-        (screen) => screen.module,
-      ),
-      ["app/feed"],
-    );
-  }
+  // Both shells host React Native: native screens load from Metro in dev, for the shell's
+  // platform, never from a bundled file.
+  assert.equal(native.bundle, undefined);
+  assert.equal(native.devServer.mainModule, ".farm/output/mobile/native/index");
+  assert.ok(native.devServer.port >= 8081, JSON.stringify(native));
+  const dev = JSON.parse(await readFile(path.join(root, "native-dev.json"), "utf8"));
+  assert.equal(dev.platform, os);
+  assert.deepEqual(
+    dev.screens.map((screen) => screen.module),
+    ["app/feed"],
+  );
 
   // The emulator reaches the host loopback as 10.0.2.2, which maps to 127.0.0.1.
   const page = await fetch(`http://127.0.0.1:${port}/notes`);
@@ -673,7 +865,7 @@ test("farm config inspect --mobile --report prints the analyzer table and writes
   );
   assert.match(
     result.output,
-    /\/notes\/new\s+web\s+web\s+web\s+1\/2\s+50%\s+src\/app\/notes\/new\/page\.tsx:1:40 <form> has no native mapping \(\+1 more\)/,
+    /\/notes\/new\s+web\s+web\s+web\s+2\/2\s+100%\s+src\/app\/notes\/new\/page\.tsx:1:53 <input type="file"> has no native mapping/,
   );
   assert.match(result.output, /\/feed\s+native\s+-\s+-\s+src\/app\/feed\/page\.android\.tsx/);
   assert.match(result.output, /full report: \.farm\/output\/mobile\/native-report\.json/);
@@ -685,7 +877,8 @@ test("farm config inspect --mobile --report prints the analyzer table and writes
     report.routes
       .find((entry) => entry.route === "/notes/new")
       .analysis.blockers.map((blocker) => blocker.rule),
-    ["unmapped-element", "unmapped-element"],
+    // The form maps to a native form; its file input does not.
+    ["unmapped-element"],
   );
 
   const wrong = await runFarm(["config", "inspect", "--report", "--root", root]);

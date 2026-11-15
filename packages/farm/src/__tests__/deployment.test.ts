@@ -16,7 +16,9 @@ import {
   isFarmDeploymentMismatchResponse,
   normalizeFarmDeploymentId,
   withFarmDeploymentResponse,
+  withoutFarmDeploymentCookie,
 } from "../deployment";
+import { _withFarmDeploymentCookie } from "../middleware/production-runtime";
 
 describe("deployment skew protocol", () => {
   it("normalizes valid deployment IDs and rejects unsafe header values", () => {
@@ -129,5 +131,56 @@ describe("deployment skew protocol", () => {
       serverDeploymentId: "release-2",
       retryable: false,
     });
+  });
+
+  it("stores the deployment cookie only on a production page no shared cache keeps", () => {
+    const cookieOf = (
+      init: { method?: string; url?: string; headers?: Record<string, string> },
+      responseHeaders: Record<string, string>,
+    ) =>
+      _withFarmDeploymentCookie(
+        new Request(init.url ?? "https://farm.test/console/page", {
+          method: init.method,
+          headers: init.headers,
+        }),
+        new Response("page", { headers: responseHeaders }),
+        "release-2",
+        "/console",
+      ).headers.getSetCookie();
+    const page = { [FARM_DEPLOYMENT_ID_HEADER]: "release-2", "cache-control": "private, no-store" };
+
+    expect(cookieOf({}, page)).toEqual([
+      `${FARM_DEPLOYMENT_COOKIE}=release-2; Path=/console; HttpOnly; SameSite=Lax; Secure`,
+    ]);
+    expect(cookieOf({ url: "http://farm.test/console/page" }, page)).toEqual([
+      `${FARM_DEPLOYMENT_COOKIE}=release-2; Path=/console; HttpOnly; SameSite=Lax`,
+    ]);
+    // Not a document load, not a page, or a response a shared cache may keep.
+    expect(cookieOf({ method: "HEAD" }, page)).toEqual([]);
+    expect(cookieOf({ method: "POST" }, page)).toEqual([]);
+    expect(cookieOf({}, { "cache-control": "private, no-store" })).toEqual([]);
+    expect(cookieOf({}, { ...page, "cache-control": "public, s-maxage=60" })).toEqual([]);
+    expect(cookieOf({}, { [FARM_DEPLOYMENT_ID_HEADER]: "release-2" })).toEqual([]);
+    expect(cookieOf({}, { ...page, "cdn-cache-control": "max-age=60" })).toEqual([]);
+    // A request from another deployment's page keeps that page's cookie.
+    expect(cookieOf({ headers: { [FARM_DEPLOYMENT_ID_HEADER]: "release-1" } }, page)).toEqual([]);
+  });
+
+  it("leaves only the cookies that name a visitor", () => {
+    expect(withoutFarmDeploymentCookie(null)).toBeUndefined();
+    expect(withoutFarmDeploymentCookie("")).toBeUndefined();
+    expect(withoutFarmDeploymentCookie(`${FARM_DEPLOYMENT_COOKIE}=release-2`)).toBeUndefined();
+    expect(withoutFarmDeploymentCookie(` ${FARM_DEPLOYMENT_COOKIE}=release-2; `)).toBeUndefined();
+    expect(withoutFarmDeploymentCookie("session=abc")).toBe("session=abc");
+    expect(withoutFarmDeploymentCookie(`session=abc; ${FARM_DEPLOYMENT_COOKIE}=release-2`)).toBe(
+      "session=abc",
+    );
+    expect(
+      withoutFarmDeploymentCookie(`${FARM_DEPLOYMENT_COOKIE}=release-2; locale=fr; theme=dark`),
+    ).toBe("locale=fr; theme=dark");
+    // Only the exact name: a lookalike is a visitor cookie.
+    expect(withoutFarmDeploymentCookie(`${FARM_DEPLOYMENT_COOKIE}_x=1`)).toBe(
+      `${FARM_DEPLOYMENT_COOKIE}_x=1`,
+    );
   });
 });

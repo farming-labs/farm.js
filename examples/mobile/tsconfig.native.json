@@ -4,6 +4,11 @@
     "lib": ["ESNext"],
     "customConditions": ["react-native"]
   },
-  "include": ["src/**/*.native.tsx", "src/**/*.android.tsx", "src/**/*.ios.tsx"],
+  "include": [
+    "src/**/*.native.tsx",
+    "src/**/*.android.tsx",
+    "src/**/*.ios.tsx",
+    "src/native/**/*"
+  ],
   "exclude": []
 }

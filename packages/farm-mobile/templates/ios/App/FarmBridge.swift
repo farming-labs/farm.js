@@ -11,12 +11,53 @@ protocol FarmPlugin: AnyObject {
     func call(method: String, args: [String: Any], webView: WKWebView) throws -> Any?
 }
 
+/// A rejection with the code `@farm.js/core/native` reads, such as `invalid_args`.
+struct FarmCallError: Error, Sendable, CustomStringConvertible {
+    let code: String
+    let message: String
+
+    var description: String { message }
+}
+
+/// How an asynchronous call settles: its value already encoded as JSON text, or a rejection. Only
+/// strings cross threads.
+enum FarmCallReply: Sendable {
+    case json(String)
+    case failure(FarmCallError)
+
+    /// `value` encoded for the page, or a rejection when it is not JSON. Safe on any thread.
+    static func value(_ value: Any?) -> FarmCallReply {
+        FarmBridge.json(value).map(FarmCallReply.json)
+            ?? .failure(FarmCallError(code: "native_error", message: "The result is not JSON."))
+    }
+}
+
+/// A plugin that answers later, such as an app native module running in React Native.
+@MainActor
+protocol FarmAsyncPlugin: FarmPlugin {
+    /// Runs on the main thread with the call's JSON arguments as sent (web screens send an array).
+    /// Throw a `FarmCallError` to reject at once; otherwise call `reply` once, on any thread.
+    func callAsync(
+        method: String,
+        args: Any?,
+        webView: WKWebView,
+        reply: @escaping @Sendable (FarmCallReply) -> Void
+    ) throws
+}
+
+extension FarmAsyncPlugin {
+    func call(method: String, args: [String: Any], webView: WKWebView) throws -> Any? {
+        throw FarmCallError(code: "native_error", message: "\(name) answers asynchronously.")
+    }
+}
+
 /// Messages a page sends to whoever currently owns its WebView.
 @MainActor
 protocol BridgeListener: AnyObject {
     func bridge(_ bridge: FarmBridge, visit url: URL, replace: Bool)
     func bridge(_ bridge: FarmBridge, rendered token: Int, title: String, pageMs: Double)
-    func bridgeRouterReady(_ bridge: FarmBridge, title: String)
+    /// `client` is the mobile client entry the document loaded, when it loaded one.
+    func bridgeRouterReady(_ bridge: FarmBridge, title: String, client: String?)
     func bridge(_ bridge: FarmBridge, title: String)
     func bridge(_ bridge: FarmBridge, renderError token: Int, url: String, message: String)
 }
@@ -37,6 +78,8 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
     private weak var webView: WKWebView?
     private let config: RouteConfig
     private let plugins: [String: FarmPlugin]
+    /// Files this page received by reference (FarmFiles.swift).
+    private let files = FarmFiles()
 
     init(webView: WKWebView, config: RouteConfig, plugins: [String: FarmPlugin], script: String) {
         self.webView = webView
@@ -59,6 +102,7 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
 
     /// Removes the message handler; the WebView is going away.
     func detach() {
+        files.close()
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: FarmBridge.handlerName,
             contentWorld: .page
@@ -118,7 +162,8 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
             let ms = (message["ms"] as? NSNumber)?.doubleValue ?? 0
             listener?.bridge(self, rendered: token, title: string("title"), pageMs: ms)
         case "router-ready":
-            listener?.bridgeRouterReady(self, title: string("title"))
+            let client = (message["client"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            listener?.bridgeRouterReady(self, title: string("title"), client: client)
         case "title":
             listener?.bridge(self, title: string("title"))
         case "error":
@@ -134,30 +179,85 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
         guard let id = FarmBridge.integer(message["id"]) else { return }
         let pluginName = message["plugin"] as? String ?? ""
         let method = message["method"] as? String ?? ""
-        let args = message["args"] as? [String: Any] ?? [:]
+        // The document that called: an answer that arrives after the WebView loaded another one
+        // settles nothing there.
+        let doc = message["doc"] as? String
         let started = CACurrentMediaTime()
-        let ok: Bool
-        let value: Any?
-        if let plugin = plugins[pluginName], let webView {
-            do {
-                value = try plugin.call(method: method, args: args, webView: webView)
-                ok = true
-            } catch {
-                value = ["code": "native_error", "message": "\(error)"]
-                ok = false
-            }
-        } else {
-            value = ["code": "native_unavailable", "message": "No native plugin \"\(pluginName)\"."]
-            ok = false
+        let answer = { [weak self] (reply: FarmCallReply) in
+            self?.answer(id, doc, pluginName, method, started, reply)
         }
-        let payload = FarmBridge.json(value) ?? "null"
+        guard let plugin = plugins[pluginName], let webView else {
+            answer(.failure(FarmCallError(
+                code: "native_unavailable", message: "No native plugin \"\(pluginName)\"."
+            )))
+            return
+        }
+        do {
+            // File references this page received go back to the module as its own file:// URLs.
+            let args = try files.resolve(message["args"])
+            if let async = plugin as? FarmAsyncPlugin {
+                try async.callAsync(method: method, args: args, webView: webView) { reply in
+                    Task { @MainActor [weak self] in
+                        self?.answer(id, doc, pluginName, method, started, reply)
+                    }
+                }
+                return
+            }
+            let value = try plugin.call(method: method, args: args as? [String: Any] ?? [:], webView: webView)
+            answer(.value(value))
+        } catch {
+            answer(.failure(FarmBridge.callError(error)))
+        }
+    }
+
+    private static func callError(_ error: Error) -> FarmCallError {
+        error as? FarmCallError ?? FarmCallError(code: "native_error", message: "\(error)")
+    }
+
+    /// Settles call `id` in the page.
+    private func answer(
+        _ id: Int,
+        _ doc: String?,
+        _ pluginName: String,
+        _ method: String,
+        _ started: CFTimeInterval,
+        _ reply: FarmCallReply
+    ) {
+        var ok: Bool
+        var payload: String
+        var bytes = "undefined"
+        switch reply {
+        case .json(let json):
+            ok = true
+            payload = json
+        case .failure(let error):
+            ok = false
+            payload = FarmBridge.json(["code": error.code, "message": error.message]) ?? "null"
+        }
+        // A file:// URL in farm-files reaches the page as a reference, its bytes alongside.
+        if ok, payload.contains("file:"), let data = payload.data(using: .utf8),
+           let value = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+            do {
+                let shared = try files.share(value)
+                if !shared.bytes.isEmpty, let json = FarmBridge.json(shared.value),
+                   let encoded = FarmBridge.json(shared.bytes) {
+                    payload = json
+                    bytes = encoded
+                }
+            } catch {
+                let failure = FarmBridge.callError(error)
+                ok = false
+                payload = FarmBridge.json(["code": failure.code, "message": failure.message]) ?? "null"
+            }
+        }
         if FarmBuild.dev {
             let ms = (CACurrentMediaTime() - started) * 1000
             FarmBridge.log.info(
                 "call #\(id) \(pluginName, privacy: .public).\(method, privacy: .public) ok=\(ok) -> \(payload, privacy: .public) (\(ms) ms native)"
             )
         }
-        evaluate("window.__farmBridge._resolve(\(id), \(ok), \(payload))")
+        let document = doc.map(FarmBridge.jsString) ?? "undefined"
+        evaluate("window.__farmBridge._resolve(\(id), \(ok), \(payload), \(document), \(bytes))")
     }
 
     /// An integral JSON number; booleans and fractions are not ids or tokens.
@@ -172,8 +272,8 @@ final class FarmBridge: NSObject, WKScriptMessageHandler {
         return Int(double)
     }
 
-    /// A JSON value as JS source, or nil when it is not JSON (nil itself is `null`).
-    static func json(_ value: Any?) -> String? {
+    /// A JSON value as JS source, or nil when it is not JSON (nil itself is `null`). Any thread.
+    nonisolated static func json(_ value: Any?) -> String? {
         let wrapped: [Any] = [value ?? NSNull()]
         guard JSONSerialization.isValidJSONObject(wrapped),
               let data = try? JSONSerialization.data(withJSONObject: wrapped),

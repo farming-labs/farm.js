@@ -1,6 +1,10 @@
 // The Android screen for /camera (module id app/camera): replaces page.native.tsx on Android only.
 import { serverFetch, useNavigate, useServerQuery } from "@farm.js/native";
+import { useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+// The note form's own server function, called as a web page would call it. The app bundle holds a
+// stub that posts to mobile.server, never this module.
+import { createNote } from "../../../features/notes/server";
 
 interface Note {
   id: string;
@@ -19,7 +23,17 @@ export const metadata = { title: "Camera roll" };
 
 export default function AndroidCameraScreen() {
   const navigate = useNavigate();
-  const { data: notes = [], error } = useServerQuery(listNotes, undefined);
+  const { data: notes = [], error, refetch } = useServerQuery(listNotes, undefined);
+  const [saving, setSaving] = useState(false);
+  const quickNote = async () => {
+    setSaving(true);
+    try {
+      await createNote({ title: `Photo note ${notes.length + 1}`, body: "" });
+      await refetch();
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <View style={styles.screen} testID="camera-screen">
@@ -40,6 +54,15 @@ export default function AndroidCameraScreen() {
           </Pressable>
         )}
       />
+      <Pressable
+        accessibilityRole="button"
+        disabled={saving}
+        onPress={quickNote}
+        style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+        testID="quick-note"
+      >
+        <Text style={styles.buttonText}>{saving ? "Saving..." : "Quick note (server function)"}</Text>
+      </Pressable>
       <Pressable
         accessibilityRole="button"
         onPress={() => navigate("/notes/new")}

@@ -224,6 +224,29 @@ class FarmShellModule(context: ReactApplicationContext) : ReactContextBaseJavaMo
         session.signOut { promise.resolve(null) }
     }
 
+    /**
+     * `signIn`/`signUp` from `@farm.js/auth/client` on a native screen. Only React Native JS reaches
+     * this module: WebView pages talk to FarmBridge, which has no session methods. Resolves
+     * `{ status, body }` once the device token is stored; cookies and tokens never reach JS.
+     */
+    @ReactMethod
+    fun signIn(path: String, body: String, promise: Promise) {
+        val session = MobileSession.instance
+            ?: return promise.reject("farm_sign_in", "The device session is not ready.")
+        session.signIn(path, body) { reply, error ->
+            if (reply == null) {
+                promise.reject("farm_sign_in", error ?: "Native sign-in failed.")
+            } else {
+                promise.resolve(
+                    Arguments.createMap().apply {
+                        putInt("status", reply.status)
+                        putString("body", reply.body)
+                    },
+                )
+            }
+        }
+    }
+
     companion object {
         const val NAME = "FarmShell"
     }

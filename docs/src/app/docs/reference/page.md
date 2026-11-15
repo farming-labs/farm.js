@@ -14,7 +14,7 @@ A compact map of the main package exports and where to learn more.
 | ----------------------------- | ------------------------------------------------------------------------------------ |
 | @farm.js/core                 | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache.             |
 | @farm.js/core/client          | Link, router helpers, callable route actions, API client, integration client.        |
-| @farm.js/core/api/client      | Renderer-neutral typed API clients.                                                  |
+| @farm.js/core/api/client      | Renderer-neutral typed API clients and integration `api` operation builders.         |
 | @farm.js/core/plugin/client   | Advanced browser lifecycle manager and client plugin event types.                    |
 | @farm.js/core/navigation      | Next-compatible redirect, notFound, and client navigation hooks.                     |
 | @farm.js/core/headers         | Next-compatible request headers and cookies helpers.                                 |
@@ -74,7 +74,8 @@ A compact map of the main package exports and where to learn more.
 | `@farm.js/convex`                                                             | `convex`, `convexRateLimitStorage`, `convexStorage`; `/server`, `/client`, `/better-auth`, `/functions`.   |
 | `@farm.js/supabase`, `@farm.js/workos`                                        | Dedicated auth integration packages with generated typed callers.                                          |
 | `@farm.js/email`                                                              | Resend integration and email template helper.                                                              |
-| `@farm.js/jobs`                                                               | Jobs integration, `task`, `defineTasks`, Trigger.dev runtime, Inngest runtime.                             |
+| `@farm.js/jobs`                                                               | Jobs integration, `task`, `defineTasks`, `local()`, Trigger.dev and Inngest runtimes, `defineJobsRuntime`. |
+| `@farm.js/jobs/testing`                                                       | `createJobsRuntimeConformance`, the checks a custom jobs runtime must pass.                                |
 | `@farm.js/unkey`                                                              | Unkey API key integration.                                                                                 |
 | `@farm.js/integrations/*`                                                     | Compatibility re-exports for older imports; new code should use the dedicated packages above.              |
 

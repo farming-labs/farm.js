@@ -150,6 +150,15 @@ The same app route serves every locale. A file such as `src/app/products/page.ts
 
 Farm canonicalizes locale paths. With `prefix-except-default`, a request for `/en/products` redirects to `/products`.
 
+Site-level files that crawlers and agents fetch at fixed URLs are not locale content, so they answer
+where they are asked for, with every `routing` value. These files are `robots.txt`, `sitemap.xml`,
+`manifest.webmanifest`, `llms.txt` and `llms-full.txt` (generated, or from a route file such as
+`sitemap.ts` at any depth), `/.well-known/*` URIs, and MCP server cards at `<endpoint>/server-card`.
+They are never redirected to a detected locale, set no locale cookie, and don't vary on
+`Cookie` or `Accept-Language`, so `/robots.txt` answers at the origin root under `prefix-always`.
+They render in `defaultLocale`; a locale URL such as `/fr/llms.txt` still selects its locale. The
+default MCP endpoint at `/mcp` takes `POST`, which is never redirected.
+
 When the application has a `basePath`, the locale prefix stays inside that mount path. For example,
 `basePath: "/store"` produces `/store/products` for the default locale and
 `/store/fr/products` for French. Server redirects, `Link`, locale switching, metadata alternates,

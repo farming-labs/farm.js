@@ -1,6 +1,7 @@
 package dev.farmjs.mobile.shell
 
 import android.content.pm.ApplicationInfo
+import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
@@ -24,10 +25,12 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
  */
 class MainActivity : AppCompatActivity() {
     private lateinit var navigator: Navigator
+    private var night = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         // Remote debugging needs adb access to the device, so any debuggable build may have it.
         val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (debuggable) WebView.setWebContentsDebuggingEnabled(true)
@@ -37,9 +40,18 @@ class MainActivity : AppCompatActivity() {
         val config = RouteConfig.load(this, if (dev) intent.getStringExtra("server") else null)
         val poolSize = if (dev) intent.getIntExtra("pool", POOL_SIZE) else POOL_SIZE
         val startPath = getString(R.string.farm_start_path)
+        // Debuggable builds (farm build --mobile --apk too) read one more, which only does what a
+        // tapped link to the app's own server does:
+        //   adb shell am start -n <id>/dev.farmjs.mobile.shell.MainActivity --es farmOpen /map
+        // visits that path once the first screen shows content. CI opens a native screen with it.
+        // Other apps can start this activity with extras, so a release build ignores it.
+        val open = intent.takeIf { debuggable }?.getStringExtra("farmOpen")
+            ?.takeIf { it.startsWith("/") && !it.startsWith("//") && '\\' !in it }
         Log.i(Navigator.TAG, "server=${config.server} pool=$poolSize rules=${config.rules.size}")
         // The device token native screens call the server with; issued after a web sign-in.
         MobileSession.init(this, config)
+        // Files web screens received by reference in an earlier run of the app.
+        FarmFiles.clearStale(this)
 
         // Device plugins reachable as native.<name>; none ship yet, so calls reject as unavailable.
         val plugins = emptyMap<String, FarmPlugin>()
@@ -69,16 +81,24 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        val newPage = { Page(this, config, plugins, script, ::openExternal) }
+        // The mobile client's files, bundled by farm build --mobile; none under farm dev --mobile.
+        val bundle = BundledAssets.load(assets, config)
+        // Page shells, bundled by farm build --mobile with mobile.shells.
+        val shells = PageShells.load(this, config)
+        val newPage = { Page(this, config, plugins, script, ::openExternal, bundle, shells) }
         val warmPath = config.tabs.firstOrNull()?.path ?: startPath
         val pool = if (poolSize > 0) WebViewPool(config, poolHolder, poolSize, warmPath, newPage) else null
         // React Native when the app has page.native.tsx screens; started after the first screen shows.
         val engine = createFarmNativeEngine(this, config)
         FarmNativeScreens.engine = engine
-        navigator = Navigator(this, config, startPath, tabsHost, bottomNav, modalLayer, pool, newPage)
+        navigator = Navigator(this, config, startPath, tabsHost, bottomNav, modalLayer, pool, newPage, shells)
         navigator.onFirstReady = {
             pool?.start()
             engine?.warm()
+            if (open != null) {
+                Log.i(Navigator.TAG, "launch open $open")
+                navigator.visitPath(open)
+            }
         }
 
         if (config.tabs.isEmpty()) {
@@ -94,10 +114,26 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             bottomNav.setOnItemReselectedListener { item -> navigator.popToRoot(item.itemId, animated = true) }
+            navigator.applyTabBarTheme()
         }
 
         onBackPressedDispatcher.addCallback(this, navigator.backCallback)
         navigator.start()
+    }
+
+    /**
+     * The shell keeps its screens and WebViews through a theme change (`uiMode` is in the
+     * manifest's configChanges), so it repaints its own chrome in the new theme.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val next = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (next == night || !::navigator.isInitialized) return
+        night = next
+        enableEdgeToEdge()
+        // Behind the transparent status bar: the window's background, which the theme set once.
+        window.decorView.setBackgroundColor(androidx.core.content.ContextCompat.getColor(this, R.color.farm_background))
+        navigator.applyTheme()
     }
 
     private fun openExternal(url: android.net.Uri) = navigator.openExternal(url)

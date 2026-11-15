@@ -99,11 +99,14 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured h3")).toHaveCSS("text-wrap", "balance");
   await expect(page.getByRole("link", { name: /Follow the releases/i })).toHaveCount(0);
   // The index features the newest post and lists the rest, so these follow the collection.
-  await expect(page.locator(".blog-featured h3 a")).toHaveAttribute("href", "/blog/agent-native");
+  await expect(page.locator(".blog-featured h3 a")).toHaveAttribute(
+    "href",
+    "/blog/native-internals",
+  );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveText("Nov 2026");
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveAttribute(
     "datetime",
-    "2026-11-01",
+    "2026-11-08",
   );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveCSS(
     "font-family",
@@ -134,7 +137,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured-bottom img")).toHaveAttribute("width", "36");
   await expect(page.locator(".blog-author small")).toHaveCSS("margin-top", "0px");
   await expect(page.locator(".blog-read-link")).toHaveText("Read article");
-  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/agent-native");
+  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/native-internals");
   await expect(page.locator(".blog-explore a")).toHaveCount(2);
   await expect(page.locator(".blog-explore a").first()).toHaveAttribute(
     "href",
@@ -1004,6 +1007,112 @@ test("home keeps its agents link usable without JavaScript", async ({ browser, b
     await expect(animatedAgents).toHaveCSS("border-top-style", "dashed");
   } finally {
     await animatedContext.close();
+  }
+});
+
+// Figure panels are fixed boxes and their type has a legibility floor, so a layout without room
+// for its text spills out of its boxes. Without JavaScript each figure shows its final frame.
+for (const width of [280, 320, 345, 360, 1440]) {
+  test(`blog and home page figures keep their text inside their boxes at ${width}px`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const context = await browser.newContext({
+      baseURL,
+      viewport: { width, height: 900 },
+      javaScriptEnabled: false,
+      reducedMotion: "reduce",
+    });
+    const page = await context.newPage();
+    try {
+      for (const pathname of [
+        "/blog/0.1.0",
+        "/blog/agent-native",
+        "/blog/web-to-native",
+        "/blog/native-internals",
+        "/blog",
+        "/",
+      ]) {
+        await page.goto(pathname);
+        await page.evaluate(() => document.fonts.ready);
+        const panels = page.locator(".blog-figure[data-figure] .bf-stage .bf-panel");
+        expect(await panels.count()).toBeGreaterThan(0);
+        const spills = await panels.evaluateAll((elements) =>
+          elements.flatMap((panel) => {
+            if (!panel.getClientRects().length) return [];
+            const box = panel.getBoundingClientRect();
+            const range = document.createRange();
+            const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
+            let right = 0;
+            let bottom = 0;
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              if (!node.textContent?.trim()) continue;
+              range.selectNodeContents(node);
+              for (const rect of range.getClientRects()) {
+                right = Math.max(right, rect.right - box.right);
+                bottom = Math.max(bottom, rect.bottom - box.bottom);
+              }
+            }
+            const body = panel.querySelector(".bf-body");
+            const clipped = body ? body.scrollWidth - body.clientWidth : 0;
+            if (right <= 0.5 && bottom <= 0.5 && clipped <= 0.5) return [];
+            const figure = panel.closest<HTMLElement>("[data-figure]")!.dataset.figure;
+            return [`${figure} ${(panel as HTMLElement).dataset.panel}`];
+          }),
+        );
+        expect(spills, pathname).toEqual([]);
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+// A post figure wider than a phone scrolls sideways inside itself; its caption must stay in view.
+test("blog figure captions stay in view while their figures scroll sideways", async ({
+  browser,
+  baseURL,
+}) => {
+  const context = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 900 },
+    javaScriptEnabled: false,
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  try {
+    let scrolled = 0;
+    for (const pathname of [
+      "/blog/0.1.0",
+      "/blog/agent-native",
+      "/blog/web-to-native",
+      "/blog/native-internals",
+    ]) {
+      await page.goto(pathname);
+      const result = await page
+        .locator(".blog-figure:not(.blog-figure--fit)")
+        .evaluateAll((figures) => {
+          const hidden: string[] = [];
+          let count = 0;
+          for (const figure of figures as HTMLElement[]) {
+            const caption = figure.querySelector("figcaption");
+            if (!caption || figure.scrollWidth <= figure.clientWidth) continue;
+            count += 1;
+            figure.scrollLeft = figure.scrollWidth;
+            const box = figure.getBoundingClientRect();
+            const rect = caption.getBoundingClientRect();
+            if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5) {
+              hidden.push(figure.dataset.figure ?? "");
+            }
+          }
+          return { count, hidden };
+        });
+      scrolled += result.count;
+      expect(result.hidden, pathname).toEqual([]);
+    }
+    expect(scrolled).toBeGreaterThan(0);
+  } finally {
+    await context.close();
   }
 });
 

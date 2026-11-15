@@ -35,23 +35,27 @@ const ALREADY_LINKED = "/src/app/globals.css";
 /**
  * Stylesheet URLs from the module graph that the document should link,
  * deduped and sorted for a deterministic head. CSS modules (`.module.css`)
- * are excluded: their classes are hashed through the JS pipeline and a plain
- * link would apply nothing useful.
+ * are left out: their stylesheet comes with the client module that imports
+ * them. In islands mode a server component's CSS module has no client module,
+ * so `cssModules` links it as `?direct`, which Vite answers with the compiled
+ * stylesheet, hashed classes included.
  */
 export function collectDevStylesheetUrls(
   modules: Iterable<DevStyleModule>,
   alreadyLinked: string = ALREADY_LINKED,
+  options: { cssModules?: boolean } = {},
 ): string[] {
   const seen = new Set<string>();
   for (const mod of modules) {
     const id = mod.id ?? mod.file ?? "";
     if (!STYLE_EXTENSIONS.test(id)) continue;
-    if (id.includes(".module.")) continue;
+    const cssModule = id.includes(".module.");
+    if (cssModule && !options.cssModules) continue;
     const url = mod.url;
     if (!url || !url.startsWith("/")) continue;
     const bare = url.split("?")[0]!;
     if (bare === alreadyLinked) continue;
-    seen.add(bare);
+    seen.add(cssModule ? `${bare}?direct` : bare);
   }
   return [...seen].sort();
 }

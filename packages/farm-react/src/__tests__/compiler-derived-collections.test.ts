@@ -245,6 +245,66 @@ describe("React AOT derived collection compiler", () => {
     expect(result.code).not.toContain("createCompiledComponent");
   });
 
+  it("compiles the length of a safe pipeline as a derived number", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Counts() {
+        const [items, setItems] = useState([{ id: "a", done: false }]);
+        const [minimum, setMinimum] = useState(0);
+        const open = items.filter((item) => !item.done).length;
+        return (
+          <section>
+            <button onClick={() => setItems([...items, { id: String(items.length), done: true }])}>Add</button>
+            <button onClick={() => setMinimum(minimum + 1)}>Raise</button>
+            <p data-open={open}>{open === 1 ? "1 open" : open + " open"}</p>
+            <p>{items.filter((item, index) => item.done && index >= minimum).toSorted().slice(0, 9).length} done</p>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["Counts"]);
+    expect(result.code).toContain(".filter(item => !item.done).length");
+    // The count reads the collection and the state its callbacks read.
+    expect(result.code).toContain("dependencies: [0, 1]");
+  });
+
+  it.each([
+    {
+      name: "an impure callback",
+      count: "items.filter((item) => check(item)).length",
+      reason: /derived local count cannot use filter callbacks cannot use function calls/i,
+    },
+    {
+      name: "a method outside the safe pipeline",
+      count: "items.map((item) => item.id).length",
+      reason: /derived local count cannot use function calls/i,
+    },
+    {
+      name: "a call on the length",
+      count: "items.filter((item) => item.done).length.toFixed()",
+      reason: /derived local count cannot use function calls/i,
+    },
+    {
+      name: "a computed length access",
+      count: 'items.filter((item) => item.done)["length"]',
+      reason: /derived local count cannot use function calls/i,
+    },
+  ])("rejects the length of $name", async ({ count, reason }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Counts() {
+        const [items, setItems] = useState([{ id: "a", done: false }]);
+        const count = ${count};
+        return <p onClick={() => setItems([...items])}>{count}</p>;
+      }
+    `);
+
+    expect(result.compiled).toEqual([]);
+    expect(result.diagnostics[0]?.reason).toMatch(reason);
+  });
+
   it("rejects an unsafe derived collection before it reaches JSX lowering", async () => {
     const result = await compile(`
       import { useState } from "react";

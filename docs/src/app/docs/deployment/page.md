@@ -36,21 +36,61 @@ export default defineConfig({
 
 These targets get the most polished Farm defaults. They map `deploy.target` to a Nitro preset, output directory, and the matching `farm deploy` command when Farm has a deploy wrapper for that platform.
 
+`deploy.target` accepts only these four names. Farm rejects any other target, such as the typo `"vercell"`, when it resolves the config and before the build starts, with an error that names the value and lists the targets. To deploy with a Nitro preset that has no first-class target, such as `bun` or `aws-lambda`, set `deploy.preset` instead; see [Nitro preset pass-through](#nitro-preset-pass-through).
+
 When no target or preset is configured, Farm recognizes platform CI through `VERCEL`, `NETLIFY`,
 and `CF_PAGES`. Detection is enabled only by the values `1` or `true` (case-insensitive); unset,
 empty, `0`, `false`, and other values do not select a platform. An explicit target, preset, or CLI
 override remains authoritative.
 
-### Immutable fingerprinted assets on Vercel
+### Client asset caching
 
-Farm's Vercel Build Output automatically serves content-hashed files under `assets/` and `chunks/`
-with `Cache-Control: public, max-age=31536000, immutable`. This covers fingerprinted JavaScript, CSS,
-fonts, and images, including nested asset directories and applications with a `basePath`.
+A production build serves Farm's content-hashed client files with
+`Cache-Control: public, max-age=31536000, immutable` on every first-class target (`node`,
+`vercel`, `netlify`, and `cloudflare`), on Bun, and on other `deploy.preset` presets wherever Nitro
+maps public assets and route rules into the preset's output. A hashed file's name
+changes whenever its bytes do, so a browser keeps it for a year and never asks for it again, on a
+repeat visit or on a client navigation that loads a new chunk. The files are:
 
-The rule intentionally excludes HTML, unhashed public files, and stable entry URLs such as
-`/farm-client.js` and `/farm-client.css`. Those URLs can change between deployments and must remain
-revalidatable. The immutable header route runs before Vercel's filesystem handler, so matching files
-are still served directly from the CDN and never enter the Farm server function.
+- every chunk under `/chunks/` and every asset under `/assets/` whose name carries Farm's `-h<hash>`
+  fingerprint, such as `/chunks/page-h1a2b3c4d.js`, `/assets/farm-client-h1a2b3c4d.css`, and the
+  self-hosted fonts in `/assets/fonts/`
+- the hashed client entries at the root: `/farm-client-h<hash>.js`, islands mode's
+  `/farm-client-boot-h<hash>.js`, and the mobile client's `/farm-mobile-client-h<hash>.js`
+
+Everything else keeps revalidating with the platform's default: files from `public/` such as
+`/favicon.ico` and `/robots.txt` (including any under `public/assets/`), the stable
+`/farm-client.js` and `/farm-client.css` URLs, HTML, and every page and API response. Hashed client
+files are served at the origin root, so an app with a `basePath` such as `/console` still loads
+them from `/chunks/...`; the policy applies there too.
+
+Farm sets the policy through Nitro. A directory that holds only hashed files, usually `chunks/` and
+`assets/`, becomes a Nitro `publicAssets` directory with a one-year `maxAge`: Nitro sends the header
+from Node and Bun servers, writes it to `_headers` on Netlify and Cloudflare, and serves the
+directory from the CDN without the server function, so a chunk an old deployment referenced is a
+`404` that no cache keeps. A directory shared with a file from `public/` or with an app route, such
+as a page at `/assets/[id]`, gets a header rule for each hashed file instead and stays shared with
+the app. On Vercel, a header route matching the same filenames runs before the filesystem handler.
+
+A `routeRules` entry of the app that sets `Cache-Control` for a hashed file wins over this policy,
+whether it names the file's directory (`"/assets/**"`) or every path (`"/**"`):
+
+```ts
+export default defineConfig({
+  routeRules: {
+    "/assets/**": { headers: { "cache-control": "public, max-age=600" } },
+  },
+});
+```
+
+`farm dev` is unchanged: Vite serves modules with its own caching.
+
+### Guarded static pages on Vercel
+
+A page that middleware guards renders on request on every target. On Vercel, a middleware file with
+`export const config = { runtime: "edge" }` runs as routing middleware in front of the pages it
+guards, so those pages prerender and the CDN serves them after the middleware lets a request
+through. See [Edge middleware on Vercel](/docs/middleware#edge-middleware-on-vercel).
 
 ## Preset showcase
 
@@ -115,6 +155,8 @@ Farm's browser error overlay and its source-map diagnostics are development-only
 
 Farm embeds a deployment ID in each HTML document and sends it with SPA data, RSC navigation, and server action requests. The server also stores the ID in an HttpOnly, `SameSite=Lax` cookie so a progressively enhanced form action carries the same protection before JavaScript loads.
 
+In apps built with `@farm.js/plugin/rsc`, only a `GET` page document that stays out of shared caches (`private` or `no-store`, with no CDN cache header) sets that cookie, in `farm dev` and in production. A page that `cache: "public"` middleware makes shareable, a prerendered page, a Flight payload, and a refused request are sent without it: a CDN does not cache a response that sets a cookie, and one that did would hand it to every visitor. Such a page still embeds its deployment ID, so navigations and JavaScript server actions from it are checked.
+
 During a rolling deployment, an open page can belong to release A while its next request reaches release B. Farm handles that mismatch according to whether replay is safe:
 
 | Request                                      | Mismatch behavior                                                              |
@@ -124,6 +166,8 @@ During a rolling deployment, an open page can belong to release A while its next
 | Form server action without JavaScript        | Return the same non-cacheable `409` response using the deployment cookie.      |
 
 Mutation requests are rejected before their action body is decoded or the handler runs. This prevents a stale action from being replayed against a new release and accidentally creating duplicate writes. The user can refresh and deliberately submit again.
+
+Page responses carry the server's ID in the `x-farm-deployment-id` header, and the cookie's path is the app's `basePath`. Docs engine pages and the not-found page count as page responses here, so a navigation from an old page to either is detected too. A page request whose header, or for a form post whose cookie, names another deployment gets the `409` after app middleware and before the page renders or an action runs. Outside `@farm.js/plugin/rsc`, only page requests are checked; API routes answer as usual. A document load reads only the header, so a stale cookie never refuses opening the app in a new tab. Farm sets the cookie on `GET` page responses, never on a refused request, so the stale page's forms stay refused. In a production build, only a page response that stays out of shared caches (`private` or `no-store`, with no CDN cache header) sets it: a prerendered, ISR, PPR, or other publicly cached page is sent without the cookie, because CDNs do not cache a response that sets one. Such a page still embeds its deployment ID, so navigations from it are checked.
 
 Farm resolves the ID from explicit config, `FARM_DEPLOYMENT_ID`, `VERCEL_GIT_COMMIT_SHA`, or `CF_PAGES_COMMIT_SHA`. Otherwise, production uses `generateBuildId` and development uses `"development"`.
 
@@ -217,6 +261,24 @@ CMD ["node", ".farm/.output/server/index.mjs"]
 
 The build stage keeps devDependencies because `farm build` runs the CLI. The runtime stage does not need `node_modules`. This file uses the default output directory, `.farm/.output`; if you set `deploy.output`, copy and start that directory instead. Add a `.dockerignore` with `node_modules`, `.farm`, and `.git` so local builds stay out of the image.
 
+### Startup code cache
+
+For the `node-server` preset, `.output/server/index.mjs` is a small launcher: it turns on
+Node's on-disk code cache and then loads the built server, `farm-server.mjs`, beside it. Keep
+starting the server through `index.mjs` as before.
+
+Node otherwise recompiles the whole server bundle from source on every start. The launcher
+writes V8's bytecode to `.output/server/.compile-cache` on the first start, and later starts
+read it instead. On the `examples/basic` app, boot to a first rendered page drops from 185 ms
+to 139 ms.
+
+The cache makes restarts and redeploys of the same build faster. It is written at runtime, so
+give the server a writable output directory to benefit from it — a container with a read-only
+filesystem, or one replaced on every request, simply starts uncached. Nothing depends on it:
+Node checks each entry against the source and its own version, and a stale, corrupt or missing
+cache compiles as before. Set `NODE_COMPILE_CACHE` yourself to put the cache elsewhere, such
+as a writable volume shared by restarts.
+
 ### Hosting platforms
 
 Any platform that builds from a Git repository and runs a long-lived Node.js process can host a Farm app, including Coolify, Dokploy, Railway, Render, Fly.io, Zeabur, Clever Cloud, and Heroku. They need the same settings:
@@ -281,6 +343,14 @@ Nitro's official deploy docs list these runtime and provider families. Farm's fi
 | Other Nitro provider docs            | Alwaysdata, AWS Lambda, Cleavr, Deno Deploy, DigitalOcean, EdgeOne Pages, Firebase, Flightcontrol, Genezio, GitHub Pages, GitLab Pages, Heroku, IIS, Koyeb, Platform.sh, Render.com, Zephyr Cloud, Zerops |
 
 Common preset names include `node-server`, `bun`, `deno-server`, `deno-deploy`, `aws-lambda`, `aws-amplify`, `azure-swa`, `cloudflare-pages`, `cloudflare-module`, `firebase-app-hosting`, `github-pages`, `gitlab-pages`, `netlify`, `netlify-edge`, `vercel`, `zeabur`, and `zerops`. Nitro can add or rename presets over time, so check Nitro's deploy docs when targeting a provider directly.
+
+Farm's Nitro version has no `vercel-edge` preset: Nitro replaced it with `vercel` on Fluid compute. Farm rejects `vercel-edge` as a `deploy.target`, `deploy.preset`, or `--preset` value when it resolves the config, before the build starts. Use the `vercel` target instead.
+
+## Files server code reads
+
+Server code can import a local file that it reads at runtime, such as a `.wasm` binary an API route imports without `@farm.js/wasm`. Farm deploys that file with the server code and keeps it out of the public assets: in `server/` for `node-server` and `bun`, in the function directory for `vercel` and `netlify`, and in the server output of other Nitro presets that run on Node.
+
+Edge presets (`cloudflare-pages`, `cloudflare-module`, `netlify-edge`) deploy no file to read, and Cloudflare Workers also refuse to compile WebAssembly from bytes. On those presets `farm build` fails and names the file. Load the module in the browser instead, with `@farm.js/wasm` or a `?url` import, or deploy that server code to a Node target.
 
 ## Build
 
@@ -364,12 +434,20 @@ Keep environment variables in the platform's environment manager or local `.env`
 Server values declared under `env.server` are validated when the app builds, but they are not
 stored in the build output. The production server reads them from its own environment when code
 calls `getEnv` or `serverEnv`, so set them wherever the server runs, and a restart picks up a
-rotated secret. On Cloudflare Workers, Farm also reads the worker's bindings and secrets. A value
-read at runtime keeps the type its parser produced at build time, such as a number or boolean. When a
-parser does more than convert the raw string to a string, number, boolean, or JSON value, such as
-splitting a list or scaling a number, Farm cannot repeat it at runtime, so that parsed value stays in
-the build output. Values declared under `env.public` are part of the client bundle, so never put a
-secret there.
+rotated secret. A value read at runtime keeps the type its parser produced at build time, such as a
+number or boolean. When a parser does more than convert the raw string to a string, number, boolean,
+or JSON value, such as splitting a list or scaling a number, Farm cannot repeat it at runtime, so that
+parsed value stays in the build output. Values declared under `env.public` are part of the client
+bundle, so never put a secret there.
+
+On Cloudflare Pages and Workers, server code reads the worker's vars and secrets through `getEnv`,
+`serverEnv`, and `process.env`, at module scope too, and storage mounts on a binding driver such as
+`cloudflare-kv-binding` read their binding. The Wrangler config Farm generates
+(`_worker.js/wrangler.json` for Pages, `server/wrangler.json` for Workers) has a compatibility date
+from before Cloudflare filled `process.env` by default, so Farm adds the
+`nodejs_compat_populate_process_env` flag to it. It leaves the flags alone when your own Wrangler
+config sets a date from `2025-04-01` on, which fills `process.env` already, or opts out with
+`nodejs_compat_do_not_populate_process_env`.
 
 ```ts
 export default defineConfig({

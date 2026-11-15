@@ -57,6 +57,7 @@ describe("Markdown literal-route matching work", () => {
     expect(hit.value).toEqual({
       pathname: "/target",
       route: config.expose !== true ? config.expose[100] : null,
+      markdownPath: "/target.md",
     });
     expect(hit.constructions).toBe(0);
   });
@@ -84,6 +85,7 @@ describe("Markdown literal-route matching work", () => {
     expect(result.value).toEqual({
       pathname: "/docs/install",
       route: { route: "/docs/[[...slug]]", title: "First", cache: 60 },
+      markdownPath: "/docs/install.md",
     });
     expect(result.constructions).toBe(1);
     expect(resolveMarkdownMirrorTarget(config, "/docs.md")?.route?.title).toBe("First");

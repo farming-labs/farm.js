@@ -183,10 +183,10 @@ function ComparisonPanel({
         {label}
       </span>
       {illustration}
-      <h3 className="mt-4 max-w-xl text-2xl font-medium leading-tight tracking-normal text-white sm:mt-5 sm:text-3xl">
+      <h3 className="mt-4 max-w-xl text-2xl font-medium tracking-normal text-white sm:mt-5 sm:text-3xl">
         {title}
       </h3>
-      <p className="mt-3 max-w-md text-sm leading-6 text-white/42">{description}</p>
+      <p className="mt-3 max-w-md text-sm text-white/42">{description}</p>
     </article>
   );
 }
@@ -344,7 +344,7 @@ function BenchmarkAreaChart() {
     <div className="relative col-span-full min-h-[40rem] overflow-hidden border-t border-white/12 bg-black">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 max-w-2xl px-6 pt-6 sm:px-12 sm:pt-12">
         <span className="flex items-center gap-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/46">
-          <span className="text-white/44">01.5</span>
+          <span>01.5</span>
           <span aria-hidden className="text-white/18">
             /
           </span>
@@ -352,7 +352,7 @@ function BenchmarkAreaChart() {
           Benchmark
         </span>
 
-        <p className="my-6 text-2xl font-medium leading-tight tracking-normal text-white sm:text-3xl">
+        <p className="my-6 text-2xl font-medium tracking-normal text-white sm:text-3xl">
           Farm.js starts, builds and ships the least of the benchmark app.{" "}
           <span className="text-white/42">
             Raw medians for startup, build, boot, SSR, and HTML. The tiles below name the framework
@@ -365,7 +365,7 @@ function BenchmarkAreaChart() {
             <span
               key={framework.id}
               className={
-                "inline-flex items-center gap-2 bg-black/45 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-normal backdrop-blur transition-colors duration-200 hover:bg-white/[0.045] hover:text-white " +
+                "inline-flex items-center gap-2 bg-black/45 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-normal backdrop-blur-sm transition-colors duration-200 hover:bg-white/[0.045] hover:text-white " +
                 (framework.id === "farm" ? "text-white" : "text-white/48")
               }
             >
@@ -383,7 +383,7 @@ function BenchmarkAreaChart() {
         </div>
       </div>
 
-      <div className="pointer-events-none absolute right-6 top-6 z-10 hidden border border-white/12 bg-black/70 px-3 py-2 font-mono text-[9px] uppercase tracking-normal text-white/44 backdrop-blur sm:block">
+      <div className="pointer-events-none absolute right-6 top-6 z-10 hidden border border-white/12 bg-black/70 px-3 py-2 font-mono text-[9px] uppercase tracking-normal backdrop-blur-sm sm:block">
         <span className="block text-white/68">X: benchmark set</span>
         <span className="mt-1 block">Y: raw median / lower is better</span>
       </div>

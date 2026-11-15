@@ -184,7 +184,9 @@
   display: flex;
   flex-direction: column;
   gap: 0.75em;
-  padding: 0 0.4em;
+  /* A bubble's tail pokes 11px past it (.bf-tail). On small type, this padding and the body's
+     1.2em must still hold it, or the body's overflow clips its tip. */
+  padding: 0 max(0.4em, calc(11px - 1.2em));
 }
 /* Message bubbles: dark, hairline border, a small curved tail on the sender's side. */
 .bf-bubble {
@@ -356,9 +358,10 @@
 }
 
 /* verbatim code inside merged figures */
+/* Bleeds to the body's edges: past its 1.2em padding, the body's overflow clips the accent bar. */
 .bf-add {
-  margin: 0 -1.3em;
-  padding: 0 1.3em;
+  margin: 0 -1.2em;
+  padding: 0 1.2em;
   background: rgb(255 255 255 / 0.06);
   box-shadow: inset 2px 0 0 #ededed;
   color: #fff;
@@ -478,7 +481,10 @@
 .blog-figure:not([data-state="playing"]) .bf-toggle .bf-icon-pause {
   display: none;
 }
+/* A figure that scrolls sideways keeps its caption in view, as it does its controls. */
 .blog-figure figcaption {
+  position: sticky;
+  left: 0;
   margin-top: 0.4rem;
   text-align: center;
   font-family: var(--font-geist-mono), ui-monospace, monospace;
@@ -729,11 +735,89 @@
   color: #ededed;
 }
 
+/* Landing mobile card: the phone panel reads as a device and its screen fills the body. */
+.blog-figure[data-figure="landing-mobile"] [data-panel="phone"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.blog-figure[data-figure="landing-mobile"] [data-panel="phone"] .bf-body {
+  flex: 1;
+  padding: 0.9em;
+}
+.bf-vphone {
+  height: 100%;
+}
+/* A modal sheet: the panel's own surface, raised over the dimmed screen it opened from. */
+.bf-vsheet {
+  border-color: rgb(255 255 255 / 0.22);
+  border-radius: 3px;
+  background: #0b0b0b;
+}
+.bf-vgrip {
+  position: absolute;
+  top: 0.6em;
+  left: 42%;
+  width: 16%;
+  height: 0.25em;
+  border-radius: 1em;
+  background: rgb(255 255 255 / 0.25);
+}
+/* One screen on the phone; screens slide and fade as layers. The phone clips them. */
+.bf-vlayer {
+  position: absolute;
+  inset: 0;
+}
+/* A screen being pushed carries a hairline on its leading edge over the one it covers. */
+.bf-vlayer--edge {
+  border-left: 1px solid rgb(255 255 255 / 0.18);
+  background: #070707;
+}
+.bf-vphone {
+  overflow: hidden;
+}
+
+/* A pushed screen's back chevron, at the header's text size. */
+.bf-vback {
+  position: absolute;
+  top: 2.4%;
+  display: inline-flex;
+  width: 1.15em;
+  height: 1.15em;
+  color: #cfcfcf;
+}
+.bf-vback svg {
+  width: 100%;
+  height: 100%;
+}
+/* Streets on the React Native map: hairlines over the hatching. */
+.bf-vroad {
+  position: absolute;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.16);
+}
+/* A map pin: the one bright mark on the React Native screen. */
+.bf-vpin {
+  position: absolute;
+  width: 0.8em;
+  height: 0.8em;
+  margin: -0.4em 0 0 -0.4em;
+  border-radius: 50%;
+  background: #ededed;
+}
+/* The tab bar's current tab: a brighter edge, not a fill. */
+.bf-vblock--tab {
+  border-color: rgb(255 255 255 / 0.32);
+  background: #1c1c1c;
+}
+
 /* Phones: figures with a phone layout swap to it, a single column of the same panels and
    connectors at a legible size, instead of a 600px stage that scrolls sideways. */
 .bf-stage--narrow {
   display: none;
-  min-width: 0;
+  /* Where its type reaches the 9px floor (the font-size above), the stage stops shrinking and
+     scrolls sideways like the wide stage, so the text keeps the room its panels were drawn for. */
+  min-width: calc(9px / (0.0162 * var(--bf-scale, 1)));
 }
 .bf-stage--narrow .bf-panel--code .bf-body {
   white-space: pre-wrap;

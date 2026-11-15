@@ -113,7 +113,13 @@ function run(testCase: Case, root: t.JSXElement, allowed: boolean): Result {
   return passes[testCase.name](
     root,
     new Map([["setRows", { index: 0 }]]),
-    ...testCase.helpers.map((name) => t.identifier(name)),
+    ...testCase.helpers.map((name) => {
+      let identifier: t.Identifier | undefined;
+      return () => {
+        expect(allowed).toBe(true);
+        return (identifier ??= t.identifier(name));
+      };
+    }),
     allowed,
   );
 }

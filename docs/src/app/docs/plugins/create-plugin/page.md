@@ -8,6 +8,11 @@ section: "Plugin Ecosystem"
 
 Build a plugin when behavior belongs to the framework rather than one product integration. Good examples include request tracing, security policy, HTML transforms, route analysis, deployment adapters, development tooling, and global instrumentation.
 
+Import `definePlugin` from `@farm.js/core/plugin`. The package root also loads Farm's React
+client, so a plugin that imports it fails in a [backend-only app](/docs/backend) without React.
+Use `isFarmRendererDisabled(config.renderer)` from `@farm.js/core/renderer` in `configure` when a
+plugin only makes sense for rendered pages, and fail with a message that names `renderer: false`.
+
 ## Options reference
 
 Every option a plugin can set. The sections below show each one in use.
@@ -51,6 +56,19 @@ Each runtime hook receives one event with `request`, `req` (the shared request s
 | `error`     | When the request throws (also gets `error`, `durationMs`) | Nothing                                                                 |
 | `close`     | Once, when the runtime shuts down (gets `reason`)         | Nothing                                                                 |
 
+API and integration requests follow the same contract in `farm dev` and in a production build:
+
+- `before` runs before app middleware, and `after` also sees a response middleware answers with.
+  Integration routes answer before app middleware.
+- A path under the API base path that no route matches still runs `context` and `before`, so a
+  guard can answer it, and `after` sees Farm's JSON 404 or the guard's early answer.
+- When an API or integration route throws, Farm answers `500`. `error` runs first with the thrown
+  value, then `after` runs with that `500` response. The flat `onError` hook gets the throw once,
+  with `phase: "runtime"`.
+- A throw from a `context`, `before`, or `after` hook runs `error`, skips the remaining `after`
+  hooks, and answers `500` with Farm's JSON body `{"error":"Internal Server Error"}`. A page
+  request gets a plain-text `Internal Server Error` instead, unless the app sets `renderer: false`.
+
 ### Router, render, build, and dev hooks
 
 These hooks receive their payload, then a context with `state`, `config`, `isDev`, and `isProd`.
@@ -83,7 +101,7 @@ Plugins can own API handlers without creating files in the app's routing directo
 them in `routes`, using the same API request pipeline as file routes:
 
 ```ts
-import { definePlugin } from "@farm.js/core";
+import { definePlugin } from "@farm.js/core/plugin";
 import { z } from "zod";
 
 export const projectRoutes = definePlugin({
@@ -155,7 +173,7 @@ This plugin creates typed private state, derives typed context for every request
 **src/plugins/request-tracing.ts**
 
 ```ts
-import { definePlugin } from "@farm.js/core";
+import { definePlugin } from "@farm.js/core/plugin";
 import { randomUUID } from "node:crypto";
 
 type RequestTracingOptions = {
@@ -281,7 +299,7 @@ A published plugin should expose an options factory and keep its setup state pri
 **packages/farm-plugin-security/src/index.ts**
 
 ```ts
-import { definePlugin } from "@farm.js/core";
+import { definePlugin } from "@farm.js/core/plugin";
 
 export interface SecurityPluginOptions {
   frameAncestors?: string;
@@ -322,7 +340,7 @@ Keep the public surface small: export the factory, its options, and any intentio
 A typed factory already gives the app autocomplete. To also check options at runtime, declare them on the plugin with a [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, and others). `definePlugin` then returns the factory for you:
 
 ```ts
-import { definePlugin } from "@farm.js/core";
+import { definePlugin } from "@farm.js/core/plugin";
 import { z } from "zod";
 
 export const securityPlugin = definePlugin({

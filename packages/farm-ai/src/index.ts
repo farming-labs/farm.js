@@ -1,8 +1,8 @@
+import { createEndpoint } from "@farm.js/core/api";
 import {
-  createEndpoint,
   describeIntegrationOriginRejection,
   validateIntegrationRequestOrigin,
-} from "@farm.js/core";
+} from "@farm.js/core/integrations";
 import {
   convertToModelMessages,
   createDownload,

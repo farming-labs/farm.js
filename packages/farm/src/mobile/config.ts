@@ -9,6 +9,11 @@ import {
   type PlatformBlockChecker,
 } from "../platform-blocks";
 import { getRoutePatternShape } from "../routing/specificity";
+import {
+  resolveFarmMobileModules,
+  type FarmMobileModuleConfig,
+  type ResolvedFarmMobileModuleConfig,
+} from "./modules";
 
 export type FarmMobileOS = "android" | "ios";
 
@@ -35,6 +40,14 @@ export interface FarmMobileRouteConfig {
  */
 export type FarmMobileScreen = "web" | "native" | "platform";
 
+/**
+ * What the route manifest shows for a route: a {@link FarmMobileScreen}, or `"server"`, a native
+ * screen the shell draws from the page the server renders (the analyzer's native tier). Config
+ * cannot ask for `"server"`; `export const mobile = { native: true }` or `native.auto: "on"` gets
+ * it for a page the analyzer proves. A shell that does not know a screen shows the route as web.
+ */
+export type FarmMobileRouteScreen = FarmMobileScreen | "server";
+
 /** What builds native screens. Only the decision is recorded for now; no engine ships yet. */
 export type FarmMobileNativeEngine = "react-native" | "platform";
 
@@ -44,7 +57,11 @@ export type FarmMobileNativeEngine = "react-native" | "platform";
  */
 export type FarmMobileNativeAuto = "off" | "report" | "on";
 
-/** `"intent"` starts a route's data request when a link to it is pressed. */
+/**
+ * Reserved: `"intent"` is meant to start a route's data request when a link to it is pressed. It is
+ * recorded in the route manifest, but no shell prefetches yet, and a page that sets it gets a
+ * build warning.
+ */
 export type FarmMobilePrefetch = "intent" | "off";
 
 export interface FarmMobileNativeRouteConfig {
@@ -62,6 +79,7 @@ export interface FarmMobileNativeRouteConfig {
   presentation?: FarmMobilePresentation;
 }
 
+/** Reserved: nothing measures these yet, and the build warns when they are set. */
 export interface FarmMobileBudgets {
   /** Installed app size, in MB. */
   appSizeMb?: number;
@@ -80,7 +98,7 @@ export interface FarmMobileNativeConfig {
   routes?: Record<string, FarmMobileNativeRouteConfig>;
   /**
    * Components that may render as native views inside web screens, such as `"Map"`. Reserved:
-   * no islands render yet.
+   * no islands render yet, and the build warns when this is set.
    */
   islands?: string[];
   /** Default for every route; a page's `export const mobile` wins. Defaults to `"intent"`. */
@@ -122,6 +140,20 @@ export interface FarmMobileUserConfig {
   routes?: Record<string, FarmMobileRouteConfig>;
   /** Screen tiers per route, the native engine, and the analyzer. */
   native?: FarmMobileNativeConfig;
+  /**
+   * Bundle a page shell, the route's layouts around its `loading.tsx`, into the app for routes
+   * whose loading file and layouts sit in static folders. A web screen that loads a document
+   * shows its shell at once, and keeps it up while the server is unreachable. Built by
+   * `farm build --mobile`; defaults to `false`.
+   */
+  shells?: boolean;
+  /**
+   * What the OS needs for each native module, keyed by module name: an app module's registered
+   * name (`src/native/NativeDevice.ts` registers `"Device"`) or an installed package such as
+   * `"react-native-vision-camera"`. `permissions` go into the Android manifest and `usage`
+   * strings into the iOS `Info.plist`.
+   */
+  modules?: Record<string, FarmMobileModuleConfig>;
 }
 
 /** What a function-valued `mobile` block receives. Resolved once per OS per dev start or build. */
@@ -163,9 +195,21 @@ export interface ResolvedFarmMobileConfig {
   /** `mobile.routes`, keyed by route pattern with route groups removed. */
   routes: Record<string, FarmMobileRouteConfig>;
   native: ResolvedFarmMobileNativeConfig;
+  shells: boolean;
+  /** `mobile.modules`, checked: permissions deduplicated per module, usage strings trimmed. */
+  modules: Record<string, ResolvedFarmMobileModuleConfig>;
 }
 
-const MOBILE_KEYS = new Set(["name", "id", "server", "tabs", "routes", "native"]);
+const MOBILE_KEYS = new Set([
+  "name",
+  "id",
+  "server",
+  "tabs",
+  "routes",
+  "native",
+  "shells",
+  "modules",
+]);
 const ROUTE_KEYS = new Set(["presentation"]);
 const TAB_KEYS = new Set(["path", "title", "icon"]);
 const NATIVE_KEYS = new Set(["engine", "auto", "routes", "islands", "prefetch", "budgets"]);
@@ -460,6 +504,17 @@ export function validateFarmMobileConfig(
     }
   }
   if (input.native !== undefined) validateNativeConfig(input.native, check);
+  if (input.shells !== undefined && typeof input.shells !== "boolean") {
+    fail("shells must be true or false.");
+  }
+  // Each entry is checked by resolveFarmMobileConfig, which knows the app's modules and reports
+  // every problem at once.
+  if (input.modules !== undefined && !isPlainObject(input.modules)) {
+    fail(
+      "modules must be an object keyed by module name, such as " +
+        '{ Device: { permissions: ["android.permission.VIBRATE"] } }.',
+    );
+  }
   // One presentation per route: mobile.routes and mobile.native.routes share the field.
   if (isPlainObject(input.routes) && isPlainObject(input.native)) {
     const nativeRoutes = isPlainObject(input.native.routes) ? input.native.routes : {};
@@ -501,6 +556,8 @@ export interface FarmMobileResolveOptions {
   srcDir?: string;
   /** The app's page route patterns, such as `"/notes/[id]"` (route groups removed). */
   routes: readonly string[];
+  /** Names the app's own native module specs register (`scanFarmMobileAppModules`). */
+  appModules?: readonly string[];
 }
 
 /**
@@ -605,6 +662,8 @@ export function resolveFarmMobileConfig(
       prefetch: native.prefetch ?? "intent",
       budgets: { ...native.budgets },
     },
+    shells: config.shells === true,
+    modules: resolveFarmMobileModules(config.modules, options, fail),
   };
 }
 

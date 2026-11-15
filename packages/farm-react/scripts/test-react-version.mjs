@@ -64,6 +64,7 @@ const testSource = String.raw`
   const {
     createCompiledComponent,
     createCompiledComponentWithFeatures,
+    createCompiledComponentWithoutRefresh,
     createCompilerKeyedArrayAppend,
     createCompilerKeyedArrayBatchInsert,
     createCompilerKeyedArrayFilter,
@@ -105,9 +106,11 @@ const testSource = String.raw`
   const { List } = await import("@farm.js/react/list");
 
   // Root text mutations must hand React back the exact committed HostText nodes.
+  for (const createComponent of [createCompiledComponentWithFeatures, createCompiledComponentWithoutRefresh,
+    createRequire(import.meta.url)("@farm.js/react/compiler-runtime").createCompiledComponentWithoutRefresh]) {
   for (const reactivity of ["static", "hybrid"]) {
     for (const hydrate of [false, true]) {
-      const RootText = createCompiledComponentWithFeatures({
+      const RootText = createComponent({
         displayName: "CompatibilityRootText", reactivity,
         initialize: () => ["before"],
         readProps: (props) => [props.next],
@@ -154,6 +157,7 @@ const testSource = String.raw`
         container.remove();
       }
     }
+  }
   }
 
   // Reappearance replays mount lifecycles, not ordinary prop-update lifecycles.

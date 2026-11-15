@@ -41,6 +41,14 @@ export function delegateNavigation(delegate: FarmNavigationDelegate): () => void
 }
 
 /**
+ * @internal Whether any delegate is registered. Code that writes history itself (the RSC router,
+ * `useRouter` without Farm's SPA router) keeps its synchronous path when this is false.
+ */
+export function hasFarmNavigationDelegates(): boolean {
+  return Boolean((globalThis as DelegateHost)[DELEGATES]?.size);
+}
+
+/**
  * @internal The router's step after its blockers: true when a delegate took the navigation. A
  * delegate that throws is reported and counts as declining, so the page still navigates.
  */

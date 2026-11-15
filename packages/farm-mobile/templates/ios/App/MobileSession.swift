@@ -11,6 +11,10 @@ import os
 /// refresh token (`/__farm/mobile/session`). Neither the nonce nor the tokens ever enter a
 /// WebView. The tokens live in the Keychain, readable only on this device after first unlock.
 ///
+/// A native screen signs in through `signIn(path:body:)`: native code sends the credentials to the
+/// auth route, puts the session cookie it gets into the WebView's cookie store, and issues the
+/// device token from it the same way. So a native sign-in signs in every web screen too.
+///
 /// Signing out on a web screen makes the server revoke the device and clear its `farm_mobile`
 /// marker cookie; the next sync sees the marker gone and deletes the tokens. A refresh the server
 /// refuses deletes them too.
@@ -57,7 +61,7 @@ final class MobileSession {
         configuration.httpCookieStorage = nil
         configuration.urlCache = nil
         configuration.timeoutIntervalForRequest = 10
-        http = URLSession(configuration: configuration)
+        http = URLSession(configuration: configuration, delegate: RefuseRedirects(), delegateQueue: nil)
         tokens = Self.readKeychain()
     }
 
@@ -129,15 +133,102 @@ final class MobileSession {
         }
     }
 
-    private func issue(cookieHeader: String) async {
+    /// What `signIn(path:body:)` hands back to JS: the auth route's status and body, never its
+    /// cookies.
+    struct SignInReply {
+        let status: Int
+        let body: String
+    }
+
+    enum SignInError: Error {
+        case notAnAuthRoute(String)
+        case unreachable(String)
+        case notIssued(Int)
+    }
+
+    /// Sign in from a native screen (`signIn`/`signUp` from `@farm.js/auth/client`): POST the JSON
+    /// `body` to `path`, which must be a route under `auth.basePath`, on `mobile.server` only, with
+    /// no cookies and without following redirects. A success's cookies go into the WebView's
+    /// cookie store, as a web sign-in's would, and the device token is issued from them with the
+    /// same challenge and exchange; any earlier device token is revoked first. A failure keeps no
+    /// cookie and issues nothing. Returns once the token is stored.
+    func signIn(path: String, body: String) async throws -> SignInReply {
+        guard Self.isAuthRoute(path, authBasePath: FarmBuild.authBasePath) else {
+            throw SignInError.notAnAuthRoute(path)
+        }
+        var request = URLRequest(url: config.url(FarmBuild.basePath + path))
+        request.httpMethod = "POST"
+        // No Cookie and no Origin: a fresh sign-in, the request any non-browser client sends.
+        request.httpShouldHandleCookies = false
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = Data(body.utf8)
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            let (received, answer) = try await http.data(for: request)
+            guard let answer = answer as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            data = received
+            response = answer
+        } catch {
+            Self.log.error("native sign-in failed: \(error.localizedDescription, privacy: .public)")
+            throw SignInError.unreachable(error.localizedDescription)
+        }
+        let reply = SignInReply(status: response.statusCode, body: String(decoding: data, as: UTF8.self))
+        let fields = Self.headerFields(response)
+        let cookies = HTTPCookie.cookies(withResponseHeaderFields: fields, for: serverURL)
+        // A refused sign-in (or a redirect) keeps no cookie. A success without one, such as a
+        // sign-up that waits for email verification, signs nobody in: nothing to issue.
+        guard (200..<300).contains(response.statusCode), !cookies.isEmpty else { return reply }
+
+        // This sign-in replaces any earlier device session.
+        if let previous = tokens {
+            clear()
+            _ = await post("/__farm/mobile/session/revoke", bearer: previous.refresh)
+        }
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        for cookie in cookies {
+            await store.setCookie(cookie)
+        }
+        let header = HTTPCookie.requestHeaderFields(with: await serverCookies())["Cookie"] ?? ""
+        attempted = header
+        let issued = await issue(cookieHeader: header)
+        guard issued == 200 else { throw SignInError.notIssued(issued) }
+        return reply
+    }
+
+    /// A route under `authBasePath`, such as `/api/auth/sign-in/email`: no query, dots, or escapes.
+    nonisolated static func isAuthRoute(_ path: String, authBasePath: String) -> Bool {
+        guard authBasePath.hasPrefix("/"), path.hasPrefix(authBasePath + "/") else { return false }
+        let rest = path.dropFirst(authBasePath.count)
+        let segments = rest.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
+        return segments.allSatisfy { segment in
+            !segment.isEmpty && segment.unicodeScalars.allSatisfy { scalar in
+                scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar) || scalar == "_" || scalar == "-")
+            }
+        }
+    }
+
+    /// Trade the WebView's cookie session for a device token: a one-time nonce, then the exchange
+    /// with the same cookies. The status of the step that answered last: 200 once stored.
+    @discardableResult
+    private func issue(cookieHeader: String) async -> Int {
         let challenge = await post("/__farm/mobile/session/challenge", cookies: cookieHeader)
         guard challenge.status == 200, let nonce = challenge.body?["nonce"] as? String, !nonce.isEmpty else {
-            return
+            return challenge.status
         }
         let issued = await post("/__farm/mobile/session", cookies: cookieHeader, nonce: nonce)
         if issued.status == 200, let next = Self.tokens(from: issued.body) {
             save(next)
             Self.log.info("device session issued")
+            return 200
+        }
+        return issued.status
+    }
+
+    private static func headerFields(_ response: HTTPURLResponse) -> [String: String] {
+        response.allHeaderFields.reduce(into: [String: String]()) { result, entry in
+            if let key = entry.key as? String, let value = entry.value as? String { result[key] = value }
         }
     }
 
@@ -166,11 +257,8 @@ final class MobileSession {
             let (data, response) = try await http.data(for: request)
             guard let response = response as? HTTPURLResponse else { return Reply(status: 0, body: nil) }
             // The device marker goes into the WebView cookie store, where web sign-out finds it.
-            let fields = response.allHeaderFields.reduce(into: [String: String]()) { result, entry in
-                if let key = entry.key as? String, let value = entry.value as? String { result[key] = value }
-            }
             let store = WKWebsiteDataStore.default().httpCookieStore
-            for cookie in HTTPCookie.cookies(withResponseHeaderFields: fields, for: serverURL) {
+            for cookie in HTTPCookie.cookies(withResponseHeaderFields: Self.headerFields(response), for: serverURL) {
                 await store.setCookie(cookie)
             }
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -241,5 +329,18 @@ final class MobileSession {
         if status != errSecSuccess {
             log.error("keychain write failed: \(status, privacy: .public)")
         }
+    }
+}
+
+/// The session's requests never follow a redirect: a 3xx comes back as it is, so nothing the
+/// shell sends, credentials included, goes anywhere but `mobile.server`.
+private final class RefuseRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest
+    ) async -> URLRequest? {
+        nil
     }
 }

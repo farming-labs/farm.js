@@ -135,22 +135,62 @@ Common config fields:
   `.farm/output/mobile/native-report.json` with each route's blockers as file:line:column;
   `farm dev|build --mobile` generates the Android shell into `.farm/output/mobile/android` (install
   `@farm.js/mobile`) and `farm build --mobile` prints the report unless `native.auto` is `"off"`;
+  `farm build` of an app with `mobile` also builds the mobile client (`.farm/mobile-client.json`),
+  which documents load when the shell sends `X-Farm-Shell`, and `farm build --mobile` bundles its
+  hashed files into the APK (iOS loads them from the server; SSG pages keep the web client;
+  server components apps get it too: islands mode as any app, the RSC pipeline as one
+  `farm-mobile-client` entry that runs the web entry, with `clientDir` in the manifest, and
+  without device tokens since it refuses `auth`/`integrations`); the RSC router offers link
+  clicks, `router.push`/`replace` and server action redirects to `delegateNavigation`;
   `--os ios` generates the iOS shell (Xcode project, Swift + UIKit) into `.farm/output/mobile/ios`
-  and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; not yet built with `xcodebuild`;
+  and builds and opens it on a booted simulator when Xcode is installed (Xcode with the iOS 16+ SDK; built and launched in simulator CI with Xcode 16.4;
   `--apk` is Android only); both shells share `templates/shared/farm-bridge.js`; on Android
   `page.native.tsx`/`page.android.tsx` build as React Native screens, verified in
   `farm dev --mobile` on an Android emulator (not in production bytecode builds or on real
-  devices), signed in through device tokens after a web-screen sign-in (`/__farm/mobile/session`:
+  devices), signed in through device tokens after a sign-in on a web or native screen (`/__farm/mobile/session`:
   the shell keeps tokens in the Keystore/Keychain, `serverFetch` sends `Authorization: Bearer` and
   refreshes once on 401, the server runs a valid bearer as the cookie session; covered for
   `@farm.js/auth` and `@farm.js/better-auth` through an integration's `session(request)`; mount
-  persistent storage at `farm-mobile` in production; `signOut()` revokes) (install
+  persistent storage at `farm-mobile` in production; with `@farm.js/auth`, native screens import
+  `signIn`, `signUp`, `getSession`, `useAuth` and `signOut` from `@farm.js/auth/client` like web
+  pages (Metro resolves its `react-native` build; web bundles unchanged; native sign-in is posted by
+  the shell, only under `auth.basePath`, and signs web screens in too; social sign-in rejects
+  natively); `signOut()` from `@farm.js/native` is the low-level forget-this-device call) (install
   `@farm.js/native react-native @react-native/metro-config` as dev deps, React 19.2.8 or later;
   needs NDK 27.1.12297006 and CMake 3.22.1; hooks `useNavigate`, `useRouteParams`,
   `useServerQuery`, `serverFetch`; Metro in dev, Hermes bytecode in builds; a screen that throws
   while loading shows the web twin `page.tsx` in builds and React Native's error screen in dev;
-  keep native files out of the web tsconfig); on iOS `native` screens show a placeholder;
-  `platform` screens show a placeholder on both; `src/native/` is for native module specs
+  keep native files out of the web tsconfig; React Native modules in the app's own `dependencies`
+  with Android code are autolinked from a Farm-written `autolinking.json`, never devDependencies or
+  transitive packages, and must have `codegenConfig` (new architecture) or generation fails naming
+  the package; an app that links one builds through React Native's Gradle plugin, AGP 9.2.1 and
+  Gradle 9.4.1, apps without one are unchanged; verified on an Android emulator, not on devices); on iOS `native` screens show a placeholder;
+  `platform` screens show a placeholder on both
+- App native modules: `src/native/Native<Name>.ts` Codegen specs
+  (`TurboModuleRegistry.getEnforcing<Spec>("<Name>")`) plus one Kotlin class per spec that extends
+  `dev.farmjs.mobile.specs.Native<Name>Spec` and takes a `ReactApplicationContext`; with a React
+  Native screen on Android, Farm copies them into a `farm-app-modules` library linked through
+  `autolinking.json` like a community module (Codegen by React Native's Gradle plugin, a generated
+  `FarmAppModulesPackage`); a spec without exactly one class, or a `.kt` without `package`, fails
+  naming the file; Swift files are copied outside the Xcode target (no iOS React Native host);
+  keep `src/native` out of the web tsconfig; not yet built into an APK
+- `mobile.modules`: per module (an app module's registered name or a React Native package in
+  `dependencies`), `permissions` (full Android names, added to `AndroidManifest.xml` after
+  `INTERNET`) and `usage` (`NS...UsageDescription` keys into `Info.plist`); every problem reported
+  at once with the key and fix; no permission table, community modules merge their own manifests;
+  `web: true` (app modules only, a community module is an error) lets web screens call the module
+- Web screens calling app modules: `import { native, NativeUnavailableError, NativeCallError } from
+"@farm.js/core/native"`; `native.<Name>.available()` first, then `native.<Name>.<method>(...args)`
+  for the spec's Promise methods only; Android and iOS (each needs a React Native screen in the
+  app; iOS also the module's Objective-C++ class, else `available()` is false); arguments are
+  checked against the Codegen spec in generated Kotlin or Swift before the module runs (`invalid_args`, `unknown_method`, `native_error`, or the
+  module's own reject code); calls run on the module instance native screens use; types come from
+  the specs into `src/farm.d.ts` (`FarmNativeModules`); large results by reference, Android only: the module
+  writes into `cacheDir/farm-files` (by name: app modules cannot import shell classes) and resolves the `file://`
+  URI, the page gets `/__farm/files/<id>` (served by its own WebView, scoped to that page, deleted
+  when the screen closes, passed back as an argument it is the `file://` URI again); `PhotoPicker`
+  from `@farm.js/ui` takes `pick` (such as `native.Device.pickPhoto`) or opens the browser's file
+  input; no event subscriptions yet
 - `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
 - `security`: application CSP policy
 - `serverActions`: trusted origins and action body limits
@@ -179,6 +219,9 @@ Read `docs/src/app/docs/configuration/page.md` before adding an unfamiliar optio
 - Metadata route files `sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, and `llms-full.ts`
   serve `/sitemap.xml`, `/robots.txt`, `/manifest.webmanifest`, `/llms.txt`, and `/llms-full.txt`
 - Route exports or route rules select dynamic, static, ISR, PPR, runtime, and cache behavior
+- Client navigations announce the new page's title (else its first `h1`, else the pathname) to
+  screen readers in a live region created on the first navigation (`#farm-route-announcer`); give
+  each page a distinct `metadata.title`; focus is not moved
 
 Page shape:
 
@@ -489,8 +532,11 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
 - Use `docs` for human docs, shared search, markdown, `llms.txt`, sitemap, robots, and agent APIs.
   A root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` (or the same file in `public/`)
   takes its path from the docs engine.
-- Docs pages render on request. `docs.prerender: true` writes the pages a docs adapter lists as
-  static files on Node and serverless targets; a docs `page.mdx` takes no `force-static` export.
+- Docs pages render on request. `docs.prerender: true` writes them as static files on Node and
+  serverless targets: every built-in renderer page (pages with social images need
+  `socialImage.baseUrl`) or the pages a docs adapter lists. A docs `page.mdx` takes no
+  `force-static` export; an app `page.md`/`page.mdx` outside the docs engine prerenders with a
+  literal top-level `export const dynamic = "force-static";` (or `revalidate`).
 - Use `agent.llmsTxt` for an app's own `/llms.txt` and `/llms-full.txt` (`full: false` skips the
   second). A static `public/llms.txt` or `public/llms-full.txt` overrides each, and so do
   `src/app/llms.ts` and `src/app/llms-full.ts`, which return the whole file as a string or the
@@ -515,12 +561,22 @@ false }` trims it (a hidden section is `null`); `agent.manifest: false` turns it
   deployments (`FARM_PREVIEW=1`, `VERCEL_ENV=preview`, Netlify deploy-preview/branch-deploy at
   build time, Render PR previews). Test locally with `FARM_PREVIEW=1 farm dev`.
 - Use `after()` only for short post-response work and a jobs integration for durable work.
+  `runtime: local()` runs tasks in the app (give the `jobs` storage namespace a persistent mount;
+  schedule `/api/jobs/_runtime/local/tick` with cron on serverless). `trigger(...)` and
+  `inngest(...)` call code deployed to the provider. `defineJobsRuntime()` adds a runtime; check it
+  with `createJobsRuntimeConformance` from `@farm.js/jobs/testing`.
 - Configure OpenTelemetry and Farm runtime events for correlated traces.
 
 `farm preview` exposes an already-running local app; it does not build or deploy. Bind remote
 sandbox development servers with `farm dev --host 0.0.0.0 --port <port>`. For deployment,
 prefer `deploy.target` for first-class targets and `deploy.preset` only for Nitro pass-through. A
-preset overrides a target. Use `farm deploy --plan` before shipping and run the exact target build.
+preset overrides a target. `deploy.target` must be `vercel`, `cloudflare`, `netlify`, or `node`;
+config resolution rejects any other name. Use `farm deploy --plan` before shipping and run the
+exact target build.
+A static page any middleware guards renders on request. On Vercel, a middleware file with
+`export const config = { runtime: "edge" }` runs in front of the pages it guards, so they prerender;
+it may import only web APIs and the Edge runtime's Node modules (`async_hooks`, `events`, `buffer`,
+`assert`, `util`), and the build stops on any other Node import.
 
 Current diagnostic and migration commands include:
 

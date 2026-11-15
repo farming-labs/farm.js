@@ -1,17 +1,18 @@
-import { brotliCompressSync, gzipSync } from "node:zlib";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import { createFarmRendererPlugin } from "../dist/vite.mjs";
-import { assertCoreRuntimeReduction } from "./runtime-size-budget.mjs";
+import { assertRuntimeSizeBudgets } from "./runtime-size-budget.mjs";
+import { measureJavaScriptOutput } from "./javascript-output-size.mjs";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtureRoot = join(packageRoot, "fixtures/runtime-size");
 const resultFile = join(packageRoot, "RUNTIME_SIZE_RESULTS.json");
 const checkOnly = process.argv.includes("--check");
+const chunkAccounting = [];
 
-async function bundle(entry, compiler) {
+async function bundle(entry, compiler, compiledRoot = false) {
   const result = await build({
     configFile: false,
     root: fixtureRoot,
@@ -22,7 +23,9 @@ async function bundle(entry, compiler) {
     plugins: createFarmRendererPlugin({
       rendererOptions: {
         experimental: {
-          compiler: compiler ? { onUnsupported: "error" } : false,
+          // These fixtures measure the compiler runtime itself; the compiled root, which moves
+          // React DOM out of the initial download, is measured separately below.
+          compiler: compiler ? { onUnsupported: "error", compiledRoot } : false,
         },
       },
     }),
@@ -34,19 +37,14 @@ async function bundle(entry, compiler) {
       },
     },
   });
-  const outputs = Array.isArray(result) ? result : [result];
-  const code = outputs
-    .flatMap((output) => output.output)
-    .filter((output) => output.type === "chunk")
-    .map((output) => output.code)
-    .join("\n");
-  const bytes = Buffer.from(code);
-  return {
-    code,
-    raw: bytes.length,
-    gzip: gzipSync(bytes, { level: 9 }).length,
-    brotli: brotliCompressSync(bytes).length,
-  };
+  const measured = measureJavaScriptOutput(result);
+  if (compiler && measured.code.includes("@farm.js/react/compiler-hmr-registry")) {
+    throw new Error(`${entry} retained the development refresh registry in production.`);
+  }
+  if (measured.chunkAccounting.files.length > 1) {
+    chunkAccounting.push({ entry, compiler, ...measured.chunkAccounting });
+  }
+  return measured;
 }
 
 const [
@@ -727,137 +725,28 @@ const results = {
   },
 };
 
+// Single-chunk reports retain their existing shape and exact byte measurements.
+if (chunkAccounting.length > 0) {
+  results.chunkAccounting = chunkAccounting.sort(
+    (a, b) => a.entry.localeCompare(b.entry) || Number(a.compiler) - Number(b.compiler),
+  );
+}
+
 if (checkOnly) {
   const reference = JSON.parse(await readFile(resultFile, "utf8"));
-  const checks = [
-    {
-      name: "direct compiler premium",
-      current: results.fixtures.direct.compilerPremium.gzip,
-      maximum: reference.fixtures.direct.compilerPremium.gzip + 128,
-    },
-    {
-      name: "keyed compiler premium",
-      current: results.fixtures.keyed.compilerPremium.gzip,
-      maximum: reference.fixtures.keyed.compilerPremium.gzip + 256,
-    },
-    {
-      name: "keyed append compiler premium",
-      current: results.fixtures.keyedAppend.compilerPremium.gzip,
-      maximum: reference.fixtures.keyedAppend.compilerPremium.gzip + 256,
-    },
-    {
-      name: "keyed filter compiler premium",
-      current: results.fixtures.keyedFilter.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 264,
-    },
-    {
-      name: "keyed structural-append compiler premium",
-      current: results.fixtures.keyedStructuralAppend.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralAppend?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralAppend.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed structural-append-map compiler premium",
-      current: results.fixtures.keyedStructuralAppendMap.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralAppendMap?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralAppendMap.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed structural-prepend compiler premium",
-      current: results.fixtures.keyedStructuralPrepend.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralPrepend?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralPrepend.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed structural-prepend-map compiler premium",
-      current: results.fixtures.keyedStructuralPrependMap.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralPrependMap?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralPrependMap.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed prepend compiler premium",
-      current: results.fixtures.keyedPrepend.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedPrepend?.compilerPremium.gzip ?? 12_000) + 256,
-    },
-    {
-      name: "keyed position compiler premium",
-      current: results.fixtures.keyedPosition.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedPosition?.compilerPremium.gzip ??
-          results.fixtures.keyedPosition.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed batch-position compiler premium",
-      current: results.fixtures.keyedBatchPosition.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedBatchPosition?.compilerPremium.gzip ??
-          results.fixtures.keyedBatchPosition.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed window-position compiler premium",
-      current: results.fixtures.keyedWindowPosition.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedWindowPosition?.compilerPremium.gzip ??
-          results.fixtures.keyedWindowPosition.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed reorder compiler premium",
-      current: results.fixtures.keyedReorder.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedReorder?.compilerPremium.gzip ??
-          results.fixtures.keyedReorder.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed map-reorder compiler premium",
-      current: results.fixtures.keyedMapReorder.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedMapReorder?.compilerPremium.gzip ??
-          results.fixtures.keyedMapReorder.compilerPremium.gzip) + 328,
-    },
-    {
-      name: "keyed sort compiler premium",
-      current: results.fixtures.keyedSort.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedSort?.compilerPremium.gzip ??
-          results.fixtures.keyedSort.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed slice compiler premium",
-      current: results.fixtures.keyedSlice.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedSlice?.compilerPremium.gzip ?? 12_250) + 256,
-    },
-    {
-      name: "keyed rolling-window compiler premium",
-      current: results.fixtures.keyedRollingWindow.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedRollingWindow?.compilerPremium.gzip ??
-          results.fixtures.keyedRollingWindow.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed mapped rolling-window compiler premium",
-      current: results.fixtures.keyedMappedRollingWindow.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedMappedRollingWindow?.compilerPremium.gzip ??
-          results.fixtures.keyedMappedRollingWindow.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "core runtime premium",
-      current: results.fixtures.isolatedRuntime.coreRuntimePremiumGzip,
-      maximum: reference.fixtures.isolatedRuntime.coreRuntimePremiumGzip + 128,
-    },
-  ];
-  for (const check of checks) {
-    if (check.current > check.maximum) {
-      throw new Error(
-        `${check.name} grew to ${check.current} B gzip; persisted maximum is ${check.maximum} B.`,
-      );
-    }
+  assertRuntimeSizeBudgets(results, reference);
+  // With the compiled root (the default when the compiler is on), React DOM leaves the initial
+  // download: it is a deferred chunk, loaded only for trees the compiled root cannot mount.
+  const directCompiledRoot = await bundle("direct.tsx", true, true);
+  const initialGzip = directCompiledRoot.chunkAccounting.initial.gzip;
+  if (!(initialGzip > 0 && initialGzip <= directOff.gzip - 30_000)) {
+    throw new Error(
+      `The compiled root's initial JavaScript is ${initialGzip} B gzip; it must be at least 30,000 B below the React DOM build's ${directOff.gzip} B.`,
+    );
   }
-  assertCoreRuntimeReduction(results.fixtures.isolatedRuntime, reference.fixtures.isolatedRuntime);
+  if (directCompiledRoot.chunkAccounting.deferred.gzip === 0) {
+    throw new Error("The compiled root did not move React DOM into a deferred chunk.");
+  }
 } else {
   await writeFile(resultFile, `${JSON.stringify(results, null, 2)}\n`, "utf8");
 }

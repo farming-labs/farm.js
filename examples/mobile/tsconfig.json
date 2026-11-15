@@ -24,6 +24,7 @@
   "exclude": [
     "src/**/*.native.tsx",
     "src/**/*.android.tsx",
-    "src/**/*.ios.tsx"
+    "src/**/*.ios.tsx",
+    "src/native/**/*"
   ]
 }

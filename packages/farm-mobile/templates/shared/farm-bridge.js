@@ -2,8 +2,8 @@
 // shell injects at document start, for the app's origin only (Android: origin rules on the
 // document-start script; iOS: an origin check around it). Defines window.__farmBridge: native calls
 // with request ids and Promise resolution (native evaluates __farmBridge._resolve), and
-// offerNavigation, which the `--mobile` client build's navigation delegate calls so link taps open
-// native screens instead of navigating in place. The OS name and message port are filled in when
+// offerNavigation, which the mobile client's navigation delegate calls so link taps open native
+// screens instead of navigating in place. The OS name and message port are filled in when
 // the project is generated; the plugin list is filled in by native code at launch.
 (() => {
   // Lets app CSS hide web-only chrome inside the shell: html[data-farm-shell] .web-tabs { display: none }
@@ -18,11 +18,43 @@
   const plugins = __FARM_PLUGINS__;
   const pending = new Map();
   let seq = 0;
+  // Call ids start at 1 in every document, so native answers with this document's id too, and an
+  // answer that arrives after the WebView loaded another document never settles that one's calls.
+  const documentId = Math.random().toString(36).slice(2, 12) || "0";
   let router;
   // In-place renders the navigator asked for; their navigations stay in the page.
   let rendering = 0;
 
   const post = (message) => port.postMessage(JSON.stringify(message));
+
+  // Files a native module answered with, by reference (/__farm/files/<id>). Android's WebView
+  // serves that path itself; WKWebView cannot answer requests to the app's origin, so the iOS shell
+  // sends a file's bytes with the answer, and the page gets a blob: URL instead. This document's
+  // blob: URLs to their references:
+  const fileUrls = new Map();
+  const swap = (value, replace) => {
+    if (typeof value === "string") return replace(value) ?? value;
+    if (Array.isArray(value)) return value.map((item) => swap(item, replace));
+    if (value && typeof value === "object") {
+      const copy = {};
+      for (const key of Object.keys(value)) copy[key] = swap(value[key], replace);
+      return copy;
+    }
+    return value;
+  };
+  const withFiles = (value, files) => {
+    const urls = new Map();
+    for (const reference of Object.keys(files)) {
+      const { type, data } = files[reference];
+      const binary = atob(data);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+      const url = URL.createObjectURL(new Blob([bytes], { type: type || "" }));
+      urls.set(reference, url);
+      fileUrls.set(url, reference);
+    }
+    return swap(value, (text) => urls.get(text));
+  };
 
   const bridge = {
     platform: __FARM_SHELL_OS__,
@@ -33,14 +65,19 @@
       const id = ++seq;
       return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
-        post({ type: "call", id, plugin, method, args: args ?? {} });
+        // A blob: URL a file arrived as goes back to native as its reference.
+        const sent = fileUrls.size > 0 ? swap(args ?? {}, (text) => fileUrls.get(text)) : args;
+        post({ type: "call", id, plugin, method, args: sent ?? {}, doc: documentId });
       });
     },
 
-    _resolve(id, ok, value) {
+    // `files` (iOS): the bytes of each file reference in `value`, which become blob: URLs.
+    _resolve(id, ok, value, doc, files) {
+      if (doc != null && doc !== documentId) return;
       const entry = pending.get(id);
       if (!entry) return;
       pending.delete(id);
+      if (ok && files) value = withFiles(value, files);
       if (ok) entry.resolve(value);
       else {
         const error = new Error((value && value.message) || "Native call failed");
@@ -99,11 +136,34 @@
         });
     },
 
+    // A document without Farm's SPA router, such as an RSC page, calls this once it has loaded:
+    // it shows its content and takes navigations, though not in-place renders (render() then
+    // reports an error and native loads the document instead).
+    ready() {
+      if (!router) postReady();
+    },
+
     // Re-render the current route from the server (used when a modal closes).
     refresh() {
       if (router && typeof router.refresh === "function") return router.refresh();
       location.reload();
     },
+  };
+
+  // Tells native the page is ready, once per document.
+  let readyPosted = false;
+  const postReady = () => {
+    if (readyPosted) return;
+    readyPosted = true;
+    // The mobile client entry this document loaded: a shell bundling page shells stops showing
+    // them when a document runs another client build.
+    const entry = document.querySelector('script[type="module"][src*="farm-mobile-client-"]');
+    post({
+      type: "router-ready",
+      url: location.href,
+      title: document.title,
+      client: entry ? entry.getAttribute("src") : null,
+    });
   };
 
   // Farm installs its client router on window.__FARM_SPA_ROUTER__; the page is ready for
@@ -114,7 +174,7 @@
     // Every screen has its own WebView, so data prefetched for a link here never reaches the
     // screen that opens it.
     if (typeof instance.prefetch === "function") instance.prefetch = () => Promise.resolve();
-    post({ type: "router-ready", url: location.href, title: document.title });
+    postReady();
   };
 
   Object.defineProperty(window, "__FARM_SPA_ROUTER__", {

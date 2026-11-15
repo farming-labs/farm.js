@@ -133,6 +133,15 @@ Auth.js and Better Auth only mount their provider handlers. Protect application 
 - Register the same absolute callback URL in the provider dashboard.
 - `returnTo` values are intentionally limited to root-relative app paths. External URLs are ignored.
 
+## Mobile apps
+
+In a [mobile app](/docs/mobile), native screens sign in with device tokens issued from the web
+session. That needs the integration to read sessions: `@farm.js/better-auth` and Farm's built-in
+`auth` do; Auth0, Auth.js, WorkOS, Supabase, and Clerk do not yet, so their native screens stay
+signed out while web screens work as usual. A custom integration opts in with a
+`session(request)` reader that returns `{ id, userId?, expiresAt? }` or `null`. See
+[Authentication on mobile](/docs/auth#mobile-apps).
+
 ## Production checklist
 
 - Keep client secrets, cookie passwords, and provider secret keys in server-only environment variables.

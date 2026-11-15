@@ -15,6 +15,15 @@ const status = await api.jobs.sendWelcomeEmail.status({
   query: { handleId: queued.data!.handleId },
 });`;
 
+const localSnippet = `const queued = await api.jobs.sendWelcomeEmail.trigger({
+  body: { userId: "usr_123" },
+});
+
+// The run starts after this response is sent.
+const status = await api.jobs.sendWelcomeEmail.status({
+  query: { handleId: queued.data!.handleId },
+});`;
+
 const inngestSnippet = `const queued = await api.jobs.importCsv.trigger({
   body: {
     fileId: "file_123",
@@ -90,7 +99,13 @@ export default async function HomePage() {
 
         <article className="code-card">
           <span className="task-label">Server Usage</span>
-          <pre>{selectedJobsRuntime === "inngest" ? inngestSnippet : triggerSnippet}</pre>
+          <pre>
+            {selectedJobsRuntime === "inngest"
+              ? inngestSnippet
+              : selectedJobsRuntime === "local"
+                ? localSnippet
+                : triggerSnippet}
+          </pre>
         </article>
       </section>
     </main>

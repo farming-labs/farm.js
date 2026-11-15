@@ -1,13 +1,19 @@
 // @vitest-environment node
 
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
+import path from "path";
 import { transform } from "esbuild";
 import { describe, expect, it } from "vitest";
 import {
   createFarmBunServerEntry,
+  createFarmCompileCacheLauncher,
   createFarmNodeServerEntry,
   FARM_DESKTOP_ENV_MODULE_SOURCE,
   FARM_NODE_ENV_MODULE_SOURCE,
+  FARM_SERVER_MODULE_FILE,
 } from "../nitro/node-server-entry";
+import { installFarmCompileCacheLauncher } from "../nitro/universal-build";
 import { resolveFarmServerConfig } from "../server-http";
 
 describe("Farm production Node entry", () => {
@@ -146,5 +152,76 @@ describe("Farm production Node entry", () => {
     expect(run(undefined)).toBe("production");
     expect(run("")).toBe("production");
     expect(run("staging")).toBe("staging");
+  });
+});
+
+describe("Farm production compile-cache launcher", () => {
+  const fs = { mkdir, readFile, rename, rm, writeFile } as typeof import("fs/promises");
+
+  it("loads the server dynamically, so the cache is enabled before it compiles", async () => {
+    const source = createFarmCompileCacheLauncher(FARM_SERVER_MODULE_FILE);
+
+    await expect(transform(source, { loader: "js", format: "esm" })).resolves.toBeDefined();
+    // A static import is compiled before any statement here runs, which writes no cache
+    // entries at all. Only a dynamic import can come after enableCompileCache.
+    expect(source).toContain('await import("./farm-server.mjs")');
+    expect(source).not.toMatch(/^import .*farm-server\.mjs/m);
+    expect(source.indexOf("enableCompileCache")).toBeLessThan(
+      source.indexOf('import("./farm-server.mjs")'),
+    );
+  });
+
+  it("leaves a deployment's own NODE_COMPILE_CACHE alone and never throws", () => {
+    const source = createFarmCompileCacheLauncher(FARM_SERVER_MODULE_FILE);
+    expect(source).toContain("if (!process.env.NODE_COMPILE_CACHE)");
+    expect(source).toContain("try {");
+    expect(source).toContain("enableCompileCache?.(");
+  });
+
+  it("moves Nitro's server aside and keeps index.mjs as the entry hosts invoke", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "farm-launcher-"));
+    try {
+      await writeFile(path.join(dir, "index.mjs"), "export default { nitro: true };\n");
+      await mkdir(path.join(dir, ".compile-cache"), { recursive: true });
+      await writeFile(path.join(dir, ".compile-cache", "stale.bin"), "stale");
+
+      expect(await installFarmCompileCacheLauncher(dir, fs)).toBe(true);
+
+      expect(await readFile(path.join(dir, FARM_SERVER_MODULE_FILE), "utf8")).toBe(
+        "export default { nitro: true };\n",
+      );
+      const entry = await readFile(path.join(dir, "index.mjs"), "utf8");
+      expect(entry).toContain('await import("./farm-server.mjs")');
+      // A cache from the previous build describes code this one replaced.
+      await expect(readFile(path.join(dir, ".compile-cache", "stale.bin"))).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not wrap the launcher in itself when a build reuses the directory", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "farm-launcher-"));
+    try {
+      await writeFile(path.join(dir, "index.mjs"), "export default {};\n");
+      expect(await installFarmCompileCacheLauncher(dir, fs)).toBe(true);
+      const launcher = await readFile(path.join(dir, "index.mjs"), "utf8");
+
+      expect(await installFarmCompileCacheLauncher(dir, fs)).toBe(false);
+      expect(await readFile(path.join(dir, "index.mjs"), "utf8")).toBe(launcher);
+      expect(await readFile(path.join(dir, FARM_SERVER_MODULE_FILE), "utf8")).toBe(
+        "export default {};\n",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports nothing to do when a preset emitted no index.mjs", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "farm-launcher-"));
+    try {
+      expect(await installFarmCompileCacheLauncher(dir, fs)).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

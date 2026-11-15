@@ -5,6 +5,7 @@ import type {
   FarmConfig,
   ParsedRoute,
   RouteModule,
+  RouteSegment,
   LayoutModule,
   SSGCollectionResult,
 } from "../types";
@@ -60,7 +61,11 @@ import {
   getFarmClientHydrationPlanOptions,
   usesFarmServerTree,
   getClientModuleMetadata,
+  isFarmClientModulePlanUnchanged,
   resolveFarmIsolatedClientHydrationMode,
+  traceFarmSourceReads,
+  withFarmSourceSnapshot,
+  type ClientModuleHydrationPlan,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
 import { getIntegrationProviders } from "../integrations";
@@ -89,9 +94,15 @@ import {
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
-import { stripFarmBasePath } from "../base-path";
+import { applyFarmBasePath, stripFarmBasePath } from "../base-path";
 import { appendFarmRedirectQuery } from "../redirect-query";
+import { encodeConfigRouteSegment } from "../plugins/route-pattern";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
+import {
+  runWithLatestPackageClientBoundaryCache,
+  runWithPackageClientBoundaryCacheFile,
+} from "../utils/package-client-boundary-cache";
+import { FarmSourceSnapshotStore } from "../utils/source-snapshot";
 import {
   createRouteDirectoryPattern,
   formatRouteSegment,
@@ -100,7 +111,11 @@ import {
   isInRouteGroupScope,
   routeBoundaryCoversDirectory,
 } from "./route-groups";
-import { getFarmRendererComponentExtensions, isReactRenderer } from "../renderer";
+import {
+  getFarmRendererComponentExtensions,
+  isReactRenderer,
+  type FarmRenderer,
+} from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
 import {
   AmbiguousRouteError,
@@ -109,6 +124,12 @@ import {
   getRoutePatternShape,
   type RouteSegmentSpecificity,
 } from "./specificity";
+
+/**
+ * A config whose renderer is resolved: `renderer: false` has become the internal no-renderer
+ * descriptor, so runtime code always reads a `FarmRenderer`.
+ */
+export type FarmRendererResolvedConfig = Required<FarmConfig> & { renderer: FarmRenderer };
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -255,11 +276,15 @@ function compareRouteEntries(left: RouteEntry, right: RouteEntry): number {
   return compareRouteSpecificity(getRouteSpecificity(left), getRouteSpecificity(right));
 }
 
+/** Files a hydration plan reads as modules (route modules of every renderer and their imports). */
+const PLAN_SOURCE = /\.(?:[cm]?[jt]sx?|vue|svelte)$/;
+const NODE_MODULES_SEGMENT = `${path.sep}node_modules${path.sep}`;
+
 /**
  * Manages route discovery and matching for the Farm.js application
  */
 export class RouteManager {
-  private config: Required<FarmConfig>;
+  private config: FarmRendererResolvedConfig;
   private routes: Map<string, RouteEntry> = new Map();
   private pageRouteShapes: Map<string, RouteEntry> = new Map();
   private layouts: Map<string, RouteEntry> = new Map();
@@ -274,8 +299,10 @@ export class RouteManager {
   private programmaticPages: Map<string, ProgrammaticPageRoute> = new Map();
   private programmaticLayouts: Map<string, ProgrammaticLayoutRoute> = new Map();
   private programmaticClientRoutes: ProgrammaticClientRoutes = mergeProgrammaticClientRoutes([]);
+  private discovery: Promise<void> = Promise.resolve();
   private rendererRuntime?: FarmServerRendererRuntime;
   private viteServer?: ViteDevServer;
+  private packageClientBoundaryCacheFile?: string;
   private clientManifestCache?: {
     projectRoot: string;
     manifest: FarmClientRouteManifest;
@@ -283,8 +310,21 @@ export class RouteManager {
     islandsErrors: string[];
   };
   private reportedIslandsErrors = new Set<string>();
+  // Each route module's hydration plan from the last plan, with the source files it read, so a dev
+  // replan recomputes only the modules that read an edited file. Every replan used to read and
+  // walk every route's import graph again, seconds on a large app, before an edit could update.
+  private ownerPlans = new Map<
+    string,
+    { plan: ClientModuleHydrationPlan; files: ReadonlySet<string> }
+  >();
+  private sourceChangeTracking = false;
+  private linkedSources = new Map<string, string | null>();
+  // What the plans read, parsed and resolved, kept between dev plans while the files are unchanged.
+  private sourceSnapshot?: FarmSourceSnapshotStore;
+  // Source files edited since the last plan; null when the next plan must recompute every module.
+  private editedSources: Set<string> | null = null;
 
-  constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
+  constructor(config: FarmRendererResolvedConfig, viteServer?: ViteDevServer) {
     this.config = config;
     this.viteServer = viteServer;
     // Record where route definitions are made from the first module the server evaluates, so
@@ -297,24 +337,41 @@ export class RouteManager {
   }
 
   /**
-   * Discover all routes in the app directory
+   * Discover all routes in the app directory.
+   *
+   * Requests keep matching the current routes until discovery finishes. Discovery awaits file and
+   * module reads, and a dev server runs it again for each page or layout a watcher reports, so
+   * clearing the tables first answered any request in between with a 404. Discoveries run one at
+   * a time, so an older scan never replaces a newer one.
    */
-  async discoverRoutes(): Promise<void> {
-    this.invalidateClientManifest();
-    this.routes.clear();
-    this.pageRouteShapes.clear();
-    this.layouts.clear();
-    this.orderedLayouts = [];
-    this.routeSlots.clear();
-    this.routeSlotOwnerSegments.clear();
-    this.loadings.clear();
-    this.errors.clear();
-    this.metadataImages.clear();
-    this.metadataRoutes.clear();
-    this.redirects.clear();
-    this.programmaticPages.clear();
-    this.programmaticLayouts.clear();
+  discoverRoutes(): Promise<void> {
+    const discovery = this.discovery
+      .catch(() => {})
+      .then(async () => {
+        const next = new RouteManager(this.config, this.viteServer);
+        await next.discoverInto();
+        this.invalidateClientManifest();
+        this.routes = next.routes;
+        this.pageRouteShapes = next.pageRouteShapes;
+        this.layouts = next.layouts;
+        this.orderedLayouts = next.orderedLayouts;
+        this.routeSlots = next.routeSlots;
+        this.routeSlotOwnerSegments = next.routeSlotOwnerSegments;
+        this.loadings = next.loadings;
+        this.errors = next.errors;
+        this.metadataImages = next.metadataImages;
+        this.metadataRoutes = next.metadataRoutes;
+        this.redirects = next.redirects;
+        this.programmaticPages = next.programmaticPages;
+        this.programmaticLayouts = next.programmaticLayouts;
+        this.programmaticClientRoutes = next.programmaticClientRoutes;
+      });
+    this.discovery = discovery;
+    return discovery;
+  }
 
+  /** Fill this manager's empty route tables. Only a fresh manager made by discoverRoutes runs it. */
+  private async discoverInto(): Promise<void> {
     const programmaticClientRoutes: ProgrammaticClientRoutes[] = [];
     for (const source of getFarmSourceRoots(this.config)) {
       await this.discoverFileRoutes(source);
@@ -387,11 +444,20 @@ export class RouteManager {
     const routePathname = this.toRoutePathname(pathname);
     const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
     const pathParts = splitRoutePath(normalizedPath);
+    // Production looks a static route up by its exact path, so a path with an empty segment
+    // (`//about`, `/console//about`, `//`) reaches no static route; only dynamic routes,
+    // matched segment by segment, skip the empty segment.
+    const trimmedPathname = routePathname.replace(/\/+$/, "");
+    const hasEmptySegment =
+      trimmedPathname.includes("//") || (trimmedPathname === "" && routePathname.length > 1);
     // Find matching page route
     let matchedRoute: RouteEntry | null = null;
     let params: Record<string, string> = {};
 
     for (const routeEntry of this.routes.values()) {
+      if (hasEmptySegment && !routeEntry.route.segments.some((segment) => segment.isDynamic)) {
+        continue;
+      }
       const match = matchRouteParts(pathParts, routeEntry.route.segments);
       if (match.matches) {
         matchedRoute = routeEntry;
@@ -428,6 +494,12 @@ export class RouteManager {
 
   getRouteSlots(): Map<string, RouteSlotEntry> {
     return new Map(this.routeSlots);
+  }
+
+  /** The layouts that wrap a registered page, root first. */
+  getRouteLayouts(pattern: string): RouteEntry[] {
+    const routeEntry = this.routes.get(pattern);
+    return routeEntry ? this.findMatchingLayouts(splitRoutePath(pattern), routeEntry) : [];
   }
 
   /** Resolve route rules, inherited layouts, and the page export in precedence order. */
@@ -500,11 +572,12 @@ export class RouteManager {
   } | null {
     const i18n = this.getI18nConfig();
     const localeMatch = i18n ? resolveFarmLocalePath(pathname, i18n) : undefined;
-    const routePathname = localeMatch?.pathname || pathname;
+    const routePathname = localeMatch?.pathname || this.toRoutePathname(pathname);
     const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
+    const urlParts = splitRoutePath(normalizedPath);
 
     for (const redirectEntry of this.redirects.values()) {
-      const match = matchRoute(normalizedPath, redirectEntry.route.segments);
+      const match = matchRouteParts(urlParts, redirectEntry.route.segments);
       if (!match.matches) continue;
 
       const statusCode =
@@ -514,7 +587,11 @@ export class RouteManager {
         redirect: redirectEntry.definition,
         destination: appendFarmRedirectQuery(
           this.localizeRedirectDestination(
-            interpolateRedirectDestination(redirectEntry.definition.destination, match.params),
+            interpolateRedirectDestination(
+              redirectEntry.definition.destination,
+              match.params,
+              getCatchAllParamSegments(redirectEntry.route.segments, urlParts),
+            ),
             localeMatch?.locale,
           ),
           search,
@@ -686,7 +763,125 @@ export class RouteManager {
     if (this.clientManifestCache?.projectRoot === normalizedProjectRoot) {
       return this.clientManifestCache.manifest;
     }
+    const cacheFile = this.packageClientBoundaryCacheFile;
+    // One plan reads each shared module once, however many routes import it.
+    const compute = () =>
+      withFarmSourceSnapshot(
+        () => this.computeClientManifest(normalizedProjectRoot),
+        this.sourceSnapshot,
+      );
+    return cacheFile ? runWithPackageClientBoundaryCacheFile(cacheFile, compute) : compute();
+  }
 
+  /**
+   * @internal The dev server reports every watched change (`noteSourceChange`), so a replan can
+   * reuse the plan of each route module that read none of the edited files. Without tracking,
+   * every plan recomputes every module.
+   */
+  trackSourceChanges(): void {
+    this.sourceChangeTracking = true;
+    this.sourceSnapshot ??= new FarmSourceSnapshotStore();
+  }
+
+  /**
+   * @internal A watched file changed. An edit to a script narrows the next replan to the route
+   * modules that read it; a script added or removed (where an import may now resolve), or a
+   * changed JSON file (a package manifest or tsconfig paths), replans everything. Other files
+   * (stylesheets, Markdown, assets) are not read by plans.
+   */
+  noteSourceChange(file: string, event: "create" | "update" | "delete"): void {
+    // Declarations (Farm writes src/farm.d.ts as the server starts) are never read as modules.
+    if (file.endsWith(".d.ts")) return;
+    if (PLAN_SOURCE.test(file)) {
+      if (event === "update") {
+        this.editedSources?.add(path.resolve(file));
+        return;
+      }
+    } else if (!/\.jsonc?$/.test(file)) {
+      return;
+    }
+    this.editedSources = null;
+    this.sourceSnapshot?.clear();
+    this.linkedSources.clear();
+  }
+
+  /**
+   * @internal Whether an edit to `file` leaves the current plan as it is: a client module the
+   * last plan read whose directive, island and hydrate exports, export shape and imports the edit
+   * kept. The next replan reads it again (the watcher reported it).
+   */
+  isEditPlanNeutral(file: string): boolean {
+    if (!this.sourceChangeTracking || !this.editedSources || !this.clientManifestCache) {
+      return false;
+    }
+    const previous = this.sourceSnapshot?.peekSource(path.resolve(file));
+    return previous !== undefined && isFarmClientModulePlanUnchanged(file, previous);
+  }
+
+  /**
+   * A route module's plan: the last one when it read none of `edited`, recomputed otherwise.
+   * Callers get a copy, since the route budget rewrites a plan's fields in place.
+   */
+  private planRouteModule(
+    key: string,
+    edited: ReadonlySet<string> | null,
+    compute: () => ClientModuleHydrationPlan,
+  ): ClientModuleHydrationPlan {
+    const previous = this.ownerPlans.get(key);
+    if (previous && edited && ![...edited].some((file) => previous.files.has(file))) {
+      return { ...previous.plan };
+    }
+    const { result, files } = traceFarmSourceReads(compute);
+    // Installed packages do not change while the dev server runs (an install restarts it or
+    // changes a package.json, which replans everything), and an icon barrel alone is thousands of
+    // files per route module, so only source files are kept.
+    const sources = new Set<string>();
+    for (const file of files) {
+      const source = this.planSourcePath(file);
+      if (source) sources.add(source);
+    }
+    this.ownerPlans.set(key, { plan: result, files: sources });
+    return { ...result };
+  }
+
+  /**
+   * The path the watcher reports for a file a plan read: itself, or the real path of a workspace
+   * package's source read through its `node_modules` link. Null for an installed package's file.
+   */
+  private planSourcePath(file: string): string | null {
+    if (!file.includes(NODE_MODULES_SEGMENT)) return file;
+    let source = this.linkedSources.get(file);
+    if (source === undefined) {
+      try {
+        const real = realpathSync(file);
+        source = real.includes(NODE_MODULES_SEGMENT) ? null : real;
+      } catch {
+        source = null;
+      }
+      this.linkedSources.set(file, source);
+    }
+    return source;
+  }
+
+  /**
+   * @internal Keep package client-boundary inspections in `file` between plans, as the dev server
+   * does. Without it, each plan outside a production build reads every package's sources again.
+   */
+  usePackageClientBoundaryCacheFile(file: string): void {
+    this.packageClientBoundaryCacheFile = file;
+  }
+
+  /**
+   * @internal Run `operation` (synchronous) with the package inspections of the latest plan, as
+   * the dev server's transforms and renders inspect the packages a module imports. Without a cache
+   * file (outside the dev server), it runs as it is.
+   */
+  inspectPackages<T>(operation: () => T): T {
+    const file = this.packageClientBoundaryCacheFile;
+    return file ? runWithLatestPackageClientBoundaryCache(file, operation) : operation();
+  }
+
+  private computeClientManifest(normalizedProjectRoot: string): FarmClientRouteManifest {
     const toUrlPath = (absolutePath: string) => {
       const rootRelative = toRootRelativeUrlPath(absolutePath, normalizedProjectRoot);
       if (rootRelative !== undefined) return rootRelative;
@@ -726,33 +921,57 @@ export class RouteManager {
     );
     const islandsMode =
       resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands";
+    // Reuse the plans of route modules that read no file edited since the last plan: the edits the
+    // watcher reported, and any file whose size or mtime changed (one outside its watch, such as
+    // a workspace package module no request has loaded yet).
+    const changed = this.sourceSnapshot?.refresh(this.editedSources ?? []);
+    let edited: Set<string> | null = null;
+    if (this.sourceChangeTracking && this.editedSources && this.ownerPlans.size > 0) {
+      edited = new Set();
+      for (const [file, previous] of changed ?? []) {
+        // An edit inside a client component (markup, state, handlers) leaves every plan as it was.
+        if (isFarmClientModulePlanUnchanged(file, previous)) continue;
+        const source = this.planSourcePath(file);
+        if (source) edited.add(source);
+      }
+    }
+    if (!edited) this.ownerPlans.clear();
     const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
       entry,
-      metadata: getClientModuleHydrationPlan(
-        entry.modulePath,
-        normalizedProjectRoot,
-        isolatedMode,
-        islandsMode ? { ...planOptions, serverTreeLayouts: true } : planOptions,
+      metadata: this.planRouteModule(`layout:${entry.modulePath}`, edited, () =>
+        getClientModuleHydrationPlan(
+          entry.modulePath,
+          normalizedProjectRoot,
+          isolatedMode,
+          islandsMode ? { ...planOptions, serverTreeLayouts: true } : planOptions,
+        ),
       ),
     }));
 
     // A Markdown page's client components come from the configured MDX components module.
-    const markdownPagePlan = createMarkdownPageHydrationPlanner(
+    const markdownComponentsPlan = createMarkdownPageHydrationPlanner(
       resolveFarmMdxComponentsModulePath(resolveMdxConfig(this.config.mdx), normalizedProjectRoot),
       normalizedProjectRoot,
       isolatedMode,
-      planOptions,
+      { ...planOptions, packageReferences: islandsMode },
     );
+    // Planned once for every Markdown page; each page gets its own copy for the route budget.
+    let markdownPlan: ClientModuleHydrationPlan | undefined;
+    const markdownPagePlan = () => ({
+      ...(markdownPlan ??= this.planRouteModule("markdown", edited, markdownComponentsPlan)),
+    });
     const routeEntries = Array.from(this.routes.values()).map((entry) => ({
       entry,
       metadata: isFarmMarkdownPageFile(entry.modulePath)
         ? markdownPagePlan()
-        : getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode, {
-            ...planOptions,
-            serverOwners:
-              resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) ===
-              "islands",
-          }),
+        : this.planRouteModule(`page:${entry.modulePath}`, edited, () =>
+            getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode, {
+              ...planOptions,
+              serverOwners:
+                resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) ===
+                "islands",
+            }),
+          ),
     }));
     // Every Markdown page shares the components module, so one warning covers them all.
     const markdownFallback = routeEntries.find(
@@ -775,7 +994,7 @@ export class RouteManager {
     for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
       if (isFarmMarkdownPageFile(entry.modulePath) || !metadata.staticPackageBoundaries) continue;
       logger.info(
-        `[Farm.js] ${entry.pattern} is async, so it renders client components from ${metadata.staticPackageBoundaries.join(", ")} as static HTML: package client components cannot be isolated yet.`,
+        `[Farm.js] ${entry.pattern} renders client components from ${metadata.staticPackageBoundaries.join(", ")} as static HTML: package client components cannot be isolated yet.`,
       );
     }
 
@@ -793,6 +1012,7 @@ export class RouteManager {
         metadata,
       })),
       routeBoundaryCoversDirectory,
+      { serverOwners: islandsMode },
     );
 
     for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
@@ -895,14 +1115,26 @@ export class RouteManager {
         containerId: entry.containerId,
         interception: entry.interception,
         fallback: entry.fallback,
-        shouldHydrate: metadata.shouldHydrate,
+        // In islands mode a server slot stays on the server; its client components are islands.
+        shouldHydrate: metadata.shouldHydrate && (!islandsMode || metadata.isClientComponent),
         isClientComponent: metadata.isClientComponent,
         segments: entry.route.segments,
       };
     });
 
+    // A server slot's client components are islands, as a server page's are.
+    const slotPlans = islandsMode
+      ? Array.from(this.routeSlots.values()).map((entry) => ({
+          metadata: getClientModuleHydrationPlan(
+            entry.modulePath,
+            normalizedProjectRoot,
+            isolatedMode,
+            { ...planOptions, serverOwners: true },
+          ),
+        }))
+      : [];
     const isolatedClientBoundaryModules = new Set<string>();
-    for (const { metadata } of [...layoutEntries, ...routeEntries]) {
+    for (const { metadata } of [...layoutEntries, ...routeEntries, ...slotPlans]) {
       // A server-tree layout's client components load from its tree, as islands do.
       if (!metadata.hasIsolatedClientBoundaries && !metadata.serverTreeLayout) continue;
       for (const boundary of metadata.isolatedBoundaries) {
@@ -926,6 +1158,8 @@ export class RouteManager {
     }
 
     const manifest = { routes, layouts, slots };
+    // The next replan starts from this one.
+    this.editedSources = this.sourceChangeTracking ? new Set() : null;
     this.clientManifestCache = {
       projectRoot: normalizedProjectRoot,
       manifest,
@@ -998,14 +1232,16 @@ export class RouteManager {
 
       if (isFarmMarkdownPageFile(modulePath)) {
         const mdxConfig = resolveMdxConfig(this.config.mdx);
-        const components = await loadFarmMdxComponents(mdxConfig, {
-          root: this.config.root,
-          loadModule: this.viteServer
-            ? (componentModulePath) => loadFarmDevModule(this.viteServer!, componentModulePath)
-            : undefined,
-        });
+        const viteServer = this.viteServer;
         return await createFarmMarkdownRouteModuleFromFile(modulePath, {
-          components,
+          // Loaded on render: the route runtime manifest only reads metadata and rendering config.
+          components: () =>
+            loadFarmMdxComponents(mdxConfig, {
+              root: this.config.root,
+              loadModule: viteServer
+                ? (componentModulePath) => loadFarmDevModule(viteServer, componentModulePath)
+                : undefined,
+            }),
           config: mdxConfig,
         });
       }
@@ -1542,22 +1778,16 @@ export class RouteManager {
     }
   }
 
-  /** The page routes a docs adapter answers before Farm's own page rendering. */
+  /** The page routes the docs runtime answers before Farm's own page rendering. */
   private getDocsAdapterRoutes():
     | { owns: (routePath: string) => boolean; prerender: boolean }
     | undefined {
     const docs = this.config.docs;
-    if (
-      !docs ||
-      typeof docs !== "object" ||
-      !docs.enabled ||
-      !docs.adapter ||
-      !docs.adapter.server ||
-      !docs.adapter.react ||
-      !isReactRenderer(this.config.renderer)
-    ) {
-      return undefined;
-    }
+    if (!docs || typeof docs !== "object" || !docs.enabled) return undefined;
+    // The docs runtime answers its paths before page routes: Farm's built-in renderer always,
+    // an adapter when the app renders with React.
+    const usesAdapter = Boolean(docs.adapter && docs.adapter.server && docs.adapter.react);
+    if (usesAdapter && !isReactRenderer(this.config.renderer)) return undefined;
     const entry = `/${String(docs.entry || "docs").replace(/^\/+|\/+$/g, "")}`;
     return {
       owns: (routePath) =>
@@ -1612,7 +1842,8 @@ export class RouteManager {
     };
   }
 
-  private toRoutePathname(pathname: string): string {
+  /** A request pathname as routes see it: without the basePath and, with i18n, the locale. */
+  toRoutePathname(pathname: string): string {
     const i18n = this.getI18nConfig();
     // Locale stripping removes the basePath too; production strips it the same way.
     return i18n
@@ -1621,11 +1852,16 @@ export class RouteManager {
   }
 
   private localizeRedirectDestination(destination: string, locale?: string): string {
-    if (!locale || !destination.startsWith("/") || destination.startsWith("//")) {
+    if (!destination.startsWith("/") || destination.startsWith("//")) {
       return destination;
     }
     const i18n = this.getI18nConfig();
-    return i18n ? localizeFarmHref(destination, locale, i18n) : destination;
+    // Like the production entry: an app-relative destination stays inside the basePath.
+    return locale && i18n
+      ? localizeFarmHref(destination, locale, i18n)
+      : this.config.basePath
+        ? applyFarmBasePath(destination, this.config.basePath)
+        : destination;
   }
 
   private getI18nConfig(): ResolvedFarmI18nConfig | undefined {
@@ -1679,13 +1915,23 @@ function getPageDirectoryField(route: ParsedRoute, pattern: string): { directory
   return directory === pattern ? {} : { directory };
 }
 
+/**
+ * Substitute decoded route params into a redirect destination, encoding each path segment as the
+ * production server does. `catchAllSegments` holds the decoded segments a catch-all consumed, so
+ * a slash decoded from `%2F` stays inside its segment instead of becoming a separator.
+ */
 export function interpolateRedirectDestination(
   destination: string,
   params: Record<string, string>,
+  catchAllSegments: Readonly<Record<string, readonly string[]>> = {},
 ): string {
   let result = destination;
 
-  for (const [key, value] of Object.entries(params)) {
+  for (const [key, rawValue] of Object.entries(params)) {
+    const segments = catchAllSegments[key];
+    const value = segments
+      ? segments.map(encodeConfigRouteSegment).join("/")
+      : encodeConfigRouteSegment(rawValue);
     // Longest token first: [[...key]] contains [...key], which contains [key].
     result = replaceAll(result, `[[...${key}]]`, value);
     result = replaceAll(result, `[...${key}]`, value);
@@ -1695,6 +1941,15 @@ export function interpolateRedirectDestination(
   }
 
   return result;
+}
+
+/** The decoded segments a matched route's catch-all consumed; each earlier segment takes one. */
+function getCatchAllParamSegments(
+  segments: readonly RouteSegment[],
+  urlParts: readonly string[],
+): Record<string, readonly string[]> {
+  const index = segments.findIndex((segment) => segment.isCatchAll);
+  return index === -1 ? {} : { [segments[index].segment]: urlParts.slice(index) };
 }
 
 function getMetadataImageSuffix(pathname: string): {

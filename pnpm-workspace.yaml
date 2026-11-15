@@ -2,6 +2,8 @@ packages:
   - "packages/*"
   - "examples/*"
   - "examples/*/*"
+  # A workspace package of the server components contract, as an app in a monorepo uses one.
+  - "examples/server-components/fixtures/workspace-ui"
   # The StackBlitz playground installs published packages from npm so it can
   # be opened standalone in the browser, so keep it out of the workspace.
   - "!examples/stackblitz"

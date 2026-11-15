@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createServer } from "vite";
 import { describe, expect, it, vi } from "vitest";
+import { pluginHook } from "./plugin-hook";
 import { FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE } from "../server/vite-config";
 import { logger } from "../utils";
 import { defineConfig, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
@@ -49,7 +50,7 @@ describe("Farm Vite server-only entries", () => {
         throw new Error(message);
       },
     };
-    return (plugin.resolveId as ResolveId).bind(context);
+    return pluginHook(plugin, "resolveId", context) as ResolveId;
   }
 
   it("rejects @farm.js/core/og in the development browser graph only", async () => {
@@ -67,6 +68,23 @@ describe("Farm Vite server-only entries", () => {
       resolveId("@farm.js/core/og", "/app/src/app/api/card/route.tsx", { ssr: true }),
     ).toBeNull();
     expect(resolveId("@farm.js/core/client", "/app/src/page.tsx", {})).toBeNull();
+  });
+
+  it("gives server graphs an empty server-only module and rejects it in the browser graph", async () => {
+    const plugin = farmServerOnlyEntriesPlugin();
+    (plugin.configResolved as (config: { root: string }) => void)({ root: process.cwd() });
+    const resolveId = createResolveId(process.cwd());
+
+    const id = resolveId("server-only", "/app/src/server/db.ts", { ssr: true }) as string;
+    expect(id).toBe("\0farm:server-only");
+    expect(pluginHook<[string], string>(plugin, "load")(id)).toBe("export {};");
+    // Vite's dependency scan reads route files as browser entries; it gets the empty module too.
+    expect(resolveId("server-only", "/app/src/app/page.tsx", { scan: true } as never)).toBe(
+      "\0farm:server-only",
+    );
+    expect(() => resolveId("server-only", "/app/src/server/db.ts", {})).toThrow(
+      '/app/src/server/db.ts imports "server-only", so it must not reach the browser',
+    );
   });
 
   it("names the install command when a server graph imports @farm.js/core/og without @vercel/og", async () => {

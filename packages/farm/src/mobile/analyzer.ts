@@ -12,12 +12,30 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 import { FARM_VERSION } from "../version";
+import {
+  inspectFarmNativeStylesheets,
+  parseFarmNativeStylesheet,
+  type FarmNativeStylesheet,
+} from "./native-css";
+import {
+  FARM_NATIVE_STYLE_PROPERTIES,
+  FARM_NATIVE_TEXT_KEYS,
+  farmNativeClassProblem,
+  resolveFarmNativeClasses,
+  resolveFarmNativeInlineStyle,
+} from "./native-style";
+import {
+  farmComponentKind,
+  farmComponentModuleScripts,
+  keepFarmComponentRanges,
+  readFarmComponentBlocks,
+} from "./component-blocks";
 
 /**
  * Cached facts are reused only by the same analyzer: bump when facts change shape or rules
  * change between releases; a new Farm version always starts fresh.
  */
-const ANALYZER_VERSION = `2:${FARM_VERSION}`;
+const ANALYZER_VERSION = `7:${FARM_VERSION}`;
 
 export type FarmUiNodeKind = "View" | "Text" | "Image" | "Pressable" | "TextInput" | "List";
 
@@ -83,7 +101,9 @@ export type FarmMobileBlockerRule =
   | "unresolved-import"
   | "dynamic-import"
   | "node-builtin"
-  | "client-logic";
+  | "client-logic"
+  | "inert-control"
+  | "renderer-component";
 
 export type FarmMobileWin = "list" | "input" | "timer";
 
@@ -141,6 +161,43 @@ export interface FarmMobileAnalyzerStats {
 export interface FarmMobileAnalyzerResult {
   routes: Record<string, FarmMobileRouteAnalysis>;
   stats: FarmMobileAnalyzerStats;
+  /**
+   * The page's own module graph (not its layouts) for each portable route, which the port emitter
+   * copies. Not part of the report.
+   *
+   * @internal
+   */
+  graphs: Record<string, FarmMobilePortGraph>;
+  /**
+   * Every plain `.css` file the analyzed pages and layouts import. A production build bundles the
+   * app's CSS into one stylesheet every page links, so each of these can style any page.
+   *
+   * @internal
+   */
+  stylesheets: string[];
+  /**
+   * Stylesheets the analyzer cannot read as plain CSS: package CSS and preprocessor files, by
+   * specifier.
+   *
+   * @internal
+   */
+  unreadStylesheets: string[];
+}
+
+/** @internal */
+export interface FarmMobilePortGraph {
+  /** Absolute page file. */
+  page: string;
+  modules: Array<{
+    /** Absolute module file. */
+    file: string;
+    /** A server function module, which the client calls over the network. */
+    serverBoundary: boolean;
+    /** Each import's specifier, and the app module it resolves to, if any. */
+    imports: Array<{ source: string; file?: string }>;
+  }>;
+  /** Class names the route's layouts render, which may wrap the page's elements on the web. */
+  layoutClasses: string[];
 }
 
 export interface FarmMobileAnalyzeOptions {
@@ -150,6 +207,8 @@ export interface FarmMobileAnalyzeOptions {
   routes: readonly string[];
   /** Absolute page file per file-based route; routes without one are programmatic. */
   pageFiles: ReadonlyMap<string, string>;
+  /** Routes whose only page is a screen file (RFC 0004, 7.3): not analyzed, not programmatic. */
+  nativeOnlyRoutes?: ReadonlySet<string>;
   /** `experimental.serverComponents` is on: pages and layouts without "use client" render on the server. */
   serverComponents?: boolean;
   /** Content-hash cache of module facts; written back after the run. */
@@ -172,9 +231,15 @@ Object.assign(INTRINSIC_KINDS, {
   a: "Pressable",
   input: "TextInput",
   textarea: "TextInput",
+  // Native-tier screens submit forms as a browser would (native-tree.ts).
+  form: "View",
   ul: "List",
   ol: "List",
 });
+
+/** Table elements: native-tier screens draw them (native-tree.ts); React Native ports do not. */
+const TABLE_TAGS = new Set("table caption thead tbody tfoot tr th td colgroup col".split(" "));
+const TABLE_STYLE_PROPERTIES = new Set(["tableLayout", "borderCollapse"]);
 
 const INPUT_TYPES = new Set(["text", "email", "password", "number", "search", "tel", "url"]);
 
@@ -300,6 +365,21 @@ export const CORE_PORTABLE: Record<string, ReadonlySet<string>> = {
   "@farm.js/core/platform": new Set(["platform"]),
 };
 
+/** Inline elements the tree reads as text runs, which cannot carry a box. */
+const INLINE_BOX_TAGS = new Set("span strong em b i small label code".split(" "));
+
+function hasBoxStyle(node: FarmUiNode): boolean {
+  const tokens = node.style ?? [];
+  const classes = tokens.filter((token) => !token.startsWith("style."));
+  const resolved = resolveFarmNativeClasses(classes.join(" "));
+  const keys = [
+    ...Object.keys(resolved.style),
+    ...Object.keys(resolved.dark ?? {}),
+    ...tokens.filter((token) => token.startsWith("style.")).map((token) => token.slice(6)),
+  ];
+  return keys.some((key) => !FARM_NATIVE_TEXT_KEYS.has(key));
+}
+
 /** Imported components with a native mapping. */
 const MAPPED_COMPONENTS: Record<string, Record<string, FarmUiNodeKind>> = {
   "@farm.js/core": { Link: "Pressable" },
@@ -318,6 +398,10 @@ const MAPPED_COMPONENTS: Record<string, Record<string, FarmUiNodeKind>> = {
 const SERVER_FN_FACTORIES = new Set(["createServerFn", "createServerQuery"]);
 
 const SCRIPT_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js", ".mjs"];
+/** Renderer component files the analyzer reads without the renderer's compiler. */
+const COMPONENT_EXTENSIONS = [".vue", ".svelte"];
+const isModuleFile = (file: string) =>
+  [...SCRIPT_EXTENSIONS, ...COMPONENT_EXTENSIONS].some((extension) => file.endsWith(extension));
 const STYLE_FILE = /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:\?.*)?$/i;
 const ASSET_FILE =
   /\.(?:png|jpe?g|gif|webp|avif|svg|ico|bmp|json|woff2?|ttf|otf|mp3|wav|txt)(?:\?.*)?$/i;
@@ -352,7 +436,7 @@ const COLOR =
 const SPACE = "(?:\\d+(?:\\.5)?|px|auto)";
 const SIZE = "(?:\\d+(?:\\.5)?|px|auto|full|\\d+/\\d+|min|max|fit)";
 const PORTABLE_CLASSES = [
-  /^(?:flex|flex-row|flex-col|flex-row-reverse|flex-col-reverse|flex-wrap|flex-nowrap|flex-wrap-reverse|flex-1|flex-auto|flex-initial|flex-none|grow|grow-0|shrink|shrink-0|hidden|relative|absolute|overflow-hidden|overflow-visible|italic|not-italic|underline|line-through|no-underline|uppercase|lowercase|capitalize|normal-case|text-left|text-center|text-right|text-justify)$/,
+  /^(?:flex|flex-row|flex-col|flex-row-reverse|flex-col-reverse|flex-wrap|flex-nowrap|flex-wrap-reverse|flex-1|flex-auto|flex-initial|flex-none|grow|grow-0|shrink|shrink-0|hidden|relative|absolute|overflow-hidden|overflow-visible|italic|not-italic|underline|line-through|no-underline|uppercase|lowercase|capitalize|normal-case|text-left|text-center|text-right|text-justify|table-auto|table-fixed|border-collapse)$/,
   /^(?:items|justify|self|content)-(?:start|end|center|between|around|evenly|stretch|baseline|auto)$/,
   new RegExp(
     `^-?(?:gap|gap-x|gap-y|p|px|py|pt|pr|pb|pl|ps|pe|m|mx|my|mt|mr|mb|ml|ms|me)-${SPACE}$`,
@@ -383,7 +467,7 @@ const BLOCKING_CLASSES: Array<[RegExp, string]> = [
   ],
   [/^(?:space-[xy]-.+|divide-.+)$/, "needs child selectors"],
   [
-    /^(?:block|inline|inline-block|inline-flex|table.*|contents|flow-root|list-item)$/,
+    /^(?:block|inline|inline-block|inline-flex|table(?!-(?:auto|fixed)$).*|contents|flow-root|list-item)$/,
     "sets a display mode other than flex",
   ],
   [
@@ -441,6 +525,20 @@ interface ModuleFacts {
   serverBoundary: boolean;
   asyncDefault: boolean;
   components: Record<string, FarmUiNode>;
+  /**
+   * Classes outside the Tailwind table: the native tier accepts one only when the app's CSS styles
+   * it in a way the tier can draw, which the route pass checks against its stylesheets.
+   */
+  appClasses: Array<{ name: string; line: number; column: number }>;
+  /** Intrinsic elements rendered, for element rules in the app's CSS. */
+  tags: string[];
+  /** A `.vue` or `.svelte` component's own `<style>` blocks: CSS that styles its classes. */
+  styles?: string[];
+  /**
+   * Function `action`/`formAction` values that may be server actions: from `source` (an import),
+   * or a function with its own "use server" when `source` is absent. The route pass decides.
+   */
+  formActions?: Array<{ source?: string; line: number; column: number; message: string }>;
 }
 
 type Node = { type: string; start: number; end: number; [key: string]: any };
@@ -531,7 +629,12 @@ const SKIP_KEYS = new Set([
 ]);
 
 /** Facts for one module's source. Pure: the same source always gives the same facts. */
-function analyzeSource(file: string, source: string, parseSync: ParseSync): ModuleFacts {
+function analyzeSource(
+  file: string,
+  source: string,
+  parseSync: ParseSync,
+  lang: "ts" | "tsx" | "jsx" = scriptLang(file),
+): ModuleFacts {
   const facts: ModuleFacts = {
     imports: [],
     blockers: [],
@@ -541,6 +644,8 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
     serverBoundary: false,
     asyncDefault: false,
     components: {},
+    appClasses: [],
+    tags: [],
   };
   const starts = lineStarts(source);
   const block = (
@@ -560,7 +665,24 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
   // cannot.
   const needsDevice = (node: { start: number }, message: string) =>
     block(node, "client-logic", message, "native");
-  const result = parseSync(file, source, { lang: scriptLang(file) });
+  // Inside a `<form>` of this module's JSX: its controls submit it.
+  let formDepth = 0;
+  // Functions declared with their own "use server" (inline server actions).
+  const serverFunctions = new Set<string>();
+  // A form action that may be a server action: an imported binding, or a "use server" function.
+  const serverActionReference = (expression: Node | undefined): { source?: string } | undefined => {
+    if (expression?.type === "Identifier") {
+      if (serverFunctions.has(expression.name)) return {};
+      const binding = imported.get(expression.name);
+      return binding ? { source: binding.source } : undefined;
+    }
+    if (expression?.type === "MemberExpression" && expression.object.type === "Identifier") {
+      const binding = imported.get(expression.object.name);
+      return binding?.name === "*" ? { source: binding.source } : undefined;
+    }
+    return undefined;
+  };
+  const result = parseSync(file, source, { lang });
   if (result.errors.length > 0) {
     const error = result.errors[0]!;
     const offset = error.labels?.[0]?.start ?? 0;
@@ -569,6 +691,43 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
   }
   const program = result.program as unknown as Node;
   const wins = new Set<FarmMobileWin>();
+  const usesServer = (body: Node | null | undefined) =>
+    body?.type === "BlockStatement" &&
+    (body.body as Node[]).some(
+      (statement) =>
+        statement.type === "ExpressionStatement" && statement.directive === "use server",
+    );
+  const findServerFunctions = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const child of node) findServerFunctions(child);
+      return;
+    }
+    const current = node as Node;
+    if (current.type === "FunctionDeclaration" && current.id && usesServer(current.body)) {
+      serverFunctions.add(current.id.name);
+    } else if (
+      current.type === "VariableDeclarator" &&
+      current.id?.type === "Identifier" &&
+      (current.init?.type === "ArrowFunctionExpression" ||
+        current.init?.type === "FunctionExpression") &&
+      usesServer(current.init.body)
+    ) {
+      serverFunctions.add(current.id.name);
+    }
+    for (const [key, value] of Object.entries(current)) {
+      if (
+        key !== "type" &&
+        key !== "start" &&
+        key !== "end" &&
+        value &&
+        typeof value === "object"
+      ) {
+        findServerFunctions(value);
+      }
+    }
+  };
+  findServerFunctions(program);
 
   // Top-level bindings: imports and declarations, to resolve JSX component names.
   const imported = new Map<string, { source: string; name: string }>();
@@ -676,7 +835,10 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
     const isIntrinsic = opening.name.type === "JSXIdentifier" && /^[a-z]/.test(tag);
     if (isIntrinsic) {
       kind = INTRINSIC_KINDS[tag];
-      if (!kind) block(opening, "unmapped-element", `<${tag}> has no native mapping`);
+      if (!facts.tags.includes(tag)) facts.tags.push(tag);
+      if (!kind && TABLE_TAGS.has(tag)) {
+        block(opening, "unmapped-element", `<${tag}> has no React Native port`, "react-native");
+      } else if (!kind) block(opening, "unmapped-element", `<${tag}> has no native mapping`);
     } else if (opening.name.type === "JSXNamespacedName") {
       block(opening, "unmapped-element", `<${tag}> has no native mapping`);
     } else {
@@ -729,6 +891,7 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
     const props: Record<string, string | number | boolean> = {};
     const style: string[] = [];
     const events: string[] = [];
+    let submits = false;
     for (const attribute of opening.attributes as Node[]) {
       if (attribute.type === "JSXSpreadAttribute") {
         if (isIntrinsic)
@@ -751,7 +914,21 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
         continue;
       }
       if ((name === "action" || name === "formAction") && isIntrinsic) {
-        block(attribute, "form-action", `${name} on <${tag}>`);
+        // A URL submits as a browser form does. A server action does too: React renders it as a
+        // form posting its id, which the server runs; any other function needs React on the page.
+        if (staticString(value) === undefined) {
+          const reference = serverActionReference(
+            value?.type === "JSXExpressionContainer" ? value.expression : undefined,
+          );
+          if (reference) {
+            (facts.formActions ??= []).push({
+              ...(reference.source !== undefined ? { source: reference.source } : {}),
+              ...locate(starts, attribute.start),
+              message: `${name} on <${tag}>`,
+            });
+          } else block(attribute, "form-action", `${name} on <${tag}>`);
+        }
+        submits = true;
         continue;
       }
       if (/^on[A-Z]/.test(name)) {
@@ -771,8 +948,16 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
         }
         for (const token of classes.split(/\s+/).filter(Boolean)) {
           const problem = classifyClass(token);
-          if (problem) block(attribute, "class-name", problem);
-          else style.push(token);
+          if (problem && /^class ".*" is not in the native Tailwind subset$/.test(problem)) {
+            // Not Tailwind: the app's CSS may style it, which the native tier and the React
+            // Native port emitter each check against the stylesheets.
+            facts.appClasses.push({ name: token, ...locate(starts, attribute.start) });
+          } else if (problem) block(attribute, "class-name", problem);
+          else {
+            style.push(token);
+            const native = farmNativeClassProblem(token);
+            if (native) block(attribute, "class-name", native, "native");
+          }
         }
         continue;
       }
@@ -788,9 +973,17 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
             continue;
           }
           const key = property.key.name ?? property.key.value;
+          if (TABLE_STYLE_PROPERTIES.has(key)) {
+            // The native tier always lays a table out this way; React Native has no tables.
+            block(property, "style", `style.${key} has no React Native port`, "react-native");
+            continue;
+          }
           if (!STYLE_PROPERTIES.has(key)) {
             block(property, "style", `style.${key} has no native mapping`);
             continue;
+          }
+          if (!FARM_NATIVE_STYLE_PROPERTIES.has(key)) {
+            block(property, "style", `style.${key} has no native-tier style`, "native");
           }
           const literal = staticString(property.value);
           if (literal !== undefined) {
@@ -816,7 +1009,9 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
       }
       if (tag === "input" && name === "type") {
         const type = staticString(value);
-        if (type === undefined || !INPUT_TYPES.has(type)) {
+        // Inside a form, a hidden field is sent and a submit input submits.
+        const formType = formDepth > 0 && (type === "hidden" || type === "submit");
+        if (!formType && (type === undefined || !INPUT_TYPES.has(type))) {
           block(
             attribute,
             "unmapped-element",
@@ -840,6 +1035,35 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
     ) {
       wins.add("input");
     }
+    // A server-drawn screen opens links; a control with no handler and no form does nothing
+    // there, so the page keeps its web screen. Handlers are blocked above as client logic.
+    // A server-drawn screen opens links and submits forms; a button that is not a form's submit
+    // button, or a field outside a form, would do nothing there.
+    const inForm = formDepth > 0;
+    const buttonType = tag === "button" ? (props.type ?? "submit") : undefined;
+    if (
+      isIntrinsic &&
+      (tag === "button" || kind === "TextInput") &&
+      events.length === 0 &&
+      !submits &&
+      props.type !== "hidden" &&
+      (!inForm || (buttonType !== undefined && buttonType !== "submit"))
+    ) {
+      block(
+        opening,
+        "inert-control",
+        inForm
+          ? `<button type="${String(buttonType)}"> does nothing on a native-tier screen`
+          : `<${tag}> has no link or form to submit on a native-tier screen`,
+        "native",
+      );
+    }
+    if (isIntrinsic && tag === "form") {
+      const method = typeof props.method === "string" ? props.method.toLowerCase() : "get";
+      if (props.method === "{expr}" || (method !== "get" && method !== "post")) {
+        block(opening, "form-action", `<form method="${String(props.method)}">`, "native");
+      }
+    }
     if (Object.keys(props).length > 0) node.props = props;
     if (style.length > 0) node.style = style;
     if (events.length > 0) node.events = events;
@@ -857,10 +1081,30 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
         return undefined;
       case "JSXElement": {
         const ui = classifyElement(node);
+        // The tree draws an inline element with a box (a background, padding) only as a flex item;
+        // inside text it has no native layout yet.
+        if (
+          INLINE_BOX_TAGS.has(ui.tag) &&
+          parent &&
+          parent.kind !== "Fragment" &&
+          parent.kind !== "Component" &&
+          !parent.style?.some((token) => token === "flex" || token === "inline-flex") &&
+          hasBoxStyle(ui)
+        ) {
+          block(
+            node.openingElement,
+            "class-name",
+            `<${ui.tag}> with a background, border, padding, or size inside text has no native-tier layout`,
+            "native",
+          );
+        }
         for (const attribute of node.openingElement.attributes as Node[]) {
           visit(attribute.type === "JSXSpreadAttribute" ? attribute.argument : attribute.value);
         }
+        const form = ui.tag === "form";
+        if (form) formDepth += 1;
         visitChildren(node.children, ui);
+        if (form) formDepth -= 1;
         append(parent, ui);
         return ui;
       }
@@ -1054,6 +1298,337 @@ function analyzeSource(file: string, source: string, parseSync: ParseSync): Modu
   return facts;
 }
 
+// Vue and Svelte tags that render their children, or nothing, rather than an element.
+const COMPONENT_STRUCTURE = new Set([
+  "template",
+  "slot",
+  "Transition",
+  "TransitionGroup",
+  "KeepAlive",
+  "Suspense",
+  "svelte:head",
+  "svelte:fragment",
+  "svelte:options",
+  "svelte:window",
+  "svelte:body",
+  "svelte:document",
+  "svelte:boundary",
+]);
+// Tags whose element or content is chosen at runtime, or rendered outside the page.
+const COMPONENT_DYNAMIC = new Set(["component", "svelte:element", "svelte:component", "Teleport"]);
+const VOID_ELEMENTS = new Set(
+  "area base br col embed hr img input link meta source track wbr".split(" "),
+);
+
+/**
+ * Facts for a `.vue` or `.svelte` component, read without the renderer's compiler. Its scripts go
+ * through the script analyzer (imports, browser globals, async), and its markup through a scanner
+ * that applies the element, class, style, and form rules JSX gets. Vue and Svelte run a page's
+ * scripts on the server unless the page exports `hydrate = true`, so that export, not a hook
+ * call, is what needs JavaScript on the device. React Native ports are React only.
+ */
+function analyzeComponentSource(file: string, source: string, parseSync: ParseSync): ModuleFacts {
+  const blocks = readFarmComponentBlocks(file, source);
+  const name = blocks.kind === "vue" ? "Vue" : "Svelte";
+  const scripts = keepFarmComponentRanges(source, blocks.scripts);
+  const typed = blocks.scripts.some((script) => script.attributes.lang === "tsx") ? "tsx" : "ts";
+  const facts = analyzeSource(file, scripts, parseSync, typed);
+  // A hook-shaped call is React's signal for the device; Vue and Svelte use `hydrate` instead.
+  facts.blockers = facts.blockers.filter((blocker) => blocker.rule !== "client-logic");
+  const starts = lineStarts(source);
+  const block = (
+    offset: number,
+    rule: FarmMobileBlockerRule,
+    message: string,
+    only?: FarmMobileBlocker["only"],
+  ) => facts.blockers.push({ ...locate(starts, offset), rule, message, ...(only ? { only } : {}) });
+  facts.blockers.push({
+    line: 1,
+    column: 1,
+    rule: "renderer-component",
+    message: `a ${name} component has no React Native port`,
+    only: "react-native",
+  });
+  for (const script of farmComponentModuleScripts(blocks)) {
+    const hydrate = /\bexport\s+const\s+hydrate\s*=\s*true\b/.exec(
+      source.slice(script.start, script.end),
+    );
+    if (hydrate) {
+      block(
+        script.start + hydrate.index,
+        "client-logic",
+        "it exports hydrate = true, which hydrates the page in the browser",
+        "native",
+      );
+    }
+  }
+  const styles = blocks.styles
+    .filter((style) => !style.attributes.lang || style.attributes.lang === "css")
+    .map((style) => source.slice(style.start, style.end));
+  if (styles.length > 0) facts.styles = styles;
+  for (const style of blocks.styles) {
+    if (style.attributes.lang && style.attributes.lang !== "css") {
+      block(
+        style.start,
+        "css-import",
+        `<style lang="${String(style.attributes.lang)}"> is not CSS`,
+      );
+    }
+  }
+
+  // The names this component's scripts import: tags that name one are components it renders.
+  const imported = new Set<string>();
+  for (const script of blocks.scripts) {
+    const text = source.slice(script.start, script.end);
+    for (const match of text.matchAll(/\bimport\s+(?:type\s+)?([\w$]+)\s*(?:,|from\b)/g)) {
+      imported.add(match[1]!);
+    }
+    for (const match of text.matchAll(/\bimport\s+(?:[\w$]+\s*,\s*)?\{([^}]*)\}/g)) {
+      for (const part of match[1]!.split(",")) {
+        const local = part
+          .trim()
+          .split(/\s+as\s+/)
+          .pop()
+          ?.trim();
+        if (local) imported.add(local);
+      }
+    }
+  }
+  const pascal = (tag: string) =>
+    tag.replace(/(^|-)([a-z])/g, (_, __, letter: string) => letter.toUpperCase());
+
+  let formDepth = 0;
+  const open: string[] = [];
+  for (const range of blocks.markup) {
+    const markup = source.slice(range.start, range.end);
+    let index = 0;
+    while (index < markup.length) {
+      const at = range.start + index;
+      if (markup.startsWith("<!--", index)) {
+        const end = markup.indexOf("-->", index + 4);
+        index = end === -1 ? markup.length : end + 3;
+        continue;
+      }
+      // Text expressions: Vue's {{ }}, Svelte's { } and its {@html}, {#if}, {:else} blocks.
+      if (markup[index] === "{") {
+        const end = closeBrace(markup, index);
+        if (blocks.kind === "svelte" && /^\{@html\b/.test(markup.slice(index))) {
+          block(at, "dangerously-set-inner-html", "{@html} renders raw HTML");
+        }
+        index = end;
+        continue;
+      }
+      if (markup[index] !== "<") {
+        index += 1;
+        continue;
+      }
+      const closing = markup[index + 1] === "/";
+      const nameMatch = /^[A-Za-z][\w:.-]*/.exec(markup.slice(index + (closing ? 2 : 1)));
+      if (!nameMatch) {
+        index += 1;
+        continue;
+      }
+      const tag = nameMatch[0];
+      let cursor = index + (closing ? 2 : 1) + tag.length;
+      const attributes: Array<{ name: string; value?: string; dynamic: boolean; offset: number }> =
+        [];
+      let selfClosing = false;
+      while (cursor < markup.length && markup[cursor] !== ">") {
+        const char = markup[cursor]!;
+        if (/\s/.test(char)) {
+          cursor += 1;
+          continue;
+        }
+        if (char === "/" && markup[cursor + 1] === ">") {
+          selfClosing = true;
+          cursor += 1;
+          continue;
+        }
+        if (char === "{") {
+          // A Svelte spread or shorthand attribute, {...props} or {value}.
+          attributes.push({ name: "{", dynamic: true, offset: range.start + cursor });
+          cursor = closeBrace(markup, cursor);
+          continue;
+        }
+        const attrName = /^[^\s=/>]+/.exec(markup.slice(cursor))?.[0] ?? char;
+        const attrOffset = range.start + cursor;
+        cursor += attrName.length;
+        while (/\s/.test(markup[cursor] ?? "")) cursor += 1;
+        let value: string | undefined;
+        let braced = false;
+        if (markup[cursor] === "=") {
+          cursor += 1;
+          while (/\s/.test(markup[cursor] ?? "")) cursor += 1;
+          const quote = markup[cursor];
+          if (quote === '"' || quote === "'") {
+            const end = markup.indexOf(quote, cursor + 1);
+            value = markup.slice(cursor + 1, end === -1 ? markup.length : end);
+            cursor = end === -1 ? markup.length : end + 1;
+          } else if (quote === "{") {
+            const end = closeBrace(markup, cursor);
+            value = markup.slice(cursor, end);
+            braced = true;
+            cursor = end;
+          } else {
+            value = /^[^\s>]+/.exec(markup.slice(cursor))?.[0] ?? "";
+            cursor += value.length;
+          }
+        }
+        const dynamic =
+          braced ||
+          attrName.startsWith(":") ||
+          attrName.startsWith("v-bind:") ||
+          attrName.startsWith("@") ||
+          attrName.startsWith("v-on:") ||
+          (blocks.kind === "svelte" && value !== undefined && /\{/.test(value));
+        attributes.push({ name: attrName, value, dynamic, offset: attrOffset });
+      }
+      index = cursor + 1;
+      if (closing) {
+        const position = open.lastIndexOf(tag);
+        if (position !== -1) {
+          for (const closed of open.splice(position)) if (closed === "form") formDepth -= 1;
+        }
+        continue;
+      }
+      const element = !selfClosing && !VOID_ELEMENTS.has(tag.toLowerCase());
+      if (element) open.push(tag);
+      if (tag === "form" && element) formDepth += 1;
+
+      for (const attribute of attributes) {
+        if (attribute.name === "v-html") {
+          block(attribute.offset, "dangerously-set-inner-html", "v-html renders raw HTML");
+        }
+        if (attribute.name.toLowerCase() === "contenteditable") {
+          block(attribute.offset, "content-editable", "contentEditable");
+        }
+      }
+      if (COMPONENT_STRUCTURE.has(tag)) continue;
+      if (COMPONENT_DYNAMIC.has(tag) || attributes.some((attribute) => attribute.name === "is")) {
+        block(at, "dynamic-component", `<${tag}> picks what it renders at runtime`);
+        continue;
+      }
+      const intrinsic = /^[a-z][a-z0-9]*$/.test(tag);
+      if (!intrinsic) {
+        if (!imported.has(tag) && !imported.has(pascal(tag))) {
+          block(at, "dynamic-component", `<${tag}> is not a component this file imports`);
+        }
+        continue;
+      }
+      const kind = INTRINSIC_KINDS[tag];
+      if (!facts.tags.includes(tag)) facts.tags.push(tag);
+      facts.elements.total += 1;
+      if (kind) {
+        facts.elements.mapped += 1;
+        facts.elements.byKind[kind] = (facts.elements.byKind[kind] ?? 0) + 1;
+      } else if (TABLE_TAGS.has(tag)) {
+        // Drawn by the native tier, so its attributes still count; not portable to React Native.
+        block(at, "unmapped-element", `<${tag}> has no React Native port`, "react-native");
+      } else {
+        block(at, "unmapped-element", `<${tag}> has no native mapping`);
+        continue;
+      }
+
+      const value = (attr: string) =>
+        attributes.find((attribute) => attribute.name.toLowerCase() === attr);
+      const boundAttribute = (attr: string) =>
+        attributes.find(
+          (attribute) =>
+            (attribute.dynamic &&
+              (attribute.name === `:${attr}` ||
+                attribute.name === `v-bind:${attr}` ||
+                attribute.name === attr)) ||
+            (attr === "class" && attribute.name.startsWith("class:")),
+        );
+      const classes = value("class");
+      if (boundAttribute("class")) {
+        block(at, "runtime-class-name", `<${tag}> builds its class names at runtime`);
+      } else if (classes?.value) {
+        for (const token of classes.value.split(/\s+/).filter(Boolean)) {
+          const problem = classifyClass(token);
+          if (problem && /^class ".*" is not in the native Tailwind subset$/.test(problem)) {
+            facts.appClasses.push({ name: token, ...locate(starts, classes.offset) });
+          } else if (problem) block(classes.offset, "class-name", problem);
+          else {
+            const native = farmNativeClassProblem(token);
+            if (native) block(classes.offset, "class-name", native, "native");
+          }
+        }
+      }
+      const style = value("style");
+      if (boundAttribute("style")) {
+        block(at, "runtime-style", `<${tag}> style is computed at runtime`);
+      } else if (style?.value) {
+        for (const declaration of resolveFarmNativeInlineStyle(style.value).unsupported) {
+          block(
+            style.offset,
+            "style",
+            `<${tag}> style "${declaration}" has no native-tier style`,
+            "native",
+          );
+        }
+      }
+      const type = value("type");
+      if (tag === "input") {
+        const inputType = type?.dynamic ? undefined : (type?.value ?? "text").toLowerCase();
+        const formType = formDepth > 0 && (inputType === "hidden" || inputType === "submit");
+        if (!formType && (inputType === undefined || !INPUT_TYPES.has(inputType))) {
+          block(
+            at,
+            "unmapped-element",
+            `<input type="${inputType ?? "{expr}"}"> has no native mapping`,
+          );
+          continue;
+        }
+        if (inputType === "hidden") continue;
+      }
+      // A server-drawn screen opens links and submits forms (see analyzeSource).
+      const buttonType = tag === "button" ? (type?.value ?? "submit").toLowerCase() : undefined;
+      if (
+        (tag === "button" || kind === "TextInput") &&
+        !value("action") &&
+        !value("formaction") &&
+        (formDepth === 0 || (buttonType !== undefined && buttonType !== "submit"))
+      ) {
+        block(
+          at,
+          "inert-control",
+          formDepth > 0
+            ? `<button type="${buttonType}"> does nothing on a native-tier screen`
+            : `<${tag}> has no link or form to submit on a native-tier screen`,
+          "native",
+        );
+      }
+      if (tag === "form") {
+        const method = value("method");
+        const methodValue = (method?.value ?? "get").toLowerCase();
+        if (method?.dynamic || (methodValue !== "get" && methodValue !== "post")) {
+          block(at, "form-action", `<form method="${method?.value ?? "{expr}"}">`, "native");
+        }
+      }
+    }
+  }
+  return facts;
+}
+
+/** The index after the brace that closes the one at `start`, past strings and nested braces. */
+function closeBrace(text: string, start: number): number {
+  let depth = 0;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"' || char === "'" || char === "`") {
+      const end = text.indexOf(char, index + 1);
+      if (end === -1) return text.length;
+      index = end;
+    } else if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+  return text.length;
+}
+
 type ParseSync = (
   file: string,
   source: string,
@@ -1067,16 +1642,23 @@ interface ResolvedImport {
   fact: ImportFact;
   /** Absolute app module path, for app-local script imports. */
   file?: string;
+  /** Absolute path of an app `.css` file it imports. */
+  stylesheet?: string;
   blocker?: LocalBlocker;
 }
 
-interface AliasEntry {
+/** @internal */
+export interface AliasEntry {
   prefix: string;
   targets: string[];
 }
 
-/** `@/` (Farm's source alias) and tsconfig `compilerOptions.paths`. */
-function readAliases(root: string, srcDir: string): AliasEntry[] {
+/**
+ * `@/` (Farm's source alias) and tsconfig `compilerOptions.paths`.
+ *
+ * @internal Exported for the native server function scan.
+ */
+export function readAliases(root: string, srcDir: string): AliasEntry[] {
   const aliases: AliasEntry[] = [{ prefix: "@/", targets: [path.join(root, srcDir) + path.sep] }];
   try {
     const raw = readFileSync(path.join(root, "tsconfig.json"), "utf8")
@@ -1106,7 +1688,8 @@ function isFile(file: string): boolean {
   }
 }
 
-function resolveFile(base: string): string | undefined {
+/** @internal Exported for the native server function scan. */
+export function resolveFile(base: string): string | undefined {
   if (isFile(base)) return base;
   for (const extension of SCRIPT_EXTENSIONS) if (isFile(base + extension)) return base + extension;
   // TypeScript ESM style: `./x.js` names `./x.ts`.
@@ -1268,14 +1851,25 @@ export async function analyzeFarmMobileRoutes(
     let pending = facts.get(file);
     if (!pending) {
       pending = readFile(file, "utf8").then((source) => {
+        const component = farmComponentKind(file);
         const hash = createHash("sha1")
-          .update(file.endsWith(".tsx") ? "tsx\0" : file.endsWith(".ts") ? "ts\0" : "jsx\0")
+          .update(
+            component
+              ? `${component}\0`
+              : file.endsWith(".tsx")
+                ? "tsx\0"
+                : file.endsWith(".ts")
+                  ? "ts\0"
+                  : "jsx\0",
+          )
           .update(source)
           .digest("hex");
         let result = cache.modules[hash];
         if (result) cached += 1;
         else {
-          result = analyzeSource(file, source, parseSync);
+          result = component
+            ? analyzeComponentSource(file, source, parseSync)
+            : analyzeSource(file, source, parseSync);
           parsed += 1;
         }
         used[hash] = result;
@@ -1331,18 +1925,14 @@ export async function analyzeFarmMobileRoutes(
       const blocker = classifyPackage(fact, moduleFacts.serverBoundary);
       return blocker ? { fact, blocker } : { fact };
     }
-    if (STYLE_FILE.test(specifier)) {
-      return {
-        fact,
-        blocker: { ...at, rule: "css-import", message: `import "${specifier}" is a stylesheet` },
-      };
-    }
     if (ASSET_FILE.test(specifier)) return { fact };
     for (const candidate of candidates) {
       const file = resolveFile(candidate);
       if (file) {
         if (ASSET_FILE.test(file)) return { fact };
         if (STYLE_FILE.test(file)) {
+          // Plain CSS is the app's stylesheet, which the native tier and React Native ports read.
+          if (file.endsWith(".css")) return { fact, stylesheet: file };
           return {
             fact,
             blocker: {
@@ -1352,7 +1942,7 @@ export async function analyzeFarmMobileRoutes(
             },
           };
         }
-        if (!SCRIPT_EXTENSIONS.some((extension) => file.endsWith(extension))) {
+        if (!isModuleFile(file)) {
           return {
             fact,
             blocker: {
@@ -1393,22 +1983,46 @@ export async function analyzeFarmMobileRoutes(
   const scripts = new Set<string>();
   for (const { page, layouts } of entries.values()) {
     for (const file of [page, ...layouts]) {
-      if (file && SCRIPT_EXTENSIONS.some((extension) => file.endsWith(extension)))
-        scripts.add(file);
+      if (file && isModuleFile(file)) scripts.add(file);
     }
   }
   await Promise.all([...scripts].map(visitModule));
+
+  const parsedSheets = new Map<string, FarmNativeStylesheet>();
+  const readStylesheet = (file: string): FarmNativeStylesheet => {
+    let sheet = parsedSheets.get(file);
+    if (!sheet) {
+      sheet = parseFarmNativeStylesheet(readFileSync(file, "utf8"));
+      parsedSheets.set(file, sheet);
+    }
+    return sheet;
+  };
 
   const settled = new Map<string, ModuleFacts>();
   for (const [file, pending] of facts) settled.set(file, await pending);
 
   const routes: Record<string, FarmMobileRouteAnalysis> = {};
+  const graphs: Record<string, FarmMobilePortGraph> = {};
+  const allStylesheets = new Set<string>();
+  const unreadStylesheets = new Set<string>();
   for (const [route, { page, layouts }] of entries) {
+    // A native-only route (no page.tsx) has nothing to analyze: its screen file is the decision.
+    // A programmatic route also has no page file, and keeps its blocker row below.
+    if (!page && options.nativeOnlyRoutes?.has(route)) continue;
     const blockers: FarmMobileBlocker[] = [];
     const wins = new Set<FarmMobileWin>();
     const elements: FarmMobileElementCounts = { total: 0, mapped: 0, byKind: {} };
     const seen = new Set<string>();
     const ir: FarmMobileRouteIR = { root: "", components: {} };
+    // For the native tier: the CSS the route imports (layouts' too, since it styles the page), and
+    // the page's classes and elements it must style.
+    const stylesheets = new Set<string>();
+    const appClasses: Array<{ file: string; name: string; line: number; column: number }> = [];
+    const tags = new Set<string>();
+    const graph: FarmMobilePortGraph["modules"] = [];
+    const layoutClasses = new Set<string>();
+    // `.vue` and `.svelte` components' own `<style>` blocks, which style their classes.
+    const componentSheets: FarmNativeStylesheet[] = [];
 
     // `layout`: a layout's graph, which only a React Native port includes.
     const walk = (file: string, entry: boolean, layout: boolean) => {
@@ -1441,8 +2055,56 @@ export async function analyzeFarmMobileRoutes(
           only: "react-native",
         });
       }
+      if (!layout) {
+        graph.push({
+          file,
+          serverBoundary: moduleFacts.serverBoundary,
+          imports: (resolved.get(file) ?? []).map((entryImport) => ({
+            source: entryImport.fact.source,
+            ...(entryImport.file ? { file: entryImport.file } : {}),
+          })),
+        });
+      }
+      if (layout) {
+        for (const appClass of moduleFacts.appClasses) layoutClasses.add(appClass.name);
+        const visit = (node: FarmUiNode) => {
+          for (const token of node.style ?? [])
+            if (!token.startsWith("style.")) layoutClasses.add(token);
+          for (const child of node.children ?? []) visit(child);
+        };
+        for (const node of Object.values(moduleFacts.components)) visit(node);
+      }
       if (moduleFacts.serverBoundary && !entry) return;
       for (const blocker of moduleFacts.blockers) add({ file: label, ...blocker });
+      // A server action needs server components (RSC or islands) to render as a submittable
+      // form: one imported from a "use server" or server function module, or declared inline.
+      for (const action of moduleFacts.formActions ?? []) {
+        const target =
+          action.source === undefined
+            ? undefined
+            : (resolved.get(file) ?? []).find((entry) => entry.fact.source === action.source)?.file;
+        const server =
+          options.serverComponents === true &&
+          (action.source === undefined ||
+            (target !== undefined && settled.get(target)?.serverBoundary === true));
+        if (!server) {
+          add({
+            file: label,
+            line: action.line,
+            column: action.column,
+            rule: "form-action",
+            message: action.message,
+          });
+        }
+      }
+      if (!layout) {
+        for (const appClass of moduleFacts.appClasses)
+          appClasses.push({ file: label, ...appClass });
+        for (const tag of moduleFacts.tags) tags.add(tag);
+        for (const css of moduleFacts.styles ?? []) {
+          componentSheets.push(parseFarmNativeStylesheet(css));
+        }
+      }
       for (const win of moduleFacts.wins) wins.add(win);
       elements.total += moduleFacts.elements.total;
       elements.mapped += moduleFacts.elements.mapped;
@@ -1454,6 +2116,12 @@ export async function analyzeFarmMobileRoutes(
         ir.components[`${label}#${name}`] = node;
       }
       for (const entryImport of resolved.get(file) ?? []) {
+        if (entryImport.stylesheet) {
+          stylesheets.add(entryImport.stylesheet);
+          allStylesheets.add(entryImport.stylesheet);
+        } else if (entryImport.blocker?.rule === "css-import") {
+          unreadStylesheets.add(entryImport.fact.source);
+        }
         if (entryImport.blocker) add({ file: label, ...entryImport.blocker });
         if (entryImport.file) walk(entryImport.file, false, layout);
       }
@@ -1480,6 +2148,35 @@ export async function analyzeFarmMobileRoutes(
       ir.root = `${relative(root, page)}#default`;
     }
     for (const layout of layouts) walk(layout, true, true);
+
+    const sheets = [...[...stylesheets].map(readStylesheet), ...componentSheets];
+    for (const appClass of appClasses) {
+      const { styled, problems } = inspectFarmNativeStylesheets(sheets, { class: appClass.name });
+      const at = { file: appClass.file, line: appClass.line, column: appClass.column };
+      if (!styled) {
+        blockers.push({
+          ...at,
+          rule: "class-name",
+          message: `class "${appClass.name}" is neither Tailwind nor in the app's CSS`,
+          only: "native",
+        });
+      }
+      for (const message of problems) {
+        blockers.push({ ...at, rule: "class-name", message, only: "native" });
+      }
+    }
+    for (const tag of tags) {
+      for (const message of inspectFarmNativeStylesheets(sheets, { tag }).problems) {
+        blockers.push({
+          file: relative(root, page ?? ""),
+          line: 1,
+          column: 1,
+          rule: "style",
+          message,
+          only: "native",
+        });
+      }
+    }
 
     const strip = ({ only: _only, ...blocker }: FarmMobileBlocker) => blocker;
     const portBlockers = blockers.filter((blocker) => blocker.only !== "native").map(strip);
@@ -1508,6 +2205,7 @@ export async function analyzeFarmMobileRoutes(
     if (portable) {
       analysis.ir = ir;
       analysis.irBytes = Buffer.byteLength(JSON.stringify(ir));
+      if (page) graphs[route] = { page, modules: graph, layoutClasses: [...layoutClasses].sort() };
     }
     routes[route] = analysis;
   }
@@ -1522,5 +2220,8 @@ export async function analyzeFarmMobileRoutes(
   return {
     routes,
     stats: { modules: facts.size, parsed, cached, ms: Math.round(performance.now() - started) },
+    graphs,
+    stylesheets: [...allStylesheets].sort(),
+    unreadStylesheets: [...unreadStylesheets].sort(),
   };
 }

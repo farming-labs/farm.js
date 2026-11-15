@@ -1,15 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 // The server components contract. Every test runs against the same app built with
 // { mode: "rsc" } and with { mode: "islands" } (playwright.server-components.config.ts).
 const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" : "rsc";
 const dev = process.env.FARM_SERVER_COMPONENTS_SERVER === "dev";
-const output = path.resolve("examples/server-components", `.farm/.output-${mode}`);
+const target = dev ? undefined : process.env.FARM_SERVER_COMPONENTS_TARGET;
+const output = path.resolve(
+  "examples/server-components",
+  `.farm/.output-${mode}${target ? `-${target}` : ""}`,
+);
+// Where the build puts its static files: Cloudflare Pages serves the output directory itself.
+const publicDir =
+  target === "cloudflare" ? output : path.join(output, target === "vercel" ? "static" : "public");
 
 /** Console errors and uncaught exceptions while the page runs. */
 function collectErrors(page: Page): string[] {
@@ -85,6 +90,21 @@ test("a client component reads context from a client provider in a server layout
   expect(errors).toEqual([]);
 });
 
+test("a client component that defers its hydration reads its layout's provider", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/context/deferred");
+  await hydrated(page);
+  await page.getByTestId("theme-later").scrollIntoViewIfNeeded();
+  await expect(page.getByTestId("theme-later")).toHaveText("Later theme: light");
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  // Both consumers read the one provider: a deferred island is not a root outside it.
+  await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
+  await expect(page.getByTestId("theme-later")).toHaveText("Later theme: dark");
+  expect(errors).toEqual([]);
+});
+
 test("a server layout around a client provider keeps its code on the server", async ({ page }) => {
   const scripts: string[] = [];
   page.on("response", async (response) => {
@@ -146,19 +166,28 @@ test("a Suspense boundary streams its fallback first, then the content", async (
   await expect(page.getByTestId("slow-content")).toBeVisible();
 });
 
-test("client components before and inside slow Suspense content both hydrate", async ({ page }) => {
-  await page.goto("/stream", { waitUntil: "commit" });
+test("client components before and inside slow Suspense content both hydrate", async ({
+  page,
+  request,
+}) => {
+  // The slow content waits for this release instead of a timer, so the body streams until then.
+  const token = randomUUID();
+  const release = async () =>
+    expect((await request.get(`/stream?release=${token}`)).ok()).toBe(true);
+  await page.goto(`/stream?hold=${token}`, { waitUntil: "commit" });
   const early = page.getByRole("button", { name: /^Early: / });
-  // Click until the Early counter responds, and note whether the slow content had arrived then.
-  let slowArrivedFirst = true;
+  // Islands mode starts the client while the body streams, in development too: the Early counter
+  // works before the slow content is released. The RSC client starts once the stream ends.
+  if (mode !== "islands") await release();
   await expect(async () => {
     await early.click({ timeout: 100 });
     await expect(early).toHaveText(/^Early: [1-9]/, { timeout: 50 });
-    slowArrivedFirst = (await page.getByTestId("slow-content").count()) > 0;
   }).toPass({ intervals: [20], timeout: 10_000 });
-  // Islands mode starts the client while the body streams, in development too. The RSC client
-  // starts once the stream ends.
-  if (mode === "islands") expect(slowArrivedFirst).toBe(false);
+  if (mode === "islands") {
+    expect(await page.evaluate(() => document.readyState)).toBe("loading");
+    expect(await page.getByTestId("slow-content").count()).toBe(0);
+    await release();
+  }
 
   const late = page.getByRole("button", { name: /^Late: / });
   await expect(page.getByTestId("slow-content")).toBeVisible();
@@ -171,7 +200,7 @@ test("client components before and inside slow Suspense content both hydrate", a
 test("a client navigation shows a Suspense page before its slow content arrives", async ({
   page,
 }) => {
-  test.skip(mode !== "islands" || dev, "islands production navigations stream");
+  test.skip(mode !== "islands", "islands navigations stream");
   const errors = collectErrors(page);
   await page.goto("/");
   await hydrated(page);
@@ -196,8 +225,73 @@ test("a client navigation shows a Suspense page before its slow content arrives"
   expect(errors).toEqual([]);
 });
 
+test("a navigation request gets the layouts it keeps as boundaries, and flush markers", async ({
+  baseURL,
+  request,
+}) => {
+  test.skip(
+    mode !== "islands",
+    "islands mode's navigation protocol, the same in dev and production",
+  );
+  // F-Layouts names the layouts the browser shows, by key: the root renders, the rest are kept.
+  const segment = await request.get("/nav/b", {
+    headers: { Accept: "text/html", "F-Layouts": JSON.stringify(["/", "/nav"]) },
+  });
+  const html = await segment.text();
+  expect(html).toContain(
+    'data-farm-layout-pattern="/" data-farm-layout-key="/" style="display:contents"',
+  );
+  expect(html).toContain('data-farm-layout-key="/nav" data-farm-layout-kept="true"');
+  expect(html).toContain("Nav page B");
+  expect(segment.headers()["cache-control"]).toBe("private, no-store");
+  // A layout chain that hydrates (a client provider in /context's layout) is drawn by React in the
+  // browser, without keys, so the server leaves them out there.
+  const hydrating = await (
+    await request.get("/context", { headers: { Accept: "text/html" } })
+  ).text();
+  expect(hydrating).toContain('data-farm-layout-pattern="/context"');
+  expect(hydrating).not.toContain("data-farm-layout-key");
+
+  // The header is the browser's word, so a layout that guards its pages still runs.
+  const keptGuard = JSON.stringify(["/", "/guarded"]);
+  for (const headers of [
+    { Accept: "text/html" },
+    { Accept: "text/html", "F-Layouts": keptGuard },
+  ]) {
+    const denied = await request.get("/guarded", { headers });
+    expect(denied.status()).toBe(404);
+    expect(await denied.text()).not.toContain("Guarded page");
+  }
+  const allowed = await request.get("/guarded", {
+    headers: { Accept: "text/html", "F-Layouts": keptGuard, "X-Guard": "allow" },
+  });
+  expect(allowed.status()).toBe(200);
+  const allowedHtml = await allowed.text();
+  expect(allowedHtml).toContain("Guarded page");
+  expect(allowedHtml).toContain('data-farm-layout-key="/guarded" data-farm-layout-kept="true"');
+  expect(allowedHtml).not.toContain("Guarded layout");
+  // Running a layout with a client island in it does not cost the segment.
+  const island = await (
+    await request.get("/action-layout", {
+      headers: { Accept: "text/html", "F-Layouts": JSON.stringify(["/", "/action-layout"]) },
+    })
+  ).text();
+  expect(island).toContain('data-farm-layout-key="/action-layout" data-farm-layout-kept="true"');
+
+  // F-Stream: flush marks where each React flush ends, with the token from F-Flush.
+  const streamed = await fetch(`${baseURL}/stream`, {
+    headers: { Accept: "text/html", "F-Stream": "flush" },
+  });
+  const token = streamed.headers.get("f-flush");
+  expect(token).toMatch(/^[0-9a-f]{32}$/);
+  const [shell, ...flushes] = (await streamed.text()).split(`<!--farm-flush:${token}-->`);
+  expect(shell).toContain("Loading slow content");
+  expect(shell).not.toContain("Slow content arrived");
+  expect(flushes.join("")).toContain("Slow content arrived");
+});
+
 test("leaving a streaming page drops the rest of its content", async ({ page }) => {
-  test.skip(mode !== "islands" || dev, "islands production navigations stream");
+  test.skip(mode !== "islands", "islands navigations stream");
   const errors = collectErrors(page);
   await page.goto("/");
   await hydrated(page);
@@ -261,7 +355,7 @@ test("generateMetadata sets the head", async ({ request }) => {
 
 test("static pages are prerendered at build time", async ({ request }) => {
   test.skip(dev, "build output only");
-  expect(existsSync(path.join(output, "public/static/a/index.html"))).toBe(true);
+  expect(existsSync(path.join(publicDir, "static/a/index.html"))).toBe(true);
   expect(await (await request.get("/static/b")).text()).toContain("Static b");
 });
 
@@ -304,6 +398,54 @@ test("client navigation keeps a layout's client state and does not reload the do
   expect(errors).toEqual([]);
 });
 
+test("a dev document inlines its own route, and navigation loads the others", async ({
+  page,
+  request,
+}) => {
+  test.skip(!dev || mode !== "islands", "development documents inline the client manifest");
+  // Every route's entry made each document grow with the app (about 650 KB at 1,000 routes).
+  const html = await (await request.get("/nav/a")).text();
+  const inlined = JSON.parse(html.match(/window\.__FARM_MANIFEST__ = (.*);\n/)![1]!);
+  expect(Object.keys(inlined.routes)).toEqual(["/nav/a"]);
+  expect(Object.keys(inlined.layouts).sort()).toEqual(["/", "/nav"]);
+  expect(inlined.module).toBe("/@farm/manifest");
+
+  const errors = collectErrors(page);
+  await page.goto("/nav/a");
+  await hydrated(page);
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("button", { name: "Layout clicks: 0" }).click();
+  await page.getByRole("link", { name: "Page B" }).click();
+  await expect(page.getByRole("heading", { name: "Nav page B" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Layout clicks: 1" })).toBeVisible();
+  const routes = await page.evaluate(() =>
+    Object.keys((window as { __FARM_MANIFEST__?: { routes: object } }).__FARM_MANIFEST__!.routes),
+  );
+  expect(routes).toEqual(expect.arrayContaining(["/", "/nav/a", "/nav/b", "/stream"]));
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Nav page A" })).toBeVisible();
+  await page.goForward();
+  await expect(page.getByRole("heading", { name: "Nav page B" })).toBeVisible();
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test("a layout's island waiting below a client page still hydrates after a navigation", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/nav-client/a");
+  await expect(page.getByRole("heading", { name: "Client page A" })).toBeVisible();
+  // Neither the page nor the layout's counter has hydrated: nothing has touched them.
+  await page.getByRole("link", { name: "Server page" }).click();
+  await expect(page.getByRole("heading", { name: "Server page B" })).toBeVisible();
+  await hydrated(page);
+  const button = page.getByRole("button", { name: /^Client layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Client layout clicks: 1");
+  expect(errors).toEqual([]);
+});
+
 test("browser-only code runs after hydration without a mismatch", async ({ page, request }) => {
   expect(await (await request.get("/window")).text()).toContain("Measuring");
   const errors = collectErrors(page);
@@ -316,10 +458,15 @@ test("a large value shared by two client components survives client navigation",
   page,
 }) => {
   const errors = collectErrors(page);
-  const documents: string[] = [];
-  page.on("response", async (response) => {
-    const type = response.request().resourceType();
-    if (type === "document" || type === "fetch") documents.push(await response.text());
+  // The document and navigation requests, replayed with the same headers once the test is done:
+  // the server answers from them (F-Values, F-Layouts), and Chrome may already have dropped a
+  // response body by the time a listener asks for it.
+  const requests: Array<Promise<{ url: string; headers: Record<string, string> }>> = [];
+  page.on("request", (request) => {
+    const type = request.resourceType();
+    if (type === "document" || type === "fetch") {
+      requests.push(request.allHeaders().then((headers) => ({ url: request.url(), headers })));
+    }
   });
   await page.goto("/values/a");
   await hydrated(page);
@@ -334,6 +481,15 @@ test("a large value shared by two client components survives client navigation",
   expect(errors).toEqual([]);
 
   if (mode === "islands") {
+    const documents: string[] = [];
+    for (const { url, headers } of await Promise.all(requests)) {
+      const sent = Object.fromEntries(
+        Object.entries(headers).filter(
+          ([name]) => !["host", "connection", "content-length"].includes(name),
+        ),
+      );
+      documents.push(await (await page.request.get(url, { headers: sent })).text());
+    }
     // The list travels once, keyed by content. A navigation never sends it again: the server
     // leaves out the layout the browser keeps, and values the browser holds.
     const [first, ...navigations] = documents;
@@ -387,6 +543,263 @@ test("a client component calls a server action it received as a prop, and the pa
   await expect(page.getByTestId("items")).toContainText(title);
   await expect(page.getByRole("button", { name: "Island clicks: 1" })).toBeVisible();
   expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test("a client navigation that streams Suspense content in several flushes reveals all of it", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/refresh-stream");
+  await hydrated(page);
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("link", { name: "Next visit" }).click();
+  await expect(page.getByTestId("visit")).toHaveText("visit 1");
+  await expect(page.getByTestId("note")).toHaveText("note arrived");
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test("a refresh after an action keeps the state of an island in streamed Suspense content", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/refresh-stream");
+  await expect(page.getByTestId("note")).toHaveText("note arrived");
+  const touch = page.getByRole("button", { name: "Touch" });
+  // Hydrated: its click runs the action.
+  await expect(touch).toHaveAttribute("data-hydrated", "true");
+  await touch.click();
+  // The island set this after the action and the refresh that follows it, and kept it.
+  await expect(page.getByTestId("touched")).toHaveText("touched");
+  await expect(page.getByTestId("note")).toHaveText("note arrived");
+  expect(errors).toEqual([]);
+});
+
+test("a server action that removes an item keeps each client component's state with its key", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto(`/action-keyed?list=${test.info().workerIndex}-${Date.now()}`);
+  await hydrated(page);
+  for (const label of ["Component Grace", "Parent Grace"]) {
+    const button = page.getByRole("button", { name: new RegExp(`^${label}:`) });
+    await button.click();
+    await expect(button).toHaveText(`${label}: 1`);
+    await button.click();
+    await expect(button).toHaveText(`${label}: 2`);
+  }
+
+  await page.getByRole("button", { name: "Remove first" }).click();
+  await expect(page.getByRole("button", { name: /^Component Ada:/ })).toHaveCount(0);
+  // React keeps state by key: Grace keeps her count, and Linus, now in Grace's place, does not take it.
+  for (const kind of ["Component", "Parent"]) {
+    await expect(page.getByRole("button", { name: new RegExp(`^${kind} Grace:`) })).toHaveText(
+      `${kind} Grace: 2`,
+    );
+    await expect(page.getByRole("button", { name: new RegExp(`^${kind} Linus:`) })).toHaveText(
+      `${kind} Linus: 0`,
+    );
+  }
+  expect(errors).toEqual([]);
+});
+
+test("a server action reads what route middleware put in its context", async ({ page }) => {
+  await page.goto("/action-middleware");
+  await hydrated(page);
+  await page.getByRole("button", { name: "Record user" }).click();
+  await expect(page.getByTestId("action-user")).toHaveText("Ada");
+});
+
+test("a server action updates the server layout around its page and keeps the layout's client state", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-layout");
+  await hydrated(page);
+  const count = async (id: string) =>
+    Number((await page.getByTestId(id).textContent())?.replace(/\D/g, ""));
+  const layout = await count("layout-count");
+  const button = page.getByRole("button", { name: /^Layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Layout clicks: 1");
+  await page.getByRole("button", { name: "Bump layout" }).click();
+  await expect(page.getByTestId("layout-count")).toHaveText(`Layout count: ${layout + 1}`);
+  await expect(button).toHaveText("Layout clicks: 1");
+  expect(errors).toEqual([]);
+});
+
+test("a server action that leaves its layout unchanged keeps what was typed there", async ({
+  page,
+}) => {
+  await page.goto("/action-layout");
+  await hydrated(page);
+  const pageCount = Number(
+    (await page.getByTestId("page-count").textContent())?.replace(/\D/g, ""),
+  );
+  // A form posts natively until the client runtime runs, and this click loads it.
+  const button = page.getByRole("button", { name: /^Layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Layout clicks: 1");
+  await expect(page.getByTestId("layout-streamed")).toBeVisible();
+  await page.getByLabel("Layout note").fill("still here");
+  await page.getByRole("button", { name: "Bump page" }).click();
+  await expect(page.getByTestId("page-count")).toHaveText(`Page count: ${pageCount + 1}`);
+  await expect(page.getByLabel("Layout note")).toHaveValue("still here");
+});
+
+test("a server action that changes only a layout island's props gives the island its new props", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-island-props");
+  await hydrated(page);
+  const pageCount = Number(
+    (await page.getByTestId("page-count").textContent())?.replace(/\D/g, ""),
+  );
+  const counter = page.getByRole("button", { name: /^Layout sees page/ });
+  await counter.click();
+  await expect(counter).toHaveText(`Layout sees page ${pageCount}: 1`);
+  await page.getByRole("button", { name: "Bump page" }).click();
+  await expect(page.getByTestId("page-count")).toHaveText(`Page count: ${pageCount + 1}`);
+  // The new label, with the state the island had.
+  await expect(counter).toHaveText(`Layout sees page ${pageCount + 1}: 1`);
+  expect(errors).toEqual([]);
+});
+
+test("a server action that changes its layout keeps what was typed there, and the focus", async ({
+  page,
+}) => {
+  await page.goto("/action-layout");
+  await hydrated(page);
+  const layout = Number((await page.getByTestId("layout-count").textContent())?.replace(/\D/g, ""));
+  const button = page.getByRole("button", { name: /^Layout clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Layout clicks: 1");
+  await expect(page.getByTestId("layout-streamed")).toBeVisible();
+  const note = page.getByLabel("Layout note");
+  await note.fill("still here");
+  await note.evaluate((input: HTMLInputElement) => input.setSelectionRange(2, 5));
+  // Clicked from script, so the note keeps the focus while the layout around it renders again.
+  await page
+    .getByRole("button", { name: "Bump layout" })
+    .evaluate((bump: HTMLElement) => bump.click());
+  await expect(page.getByTestId("layout-count")).toHaveText(`Layout count: ${layout + 1}`);
+  await expect(note).toHaveValue("still here");
+  await expect(note).toBeFocused();
+  expect(
+    await note.evaluate((input: HTMLInputElement) => [input.selectionStart, input.selectionEnd]),
+  ).toEqual([2, 5]);
+});
+
+test("a server route slot stays on the server, and its client component hydrates", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "the rsc pipeline does not render route slots");
+  const errors = collectErrors(page);
+  const scripts: Promise<string>[] = [];
+  page.on("response", (response) => {
+    if (response.request().resourceType() === "script")
+      scripts.push(response.text().catch(() => ""));
+  });
+  await page.goto("/slots");
+  await hydrated(page);
+  await expect(page.getByTestId("slot-note")).toHaveText("SERVER_SLOT_MARKER_6f1c");
+  const button = page.getByRole("button", { name: /^Slot clicks/ });
+  await button.click();
+  await expect(button).toHaveText("Slot clicks: 1");
+  await page.waitForLoadState("networkidle");
+  expect(
+    (await Promise.all(scripts)).filter((text) => text.includes("SERVER_SLOT_MARKER")),
+  ).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("a declared failure from a form posted before JavaScript loads keeps its status", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-nojs");
+  const response = page.waitForResponse((candidate) => candidate.request().method() === "POST");
+  await page.getByRole("button", { name: "Reserve" }).click();
+  expect((await response).status()).toBe(409);
+  await context.close();
+});
+
+test("a form posted before JavaScript loads returns to the URL it was posted to, not a rewrite's target", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-rewrite/alias");
+  await expect(page.getByRole("heading", { name: "Action rewrite" })).toBeVisible();
+  const title = `rewritten no-js item ${Date.now()}`;
+  await page.getByLabel("Title").fill(title);
+  await page.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByTestId("todos")).toContainText(title);
+  expect(new URL(page.url()).pathname).toBe("/action-rewrite/alias");
+  await context.close();
+});
+
+test("useActionState shows the action's result after a form posted before JavaScript loads", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-state");
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 0, last: none");
+  await page.getByLabel("Choice").fill("coffee");
+  await page.getByRole("button", { name: "Vote", exact: true }).click();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 1, last: coffee");
+  await context.close();
+});
+
+test("an island hydrates with the useActionState result of a form posted before it loaded", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  // The first page loads without its scripts, so the form posts as HTML; the response loads them.
+  let blocked = true;
+  await page.route(
+    (url) => url.pathname.endsWith(".js"),
+    (route) => (blocked ? route.abort() : route.continue()),
+  );
+  await page.goto("/action-state");
+  await page.getByLabel("Choice").fill("coffee");
+  blocked = false;
+  await page.getByRole("button", { name: "Vote", exact: true }).click();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 1, last: coffee");
+  await page.waitForLoadState("networkidle");
+  // Hydrated: the island's own state works, and it kept the action's result.
+  await page.getByRole("button", { name: "Vote form clicks: 0" }).click();
+  await expect(page.getByRole("button", { name: "Vote form clicks: 1" })).toBeVisible();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 1, last: coffee");
+  // And the form keeps going from that state (the response rendered the field's default again).
+  await page.getByRole("button", { name: "Vote", exact: true }).click();
+  await expect(page.getByTestId("vote-result")).toHaveText("votes: 2, last: tea");
+  // The first load's blocked scripts may report late. The checks above prove the second load ran.
+  expect(
+    errors.filter(
+      (error) =>
+        !error.includes("net::ERR_FAILED") &&
+        !error.includes("Failed to fetch dynamically imported module"),
+    ),
+  ).toEqual([]);
+});
+
+test("a server action returns elements, with a server component's output and a live client component", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-element");
+  await hydrated(page);
+  await page.getByRole("button", { name: "Summarize" }).click();
+  const summary = page.getByTestId("action-element");
+  await expect(summary).toContainText("Saved 3 items");
+  const counter = summary.getByRole("button", { name: "Returned clicks: 1" });
+  await counter.click();
+  await expect(summary.getByRole("button", { name: "Returned clicks: 2" })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -480,27 +893,21 @@ test("middleware runs for API routes, and API routes keep their validation", asy
   expect((await request.get("/api/missing")).status()).toBe(404);
 });
 
-test("after() runs once the response has finished", async ({ page }) => {
+test("after() runs once the response has finished", async ({ page, request }) => {
   const token = randomUUID();
-  const marker = path.join(tmpdir(), `farm-contract-after-${token}.json`);
-  await rm(marker, { force: true });
+  const written = async () =>
+    (
+      (await (await request.get(`/api/after?token=${token}`)).json()) as {
+        written: { token: string; scheduledAt: number; completedAt: number } | null;
+      }
+    ).written;
   const response = await page.goto(`/after?token=${token}`);
   expect(response?.status()).toBe(200);
   await expect(page.getByTestId("after-status")).toHaveText("scheduled");
-  expect(existsSync(marker)).toBe(false);
-  let written: { token: string; scheduledAt: number; completedAt: number } | undefined;
-  await expect
-    .poll(async () => {
-      try {
-        written = JSON.parse(await readFile(marker, "utf8"));
-        return written?.token;
-      } catch {
-        return undefined;
-      }
-    })
-    .toBe(token);
-  expect(written!.completedAt - written!.scheduledAt).toBeGreaterThanOrEqual(500);
-  await rm(marker, { force: true });
+  expect(await written()).toBeNull();
+  await expect.poll(async () => (await written())?.token).toBe(token);
+  const record = (await written())!;
+  expect(record.completedAt - record.scheduledAt).toBeGreaterThanOrEqual(500);
 });
 
 test("server function middleware runs in order for browser and form calls", async ({ page }) => {
@@ -580,6 +987,27 @@ test("navigation keeps the document title in sync, and back restores it", async 
   await expect(page).toHaveTitle("Server components contract");
 });
 
+test("a client navigation is announced to screen readers, and the first load is not", async ({
+  page,
+  request,
+}) => {
+  expect(await (await request.get("/")).text()).not.toContain("farm-route-announcer");
+  const errors = collectErrors(page);
+  await page.goto("/");
+  await hydrated(page);
+  const announcer = page.locator("#farm-route-announcer");
+  await expect(announcer).toHaveCount(0);
+  await page.getByRole("link", { name: "Meta", exact: true }).click();
+  await expect(announcer).toHaveText("Contract meta 42");
+  await expect(announcer).toHaveAttribute("aria-live", "assertive");
+  await expect(announcer).toHaveAttribute("aria-atomic", "true");
+  await page.goBack();
+  await expect(page).toHaveTitle("Server components contract");
+  await expect(announcer).toHaveText("Server components contract");
+  await expect(announcer).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
 test("the app's stylesheet loads", async ({ page }) => {
   await page.goto("/");
   const href = await page.locator('link[rel="stylesheet"]').first().getAttribute("href");
@@ -608,5 +1036,257 @@ test("client components use Farm's router hooks, page state, blocker and Link", 
   await expect(page.getByRole("button", { name: "page state: details" })).toBeVisible();
   await page.getByRole("link", { name: "link home" }).click();
   await expect(page).toHaveURL(/\/$/);
+  expect(errors).toEqual([]);
+});
+
+// Hydration timing: `export const island = "interaction" | "visible" | "idle"` in a client module
+// (/timing has one island of each). Each island keeps its own trigger.
+test("an interaction island stays server HTML until it is clicked, and counts that click", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/timing");
+  await hydrated(page);
+  const island = page.getByTestId("interaction");
+  await expect(island).toHaveText("Interaction: 0");
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  await island.click();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await expect(island).toHaveText("Interaction: 1");
+  expect(errors).toEqual([]);
+});
+
+test("a visible island hydrates when it scrolls into view", async ({ page }) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/timing");
+  await hydrated(page);
+  const island = page.getByTestId("visible");
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  await island.scrollIntoViewIfNeeded();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await island.click();
+  await expect(island).toHaveText("Visible: 1");
+  expect(errors).toEqual([]);
+});
+
+test("an idle island hydrates without input, and leaves the other islands waiting", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/timing");
+  const island = page.getByTestId("idle");
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await island.click();
+  await expect(island).toHaveText("Idle: 1");
+  await expect(page.getByTestId("interaction")).toHaveAttribute("data-hydrated", "false");
+  await expect(page.getByTestId("visible")).toHaveAttribute("data-hydrated", "false");
+  expect(errors).toEqual([]);
+});
+
+// The client runtime (React, islx, the router) loads when a page first needs it: at once when an
+// island hydrates at load, otherwise on an island's own trigger or a link (RFC 0003, section 10).
+// /timing/later has an interaction island, a link, and a visible island below the fold.
+function scriptRequests(page: Page): string[] {
+  const scripts: string[] = [];
+  page.on("request", (request) => {
+    if (request.resourceType() === "script") scripts.push(new URL(request.url()).pathname);
+  });
+  return scripts;
+}
+
+/** Production's client entry, or farm dev's. */
+function isClientRuntime(pathname: string): boolean {
+  return /^\/farm-client-h[0-9a-f]+\.js$/.test(pathname) || pathname === "/@farm/client.js";
+}
+
+test("a page with an island that hydrates at load loads the client runtime at once", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const scripts = scriptRequests(page);
+  // /window's island reads the window in an effect, so it hydrates at load.
+  await page.goto("/window");
+  await hydrated(page);
+  expect(scripts.filter(isClientRuntime)).toHaveLength(1);
+});
+
+test("a page whose islands all hydrate later loads the client runtime when one is due", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  const scripts = scriptRequests(page);
+  await page.goto("/timing/later");
+  await hydrated(page);
+  expect(scripts.filter(isClientRuntime)).toEqual([]);
+  await page.getByTestId("visible").scrollIntoViewIfNeeded();
+  await expect(page.getByTestId("visible")).toHaveAttribute("data-hydrated", "true");
+  expect(scripts.filter(isClientRuntime)).toHaveLength(1);
+  await expect(page.getByTestId("interaction")).toHaveAttribute("data-hydrated", "false");
+  expect(errors).toEqual([]);
+});
+
+test("a click on an island before the client runtime loads is replayed once it hydrates", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  const scripts = scriptRequests(page);
+  await page.goto("/timing/later");
+  await hydrated(page);
+  expect(scripts.filter(isClientRuntime)).toEqual([]);
+  const island = page.getByTestId("interaction");
+  await island.click();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await expect(island).toHaveText("Interaction: 1");
+  expect(errors).toEqual([]);
+});
+
+test("every click on an island while its code loads is replayed once it hydrates", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  // The runtime is held until both clicks are in, so neither lands after hydration.
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => isClientRuntime(url.pathname),
+    async (route) => {
+      await released;
+      await route.continue();
+    },
+  );
+  await page.goto("/timing/later");
+  await hydrated(page);
+  const island = page.getByTestId("interaction");
+  await island.click();
+  await island.click();
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  release();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await expect(island).toHaveText("Interaction: 2");
+  expect(errors).toEqual([]);
+});
+
+test("a link followed before the client runtime loads is a client navigation", async ({ page }) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  const scripts = scriptRequests(page);
+  await page.goto("/timing/later");
+  await hydrated(page);
+  expect(scripts.filter(isClientRuntime)).toEqual([]);
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  // A click with no pointer before it: nothing has started the runtime, so the click is held.
+  await page.getByRole("link", { name: "To timing" }).dispatchEvent("click");
+  await expect(page).toHaveURL(/\/timing$/);
+  await expect(page.getByRole("heading", { name: "Timing", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("a page that hydrates loads the router only when a navigation needs it", async ({ page }) => {
+  test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
+  const errors = collectErrors(page);
+  const routerRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("farm-client-router")) routerRequests.push(request.url());
+  });
+  await page.goto("/");
+  await hydrated(page);
+  expect(routerRequests).toEqual([]);
+  const increment = page.getByRole("button", { name: /Count: 5/ });
+  await increment.click();
+  await expect(page.getByRole("button", { name: /Count: 6/ })).toBeVisible();
+  expect(routerRequests).toEqual([]);
+
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  const link = page.getByRole("link", { name: "Stream", exact: true });
+  await link.hover();
+  await expect.poll(() => routerRequests.length).toBe(1);
+  await link.click();
+  await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(routerRequests).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test("a link still navigates when the router fails to load", async ({ page }) => {
+  test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
+  let aborted = 0;
+  await page.route("**/farm-client-router-*", (route) => {
+    aborted += 1;
+    return route.abort();
+  });
+  await page.goto("/");
+  await hydrated(page);
+  // The counter's click starts the client entry, which watches for link intent.
+  await page.getByRole("button", { name: /Count: 5/ }).click();
+  await expect(page.getByRole("button", { name: /Count: 6/ })).toBeVisible();
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  const link = page.getByRole("link", { name: "Stream", exact: true });
+  // A hover that fails leaves the page alone: it must not reload what the visitor is reading.
+  await link.hover();
+  await expect.poll(() => aborted).toBeGreaterThan(0);
+  await page.waitForLoadState("networkidle");
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  await link.click();
+  await expect(page).toHaveURL(/\/stream$/);
+  await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
+  // A new document: the browser navigated itself, without the router.
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(false);
+});
+
+test("a link still navigates when the client runtime fails to load", async ({ page, request }) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const html = await (await request.get("/timing/later")).text();
+  const runtime = /<script[^>]*\sdata-farm-runtime="([^"]+)"/.exec(html)?.[1];
+  expect(runtime).toMatch(/^\/(farm-client-h[0-9a-f]+\.js|@farm\/client\.js)$/);
+  const blocked: string[] = [];
+  await page.route(
+    (url) => url.pathname === runtime,
+    (route) => {
+      blocked.push(route.request().url());
+      return route.abort();
+    },
+  );
+  await page.goto("/timing/later");
+  await hydrated(page);
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  await page.getByRole("link", { name: "To timing" }).dispatchEvent("click");
+  await expect(page).toHaveURL(/\/timing$/);
+  await expect(page.getByRole("heading", { name: "Timing", exact: true })).toBeVisible();
+  // A new document: the browser navigated itself, without the runtime.
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(false);
+  expect(blocked.length).toBeGreaterThan(0);
+});
+
+test("the next page of a layout that hydrates as one root updates the page on screen in place, as React Server Components do", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/context/a");
+  await page.waitForLoadState("networkidle");
+  await page.getByTestId("clicker-item").click();
+  await expect(page.getByTestId("clicker-item")).toHaveText("item: 1");
+  await page.evaluate(() => {
+    (window as { __item?: Element | null }).__item = document.querySelector(
+      "[data-testid=clicker-item]",
+    );
+  });
+  await page.click("[data-next]");
+  await expect(page.locator("h1")).toHaveText("Item b");
+  // The same client component in the same place keeps its node and its state.
+  expect(
+    await page.evaluate(
+      () =>
+        (window as { __item?: Element | null }).__item ===
+        document.querySelector("[data-testid=clicker-item]"),
+    ),
+  ).toBe(true);
+  await expect(page.getByTestId("clicker-item")).toHaveText("item: 1");
   expect(errors).toEqual([]);
 });

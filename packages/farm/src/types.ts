@@ -160,8 +160,12 @@ export interface FarmConfig {
   /**
    * Component renderer used for JSX compilation, SSR, and browser hydration.
    * React is used when omitted.
+   *
+   * Set `false` for a backend-only app: API routes, middleware, and server features with no
+   * pages. Farm then builds no browser client, needs no React, and answers unmatched requests
+   * with JSON instead of an HTML page.
    */
-  renderer?: FarmRenderer;
+  renderer?: FarmRenderer | false;
   preset?: NitroPreset;
   deploy?: {
     target?: "vercel" | "cloudflare" | "netlify" | "node" | string;
@@ -235,7 +239,8 @@ export interface FarmConfig {
   /**
    * Request and MCP tool analytics for a Farm Infra project. On only when the server
    * environment sets `FARMJS_API_KEY` (plus `FARMJS_PROJECT_ID` for a key reaching several
-   * projects). Set to false to never send them.
+   * projects). Each request is reported with its route template and the path it asked for,
+   * never its query string. Set to false to never send them.
    */
   analytics?: boolean;
   /**

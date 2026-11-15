@@ -138,6 +138,100 @@ describe("scheduleFarmIslandHydration", () => {
     expect(handledClicks).toBe(1);
   });
 
+  it("replays every click made while an interaction boundary hydrates, in order", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<div id="island"><button type="button" id="add">Add</button><button type="button" id="undo">Undo</button></div>';
+    const container = document.getElementById("island")!;
+    const add = document.getElementById("add")!;
+    const undo = document.getElementById("undo")!;
+    const handled: string[] = [];
+    let finishHydrate!: () => void;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      hydrate: () =>
+        new Promise<void>((resolve) => {
+          finishHydrate = () => {
+            add.addEventListener("click", () => handled.push("add"));
+            undo.addEventListener("click", () => handled.push("undo"));
+            resolve();
+          };
+        }),
+    });
+
+    add.click();
+    add.click();
+    undo.click();
+    await vi.advanceTimersByTimeAsync(0);
+    finishHydrate();
+    await scheduled;
+    await vi.runAllTimersAsync();
+    expect(handled).toEqual(["add", "add", "undo"]);
+  });
+
+  it("submits a form once when its submit button is clicked twice before hydration", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<div id="island"><form><button type="submit">Save</button></form></div>';
+    const container = document.getElementById("island")!;
+    const button = container.querySelector("button")!;
+    let finishHydrate!: () => void;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      hydrate: () => new Promise<void>((resolve) => (finishHydrate = resolve)),
+    });
+    let submits = 0;
+    container.querySelector("form")!.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submits++;
+    });
+
+    button.click();
+    button.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(submits).toBe(0);
+    finishHydrate();
+    await scheduled;
+    await vi.runAllTimersAsync();
+    expect(submits).toBe(1);
+  });
+
+  it("replays a click the boot script queued and announced once, not once per record", async () => {
+    vi.useFakeTimers();
+    const container = document.getElementById("island")!;
+    const button = container.querySelector("button")!;
+    const queue: Array<{ target: Element; kind: string }> = [];
+    Object.assign(window, { __FARM_PREHYDRATION_CLICK_QUEUE__: queue });
+    let handledClicks = 0;
+    let finishHydrate!: () => void;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      hydrate: () =>
+        new Promise<void>((resolve) => {
+          finishHydrate = () => {
+            button.addEventListener("click", () => handledClicks++);
+            resolve();
+          };
+        }),
+    });
+
+    // What the boot script does for each click it holds: queue it, then announce it.
+    for (let index = 0; index < 2; index++) {
+      queue.push({ target: button, kind: "click" });
+      document.dispatchEvent(
+        new CustomEvent("farm:island-interaction", { detail: { target: button, kind: "click" } }),
+      );
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    finishHydrate();
+    await scheduled;
+    await vi.runAllTimersAsync();
+    expect(handledClicks).toBe(2);
+  });
+
   it("keeps sibling interaction queues and replay boundary-local", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = `

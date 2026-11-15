@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/integration-utils",
-  "version": "0.1.51-beta.2",
+  "version": "0.1.73",
   "description": "Shared integration utilities for Farm.js",
   "license": "MIT",
   "repository": {
@@ -19,6 +19,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
     },
     "./config": {
       "types": "./dist/config.d.ts",
