@@ -2,7 +2,7 @@ import type { DocsConfig, DocsLlmsTxtPageInput, DocsSearchSourcePage } from "@fa
 import path from "node:path";
 import { applyFarmBasePath, normalizeFarmBasePath } from "../base-path";
 import { isSecretDocsConfigKey } from "./config-secrets";
-import { docsEngine, loadFarmDocsEngine } from "./engine";
+import { docsEngine, loadFarmDocsEngine, loadFarmDocsOpenApiDiscovery } from "./engine";
 import { resolveDocsConfig } from "../config";
 import { cloneFarmRequest } from "../server-http";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./types";
@@ -329,7 +329,13 @@ function getDocsLlmsOptions(context: FarmDocsAPIContext, request: Request) {
   };
 }
 
-function getDocsDiscoveryOptions(context: FarmDocsAPIContext, request: Request) {
+type OpenApiDiscovery = Awaited<ReturnType<typeof loadFarmDocsOpenApiDiscovery>>;
+
+function getDocsDiscoveryOptions(
+  context: FarmDocsAPIContext,
+  request: Request,
+  openApiDiscovery: OpenApiDiscovery,
+) {
   const origin = new URL(request.url).origin;
 
   return {
@@ -357,7 +363,7 @@ function getDocsDiscoveryOptions(context: FarmDocsAPIContext, request: Request) 
     llms: getDocsLlmsOptions(context, request),
     sitemap: context.docs.config.sitemap ?? true,
     robots: context.docs.config.robots ?? true,
-    openapi: docsEngine().resolveApiReferenceOpenApiDiscovery(context.docs.config.apiReference),
+    openapi: openApiDiscovery(context.docs.config.apiReference),
     markdown: {
       acceptHeader: true,
       signatureAgentHeader: true,
@@ -383,7 +389,11 @@ function renderLlmsTxt(context: FarmDocsAPIContext, request: Request, full: bool
   return full ? generated.llmsFullTxt : generated.llmsTxt;
 }
 
-function renderSkillDocument(context: FarmDocsAPIContext, request: Request): string {
+function renderSkillDocument(
+  context: FarmDocsAPIContext,
+  request: Request,
+  openApiDiscovery: OpenApiDiscovery,
+): string {
   const farmAliases = [
     "## Farm API Route Aliases",
     "",
@@ -397,20 +407,34 @@ function renderSkillDocument(context: FarmDocsAPIContext, request: Request): str
     "- Agent spec JSON: /api/docs/agent/spec",
   ].join("\n");
 
-  return `${docsEngine().renderDocsSkillDocument(getDocsDiscoveryOptions(context, request)).trim()}\n\n${farmAliases}\n`;
+  return `${docsEngine()
+    .renderDocsSkillDocument(getDocsDiscoveryOptions(context, request, openApiDiscovery))
+    .trim()}\n\n${farmAliases}\n`;
 }
 
-function renderAgentsDocument(context: FarmDocsAPIContext, request: Request): string {
-  return `${docsEngine().renderDocsAgentsDocument(getDocsDiscoveryOptions(context, request)).trim()}\n`;
+function renderAgentsDocument(
+  context: FarmDocsAPIContext,
+  request: Request,
+  openApiDiscovery: OpenApiDiscovery,
+): string {
+  return `${docsEngine()
+    .renderDocsAgentsDocument(getDocsDiscoveryOptions(context, request, openApiDiscovery))
+    .trim()}\n`;
 }
 
-function buildAgentSpec(context: FarmDocsAPIContext, request: Request) {
+function buildAgentSpec(
+  context: FarmDocsAPIContext,
+  request: Request,
+  openApiDiscovery: OpenApiDiscovery,
+) {
   const url = new URL(request.url);
   const origin = url.origin;
   const pages = discoverFarmDocsPages(context.contentDir, context.docs).filter(
     (page) => !context.isPathGuarded(page.href),
   );
-  const spec = docsEngine().buildDocsAgentDiscoverySpec(getDocsDiscoveryOptions(context, request));
+  const spec = docsEngine().buildDocsAgentDiscoverySpec(
+    getDocsDiscoveryOptions(context, request, openApiDiscovery),
+  );
   const title = getDocsTitle(context.docs);
 
   return {
@@ -633,10 +657,18 @@ async function handleDocsAPIGet(request: Request, context: FarmDocsAPIContext): 
   }
 
   if (format === "skill")
-    return text(renderSkillDocument(context, request), "text/markdown; charset=utf-8");
+    return text(
+      renderSkillDocument(context, request, await loadFarmDocsOpenApiDiscovery()),
+      "text/markdown; charset=utf-8",
+    );
   if (format === "agents")
-    return text(renderAgentsDocument(context, request), "text/markdown; charset=utf-8");
-  if (format === "agent" || format === "agent-spec") return json(buildAgentSpec(context, request));
+    return text(
+      renderAgentsDocument(context, request, await loadFarmDocsOpenApiDiscovery()),
+      "text/markdown; charset=utf-8",
+    );
+  if (format === "agent" || format === "agent-spec") {
+    return json(buildAgentSpec(context, request, await loadFarmDocsOpenApiDiscovery()));
+  }
   if (format === "diagnostics") {
     return context.diagnostics
       ? json(buildDiagnostics(context))
