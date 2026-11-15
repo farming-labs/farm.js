@@ -13986,6 +13986,13 @@ function toFarmNodeResponse(request, response) {
             // in flight overlaps the worker's rendering with this thread's per-route work.
             concurrency: Math.min(os.availableParallelism(), 8),
             routes: prerenderRoutes.map(toPrerenderPublicPath),
+            // Cloudflare's asset server answers a directory index (about/index.html) at the
+            // trailing-slash URL and redirects the other spelling to it, so a page is written as
+            // about.html unless trailingSlash asks for the slash, as Nitro's Netlify and Vercel
+            // presets already write it.
+            ...(preset.startsWith("cloudflare")
+              ? { autoSubfolderIndex: config.trailingSlash === true }
+              : {}),
           },
         }
       : {}),
