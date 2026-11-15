@@ -4618,11 +4618,10 @@ ${clientScript}
     res.setHeader(FARM_DEPLOYMENT_ID_HEADER, deploymentId);
     if ((req.method || "GET").toUpperCase() !== "GET") return;
 
-    const forwardedProto = req.headers["x-forwarded-proto"];
+    // A client-sent X-Forwarded-Proto counts only behind a trusted proxy, as in production.
     const isSecure =
-      (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)
-        ?.split(",")[0]
-        ?.trim() === "https" || Boolean((req.socket as any)?.encrypted);
+      resolveFarmRequestURL(req, { trustProxy: this.config.server?.trustProxy }).protocol ===
+      "https:";
     const cookie = createFarmDeploymentCookie(deploymentId, this.config.basePath || "/", isSecure);
     const existing = res.getHeader("Set-Cookie");
 
