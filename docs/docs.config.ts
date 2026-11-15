@@ -390,6 +390,7 @@ const sidebar = [
           { label: "Progress", slug: "plugins/progress", icon: "activity" },
           { label: "Search", slug: "plugins/search", icon: "search" },
           { label: "Scripts", slug: "plugins/scripts", icon: "code" },
+          { label: "Scroll Restoration", slug: "plugins/scroll-restoration", icon: "layout" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
           { label: "Sync", slug: "plugins/sync", icon: "network" },
           { label: "StyleX", slug: "plugins/stylex", icon: "braces" },

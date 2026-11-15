@@ -4016,7 +4016,8 @@ ${generateUniversalRouterStateProperties()}
       this.currentHistoryState = options.popState;
     }
 
-    this.saveScrollPosition(window.location.pathname + window.location.search);
+    // Save under the page still on screen: on Back/Forward the URL already names the destination.
+    this.saveScrollPosition(from);
     const navigation = this.startNavigation(from, url, action);
     let clientNavigation;
     try {
@@ -5309,7 +5310,8 @@ ${
     // A route transition invalidates any trigger waiting on the previous DOM boundary.
     cancelPendingPageHydration();
     this.stopNavigationStream();
-    this.saveScrollPosition(window.location.pathname + window.location.search);
+    // Save under the page still on screen: on Back/Forward the URL already names the destination.
+    this.saveScrollPosition(from);
     const navigation = this.startNavigation(from, url, action);
     // A refresh keeps the islands still on the page (islands mode).
     navigation.refresh = options.refresh === true;
