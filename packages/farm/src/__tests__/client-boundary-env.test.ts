@@ -33,6 +33,50 @@ describe("shouldInspectClientBoundary", () => {
   });
 });
 
+describe("shouldInspectClientBoundary: mentions inside literals", () => {
+  const inspect = (code: string) => shouldInspectClientBoundary("/app/src/page.md", code);
+
+  it("skips a module that mentions process.env and node: only in strings, templates, comments and regexes", () => {
+    // Shaped like a compiled Markdown page: code samples are string children.
+    const page = [
+      'import { jsx as _jsx } from "react/jsx-runtime";',
+      "// read process.env.SECRET on the server",
+      "/* import fs from 'node:fs' */",
+      "function _createMdxContent(props) {",
+      '  return _jsx("pre", { children: "const key = process.env.SECRET;\\nimport fs from \\"node:fs\\";" });',
+      "}",
+      "const sample = `process.env.TOKEN and node:path`;",
+      "const pattern = /process.env|node:/;",
+      'const quoted = /"/.test(sample) ? `${"a"}` : "b";',
+      "export default _createMdxContent;",
+    ].join("\n");
+    expect(inspect(page)).toBe(false);
+  });
+
+  it("inspects real reads and builtin specifiers wherever they appear in code", () => {
+    expect(inspect("const k = process.env.SECRET;")).toBe(true);
+    expect(inspect("const k = `${process.env.SECRET}`;")).toBe(true);
+    expect(inspect('const ok = /"/.test(a);\nconst k = process.env.SECRET;')).toBe(true);
+    expect(inspect("const s = x / 2; const k = process.env.SECRET;")).toBe(true);
+    expect(inspect('import fs from "node:fs";')).toBe(true);
+    expect(inspect("const fs = require('node:fs');")).toBe(true);
+    expect(inspect("const fs = await import(`node:fs`);")).toBe(true);
+  });
+
+  it("agrees with the analysis on every module the analysis flags", () => {
+    for (const code of [
+      "export const key = process.env.API_KEY;",
+      'const k = process.env["SECRET"];',
+      'export * from "node:path";',
+      'const p = import("node:fs/promises");',
+    ]) {
+      const findings = analyze(code);
+      expect(findings.envKeys.length + findings.builtinImports.length).toBeGreaterThan(0);
+      expect(inspect(code), code).toBe(true);
+    }
+  });
+});
+
 describe("analyzeClientBoundary: process.env reads", () => {
   it("flags a module-scope read of a non-public key", () => {
     expect(analyze("const url = process.env.DATABASE_URL;").envKeys).toEqual(["DATABASE_URL"]);
