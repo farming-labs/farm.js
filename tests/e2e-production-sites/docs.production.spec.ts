@@ -1068,6 +1068,54 @@ for (const width of [280, 320, 345, 360, 1440]) {
   });
 }
 
+// A post figure wider than a phone scrolls sideways inside itself; its caption must stay in view.
+test("blog figure captions stay in view while their figures scroll sideways", async ({
+  browser,
+  baseURL,
+}) => {
+  const context = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 900 },
+    javaScriptEnabled: false,
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  try {
+    let scrolled = 0;
+    for (const pathname of [
+      "/blog/0.1.0",
+      "/blog/agent-native",
+      "/blog/web-to-native",
+      "/blog/native-internals",
+    ]) {
+      await page.goto(pathname);
+      const result = await page
+        .locator(".blog-figure:not(.blog-figure--fit)")
+        .evaluateAll((figures) => {
+          const hidden: string[] = [];
+          let count = 0;
+          for (const figure of figures as HTMLElement[]) {
+            const caption = figure.querySelector("figcaption");
+            if (!caption || figure.scrollWidth <= figure.clientWidth) continue;
+            count += 1;
+            figure.scrollLeft = figure.scrollWidth;
+            const box = figure.getBoundingClientRect();
+            const rect = caption.getBoundingClientRect();
+            if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5) {
+              hidden.push(figure.dataset.figure ?? "");
+            }
+          }
+          return { count, hidden };
+        });
+      scrolled += result.count;
+      expect(result.hidden, pathname).toEqual([]);
+    }
+    expect(scrolled).toBeGreaterThan(0);
+  } finally {
+    await context.close();
+  }
+});
+
 for (const width of [320, 390, 768]) {
   test(`blog navigation and reading stay usable at ${width}px without JavaScript`, async ({
     browser,

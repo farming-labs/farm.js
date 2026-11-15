@@ -481,7 +481,10 @@
 .blog-figure:not([data-state="playing"]) .bf-toggle .bf-icon-pause {
   display: none;
 }
+/* A figure that scrolls sideways keeps its caption in view, as it does its controls. */
 .blog-figure figcaption {
+  position: sticky;
+  left: 0;
   margin-top: 0.4rem;
   text-align: center;
   font-family: var(--font-geist-mono), ui-monospace, monospace;
