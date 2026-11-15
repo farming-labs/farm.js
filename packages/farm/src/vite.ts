@@ -4041,13 +4041,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               if (req.method !== "GET" && req.method !== "HEAD") {
                 body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
               }
-              // Like production, the handler can see the client go away.
-              return new Request(`http://${req.headers.host || "localhost:3000"}${req.url}`, {
-                method: req.method,
-                headers,
-                body: toRequestBody(body),
-                signal: createFarmNodeRequestAbortSignal(req, res),
-              });
+              // Like production, the handler can see the client go away. Under
+              // server.trustProxy it reads the public URL, as pages and middleware do.
+              return new Request(
+                resolveFarmRequestURL(req as FarmRequest, {
+                  trustProxy: currentServerConfig.trustProxy,
+                }),
+                {
+                  method: req.method,
+                  headers,
+                  body: toRequestBody(body),
+                  signal: createFarmNodeRequestAbortSignal(req, res),
+                },
+              );
             };
             const isDocsAPIRequest = Boolean(
               farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(pathname),
