@@ -1,6 +1,6 @@
 "use client";
 
-import type { FarmClientPlugin } from "@farm.js/core/client/plugin";
+import type { FarmClientPlugin } from "@farm.js/core/plugin/client";
 import { createWebVitalsCollector } from "./collector.js";
 import type { WebVitalsClientOptions, WebVitalsCollector } from "./types.js";
 
