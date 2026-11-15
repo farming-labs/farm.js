@@ -7500,6 +7500,9 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   listFarmMCPLlmsTxtLinks,
   readFarmLlmsMarkdownFrom,
   registerFarmMCPServer,
+  _listFarmRegisteredMCPServerTools,
+  _observeFarmRegisteredMCPResponse,
+  _readFarmRegisteredMCPCalls,
   renderFarmLlmsFullTxt,
   resolveFarmAgentOrigin,
   createFarmLlmsFullRenderer,
@@ -8418,7 +8421,20 @@ farmAppManifestInput.guardCoversPath = (path) =>
     },
     path,
     farmLocalAPIBasePath,
-  );\n`
+  );\n${
+    config.docs?.enabled
+      ? `// A docs runtime's MCP server lists its tools when asked over MCP, in process. A build
+// can't change them, so they are read once.
+if (farmDocsHandler) {
+  farmAppManifestInput.registeredMCP = (request) =>
+    _listFarmRegisteredMCPServerTools(farmDocsHandler, request, {
+      basePath: ${JSON.stringify(config.basePath)},
+      guardCoversPath: farmAppManifestInput.guardCoversPath,
+      cache: true,
+    });
+}\n`
+      : ""
+  }`
       : ""
   }
 function isFarmLocalAPIPathname(pathname) {
@@ -10924,7 +10940,13 @@ ${
       ? ` && !${JSON.stringify(owned)}.includes(normalizeRuntimePath(routePathname))`
       : "";
   })()}) {
-    const docsResponse = await farmDocsHandler(cloneFarmRequestWithContext(request));
+    const farmDocsRequest = cloneFarmRequestWithContext(request);
+    // Tool calls to a docs runtime's MCP server emit mcp.tool.complete, as @farm.js/mcp's do.
+    const farmRegisteredMCPCalls = await _readFarmRegisteredMCPCalls(
+      farmDocsRequest,
+      ${JSON.stringify(config.basePath)},
+    );
+    const docsResponse = await farmDocsHandler(farmDocsRequest);
     if (docsResponse) {${
       hasInfraAnalyticsRuntime
         ? `
@@ -10939,7 +10961,19 @@ ${
     }
       if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
         return applyProductionMiddlewareHeaders(
-          withFarmDocsRequestCache(docsResponse, request, farmLocaleResolution, middlewareData, middlewareContext),
+          withFarmDocsRequestCache(
+            _observeFarmRegisteredMCPResponse(
+              docsResponse,
+              farmRegisteredMCPCalls,
+              typeof adapterContext?.waitUntil === "function"
+                ? adapterContext.waitUntil.bind(adapterContext)
+                : undefined,
+            ),
+            request,
+            farmLocaleResolution,
+            middlewareData,
+            middlewareContext,
+          ),
           middlewareHeaders,
         );
       }

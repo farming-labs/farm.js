@@ -801,7 +801,8 @@ such as the [docs engine](/docs/docs-engine)'s endpoint, join the catalog throug
 
 Every app serves `/.well-known/farmjs.json` (and, for Farm 0.1.34's readers, `/.well-known/farmjs`)
 to any client: Farm's version and the installed `@farm.js/*` packages, the renderer and base path,
-the MCP tools Farm serves with their JSON Schemas, WebMCP browser tools, each integration's
+the MCP tools Farm serves with their JSON Schemas (and the docs engine's, which Farm asks for over
+MCP), WebMCP browser tools, each integration's
 category and provider (never its configuration), plugin names, and the site's public origin from
 `FARM_SITE_URL` or the host's production address.
 [Farm Infra analytics](/docs/infra-analytics) lists every field, and
