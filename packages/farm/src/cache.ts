@@ -188,6 +188,8 @@ export interface FarmCacheStorage {
   /** `options.ttl` is in seconds, matching unstorage drivers that support expiry. */
   setItem<T = unknown>(key: string, value: T, options?: { ttl?: number }): Promise<unknown>;
   removeItem(key: string): Promise<unknown>;
+  /** Keys under `base`, as unstorage lists them; `clear` removes them one by one. */
+  getKeys?(base?: string): Promise<string[]>;
   clear?(base?: string): Promise<unknown>;
 }
 
@@ -228,11 +230,19 @@ export function storageCacheAdapter(
     delete: async (key: string) => {
       await storage.removeItem(await entryKey(key));
     },
-    clear: storage.clear
+    // unstorage's clear(base) only empties drivers mounted below `base`, so on a store whose
+    // driver is mounted at the root it removed nothing. Remove the listed keys instead, as
+    // Farm's namespaced stores do.
+    clear: storage.getKeys
       ? async () => {
-          await storage.clear!(base);
+          const keys = await storage.getKeys!(base);
+          await Promise.all(keys.map((key) => storage.removeItem(key)));
         }
-      : undefined,
+      : storage.clear
+        ? async () => {
+            await storage.clear!(base);
+          }
+        : undefined,
     getTagVersions: async (tags) => {
       const versions = await Promise.all(
         tags.map(async (tag) => {
