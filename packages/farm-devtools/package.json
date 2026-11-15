@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/devtools",
-  "version": "0.1.71",
+  "version": "0.1.72",
   "description": "Development workspace inspector for Farm.js routes, runtime, and browser modules",
   "keywords": [
     "devtools",
