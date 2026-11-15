@@ -112,7 +112,7 @@ import type {
 } from "./desktop/config";
 import type { FarmMobileConfigInput } from "./mobile/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
-import type { OpenAPISecurityMode } from "./openapi/types";
+import type { OpenAPIPathItemObject, OpenAPISecurityMode } from "./openapi/types";
 import { isFarmRendererDisabled, isReactRenderer, resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
 import { applyFarmDocsFrameworkAutoDetection } from "./docs/framework-detect";
@@ -329,6 +329,13 @@ export interface OpenAPIConfig {
     name: string;
     url?: string;
   };
+  /**
+   * Path items for routes Farm serves without an API route file, such as the docs
+   * engine's `/api/docs`. Keys are relative to the API server, like generated paths
+   * (`/docs` for `/api/docs`). Describing an operation Farm already generates is an
+   * error.
+   */
+  paths?: Record<`/${string}`, OpenAPIPathItemObject>;
 }
 
 export type MiddlewareConfig = FarmMiddlewareConfig;

@@ -5999,6 +5999,7 @@ async function buildSSRInMemory(
     const openAPIManager = new OpenAPIManager(appDirs, config.openapi, {
       mode: "production",
       apiBaseURL: config.api.baseURL,
+      routes: () => apiRouteManager.getRoutes().values(),
       loadModule: (filePath) => apiRouteManager.loadModule(filePath),
     });
     const spec = await openAPIManager.generateSpec();

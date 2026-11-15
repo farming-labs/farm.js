@@ -1,4 +1,9 @@
-import { OpenAPIGenerator, type OpenAPIGeneratorContext, type OpenAPISpec } from "./generator";
+import {
+  OpenAPIGenerator,
+  type OpenAPIGeneratorContext,
+  type OpenAPIRouteInput,
+  type OpenAPISpec,
+} from "./generator";
 import { APITypeGenerator } from "../type-generator";
 import type { OpenAPIConfig } from "../config";
 import { SCALAR_API_REFERENCE_SCRIPT } from "./scalar-assets";
@@ -37,23 +42,44 @@ export function renderOpenAPIReferenceHTML(spec: OpenAPISpec, config: OpenAPICon
     `;
 }
 
+export interface OpenAPIManagerContext extends OpenAPIGeneratorContext {
+  /**
+   * The mounted API routes, with their loaded endpoints. Farm passes its route
+   * table so the document describes what is served, plugin routes included,
+   * without importing route files a second time. Without it, route files are
+   * scanned and imported.
+   */
+  routes?: () => Iterable<OpenAPIRouteInput>;
+}
+
 export class OpenAPIManager {
   private generator: OpenAPIGenerator;
   private apiTypeGenerator: APITypeGenerator;
   private config: OpenAPIConfig;
   private appDir: string;
+  private mountedRoutes?: () => Iterable<OpenAPIRouteInput>;
   private specCache: any = null;
 
   constructor(
     appDir: string | readonly string[],
     config: OpenAPIConfig,
-    context: OpenAPIGeneratorContext = {},
+    context: OpenAPIManagerContext = {},
   ) {
     const appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.appDir = appDirs[appDirs.length - 1];
     this.config = config;
+    this.mountedRoutes = context.routes;
     this.generator = new OpenAPIGenerator(this.appDir, config, context);
     this.apiTypeGenerator = new APITypeGenerator(appDirs);
+  }
+
+  private getRoutes(): OpenAPIRouteInput[] {
+    if (!this.mountedRoutes) return this.apiTypeGenerator.scanAPIRoutes();
+    return [...this.mountedRoutes()].sort(
+      (left, right) =>
+        left.path.localeCompare(right.path) ||
+        (left.filePath ?? "").localeCompare(right.filePath ?? ""),
+    );
   }
 
   /**
@@ -61,8 +87,7 @@ export class OpenAPIManager {
    */
   async generateSpec(): Promise<any> {
     try {
-      // Get API routes using the existing type generator
-      const routes = this.apiTypeGenerator.scanAPIRoutes();
+      const routes = this.getRoutes();
 
       // Generate OpenAPI spec (now async)
       const spec = await this.generator.generateSpec(routes);
@@ -95,7 +120,7 @@ export class OpenAPIManager {
    */
   async generateSpecFile(): Promise<void> {
     try {
-      const routes = this.apiTypeGenerator.scanAPIRoutes();
+      const routes = this.getRoutes();
       const outputPath = `${this.appDir}/lib/openapi.spec.json`;
 
       await this.generator.generateSpecFile(routes, outputPath);

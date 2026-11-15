@@ -2565,6 +2565,7 @@ export function farmPlugin(
         openAPIManager = new OpenAPIManager(appDirs, options.openapi, {
           mode: "development",
           apiBaseURL: typeof options.api?.baseURL === "string" ? options.api.baseURL : undefined,
+          routes: () => apiRouteManager.getRoutes().values(),
           loadModule: (filePath) => apiRouteManager.loadModule(filePath),
         });
         const spec = await openAPIManager.generateSpec();

@@ -46,6 +46,58 @@ describe("APIRouteManager", () => {
     expect(manager.getRoutes().get("/api/jsx")?.methods).toEqual(["GET"]);
   });
 
+  it("keeps a route file's openapi export with the methods that file defines", async () => {
+    const layer = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-layer-"));
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-project-"));
+    tempDirs.push(layer, project);
+    for (const appDir of [layer, project]) {
+      fs.mkdirSync(path.join(appDir, "api", "admin"), { recursive: true });
+      fs.writeFileSync(path.join(appDir, "api", "admin", "route.ts"), "export {};\n");
+    }
+    const handler = async () => new Response();
+    const manager = new APIRouteManager([layer, project], {
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) =>
+              filePath.startsWith(layer)
+                ? { GET: handler, POST: handler, openapi: { hidden: true } }
+                : { POST: handler },
+          },
+        },
+      },
+    } as any);
+
+    await manager.discoverRoutes();
+
+    // The project's POST replaces the layer's, and its OpenAPI options with it.
+    expect(manager.getRoutes().get("/api/admin")?.openapi).toEqual({ GET: { hidden: true } });
+  });
+
+  it("rejects an openapi route export it does not understand", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    fs.mkdirSync(path.join(root, "api", "admin"), { recursive: true });
+    fs.writeFileSync(path.join(root, "api", "admin", "route.ts"), "export {};\n");
+    const manager = new APIRouteManager(
+      root,
+      {
+        environments: {
+          ssr: {
+            runner: {
+              import: async () => ({ GET: async () => new Response(), openapi: { hide: true } }),
+            },
+          },
+        },
+      } as any,
+      { throwOnLoadError: true },
+    );
+
+    await expect(manager.discoverRoutes()).rejects.toThrow(
+      'API route "/api/admin" exports "openapi" with an unknown option "hide"',
+    );
+  });
+
   it("rejects dynamic API routes that match the same URL shape", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
     tempDirs.push(root);

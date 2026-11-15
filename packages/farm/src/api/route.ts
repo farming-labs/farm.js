@@ -4,6 +4,7 @@ import {
   type AnyEndpointMiddleware,
   type EndpointMCPOptions,
   type EndpointMiddlewareResult,
+  type EndpointOpenAPIMetadata,
   type InferEndpointMiddlewareContext,
 } from "./endpoint";
 import {
@@ -108,6 +109,8 @@ export type RouteOptions<
   output?: O;
   /** Opt this app-owned endpoint into an installed MCP transport. */
   mcp?: EndpointMCPOptions;
+  /** OpenAPI-only operation metadata, such as `{ hidden: true }`. */
+  openapi?: EndpointOpenAPIMetadata;
   middleware?: RouteMiddlewares<MiddlewareResults>;
   handler(
     request: Request,
@@ -227,6 +230,7 @@ function createRouteFactoryAt(prefix: string): RouteFactory {
           headers: input.headers,
           middleware: options.middleware,
           mcp: options.mcp,
+          openapi: options.openapi,
         },
         (ctx) =>
           options.handler(ctx.request, {
