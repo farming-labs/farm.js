@@ -812,7 +812,9 @@
    connectors at a legible size, instead of a 600px stage that scrolls sideways. */
 .bf-stage--narrow {
   display: none;
-  min-width: 0;
+  /* Where its type reaches the 9px floor (the font-size above), the stage stops shrinking and
+     scrolls sideways like the wide stage, so the text keeps the room its panels were drawn for. */
+  min-width: calc(9px / (0.0162 * var(--bf-scale, 1)));
 }
 .bf-stage--narrow .bf-panel--code .bf-body {
   white-space: pre-wrap;
