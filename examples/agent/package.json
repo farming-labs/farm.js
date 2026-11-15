@@ -13,7 +13,7 @@
   "dependencies": {
     "@farm.js/agent": "workspace:*",
     "@farm.js/core": "workspace:*",
-    "agent-unit": "^0.4.0",
+    "agent-unit": "^0.5.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

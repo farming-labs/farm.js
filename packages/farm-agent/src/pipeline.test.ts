@@ -414,6 +414,92 @@ console.log("RESULTS " + JSON.stringify(results));
   }, 240_000);
 });
 
+// A task can run one of the app's agents (agent-unit 0.5): the cron route starts it, once per
+// scheduled time however often the scheduler fires. Farm.js Infra can then cancel the run from its
+// approval, with a call signed for the very path Farm serves the agent API under.
+describe("an agent task on Vercel", () => {
+  it("starts one run per scheduled time, and Infra's signed cancel reaches it", async () => {
+    const root = await createApp(
+      "farm-agent-task-",
+      `tasks: { "nightly-refund": { schedule: "0 0 * * *", agent: "refund", input: { orderId: "T1" } } }`,
+    );
+    await buildForVercel(root);
+
+    const script = `
+import { createHash, createHmac } from "node:crypto";
+const { default: server } = await import(${JSON.stringify(await vercelEntry(root))});
+const PASS = ${JSON.stringify(PASS)};
+const call = async (pathname, init = {}) => {
+  const pending = [];
+  const response = await server.fetch(new Request("https://app.example" + pathname, init), {
+    waitUntil: (promise) => pending.push(promise),
+  });
+  const failed = (await Promise.allSettled(pending)).filter((result) => result.status === "rejected");
+  if (failed.length) throw failed[0].reason;
+  return response;
+};
+const fire = async () =>
+  (await call("/_vercel/cron", {
+    headers: { "x-vercel-cron-schedule": "0 0 * * *", authorization: "Bearer cron-secret" },
+  })).status;
+
+// The scheduler fires twice for one scheduled time, as a retried cron call does.
+const fires = [await fire(), await fire()];
+const { runs } = await (await call("/api/agent/runs", { headers: PASS })).json();
+const run = runs.length === 1 ? await (await call("/api/agent/runs/" + runs[0].id, { headers: PASS })).json() : undefined;
+
+// Infra signs the method and the path it calls with the hex SHA-256 of FARMJS_API_KEY.
+process.env.FARMJS_API_KEY = "farmjs_test_vector_key";
+const pathname = "/api/agent/__agent-unit/cancel/" + run?.id;
+const body = JSON.stringify({ key: run?.interrupt?.key, interrupt: run?.interrupt?.name });
+const hmacKey = createHash("sha256").update(process.env.FARMJS_API_KEY).digest("hex");
+const t = String(Math.floor(Date.now() / 1000));
+const v1 = createHmac("sha256", hmacKey).update("farmjs-agent-v1\\n" + t + "\\nPOST " + pathname).digest("hex");
+const headers = { ...PASS, "content-type": "application/json" };
+const unsigned = await call(pathname, { method: "POST", headers, body });
+const signed = await call(pathname, {
+  method: "POST",
+  headers: { ...headers, "farmjs-signature": "t=" + t + ",v1=" + v1 },
+  body,
+});
+const after = await (await call("/api/agent/runs/" + run?.id, { headers: PASS })).json();
+console.log("RESULTS " + JSON.stringify({
+  fires,
+  runs: runs.length,
+  id: run?.id,
+  status: run?.status,
+  input: run?.input,
+  interrupt: run?.interrupt?.name,
+  unsigned: unsigned.status,
+  signed: [signed.status, await signed.json()],
+  after: after.status,
+}));
+`;
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      NODE_ENV: "production",
+      CRON_SECRET: "cron-secret",
+    };
+    delete env.FARMJS_API_KEY;
+    const stdout = await runScript(root, script, env);
+    const line = stdout.split("\n").find((value) => value.startsWith("RESULTS "));
+    if (!line) throw new Error(`No results\n${stdout}`);
+    const results = JSON.parse(line.slice("RESULTS ".length));
+    // A run started by a task has an id derived from the task and its scheduled time.
+    expect(results.id).toMatch(/^run_[0-9a-f]{32}$/);
+    expect({ ...results, id: undefined }).toEqual({
+      fires: [200, 200],
+      runs: 1,
+      status: "interrupted",
+      input: { orderId: "T1" },
+      interrupt: "approve-refund",
+      unsigned: 401,
+      signed: [200, { status: "cancelled" }],
+      after: "cancelled",
+    });
+  }, 240_000);
+});
+
 // Without `storage`, agent-unit keeps runs in Farm.js storage when the build has FARMJS_API_KEY,
 // and stops a build for a host without a durable disk that has neither, rather than keeping runs
 // in memory, where a serverless function loses them between requests.

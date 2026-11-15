@@ -103,7 +103,27 @@ agent({
 
 Set `authorize` before anyone else can reach the app; a middleware or plugin guard on `basePath` works too. Without either, anyone who can reach the server can list every run with its input and output, read a run and its events, answer its interrupt, cancel or delete it, and start new runs.
 
-A guard on `basePath` also sees agent-unit's internal `__agent-unit/continue` and `__agent-unit/sweep` requests, which carry `AGENT_UNIT_SECRET` as a bearer token. Let them through, rather than redirecting them to a sign-in page, so a yielded run continues in a fresh invocation and Netlify's scheduled sweep reaches the server; agent-unit checks the secret itself. A redirect that ends on a page answering 200 looks like a delivered hand-off, so the run waits for the next sweep instead of continuing.
+A guard on `basePath` also sees agent-unit's internal `__agent-unit/continue` and `__agent-unit/sweep` requests, which carry `AGENT_UNIT_SECRET` as a bearer token, and [Farm.js Infra's](#approve-runs-in-farmjs-infra) `__agent-unit/wake`, `answer`, and `cancel` calls, which carry a `farmjs-signature` header. Let them through, rather than redirecting them to a sign-in page, so a yielded run continues in a fresh invocation and Netlify's scheduled sweep reaches the server; agent-unit checks the secret and the signature itself. A redirect that ends on a page answering 200 looks like a delivered hand-off, so the run waits for the next sweep instead of continuing.
+
+## Run an agent on a schedule
+
+A task with `agent` starts a run of that agent each time its schedule comes round, on the deploy target's scheduler:
+
+```ts
+agent({
+  tasks: {
+    "morning-digest": { schedule: "0 8 * * *", agent: "digest", input: { team: "support" } },
+  },
+});
+```
+
+Each scheduled time starts one run. Its id comes from the task's name and that time, so a retried cron call, or a cluster where every process runs the schedule, gets the run the first call started. Times are read in the server's time zone: UTC on Vercel and Workers. The runs are ordinary runs: `GET /api/agent/runs?agent=digest` lists them, and they can sleep or pause for approval like any other. `input` evaluates where the server runs, like the other settings.
+
+A task with `handler` instead calls the default export of that module. See agent-unit's [scheduled tasks](https://github.com/farming-labs/agent-unit#background-work-and-scheduled-tasks) for the hosts that run a schedule.
+
+## Approve runs in Farm.js Infra
+
+With `FARMJS_API_KEY` set where the server runs, every interrupt a run waits on shows up under Agents > Approvals in the [Farm.js Infra](https://app.farmjs.dev) dashboard. An owner or admin of the project's organization approves or rejects it, with an optional note, or cancels the run. Infra calls `POST /api/agent/__agent-unit/answer/:id` or `POST /api/agent/__agent-unit/cancel/:id` on the app, signed with the key, and a cancel ends the run only while it still waits on that pause. The same key lets Infra wake sleeping runs. See agent-unit's [Farm.js Infra section](https://github.com/farming-labs/agent-unit#approve-interrupts-in-farmjs-infra) for the variables it reads.
 
 ## Storage and deploy targets
 
@@ -140,7 +160,7 @@ On Vercel, set `CRON_SECRET` in the project's environment variables. Vercel Cron
 | `presets`   | none             | Settings per deploy target, applied over the top-level ones.                         |
 | `authorize` | none             | Decides every request.                                                               |
 | `name`      | the package name | The name in the manifest, MCP, and A2A.                                              |
-| `tasks`     | none             | Scheduled tasks that run on the target's scheduler.                                  |
+| `tasks`     | none             | Scheduled tasks: an `agent` to run or a `handler` module, on the target's scheduler. |
 | `budget`    | per target       | How long a run works before it yields and continues: 240s on Vercel, 25s on Workers. |
 | `retention` | kept             | How long finished runs are kept.                                                     |
 | `sweep`     | every minute     | The sweep's cron schedule, or `false`.                                               |
