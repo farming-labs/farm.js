@@ -7,7 +7,6 @@ import {
 import VueCompat, {
   Fragment,
   Suspense,
-  ErrorBoundary,
   createElement,
   isValidElement,
   markFunctionComponent,
@@ -19,7 +18,26 @@ export const name = "vue";
 export const capabilities = {
   streaming: { node: true, web: true },
 } as const;
-export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement, markFunctionComponent };
+export { Fragment, Suspense, createElement, isValidElement, markFunctionComponent };
+
+/**
+ * Vue's server renderer never renders a boundary again after `onErrorCaptured`, so a throw
+ * inside it was dropped: the response was a 200 page, and a redirect() or notFound() never
+ * reached Farm. On the server the boundary passes its children through and the throw fails the
+ * render, as React's and Preact's do, so Farm answers with the route's error page and status,
+ * as in production. The client keeps the real boundary, and both take the same props.
+ */
+export const ErrorBoundary = defineComponent({
+  name: "FarmVueErrorBoundary",
+  props: {
+    Fallback: { type: [Object, Function], required: true },
+    fallbackProps: { type: Object, default: () => ({}) },
+  },
+  setup:
+    (_props, { slots }) =>
+    () =>
+      slots.default?.(),
+});
 
 /** Vue hydration does not require an inline bootstrap before the client entry. */
 export function generateHydrationScript(): string {
