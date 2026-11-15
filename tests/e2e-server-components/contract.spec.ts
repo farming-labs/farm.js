@@ -398,6 +398,38 @@ test("client navigation keeps a layout's client state and does not reload the do
   expect(errors).toEqual([]);
 });
 
+test("a dev document inlines its own route, and navigation loads the others", async ({
+  page,
+  request,
+}) => {
+  test.skip(!dev || mode !== "islands", "development documents inline the client manifest");
+  // Every route's entry made each document grow with the app (about 650 KB at 1,000 routes).
+  const html = await (await request.get("/nav/a")).text();
+  const inlined = JSON.parse(html.match(/window\.__FARM_MANIFEST__ = (.*);\n/)![1]!);
+  expect(Object.keys(inlined.routes)).toEqual(["/nav/a"]);
+  expect(Object.keys(inlined.layouts).sort()).toEqual(["/", "/nav"]);
+  expect(inlined.module).toBe("/@farm/manifest");
+
+  const errors = collectErrors(page);
+  await page.goto("/nav/a");
+  await hydrated(page);
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("button", { name: "Layout clicks: 0" }).click();
+  await page.getByRole("link", { name: "Page B" }).click();
+  await expect(page.getByRole("heading", { name: "Nav page B" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Layout clicks: 1" })).toBeVisible();
+  const routes = await page.evaluate(() =>
+    Object.keys((window as { __FARM_MANIFEST__?: { routes: object } }).__FARM_MANIFEST__!.routes),
+  );
+  expect(routes).toEqual(expect.arrayContaining(["/", "/nav/a", "/nav/b", "/stream"]));
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Nav page A" })).toBeVisible();
+  await page.goForward();
+  await expect(page.getByRole("heading", { name: "Nav page B" })).toBeVisible();
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
 test("a layout's island waiting below a client page still hydrates after a navigation", async ({
   page,
 }) => {
