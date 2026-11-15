@@ -14025,6 +14025,25 @@ function toFarmNodeResponse(request, response) {
     const orderOf = (route: string) => prerenderOrder.get(route) ?? Number.MAX_SAFE_INTEGER;
     prerenderedRoutes.sort((a, b) => orderOf(a.route) - orderOf(b.route));
   });
+  // A page that answers with something other than its HTML, such as the body-less 307/308 of a
+  // `redirect()` it calls, has no page to save: Nitro would write that empty body as the page's
+  // file and serve it as a blank 200. Keep such a page server-handled, with the route rules any
+  // other server-handled page has, so each request gets the page's own response.
+  const prerenderPagePaths = new Set(prerenderRoutes.map(toPrerenderPublicPath));
+  let skippedNonHtmlPrerenderRoute = false;
+  nitroInstance.hooks.hook("prerender:generate", (route) => {
+    if (route.error || !prerenderPagePaths.has(route.route)) return;
+    if (route.contentType?.toLowerCase().includes("html")) return;
+    route.skip = true;
+    skippedNonHtmlPrerenderRoute = true;
+    const configuredRule = configuredNitroRouteRules[route.route];
+    if (configuredRule) nitroInstance.options.routeRules[route.route] = configuredRule;
+    else delete nitroInstance.options.routeRules[route.route];
+    logger.info(`↪ Keeping SSG route ${route.route} server-handled (it does not render HTML)`);
+  });
+  nitroInstance.hooks.hook("prerender:done", () => {
+    if (skippedNonHtmlPrerenderRoute) nitroInstance.routing.sync();
+  });
   if (config.md?.enabled) {
     // A prerendered page is served as a static file, so it cannot negotiate
     // `Accept: text/markdown`. Send the same Link header dynamic pages send, so
