@@ -98,6 +98,9 @@ because request-bound work in transitive imports cannot be proven safe from the 
 Farm serves generated HTML only for `GET` and `HEAD` requests. Other request methods continue through
 the live route instead of receiving a cached page document.
 
+A static page that calls `redirect()` or `permanentRedirect()` while it renders has no HTML to save.
+The build keeps it server-handled, so each request gets its 307 or 308 with the `Location` header.
+
 The build prerenders up to eight pages at once, or as many as the machine has CPU cores when that is
 fewer. Each page renders as its own request, as it would on the production server, so the output does
 not depend on this number. To lower it, for example when pages call a rate-limited API, set Nitro's
@@ -112,6 +115,24 @@ export const dynamic = "force-static";
 export default function AboutPage() {
   return <main>About Farm</main>;
 }
+```
+
+A `page.md` or `page.mdx` page opts in the same way, with an ESM export at the top level of its
+source. Farm reads the literal value without evaluating the page, so write a string, number, or
+boolean; an export inside a fenced code block is part of the content, not the page's config.
+`dynamic`, `revalidate`, and `ssg` are read this way. Pages the
+[docs engine](/docs/docs-engine) renders ignore them and follow `docs.prerender`.
+
+**src/app/docs/installation/page.mdx**
+
+```mdx
+---
+title: Installation
+---
+
+export const dynamic = "force-static";
+
+# Installation
 ```
 
 ## ISR-style revalidation
@@ -129,6 +150,18 @@ export default async function PricingPage() {
   return <PricingTable plans={plans} />;
 }
 ```
+
+In production a page with `revalidate` is sent with
+`Cache-Control: public, s-maxage=<revalidate>, stale-while-revalidate=300`, so a CDN or reverse
+proxy serves it and refreshes it in the background; a static page the server renders on request
+gets `s-maxage=60`. A render that is one visitor's is sent with `Cache-Control: private, no-store`
+instead: a request with a cookie other than Farm's deployment cookie or with an `Authorization`
+header, middleware request data, a render that reads the request or suspends, and a response that
+middleware let through (see [Responses behind middleware](/docs/cache-ppr#responses-behind-middleware)). A
+`Cache-Control` that middleware sets with `ctx.headers` does not replace the page's. Shareable
+responses never set the deployment cookie. `farm dev` renders these pages on each request without
+a shared policy. React Server Components apps follow the same rules, except that a page streams
+with its policy set up front, as described under [React Server Components](#react-server-components).
 
 ## PPR with Suspense
 
@@ -267,9 +300,7 @@ Islands have the same limits as [isolated client leaves](#isolated-client-leaves
   elsewhere that one client component keeps its server HTML and Farm logs it once.
 - A client component must export each component by name (`export function Name`,
   `export { Name }`, `export { Name } from "./name"`, or `export default`), not through
-  `export *`, and must not sit where the HTML parser moves it: directly inside `<table>`, `<tbody>`,
-  `<tr>`, `<select>` or `<svg>`. Inside a `<td>`, `<th>`, `<caption>` or `<foreignObject>` it is
-  fine.
+  `export *`.
 - An integration provider that wraps the whole route, and does not declare
   `supportsIsolatedHydration: true`, keeps its routes route-wide.
 
@@ -277,6 +308,15 @@ When one of these applies, the route stays server-rendered, its client component
 interactive, and Farm logs a warning naming the module and the reason. Fix the reason, or render
 the interactive part from a synchronous page. Preact, Solid, Vue, and Svelte keep async pages
 server-only.
+
+A client component directly inside `<table>`, `<thead>`, `<tbody>`, `<tfoot>`, `<tr>`,
+`<select>`, `<optgroup>`, `<datalist>`, `<svg>`, `<ul>` or `<ol>` cannot have an `<f-island>`
+around it: the HTML parser moves or drops it there, and `ul > li` selectors stop matching. Farm
+makes the outermost such element the island instead, so the browser gets the same table, options,
+SVG shapes and list items as under React Server Components. The element's server-rendered parts
+travel as a server tree, so moving `"use client"` up to a component that renders the whole
+element is still the cheaper choice for a large table. Inside a `<td>`, `<th>`, `<caption>`,
+`<li>` or `<foreignObject>` a client component is an island of its own.
 
 In [islands mode](#react-server-components) every page is a server component, so hydrating a page whole
 would ship its module and its server-only imports to the browser. Islands mode never does that:
@@ -346,7 +386,9 @@ around server content, reaches the consumers in it) and keep their own state, an
 not render at first (a tab, a closed panel) is there when it does. `useId` returns the ids in the
 server HTML, unique across client components. A server page under a
 layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
-components read the provider's context. That layout, and the other server layouts on its pages,
+components read the provider's context. So do a Markdown page's MDX components, and client
+components that declare a deferred `island` strategy: inside the tree they hydrate with the
+layout instead of waiting. That layout, and the other server layouts on its pages,
 render as server trees too: the browser rebuilds them from the HTML, so their modules and their
 server-only imports never reach it, and a navigation keeps the provider's state. A provider
 imported straight from a package fails the build; render it from a local `"use client"` module
@@ -419,14 +461,19 @@ output directory, so `farm start` and platform deploys work unchanged.
 The RSC pipeline (`serverComponents: { mode: "rsc" }`) does not run every Farm feature
 yet:
 
-- `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, `context`, and
-  `security.csp` decide what a request may see or receive. Running the app without them could
+- `auth`, `integrations`, `routeRules`, `context`, and `security.csp` decide what a request may
+  see or receive. Running the app without them could
   expose what they protect, so `farm dev` and `farm build` stop with an error that names them,
   including when a layer (`extends`) or a plugin's `configure` sets them.
 - Farm `plugins` run only their `configure` hook, in `farm dev` and `farm build`, and their
   [`client` hooks](/docs/plugins/client), in the browser, next to the app's `src/client.ts`. The
   rest of a plugin, from its `runtime` hooks to its routes, is ignored, and so are `storage`,
   `schema`, `cron`, `workflows`, `docs`, `theme`, and `observability`, with a warning.
+  The production server still loads the plugins that have server hooks, as `farm dev` does, so
+  what such a plugin does when it's created runs there: `bot()` keeps its settings for
+  `verifyBot()`, for example. The build takes those entries, and only the bindings they use, from
+  the `plugins` array in `farm.config.ts`, so declare it directly in
+  `defineConfig({ plugins: [...] })`.
 
 Islands mode renders on Farm's own pipeline, so it runs all of these.
 
@@ -446,16 +493,81 @@ Both setups follow the same route contract:
   is prerendered at build time together with its RSC payload. A dynamic route lists its paths with
   `generateStaticParams()`. Client navigation fetches the payload at `<page>.rsc` (`/index.rsc` for
   `/`), so a prerendered page navigates without reaching the server. A page that any middleware may
-  handle, and every page of an app with i18n, stays server-rendered, because middleware never sees a
-  static file. Pages with `revalidate` also render on each request for now; the pipeline has no
-  revalidating cache yet. A page that asks to be static and fails to render fails the build.
+  handle stays server-rendered, because middleware never sees a static file. With i18n a static page
+  prerenders at each URL that names its locale (`/fr/about`, below the base path); a URL without a
+  locale (the default locale's under `"prefix-except-default"`) redirects visitors whose cookie or
+  `Accept-Language` picks another locale, so it stays server-rendered unless `detection` is off, and
+  `routing: "none"` prerenders nothing. A page that asks to be static and fails to render fails the build.
+- **Revalidation.** Pages with `revalidate` render on each request and get the same
+  `Cache-Control` as in other Farm apps (see [ISR-style revalidation](#isr-style-revalidation)),
+  on the HTML, on the Flight payload, and on `<page>.rsc` alike, so a CDN serves the page and its
+  client navigations; the pipeline keeps no revalidating cache of its own. So does a static page
+  that renders on request instead of prerendering. Unlike other Farm apps, which keep a render
+  that suspends private, the page streams with its policy set before it does, so Suspense content
+  and an error boundary that catches inside it are part of the shared response. A request read
+  in `generateMetadata` or in an `async` page or layout makes the page private, as in other Farm
+  apps, but a read in a component that renders while the page streams is not seen. A shared
+  request has no cookie or `Authorization` header to read (either makes it private), but its
+  other headers, such as `Accept-Language` or the client address, are one visitor's, so do not
+  render them in a page that revalidates.
 - **Metadata.** Layouts and pages resolve `metadata`, `generateMetadata()`, and viewport exports in
   the same order and with the same title templates as other Farm apps, and the server renders the
-  same head tags.
+  same head tags. A client navigation sets the next page's title and replaces the tags Farm rendered
+  from metadata (description, canonical and alternate links, robots, Open Graph, JSON-LD) with
+  that page's, as other Farm apps do; tags your components render (React 19 `<meta>` and `<title>`)
+  stay React's. [Metadata route files](/docs/routing#application-metadata-routes)
+  (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, `llms-full.ts`) and `opengraph-image` and
+  `twitter-image` files are served as in other Farm apps, and the head names the nearest manifest
+  and images unless the metadata sets them.
 - **Images.** `<Image>` follows the app's `images` config. Without `sharp`, `provider: "auto"` keeps
   original image URLs, and the optimizer at `images.path` runs only when it can.
 - **Root layouts.** A root layout that renders `<html>` owns the document, as in Next.js, and the
   browser hydrates the whole document.
+- **Base path.** Under a [`basePath`](/docs/configuration#application-base-path), pages answer
+  below it as in other Farm apps: with `basePath: "/console"`, `app/about/page.tsx` serves
+  `/console/about` and its payload `/console/about.rsc`, `<Link href="/about">` renders
+  `/console/about`, and a static page prerenders at its URL below the base path. As in other Farm
+  apps, the page also answers at `/about`, and `redirect()` sends its target as written (with i18n,
+  in the request's locale below the base path). With i18n
+  the locale prefix is stripped too, so `/console/fr/about` matches `app/about/page.tsx`, which
+  reads its locale with `getLocale()` (see Internationalization below).
+  Pages nested in folders that spell out the prefix, as RSC apps had to write them before
+  (`app/console/about/page.tsx`, or `app/[lang]/about/page.tsx` and
+  `app/console/[lang]/about/page.tsx` with i18n), keep their URLs and win over a page at the
+  stripped path: with both `app/page.tsx` and `app/console/page.tsx`, `/console` renders the
+  latter. A dynamic or catch-all folder at the root never takes the base path itself, so
+  `app/[[...slug]]/page.tsx` sees `/console/guides` as `guides`. When no page matches the stripped
+  path, the path as received is matched.
+- **Internationalization.** With [`i18n`](/docs/internationalization), each request resolves its
+  locale as in other Farm apps: `getLocale()`, `t()` and `format` from `@farm.js/core/i18n/server`
+  work in pages, layouts, server actions, route handlers and middleware, and a page URL without a
+  locale redirects to the one the visitor's cookie or `Accept-Language` picks, varying on those
+  headers. Client components read the locale the page rendered with: `useLocale()`,
+  `useTranslations()`, and `<Link href="/about">`, which renders `/console/fr/about` on a French page.
+  A link to another locale loads a new document. `redirect("/about")` from a French page, server
+  action or form sends `/console/fr/about`, as other Farm apps localize it. Farm sets `lang` and
+  `dir` on the document's `<html>`, also on the one a root layout returns, in place of the layout's
+  own, as other Farm apps do; a root layout that is a client component or returns `<html>` inside
+  another component sets them itself, for example `<html lang={getLocale()}>`. With `trailingSlash: true`, a locale redirect goes straight to the
+  page's trailing-slash URL. The head carries `hreflang` alternate links for each locale and
+  `x-default`, absolute on the route's `metadataBase` or the request's origin (forwarded headers
+  only with `server.trustProxy`), as in other Farm apps; a prerendered page has no request, so
+  without `metadataBase` its alternates name paths. `llms.txt` and `sitemap.xml` list each page
+  once, at its unprefixed URL, as in other Farm apps.
+- **Trailing slashes.** Pages follow [`trailingSlash`](/docs/configuration#trailing-slashes) as in
+  other Farm apps: by default `/about/` redirects (308) to `/about`, and with `trailingSlash: true`
+  `/about` redirects to `/about/`, `<Link href="/about">` renders `/about/`, and its payload is
+  `/about/index.rsc`. A payload request at the other spelling redirects to the canonical page's
+  payload, a static page prerenders at its canonical URL, and `sitemap.xml` and `llms.txt` list
+  each page at that URL.
+- **Redirects, rewrites and headers.** The config [`redirects()`, `rewrites()` and
+  `headers()`](/docs/configuration#route-rules) apply in `farm dev` and in production as in other
+  Farm apps: redirects answer before any route or middleware, a rewrite applies only where no page,
+  API route, route file (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, `llms-full.ts`),
+  metadata image or generated agent file (`llms.txt`, `sitemap.xml`, `robots.txt`) answers, and
+  headers apply to whatever answers, API routes, agent files and redirects included; a response middleware let through keeps `Cache-Control: private, no-store`. A payload
+  request matches as its page, so a client navigation follows a redirect to the destination's
+  payload. A static page any of them matches renders on each request instead of prerendering.
 
 A client that loaded an older deployment and fetches a prerendered payload from a newer one does not
 get the deployment-mismatch reload that a server-rendered payload triggers.

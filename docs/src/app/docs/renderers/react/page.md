@@ -276,9 +276,13 @@ Rows with `onChange` handlers stay React-owned under React DOM, because React de
 from each row's own Fiber; this root instead listens on the list container for the native event
 React's `onChange` follows for each control (`input` for text fields, `change` for checkboxes,
 radios, selects, and file inputs), so those lists need no React DOM either. The same holds for
-`onChange` rows beside conditional content and in lists between static siblings: under React DOM
-their blocks let React render the rows, and here they run the rows themselves. Fields it creates get
-the same `value` and `checked` defaults React sets, so a form reset behaves the same.
+`onChange` rows beside or inside conditional content and in lists between static siblings: under
+React DOM their blocks let React render the rows, and here they run the rows themselves. Fields it
+creates get the same `value` and `checked` defaults React sets, so a form reset behaves the same.
+Like React DOM, the root puts a controlled field back to its `value` or `checked` after that native
+event, once the event's compiled updates have committed: an edit the state rejects disappears, and
+in a radio group the other radios return too. A field whose state took the edit is not written
+again, so its caret and undo history stay.
 Rows with conditional content mount here too when their events can be delegated, as described in
 [Compiler-owned host conditionals inside keyed rows](#compiler-owned-host-conditionals-inside-keyed-rows).
 Compiled parts that still re-render through React, such as conditional sections, child component
@@ -298,11 +302,11 @@ Fast Refresh, an edit reloads the page.
 
 Imports that also name `hydrateRoot`, default or namespace imports, dependencies, and server
 modules keep React DOM. Pages that Farm renders and hydrates are not affected. Set
-`compiledRoot: false` to keep React DOM for every root. That also compiles `onChange` rows beside
-conditional content or in a list between static siblings to the React-owned list, which ships less
-code when no root mounts without React DOM; with `compiledRoot` on, those rows compile to blocks
-that React renders under React DOM, as it would the React-owned list. To pass options such as
-`onFallback`, call `createCompiledRoot(container, options)` from `@farm.js/react/compiled-root`.
+`compiledRoot: false` to keep React DOM for every root. That also compiles `onChange` rows beside or
+inside conditional content or in a list between static siblings to the React-owned list, which
+ships less code when no root mounts without React DOM; with `compiledRoot` on, those rows compile to
+blocks that React renders under React DOM, as it would the React-owned list. To pass options such
+as `onFallback`, call `createCompiledRoot(container, options)` from `@farm.js/react/compiled-root`.
 
 ### Static and hybrid reactivity
 
@@ -562,6 +566,9 @@ satisfy all of these rules:
 | Props               | Object destructuring supports shorthand names, aliases, defaults, nested object and array patterns, and rest. Referenced primitive values join the dependency graph after mount. |
 | Body                | Top-level `useState` declarations, compiler-safe derived values and named handlers in any order (a derived value cannot read a later state), then one unconditional JSX return.  |
 | State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                                                       |
+| Memoization         | `useMemo(() => value, deps)` and `useCallback(handler, deps)` whose dependency array names every state, prop, and local they read; read as the value or handler itself.          |
+| Refs                | `const ref = useRef(initial)`, read and written in handlers, and attached with `ref={ref}` to a static element below the root (not inside a list or conditional).                |
+| Effects             | `useEffect` and `useLayoutEffect` with a synchronous callback and an array of names; they close over the render and run after the DOM update.                                    |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                                                           |
 | Tree                | A statically known host tree around eligible conditional, keyed-list, compiled keyed-row, and component-island boundaries.                                                       |
 | Text bindings       | State-driven text in a leaf host element.                                                                                                                                        |
@@ -2079,35 +2086,42 @@ are added to SSR output.
 This compiler-owned tier requires a lowercase host row. Branches may use logical or ternary
 expressions, multiple known locations, static siblings, nested lowercase host conditions, and safe
 text, attribute, or inline-style expressions. It applies to automatic keyed `.map(...)` syntax and
-inline host rows rendered by `List`.
+inline host rows rendered by `List`. The list's container may be the component's returned root
+element when the list is its only child and the container's attributes do not depend on state; a
+root list beside static siblings keeps its React-owned rows when they hold conditional content.
 
-The row may also hold inline synchronous events on its static elements, such as a toggle button
-beside the conditional:
+The row may also hold inline synchronous events, on its static elements and inside its branches,
+such as a toggle button beside the conditional and an undo action inside it:
 
 ```tsx
 <ul>
   {todos.map((todo) => (
     <li key={todo.id}>
       <button onClick={() => toggle(todo.id)}>Toggle</button>
-      {todo.done ? <s>{todo.title}</s> : <span>{todo.title}</span>}
+      {todo.done ? <s onClick={() => toggle(todo.id)}>{todo.title}</s> : <span>{todo.title}</span>}
     </li>
   ))}
 </ul>
 ```
 
 The list container receives each event and runs the handler of every row element that contains the
-target, innermost first, with the row's current item and index and with `currentTarget` set to that
-element; `stopPropagation()` stops the remaining row handlers. The container finds the element by its
-position among the row's static elements, so the element must not follow a conditional or a nested
-list at any level of its path (those change how many elements come before it). Events the
-container cannot receive the way React does keep the row React-owned: events that do not bubble,
-such as `onMouseEnter`; a handler on an element that follows a conditional or a list; and a handler
-inside a branch. `onChange`, which React derives from each row's own Fiber, runs through the
-container only on a [root without React DOM](#roots-without-react-dom): under React DOM the block
-lets React render the rows, and with `compiledRoot: false` they keep the React-owned list.
+target, innermost first (outermost first for capture handlers), with the row's current item and
+index and with `currentTarget` set to that element; `stopPropagation()` stops the remaining row
+handlers. Each element's descriptor lists its events, and the runtime records them when it mounts
+the element: when it adopts the first render, when a state change mounts a branch, and when a row
+is added. An element with events may therefore sit in a branch, in a nested branch, or after a
+conditional or a nested list. Events the container cannot receive the way React does keep the row
+React-owned: events that do not bubble, such as `onMouseEnter`, and handlers in the rows of a
+nested list. `onChange`, which React derives from each row's own Fiber, runs through the container
+only on a [root without React DOM](#roots-without-react-dom), in a branch or not: under React DOM
+the block lets React render the rows, and with `compiledRoot: false` they keep the React-owned
+list. That root restores a controlled field after a rejected change, as React DOM does. Form fields
+in these rows meet the same rules as in other keyed rows: a controlled input needs a static `type`,
+and file inputs with a `value`, controlled textareas with children, and controlled selects with
+dynamic options keep the React-owned list.
 
-Hooks, custom components, events inside a compiler-owned branch, refs, SVG, fragments, JSX spreads,
-dangerous HTML, controlled inputs inside a conditional, and any unproven shape stay on React.
+Hooks, custom components, refs, SVG, fragments, JSX spreads, dangerous HTML, and any unproven shape
+stay on React.
 Interactive rows outside that event contract keep their React-owned conditional-slot behavior: Farm
 compares row snapshots and asks React to refresh a changed slot, while React retains event, Fiber,
 hydration, and structural-list ownership. Duplicate runtime keys or an invalid adopted shape also
@@ -2373,10 +2387,11 @@ The optimized host-row contract is deliberately narrow:
   mounts, replaces, or removes only those host blocks within each keyed row instance.
 - A dedicated non-interactive row may recursively contain keyed map/`List` ranges in known host
   containers. Each stable parent key receives an isolated child key table and LIS pass.
-- Inline synchronous row events use the hybrid React-owned row path. Branch or inner-row events,
-  non-inline or async handlers, file inputs, dynamic form control types or options, custom
-  components, fragments, refs, SVG, attribute spreads, dangerous HTML, and dynamic text mixed
-  beside nested elements stay React-owned.
+- Inline synchronous row events run through the rows container or the hybrid React-owned row
+  path; rows whose branches compiler-owned host blocks render also run the events inside those
+  branches through the container. Inner-row events, non-inline or async handlers, file inputs,
+  dynamic form control types or options, custom components, fragments, refs, SVG, attribute
+  spreads, dangerous HTML, and dynamic text mixed beside nested elements stay React-owned.
 - Unsupported or mutating collection methods, spread children, Hooks in callbacks, and other
   unproven shapes fall back to normal React.
 
@@ -2533,8 +2548,8 @@ row path; put Hooks inside a keyed row component.
 | Interactive ranges beside siblings or non-host range siblings                                                                         | The range owner requires a host container and non-interactive host rows.           |
 | Branch events, keys, components, fragments, refs, SVG, interactive rows, or unsupported nested blocks in a compiled conditional range | They require the React-owned conditional path rather than compiler-created hosts.  |
 | Dynamic/member component types, component spreads, refs, keys, or children                                                            | Their identity or ownership is outside the first component-island contract.        |
-| Effects or hooks other than the supported `useState` shape                                                                            | Their lifecycle and ordering must remain under React's hook dispatcher.            |
-| `ref` or `dangerouslySetInnerHTML`                                                                                                    | They directly participate in DOM ownership.                                        |
+| Hooks other than state, ref, memo, and effect hooks; async effects; memoization with incomplete dependencies                          | Their lifecycle and ordering must remain under React's hook dispatcher.            |
+| A ref read during render, on the root element, or in a list or conditional, other refs, or `dangerouslySetInnerHTML`                  | They directly participate in DOM ownership.                                        |
 | Stateful `children` or `key` bindings outside an eligible boundary                                                                    | These need structure or identity semantics.                                        |
 | Conditional style objects, style spreads, methods, or computed names                                                                  | The final property set or precedence cannot be prepared statically.                |
 | JSX attribute spreads or namespaced attributes                                                                                        | The compiler cannot currently enumerate a stable binding contract.                 |

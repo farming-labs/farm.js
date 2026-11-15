@@ -8,6 +8,7 @@ import {
   collectFarmRenderedClientModules,
   getIslandStrategyExport,
   resolveImportedModule,
+  traceFarmSourceReads,
 } from "./utils/client-component";
 
 /**
@@ -88,6 +89,23 @@ export function inferFarmIslandStrategy(filePath: string, root?: string): FarmIs
   return result;
 }
 
+// Route roots by root and owners, valid while none of the files they read changes. Every document
+// and navigation render of a route below a hydrating layout asks again, and listing its client
+// components walks the import graph of its page and layouts, packages included: without this,
+// each request read and parsed that graph again.
+const routeRootInferences = new Map<
+  string,
+  { stamps: Array<[string, number]>; result: FarmIslandInference }
+>();
+
+/**
+ * @internal Forget every route root inference, as the dev server does when a watched file changes.
+ * Stamps see edits to the files an inference read, not a file added where an import now resolves.
+ */
+export function invalidateFarmRouteRootInferences(): void {
+  routeRootInferences.clear();
+}
+
 /**
  * Islands mode: whether a route that hydrates as one root (a layout around a client provider, or a
  * client page) can wait for an interaction. `owners` are the route modules inside that root, the
@@ -95,6 +113,27 @@ export function inferFarmIslandStrategy(filePath: string, root?: string): FarmIs
  * output is the root's own, so the slot rule for islands does not apply.
  */
 export function inferFarmRouteRootStrategy(owners: string[], root?: string): FarmIslandInference {
+  const key = [root ?? "", ...owners.map((owner) => path.resolve(owner))].join("\n");
+  const cached = routeRootInferences.get(key);
+  if (cached && cached.stamps.every(([read, stamp]) => modifiedAt(read) === stamp)) {
+    return cached.result;
+  }
+  const { result, files } = traceFarmSourceReads(() => inferRouteRoot(owners, root));
+  // Installed packages do not change while the app runs; stamping each file of an icon barrel
+  // would make every check stat thousands of files.
+  const read = new Set([...files, ...result.files].filter((file) => !isInstalledPackageFile(file)));
+  routeRootInferences.set(key, {
+    stamps: [...read].map((file) => [file, modifiedAt(file)]),
+    result,
+  });
+  return result;
+}
+
+function isInstalledPackageFile(file: string): boolean {
+  return file.split(path.sep).includes("node_modules");
+}
+
+function inferRouteRoot(owners: string[], root?: string): FarmIslandInference {
   const files: string[] = [];
   const modules: string[] = [];
   for (const owner of owners) {

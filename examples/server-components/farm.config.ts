@@ -11,6 +11,9 @@ const target = process.env.FARM_SERVER_COMPONENTS_TARGET;
 // plugin loads the client runtime on every page, and the contract checks that pages without
 // islands load none.
 const clientPlugins = mode === "rsc" || process.env.FARM_SERVER_COMPONENTS_CLIENT_PLUGINS === "1";
+// A strict nonce Content Security Policy (csp.spec.ts): every script runs only with the response's
+// nonce. Only builds with FARM_SERVER_COMPONENTS_CSP=nonce have it.
+const cspNonce = process.env.FARM_SERVER_COMPONENTS_CSP === "nonce";
 const clientLifecycle = definePlugin({
   name: "contract:client-lifecycle",
   client: {
@@ -67,8 +70,11 @@ export default defineConfig({
     serverActions: true,
   },
   plugins: clientPlugins ? [clientLifecycle] : [],
+  ...(cspNonce
+    ? { security: { csp: { directives: { scriptSrc: ["'self'"], objectSrc: ["'none'"] }, nonce: true } } }
+    : {}),
   deploy: {
     ...(target ? { target } : {}),
-    outputDir: `.farm/.output-${mode}${target ? `-${target}` : ""}${mode === "islands" && clientPlugins ? "-plugins" : ""}`,
+    outputDir: `.farm/.output-${mode}${target ? `-${target}` : ""}${mode === "islands" && clientPlugins ? "-plugins" : ""}${cspNonce ? "-csp" : ""}`,
   },
 });

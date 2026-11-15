@@ -111,16 +111,31 @@ function pathSpecificConfigMiddlewareCovers(
   });
 }
 
+/** The `config` a middleware file exports: read from source at build time, or its loaded module. */
+function middlewareRouteConfig(route: FarmGuardMiddlewareRoute): unknown {
+  if (route.config !== undefined) return route.config === "unknown" ? undefined : route.config;
+  return route.module?.config;
+}
+
+/** @internal A middleware file as the guard checks see it: its folder and, when known, its config. */
+export interface FarmGuardMiddlewareRoute {
+  path: string;
+  config?: StaticMiddlewareConfig | { matcher?: unknown; exclude?: unknown } | null | "unknown";
+  module?: { config?: unknown };
+}
+
 /**
  * Whether a guard written for this page's path covers it: middleware.ts in the page's
- * folder or a parent below the root, a config middleware matcher, or an integration's
- * middleware matcher (`protectedRoutes`). Public listings (sitemap.xml, llms.txt, the
- * default MCP server) leave such a page out, so its path and title stay unpublished.
+ * folder or a parent below the root, a root middleware.ts whose own `config.matcher` names
+ * the path, a config middleware matcher, or an integration's middleware matcher
+ * (`protectedRoutes`). Public listings (sitemap.xml, llms.txt, the default MCP server) leave
+ * such a page out, so its path and title stay unpublished.
  *
- * Guards that cover every path (a root middleware.ts, middleware without a matcher or
- * with a catch-all or function matcher, a plugin's `runtime.before`) name no page, so
- * they hide nothing: the listings would otherwise be empty. Their pages are still read
- * as an anonymous visitor, so a guard there keeps the content itself private.
+ * Guards that cover every path (a root middleware.ts without a path-specific matcher,
+ * middleware without a matcher or with a catch-all or function matcher, a plugin's
+ * `runtime.before`) name no page, so they hide nothing: the listings would otherwise be
+ * empty. Their pages are still read as an anonymous visitor, so a guard there keeps the
+ * content itself private.
  *
  * @internal
  */
@@ -130,14 +145,26 @@ export function farmPathGuardCoversPage(
       middleware?: ResolvedFarmConfig["middleware"];
       integrations?: FarmIntegrationsUserConfig;
     };
-    middlewareRoutes: readonly { path: string }[];
+    middlewareRoutes: readonly FarmGuardMiddlewareRoute[];
   },
   pathname: string,
 ): boolean {
   return (
     appMiddlewareMayHandlePath(
-      options.middlewareRoutes.filter((route) => route.path !== "/"),
+      options.middlewareRoutes.filter((route) => route.path !== "/") as Parameters<
+        typeof appMiddlewareMayHandlePath
+      >[0],
       pathname,
+    ) ||
+    // The root file runs for every path unless its own matcher narrows it, which is how a
+    // Next.js-style `middleware.ts` guards `/dashboard/:path*`.
+    options.middlewareRoutes.some(
+      (route) =>
+        route.path === "/" &&
+        pathSpecificConfigMiddlewareCovers(
+          middlewareRouteConfig(route) as ResolvedFarmConfig["middleware"],
+          pathname,
+        ),
     ) ||
     pathSpecificConfigMiddlewareCovers(options.config.middleware, pathname) ||
     integrationMiddlewareMayHandlePath(options.config.integrations, pathname, CATCH_ALL_PROBE)

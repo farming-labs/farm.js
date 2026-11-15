@@ -13,6 +13,8 @@ import type { InlineConfig, ViteDevServer } from "vite";
 import { createFarmDevLoopbackPlugin } from "./server/dev-loopback";
 import { loadTailwindVitePlugin } from "./build/tailwind";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
+import { hasFarmServerRuntimePlugins } from "./plugin-server-runtime";
+import type { FarmPlugin } from "./plugin";
 import { resolveFarmPlatform } from "./desktop/config";
 import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
 import { loadFarmReactPlugin } from "./react-refresh";
@@ -47,6 +49,7 @@ const FARM_RSC_CONFIG_KEYS = [
   "srcDir",
   "extends",
   "basePath",
+  "trailingSlash",
   "api",
   "server",
   "middleware",
@@ -60,7 +63,7 @@ const FARM_RSC_CONFIG_KEYS = [
 ] as const;
 
 /** Read by the RSC pipeline's own config hook, which `defineConfig` does not copy. */
-const FARM_RSC_PASSTHROUGH_KEYS = ["i18n", "cache"] as const;
+const FARM_RSC_PASSTHROUGH_KEYS = ["i18n", "cache", "redirects", "rewrites", "headers"] as const;
 
 function pickImportTarget(entry: unknown): string | undefined {
   if (typeof entry === "string") return entry;
@@ -202,6 +205,10 @@ export async function createFarmRscViteConfig(
     // The RSC entry hands navigations to a mobile shell itself.
     "web",
   );
+  const serverPlugins =
+    options.command === "build"
+      ? await resolveFarmRscServerPlugins(userConfig, config, root)
+      : undefined;
   const farmConfig = pluginRsc.defineConfig({
     ...rscConfig,
     ...(mobileClient ? { mobileClient } : {}),
@@ -210,6 +217,10 @@ export async function createFarmRscViteConfig(
       imports: clientPluginEntry.imports,
       registrations: clientPluginEntry.registrations,
     },
+    // Plugins with server hooks load in the production server, as in Farm's other servers, so
+    // factories such as `bot()` run there. Dev loaded them with the config already.
+    ...(serverPlugins ? { serverPlugins } : {}),
+    ...(options.preset ? { preset: options.preset } : {}),
     experimental: { ...config.experimental, serverComponents: { mode: "rsc" } },
     port: options.port ?? config.server?.port,
     plugins: [
@@ -245,6 +256,53 @@ export async function createFarmRscViteConfig(
     configFile: false,
     mode: options.command === "build" ? "production" : "development",
   };
+}
+
+/**
+ * Where the plugins with server hooks sit in each config file's `plugins`, by absolute path, so
+ * the production server loads those and no others. Positions come from the evaluated config, whose
+ * `plugins` array matches the one the file declares. A plugin `configure` removed stays out.
+ */
+async function resolveFarmRscServerPlugins(
+  userConfig: FarmConfigInput,
+  config: FarmConfigInput,
+  root: string,
+): Promise<Record<string, { indexes: number[]; count: number }> | undefined> {
+  const kept: FarmPlugin[] = config.plugins ?? [];
+  const names = new Set(
+    kept.filter((plugin) => hasFarmServerRuntimePlugins([plugin])).map((plugin) => plugin.name),
+  );
+  if (names.size === 0) return undefined;
+  const loads = (plugin: unknown) => {
+    const candidate = plugin as FarmPlugin | null | undefined;
+    return !!candidate && names.has(candidate.name) && hasFarmServerRuntimePlugins([candidate]);
+  };
+
+  const { findFarmConfigFile, loadFarmConfigFile, resolveFarmLayers } = await import("./layers");
+  const files: Array<[string, unknown]> = [];
+  if (userConfig.extends) {
+    const { layers } = await resolveFarmLayers(userConfig, { root, mode: "production" });
+    for (const layer of layers) {
+      if (!layer.configFile) continue;
+      const layerConfig = await loadFarmConfigFile<FarmConfigInput>(layer.configFile, {
+        root: layer.root,
+        cacheRoot: root,
+      });
+      files.push([layer.configFile, layerConfig.plugins]);
+    }
+  }
+  const configFile = findFarmConfigFile(root);
+  if (configFile) files.push([configFile, userConfig.plugins]);
+
+  const selections: Record<string, { indexes: number[]; count: number }> = {};
+  for (const [file, plugins] of files) {
+    const entries: unknown[] = Array.isArray(plugins) ? plugins : [plugins];
+    const indexes = entries.flatMap((entry, index) =>
+      [entry].flat(Infinity).some(loads) ? [index] : [],
+    );
+    if (indexes.length > 0) selections[path.resolve(file)] = { indexes, count: entries.length };
+  }
+  return Object.keys(selections).length > 0 ? selections : undefined;
 }
 
 /** Run the plugins' `configure` hooks the way `farm build` and Farm's dev server do. */

@@ -200,10 +200,23 @@ export default {
     path.join(root, "src", "app", "stream-tail.tsx"),
     `export default function StreamTail() { return <span data-stream-tail="complete">stream complete</span>; }`,
   );
+  // A client component whose dynamic import the client build splits into chunks/.
+  await fs.writeFile(
+    path.join(root, "src", "app", "client-chunk.tsx"),
+    `"use client";
+import { useEffect, useState } from "react";
+export default function ClientChunk() {
+  const [label, setLabel] = useState("client chunk pending");
+  useEffect(() => { void import("./stream-tail").then(() => setLabel("client chunk loaded")); }, []);
+  return <span data-client-chunk>{label}</span>;
+}
+`,
+  );
   await fs.writeFile(
     path.join(root, "src", "app", "page.tsx"),
     `
 import React, { lazy, Suspense } from "react";
+import ClientChunk from "./client-chunk";
 
 const StreamTail = lazy(() =>
   new Promise((resolve) => setTimeout(() => resolve(import("./stream-tail")), 25)),
@@ -215,6 +228,7 @@ export default function Page() {
   return (
     <main data-provider-runtime=${JSON.stringify(target)}>
       Farm provider runtime
+      <ClientChunk />
       <Suspense fallback={<span data-stream-tail="pending">stream pending</span>}>
         <StreamTail />
       </Suspense>
@@ -780,6 +794,57 @@ async function expectProviderRuntime(
   }
 }
 
+/**
+ * A `_headers` file as Wrangler hands it to the asset worker (assetConfig.headers), so
+ * Miniflare applies the rules Nitro wrote for the Cloudflare output.
+ */
+async function readCloudflareHeaderRules(publicDir: string): Promise<{
+  version: 2;
+  rules: Record<string, { set: Record<string, string> }>;
+}> {
+  const rules: Record<string, { set: Record<string, string> }> = {};
+  const source = await fs.readFile(path.join(publicDir, "_headers"), "utf8").catch(() => "");
+  let current: Record<string, string> | undefined;
+  for (const line of source.split("\n")) {
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+    if (!/^\s/.test(line)) {
+      current = (rules[line.trim()] ??= { set: {} }).set;
+      continue;
+    }
+    const separator = line.indexOf(":");
+    if (current && separator > 0) {
+      current[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
+    }
+  }
+  return { version: 2, rules };
+}
+
+const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/** Hashed client files are cached for a year; public files keep revalidating. */
+async function expectImmutableClientAssets(
+  publicDir: string,
+  request: (path: string, init?: RequestInit) => Promise<Response>,
+): Promise<void> {
+  const files = (await fs.readdir(publicDir, { recursive: true })).map((file) =>
+    file.split(path.sep).join("/"),
+  );
+  const entry = files.find((file) => /^farm-client-h[0-9a-f]+\.js$/.test(file));
+  const chunk = files.find((file) => /^chunks\/.+-h[0-9a-f]+\.js$/.test(file));
+  expect(entry, files.join(", ")).toBeDefined();
+  expect(chunk, files.join(", ")).toBeDefined();
+  for (const file of [entry!, chunk!]) {
+    const response = await request(`/${file}`);
+    expect(response.status, file).toBe(200);
+    expect(response.headers.get("cache-control"), file).toBe(IMMUTABLE_CACHE_CONTROL);
+  }
+  for (const file of ["runtime-marker.txt", "farm-client.js"]) {
+    const response = await request(`/${file}`);
+    expect(response.status, file).toBe(200);
+    expect(response.headers.get("cache-control") ?? "", file).not.toContain("immutable");
+  }
+}
+
 async function readMCPResponse(response: Response): Promise<any> {
   const text = await response.text();
   if (!response.headers.get("content-type")?.startsWith("text/event-stream")) {
@@ -813,11 +878,15 @@ describe("first-class provider runtime output", () => {
         routerConfig: {
           has_user_worker: true,
         },
+        assetConfig: { headers: await readCloudflareHeaderRules(outputDir) },
       },
     });
 
     try {
       await expectProviderRuntime("cloudflare", (requestPath, init) =>
+        runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test"), init),
+      );
+      await expectImmutableClientAssets(outputDir, (requestPath, init) =>
         runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test"), init),
       );
       await expectEdgeDocsRuntime((requestPath, init) =>
@@ -1014,12 +1083,14 @@ describe("first-class provider runtime output", () => {
 
     try {
       await runtime.start();
-      await expectProviderRuntime("netlify", async (requestPath, init) => {
+      const request = async (requestPath: string, init?: RequestInit) => {
         const response = await runtime.handle(
           new Request(new URL(requestPath, "https://farm-runtime.test"), init),
         );
         return response ?? new Response(null, { status: 404 });
-      });
+      };
+      await expectProviderRuntime("netlify", request);
+      await expectImmutableClientAssets(path.join(root, "dist"), request);
     } finally {
       await runtime.stop();
     }

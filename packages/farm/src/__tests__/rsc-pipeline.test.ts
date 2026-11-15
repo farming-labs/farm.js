@@ -101,6 +101,7 @@ describe("experimental.serverComponents from farm.config", () => {
       {
         srcDir: "web",
         basePath: "/docs",
+        trailingSlash: true,
         middleware,
         images: { provider: "none" },
         md: false,
@@ -120,6 +121,7 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(config.farm).toMatchObject({
       srcDir: "web",
       basePath: "/docs",
+      trailingSlash: true,
       middleware,
       images: { provider: "none" },
       md: false,
@@ -235,6 +237,36 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(entry.registrations).not.toContain("farm:mobile-shell");
   });
 
+  it("has the production server load only the plugins with server hooks", async () => {
+    const root = createApp();
+    writeFileSync(path.join(root, "farm.config.ts"), "export default {};");
+    const serverPlugins = async (plugins: unknown[], command: "serve" | "build") =>
+      (
+        (await createFarmRscViteConfig(
+          { experimental: { serverComponents: { mode: "rsc" as const } }, plugins },
+          { root, command, preset: "node-server" },
+        )) as Record<string, any>
+      ).farm.serverPlugins;
+    const withServerHooks = { name: "with-server-hooks", runtime: {} };
+    const clientOnly = { name: "client-only", client: { setup() {} } };
+    // Like devtools, a plugin with server hooks can leave a production build.
+    const devOnly: Record<string, any> = {
+      name: "dev-only",
+      runtime: {},
+      configure: (config: Record<string, any>, context: { isProd: boolean }) =>
+        context.isProd
+          ? { ...config, plugins: config.plugins.filter((plugin: unknown) => plugin !== devOnly) }
+          : undefined,
+    };
+
+    expect(await serverPlugins([clientOnly, withServerHooks, devOnly], "build")).toEqual({
+      [path.join(root, "farm.config.ts")]: { indexes: [1], count: 3 },
+    });
+    expect(await serverPlugins([clientOnly, devOnly], "build")).toBeUndefined();
+    // `farm dev` loaded the config in its own process, so the plugins have already run there.
+    expect(await serverPlugins([withServerHooks], "serve")).toBeUndefined();
+  });
+
   it("runs the app's plugin `configure` hooks first, as Farm's other pipelines do", async () => {
     const root = createApp();
     const contexts: Array<{ isDev: boolean; isProd: boolean }> = [];
@@ -292,22 +324,57 @@ describe("experimental.serverComponents from farm.config", () => {
 
   it("refuses config a plugin's `configure` adds that RSC would not run", async () => {
     const root = createApp();
-    const addsHeaders = {
-      name: "adds-headers",
+    const addsRouteRules = {
+      name: "adds-route-rules",
       configure: (config: Record<string, unknown>) => ({
         ...config,
-        headers: [{ source: "/(.*)", headers: [{ key: "x-frame-options", value: "DENY" }] }],
+        routeRules: { "/blog/**": { headers: { "x-frame-options": "DENY" } } },
       }),
     };
     await expect(
       createFarmRscViteConfig(
         {
           experimental: { serverComponents: { mode: "rsc" as const } },
-          plugins: [addsHeaders],
+          plugins: [addsRouteRules],
         },
         { root, command: "build", preset: "node-server" },
       ),
-    ).rejects.toThrow("does not run `headers` yet");
+    ).rejects.toThrow("does not run `routeRules` yet");
+  });
+
+  it("hands config redirects(), rewrites() and headers() to the RSC pipeline", async () => {
+    const redirects = () => [{ source: "/old", destination: "/new" }];
+    const rewrites = () => [{ source: "/alias", destination: "/about" }];
+    const addsHeaders = {
+      name: "adds-headers",
+      configure: (config: Record<string, unknown>) => ({
+        ...config,
+        headers: () => [
+          { source: "/:path*", headers: [{ key: "x-frame-options", value: "DENY" }] },
+        ],
+      }),
+    };
+    const config = (await createFarmRscViteConfig(
+      {
+        experimental: { serverComponents: { mode: "rsc" as const } },
+        redirects,
+        rewrites,
+        plugins: [addsHeaders],
+      },
+      { root: createApp(), command: "build", preset: "node-server" },
+    )) as Record<string, any>;
+    // Read by the pipeline's own config hook, which resolves them as core's config does.
+    expect(config.redirects).toBe(redirects);
+    expect(config.rewrites).toBe(rewrites);
+    expect(await config.headers()).toEqual([
+      { source: "/:path*", headers: [{ key: "x-frame-options", value: "DENY" }] },
+    ]);
+    expect(
+      farmAppUsesRscPipeline(
+        { redirects, rewrites, experimental: { serverComponents: { mode: "rsc" as const } } },
+        createApp(),
+      ),
+    ).toBe(true);
   });
 
   it("gives development Fast Refresh with core's plugin-react when the app has none", async () => {

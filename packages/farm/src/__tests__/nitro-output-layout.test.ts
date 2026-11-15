@@ -3,10 +3,8 @@
 import { describe, expect, it } from "vitest";
 import { loadOptions } from "nitro/builder";
 import path from "node:path";
-import {
-  resolveCloudflareProcessEnvFlags,
-  resolveFarmNitroOutputConfig,
-} from "../nitro/universal-build";
+import { resolveCloudflareProcessEnvFlags } from "../deployment";
+import { resolveFarmNitroOutputConfig } from "../nitro/universal-build";
 
 describe("Farm Nitro output layout", () => {
   it("keeps Farm's server/public layout for node-server", () => {

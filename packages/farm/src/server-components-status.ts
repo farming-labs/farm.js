@@ -29,9 +29,6 @@ export const FARM_RSC_INSTALL_HINT = `pnpm add ${FARM_RSC_PACKAGES.join(" ")}`;
 const FARM_RSC_BLOCKING_KEYS = [
   "auth",
   "integrations",
-  "headers",
-  "redirects",
-  "rewrites",
   "routeRules",
   "context",
   // A Content Security Policy the RSC pipeline would not send.

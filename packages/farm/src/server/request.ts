@@ -236,9 +236,26 @@ export function resolveFarmWebRequestOrigin(
   return resolveRequestOrigin(proto, forwardedHost, url.host);
 }
 
+/**
+ * @internal Under `server.trustProxy`, the production request at the public origin a trusted
+ * proxy's `X-Forwarded-Host` and `X-Forwarded-Proto` name, as development rebuilds every page and
+ * middleware request. Middleware, pages, and API routes then read the URL the visitor requested.
+ * The request is returned as is when the proxy names the origin the adapter already used.
+ */
+export function _withFarmTrustedProxyOrigin(request: Request): Request {
+  const url = new URL(request.url);
+  const origin = resolveFarmWebRequestOrigin(request, { trustProxy: true });
+  if (origin === url.origin) return request;
+  // The method, headers, body, and abort signal carry over from the adapter's request.
+  return new Request(`${origin}${url.pathname}${url.search}`, request);
+}
+
 export function createWebRequestFromFarmRequest(
   req: FarmRequest,
-  options: FarmRequestURLOptions = {},
+  options: FarmRequestURLOptions & {
+    /** Aborts when the client goes away, as a production request's signal does. */
+    signal?: AbortSignal;
+  } = {},
 ): Request {
   const fullUrl = resolveFarmRequestURL(req, options).toString();
 
@@ -262,6 +279,7 @@ export function createWebRequestFromFarmRequest(
   const init: RequestInit & { duplex?: "half" } = {
     method: req.method,
     headers,
+    ...(options.signal ? { signal: options.signal } : {}),
   };
 
   if (method !== "GET" && method !== "HEAD") {

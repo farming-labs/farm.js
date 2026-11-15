@@ -11,7 +11,8 @@ import {
   loadFarmDevModule,
 } from "./dev-module";
 import { createBundledEnv } from "./env";
-import { parseSync } from "vite";
+import { createRunnableDevEnvironment, parseSync } from "vite";
+import { initSync as initModuleLexer, parse as lexModule } from "es-module-lexer";
 import type {
   AliasOptions,
   ConfigEnv,
@@ -45,7 +46,9 @@ import {
   type FarmPluginRuntimeRequestScope,
   type FarmPluginRuntimeSession,
   type PluginManager,
+  type RenderLifecyclePayload,
 } from "./plugin";
+import { hasFarmServerRuntimePlugins } from "./plugin-server-runtime";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
 import {
   generateClientCachePersistenceCode,
@@ -89,6 +92,7 @@ import {
   resolveMarkdownMirrorTarget,
 } from "./markdown";
 import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
+import { toFarmTrailingSlashPageRequest } from "./trailing-slash";
 import { FARM_NATIVE_TREE_CONTENT_TYPE } from "./mobile/native-tree-type";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import { resolveFarmAgentCrawlers } from "./agent-crawlers";
@@ -100,6 +104,8 @@ import {
   farmRequestWantsMarkdown,
   isFarmMarkdownPageFile,
   normalizeFarmMarkdownRoutePath,
+  resolveFarmMdxComponentsModulePath,
+  resolveMdxConfig,
 } from "./app-markdown";
 import {
   applyWebResponseHeaders,
@@ -118,6 +124,11 @@ import {
 } from "./route-label";
 import { registerFarmMCPServer } from "./mcp-catalog";
 import {
+  _listFarmRegisteredMCPServerTools,
+  _observeFarmRegisteredMCPResponse,
+  _readFarmRegisteredMCPCalls,
+} from "./registered-mcp";
+import {
   createFarmApiCatalogResponse,
   FARM_API_CATALOG_PATH,
   resolveFarmApiCatalogInput,
@@ -135,13 +146,16 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "./document-layout-client";
+import { FARM_NAVIGATION_SCRIPT_SOURCE } from "./client/navigation-scripts";
 import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "./client/navigation-stream-client";
+import { FARM_REFRESH_FIELDS_SOURCE } from "./client/refresh-fields";
 import {
   getClientModuleMetadata,
   resolveModuleSourcePath,
   getIslandStrategyExport,
   collectFarmServerBundledPackageInfo,
   getFarmClientReachableModules,
+  getFarmClientRenderingBindings,
   hasUseClientDirective,
   invalidateFarmClientReachableModules,
   isFarmPackageClientBoundary,
@@ -149,7 +163,10 @@ import {
   resolveFarmIsolatedClientHydrationMode,
   stripUseClientDirective,
 } from "./utils/client-component";
-import { resolvePackageClientBoundaryCacheFile } from "./utils/package-client-boundary-cache";
+import {
+  dropLatestPackageClientBoundaryCache,
+  resolvePackageClientBoundaryCacheFile,
+} from "./utils/package-client-boundary-cache";
 import {
   dispatchIntegrationRequest,
   getFarmIntegrationPluginOwner,
@@ -173,10 +190,10 @@ import type { FarmPlatform } from "./platform";
 import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
 import * as fs from "fs";
 import * as path from "path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
-import { getRouteGroupScope, stripRouteGroups } from "./routing/route-groups";
+import { createFarmDevClientManifest } from "./server/dev-client-manifest";
 import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
 import { FARM_VERSION } from "./version";
 import { createDeferredDataResponse } from "./deferred";
@@ -227,15 +244,25 @@ import {
   ensureFarmPackageClientReference,
   FARM_CLIENT_REFERENCE_DIRECTORY,
   FARM_CLIENT_REFERENCE_PRAGMA,
+  FARM_RESOLVE_FROM_PREFIX,
+  parseFarmResolveFrom,
   rewriteFarmPackageClientImports,
 } from "./islands-package-references";
+import {
+  ensureFarmIslandContainerReference,
+  farmIslandContainerReferencePath,
+  wrapFarmIslandContainers,
+} from "./islands-containers";
 import {
   invalidateFarmClientOnlyScan,
   farmRelativeImportFiles,
   rewriteFarmReactServerClientModuleImports,
   rewriteFarmReactServerImports,
 } from "./islands-react-server-exports";
-import { rewriteFarmReactCacheImport } from "./islands-react-cache-transform";
+import {
+  FARM_REACT_CACHE_MODULE,
+  rewriteFarmReactCacheImport,
+} from "./islands-react-cache-transform";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { renderFarmLocaleAlternateLinks } from "./i18n/alternates";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
@@ -243,6 +270,7 @@ import {
   createFarmClientOptimizeDepsConfig,
   createFarmClientOptimizeDepsEntries,
   createFarmSourceAlias,
+  mergeFarmViteAlias,
 } from "./server/vite-config";
 import {
   generateFarmDocsAdapterClientRuntime,
@@ -279,7 +307,11 @@ import type { FarmRenderer } from "./renderer";
 import { createFarmReactRefreshPlugins, isFarmReactRefreshActive } from "./react-refresh";
 import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
-import { inferFarmIslandStrategy, resolveFarmRouteRootStrategy } from "./island-inference";
+import {
+  inferFarmIslandStrategy,
+  invalidateFarmRouteRootInferences,
+  resolveFarmRouteRootStrategy,
+} from "./island-inference";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
   createFarmRouteRenderPlan,
@@ -299,7 +331,11 @@ import { FARM_CONFIG_REDIRECTS_PLUGIN_NAME, getConfigRedirectMatcher } from "./p
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
 import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
-import { parseFarmRequestTarget, resolveFarmRequestURL } from "./server/request";
+import {
+  _runWithCurrentRequest,
+  parseFarmRequestTarget,
+  resolveFarmRequestURL,
+} from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
 
 /** Paths `agent.llmsTxt` serves without a route file. */
@@ -437,6 +473,7 @@ const FARM_PLATFORM_CLIENT_ID = "\0farm:platform-client";
 /** The specifiers `farm:server-only-entries` resolves: its own entries and Node builtins. */
 const FARM_SERVER_ONLY_ENTRIES_RESOLVE_FILTER = [
   exactIdPattern([FARM_PLATFORM_ENTRY, SERVER_ONLY_PACKAGE, ...FARM_SERVER_ONLY_ENTRIES]),
+  new RegExp(`^${FARM_RESOLVE_FROM_PREFIX}`),
   // What isBuiltin() accepts: `node:` ids and the builtin names, subpaths such as fs/promises
   // included.
   /^node:/,
@@ -462,7 +499,8 @@ export function appDataDir() {
 }
 
 /**
- * In development, pre-bundle each server-bundled package whose only ES module build is `module`
+ * In a Vite server that loads the app's modules (`farm dev`, and the server a build loads route
+ * modules with), pre-bundle each server-bundled package whose only ES module build is `module`
  * into one file, with Vite's SSR dependency optimizer. Served unbundled, such a package is loaded
  * one module at a time through the SSR module runner: a barrel like lucide-react's is thousands of
  * modules on the first page that imports one icon. The bundle is cached in Vite's `deps_ssr`
@@ -494,6 +532,45 @@ function createFarmServerPrebundleConfig(bundledPackages: readonly FarmServerBun
 }
 
 /**
+ * Islands mode (RFC 0006): a client component in a position that cannot hold `<f-island>` (a row in
+ * a table, an option in a select, a shape in an svg, an item in a list) makes the element around it
+ * the island. Runs before JSX compiles, on the server module's source.
+ */
+export function farmIslandContainersPlugin(config: {
+  root?: string;
+  experimental?: FarmVitePluginOptions["experimental"];
+}): Plugin {
+  let root = config.root ?? process.cwd();
+  return {
+    name: "farm:island-containers",
+    enforce: "pre",
+    configResolved(resolved) {
+      root = config.root || resolved.root;
+    },
+    transform(code, id) {
+      if (resolveFarmServerComponentsMode(config.experimental?.serverComponents) !== "islands") {
+        return null;
+      }
+      if (id.startsWith("\0") || id.includes("/node_modules/") || !/\.[jt]sx(?:$|\?)/.test(id)) {
+        return null;
+      }
+      if (hasUseClientDirective(code)) return null;
+      const file = id.split("?", 1)[0]!;
+      const bindings = getFarmClientRenderingBindings(code, file, root);
+      if (bindings.length === 0) return null;
+      const grown = wrapFarmIslandContainers({
+        code,
+        file,
+        bindings,
+        reference: farmIslandContainerReferencePath(root),
+      });
+      if (grown === null) return null;
+      ensureFarmIslandContainerReference(root);
+      return { code: grown, map: null };
+    },
+  };
+}
+/**
  * Fail a browser graph that imports a server-only core entry, instead of
  * bundling its server runtime (for `@farm.js/core/og`, the `@vercel/og` wasm
  * renderer) into client code. A server graph that imports `@farm.js/core/og`
@@ -505,8 +582,8 @@ export function farmServerOnlyEntriesPlugin(
     /** The browser graph's platform; a web build's mobile client passes `"mobile"`. */
     platform?: FarmPlatform;
     /**
-     * Pre-bundle module-entry packages for SSR (`createFarmServerPrebundleConfig`). Only the dev
-     * server sets it: a build's own Vite server, which loads the project's modules, does not.
+     * Pre-bundle module-entry packages for SSR (`createFarmServerPrebundleConfig`). The dev server
+     * and a build's own Vite server, which load the project's modules, set it; bundling does not.
      */
     prebundleServerPackages?: boolean;
   } = {},
@@ -553,6 +630,22 @@ export function farmServerOnlyEntriesPlugin(
         }
         if (!options?.ssr && isBuiltin(id)) {
           return resolveFarmBrowserBuiltin(this, id, importer, options);
+        }
+        // A client reference for a package the app root does not resolve to the importer's copy
+        // (a workspace package's dependency in a pnpm monorepo) resolves it from the importer's
+        // side, as React Server Components resolve a client reference.
+        const resolveFrom = importer ? parseFarmResolveFrom(id, importer.split("?", 1)[0]!) : null;
+        if (resolveFrom) {
+          const directory = path.dirname(resolveFrom.importer);
+          return this.resolve(resolveFrom.specifier, resolveFrom.importer, {
+            ...options,
+            skipSelf: true,
+          }).then((resolved) => {
+            if (resolved) return resolved;
+            return this.error(
+              `Could not resolve "${resolveFrom.specifier}" from ${directory}, the package whose server component renders it. Install it in that package, or run your package manager's install again.`,
+            );
+          });
         }
         if (!FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
         const importedBy = importer ? ` (imported by ${importer})` : "";
@@ -676,6 +769,10 @@ export { farmImageImportsPlugin } from "./image-vite";
 export { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
 export { readRouteRenderingDirectiveFromFile } from "./ssg";
 export { resolveFarmImageProviderForRuntime, resolveFarmImageServerRuntime } from "./image-runtime";
+// Config headers() on those pipelines' dev responses, and the requests Vite keeps from config
+// routes (#2685).
+export { installConfigResponseHeaders } from "./plugins/headers";
+export { isViteDevClientRequest, isViteModuleRequest } from "./dev-static";
 
 /** Exported for tests: the request boundary all Farm dev middlewares share. */
 export function withFarmRequestTracing(
@@ -736,13 +833,33 @@ function createFarmDevMiddlewareErrorResponse(): Response {
 }
 
 /**
+ * The status and headers of the runtime hook 500. Production answers a new response, so none of
+ * the headers the failed request set (app middleware's headers and cookies, a page's cache
+ * policy) is kept; the headers() config, Set-Cookie included, is applied again when the head is
+ * written, as production applies it to that response.
+ */
+function setFarmDevRuntimeHookErrorHead(res: ServerResponse, json: boolean): void {
+  for (const name of res.getHeaderNames()) res.removeHeader(name);
+  res.statusCode = 500;
+  res.setHeader("Content-Type", json ? "application/json" : "text/plain; charset=utf-8");
+}
+
+/**
  * The 500 a request answers when a plugin runtime hook throws, as in the production entry: the
  * generic JSON body on an API path or with `renderer: false`, plain text for a page.
  */
 function sendFarmDevRuntimeHookError(res: ServerResponse, json: boolean): void {
-  res.statusCode = 500;
-  res.setHeader("Content-Type", json ? "application/json" : "text/plain; charset=utf-8");
+  setFarmDevRuntimeHookErrorHead(res, json);
   res.end(json ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error");
+}
+
+/**
+ * Whether a dev request runs inside a plugin runtime session. The production entry runs every
+ * request inside the plugin runtime whenever a plugin has hooks its server runs, runtime hooks
+ * or not, so a page failure is the runtime's to report, as the "runtime" phase.
+ */
+function opensFarmDevRuntimeSession(pm: PluginManager): boolean {
+  return pm.hasRuntimeRequestHooks() || hasFarmServerRuntimePlugins(pm.getPlugins());
 }
 
 const FARM_CONFIG_ROUTE_PLUGIN_NAMES = new Set([
@@ -778,7 +895,7 @@ async function proxyFarmExternalRewrite(
   let request = createRequestFromNodeRequest(req, new URL(destination));
   if (request.method !== "GET" && request.method !== "HEAD") {
     const body = await readNodeRequestBody(req as any, bodySizeLimit);
-    request = new Request(request, { body: toRequestBody(body) });
+    request = new Request(request, { method: request.method, body: toRequestBody(body) });
   }
   await sendWebResponse(res, await fetchFarmExternalRewrite(request));
   return true;
@@ -939,12 +1056,7 @@ function interceptFarmDevPageResponse(options: {
     console.error("Error in afterResponse hook:", error);
   };
   const writeRuntimeHookFailure = () => {
-    res.statusCode = 500;
-    res.removeHeader("Content-Length");
-    res.setHeader(
-      "Content-Type",
-      options.jsonError ? "application/json" : "text/plain; charset=utf-8",
-    );
+    setFarmDevRuntimeHookErrorHead(res, Boolean(options.jsonError));
     originalWriteHead(500);
     originalWrite(options.jsonError ? FARM_INTERNAL_SERVER_ERROR_BODY : "Internal Server Error");
   };
@@ -1326,6 +1438,71 @@ interface FarmModuleAstNode {
   [key: string]: unknown;
 }
 
+/** A string-literal module specifier: its value, and the range of the literal with its quotes. */
+interface FarmModuleSpecifier {
+  value: string;
+  start: number;
+  end: number;
+}
+
+let moduleLexerReady = false;
+
+/**
+ * The string-literal specifiers of a JavaScript module's imports, re-exports and dynamic
+ * imports, read with es-module-lexer instead of a full parse. Null when the lexer cannot read
+ * the code, so the caller falls back to the parser.
+ */
+function lexModuleSpecifiers(code: string): FarmModuleSpecifier[] | null {
+  if (!moduleLexerReady) {
+    initModuleLexer();
+    moduleLexerReady = true;
+  }
+  let imports: ReturnType<typeof lexModule>[0];
+  try {
+    [imports] = lexModule(code);
+  } catch {
+    return null;
+  }
+  const specifiers: FarmModuleSpecifier[] = [];
+  for (const entry of imports) {
+    if (entry.n === undefined || entry.d === -2) continue;
+    // A static specifier's range excludes its quotes; a dynamic import's argument includes them.
+    const start = entry.d === -1 ? entry.s - 1 : entry.s;
+    const end = entry.d === -1 ? entry.e + 1 : entry.e;
+    const quote = code[start];
+    if ((quote !== '"' && quote !== "'") || code[end - 1] !== quote) continue;
+    specifiers.push({ value: entry.n, start, end });
+  }
+  return specifiers;
+}
+
+function parseModuleSpecifiers(options: {
+  code: string;
+  parse: (code: string) => FarmModuleAstNode;
+}): FarmModuleSpecifier[] | null {
+  let ast: FarmModuleAstNode;
+  try {
+    ast = options.parse(options.code);
+  } catch {
+    return null;
+  }
+  const specifiers: FarmModuleSpecifier[] = [];
+  walkModuleAst(ast, (node) => {
+    if (
+      node.type !== "ImportDeclaration" &&
+      node.type !== "ExportNamedDeclaration" &&
+      node.type !== "ExportAllDeclaration" &&
+      node.type !== "ImportExpression"
+    ) {
+      return;
+    }
+    const source = node.source;
+    if (!isFarmModuleAstNode(source) || typeof source.value !== "string") return;
+    specifiers.push({ value: source.value, start: source.start, end: source.end });
+  });
+  return specifiers;
+}
+
 export function rewriteEarlySsrRelativeImports(options: {
   code: string;
   id: string;
@@ -1337,27 +1514,12 @@ export function rewriteEarlySsrRelativeImports(options: {
     return null;
   }
 
+  const sources = lexModuleSpecifiers(options.code) ?? parseModuleSpecifiers(options);
+  if (!sources) return null;
+
   const replacements: Array<{ start: number; end: number; code: string }> = [];
-  let ast: FarmModuleAstNode;
-  try {
-    ast = options.parse(options.code);
-  } catch {
-    return null;
-  }
-
-  walkModuleAst(ast, (node) => {
-    if (
-      node.type !== "ImportDeclaration" &&
-      node.type !== "ExportNamedDeclaration" &&
-      node.type !== "ExportAllDeclaration" &&
-      node.type !== "ImportExpression"
-    ) {
-      return;
-    }
-
-    const source = node.source;
-    if (!isFarmModuleAstNode(source) || typeof source.value !== "string") return;
-    if (!source.value.startsWith(".")) return;
+  for (const source of sources) {
+    if (!source.value.startsWith(".")) continue;
 
     const suffixIndex = source.value.search(/[?#]/);
     const sourcePath = suffixIndex === -1 ? source.value : source.value.slice(0, suffixIndex);
@@ -1373,15 +1535,17 @@ export function rewriteEarlySsrRelativeImports(options: {
       end: source.end,
       code: JSON.stringify(`${specifier}${suffix}`),
     });
-  });
+  }
 
   if (replacements.length === 0) return null;
 
-  let output = options.code;
-  for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
-    output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
+  let output = "";
+  let copied = 0;
+  for (const replacement of replacements.sort((left, right) => left.start - right.start)) {
+    output += options.code.slice(copied, replacement.start) + replacement.code;
+    copied = replacement.end;
   }
-  return output;
+  return output + options.code.slice(copied);
 }
 
 export function transformIsolatedClientBoundaryModule(options: {
@@ -1398,7 +1562,14 @@ export function transformIsolatedClientBoundaryModule(options: {
    * (RFC 0003, section 11); `islandStrategy` is ignored.
    */
   inferredInteraction?: boolean;
+  /** The specifier the module imports a Farm runtime module by (see farmPlugin's transform). */
+  runtimeModule?: (specifier: string) => string;
 }): string | null {
+  const runtimeModule = options.runtimeModule ?? ((specifier: string) => specifier);
+  const islxReact = JSON.stringify(runtimeModule("@farm.js/core/internal/islx-react"));
+  const isolatedBoundary = JSON.stringify(
+    runtimeModule("@farm.js/core/internal/isolated-boundary"),
+  );
   // Islands mode: a server component's form around an island reports its submit to the island's
   // useFormStatus, which then comes from islx instead of react-dom. Both builds rewrite it.
   if (options.slots) {
@@ -1407,7 +1578,7 @@ export function transformIsolatedClientBoundaryModule(options: {
         code: options.code,
         id: options.moduleReference,
         parse: options.parse as (code: string) => AstNode,
-        from: "@farm.js/core/internal/islx-react",
+        from: runtimeModule("@farm.js/core/internal/islx-react"),
       });
       if (rewritten) options = { ...options, code: rewritten.code };
     } catch {
@@ -1547,11 +1718,14 @@ export function transformIsolatedClientBoundaryModule(options: {
     output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
   }
 
+  // Names are a guess: an uppercase export can be a constant (`SURFACES`) or a context, which
+  // stay as they are.
+  const isComponent = `(value) => typeof value === "function" || (typeof value === "object" && value !== null && [Symbol.for("react.memo"), Symbol.for("react.forward_ref"), Symbol.for("react.lazy")].includes(value.$$typeof))`;
   const runtimeImport = options.slots
     ? options.browser
       ? "const __farm_islx_island__ = (component) => component;"
-      : `import { createIsland as __farm_islx_island__ } from "@farm.js/core/internal/islx-react";`
-    : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";`;
+      : `import { createIsland as __farm_islx_create_island__ } from ${islxReact};\nconst __farm_is_component__ = ${isComponent};\nconst __farm_islx_island__ = (component, ...rest) => __farm_is_component__(component) ? __farm_islx_create_island__(component, ...rest) : component;`
+    : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_boundary__ } from ${isolatedBoundary};\nconst __farm_is_component__ = ${isComponent};\nconst __farm_create_isolated_boundary__ = (react, component, ...rest) => __farm_is_component__(component) ? __farm_create_boundary__(react, component, ...rest) : component;`;
   return `${runtimeImport}\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
 }
 
@@ -1648,11 +1822,59 @@ export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer | false): bo
   return getFarmRendererCapabilities(resolveFarmRenderer(renderer)).reconcilesRerenders;
 }
 
-function hasViteAlias(alias: AliasOptions | undefined, find: string): boolean {
+/**
+ * Prefix of the id a development server module imports a Farm runtime module by when the module
+ * lives outside the app root. Farm's plugin resolves it from Farm's own install.
+ *
+ * Vite's server environment externalizes a bare `@farm.js/core/internal/*` import, deciding once
+ * per specifier, and then resolves it with Node from the importing file's directory. A workspace
+ * package that does not depend on Farm cannot resolve it from there, so a client component in
+ * one failed to load in `farm dev` once an app component had made the specifier external.
+ */
+const FARM_RUNTIME_MODULE_PREFIX = "/@farm/runtime/";
+
+function toFarmRuntimeModuleId(specifier: string): string {
+  return FARM_RUNTIME_MODULE_PREFIX + specifier;
+}
+
+/** A file of the `@farm.js/core` install this code runs from, which resolves its own exports. */
+function getFarmCoreFile(): string {
+  return typeof __filename === "string" ? __filename : fileURLToPath(import.meta.url);
+}
+
+// `@/` imports an app alias must answer to stand in for Farm's own `@`: shallow and nested paths,
+// with and without an extension, and a directory no app would alias by name.
+const FARM_SOURCE_ALIAS_PROBES = [
+  "@/x",
+  "@/index.ts",
+  "@/components/button",
+  "@/lib/utils/format.ts",
+  "@/__farm__/probe",
+];
+
+/** Whether a Vite alias `find` matches a specifier, as Vite matches it. */
+function matchesViteAlias(find: string | RegExp, specifier: string): boolean {
+  if (typeof find === "string") return specifier === find || specifier.startsWith(`${find}/`);
+  // A global or sticky pattern carries `lastIndex` from one test to the next.
+  find.lastIndex = 0;
+  const matched = find.test(specifier);
+  find.lastIndex = 0;
+  return matched;
+}
+
+/**
+ * Whether one of the app's aliases answers every `@/…` import, so Farm's `@` alias would never be
+ * reached: `"@"` itself, or a pattern such as `/^@\/(.*)$/`. One that answers only some, such as
+ * `/^@\/components\/ui\/(.*)$/`, narrows `@` for those paths; Farm's `@`, merged after the app's
+ * aliases, still serves the rest.
+ */
+function hasFarmSourceAliasOverride(alias: AliasOptions | undefined): boolean {
   if (!alias) return false;
-  if (!Array.isArray(alias)) return Object.prototype.hasOwnProperty.call(alias, find);
-  return alias.some((entry) =>
-    typeof entry.find === "string" ? entry.find === find : entry.find.test(`${find}/`),
+  const finds = Array.isArray(alias)
+    ? alias.map((entry: { find: string | RegExp }) => entry.find)
+    : Object.keys(alias);
+  return finds.some((find) =>
+    FARM_SOURCE_ALIAS_PROBES.every((probe) => matchesViteAlias(find, probe)),
   );
 }
 
@@ -1669,7 +1891,36 @@ export function farmPlugin(
     publicDir: options.publicDir,
   });
   let farmApp: FarmApp;
+  // Files Farm writes under its output directory (client references, caches), as a POSIX path.
+  const isFarmGeneratedOutput = (file: string): boolean => {
+    const root = farmApp?.getConfig().root ?? options.root;
+    if (!root) return file.includes("/.farm/");
+    const output = toPosixPath(path.resolve(root, options.distDir || ".farm"));
+    return file === output || file.startsWith(`${output}/`);
+  };
   let serverFnTransformActive = false;
+  // The modules a page render evaluates on the server: route modules and the MDX components.
+  const getFarmRenderedServerModules = (): Set<string> => {
+    const routeManager = farmApp?.getRouteManager();
+    if (!routeManager) return new Set();
+    const files = new Set<string>();
+    for (const entries of [
+      routeManager.getRoutes(),
+      routeManager.getLayouts(),
+      routeManager.getLoadings(),
+      routeManager.getErrors(),
+      routeManager.getRouteSlots(),
+    ]) {
+      for (const entry of entries.values()) files.add(entry.modulePath);
+    }
+    const config = farmApp.getConfig();
+    const mdxComponents = resolveFarmMdxComponentsModulePath(
+      resolveMdxConfig(config.mdx),
+      config.root,
+    );
+    if (mdxComponents) files.add(mdxComponents);
+    return files;
+  };
   // Islands mode runs server functions on islx's actions: no @farm.js/plugin/rsc needed.
   const islandsServerFns = () => {
     const config = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
@@ -1723,18 +1974,37 @@ export function farmPlugin(
   const getProgrammaticClientRoutes = () =>
     options.programmaticClientRoutes ?? farmApp?.getRouteManager().getProgrammaticClientRoutes();
 
+  // A workspace package's source or a linked package: Node resolution from there may not reach
+  // the app's dependencies.
+  const isOutsideAppRoot = (file: string) => {
+    const root = farmApp?.getConfig().root || server?.config.root || options.root;
+    if (!root) return false;
+    const relative = path.relative(root, file.split("?", 1)[0]!);
+    return relative.startsWith("..") || path.isAbsolute(relative);
+  };
+
   const plugin: Plugin = {
     name: "farm",
     api: { getProgrammaticClientRoutes } satisfies FarmProgrammaticRoutesPluginApi,
 
     config(userConfig, configEnv) {
       isBuild = configEnv.command === "build";
-      const layerAliases = getFarmLayerAliases(options.layers);
       // `@/` resolves to the source directory in development as it does in production
-      // builds. An `@` alias in the app's own Vite config wins.
-      const sourceAlias = hasViteAlias(userConfig.resolve?.alias, "@")
-        ? {}
-        : createFarmSourceAlias(options.root || process.cwd(), options.srcDir);
+      // builds. An app alias that answers every `@/` import replaces it.
+      const farmAliases = {
+        ...getFarmLayerAliases(options.layers),
+        ...(hasFarmSourceAliasOverride(userConfig.resolve?.alias)
+          ? {}
+          : createFarmSourceAlias(options.root || process.cwd(), options.srcDir)),
+      };
+      // Vite puts the aliases a plugin's config hook returns ahead of the app's, and uses the
+      // first that matches, so an app alias for `@/components/ui/*` lost to Farm's `@` in
+      // development while production builds, which merge the app's first, honored it. Merge
+      // Farm's after the app's here too.
+      if (Object.keys(farmAliases).length > 0) {
+        userConfig.resolve ??= {};
+        userConfig.resolve.alias = mergeFarmViteAlias(farmAliases, userConfig.resolve.alias);
+      }
       const layerRoots = (options.layers ?? []).map((layer) => layer.root);
       // Vite's CORS middleware runs ahead of every plugin's and ends each OPTIONS request with a
       // 204, so route OPTIONS exports, app middleware, and routeRules CORS never saw one, and app
@@ -1749,9 +2019,6 @@ export function farmPlugin(
         // Keep development module ownership explicit; the RSC plugin adds its
         // environment only when enabled. Production environment setup is unchanged.
         ...(!isBuild ? { environments: { client: {}, ssr: {} } } : {}),
-        resolve: {
-          alias: { ...layerAliases, ...sourceAlias },
-        },
         server: {
           ...(farmOwnsDevCors ? { cors: false } : {}),
           fs: {
@@ -1760,6 +2027,28 @@ export function farmPlugin(
               : {}),
             deny: getFarmDevFsDeny(userConfig.server?.fs?.deny, options),
           },
+        },
+      };
+    },
+
+    configEnvironment(name, environmentConfig, env) {
+      // Vite's default server module runner turns on Node's source map support for the whole
+      // process, which then parses the source map of every module Node or the runner loads. The
+      // prepareStackTrace interceptor maps the same app frames when a stack is read. An
+      // environment a plugin creates keeps its own runner.
+      if (
+        env.command !== "serve" ||
+        (name !== "ssr" && name !== "rsc") ||
+        environmentConfig.dev?.createEnvironment
+      ) {
+        return;
+      }
+      return {
+        dev: {
+          createEnvironment: (environmentName, config) =>
+            createRunnableDevEnvironment(environmentName, config, {
+              runnerOptions: { sourcemapInterceptor: "prepareStackTrace" },
+            }),
         },
       };
     },
@@ -1844,6 +2133,8 @@ export function farmPlugin(
             options.distDir || ".farm",
           ),
         );
+      // A replan after an edit reuses the plans of route modules that read no edited file.
+      farmApp.getRouteManager().trackSourceChanges();
 
       await farmApp.initialize();
 
@@ -2331,6 +2622,40 @@ export function farmPlugin(
               basePath: farmConfig.basePath,
             })
         : null;
+      // Farm Infra analytics reports a docs page the renderer publishes by its path, as in
+      // production (see route-label.ts). Only when analytics runs, the pages are listed on the
+      // first docs request and again after a file is added or removed.
+      const farmDocsListsPages = Boolean(
+        farmDocsDevRuntime &&
+        pm?.getPlugins().some((plugin) => plugin.name === "farm:infra-analytics"),
+      );
+      let farmDocsPagePaths: Promise<ReadonlySet<string> | undefined> | undefined;
+      const getFarmDocsPagePaths = () => {
+        if (!farmDocsDevRuntime || !farmDocsListsPages) return undefined;
+        farmDocsPagePaths ??= farmDocsDevRuntime
+          .listFarmDocsPagePaths(farmConfig.docs, {
+            root: farmConfig.root,
+            srcDir: farmConfig.srcDir,
+            adapter: farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs),
+          })
+          .then(
+            (pages) => new Set(pages),
+            (error) => {
+              logger.warn(
+                `Farm Infra analytics reports docs pages by the docs route, not each page's path: listing them failed (${error instanceof Error ? error.message : String(error)}).`,
+              );
+              return undefined;
+            },
+          );
+        return farmDocsPagePaths;
+      };
+      if (farmDocsListsPages) {
+        for (const event of ["add", "unlink"] as const) {
+          server.watcher.on(event, () => {
+            farmDocsPagePaths = undefined;
+          });
+        }
+      }
       const wrapFarmDocsResponseWithLayouts = async (
         request: Request,
         response: Response,
@@ -2723,11 +3048,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 (isViteDevClientRequest(parsedRequestUrl, req.headers) &&
                   devServableFileExists(requestPathname, [server.config.root]))));
 
-          // Config headers() and redirects() see the requested URL before any route or app
-          // middleware does, as in the production entry: headers() then apply to whatever
-          // answers, a redirect or a middleware response included, and a redirect passes through
-          // the plugin runtime like any response. A request a config rewrite re-entered this
-          // handler with, or a dotted path back from Vite's file serving, has passed them already.
+          // Config headers() and redirects(), and route-file redirects, see the requested URL
+          // before any route or app middleware does, as in the production entry: headers() then
+          // apply to whatever answers, a redirect or a middleware response included, and a
+          // redirect passes through the plugin runtime like any response. A request a config
+          // rewrite re-entered this handler with, or a dotted path back from Vite's file
+          // serving, has passed them already.
           const configRewriteSource = (req as FarmDevConfigRewriteRequest)[
             FARM_DEV_CONFIG_REWRITE_SOURCE
           ];
@@ -2735,22 +3061,107 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // API path or with `renderer: false`, and plain text on a page, as in production.
           const runtimeHookErrorAnswersJSON =
             rendererDisabled || isFarmAPIPathname(requestPathname, apiServerBasePath);
+
+          // The router and render hooks, as the production entry runs them for every request its
+          // plugin runtime classes as a page (kind "page"): on the URL as requested (a config
+          // rewrite's source, and the incoming URL when runtime.before returned a replacement
+          // Request), inside the runtime request, before the request is resolved. So
+          // they run for a config redirect, the generated llms.txt, sitemap.xml and robots.txt,
+          // a Markdown mirror, the app manifest, and the not-found page as for a page route, and
+          // not for an app metadata route (sitemap.ts, robots.ts, a metadata image), which
+          // production classes as an asset. A hook that throws rejects; the caller fails the
+          // request as it fails a throwing runtime hook.
+          const requestedPagePathname =
+            configRewriteSource === undefined
+              ? requestPathname
+              : new URL(configRewriteSource).pathname;
+          let pageHookRouteMatch:
+            | { render: RenderLifecyclePayload & Record<string, unknown>; layoutPatterns: string[] }
+            | undefined;
+          const pageHookRoute = () => {
+            if (pageHookRouteMatch) return pageHookRouteMatch;
+            const pathname = requestedPagePathname;
+            const match = farmApp.getRouteManager().matchRoute(pathname);
+            pageHookRouteMatch = {
+              render: {
+                pathname,
+                method: requestMethod,
+                routePattern: match?.route?.pattern || null,
+                params: match?.params || {},
+              },
+              layoutPatterns: (match?.layouts || []).map((layout) => layout.pattern),
+            };
+            return pageHookRouteMatch;
+          };
+          // An app metadata route (sitemap.ts, robots.ts, manifest.ts, llms.ts, a metadata
+          // image) the path matches: production's plugin runtime classes its request as an asset,
+          // with the metadata route's pattern and params, whatever the method.
+          const matchAppMetadataRoute = (
+            pathname: string,
+          ): { pattern: string; params: Record<string, string> } | null => {
+            const routeManager = farmApp.getRouteManager();
+            const image = routeManager.matchMetadataImage(pathname);
+            if (image) return { pattern: image.image.pattern, params: image.params };
+            const metadata = routeManager.matchMetadataRoute(pathname);
+            return metadata
+              ? { pattern: metadata.metadata.pattern, params: metadata.params }
+              : null;
+          };
+          const runFarmDevPageHooks = async (): Promise<void> => {
+            if (
+              !pm ||
+              (!pm.hasHook("beforeRouteMatch") &&
+                !pm.hasHook("afterRouteMatch") &&
+                !pm.hasHook("beforeRender"))
+            ) {
+              return;
+            }
+            const { render, layoutPatterns } = pageHookRoute();
+            if (
+              matchAppMetadataRoute(render.pathname) ||
+              // A path no page route matches is a page only for a GET or HEAD request.
+              (!render.routePattern && requestMethod !== "GET" && requestMethod !== "HEAD")
+            ) {
+              return;
+            }
+            await pm.runHookParallel("beforeRouteMatch", {
+              pathname: render.pathname,
+              method: requestMethod,
+            });
+            await pm.runHookParallel("afterRouteMatch", {
+              pathname: render.pathname,
+              matched: Boolean(render.routePattern),
+              routePattern: render.routePattern,
+              params: render.params,
+              layoutPatterns,
+            });
+            await pm.runHookParallel("beforeRender", render);
+          };
+
+          const meetsRequestedURLRoutes =
+            configRewriteSource === undefined && !deferredDottedRequests.has(req);
+          // Production lists route-file redirects before config redirects, so they win.
+          const routeRedirect = meetsRequestedURLRoutes
+            ? farmApp.getRouteManager().matchRedirect(requestPathname, parsedRequestUrl.search)
+            : null;
           if (
-            pm &&
-            configRewriteSource === undefined &&
-            !deferredDottedRequests.has(req) &&
-            (configRoutePlugins.has(FARM_CONFIG_HEADERS_PLUGIN_NAME) ||
-              configRedirectMatchers.length > 0) &&
+            meetsRequestedURLRoutes &&
+            (routeRedirect ||
+              (pm &&
+                (configRoutePlugins.has(FARM_CONFIG_HEADERS_PLUGIN_NAME) ||
+                  configRedirectMatchers.length > 0))) &&
             !isViteOwnedRequest()
           ) {
-            let redirect: ReturnType<(typeof configRedirectMatchers)[number]> = null;
+            let redirect: { destination: string; statusCode: number } | null = routeRedirect;
             try {
-              await pm.runHookParallelFiltered(
-                "beforeRequest",
-                (plugin) => plugin.name === FARM_CONFIG_HEADERS_PLUGIN_NAME,
-                req,
-                res,
-              );
+              if (pm) {
+                await pm.runHookParallelFiltered(
+                  "beforeRequest",
+                  (plugin) => plugin.name === FARM_CONFIG_HEADERS_PLUGIN_NAME,
+                  req,
+                  res,
+                );
+              }
               for (const matchRedirect of configRedirectMatchers) {
                 redirect ??= matchRedirect(parsedRequestUrl);
               }
@@ -2768,22 +3179,27 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 status: redirect.statusCode,
                 headers: { Location: redirect.destination },
               });
-              if (pm.hasRuntimeRequestHooks()) {
+              if (pm && opensFarmDevRuntimeSession(pm)) {
                 const redirectResponse = response;
                 try {
                   // The session describes the request as production's does for a path no route
-                  // answers.
+                  // answers, or an app metadata route.
+                  const metadataRoute = matchAppMetadataRoute(requestPathname);
+                  const kind = metadataRoute
+                    ? "asset"
+                    : isFarmAPIPathname(requestPathname, apiServerBasePath)
+                      ? "api"
+                      : requestMethod === "GET" || requestMethod === "HEAD"
+                        ? "page"
+                        : "request";
                   response = await pm.runRuntimeRequest(
                     createRequestFromNodeRequest(req, parsedRequestUrl),
-                    () => redirectResponse,
-                    {
-                      kind: isFarmAPIPathname(requestPathname, apiServerBasePath)
-                        ? "api"
-                        : requestMethod === "GET" || requestMethod === "HEAD"
-                          ? "page"
-                          : "request",
-                      route: { pathname: requestPathname },
+                    async () => {
+                      // Production runs the page hooks before it answers the redirect.
+                      if (kind === "page") await runFarmDevPageHooks();
+                      return redirectResponse;
                     },
+                    { kind, route: { pathname: requestPathname, ...metadataRoute } },
                   );
                 } catch {
                   // The runtime reported the failure to runtime.error and onError.
@@ -2815,10 +3231,51 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             );
           };
 
+          // Vite's error page, with its overlay, reports a page error in place of production's
+          // error document. It is HTML kept out of caches like that document, and runtime.after
+          // sees it through a response interceptor, as it sees the document in production.
+          const sendDevErrorPage = (error: unknown) => {
+            if (!res.headersSent) {
+              res.setHeader("Content-Type", "text/html; charset=utf-8");
+              res.setHeader("Cache-Control", "private, no-store");
+            }
+            next(error);
+          };
+
+          // The JSON 500 production answers when app middleware throws on an API path or with
+          // `renderer: false`: runtime.error and onError observe the throw once, and
+          // runtime.after sees the 500, as for a throwing API route. Returns the status sent.
+          const sendMiddlewareErrorJSON = async (
+            runtimeSession: FarmPluginRuntimeSession | undefined,
+            error: unknown,
+          ): Promise<number> => {
+            let response = createFarmDevMiddlewareErrorResponse();
+            if (runtimeSession) {
+              const errorResponse = response;
+              try {
+                response = await pm!.completeRuntimeRequest(
+                  runtimeSession,
+                  async (_request, runtime) => {
+                    await runtime.reportError(error);
+                    return errorResponse;
+                  },
+                );
+              } catch {
+                // A runtime.after hook threw; the runtime reported it.
+                sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                return 500;
+              }
+            }
+            await sendWebResponse(res, response);
+            return response.status;
+          };
+
           // Runs app middleware inside a plugin runtime session `beginRuntimeRequest` opened,
           // as production runs it inside the runtime request: runtime.after sees a response
-          // middleware answers with. A middleware throw is rethrown for the caller to report and
-          // answer. `logResponse` reports the status of a request middleware handled.
+          // middleware answers with. A middleware throw on a page path answers Vite's error
+          // page, as on any page, and counts as handled; elsewhere it is rethrown for the caller
+          // to report and answer. `logResponse` reports the status of a request middleware
+          // handled.
           const runAppMiddlewareInRuntimeSession = async (
             runtimeSession: FarmPluginRuntimeSession | undefined,
             logResponse?: (status: number) => void,
@@ -2848,9 +3305,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             try {
               handled = await runAppMiddlewareForContentRoute();
             } catch (error) {
-              // The caller answers the throw and reports it to the runtime.
-              interceptor?.release();
-              throw error;
+              if (runtimeHookErrorAnswersJSON || res.headersSent) {
+                // The caller answers the throw and reports it to the runtime.
+                interceptor?.release();
+                throw error;
+              }
+              // As in production, runtime.error and onError observe the throw once, and
+              // runtime.after sees the HTML 500 through the interceptor. The session is not
+              // failed, so a runtime.after throw is reported too.
+              if (runtimeSession) await pm!.reportRuntimeRequestError(runtimeSession, error);
+              sendDevErrorPage(error);
+              return true;
             }
             if (!handled) {
               interceptor?.release();
@@ -2900,7 +3365,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               await sendWebResponse(res, runtimeResponse);
             };
             let runtimeSession: FarmPluginRuntimeSession | undefined;
-            if (pm?.hasRuntimeRequestHooks()) {
+            if (pm && opensFarmDevRuntimeSession(pm)) {
               try {
                 const routePathname = stripFarmBasePath(requestPathname, farmConfig.basePath);
                 const route = setFarmRouteLabel(
@@ -2928,6 +3393,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               }
               pm.copyRequestContext(runtimeSession.request, req);
               applyWebRequestToNodeRequest(runtimeSession.request, req);
+              if (kind === "page") {
+                try {
+                  await runFarmDevPageHooks();
+                } catch (error) {
+                  // A throwing router or render hook fails the request as a runtime hook does.
+                  await discard();
+                  await pm.failRuntimeRequest(runtimeSession, error);
+                  sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                  return;
+                }
+              }
             }
             let response: Response | void;
             let responding = false;
@@ -2941,8 +3417,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 runtimeSession?.request ?? createRequestFromNodeRequest(req, new URL(fullUrl)),
               );
             } catch (error) {
+              if (!responding && !res.headersSent) {
+                // App middleware threw on an API path or with `renderer: false`.
+                logger.error(`Middleware error: ${error}`);
+                await discard();
+                await sendMiddlewareErrorJSON(runtimeSession, error);
+                return;
+              }
               if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
-              if (!runtimeSession || !responding || res.headersSent) throw error;
+              if (!runtimeSession || res.headersSent) throw error;
               // The route answers inside the runtime request, as in production, so its throw
               // fails that request: runtime.error and onError observed it once, runtime.after
               // does not run, and the request answers the runtime hook 500 for its path.
@@ -3004,6 +3487,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             options.agent?.manifest !== false &&
             isFarmAppManifestPath(stripFarmBasePath(requestPathname, farmConfig.basePath))
           ) {
+            const manifestGuardCoversPath = (path: string) =>
+              farmPathGuardCoversEndpoint(
+                {
+                  config: farmConfig,
+                  middlewareRoutes: middlewareManager
+                    .getMiddlewares()
+                    .filter((entry) => entry.source !== "config"),
+                },
+                path,
+                apiServerBasePath,
+              );
             await serveBuiltInRoute(async () => {
               farmAppPackages ??= resolveFarmAppPackages(farmConfig.root ?? process.cwd());
               const manifest = await createFarmAppManifestResponse(
@@ -3022,17 +3516,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   }),
                   defaultMCP: () => farmApp.getServerRenderer().getDefaultMCPServer(),
                   // A guard written for an MCP server's path keeps its tools out of the public view.
-                  guardCoversPath: (path) =>
-                    farmPathGuardCoversEndpoint(
-                      {
-                        config: farmConfig,
-                        middlewareRoutes: middlewareManager
-                          .getMiddlewares()
-                          .filter((entry) => entry.source !== "config"),
-                      },
-                      path,
-                      apiServerBasePath,
-                    ),
+                  guardCoversPath: manifestGuardCoversPath,
+                  // A docs runtime's MCP server lists its tools when asked, read on each request.
+                  ...(farmDocsHandler
+                    ? {
+                        registeredMCP: (request: Request) =>
+                          _listFarmRegisteredMCPServerTools(farmDocsHandler, request, {
+                            basePath: farmConfig.basePath,
+                            guardCoversPath: manifestGuardCoversPath,
+                          }),
+                      }
+                    : {}),
                 },
               );
               return manifest;
@@ -3113,10 +3607,50 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               requestMethod === "GET" || requestMethod === "HEAD"
                 ? {}
                 : { body: createFarmNodeRequestBodyStream(req), duplex: "half" };
-            const docsResponse = await farmDocsHandler(new Request(docsRequest, docsBodyInit));
+            const docsHandlerRequest = new Request(docsRequest, docsBodyInit);
+            // Tool calls to a docs runtime's MCP server emit mcp.tool.complete, as in production.
+            const registeredMCPCalls = await _readFarmRegisteredMCPCalls(
+              docsHandlerRequest,
+              farmConfig.basePath,
+            );
+            const docsResponse = await farmDocsHandler(docsHandlerRequest);
             if (docsResponse) {
+              const docsPage = docsResponse.headers
+                .get("content-type")
+                ?.toLowerCase()
+                .includes("text/html");
               await serveBuiltInRoute(
-                () => wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
+                async (request) => {
+                  if (!docsPage) {
+                    const response = await wrapFarmDocsResponseWithLayouts(
+                      docsRequest,
+                      docsResponse,
+                    );
+                    // Inside the runtime request, so analytics ties each tool call to it.
+                    return _runWithCurrentRequest(request, () =>
+                      _observeFarmRegisteredMCPResponse(response, registeredMCPCalls),
+                    );
+                  }
+                  // A docs page is a page document: it names this deployment, and a navigation
+                  // from another deployment's page is refused, as for an app page.
+                  const deploymentMismatch = getFarmDeploymentMismatch(
+                    request,
+                    farmConfig.deploymentId,
+                  );
+                  if (deploymentMismatch) {
+                    await docsResponse.body?.cancel();
+                    return createFarmDeploymentMismatchResponse(deploymentMismatch);
+                  }
+                  return withFarmDeploymentResponse(
+                    await wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
+                    farmConfig.deploymentId,
+                    {
+                      setCookie: request.method.toUpperCase() === "GET",
+                      cookiePath: farmConfig.basePath || "/",
+                      secureCookie: new URL(request.url).protocol === "https:",
+                    },
+                  );
+                },
                 {
                   kind: "docs",
                   computed: docsResponse,
@@ -3125,6 +3659,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     {
                       path: farmConfig.docs?.entry || "/docs",
                       roots: farmConfig.docs?.roots?.map((root) => root.entry),
+                      pages: await getFarmDocsPagePaths(),
                     },
                   ),
                 },
@@ -3206,14 +3741,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 },
                 // The anonymous check goes through this server, so its guards and
                 // middleware see the page's own path, as in production. It connects to
-                // this server's own listener, never the host the caller's Host names.
+                // this server's own listener, never the host the caller's Host names. The
+                // page is asked for at the URL it answers at, not through the trailing-slash 308.
                 renderPage: async (request) =>
                   createFarmDevServerDispatch(server)(
-                    new Request(request, {
-                      signal: res.destroyed
-                        ? AbortSignal.abort()
-                        : createFarmNodeRequestAbortSignal(req, res),
-                    }),
+                    new Request(
+                      toFarmTrailingSlashPageRequest(
+                        request,
+                        farmApp.getConfig().trailingSlash === true,
+                      ),
+                      {
+                        signal: res.destroyed
+                          ? AbortSignal.abort()
+                          : createFarmNodeRequestAbortSignal(req, res),
+                      },
+                    ),
                   ),
               });
           if (markdownSourceResponse) {
@@ -3237,20 +3779,27 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
                 // The page is rendered by this server's own listener, never the host the
                 // caller's Host names. Redirects are not followed, so the mirror answers with
-                // the page's own (a sign-in gate, say), as production does.
+                // the page's own (a sign-in gate, say), as production does. The page is read
+                // at the URL it answers at ('/about/' with trailingSlash), not through the 308.
                 renderPage: async (request) => {
                   const headers = new Headers(request.headers);
                   // The mirror reads the HTML itself; the dispatch does not decompress.
                   headers.delete("accept-encoding");
                   return createFarmDevServerDispatch(server)(
-                    new Request(request, {
-                      headers,
-                      // Only accepted mirrors need disconnect listeners. An earlier
-                      // close (for example while the docs handler ran) must also abort.
-                      signal: res.destroyed
-                        ? AbortSignal.abort()
-                        : createFarmNodeRequestAbortSignal(req, res),
-                    }),
+                    new Request(
+                      toFarmTrailingSlashPageRequest(
+                        request,
+                        farmApp.getConfig().trailingSlash === true,
+                      ),
+                      {
+                        headers,
+                        // Only accepted mirrors need disconnect listeners. An earlier
+                        // close (for example while the docs handler ran) must also abort.
+                        signal: res.destroyed
+                          ? AbortSignal.abort()
+                          : createFarmNodeRequestAbortSignal(req, res),
+                      },
+                    ),
                   );
                 },
                 apiServerBasePath,
@@ -3474,7 +4023,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 });
               }
               logger.error(`Integration route error: ${error}`);
-              if (!res.writableEnded) {
+              if (runtimeReportsErrors) {
+                // A runtime hook failed the request: answer the runtime hook 500 for its path,
+                // plain text outside the API base path, as production does.
+                if (!res.headersSent) sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                else if (!res.writableEnded) res.end();
+              } else if (!res.writableEnded) {
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
                 res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
@@ -3538,16 +4092,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             return;
           }
 
-          const redirectMatch = farmApp
-            .getRouteManager()
-            .matchRedirect(requestPathname, parsedRequestUrl.search);
-          if (redirectMatch) {
-            res.statusCode = redirectMatch.statusCode;
-            res.setHeader("Location", redirectMatch.destination);
-            res.end(`Redirecting to ${redirectMatch.destination}`);
-            return;
-          }
-
           // Handle API routes first
           const matchedApiRoute = apiRouteManager.matchRoute(requestPathname);
           const hasMatchedApiRoute = Boolean(matchedApiRoute);
@@ -3599,13 +4143,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               if (req.method !== "GET" && req.method !== "HEAD") {
                 body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
               }
-              // Like production, the handler can see the client go away.
-              return new Request(`http://${req.headers.host || "localhost:3000"}${req.url}`, {
-                method: req.method,
-                headers,
-                body: toRequestBody(body),
-                signal: createFarmNodeRequestAbortSignal(req, res),
-              });
+              // Like production, the handler can see the client go away. Under
+              // server.trustProxy it reads the public URL, as pages and middleware do.
+              return new Request(
+                resolveFarmRequestURL(req as FarmRequest, {
+                  trustProxy: currentServerConfig.trustProxy,
+                }),
+                {
+                  method: req.method,
+                  headers,
+                  body: toRequestBody(body),
+                  signal: createFarmNodeRequestAbortSignal(req, res),
+                },
+              );
             };
             const isDocsAPIRequest = Boolean(
               farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(pathname),
@@ -3627,7 +4177,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // request; middleware and the route handler then run inside it.
             let runtimeSession: FarmPluginRuntimeSession | undefined;
             let sessionRequestUrl: string | undefined;
-            if (pm?.hasRuntimeRequestHooks()) {
+            if (pm && opensFarmDevRuntimeSession(pm)) {
               try {
                 runtimeSession = await pm.beginRuntimeRequest(
                   await createAPIRequest(),
@@ -3664,9 +4214,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
                 // The runtime already reported a hook failure to runtime.error and onError.
                 logger.error(`API route error: ${error}`);
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                sendFarmDevRuntimeHookError(res, true);
                 return;
               }
               pm.copyRequestContext(runtimeSession.request, req);
@@ -3691,28 +4239,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 throw error;
               }
               logger.error(`Middleware error: ${error}`);
-              // As in production, runtime.error and onError observe the throw, and
-              // runtime.after sees the 500 it answers, as for a throwing API route.
-              let response = createFarmDevMiddlewareErrorResponse();
-              if (runtimeSession) {
-                const errorResponse = response;
-                try {
-                  response = await pm!.completeRuntimeRequest(
-                    runtimeSession,
-                    async (_request, runtime) => {
-                      await runtime.reportError(error);
-                      return errorResponse;
-                    },
-                  );
-                } catch {
-                  // A runtime.after hook threw; the runtime reported it.
-                  logResponse(method, urlPath, 500, Date.now() - startTime, "API");
-                  sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
-                  return;
-                }
-              }
-              logResponse(method, urlPath, response.status, Date.now() - startTime, "API");
-              await sendWebResponse(res, response);
+              const status = await sendMiddlewareErrorJSON(runtimeSession, error);
+              logResponse(method, urlPath, status, Date.now() - startTime, "API");
               return;
             }
 
@@ -3772,6 +4300,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 route: apiRoutePattern,
                 method,
               });
+              // The route's outcome reaches observability once, when the route settles, as in
+              // production: a runtime.after hook that fails the request later does not turn a
+              // completed request into an api.error.
+              let apiOutcomeReported = false;
               try {
                 const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
                 const request = await createHandlerRequest();
@@ -3781,7 +4313,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   method,
                   routePath: apiRoutePattern,
                 };
-                let apiHandlerFailed = false;
                 const invokeAPIHandler = async (
                   runtimeRequest: Request,
                   runtime?: FarmPluginRuntimeRequestScope,
@@ -3797,10 +4328,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   let response: Response;
                   try {
                     response = await apiHandler(handledRequest);
+                    apiOutcomeReported = true;
+                    emitFarmEvent({
+                      type: "api.request.complete",
+                      pathname,
+                      route: apiRoutePattern,
+                      method,
+                      status: response.status,
+                      durationMs: Date.now() - startTime,
+                    });
                   } catch (error) {
                     // As in production, a throwing route answers 500: runtime.error observes
                     // the throw, and runtime.after still sees that response.
-                    apiHandlerFailed = true;
+                    apiOutcomeReported = true;
                     emitFarmEvent({
                       type: "api.error",
                       pathname,
@@ -3827,16 +4367,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 });
 
                 const duration = Date.now() - startTime;
-                if (!apiHandlerFailed) {
-                  emitFarmEvent({
-                    type: "api.request.complete",
-                    pathname,
-                    route: apiRoutePattern,
-                    method,
-                    status: handledResponse.status,
-                    durationMs: duration,
-                  });
-                }
                 logResponse(method, urlPath, handledResponse.status, duration, "API");
 
                 // Send response
@@ -3844,14 +4374,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 return;
               } catch (error) {
                 const duration = Date.now() - startTime;
-                emitFarmEvent({
-                  type: "api.error",
-                  pathname,
-                  route: apiRoutePattern,
-                  method,
-                  durationMs: duration,
-                  error,
-                });
+                if (!apiOutcomeReported) {
+                  emitFarmEvent({
+                    type: "api.error",
+                    pathname,
+                    route: apiRoutePattern,
+                    method,
+                    durationMs: duration,
+                    error,
+                  });
+                }
                 const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
                 if (bodyErrorResponse) {
                   logResponse(method, urlPath, bodyErrorResponse.status, duration, "API");
@@ -3860,9 +4392,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
                 // The plugin runtime already reported the failure to runtime.error and onError.
                 logger.error(`API route error: ${error}`);
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                sendFarmDevRuntimeHookError(res, true);
                 return;
               }
             }
@@ -3911,9 +4441,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
                 // The plugin runtime already reported the failure to runtime.error and onError.
                 logger.error(`Docs API route error: ${error}`);
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                sendFarmDevRuntimeHookError(res, true);
                 return;
               }
             }
@@ -3942,9 +4470,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             } catch (error) {
               // The runtime already reported a hook failure to runtime.error and onError.
               logger.error(`API route error: ${error}`);
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+              sendFarmDevRuntimeHookError(res, true);
             }
             return;
           }
@@ -4410,23 +4936,20 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             trustProxy: currentServerConfig.trustProxy,
           }).pathname;
           const routeManager = farmApp.getRouteManager();
-          const hasBeforeRouteMatchHook = pm?.hasHook("beforeRouteMatch") ?? false;
-          const hasAfterRouteMatchHook = pm?.hasHook("afterRouteMatch") ?? false;
           const hasBeforeRequestHook = pm?.hasHook("beforeRequest") ?? false;
-          const hasBeforeRenderHook = pm?.hasHook("beforeRender") ?? false;
           const hasAfterResponseHook = pm?.hasHook("afterResponse") ?? false;
           const hasHTMLTransformHook =
             (pm?.hasHook("transformHTML") ?? false) || (pm?.hasHook("afterRender") ?? false);
-          const hasRuntimeRequestHooks = pm?.hasRuntimeRequestHooks() ?? false;
+          const opensRuntimeSession = pm ? opensFarmDevRuntimeSession(pm) : false;
           const hasRuntimeAfterHook = pm?.hasRuntimeHook("after") ?? false;
 
           // `runtime.before` may return a replacement Request, and the page has
           // to be routed on whatever the session yields: that is what
           // `runRuntimeRequest` does in the production entry, where the routed
           // request is the session's. So the session opens before the route is
-          // resolved. The session options still describe the requested route,
-          // because production computes them from the incoming request too.
-          const requestedMatch = routeManager.matchRoute(requestedPathname);
+          // resolved. The session options, and the router and render hooks, still
+          // describe the requested route, because production computes them from the
+          // incoming request too.
           // What the renderer serves without a route (llms.txt, robots.txt, sitemap.xml, the
           // default MCP server) is reported by its fixed path; see route-label.ts.
           const pageBuiltInRouteLabel = (pathname: string) => {
@@ -4439,27 +4962,47 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               ? FARM_DEFAULT_MCP_PATH
               : null;
           };
+          const pageRuntimeOptions = (pathname: string): FarmPluginRuntimeRequestOptions => {
+            const match = routeManager.matchRoute(pathname);
+            return {
+              kind: "page",
+              route: setFarmRouteLabel(
+                {
+                  pathname,
+                  pattern: match?.route?.pattern || null,
+                  params: match?.params || {},
+                },
+                match?.route ? null : pageBuiltInRouteLabel(pathname),
+              ),
+            };
+          };
           let runtimeSession: FarmPluginRuntimeSession | undefined;
           let pathname = requestedPathname;
-          if (pm && hasRuntimeRequestHooks) {
+          if (pm && opensRuntimeSession) {
             try {
-              const sessionOptions = {
-                kind: "page" as const,
-                route: setFarmRouteLabel(
-                  {
-                    pathname: requestedPathname,
-                    pattern: requestedMatch?.route?.pattern || null,
-                    params: requestedMatch?.params || {},
-                  },
-                  requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
-                ),
-              };
-              // A config rewrite's session opens on the requested URL, and runtime.before runs
-              // again on the destination with the same ctx, as on production's re-entry.
+              // The renderer answers an app metadata route here too; production classes it as
+              // an asset. A config rewrite never starts from one, since a local route wins.
+              const metadataRoute =
+                configRewriteSource === undefined ? matchAppMetadataRoute(requestedPathname) : null;
+              // A config rewrite's session opens on the requested URL, with the route that URL
+              // matches, and runtime.before runs again on the destination with the destination's
+              // route and the same ctx, as on production's re-entry. requestedPathname is the
+              // destination's here.
+              const sessionOptions: FarmPluginRuntimeRequestOptions = metadataRoute
+                ? { kind: "asset", route: { pathname: requestedPathname, ...metadataRoute } }
+                : pageRuntimeOptions(
+                    configRewriteSource === undefined ? requestedPathname : requestedPagePathname,
+                  );
               runtimeSession = await pm.beginRuntimeRequest(
                 createRequestFromNodeRequest(req, new URL(configRewriteSource ?? fullUrl)),
                 sessionOptions,
               );
+              // The router and render hooks run once runtime.before let the request through,
+              // and before a config rewrite's runtime.before. They describe the URL as
+              // requested even when runtime.before replaced the Request, as production takes
+              // their route from the incoming request; the page is still routed on the
+              // replacement below. A hook that throws fails the session below.
+              if (!runtimeSession.response) await runFarmDevPageHooks();
               const routedRequest =
                 runtimeSession.response ??
                 (configRewriteSource === undefined
@@ -4467,7 +5010,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   : await pm.runRuntimeBeforeForRewrite(
                       runtimeSession.request,
                       createRequestFromNodeRequest(req, new URL(fullUrl)),
-                      sessionOptions,
+                      pageRuntimeOptions(requestedPathname),
                     ));
 
               if (routedRequest instanceof Response) {
@@ -4480,41 +5023,44 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               pathname = new URL(routedRequest.url).pathname;
             } catch (error) {
               // runtime.error and onError observe a hook failure once: the runtime reported a
-              // throw from opening or ending the session, and a rewrite's runtime.before fails
-              // the session here.
+              // throw from opening or ending the session, and a router or render hook, or a
+              // rewrite's runtime.before, fails the session here.
               if (runtimeSession) await pm.failRuntimeRequest(runtimeSession, error);
               sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
               return;
             }
           }
 
-          // A replacement request is matched on its own pathname, including when
-          // it matches nothing and has to 404 on the rewritten path. An ordinary
-          // request is not re-matched, so the common path still matches once.
-          const routeMatch =
-            pathname === requestedPathname ? requestedMatch : routeManager.matchRoute(pathname);
-
-          if (pm && hasBeforeRouteMatchHook) {
-            await pm.runHookParallel("beforeRouteMatch", {
-              pathname,
-              method,
-            });
-          }
-          if (pm && hasAfterRouteMatchHook) {
-            await pm.runHookParallel("afterRouteMatch", {
-              pathname,
-              matched: !!routeMatch?.route,
-              routePattern: routeMatch?.route?.pattern || null,
-              params: routeMatch?.params || {},
-              layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
-            });
-          }
-          const renderPayload = {
-            pathname,
-            method,
-            routePattern: routeMatch?.route?.pattern || null,
-            params: routeMatch?.params || {},
+          // A router or render hook that throws fails the page as a throwing runtime hook does,
+          // as in production, where these hooks run inside the runtime request: runtime.error
+          // observes it, onError gets it once as the "runtime" phase, no runtime.after runs,
+          // and the page answers the runtime hook 500.
+          const failPageHook = async (error: unknown): Promise<void> => {
+            logResponse(method, urlPath, 500, Date.now() - startTime, "PAGE");
+            if (runtimeSession) {
+              await pm!.failRuntimeRequest(runtimeSession, error);
+            } else {
+              // No session to fail (no plugin has runtime request hooks): report what the
+              // runtime would, as production does.
+              await emitPluginError("runtime", error, {
+                kind: "page",
+                pathname,
+                durationMs: Date.now() - startTime,
+              });
+            }
+            if (!res.headersSent) sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
           };
+
+          // Without a runtime session the hooks have not run yet. As in production, they run
+          // before app middleware, which may then answer the request itself.
+          if (!runtimeSession) {
+            try {
+              await runFarmDevPageHooks();
+            } catch (error) {
+              await failPageHook(error);
+              return;
+            }
+          }
 
           // Runtime response transforms need the complete byte stream, including
           // responses completed by middleware or beforeRequest hooks.
@@ -4534,7 +5080,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   hasRuntimeAfterHook,
                   hasAfterResponseHook,
                   hasHTMLTransformHook,
-                  renderPayload,
+                  // render.html gets the render info render.before got.
+                  renderPayload: pageHookRoute().render,
                   method,
                   urlPath,
                   pathname,
@@ -4591,9 +5138,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
 
             const renderer = farmApp.getServerRenderer();
-            if (pm && hasBeforeRenderHook) {
-              await pm.runHookParallel("beforeRender", renderPayload);
-            }
             await renderer.renderPage(req as any, res as any);
             if (!shouldInterceptResponse) {
               logResponse(method, urlPath, res.statusCode || 200, Date.now() - startTime, "PAGE");
@@ -4603,9 +5147,27 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const duration = Date.now() - startTime;
             logResponse(method, urlPath, 500, duration, "PAGE");
             if (pm && runtimeSession) {
-              await pm.failRuntimeRequest(runtimeSession, error);
-            }
-            if (!(middlewareFailed && runtimeSession)) {
+              if (middlewareFailed) {
+                // A middleware throw is answered inside the runtime request, as production's
+                // reportError reports it: runtime.after still runs on the 500, and a throw
+                // there is reported too.
+                await pm.reportRuntimeRequestError(runtimeSession, error);
+              } else {
+                // The renderer answers a page that throws with its error page, a 500
+                // runtime.after sees, so what throws here is a hook around the render
+                // (beforeRequest, say) or the renderer itself. Production runs both inside the
+                // runtime request, so the throw fails it: runtime.error and onError observe it
+                // once, as the "runtime" phase, runtime.after does not run, and the page answers
+                // the runtime hook 500.
+                await pm.failRuntimeRequest(runtimeSession, error);
+                if (!res.headersSent && !responseInterceptor?.isEnded()) {
+                  responseInterceptor?.release();
+                  console.error("[FARM] Page error:", error);
+                  sendFarmDevRuntimeHookError(res, runtimeHookErrorAnswersJSON);
+                  return;
+                }
+              }
+            } else {
               await emitPluginError("render-page", error, { pathname });
             }
             // With `renderer: false` no error page renders: answer the JSON 500 production
@@ -4614,14 +5176,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               sendFarmDevErrorJSON(res);
               return;
             }
-            // Vite's error page, with its overlay, reports it in place of production's error
-            // document. It is HTML kept out of caches like that document, and runtime.after
-            // sees it through the response interceptor, as it sees the document in production.
-            if (!res.headersSent) {
-              res.setHeader("Content-Type", "text/html; charset=utf-8");
-              res.setHeader("Cache-Control", "private, no-store");
-            }
-            next(error);
+            sendDevErrorPage(error);
           }
         }),
       );
@@ -4659,6 +5214,23 @@ window.__FARM_MANIFEST__ = ${inlineValue({
     },
 
     async resolveId(id, importer, resolveOptions) {
+      // A Farm runtime module the transform below anchored at Farm's own install.
+      if (id.startsWith(FARM_RUNTIME_MODULE_PREFIX)) {
+        return this.resolve(id.slice(FARM_RUNTIME_MODULE_PREFIX.length), getFarmCoreFile(), {
+          ...resolveOptions,
+          skipSelf: true,
+        });
+      }
+      // The island transform imports Farm's runtime into client components, including ones in a
+      // workspace package's source that does not depend on Farm: those resolve from the app.
+      if (id.startsWith("@farm.js/core/internal/") && importer && isOutsideAppRoot(importer)) {
+        const root = (farmApp?.getConfig().root || server?.config.root || options.root)!;
+        return this.resolve(id, path.join(root, "package.json"), {
+          ...resolveOptions,
+          skipSelf: true,
+        });
+      }
+
       if (typeof fontImports.resolveId === "function") {
         const fontId = await fontImports.resolveId.call(this, id, importer, resolveOptions);
         if (fontId) return fontId;
@@ -4809,8 +5381,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         return generateServerCode();
       }
 
-      // Virtual manifest module - TanStack Start pattern
-      // Manifest is generated at build time and inlined
+      // The development client route manifest (FARM_DEV_CLIENT_MANIFEST_MODULE)
       if (id === "/@farm/manifest") {
         const routeManager = farmApp?.getRouteManager();
         if (!routeManager) {
@@ -4825,71 +5396,30 @@ export const getManifest = () => ({
 `;
         }
 
-        const manifest = routeManager.generateClientManifest(server.config.root);
         const globalStylesheetHref = resolveDevGlobalStylesheetHref(
           server.config.root,
           farmApp?.getConfig().srcDir,
         );
+        const fullManifest = createFarmDevClientManifest(
+          routeManager.generateClientManifest(server.config.root),
+          {
+            sharedAssets: globalStylesheetHref
+              ? [{ tag: "link", attrs: { rel: "stylesheet", href: globalStylesheetHref } }]
+              : [],
+          },
+        );
 
-        // Convert to full manifest format
-        const fullManifest = {
-          clientEntry: "/@farm/client.js",
-          routes: {} as Record<string, any>,
-          layouts: {} as Record<string, any>,
-          slots: [] as Array<Record<string, any>>,
-          sharedAssets: globalStylesheetHref
-            ? [{ tag: "link", attrs: { rel: "stylesheet", href: globalStylesheetHref } }]
-            : [],
+        // The whole client manifest, which a document's client imports the first time a
+        // navigation needs a route the document did not inline (see dev-client-manifest.ts).
+        // Parsed from a string: V8 parses large JSON faster than an object literal. No source
+        // map: one would repeat the manifest several times over.
+        return {
+          code: `const manifest = JSON.parse(${JSON.stringify(JSON.stringify(fullManifest))});
+export const getManifest = () => manifest;
+export { manifest };
+`,
+          map: { mappings: "" },
         };
-
-        // Convert routes array to object keyed by pattern
-        for (const route of manifest.routes) {
-          fullManifest.routes[route.pattern] = {
-            modulePath: route.modulePath,
-            pattern: route.pattern,
-            ...(route.directory ? { directory: route.directory } : {}),
-            segments: route.segments,
-            search: route.search,
-            isClientComponent: route.isClientComponent,
-            shouldHydrate: route.shouldHydrate,
-            islandStrategy: route.islandStrategy,
-            renderPlan: route.renderPlan,
-            preloads: [route.modulePath], // In dev, preload is just the module
-            assets: [],
-          };
-        }
-
-        // Convert layouts array to object keyed by pattern
-        for (const layout of manifest.layouts) {
-          const groupScope = getRouteGroupScope(layout.pattern);
-          fullManifest.layouts[layout.pattern] = {
-            modulePath: layout.modulePath,
-            pattern: layout.pattern,
-            ...(groupScope ? { urlPattern: stripRouteGroups(layout.pattern), groupScope } : {}),
-            shouldHydrate: layout.shouldHydrate,
-            islandStrategy: layout.islandStrategy,
-            // Islands mode: rebuilt from its server tree, so its module is never preloaded.
-            ...(layout.serverTree ? { serverTree: true } : {}),
-            preloads: layout.serverTree ? [] : [layout.modulePath],
-            assets: [],
-          };
-        }
-
-        for (const slot of manifest.slots) {
-          fullManifest.slots.push({
-            ...slot,
-            preloads: [slot.modulePath],
-            assets: [],
-          });
-        }
-
-        return `
-// Auto-generated manifest for SPA navigation (TanStack Start pattern)
-// This manifest is inlined in the server bundle - no file on disk
-// Client receives this via window.__FARM_MANIFEST__ in HTML
-export const getManifest = () => (${JSON.stringify(fullManifest, null, 2)});
-export const manifest = getManifest();
-`;
       }
     },
 
@@ -4897,6 +5427,14 @@ export const manifest = getManifest();
       if (pendingClientSetup && !transformOptions?.ssr && !farmSetupContext.getStore()) {
         await pendingClientSetup;
       }
+      // How the runtime imports Farm adds below are written. A development server module outside
+      // the app root imports them from Farm's own install (see FARM_RUNTIME_MODULE_PREFIX). Builds
+      // and the browser keep the package specifier, which the resolveId hook resolves from the
+      // app, so the browser shares the copy Vite pre-bundles for the app's own modules.
+      const runtimeModule =
+        !isBuild && transformOptions?.ssr === true && isOutsideAppRoot(id)
+          ? toFarmRuntimeModuleId
+          : undefined;
       // Islands mode: `"use server"` modules register as actions on the server and become stubs in
       // the browser (RFC 0003). The RSC engine has its own transform.
       const actionConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
@@ -4935,7 +5473,7 @@ export const manifest = getManifest();
                 code,
                 file,
                 reference: (specifier, exportName) =>
-                  ensureFarmPackageClientReference(projectRoot, specifier, exportName),
+                  ensureFarmPackageClientReference(projectRoot, specifier, exportName, file),
                 onServerFile: (serverFile) => farmReactServerFiles.add(serverFile),
               });
           if (reactServer !== null) {
@@ -4956,19 +5494,31 @@ export const manifest = getManifest();
             rewrotePackageImports = true;
           }
         }
-        const referenced = rewriteFarmPackageClientImports({
-          code,
-          file,
-          root: projectRoot,
-          isClientPackage: (specifier) => isFarmPackageClientBoundary(file, specifier, projectRoot),
-        });
+        const rewritePackageImports = (source: string) =>
+          rewriteFarmPackageClientImports({
+            code: source,
+            file,
+            root: projectRoot,
+            isClientPackage: (specifier) =>
+              isFarmPackageClientBoundary(file, specifier, projectRoot),
+          });
+        // Each module that imports a package would otherwise read the package's whole entry graph.
+        const routeManager = farmApp?.getRouteManager();
+        const source = code;
+        const referenced = routeManager
+          ? routeManager.inspectPackages(() => rewritePackageImports(source))
+          : rewritePackageImports(source);
         if (referenced !== null) {
           code = referenced;
           rewrotePackageImports = true;
         }
         // Server code only: in the browser React's own cache is the one RSC has there too.
         if (transformOptions?.ssr === true) {
-          const cached = rewriteFarmReactCacheImport(code, file);
+          const cached = rewriteFarmReactCacheImport(
+            code,
+            file,
+            runtimeModule?.(FARM_REACT_CACHE_MODULE),
+          );
           if (cached !== null) {
             code = cached;
             rewrotePackageImports = true;
@@ -5008,6 +5558,7 @@ export const manifest = getManifest();
           ssr: transformOptions?.ssr === true,
           // Parsed by file type: page components are TSX.
           parse: (source) => (parseSync(file, source) as { program: unknown }).program as never,
+          runtimeModule,
         });
         if (actionModule) return { code: actionModule, map: null };
       }
@@ -5131,6 +5682,7 @@ export const manifest = getManifest();
             slots: islandsMode,
             browser: transformOptions?.ssr !== true,
             inferredInteraction: inference?.strategy === "interaction",
+            runtimeModule,
           });
           if (!transformedBoundary) {
             this.error(
@@ -5363,10 +5915,18 @@ if (import.meta.hot) {
       }
     },
 
-    watchChange() {
+    watchChange(id, change) {
+      // The next hydration plan replans only the route modules that read an edited source file.
+      // Generated output (client references, caches, Vite's deps) is not the app's source.
+      const watched = toPosixPath(id);
+      if (!watched.includes("/node_modules/") && !isFarmGeneratedOutput(watched)) {
+        farmApp?.getRouteManager().noteSourceChange(id, change.event);
+      }
       // A module that gains or loses "use client", or an import, changes what client code reaches.
       invalidateFarmClientReachableModules();
       invalidateFarmClientOnlyScan();
+      invalidateFarmRouteRootInferences();
+      dropLatestPackageClientBoundaryCache();
     },
     async handleHotUpdate(ctx: HmrContext) {
       // A file changed while a deferred setup still discovers routes: handle it against the result.
@@ -5471,13 +6031,16 @@ if (import.meta.hot) {
 
       const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
       const planRouteManager = farmApp?.getRouteManager();
+      // A source module outside src (a workspace package's) can be a client boundary too. A replan
+      // recomputes only the route modules that read the edited file, so it costs nothing for a
+      // module no plan read.
       const isHydrationPlanSource =
-        currentSrcRoot !== null &&
-        normalizedFile.startsWith(`${currentSrcRoot}/`) &&
-        /\.[cm]?[jt]sx?$/.test(normalizedFile);
+        /\.[cm]?[jt]sx?$/.test(normalizedFile) &&
+        !normalizedFile.includes("/node_modules/") &&
+        !isFarmGeneratedOutput(normalizedFile);
       // Any source module can become an async owner's client boundary. Replan
       // React source updates even when the previous plan had no islands, but
-      // keep CSS, generated output and files outside src off this static pass.
+      // keep CSS and generated output off this static pass.
       const tracksAsyncOwnerIslands =
         isReactRenderer(currentFarmConfig?.renderer) && planRouteManager !== undefined;
       // Set once the plan below is rebuilt from this edit, so it is not rebuilt again right after.
@@ -5489,7 +6052,14 @@ if (import.meta.hot) {
           tracksAsyncOwnerIslands)
       ) {
         const routeManager = planRouteManager;
-        if (routeManager) {
+        // An edit inside a client component (its markup, state or handlers) changes no plan, so
+        // React Fast Refresh applies it without the replan; the next replan reads the file again.
+        if (routeManager?.isEditPlanNeutral(file)) {
+          clientPlanCurrent = true;
+        } else if (routeManager) {
+          // Vite reported the change to watchChange first; say it again for a caller that runs
+          // this hook alone, so the replan recomputes every route module that read the file.
+          routeManager.noteSourceChange(file, "update");
           try {
             const previousPlan = JSON.stringify(
               routeManager.generateClientManifest(currentFarmConfig.root),
@@ -5583,6 +6153,20 @@ if (import.meta.hot) {
         }
       }
 
+      // A server component a page or layout renders, such as one imported only by server
+      // modules in islands mode: the browser holds none of its code, so no hot update reached
+      // the open page, which kept the old server output until a manual reload. Run the new code
+      // on the next render and reload the page, as an edit to the page itself does.
+      if (
+        /\.[cm]?[jt]sx?$/.test(normalizedFile) &&
+        !server.environments.client?.moduleGraph.getModulesByFile(normalizedFile)?.size &&
+        invalidateFarmDevDependents(server, file, getFarmRenderedServerModules()).length > 0
+      ) {
+        logUpdate("PAGE", `updated ${path.basename(file)}`);
+        server.ws.send({ type: "full-reload", path: "*" });
+        return [];
+      }
+
       return modules;
     },
   };
@@ -5646,10 +6230,20 @@ function runFarmMiddlewareWithNavigation(
   execute: () => Promise<boolean>,
 ): Promise<boolean> {
   return renderer.runWithRequestContext(middlewareRequest, async () => {
+    // Middleware writes ctx.cookies to the response as it runs.
+    const headersBeforeMiddleware = res.getHeaders();
     try {
       return await execute();
     } catch (error) {
       if (await renderer.respondToNavigationError(req as any, res as any, error)) return true;
+      // As in production, the 500 a throwing middleware fails the request with carries nothing
+      // the failed run set: drop its headers and cookies.
+      if (!res.headersSent) {
+        for (const name of res.getHeaderNames()) res.removeHeader(name);
+        for (const [name, value] of Object.entries(headersBeforeMiddleware)) {
+          if (value !== undefined) res.setHeader(name, value);
+        }
+      }
       throw error;
     }
   });
@@ -6322,7 +6916,8 @@ async function createFarmServerTreePageElement(source, pathname) {
     return await createFarmServerTreeElement(React, source, {
       load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
       ServerHtml: FarmServerPage,
-      key: pathname,
+      // No key: the next page of the same layout updates this one in place, as React Server
+      // Components do, instead of unmounting it and building every node again.
     });
   } catch (error) {
     console.warn('[Farm.js] Could not rebuild the server tree of ' + pathname + '; its server HTML was kept.', error);
@@ -6425,6 +7020,35 @@ function wrapFarmClientRouteGraph(element) {
 // Get manifest from window (inlined by server in HTML)
 // Fallback to empty manifest if not available yet
 const getManifest = () => window.__FARM_MANIFEST__ || { routes: {}, layouts: {}, slots: [], clientEntry: '', sharedAssets: [] };
+
+// A document inlines only the entries its page boots with and names the module that has the
+// whole manifest (manifest.module), as production keeps its route table out of the HTML. Code
+// that matches another route awaits this first; it imports the module once. A failed import
+// keeps the inlined entries, so the router treats other routes as it treats an unknown one.
+let farmManifestLoad = null;
+function ensureFarmManifest() {
+  const inlined = window.__FARM_MANIFEST__;
+  if (!inlined || typeof inlined.module !== 'string') return Promise.resolve();
+  if (!farmManifestLoad) {
+    farmManifestLoad = import(/* @vite-ignore */ new URL(inlined.module, location.origin).href)
+      .then((loaded) => {
+        const manifest = loaded.getManifest();
+        if (window.__FARM_MANIFEST__ !== inlined) return;
+        const { module: _module, ...boot } = inlined;
+        window.__FARM_MANIFEST__ = {
+          ...boot,
+          routes: manifest.routes,
+          layouts: manifest.layouts,
+          slots: manifest.slots,
+        };
+      })
+      .catch((error) => {
+        farmManifestLoad = null;
+        console.warn('[Farm.js] Could not load the route manifest: ' + inlined.module, error);
+      });
+  }
+  return farmManifestLoad;
+}
 
 // ====== CLIENT-SIDE ROUTE MATCHING ======
 // Matches URL to route using manifest (no server request!)
@@ -7435,14 +8059,11 @@ function readActiveLayoutPatterns() {
     .filter(Boolean);
 }
 
+${FARM_NAVIGATION_SCRIPT_SOURCE}
+
 function activateFragmentScripts(root) {
   for (const script of Array.from(root.querySelectorAll?.('script') || [])) {
-    const freshScript = document.createElement('script');
-    for (const attribute of Array.from(script.attributes)) {
-      freshScript.setAttribute(attribute.name, attribute.value);
-    }
-    freshScript.textContent = script.textContent || '';
-    script.replaceWith(freshScript);
+    script.replaceWith(createFarmNavigationScript(script));
   }
 }
 
@@ -7483,7 +8104,13 @@ function getLayoutShell(root, patterns, index, find) {
     : shell.querySelector('#__farm_page__');
   inner?.replaceChildren();
   removeSuspenseContent(shell);
-  shell.querySelectorAll('script').forEach((script) => script.remove());
+  // Each island's props stay, without its id, so new props count as a change.
+  shell.querySelectorAll('script').forEach((script) => {
+    if (script.type !== 'f/props') return script.remove();
+    Array.from(script.attributes).forEach((attribute) => {
+      if (attribute.name !== 'type') script.removeAttribute(attribute.name);
+    });
+  });
   shell.querySelectorAll('f-island').forEach((island) => {
     island.replaceChildren();
     Array.from(island.attributes).forEach((attribute) => island.removeAttribute(attribute.name));
@@ -7491,7 +8118,7 @@ function getLayoutShell(root, patterns, index, find) {
   return shell.innerHTML;
 }
 
-function replaceNavigationBoundary(
+${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceNavigationBoundary(
   container,
   fragment,
   currentPatterns,
@@ -7499,6 +8126,8 @@ function replaceNavigationBoundary(
   refresh = false,
   find = findLayoutBoundary,
 ) {
+  // A refresh keeps the islands still on the page: the ones in streamed Suspense content too.
+  if (refresh) revealFarmStreamedContent(fragment);
   let sharedCount = 0;
   while (
     sharedCount < currentPatterns.length &&
@@ -7528,7 +8157,13 @@ function replaceNavigationBoundary(
     activateFragmentScripts(container);
     return container;
   }
-
+${
+  islandValues
+    ? `
+  // A refresh renders the same layouts again: their fields keep what was typed, and the focus.
+  const fields = refresh ? captureFarmServerFields(currentTarget) : null;`
+    : ""
+}
   ${
     isolatedHydrationEnabled
       ? `${
@@ -7540,7 +8175,7 @@ function replaceNavigationBoundary(
         }disposeFarmIsolatedClientBoundaries(currentTarget);`
       : ""
   }
-  currentTarget.replaceWith(nextTarget);
+  currentTarget.replaceWith(nextTarget);${islandValues ? "\n  if (fields) restoreFarmServerFields(fields, nextTarget);" : ""}
   activateFragmentScripts(nextTarget);
   if (fragmentTreeRoot && fragmentTreeRoot !== nextTarget) fragmentTreeRoot.remove();
 
@@ -7550,7 +8185,17 @@ function replaceNavigationBoundary(
     const support = document.createElement('div');
     support.hidden = true;
     support.dataset.farmFragmentSupport = 'true';
-    support.append(fragment);
+    while (fragment.firstChild) {
+      const node = fragment.firstChild;
+      // React's staged Suspense content stays in the root, where a later flush of a streamed
+      // navigation reveals it; React removes it then.
+      if (node.nodeType === 1 && node.matches('div[hidden][id^="S:"]')) {
+        container.appendChild(node);
+        activateFragmentScripts(node);
+      } else {
+        support.appendChild(node);
+      }
+    }
     document.body.appendChild(support);
     activateFragmentScripts(support);
     setTimeout(() => support.remove(), 0);
@@ -7621,6 +8266,7 @@ async function fetchFarmNavigationDocument(path, context) {
   // A prefetch reads the page whole for the router's cache, and leaves a page that streams alone.
   if (!context.prefetch) farmNavigationStreamGeneration++;
   const url = new URL(path, window.location.href);
+  await ensureFarmManifest();
   const match = farmDocumentNavigationRoute(url.pathname);
   const container = document.getElementById('root');
   if (!match || !container) return null;
@@ -7637,7 +8283,8 @@ async function fetchFarmNavigationDocument(path, context) {
       redirect: 'manual',
       headers: createFarmDeploymentRequestHeaders(deploymentId, {
         Accept: 'text/html',
-        ...(context.prefetch ? {} : { 'F-Stream': 'flush' }),
+        // A refresh arrives whole, like a transition: the islands it keeps are all in it.
+        ...(context.prefetch || context.refresh ? {} : { 'F-Stream': 'flush' }),
         ...getFarmIslandValueHeaders(),
         // A prefetch names its layouts even when it keeps none: that marks it as a navigation,
         // which the server answers without loading.tsx.
@@ -7776,6 +8423,9 @@ async function renderPage(pageData, info) {
     return;
   }
 
+  // Page data carries the route's render plan, which the manifest entry only backs up. Islands
+  // mode also reads which layouts render as server trees (loadLayoutComponents).
+  if (${islandValues ? "true" : "!pageData.renderPlan"}) await ensureFarmManifest();
   const manifestRoute = findRoute(window.location.pathname)?.route;
   const renderPlan = pageData.renderPlan || manifestRoute?.renderPlan;
   const hydrationMode = renderPlan?.hydration;
@@ -8509,6 +9159,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),
+      farmIslandContainersPlugin(config),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(config),
       farmBrandingPlugin,

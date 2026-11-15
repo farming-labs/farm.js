@@ -265,13 +265,15 @@ onFarmEvent((event) => {
 ```
 
 `agent.category` is `agent` for user-triggered fetchers such as ChatGPT-User, Claude-User, and
-Perplexity-User, and `crawler` for indexing and training crawlers such as GPTBot, ClaudeBot, and
-PerplexityBot. The identity is `self-reported`: any client can send these tokens, so use it to
-understand traffic, never to grant access. Farm's own reads, such as llms-full.txt reading each
-page, are not reported.
+Perplexity-User, `crawler` for indexing and training crawlers such as GPTBot, ClaudeBot, and
+PerplexityBot, and `harness` for coding agents such as Claude Code and Codex. The identity is
+`self-reported`: any client can send these tokens, so use it to understand traffic, never to grant
+access. Farm's own reads, such as llms-full.txt reading each page, are not reported.
 
 `classifyFarmAgent(userAgent)` from `@farm.js/core` returns the same identity for any request, for
-example in middleware.
+example in middleware. `classifyFarmClient(request)` also names clients that aren't AI agents, such
+as browsers, search crawlers and scripts, the way [Farm Infra analytics](/docs/infra-analytics#which-client-sent-a-request)
+reports them.
 
 ## Middleware event payloads
 

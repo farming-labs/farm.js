@@ -55,6 +55,24 @@ test("Radix parts composed in a server component open and close", async ({ page 
   expect(errors).toEqual([]);
 });
 
+test("a Radix trigger with asChild gives its props to the server button it wraps", async ({
+  page,
+}) => {
+  const errors = await open(page, "/compat/dialog");
+  // By class: an open modal hides the rest of the page from the accessibility tree.
+  const trigger = page.locator(".as-child-trigger");
+  await expect(trigger).toHaveText("Open as child");
+  await expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+  await expect(trigger).toHaveAttribute("data-state", "closed");
+  await trigger.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("As child title");
+  await expect(trigger).toHaveAttribute("data-state", "open");
+  await page.getByRole("button", { name: "Close as child" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test("a package Toaster in a server component shows a toast a client component raises", async ({
   page,
 }) => {
@@ -249,5 +267,22 @@ test("a cmdk command menu filters its items", async ({ page }) => {
   await page.getByPlaceholder("Search").fill("ban");
   await expect(page.getByRole("option", { name: "Banana" })).toBeVisible();
   await expect(page.getByRole("option", { name: "Apple" })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("a workspace package's server component renders client components of its own dependencies", async ({
+  page,
+  request,
+}) => {
+  // Only @farm-fixtures/workspace-ui depends on @farm-fixtures/widget-kit, as in a pnpm monorepo:
+  // the app's root cannot resolve it.
+  const html = await (await request.get("/compat/workspace-ui")).text();
+  expect(html).toContain("widget panel");
+  expect(html).toContain("widget clicks: 0");
+  const errors = await open(page, "/compat/workspace-ui");
+  const counter = page.getByTestId("widget-counter");
+  await expect(counter).toHaveText("widget clicks: 0");
+  await counter.click();
+  await expect(counter).toHaveText("widget clicks: 1");
   expect(errors).toEqual([]);
 });

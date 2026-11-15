@@ -456,6 +456,28 @@ test("rejects the vercel-edge preset before planning a Vercel deploy", async () 
   }
 });
 
+test("rejects an unknown deploy target before planning a deploy", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-unknown-target-"));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { deploy: { target: 'vercell' } };\n",
+    );
+
+    // With a platform flag the typo was ignored; without one the error blamed a missing target.
+    for (const options of [{ root, vercel: true }, { root }]) {
+      await assert.rejects(createFarmDeployPlan(options), {
+        message:
+          'Unknown deploy target "vercell". Farm\'s deploy targets are "vercel", "cloudflare", "netlify", "node". To build with another Nitro preset, set deploy.preset instead.',
+      });
+    }
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("keeps a custom preset when its configured target matches the flag", async () => {
   let root;
 

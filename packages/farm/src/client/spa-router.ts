@@ -167,11 +167,24 @@ export type FarmNavigationListener = (state: FarmNavigationState) => void;
 const FARM_PAGE_STATE_KEY = "__farmPageState";
 const FARM_INTERCEPT_FROM_KEY = "__farmInterceptFrom";
 const FARM_HISTORY_INDEX_KEY = "__farmHistoryIndex";
+const FARM_HISTORY_KEY = "__farmHistoryKey";
 
 function readHistoryIndex(state: unknown): number | null {
   if (!state || typeof state !== "object") return null;
   const value = (state as Record<string, unknown>)[FARM_HISTORY_INDEX_KEY];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readHistoryKey(state: unknown): string | null {
+  if (!state || typeof state !== "object") return null;
+  const value = (state as Record<string, unknown>)[FARM_HISTORY_KEY];
+  return typeof value === "string" && value.length > 0 && value.length <= 64 ? value : null;
+}
+
+/** A key for a new history entry. The time keeps keys unique across the reloads and documents
+ * that share a tab's sessionStorage. */
+function createHistoryKey(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 const IDLE_NAVIGATION_STATE: FarmNavigationState = {
   state: "idle",
@@ -222,6 +235,7 @@ export class SPARouter {
   private currentHistoryHash = "";
   private currentInterceptFrom: unknown;
   private currentHistoryIndex: number | null = null;
+  private currentHistoryKey: string | null = null;
   private suppressNextPopState = false;
   private navigationSequence = 0;
   private activeNavigation?: {
@@ -251,7 +265,7 @@ export class SPARouter {
       event.preventDefault();
       event.returnValue = "";
     }
-    this.saveScrollPosition(window.location.pathname + window.location.search);
+    this.saveScrollPosition(this.currentScrollKey());
   };
 
   constructor(options: RouterOptions = {}) {
@@ -277,22 +291,28 @@ export class SPARouter {
       this.currentHistoryHash = window.location.hash;
       this.currentInterceptFrom = window.history.state?.[FARM_INTERCEPT_FROM_KEY];
       const existingIndex = readHistoryIndex(window.history.state);
-      if (existingIndex == null) {
+      const existingKey = readHistoryKey(window.history.state);
+      if (existingIndex == null || existingKey == null) {
+        const historyKey = existingKey ?? createHistoryKey();
         try {
           window.history.replaceState(
             {
               ...((window.history.state as object | null) ?? {}),
-              [FARM_HISTORY_INDEX_KEY]: 0,
+              [FARM_HISTORY_INDEX_KEY]: existingIndex ?? 0,
+              [FARM_HISTORY_KEY]: historyKey,
             },
             "",
             window.location.href,
           );
-          this.currentHistoryIndex = 0;
+          this.currentHistoryIndex = existingIndex ?? 0;
+          this.currentHistoryKey = historyKey;
         } catch {
-          this.currentHistoryIndex = null;
+          this.currentHistoryIndex = existingIndex;
+          this.currentHistoryKey = existingKey;
         }
       } else {
         this.currentHistoryIndex = existingIndex;
+        this.currentHistoryKey = existingKey;
       }
     }
   }
@@ -410,7 +430,7 @@ export class SPARouter {
 
       // Save current scroll position
       if (this.options.scrollRestoration) {
-        this.saveScrollPosition(window.location.pathname + window.location.search);
+        this.saveScrollPosition(this.currentScrollKey());
       }
     }
 
@@ -712,7 +732,7 @@ export class SPARouter {
 
   registerScrollElement(key: string, element: HTMLElement): () => void {
     this.scrollElements.set(key, element);
-    this.restoreScrollElement(window.location.pathname + window.location.search, key, element);
+    this.restoreScrollElement(this.currentScrollKey(), key, element);
     return () => {
       if (this.scrollElements.get(key) === element) {
         this.scrollElements.delete(key);
@@ -764,12 +784,15 @@ export class SPARouter {
     if (nextHistoryIndex != null) {
       historyState[FARM_HISTORY_INDEX_KEY] = nextHistoryIndex;
     }
+    const historyKey = (options.replace && readHistoryKey(historyState)) || createHistoryKey();
+    historyState[FARM_HISTORY_KEY] = historyKey;
     if (options.replace) {
       window.history.replaceState(historyState, "", historyPath);
     } else {
       window.history.pushState(historyState, "", historyPath);
     }
     this.currentHistoryIndex = nextHistoryIndex;
+    this.currentHistoryKey = historyKey;
     const resolvedHistoryUrl = resolveFarmNavigationURL(historyPath, window.location.href);
     this.currentHistoryPath = resolvedHistoryUrl.pathname + resolvedHistoryUrl.search;
     this.currentHistoryHash = resolvedHistoryUrl.hash;
@@ -794,9 +817,9 @@ export class SPARouter {
         window.scrollTo(0, 0);
       }
     } else if (this.options.scrollRestoration) {
-      const restorePath = this.currentHistoryPath ?? options.fullPath;
-      this.restoreWindowScroll(restorePath);
-      this.restoreScrollElements(restorePath);
+      const restoreKey = this.currentScrollKey();
+      this.restoreWindowScroll(restoreKey);
+      this.restoreScrollElements(restoreKey);
     }
   }
 
@@ -1019,6 +1042,9 @@ export class SPARouter {
       const restoredState: Record<string, unknown> = {
         path: from,
       };
+      if (this.currentHistoryKey != null) {
+        restoredState[FARM_HISTORY_KEY] = this.currentHistoryKey;
+      }
       if (this.currentHistoryIndex != null && eventIndex != null) {
         restoredState[FARM_HISTORY_INDEX_KEY] = eventIndex + 1;
         this.currentHistoryIndex = eventIndex + 1;
@@ -1060,6 +1086,7 @@ export class SPARouter {
       this.cancelActiveNavigation();
       this.currentHistoryHash = window.location.hash;
       this.currentHistoryIndex = readHistoryIndex(event.state);
+      this.currentHistoryKey = readHistoryKey(event.state);
       return;
     }
 
@@ -1074,10 +1101,17 @@ export class SPARouter {
       return;
     }
 
+    // Save the entry still on screen before tracking the destination.
+    if (this.options.scrollRestoration) {
+      this.saveScrollPosition(this.currentScrollKey());
+    }
+
     this.currentHistoryPath = path;
     this.currentHistoryHash = window.location.hash;
     this.currentInterceptFrom = event.state?.[FARM_INTERCEPT_FROM_KEY];
     this.currentHistoryIndex = readHistoryIndex(event.state);
+    this.currentHistoryKey = readHistoryKey(event.state);
+    const destinationScrollKey = this.currentScrollKey();
 
     const navigation = this.startNavigation({
       from,
@@ -1127,19 +1161,18 @@ export class SPARouter {
       // restored regardless of whether a fragment is present, even when the
       // anchor resolves, so a persistent-layout scroll element is not left at
       // the prior route's offset on a hash-destination popstate.
-      const destinationPath = window.location.pathname + window.location.search;
       if (window.location.hash) {
         const target = getHashTargetElement(window.location.hash);
         if (target) {
           target.scrollIntoView();
         } else if (this.options.scrollRestoration) {
-          this.restoreWindowScroll(destinationPath);
+          this.restoreWindowScroll(destinationScrollKey);
         }
       } else if (this.options.scrollRestoration) {
-        this.restoreWindowScroll(destinationPath);
+        this.restoreWindowScroll(destinationScrollKey);
       }
       if (this.options.scrollRestoration) {
-        this.restoreScrollElements(destinationPath);
+        this.restoreScrollElements(destinationScrollKey);
       }
 
       if (clientNavigation) {
@@ -1293,6 +1326,9 @@ export class SPARouter {
       unknown
     >;
 
+    // A push is a new entry; createHistoryState copied the current entry's key into it.
+    const historyKey = (action === "replace" && readHistoryKey(nextState)) || createHistoryKey();
+    nextState[FARM_HISTORY_KEY] = historyKey;
     if (action === "replace") {
       window.history.replaceState(nextState, "", url);
     } else {
@@ -1303,6 +1339,7 @@ export class SPARouter {
       this.currentHistoryIndex =
         this.currentHistoryIndex == null ? null : this.currentHistoryIndex + 1;
     }
+    this.currentHistoryKey = historyKey;
     this.currentHistoryPath = nextPath;
     this.currentHistoryHash = parsedUrl.hash;
     this.currentInterceptFrom = nextState[FARM_INTERCEPT_FROM_KEY];
@@ -1311,17 +1348,29 @@ export class SPARouter {
   }
 
   /**
-   * Save scroll position for a path
+   * The key the history entry on screen saves its scroll positions under: its history key, so
+   * the same URL twice in history keeps two positions, or its path for an entry Farm did not write.
    */
-  private saveScrollPosition(path: string): void {
+  private currentScrollKey(): string {
+    return (
+      this.currentHistoryKey ??
+      this.currentHistoryPath ??
+      window.location.pathname + window.location.search
+    );
+  }
+
+  /**
+   * Save the window and registered element scroll positions under a scroll key.
+   */
+  private saveScrollPosition(scrollKey: string): void {
     try {
       sessionStorage.setItem(
-        `farm-scroll-${path}`,
+        `farm-scroll-${scrollKey}`,
         JSON.stringify({ x: window.scrollX, y: window.scrollY }),
       );
       for (const [key, element] of this.scrollElements) {
         sessionStorage.setItem(
-          getScrollElementStorageKey(path, key),
+          getScrollElementStorageKey(scrollKey, key),
           JSON.stringify({ x: element.scrollLeft, y: element.scrollTop }),
         );
       }
@@ -1331,11 +1380,11 @@ export class SPARouter {
   }
 
   /**
-   * Restore the saved window scroll position for a path.
+   * Restore the saved window scroll position for a scroll key.
    */
-  private restoreWindowScroll(path: string): void {
+  private restoreWindowScroll(scrollKey: string): void {
     try {
-      const saved = sessionStorage.getItem(`farm-scroll-${path}`);
+      const saved = sessionStorage.getItem(`farm-scroll-${scrollKey}`);
       if (saved) {
         const { x, y } = JSON.parse(saved);
         setTimeout(() => window.scrollTo(x, y), 0);
@@ -1350,19 +1399,19 @@ export class SPARouter {
    * are hash-stripped (see getScrollElementStorageKey), so this runs regardless
    * of whether the destination URL carries a fragment.
    */
-  private restoreScrollElements(path: string): void {
+  private restoreScrollElements(scrollKey: string): void {
     try {
       for (const [key, element] of this.scrollElements) {
-        this.restoreScrollElement(path, key, element);
+        this.restoreScrollElement(scrollKey, key, element);
       }
     } catch {
       // Ignore storage errors
     }
   }
 
-  private restoreScrollElement(path: string, key: string, element: HTMLElement): void {
+  private restoreScrollElement(scrollKey: string, key: string, element: HTMLElement): void {
     try {
-      const saved = sessionStorage.getItem(getScrollElementStorageKey(path, key));
+      const saved = sessionStorage.getItem(getScrollElementStorageKey(scrollKey, key));
       if (!saved) return;
       const { x, y } = JSON.parse(saved);
       setTimeout(() => {
@@ -1505,6 +1554,6 @@ function createNavigationLocation(url: URL): FarmNavigationLocation {
   };
 }
 
-function getScrollElementStorageKey(path: string, key: string): string {
-  return `farm-scroll-${path}:${key}`;
+function getScrollElementStorageKey(scrollKey: string, key: string): string {
+  return `farm-scroll-${scrollKey}:${key}`;
 }

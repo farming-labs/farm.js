@@ -7,7 +7,9 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
+import { createFarmRouter } from "../router";
 import {
+  generateClientPageDirectorySource,
   generateConfiguredResponseHeadersRuntimeSource,
   generateRedirectInterpolationSource,
   generateRuntimePathMatcherSource,
@@ -20,6 +22,19 @@ import {
   resolveConfigRoutePathname,
 } from "../plugins/route-pattern";
 import { resolveFarmI18nConfig } from "../i18n/config";
+
+// The history key helpers the router properties call, taken from the generated runtime.
+const HISTORY_KEY_HELPER_NAMES = [
+  "readHistoryKey",
+  "createHistoryKey",
+  "historyScrollKey",
+  "FARM_HISTORY_KEY",
+];
+function readHistoryKeyHelpers(): unknown[] {
+  return new Function(
+    `${generateUniversalRouterStateRuntime()}; return [${HISTORY_KEY_HELPER_NAMES.join(", ")}];`,
+  )();
+}
 
 describe("generateConfiguredResponseHeadersRuntimeSource", () => {
   it("preserves handler and configured Set-Cookie fields separately", () => {
@@ -323,6 +338,7 @@ describe("generateUniversalRouterStateProperties", () => {
       "FARM_HISTORY_INDEX_KEY",
       "URL",
       "CustomEvent",
+      ...HISTORY_KEY_HELPER_NAMES,
       `return ({${runtime}});`,
     );
     const createHistoryState = (path: string, pageState: unknown, currentState?: unknown) => ({
@@ -338,6 +354,7 @@ describe("generateUniversalRouterStateProperties", () => {
       "__farmHistoryIndex",
       URL,
       Event,
+      ...readHistoryKeyHelpers(),
     );
     router.currentHistoryIndex = 2;
 
@@ -596,6 +613,7 @@ describe("generateUniversalRouterStateProperties", () => {
       "FARM_HISTORY_INDEX_KEY",
       "URL",
       "CustomEvent",
+      ...HISTORY_KEY_HELPER_NAMES,
       `return ({${runtime}});`,
     );
     const createHistoryState = (path: string, pageState: unknown, currentState?: unknown) => ({
@@ -619,6 +637,7 @@ describe("generateUniversalRouterStateProperties", () => {
       "__farmHistoryIndex",
       URL,
       Event,
+      ...readHistoryKeyHelpers(),
     );
 
     router.initializeHistory();
@@ -647,7 +666,7 @@ describe("generateUniversalRouterStateProperties", () => {
 
   it("restores registered scroll elements with the current query string", () => {
     expect(runtime).toContain(
-      "this.restoreScrollElement(window.location.pathname + window.location.search, key, element)",
+      "historyScrollKey(this.currentHistoryState, window.location.pathname + window.location.search)",
     );
     expect(runtime).not.toContain(
       "this.restoreScrollElement(window.location.pathname, key, element)",
@@ -1029,6 +1048,23 @@ describe("generateRedirectInterpolationSource", () => {
         pathname: "/e/foo",
         expected: "/e/foo-foo",
       },
+      // A param name that starts another param's name is read whole, in either order.
+      {
+        source: "/u/:id/:idx",
+        destination: "/v/:idx/:id",
+        pathname: "/u/A/B",
+        expected: "/v/B/A",
+      },
+      {
+        source: "/blog/:slug/:s",
+        destination: "/posts/:s/:slug",
+        pathname: "/blog/hello/2",
+        expected: "/posts/2/hello",
+      },
+      // An unknown name stays as written instead of losing its start to a shorter param.
+      { source: "/k/:id", destination: "/k/:idx/:id", pathname: "/k/7", expected: "/k/:idx/7" },
+      // A value that itself looks like a reference is injected once, never read again.
+      { source: "/q/:a/:b", destination: "/q/:b/:a", pathname: "/q/:b/x", expected: "/q/x/%3Ab" },
     ];
 
   for (const { source, destination, pathname, expected } of cases) {
@@ -1054,5 +1090,41 @@ describe("toBakedMarkdownSourcePath", () => {
     expect(toBakedMarkdownSourcePath(root, path.resolve("/etc/secrets/page.md"))).toBe("page.md");
     expect(toBakedMarkdownSourcePath(root, "src/app/page.md")).toBe("src/app/page.md");
     expect(toBakedMarkdownSourcePath(root, undefined)).toBe("");
+  });
+});
+
+describe("generateClientPageDirectorySource", () => {
+  type Route = { pattern: string; directory?: string; docs?: true };
+  const pageDirectory = (routes: Route[]) => {
+    const matcher = (entries: Route[]) =>
+      createFarmRouter(entries.map((route) => ({ path: route.pattern, meta: route })));
+    return new Function(
+      "clientRouteMatcher",
+      "clientPageRouteMatcher",
+      "getFarmRoutePathname",
+      `${generateClientPageDirectorySource()}; return getFarmPageDirectory;`,
+    )(
+      matcher(routes),
+      matcher(routes.filter((route) => !route.docs)),
+      (pathname: string) => pathname,
+    ) as (pathname: string) => string | null;
+  };
+
+  it("takes a docs path's directory from the app page there, as the server does", () => {
+    const docs: Route[] = [
+      { pattern: "/docs", docs: true },
+      { pattern: "/docs/[...slug]", docs: true },
+    ];
+    const getFarmPageDirectory = pageDirectory([
+      ...docs,
+      { pattern: "/docs/[[...slug]]", directory: "/(docs)/docs/[[...slug]]" },
+      { pattern: "/blog", directory: "/(home)/blog" },
+    ]);
+    expect(getFarmPageDirectory("/docs/installation")).toBe("/(docs)/docs/[[...slug]]");
+    expect(getFarmPageDirectory("/docs")).toBe("/(docs)/docs/[[...slug]]");
+    expect(getFarmPageDirectory("/blog")).toBe("/(home)/blog");
+    expect(getFarmPageDirectory("/missing")).toBeNull();
+    // Docs the app has no page for sit in no route group.
+    expect(pageDirectory(docs)("/docs/installation")).toBeNull();
   });
 });

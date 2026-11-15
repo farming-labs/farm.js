@@ -1,16 +1,14 @@
 // @vitest-environment node
 
-import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import { request as httpRequest } from "node:http";
-import { connect } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../config";
 import { buildFarmRsc } from "../rsc-pipeline";
-import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer, type ProductionServer } from "./production-server";
 
 // A production build of an app on the RSC pipeline (`experimental.serverComponents`), served by its
 // Nitro node-server output: the mobile client a build adds for a `mobile` block, the documents a
@@ -20,11 +18,11 @@ import { getAvailablePort } from "./dev-server-port";
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const exampleModules = path.resolve(packageRoot, "../../examples/server-components/node_modules");
 const roots = new Set<string>();
-const children = new Set<ChildProcess>();
+const servers = new Set<ProductionServer>();
 
 afterEach(async () => {
-  for (const child of children) child.kill("SIGKILL");
-  children.clear();
+  await Promise.all([...servers].map((server) => server.stop()));
+  servers.clear();
   await Promise.all(
     [...roots].map((root) => fs.rm(root, { recursive: true, force: true, maxRetries: 10 })),
   );
@@ -112,32 +110,12 @@ async function buildApp(root: string) {
 }
 
 async function startServer(root: string): Promise<number> {
-  const port = await getAvailablePort();
-  const child = spawn(process.execPath, [path.join(root, OUTPUT, "server", "index.mjs")], {
-    cwd: root,
-    env: { ...process.env, NODE_ENV: "production", PORT: String(port), HOST: "127.0.0.1" },
-    stdio: ["ignore", "pipe", "pipe"],
+  // srvx prints the listen line the helper waits for only while TEST is unset; vitest sets it.
+  const server = await startProductionServer(path.join(root, OUTPUT, "server"), {
+    env: { NODE_ENV: "production", TEST: "" },
   });
-  children.add(child);
-  let output = "";
-  child.stdout!.on("data", (chunk: Buffer) => (output += chunk.toString()));
-  child.stderr!.on("data", (chunk: Buffer) => (output += chunk.toString()));
-  // Ready once the port accepts a connection. The server prints no "Listening on" line under
-  // vitest, whose TEST variable the child inherits and which silences it.
-  const deadline = Date.now() + 30_000;
-  while (child.exitCode === null && Date.now() < deadline) {
-    const connected = await new Promise<boolean>((resolve) => {
-      const socket = connect(port, "127.0.0.1");
-      socket.once("connect", () => {
-        socket.destroy();
-        resolve(true);
-      });
-      socket.once("error", () => resolve(false));
-    });
-    if (connected) return port;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`server did not start (exit ${child.exitCode}): ${output}`);
+  servers.add(server);
+  return server.port;
 }
 
 interface Reply {

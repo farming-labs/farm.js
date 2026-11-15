@@ -169,6 +169,33 @@ describe("Preact renderer", () => {
     expect(outcome).toBe("shell error: page failed");
   });
 
+  it("waits for a suspended lazy component in a buffered render", async () => {
+    // Farm renders the not-found and error documents with renderToString, layouts included. A
+    // layout holding a lazy component made Preact's synchronous renderer throw.
+    const Nav = lazy(
+      () =>
+        new Promise<{ default: () => unknown }>((resolve) =>
+          setTimeout(() => resolve({ default: () => createElement("nav", null, "lazy nav") }), 5),
+        ),
+    );
+    const html = await serverRuntime.renderToString(
+      createElement(
+        "body",
+        null,
+        createElement(
+          Suspense,
+          { fallback: createElement("p", null, "waiting") },
+          createElement(Nav, null),
+        ),
+        createElement("main", null, "not found"),
+      ),
+    );
+
+    expect(html).toContain("<nav>lazy nav</nav>");
+    expect(html).toContain("<main>not found</main>");
+    expect(html).not.toContain("waiting");
+  });
+
   it("does not require a renderer-specific hydration bootstrap", () => {
     expect(generateHydrationScript()).toBe("");
   });

@@ -1,3 +1,4 @@
+import { resolveConfig } from "../config";
 import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -303,6 +304,62 @@ describe("Farm locale request signals", () => {
         config,
       ).redirect,
     ).toBeUndefined();
+  });
+
+  it("answers site-level agent files where they are asked for, in the default locale", () => {
+    const headers = { "accept-language": "am", cookie: "farm_locale=am" };
+    const files = [
+      "/robots.txt",
+      "/sitemap.xml",
+      "/blog/sitemap.xml",
+      "/manifest.webmanifest",
+      "/llms.txt",
+      "/llms-full.txt",
+      "/.well-known/farmjs.json",
+      "/.well-known/ai-catalog.json",
+      "/mcp/server-card",
+    ];
+    for (const routing of ["prefix-always", "prefix-except-default"] as const) {
+      for (const basePath of ["/", "/console"]) {
+        const localized = resolveFarmI18nConfig(
+          { locales: ["en", "am"], defaultLocale: "en", routing },
+          { basePath },
+        );
+        const prefix = basePath === "/" ? "" : basePath;
+        for (const file of files) {
+          const resolution = resolveFarmLocaleRequest(
+            new Request(`https://farm.test${prefix}${file}`, { headers }),
+            localized,
+          );
+          expect({ routing, file, ...resolution }).toEqual({
+            routing,
+            file,
+            locale: "en",
+            source: "default",
+            pathname: file,
+            persist: false,
+          });
+          expect(getFarmLocaleVaryHeaders(localized, resolution)).toEqual([]);
+        }
+        // Crawlers read robots.txt at the origin root, outside the basePath too.
+        expect(
+          resolveFarmLocaleRequest(new Request("https://farm.test/robots.txt"), localized).redirect,
+        ).toBeUndefined();
+        // A locale URL still selects its locale, and pages still redirect.
+        expect(
+          resolveFarmLocaleRequest(
+            new Request(`https://farm.test${prefix}/am/llms.txt`),
+            localized,
+          ),
+        ).toMatchObject({ locale: "am", source: "url" });
+        expect(
+          resolveFarmLocaleRequest(
+            new Request(`https://farm.test${prefix}/about`, { headers }),
+            localized,
+          ).redirect,
+        ).toBe(`${prefix}/am/about`);
+      }
+    }
   });
 
   it("varies signal-resolved responses while keeping URL locales cacheable", () => {
@@ -720,6 +777,41 @@ describe("Farm i18n with trailingSlash", () => {
     }
     // trailingSlash: true settles on the slashed locale URL.
     expect(pathname).toBe("/en/about/");
+  });
+
+  it("redirects a detected locale straight to its slashed URL, in one hop", () => {
+    const slashed = resolveFarmI18nConfig(
+      { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-except-default" },
+      { basePath: "/app", trailingSlash: true },
+    );
+    const resolution = resolveFarmLocaleRequest(
+      new Request("https://farm.test/app/about/?ref=1", { headers: { "accept-language": "fr" } }),
+      slashed,
+    );
+    expect(resolution.redirect).toBe("/app/fr/about/?ref=1");
+    // No trailing-slash redirect is left to make after it.
+    expect(
+      resolveFarmTrailingSlashRedirect(new URL(`https://farm.test${resolution.redirect}`), true),
+    ).toBeNull();
+    // Without trailingSlash, the redirect stays slash-free.
+    const plain = resolveFarmI18nConfig(
+      { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-except-default" },
+      { basePath: "/app" },
+    );
+    expect(
+      resolveFarmLocaleRequest(
+        new Request("https://farm.test/app/about", { headers: { "accept-language": "fr" } }),
+        plain,
+      ).redirect,
+    ).toBe("/app/fr/about");
+  });
+
+  it("carries the app's trailingSlash into the resolved i18n config", async () => {
+    const resolved = await resolveConfig(
+      { root: "/test", trailingSlash: true, i18n: { locales: ["en", "fr"], defaultLocale: "en" } },
+      "production",
+    );
+    expect(resolved.i18n.trailingSlash).toBe(true);
   });
 
   it("still canonicalizes a non-trailing-slash locale difference", () => {

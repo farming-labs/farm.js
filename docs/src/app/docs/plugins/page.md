@@ -257,6 +257,9 @@ inside the current request; they do not create another plugin request lifecycle.
 | `waitUntil()` | Runtime request hooks                   | Registers non-blocking work with hosts that support background tasks.   |
 | `durationMs`  | After, error                            | Elapsed request time at that lifecycle phase.                           |
 
+An app metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, or a metadata image)
+is an `asset` request whose `route.pattern` is the metadata route's, in development and production.
+
 ### Router hooks
 
 | Hook                | Purpose                                                                   |
@@ -276,6 +279,21 @@ Router hooks are useful for diagnostics, conventions, manifests, and instrumenta
 | `render.html`   | Inspect or transform the completed HTML document. | Replacement HTML or nothing. |
 
 Adding `render.html` requires Farm to buffer the final document. Prefer `render.before` when observation is enough and preserving streaming matters.
+
+Render hooks run for every page request, in development and production: a request a page route
+matches, or a `GET` or `HEAD` request that no API route, integration route, docs page, or app
+metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, a metadata image) answers. That includes a
+config redirect, a route-file `redirect()` from `defineRoutes`, a config rewrite (once, for the URL
+as requested, not again for its destination), the generated `llms.txt`, `sitemap.xml`, and
+`robots.txt`, the app manifest, a Markdown mirror (and the page it reads), and the not-found page.
+`render.before` runs before Farm resolves the request, so the response may be a redirect or a text
+file rather than a rendered page. Its `routePattern` and `params` describe the page route the
+requested URL matches; `routePattern` is `null` when none does, so check it before doing page-only
+work. The router and render hooks describe the requested URL even when a `runtime.before` hook
+returns a replacement `Request`; Farm routes and renders the replacement, and `runtime.after` sees
+it. Render hooks do not run when a `runtime.before` hook answers the request, and `render.html` sees
+only HTML responses. The React Server Components pipeline does not run render hooks yet; see
+[Server rendering](/docs/server-rendering#react-server-components).
 
 ### Build hooks
 
@@ -336,7 +354,12 @@ For each application request, Farm runs the runtime hooks in this order:
    `runtime.after` still sees that response. A throw from `runtime.context`, `runtime.before`, or
    `runtime.after` skips the remaining `runtime.after` hooks and fails the request with a `500`:
    the JSON body `{"error":"Internal Server Error"}` under the API base path or in a
-   `renderer: false` app, and a plain-text `Internal Server Error` for a page.
+   `renderer: false` app, and a plain-text `Internal Server Error` for a page. That `500` is a
+   new response: it carries your `headers()` config, but no header or cookie that middleware or
+   the route had set. In production, a `500` from a hook that runs after the app answered (such
+   as `runtime.after` or an HTML transform) is sent with `Cache-Control: private, no-store` when
+   middleware or a `runtime.before` hook let the request through, as the response it replaces
+   would be.
 
 This order is the same in `farm dev` and in a production build. A thrown route error reaches the
 flat `onError` hook once, with `phase: "runtime"` and `meta.kind` naming the request kind (such as
@@ -350,7 +373,7 @@ through is sent with `Cache-Control: private, no-store` instead of a shared poli
 as logging or analytics, declares `runtime: { cache: "public", before() {} }` to keep the app's
 shared caching.
 
-When a configured rewrite sends the request to an internal destination, every `runtime.before` runs again with the destination `Request` and the same `ctx`, so a guard on `/admin/*` also covers a rewrite that lands there. `runtime.context` and `runtime.after` run once per request.
+When a configured rewrite sends the request to an internal destination, every `runtime.before` runs again with the destination `Request` and the same `ctx`, so a guard on `/admin/*` also covers a rewrite that lands there. `runtime.context` and `runtime.after` run once per request. Only that second `runtime.before` gets the destination's `route`; every other runtime hook gets the `route` of the URL as requested.
 
 Runtime hooks don't run for files in `public/`, which are served as static assets first; serve a protected file from a route instead. Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
 
@@ -451,6 +474,36 @@ compressed payloads are skipped, so images, video, audio, archives, PDFs, Office
 identity `Content-Length` and strong `ETag` intact. A response with no `Content-Type` is also left
 alone, since its bytes may already be compressed. Set a `Content-Type` when a route returns text
 that should be compressed.
+
+### Request logging
+
+`createLoggerPlugin` writes one line per request through the portable `runtime.after` hook, so it behaves the same in development, Node output, and edge runtimes. The development server already prints its own `[FARM]` line for every request, so Farm does not register the logger for you; add it when you want structured output, redaction, or sampling.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { createLoggerPlugin } from "@farm.js/core/plugin/server";
+
+export default defineConfig({
+  plugins: [
+    createLoggerPlugin({
+      headers: ["user-agent", "x-request-id"],
+      redact: ["x-session"],
+      sample: 0.25,
+    }),
+  ],
+});
+```
+
+| Option    | Default                           | Description                                                                                                                                               |
+| --------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`  | `"text"` in dev, `"json"` in prod | `text` prints `GET /about 200 12ms`; `json` prints one `{ time, level, method, path, status, durationMs, headers? }` object per line for log collectors.  |
+| `headers` | none                              | Request headers to include in each entry. Nothing is logged from the request unless it is listed here.                                                    |
+| `redact`  | built-in list                     | Header and query-string names, matched case-insensitively, whose values are logged as `[redacted]`. These add to the built-in list below.                 |
+| `sample`  | `1`                               | Fraction of requests to log, from `0` to `1`. Responses with a `5xx` status are always logged, so sampling thins routine traffic without hiding failures. |
+
+The built-in redaction list is `authorization`, `cookie`, `set-cookie`, `proxy-authorization`, `x-api-key`, `api_key`, `apikey`, `access_token`, `token`, `password`, and `secret`. It applies to query-string values in the logged path and to any header you select with `headers`; repeated keys and the original encoding of other query values are preserved. `4xx` responses log at level `warn` and `5xx` responses at `error` (written to `stderr`); everything else is `info`.
+
+The `beforeRequest` and `afterResponse` callback options still work as deprecated aliases for the Node-only flat hooks. New code should write a plugin with `runtime.before` or `runtime.after` instead.
 
 ## Legacy hooks
 

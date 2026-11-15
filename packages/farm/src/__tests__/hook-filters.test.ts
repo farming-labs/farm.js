@@ -84,6 +84,7 @@ describe("Farm plugin hook filters", () => {
       ...builtinModules,
       ...builtinModules.map((name) => `node:${name}`),
       "node:sqlite",
+      "farm:resolve-from:..%2F..%2Fpackages%2Fui:@radix-ui/react-dialog",
     ];
     for (const id of handled) expect(passes(resolve.id, id), id).toBe(true);
     for (const id of ["react", "./page.tsx", "@farm.js/core", "fsx", "node-fetch"]) {

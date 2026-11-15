@@ -1,6 +1,18 @@
 import type { FarmMarkdownResolvedConfig } from "@farm.js/core/markdown";
-import type { ResolvedFarmLlmsTxtConfig } from "@farm.js/core/internal/production-runtime";
-import type { ResolvedFarmI18nConfig } from "@farm.js/core/i18n";
+import type {
+  ResolvedFarmAgentCrawlers,
+  ResolvedFarmAgentSitemap,
+  ResolvedFarmLlmsTxtConfig,
+} from "@farm.js/core/internal/production-runtime";
+import type { FarmI18nCatalogs, ResolvedFarmI18nConfig } from "@farm.js/core/i18n";
+import type { createConfigRedirectMatcher } from "@farm.js/core/internal/production-runtime";
+import type { createConfigHeadersMatcher } from "@farm.js/core/internal/production-runtime";
+import type { createConfigRewriteMatcher } from "@farm.js/core/internal/production-runtime";
+
+/** Core's config `redirects()`, `rewrites()` and `headers()` entries. */
+export type RedirectConfig = Parameters<typeof createConfigRedirectMatcher>[0][number];
+export type RewriteConfig = Parameters<typeof createConfigRewriteMatcher>[0][number];
+export type HeaderConfig = Parameters<typeof createConfigHeadersMatcher>[0][number];
 import type {
   FarmServerActionsConfig,
   ResolvedFarmServerActionsConfig,
@@ -69,7 +81,23 @@ export interface FarmRscPluginOptions {
    * and its `src/client.ts`, as core generates it for every entry.
    */
   clientPlugins?: FarmRscClientPlugins;
+
+  /**
+   * @internal Set by `farm build` when some of the app's Farm `plugins` have server hooks: for
+   * each config file, by absolute path, where those entries sit in its `plugins` array. The
+   * server loads them, so their factories run there.
+   */
+  serverPlugins?: FarmRscServerPlugins;
+
+  /**
+   * @internal Set by `farm build`: the Nitro preset it deploys with. A Cloudflare preset builds
+   * the RSC and SSR bundles with their packages included, since Workers have no node_modules.
+   */
+  preset?: string;
 }
+
+/** @internal See `FarmRscPluginOptions.serverPlugins`. */
+export type FarmRscServerPlugins = Record<string, { indexes: number[]; count: number }>;
 
 /** @internal See `FarmRscPluginOptions.mobileClient`. */
 export type FarmRscMobileClient = "entry" | "inline";
@@ -97,6 +125,12 @@ export interface EntryContext {
 
   /** Base URL path, e.g. '/' */
   basePath: string;
+
+  /**
+   * Core's `trailingSlash`: pages answer at `/about/` instead of `/about`, and `<Link>` renders
+   * that URL. Either way a page's other spelling redirects (308) to it.
+   */
+  trailingSlash?: boolean;
 
   /** Resolved same-origin mount for canonical /api routes. */
   apiBasePath?: string;
@@ -127,6 +161,12 @@ export interface EntryContext {
   pageRenderingDirectives?: Record<string, unknown>;
 
   /**
+   * Whether the server runs in Cloudflare Workers, where SSR renders to web streams because there
+   * are no Node streams.
+   */
+  workers?: boolean;
+
+  /**
    * The resolved `images` config, its public half for `<Image>`, and the optimizer the server
    * mounts at `images.path` (`none` when Image keeps original URLs).
    */
@@ -154,6 +194,23 @@ export interface EntryContext {
   i18n?: ResolvedFarmI18nConfig;
 
   /**
+   * The i18n catalogs a build inlines, read and validated as core's build reads them, so the
+   * server needs no catalog files. Development reads them from disk instead.
+   */
+  i18nCatalogs?: FarmI18nCatalogs;
+
+  /**
+   * The config `redirects()`, `rewrites()` and `headers()`, resolved once as core resolves them.
+   * Set only when one of them has an entry, and applied by the production server; the dev server
+   * applies them ahead of Vite and the API routes, as core's does.
+   */
+  configRoutes?: {
+    redirects: RedirectConfig[];
+    rewrites: RewriteConfig[];
+    headers: HeaderConfig[];
+  };
+
+  /**
    * Server settings the request path needs. `trustProxy` decides whether
    * forwarded headers are believed when middleware reads the client address.
    */
@@ -169,11 +226,37 @@ export interface EntryContext {
   /** Modules that export `{ mcp }`, read from the app's config files, in layer order. */
   mcpConfigPaths?: string[];
 
+  /** Modules that export `{ plugins }`, read from the app's config files, in layer order. */
+  pluginsConfigPaths?: string[];
+
   /** Resolved Markdown mirror settings (core's `md`): `.md` pages and `Accept: text/markdown`. */
   markdown?: FarmMarkdownResolvedConfig;
 
   /** Resolved `agent.llmsTxt`: the generated `/llms.txt` and `/llms-full.txt`. */
   llmsTxt?: ResolvedFarmLlmsTxtConfig;
+
+  /** Resolved `agent.sitemap`: the generated `/sitemap.xml`. */
+  sitemap?: ResolvedFarmAgentSitemap;
+
+  /** Route-relative page keys to their file's last change (ISO), the sitemap's lastmod. */
+  pageLastModified?: Record<string, string>;
+
+  /** Resolved `agent.crawlers`: the generated `/robots.txt`, set only when it is on. */
+  crawlers?: ResolvedFarmAgentCrawlers;
+
+  /**
+   * Serve `sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts` and `llms-full.ts` route files, as
+   * core does: set when the app has one, and always in development so a new file is picked up.
+   */
+  appMetadataRoutes?: boolean;
+
+  /**
+   * Serve `opengraph-image` and `twitter-image` files (static images and generated modules) and
+   * add the nearest one to the page head, as core does. `static` covers image files (`.png`,
+   * `.jpg`, `.jpeg`, `.gif`, `.webp`) and `generated` modules rendered with `@vercel/og`; each is
+   * set when the app has one, and both always in development so a new file is picked up.
+   */
+  metadataImages?: { static: boolean; generated: boolean };
 
   /** Whether debug mode is enabled */
   debug: boolean;
@@ -215,11 +298,13 @@ export interface RscPayload {
   /** Content for div#root only (for client hydration to avoid double/repeated content) */
   rootContent?: React.ReactElement;
 
-  /** Serializable document metadata used during client-side navigation. */
+  /** The document title, which client-side navigation sets. */
   metadata?: {
     title?: string;
-    description?: string;
   };
+
+  /** The head tags rendered from the route's metadata, which client-side navigation swaps in. */
+  metadataHead?: string;
 
   /** Server action return value (if action was executed) */
   returnValue?: {

@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -9,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
-import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots = new Set<string>();
@@ -100,33 +99,11 @@ async function withProductionServer(
   root: string,
   run: (port: number) => Promise<void>,
 ): Promise<void> {
-  const serverDir = path.join(root, ".farm", ".output", "server");
-  const port = await getAvailablePort();
-  const processOutput: string[] = [];
-  const child = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
-    cwd: serverDir,
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout.on("data", (chunk) => processOutput.push(String(chunk)));
-  child.stderr.on("data", (chunk) => processOutput.push(String(chunk)));
-  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-
+  const server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
   try {
-    let ready = false;
-    for (let attempt = 0; attempt < 200 && !ready; attempt++) {
-      if (child.exitCode !== null) break;
-      ready = await fetch(`http://127.0.0.1:${port}/_farm/health/ready`).then(
-        (response) => response.ok,
-        () => false,
-      );
-      if (!ready) await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    expect(ready, processOutput.join("")).toBe(true);
-    await run(port);
+    await run(server.port);
   } finally {
-    if (child.exitCode === null) child.kill();
-    await exited;
+    await server.stop();
   }
 }
 

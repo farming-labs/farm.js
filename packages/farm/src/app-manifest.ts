@@ -86,6 +86,10 @@ export interface FarmAppManifest {
    * versions with `agent.manifest.packages: "names"`.
    */
   packages: Record<string, string | null> | null;
+  /**
+   * The MCP servers the app serves: those `@farm.js/mcp` mounts, a docs runtime's server, and the
+   * default read-only server while it answers.
+   */
   mcp: { servers: FarmAppManifestServer[] } | null;
   /** Browser tools from `@farm.js/webmcp`, read from the app's source. */
   webmcp: { enabled: boolean; tools: FarmAppManifestWebMCPTool[] } | null;
@@ -125,6 +129,11 @@ export interface FarmAppManifestInput {
    * as requiring authorization, without its tools, resources or prompts.
    */
   guardCoversPath?: (path: string) => boolean;
+  /**
+   * The MCP servers a docs runtime serves in the app (see `registerFarmMCPServer`), each with
+   * the tools it lists. Set by the server at runtime, which asks each one over MCP in process.
+   */
+  registeredMCP?: (request: Request) => Promise<FarmAppManifestServer[]>;
 }
 
 export function resolveFarmAppManifestInput(
@@ -186,8 +195,14 @@ const SOURCES = {
 
 const DEFAULT_SECTIONS = resolveFarmAppManifestConfig(undefined) as ResolvedFarmAppManifestConfig;
 
-/** The manifest now: the static input plus the MCP tools the running servers published. */
-export function createFarmAppManifest(input: FarmAppManifestInput): FarmAppManifest {
+/**
+ * The manifest now: the static input plus the MCP tools the running servers published, and
+ * `registered`, the servers a docs runtime serves (from `input.registeredMCP`).
+ */
+export function createFarmAppManifest(
+  input: FarmAppManifestInput,
+  registered: readonly FarmAppManifestServer[] = [],
+): FarmAppManifest {
   const sections = input.sections ?? DEFAULT_SECTIONS;
   const { app, mcp, webmcp } = sections;
   return {
@@ -206,7 +221,7 @@ export function createFarmAppManifest(input: FarmAppManifestInput): FarmAppManif
         : sections.packages
           ? input.packages
           : null,
-    mcp: mcp ? { servers: listServers(input, mcp) } : null,
+    mcp: mcp ? { servers: listServers(input, mcp, registered) } : null,
     webmcp: webmcp
       ? {
           enabled: input.webmcp.enabled,
@@ -253,7 +268,11 @@ function resolveFarmSiteUrl(): string | null {
 
 type MCPSection = Exclude<ResolvedFarmAppManifestConfig["mcp"], false>;
 
-function listServers(input: FarmAppManifestInput, mcp: MCPSection): FarmAppManifestServer[] {
+function listServers(
+  input: FarmAppManifestInput,
+  mcp: MCPSection,
+  registered: readonly FarmAppManifestServer[],
+): FarmAppManifestServer[] {
   const servers = _listFarmMCPCatalogs().map(({ server, tools, details }) => {
     // A server that didn't say it's public (an older @farm.js/mcp) counts as protected,
     // as does one behind a guard written for its path: anonymous clients cannot list it.
@@ -285,7 +304,13 @@ function listServers(input: FarmAppManifestInput, mcp: MCPSection): FarmAppManif
       }),
     } satisfies FarmAppManifestServer;
   });
-  return [...servers, ...listDefaultServer(input)]
+  // A server @farm.js/mcp mounts keeps its path; a registered one there is the same endpoint.
+  const served = new Set<string>(servers.map((server) => server.path));
+  return [
+    ...servers,
+    ...registered.filter((server) => !served.has(server.path)),
+    ...listDefaultServer(input),
+  ]
     .filter((server) => !mcp.hide.includes(server.name))
     .map((server) => ({
       ...server,
@@ -350,7 +375,11 @@ export async function createFarmAppManifestResponse(
       headers: { ...CORS_HEADERS, allow: "GET, HEAD, OPTIONS", "content-type": "text/plain" },
     });
   }
-  const body = JSON.stringify(createFarmAppManifest(input));
+  const sections = input.sections ?? DEFAULT_SECTIONS;
+  // A docs runtime's server never keeps the manifest from answering.
+  const registered =
+    sections.mcp && input.registeredMCP ? await input.registeredMCP(request).catch(() => []) : [];
+  const body = JSON.stringify(createFarmAppManifest(input, registered));
   const etag = createFarmWeakETag(body);
   const headers = {
     ...CORS_HEADERS,

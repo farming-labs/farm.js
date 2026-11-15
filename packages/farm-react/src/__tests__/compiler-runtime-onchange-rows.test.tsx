@@ -7,8 +7,8 @@ import {
   removeCompiledModules,
 } from "./compiled-module-harness";
 
-// Compiler-owned rows with onChange beside row conditionals, or in a list between static
-// siblings, run their events through the container only on a root without React DOM. Under React
+// Compiler-owned rows with onChange beside or inside row conditionals, or in a list between
+// static siblings, run their events through the container only on a root without React DOM. Under React
 // DOM the block renders them through React from the start. Each scenario renders the source with
 // React and the compiled output with React DOM, then compares the DOM after every interaction.
 
@@ -98,6 +98,42 @@ describe("onChange rows under React DOM", () => {
       "Todos",
       "hostBlocks={true}",
       steps,
+    );
+  });
+
+  it("inside row branches render through React with working handlers", async () => {
+    await expectParity(
+      `import { useState } from "react";
+      export function Todos() {
+        const [rows, setRows] = useState([{ id: 1, label: "One", done: false }]);
+        const update = (id, patch) =>
+          setRows(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+        return (
+          <section>
+            <button id="add" onClick={() => setRows([...rows, { id: rows.length + 1, label: "", done: false }])}>Add</button>
+            <ul>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  <input className="done" type="checkbox" checked={row.done} onChange={(event) => update(row.id, { done: event.target.checked })} />
+                  {row.done ? <s>{row.label}</s> : <input className="label" value={row.label} onChange={(event) => { if (event.target.value.length <= 5) update(row.id, { label: event.target.value }); }} />}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      }`,
+      "Todos",
+      "hostBlocks={true}",
+      [
+        type('li[data-id="1"] .label', "One!"),
+        type('li[data-id="1"] .label', "Toolong"),
+        click('li[data-id="1"] .done'),
+        click('li[data-id="1"] .done'),
+        type('li[data-id="1"] .label', "Uno"),
+        click("#add"),
+        type('li[data-id="2"] .label', "Two"),
+        click('li[data-id="2"] .done'),
+      ],
     );
   });
 

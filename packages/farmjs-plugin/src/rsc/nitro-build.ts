@@ -24,7 +24,9 @@ import {
   FARM_NODE_ENV_MODULE_FILE,
   FARM_NODE_ENV_MODULE_SOURCE,
 } from "@farm.js/core/internal/production-node-env";
+import { resolveCloudflareProcessEnvFlags } from "@farm.js/core/deployment";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
+import { isRscWorkersPreset } from "./presets.js";
 import {
   finalizeFarmRscMobileClient,
   patchFarmRscMobileShellClient,
@@ -607,6 +609,24 @@ function removeSeedOutput(nitro: Nitro, fileName: string | undefined): void {
   }
 }
 
+/**
+ * Puts the worker's vars and secrets in `process.env`, as core's Cloudflare builds do: Nitro writes
+ * a compatibility date from before Workers did that by default.
+ */
+function populateWorkerProcessEnv(serverDir: string): void {
+  const wranglerPath = path.join(serverDir, "wrangler.json");
+  // `cloudflare.deployConfig: false` writes no Wrangler config.
+  if (!existsSync(wranglerPath)) return;
+  const wrangler = JSON.parse(readFileSync(wranglerPath, "utf-8")) as Record<string, unknown>;
+  const flags = resolveCloudflareProcessEnvFlags(wrangler);
+  if (!flags) return;
+  writeFileSync(
+    wranglerPath,
+    JSON.stringify({ ...wrangler, compatibility_flags: flags }, null, 2),
+    "utf-8",
+  );
+}
+
 export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void> {
   const { rendererPath, publicDir, ssrPath, assetsDir, root, preset = "vercel" } = options;
   const outputDir = options.outputDir ?? path.join(root, ".output");
@@ -620,7 +640,9 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   // Vercel's Build Output API has its own layout (functions/, static/), which the preset owns when
   // the caller names the deployment directory (`farm build`). Without one, the output keeps the
   // server/ and public/ layout that hand-written post-build scripts copy from.
-  const presetOwnsLayout = options.outputDir !== undefined && preset === "vercel";
+  // Cloudflare Pages runs `_worker.js` beside the static files, which the preset lays out too.
+  const workers = isRscWorkersPreset(preset);
+  const presetOwnsLayout = (options.outputDir !== undefined && preset === "vercel") || workers;
 
   // The server sets NODE_ENV to "production" unless the deployment chose one, as the core
   // node-server output does. The RSC and SSR bundles read it at runtime: left unset, React loads
@@ -688,7 +710,10 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
       },
     },
     compatibilityDate: "2024-12-01",
-    minify: true,
+    // Nitro's minifier prints the entry's import() specifier as a template literal, and workerd
+    // only follows string-literal module specifiers. The entry is small, and the RSC and SSR
+    // bundles aren't minified either way.
+    minify: !workers,
   };
 
   if (ssrPath) {
@@ -714,7 +739,8 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   }
   await build(nitro);
   await nitro.close();
-  copyRuntimePackages(serverDir, registeredRuntimePackages);
+  // A Workers build includes its packages in the bundles, and Workers can't read node_modules.
+  if (!workers) copyRuntimePackages(serverDir, registeredRuntimePackages);
 
   // Copy dist into server so runtime relative imports resolve. Handle missing dir (e.g. buildApp order).
   const serverDistDir = path.join(serverDir, "dist");
@@ -723,7 +749,7 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   mkdirSync(serverDistDir, { recursive: true });
   copyDir(rscSrc, path.join(serverDistDir, "rsc"));
   if (ssrSrc) copyDir(ssrSrc, path.join(serverDistDir, "ssr"));
-  await traceRscBundleDependencies(root, serverDir, rscSrc, ssrSrc);
+  if (!workers) await traceRscBundleDependencies(root, serverDir, rscSrc, ssrSrc);
   // Stub manifest if missing (RSC plugin may write it after our hook runs)
   const rscDestDir = path.join(serverDistDir, "rsc");
   const manifestDest = path.join(rscDestDir, "__vite_rsc_assets_manifest.js");
@@ -739,6 +765,7 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   // Nitro may group the entry differently by builder. Make copied-dist imports
   // relative to the emitted chunk so output survives moving away from the project.
   rewriteRscEntryImports(serverDir, serverDistDir);
+  if (workers) populateWorkerProcessEnv(serverDir);
 
   console.log("[FARM] RSC Nitro build completed");
   console.log(`[FARM] Output: ${outputDir}`);

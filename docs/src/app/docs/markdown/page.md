@@ -45,6 +45,10 @@ description: A markdown-first static page.
 
 This creates `/about` automatically. Because the route is source-authored markdown, Farm also serves the raw source at `/about.md` by default.
 
+Like any page, a Markdown page renders on each request. Add `export const dynamic = "force-static";`
+to its source to prerender it at build time, or `export const revalidate = 300;` to revalidate it, as
+described in [Static rendering](/docs/server-rendering#static-rendering).
+
 ## Override a React page
 
 Keep the visual page in React:
@@ -414,15 +418,17 @@ callers.
 
 Apps built with `defineConfig` from `@farm.js/plugin/rsc` serve the same mirrors. Every page answers
 at its `.md` URL and to `Accept: text/markdown`, with `?outline`, `?section`, `?max_tokens`, and
-`?actions`. HTML pages send the `Link` header, a missing `.md` page answers a Markdown 404, and reads
-fire `agent.read` events. The mirror renders the page through the normal request path, so middleware
+`?actions`. HTML pages send the `Link` header and the `<link rel="alternate" type="text/markdown">`
+head tag, a missing `.md` page answers a Markdown 404, and reads fire `agent.read` events. The mirror renders the page through the normal request path, so middleware
 and sign-in gates apply, and a page that must not be shared keeps its private `Cache-Control`.
 Under a `basePath` or locale prefix, a home page's mirror is `<prefix>/index.md` and `md.expose`
 lists route paths without the prefix, as described above.
 
-The RSC renderer currently sets a deployment cookie on HTML page renders. Its generated mirrors
-therefore use `private, no-store` too; setting `md.cache` does not enable shared caching while that
-cookie is present. This prevents caches from replaying response cookies to another reader.
+RSC pages default to `private, no-store`, so their mirrors do too. A page whose middleware declares
+`cache: "public"` and sets a shareable `Cache-Control` has a mirror that `md.cache` may cache when
+it is requested without an `Authorization` header or any cookie besides the deployment cookie,
+which names a release rather than a visitor. A mirror never sets the deployment cookie, and one that carries a cookie the page or its middleware set is sent with
+`private, no-store`, so caches never replay a response cookie to another reader.
 
 Set the same `md` options on the RSC config:
 
@@ -437,8 +443,12 @@ export default defineConfig({
 `md: false` turns mirrors off. `page.md` sources are not part of the RSC pipeline yet.
 
 RSC apps also serve `/llms.txt` by default, listing their static pages with links to these mirrors.
-It is answered after middleware, like a page. Set `agent.llmsTxt` with the same options as core;
-`full: true` adds `/llms-full.txt`, and `false` turns both off:
+It is answered after middleware, like a page, and lists the same pages as in other Farm apps. Under
+a `basePath` it answers at `/console/llms.txt` and links each page at its public URL
+(`/console/index.md` for the home page), on the root layout's `metadataBase` when it has one;
+`include`, `exclude`, and `md.expose` match route paths. Pages a path-specific guard or a route
+`guard` covers, and pages that render noindex, are left out. Set `agent.llmsTxt` with the same
+options as core; `full: true` adds `/llms-full.txt`, and `false` turns both off:
 
 ```ts title="vite.config.ts"
 export default defineConfig({
@@ -446,7 +456,9 @@ export default defineConfig({
 });
 ```
 
-`llms.ts` and `llms-full.ts` route files are not supported in RSC apps yet.
+`llms.ts` and `llms-full.ts` route files replace the generated files in RSC apps too, and receive
+the same `pages` and `defaults` (and, for `llms-full.ts`, `markdown`) as in other Farm apps; see
+[application metadata routes](/docs/routing#application-metadata-routes).
 
 ## Production notes
 

@@ -19,10 +19,11 @@ pipeline. Farm extracts an explicit `middleware` property, from `farm.config.ts`
 `defineConfig` from `@farm.js/plugin/rsc` in `vite.config.ts`, and the imports and local bindings it
 references into a server-only RSC module. This preserves handler closures, regular-expression
 matchers, and function matchers without shipping unrelated build plugins or integrations. Config
-middleware still runs before matching `src/app/**/middleware.ts` files. RSC pages match the
-request path as received, so pages under a `basePath` or locale prefix live in
-`src/app/<basePath>/` or `src/app/[lang]/`; middleware there runs for them, and middleware matching
-the path without the prefix runs as well. Farm reports an error for a dynamic config shape or a
+middleware still runs before matching `src/app/**/middleware.ts` files. RSC pages answer below a
+`basePath` or locale prefix at their route path, as in other Farm apps, and pages nested in
+`src/app/<basePath>/` or `src/app/[lang]/` keep answering at the path as received
+([precedence](/docs/server-rendering#react-server-components)); middleware matching either path
+runs for them. Farm reports an error for a dynamic config shape or a
 spread that makes the middleware value ambiguous; declare the property directly or move that
 middleware to `src/app/**/middleware.ts`.
 
@@ -45,7 +46,9 @@ Data and headers written during middleware are request-scoped:
 
 Cookies set by multiple matching middleware handlers are accumulated into separate `Set-Cookie`
 headers. They are also preserved when the short-circuiting `Response` supplies its own cookies, so
-a returned response does not replace cookies already written through `ctx.cookies`.
+a returned response does not replace cookies already written through `ctx.cookies`. The response's
+own `Set-Cookie` headers come after them, so for a cookie both set, such as a session one handler
+refreshes and a logout response clears, the response's value is the one the browser keeps.
 
 A middleware handler that throws (other than `redirect()` or `notFound()`) fails the request. In a
 production build outside the RSC pipeline, a request under the API base path, or
@@ -57,7 +60,8 @@ or stack to them. As for a throwing API route, the error reaches the `middleware
 plugin `runtime.error` hooks, and `onError` hooks with `phase: "runtime"`, and every
 `runtime.after` hook then sees the `500`. Development answers the same `private, no-store` JSON
 `500` under the API base path, and shows the error overlay for a page instead, also a
-`private, no-store` HTML `500`; the hooks run the same way for both.
+`private, no-store` HTML `500`. Neither keeps a header or cookie the failed run set, and the hooks
+run the same way for both.
 
 ## Route middleware
 
@@ -473,6 +477,54 @@ The production middleware runtime is easiest to verify with a tiny app fixture t
 | Events            | The expected `middleware.*` events are emitted in order.       |
 
 Farm's own test suite keeps this as a reusable helper at `packages/farm/src/__tests__/fixtures/middleware-production-fixture.ts`.
+
+## Edge middleware on Vercel
+
+A static page that middleware guards renders on request, because a platform serves static files
+before any middleware runs. On Vercel, a middleware file can run in front of the static files
+instead: set `runtime: "edge"` in its `config`.
+
+**src/app/docs/middleware.ts**
+
+```ts
+export const config = { runtime: "edge" };
+
+export function middleware(request: Request) {
+  if (!request.headers.get("cookie")?.includes("session=")) {
+    return Response.redirect(new URL("/sign-in", request.url), 307);
+  }
+}
+```
+
+With `deploy.target: "vercel"`, `farm build` then:
+
+- prerenders each static page, and each [`docs.prerender`](/docs/docs-engine#prerender-docs-pages)
+  page, that only `runtime: "edge"` middleware guards, without running that middleware for the
+  build's own request;
+- bundles the middleware that guards those pages into an Edge function, and adds a route that runs
+  it before Vercel serves each page's file (`/docs/guide`, `/docs/guide/`, `/docs/guide/index.html`,
+  and the same paths under a `basePath`);
+- sends those pages with `Cache-Control: private, no-store`.
+
+The middleware decides each request as it does in the server: a returned `Response`, `redirect()`,
+or `ctx.headers` work the same way, `ctx.rewrite()` routes to the new path, and `notFound()` answers
+with the app's not-found page. A middleware that throws answers `500` instead of the page. Dynamic
+routes, API routes, and pages any other middleware guards keep running the same middleware in the
+server function.
+
+Each guarded page view still runs the middleware, which Vercel bills as compute, but the page is
+served from the CDN instead of rendered by the server function.
+
+The literal value counts, as for `matcher`: `runtime: "edge"` must be written in the `config`
+object itself. Config middleware in `farm.config.ts` and integration guards such as
+`protectedRoutes` stay in the server, and pages they guard render on request. Other targets ignore
+`runtime: "edge"`: the middleware runs in the server and its pages render on request.
+
+Vercel's Edge runtime provides web APIs and only the `async_hooks`, `events`, `buffer`, `assert`, and
+`util` Node modules. The build stops and names the import when edge middleware, or code it imports,
+uses another Node module, so check a session with a cookie, a signed token, or `fetch` rather than a
+database driver. The gzipped function must fit Vercel's Edge size limit (1 MB on Hobby); the build
+warns when it does not.
 
 ## Caching
 

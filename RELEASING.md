@@ -52,6 +52,10 @@ An independently versioned package is not bumped by this command.
 The first stable release moves the shared group from `0.1.0-beta.N` to `0.1.0`. Packages outside
 `bump.config.ts` stay on their own beta line until they are deliberately promoted.
 
+Before a stable release, run the **App Scale Diagnostic** (`benchmarks/app-scale`) on the release
+commit and on the previous release's tag, and compare the dev-startup and build medians. A
+regression that grows with an app's route count does not show on the small example apps.
+
 ## Islands server components
 
 Before releasing changes to the ISLX integration or updating `@farm.js/islx`, record these checks

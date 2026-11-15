@@ -500,10 +500,22 @@ export interface FarmPluginRenderHooks<
   TIntegrationInstance = unknown,
   TIntegrationBound extends boolean = false,
 > {
+  /**
+   * Runs for every page request, before Farm resolves it: a request a page route matches, or a
+   * GET or HEAD request that no API route, integration route, docs page, or app metadata route
+   * (such as `sitemap.ts` or a metadata image) answers. That includes a config redirect, a
+   * route-file `redirect()`, a config rewrite (once, for the URL as requested), the generated
+   * `llms.txt`, `sitemap.xml` and `robots.txt`, a Markdown mirror, and the not-found page, so the
+   * response may not be a rendered page. `render.routePattern` is `null` when no page route
+   * matches the URL. It describes the requested URL even when `runtime.before` returned a
+   * replacement `Request`, which Farm routes and renders. It does not run when a
+   * `runtime.before` hook answered the request.
+   */
   before?(
     render: RenderLifecyclePayload,
     context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
+  /** Transforms the HTML document a page request answers with; see `before`. */
   html?(
     html: string,
     render: RenderLifecyclePayload,
@@ -1415,6 +1427,7 @@ export class PluginManager {
    * Runs only `runtime.before` for a request Farm re-routed internally, such as
    * a configured rewrite, so guards also see the destination URL. The session
    * opened for `source` keeps its context; context and after hooks don't rerun.
+   * `options` describe the destination; the session keeps the source's route.
    */
   async runRuntimeBeforeForRewrite(
     source: Request,
@@ -1560,6 +1573,25 @@ export class PluginManager {
     );
   }
 
+  /**
+   * @internal Reports an error the handler answered to `runtime.error` and `onError`, as the
+   * runtime scope's `reportError` does, without failing the session: `after` still runs, and a
+   * later throw in it is reported too.
+   */
+  async reportRuntimeRequestError(
+    session: FarmPluginRuntimeSession,
+    error: unknown,
+  ): Promise<void> {
+    await this.runRuntimeErrorHooks(
+      session.request,
+      error,
+      session.ctx,
+      Date.now() - session.startedAt,
+      session.options,
+      session.waitUntil,
+    );
+  }
+
   async runRuntimeRequest(
     request: Request,
     handler: FarmPluginRuntimeRequestHandler,
@@ -1583,15 +1615,7 @@ export class PluginManager {
         (await handler(session.request, {
           // Not a failed session: the handler answers, so `after` runs and a later throw in it
           // is still reported.
-          reportError: (error) =>
-            this.runRuntimeErrorHooks(
-              session.request,
-              error,
-              session.ctx,
-              Date.now() - session.startedAt,
-              session.options,
-              session.waitUntil,
-            ),
+          reportError: (error) => this.reportRuntimeRequestError(session, error),
         }));
       if (!(response instanceof Response)) {
         throw new TypeError("Farm plugin runtime handlers must return a Response");

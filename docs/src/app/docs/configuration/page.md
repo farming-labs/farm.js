@@ -331,10 +331,67 @@ export default defineConfig({
 ```
 
 Farm keeps the options it needs to produce its production output: `root`, `base`, `mode`,
-`appType`, `publicDir`, the build's entries and output (`build.outDir`, `build.emptyOutDir`,
-`build.ssr`, `build.ssrEmitAssets`, `build.write`, `build.lib`, `build.watch`,
-`build.rollupOptions.input`, and `build.rollupOptions.output`), and any `build`, `define`, or
-`esbuild` value Farm sets for that build. Use `basePath` and `publicDir` in Farm's config instead.
+`appType`, `publicDir`, the build's entries and output location (`build.outDir`,
+`build.emptyOutDir`, `build.ssr`, `build.ssrEmitAssets`, `build.write`, `build.lib`,
+`build.watch`, and `build.rollupOptions.input`), and any `build`, `define`, or `esbuild` value
+Farm sets for that build. Use `basePath` and `publicDir` in Farm's config instead.
+
+### Client output and chunking
+
+`vite.build.rolldownOptions.output` (or its older name `rollupOptions.output`) applies to the
+production client build, so an app can choose how the browser bundle is split into chunks:
+
+```ts
+export default defineConfig({
+  vite: {
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [{ name: "vendor", test: /node_modules/, minShareCount: 2, maxSize: 500_000 }],
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+Farm keeps the output options the server reads or that would publish private data: `dir`, `file`,
+`format`, `entryFileNames`, `chunkFileNames`, `assetFileNames`, `hashCharacters`, and every
+`sourcemap*` option (see `vite.build.sourcemap` below). Every other output option, such as
+`codeSplitting`, `manualChunks`, `minify`, `banner`, or `generatedCode`, is used as written. Set
+`output` to one object; an array of outputs fails the build. The server build keeps Farm's own
+output options.
+
+A production document lists the chunks its page needs before it hydrates as
+`<link rel="modulepreload">`: the static imports of the client entry (Farm's runtime and the
+hydrating layouts), of the page's hydrating module, and of the islands that hydrate at load.
+Dynamically imported modules, other routes' chunks, and islands with a deferred strategy
+(`interaction`, `visible`, or `idle`) are not preloaded; they load when they are needed. Each
+chunk in that static closure is one request, which matters most over HTTP/1.1.
+
+Farm aliases `@/` to `srcDir`. Aliases in `vite.resolve.alias` come before Farm's in dev and in
+both builds, and Vite uses the first one that matches, so an app alias for part of `@/` wins for
+the imports it matches and Farm's `@` handles the rest. For example, this sends
+`@/components/ui/*` to a shared workspace package:
+
+```ts
+import path from "node:path";
+
+const ui = path.resolve("../../packages/ui/src");
+
+export default defineConfig({
+  vite: {
+    resolve: {
+      alias: [{ find: /^@\/components\/ui\/(.*)$/, replacement: `${ui}/components/ui/$1` }],
+    },
+  },
+});
+```
+
+Farm leaves out its own `@` only when an app alias matches every `@/` import: `"@"` itself, or a
+pattern such as `/^@\/(.*)$/`.
 
 `vite.build.sourcemap` never publishes client source maps. A client map carries the original
 source of each module, including code Farm strips from the browser bundle such as
@@ -366,6 +423,10 @@ Farm accepts a leading-slash or bare pathname and removes duplicate and trailing
 URLs, query strings, hashes, backslashes, control characters, and `.` or `..` segments because a
 browser could otherwise resolve a different path than Farm's server router.
 
+Apps on the RSC pipeline route the same way: `app/about/page.tsx` answers at `/console/about`.
+Pages that earlier RSC apps nested under `app/console/` keep their URLs; see
+[React Server Components](/docs/server-rendering#react-server-components) for the precedence.
+
 ## Trailing slashes
 
 Application page URLs omit a trailing slash by default. Set `trailingSlash: true` to generate
@@ -380,7 +441,13 @@ export default defineConfig({
 
 The redirect uses status 308 and preserves the query string. The root URL remains `/`, and API,
 integration, image, and metadata routes keep their own URL contracts. A `<Link trailingSlash={false}>`
-or `<Link trailingSlash>` prop overrides the app default for that link.
+or `<Link trailingSlash>` prop overrides the app default for that link. The generated
+[`sitemap.xml`](#sitemap) and `llms.txt` list each page at its canonical URL, so none of their
+links redirect: `/console/about/` under `basePath: "/console"` with `trailingSlash: true`, and the
+home page at `/console` without it. A [Markdown mirror](/docs/markdown) such as `/about.md` keeps
+its URL and renders the page at the canonical one. With [i18n](/docs/internationalization), both
+list the default locale's URL: `/console/en/about/` and `/console/en/about.md` under
+`routing: "prefix-always"`, and the unprefixed URL under the default `"prefix-except-default"`.
 
 ## API client base URL
 
@@ -596,9 +663,11 @@ the page's file last changed, read when the server builds. Dynamic routes, pages
 says `robots: { index: false }` (their own, or a layout's when the page sets no `robots`), pages
 behind a route [`guard`](/docs/routing#route-guards), and
 pages a guard written for their path covers are left out: a `middleware.ts` in the page's folder or
-a parent below the root, a config middleware `matcher` that names the path, or an integration's
-`protectedRoutes`. Guards that cover every path (a root `middleware.ts`, middleware without a
-matcher or with a catch-all or function matcher, a plugin's `runtime.before` hook) hide nothing,
+a parent below the root, a root `middleware.ts` whose own `config.matcher` names the path (such as
+`matcher: ["/dashboard/:path*"]`), a config middleware `matcher` that names the path, or an
+integration's `protectedRoutes`. Guards that cover every path (a root `middleware.ts` without such a
+matcher, middleware without a matcher or with a catch-all or function matcher, a plugin's
+`runtime.before` hook) hide nothing,
 since they name no page; the content behind them stays private, because pages are read as a
 signed-out visitor. URLs use the root layout's `metadataBase`, or the request's origin when it has
 none, the same origin the generated `llms.txt` links to; set `metadataBase` so crawlers and caches
@@ -618,6 +687,11 @@ same `include` and `exclude`. A `public/sitemap.xml`
 or a root [`sitemap.ts`](/docs/routing#application-metadata-routes), which can list dynamic pages,
 replaces the generated file.
 
+Apps on the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`) serve the same
+generated `/sitemap.xml`, on by default, with the same options in `agent.sitemap`. `farm dev` reads
+each page's `<lastmod>` when it starts. A `public/sitemap.xml` still replaces it; `sitemap.ts` is
+not supported in RSC apps yet.
+
 ### Default MCP server
 
 Left unset, `mcp` serves a read-only [MCP](https://modelcontextprotocol.io) server at `/mcp`
@@ -632,7 +706,15 @@ Left unset, `mcp` serves a read-only [MCP](https://modelcontextprotocol.io) serv
 The pages are the static pages `llms.txt` and the sitemap list that have a Markdown mirror: dynamic
 routes, pages whose metadata says `robots: { index: false }` (or inherits it from a layout), and pages a path-specific guard
 covers (see [Sitemap](#sitemap)) are left out, and `read_page` answers only for a listed page; `md.expose`
-leaves out more. Pages are read the way `llms-full.txt` reads them, as a fresh request without the
+leaves out more. Each page's `url` is the one it answers at, without a redirect, as the sitemap
+lists it: below the app `basePath`, spelled as `trailingSlash` says, and with
+[i18n](/docs/internationalization) in the default locale (`/en/about` with `routing: "prefix-always"`, `/about`
+with the default `"prefix-except-default"`). URLs use the root layout's `metadataBase`, or the
+request's origin when it has none, the same origin the sitemap and `llms.txt` link to.
+`read_page` takes that URL as well as the `path`, and accepts a URL only on the request's origin or
+the `metadataBase` origin; it reads the page from the server that answered, never from the URL's
+host.
+Pages are read the way `llms-full.txt` reads them, as a fresh request without the
 caller's cookies or credentials, so a page a root middleware or plugin `runtime.before` hook keeps
 private answers as signed out. The server has no write tools and never reaches API routes, server functions, sessions, or
 environment values.
@@ -700,6 +782,9 @@ The app's own file wins. Farm serves `/robots.txt` from, in order:
 3. The generated file from `agent.crawlers`.
 4. The [docs engine](/docs/docs-engine)'s robots.txt, when the docs engine is enabled.
 
+[React Server Components](/docs/server-rendering#react-server-components) apps serve the same
+generated file from `agent.crawlers`, after middleware and below a `basePath` as in other Farm apps.
+
 ### AI catalog
 
 When the app mounts an MCP server, through the top-level [`mcp`](/docs/plugins/mcp) config or
@@ -716,7 +801,8 @@ such as the [docs engine](/docs/docs-engine)'s endpoint, join the catalog throug
 
 Every app serves `/.well-known/farmjs.json` (and, for Farm 0.1.34's readers, `/.well-known/farmjs`)
 to any client: Farm's version and the installed `@farm.js/*` packages, the renderer and base path,
-the MCP tools Farm serves with their JSON Schemas, WebMCP browser tools, each integration's
+the MCP tools Farm serves with their JSON Schemas (and the docs engine's, which Farm asks for over
+MCP), WebMCP browser tools, each integration's
 category and provider (never its configuration), plugin names, and the site's public origin from
 `FARM_SITE_URL` or the host's production address.
 [Farm Infra analytics](/docs/infra-analytics) lists every field, and
@@ -1075,6 +1161,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 ```
 
+A client navigation fetches the next page as a new response, with a nonce of its own, while the
+page's policy still trusts the nonce of the response that loaded it. Farm runs the scripts the
+navigation response gave its nonce (such as React's streaming scripts) with the page's nonce, and
+leaves every other script without one, so the same rules hold after a navigation as on a full load.
+
+Libraries that render their own inline script take the nonce as a prop: pass `getCspNonce()` to
+next-themes' `ThemeProvider` (`nonce`) or react-wrap-balancer's `Balancer` and `Provider` (`nonce`).
+
 For fully prerendered HTML, the same option keeps the page static. Farm hashes the exact contents of
 the inline scripts that carry the nonce (its own and the ones you opted in) with SHA-256, removes the
 build-time nonce, and emits a route-specific policy with those hashes. Inline scripts that were not
@@ -1121,7 +1215,7 @@ The RSC development bridge applies these limits too. `POST`, `PUT`, `PATCH`, `DE
 bodies keep their original bytes, including multipart uploads and binary data. `GET` and `HEAD`
 remain bodyless. Action origin validation runs before buffering an action body.
 
-`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` values. Farm uses those headers for the client address and public request URL only when the proxy is trusted. The client address is the last `X-Forwarded-For` hop, the one your proxy appended: a proxy that appends (nginx `$proxy_add_x_forwarded_for`, most load balancers) keeps whatever the client sent ahead of it, so earlier hops are never trusted. Behind a chain of proxies that address is the one the closest proxy saw; pass a rate-limit `keyGenerator` if you need an outer proxy's view. A directly exposed Farm server must leave it disabled so a client cannot spoof the address or authority used by rate limits, redirects, authentication callbacks, logs, or access policy.
+`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` values. Farm uses those headers for the client address and public request URL only when the proxy is trusted. With `trustProxy` on, `request.url` in middleware (and `ctx.url`), pages (`getCurrentRequest()`), and API routes is that public URL, in development and production alike, so `new URL("/sign-in", request.url)` points at the origin visitors use. The client address is the last `X-Forwarded-For` hop, the one your proxy appended: a proxy that appends (nginx `$proxy_add_x_forwarded_for`, most load balancers) keeps whatever the client sent ahead of it, so earlier hops are never trusted. Behind a chain of proxies that address is the one the closest proxy saw; pass a rate-limit `keyGenerator` if you need an outer proxy's view. A directly exposed Farm server must leave it disabled so a client cannot spoof the address or authority used by rate limits, redirects, authentication callbacks, logs, or access policy.
 
 Workflow runner secrets are accepted only through `Authorization: Bearer <secret>` or `X-Farm-Workflow-Secret`. Farm does not accept secrets in query strings because URLs are commonly retained in logs, browser history, and referrer data.
 
@@ -1174,6 +1268,8 @@ serverActions: {
 ```
 
 Do not use `allowedOrigins` as a replacement for CORS or as a public API allowlist. Browser action requests must provide a matching `Origin` or `Referer`; Farm accepts `Sec-Fetch-Site: same-origin` when both are unavailable. Explicitly configured origins can cross a trusted proxy boundary.
+
+With [`server.trustProxy`](#server-http-policy) on, an action's origin is checked against the public origin the proxy's `X-Forwarded-Host` and `X-Forwarded-Proto` name, in RSC and islands apps, in development and production. An app behind a TLS-terminating proxy needs no `allowedOrigins` entry for its own public origin.
 
 `bodySizeLimit` accepts bytes or strings such as `"500kb"`, `"2mb"`, and `"2MiB"`. Farm checks `Content-Length` when present and also counts streamed bytes, so chunked requests cannot bypass the limit.
 
@@ -1251,6 +1347,12 @@ same header is returned by a handler. They match the requested path and also app
 and middleware responses. `Link` is additive: handler and configured link values are
 merged instead of replacing one another. `Set-Cookie` is also additive, and each handler or
 configured cookie remains a separate response header.
+Apps on the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`) apply all three the
+same way in `farm dev` and in their production server. A page's RSC payload (`/about.rsc`) matches
+as its page: headers for `/about` apply to it, a redirect sends it to the destination's payload,
+and a rewrite renders the destination's payload. A static page that any of them matches is
+rendered on each request instead of prerendered, because a prerendered file never reaches the
+server that applies them.
 
 ```ts
 export default defineConfig({
@@ -1287,6 +1389,21 @@ export default defineConfig({
 ```
 
 `render: "static"` maps to prerendering. `render: "dynamic"` forces a dynamic response. `swr` and `isr` accept `true` or a TTL in seconds. `cors: true` applies permissive API CORS headers; pass an object when you need a specific origin, methods, or headers.
+
+A pattern matches as Nitro's router does: `:name` matches one segment, and `*`, `**`, `:name*` or
+`:name+` match any number of segments. A pattern may have only one of these, so write
+`/:locale/docs/**` rather than `/*/docs/**`. Config resolution rejects a pattern with two and
+suggests the named form.
+
+On a production server, a `swr` or `cache` rule stores the pages it covers and serves later requests
+from that copy with `X-Cache: HIT`, including a page that renders on each request because it sets no
+`dynamic` or `revalidate`. Nitro renders such a page without the request's cookies, `Authorization`,
+query string, or any header the rule does not key on, so one render serves everyone. A page whose
+render is still one visitor's (it reads `cookies()`, `headers()` or the request, has middleware
+data, a request `context`, an error status, or streams a Suspense boundary) keeps
+`Cache-Control: private, no-store`, is never stored, and emits a `cache.bypass`
+[event](/docs/observability) naming the reason. A response that middleware let through stays
+private too, as in [Responses behind middleware](/docs/cache-ppr#responses-behind-middleware).
 
 On Netlify, an `isr` rule caches a response on Netlify's CDN only when Farm sends it with a shared
 `Cache-Control`. A response Farm marks `private` or `no-store` (a request with cookies or an
@@ -1426,7 +1543,8 @@ retention, preview-environment, opt-out, and static-export details.
 
 An app whose server environment sets `FARMJS_API_KEY` to a Site analytics key reports request and
 MCP tool analytics to that key's Farm Infra project. A key reaching several projects also needs
-`FARMJS_PROJECT_ID`. Set `analytics: false` to never send them. See
+`FARMJS_PROJECT_ID`. Each request is reported with its route template and the path it asked for
+(never its query string). Set `analytics: false` to never send them. See
 [Farm Infra analytics](/docs/infra-analytics) for what is sent and how.
 
 ## Deployment config
@@ -1440,7 +1558,7 @@ export default defineConfig({
 });
 ```
 
-`deploy.target` selects the deployment provider. Farm resolves that to the matching Nitro preset and output shape unless you override it.
+`deploy.target` selects the deployment provider: `vercel`, `cloudflare`, `netlify`, or `node`. Farm resolves that to the matching Nitro preset and output shape unless you override it. Any other target name, such as a typo, fails when Farm resolves the config, so `farm dev`, `farm build`, `farm start`, and `farm deploy` stop with an error that lists these targets. Set `deploy.preset` to build with another Nitro preset. See [First-class targets](/docs/deployment#first-class-targets).
 
 ### Deployment identity
 

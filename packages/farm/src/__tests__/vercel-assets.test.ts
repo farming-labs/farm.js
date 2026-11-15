@@ -48,6 +48,9 @@ describe("Vercel immutable Farm assets", () => {
     // The fingerprinted entry sits at the root — its relative chunk imports
     // pin it there — and only the farm-client name qualifies at that level.
     expect(isFarmVercelImmutableAssetPath("/farm-client-h1a2b3c4d.js")).toBe(true);
+    // Islands mode's boot entry and the mobile client entry sit beside it.
+    expect(isFarmVercelImmutableAssetPath("/farm-client-boot-h1a2b3c4d.js")).toBe(true);
+    expect(isFarmVercelImmutableAssetPath("/farm-mobile-client-h1a2b3c4d.js")).toBe(true);
     expect(isFarmVercelImmutableAssetPath("/other-h1a2b3c4d.js")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/assets/logo.svg")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/assets/icon-v2.svg")).toBe(false);

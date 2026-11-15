@@ -1,0 +1,18 @@
+/* Tailwind v3's preflight defaults that v4 changed, so the site renders as it did on v3. */
+*,
+::after,
+::before,
+::backdrop,
+::file-selector-button {
+  border-color: #e5e7eb;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #9ca3af;
+}
+
+button:not(:disabled),
+[role="button"]:not(:disabled) {
+  cursor: pointer;
+}

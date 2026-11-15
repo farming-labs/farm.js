@@ -12,8 +12,13 @@
  * The protocol handler lives in `agent-mcp-handler.ts`, loaded only when `/mcp` is asked for.
  * Kept free of Node built-ins: the production server runs on edge runtimes too.
  */
-import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
-import { collectFarmLlmsTxtPages } from "./llms-txt";
+import { stripFarmBasePath } from "./base-path";
+import type { FarmLocalePathConfig } from "./i18n/routing";
+import {
+  collectFarmLlmsTxtPages,
+  getFarmAgentPagePublicPath,
+  resolveFarmAgentOrigin,
+} from "./llms-txt";
 import {
   getFarmMarkdownMirrorPath,
   isFarmMarkdownMirrorExposed,
@@ -24,6 +29,7 @@ import {
   _listFarmRegisteredMCPServers,
   type FarmMCPServerRegistration,
 } from "./mcp-catalog";
+import { normalizeFarmTrailingSlashPathname } from "./trailing-slash";
 
 export const FARM_DEFAULT_MCP_PATH = "/mcp";
 
@@ -130,10 +136,16 @@ export interface FarmDefaultMCPPage {
   /** The page's route path, such as `/about`. */
   path: string;
   title: string;
-  /** The page's absolute URL. */
+  /**
+   * The page's absolute URL: the one it answers at, without a redirect, on the root layout's
+   * `metadataBase` when it has one, as the sitemap and llms.txt link it.
+   */
   url: string;
   description?: string;
-  /** The absolute URL of the page's Markdown mirror, which `read_page` reads. */
+  /**
+   * The absolute URL of the page's Markdown mirror, which `read_page` reads: on the origin the
+   * request reached, so a read stays on this server whatever `metadataBase` names.
+   */
   markdownUrl: string;
 }
 
@@ -143,14 +155,29 @@ export interface FarmDefaultMCPPageSource {
   module?: unknown;
 }
 
+/** The app's resolved i18n routing (`config.i18n`); ignored when `enabled` is false. */
+export type FarmDefaultMCPI18n = FarmLocalePathConfig & { enabled?: boolean };
+
 /**
  * The pages the default server lists and reads: static pages with a Markdown mirror,
  * leaving out pages whose metadata says noindex and pages behind a route `guard`, as the
- * generated sitemap does.
+ * generated sitemap does. Each URL is the one the page answers at, so none redirects: below
+ * the base path, in the default locale with i18n, and spelled as `trailingSlash` says. URLs
+ * use the root layout's `metadataBase`, else the request's origin, as the sitemap does.
  */
 export function collectFarmDefaultMCPPages(
   sources: Iterable<FarmDefaultMCPPageSource>,
-  options: { origin: string; basePath?: string; markdown?: FarmMarkdownResolvedConfig },
+  options: {
+    /** The origin the request reached, which `read_page` reads mirrors from. */
+    origin: string;
+    /** The root layout's `metadataBase`: page URLs use its origin when it is absolute http(s). */
+    metadataBase?: unknown;
+    basePath?: string;
+    markdown?: FarmMarkdownResolvedConfig;
+    /** The app's `trailingSlash`: pages answer at `/about/`. */
+    trailingSlash?: boolean;
+    i18n?: FarmDefaultMCPI18n;
+  },
 ): FarmDefaultMCPPage[] {
   const readable: Array<{ pattern: string; metadata?: unknown }> = [];
   for (const source of sources) {
@@ -160,6 +187,7 @@ export function collectFarmDefaultMCPPages(
     if (!isFarmMarkdownMirrorExposed(options.markdown, source.pattern)) continue;
     readable.push({ pattern: source.pattern, metadata: module?.metadata });
   }
+  const base = resolveFarmAgentOrigin(options.metadataBase, options.origin);
   return collectFarmLlmsTxtPages(readable, {
     origin: options.origin,
     basePath: options.basePath,
@@ -167,13 +195,27 @@ export function collectFarmDefaultMCPPages(
   }).map((page) => ({
     path: page.path,
     title: page.title,
-    url: `${options.origin}${applyFarmBasePath(page.path, options.basePath)}`,
+    // As the sitemap lists it: '/base' without trailingSlash ('/base/' redirects there).
+    url: `${base}${normalizeFarmTrailingSlashPathname(
+      getFarmAgentPagePublicPath(page.path, options),
+      options.trailingSlash === true,
+    )}`,
     ...(page.description ? { description: page.description } : {}),
-    markdownUrl: `${options.origin}${applyFarmBasePath(
+    // A mirror keeps its .md URL whatever trailingSlash says, as llms.txt links it.
+    markdownUrl: `${options.origin}${getFarmAgentPagePublicPath(
       getFarmMarkdownMirrorPath(page.path),
-      options.basePath,
+      options,
     )}`,
   }));
+}
+
+/** The i18n routing that shapes page URLs, or undefined when the app has no i18n. */
+export function resolveFarmDefaultMCPI18n(
+  i18n: FarmDefaultMCPI18n | undefined,
+  basePath: string | undefined,
+): FarmLocalePathConfig | undefined {
+  if (!i18n || i18n.enabled === false) return undefined;
+  return { ...i18n, basePath: basePath ?? i18n.basePath };
 }
 
 /**

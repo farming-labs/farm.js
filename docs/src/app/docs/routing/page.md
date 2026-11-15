@@ -472,8 +472,9 @@ Page state is stored in `history.state`, so back/forward navigation restores the
 ## Scroll restoration
 
 Farm restores window scroll during SPA navigation. Register nested scroll areas when a layout owns its own scroll container.
-Locations with different query strings keep independent positions, so browser history restores the
-correct filtered, searched, or paginated view.
+Positions are saved per history entry, like the browser does: Back and Forward return to where you
+left each visit, even when the same URL is in history twice, and locations with different query
+strings keep independent positions. A link with `scroll={false}` keeps the current scroll.
 
 ```tsx
 "use client";
@@ -1330,6 +1331,12 @@ Farm automatically adds the nearest discovered manifest to rendered page heads u
 
 With the [docs engine](/docs/docs-engine) enabled, a root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` takes its path from the docs engine, which keeps serving the ones the app does not define. An app sitemap replaces the docs engine's instead of extending it, so list the docs pages in it when crawlers should find them there.
 
+[React Server Components](/docs/server-rendering#react-server-components) apps serve `sitemap.ts`,
+`robots.ts`, `manifest.ts`, `llms.ts`, and `llms-full.ts` the same way, after middleware and below
+a `basePath`, in place of the generated files, and add the nearest manifest to the page head. A
+production build bundles these files only when the app has one; `farm dev` serves a file added
+while it runs.
+
 Generated metadata routes accept `GET` and `HEAD` and return `405` for other methods. They revalidate by default. Export `revalidate = 300` for shared CDN caching or `revalidate = false` only for permanently immutable output. A returned `Response` is an escape hatch for custom XML, headers, or status codes.
 
 `feed.ts` is not reserved yet because feeds need an explicit RSS, Atom, or JSON Feed contract. Use an API or programmatic route for feeds until that format is defined.
@@ -1388,6 +1395,12 @@ Farm serves the file through the extensionless `/products/opengraph-image` endpo
 Use `twitter-image.png` when X/Twitter needs a different image. Otherwise, social platforms can use the Open Graph image. An explicit `metadata.openGraph.images` or `metadata.twitter.images` value always wins over a matching file.
 
 Static images inside a dynamic segment are shared by every concrete route. Use a generated image when the preview must depend on route params.
+
+[React Server Components](/docs/server-rendering#react-server-components) apps serve static and
+generated `opengraph-image` and `twitter-image` files the same way, at the same URLs, with the same
+caching and head tags, after middleware and below a `basePath` and locale prefix. A production
+build inlines static images and bundles generated ones only when the app has them; `farm dev`
+serves a file added while it runs.
 
 ### Generated metadata images
 
@@ -1586,7 +1599,8 @@ With experimental RSC enabled, failures before the HTML shell is sent render the
 `error.tsx` through RSC and SSR with status `500` and `Cache-Control: private, no-store`.
 `{ mode: "rsc" }` answers `notFound()` and unmatched URLs with a plain `404` for now, without the
 app's not-found page; `{ mode: "islands" }` renders it. A form posted without JavaScript whose
-action calls `redirect()` gets a `303`, so the browser loads the target with a `GET`.
+action calls `redirect()` gets a `303`, so the browser loads the target with a `GET`; one whose action
+calls `notFound()` gets the same plain `404`.
 RSC loading and error boundaries follow the selected page's file ancestors, including route
 groups and catch-all folders. For example, `/users/[id]/error.tsx` does not handle a sibling
 `/users/new/page.tsx`. Failures before page selection, such as middleware errors, use only the
@@ -1611,6 +1625,12 @@ export default defineConfig({
   },
 });
 ```
+
+The not-found page renders inside the root layouts, and an `error.tsx` page inside its route's
+layouts. Neither streams: Farm sends each document whole, with its `404` or error status, after
+every lazy component, `use()` read, or other Suspense boundary in the page and its layouts has
+resolved, in development and production. A document that does not suspend renders in one
+synchronous pass.
 
 ## Catch-all routes
 

@@ -1,5 +1,6 @@
 import { _withFarmResponseHeaders } from "./owned-response";
 import { stripFarmBasePath } from "./base-path";
+import { withoutFarmDeploymentCookie } from "./deployment";
 import { _findFarmMCPEndpointTool, type FarmMCPEndpointTool } from "./mcp-catalog";
 import { createFarmMarkdownViewResponse, FARM_MARKDOWN_VIEW_PARAMS } from "./markdown-view";
 
@@ -339,7 +340,7 @@ export async function createMarkdownMirrorResponse(
     "Cache-Control",
     pageCacheControl && isPrivateCacheControl(pageCacheControl)
       ? pageCacheControl
-      : headers.has("cookie") || headers.has("authorization")
+      : withoutFarmDeploymentCookie(headers.get("cookie")) || headers.has("authorization")
         ? "private, no-store"
         : createMarkdownCacheHeader(cache),
   );

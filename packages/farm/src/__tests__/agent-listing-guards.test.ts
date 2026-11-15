@@ -28,6 +28,26 @@ describe("farmPathGuardCoversPage", () => {
       "/private/notes",
     ],
     ["file middleware", {}, [{ path: "/staff" }], "/staff/roster"],
+    // A Next.js-style root middleware.ts whose own matcher names the guarded paths: its literal
+    // config as the build reads it, its loaded module in the server, its config in dev.
+    [
+      "root middleware.ts matcher read at build",
+      {},
+      [{ path: "/", config: { matcher: ["/dashboard/:path*"] } }],
+      "/dashboard/payroll",
+    ],
+    [
+      "root middleware.ts matcher in its loaded module",
+      {},
+      [{ path: "/", module: { config: { matcher: "/dashboard/:path*" } } }],
+      "/dashboard/payroll",
+    ],
+    [
+      "root middleware.ts RegExp matcher",
+      {},
+      [{ path: "/", config: { matcher: /^\/dashboard\// } }],
+      "/dashboard/payroll",
+    ],
     [
       "integration protectedRoutes",
       { integrations: { auth: guarded([{ matcher: ["/members(.*)"], handler: deny }]) } },
@@ -42,6 +62,17 @@ describe("farmPathGuardCoversPage", () => {
 
   it.each([
     ["root file middleware", {}, [{ path: "/" }]],
+    ["root file middleware whose config is not literal", {}, [{ path: "/", config: "unknown" }]],
+    [
+      "root file middleware with a catch-all matcher",
+      {},
+      [{ path: "/", config: { matcher: ["/(.*)", "/:path*"] } }],
+    ],
+    [
+      "root file middleware with a function matcher",
+      {},
+      [{ path: "/", module: { config: { matcher: () => true } } }],
+    ],
     ["config middleware without a matcher", { middleware: [{ handler() {} }] }, []],
     ["config catch-all matcher", { middleware: [{ matcher: "/(.*)" }, { matcher: "*" }] }, []],
     ["config :path* from the root", { middleware: [{ matcher: "/:path*" }] }, []],
@@ -71,9 +102,12 @@ describe("farmPathGuardCoversPage", () => {
         middleware: [{ matcher: "/private/:path*" }],
         integrations: { auth: guarded([{ matcher: ["/members(.*)"], handler: deny }]) },
       } as never,
-      middlewareRoutes: [{ path: "/" }, { path: "/staff" }],
+      middlewareRoutes: [
+        { path: "/", config: { matcher: ["/dashboard/:path*"] } },
+        { path: "/staff" },
+      ],
     };
-    for (const pathname of ["/", "/about", "/privacy", "/staffing", "/membership"]) {
+    for (const pathname of ["/", "/about", "/privacy", "/staffing", "/membership", "/dashboards"]) {
       expect({ pathname, covered: farmPathGuardCoversPage(guards, pathname) }).toEqual({
         pathname,
         covered: false,

@@ -23,7 +23,7 @@ import { resolveFarmAPIRequestURL } from "@farm.js/core/api";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
 import farmRsc, { defineConfig } from "./index.js";
 import { buildRscNitro } from "./nitro-build.js";
-import { linkRscFixtureDependencies } from "./test-fixture-dependencies.js";
+import { linkRscFixtureDependencies, METADATA_TEST_PNG } from "./test-fixture-dependencies.js";
 
 const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -292,6 +292,11 @@ export const schema = z.string();`;
     { name: "cache-variants", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "config-middleware", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "nested-layouts", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "base-path", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "i18n", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "trailing-slash", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "config-routes", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "metadata-routes", api: undefined, baseURL: "/api", mount: "/api" },
     {
       name: "custom",
       api: {
@@ -534,6 +539,256 @@ export default defineConfig({
             `export default async function Page() { await Promise.resolve(); return <p>Async page</p>; }`,
           );
         }
+        if (name === "trailing-slash") {
+          // basePath "/console" with trailingSlash: pages answer at '/console/about/', a <Link>
+          // renders that URL, and a static page prerenders there.
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "about/page.tsx",
+            `export default function Page() { return <main>About with a trailing slash</main>; }`,
+          );
+          writeRoute(
+            "static/page.tsx",
+            `export const dynamic = "force-static";
+export default function Page() { return <main>Static with a trailing slash</main>; }`,
+          );
+          writeRoute(
+            "links/page.tsx",
+            `import { Link } from "@farm.js/core/client";
+export default function Page() { return <Link href="/about">About link</Link>; }`,
+          );
+        }
+        if (name === "config-routes") {
+          // basePath "/console" with config redirects(), rewrites() and headers().
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "about/page.tsx",
+            `export default function Page() { return <main>About page</main>; }`,
+          );
+          writeRoute(
+            "guarded/page.tsx",
+            `export default function Page() { return <main>Guarded page</main>; }`,
+          );
+          writeRoute(
+            "guarded/middleware.ts",
+            `export function middleware(request, context) {
+  context.headers.set("x-mw-path", new URL(request.url).pathname);
+}`,
+          );
+          writeRoute(
+            "api/hello/route.ts",
+            `export function GET(request) { return Response.json({ hello: new URL(request.url).pathname }); }`,
+          );
+          // Config headers apply to this static page, so the server renders it.
+          writeRoute(
+            "static/page.tsx",
+            `export const dynamic = "force-static";
+export default function Page() { return <main>Static with config headers</main>; }`,
+          );
+          writeRoute(
+            "prerendered/page.tsx",
+            `export const dynamic = "force-static";
+export default function Page() { return <main>Prerendered page</main>; }`,
+          );
+          // A route file is a local route: a config rewrite with its URL as source never applies.
+          writeRoute(
+            "docs/[section]/sitemap.ts",
+            `export default function sitemap({ params }) {
+  return [{ url: "https://shop.example/console/docs/" + params.section }];
+}`,
+          );
+        }
+        if (name === "metadata-routes") {
+          // basePath "/console" with sitemap.ts, robots.ts, llms.ts and llms-full.ts route files,
+          // which replace the generated files as in core, and a nested dynamic sitemap.ts.
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "about/page.tsx",
+            `export const metadata = { title: "About" };
+export default function Page() { return <main>About from a route file app</main>; }`,
+          );
+          writeRoute(
+            "sitemap.ts",
+            `export const revalidate = 60;
+export default function sitemap({ path }) {
+  return [{ url: "https://shop.example/console/custom", lastModified: "2026-01-02" }, { url: "https://shop.example/at" + path }];
+}`,
+          );
+          writeRoute(
+            "docs/[section]/sitemap.ts",
+            `export default function sitemap({ params, path }) {
+  return [{ url: "https://shop.example/console" + path + "?section=" + params.section }];
+}`,
+          );
+          writeRoute(
+            "robots.ts",
+            `export default function robots() { return { rules: { userAgent: "*", disallow: "/private" } }; }`,
+          );
+          writeRoute(
+            "llms.ts",
+            `export default function llms({ pages, defaults }) {
+  return { ...defaults, title: "Custom index", details: "Paths: " + pages.map((page) => page.path).join(", ") };
+}`,
+          );
+          writeRoute(
+            "llms-full.ts",
+            `export default function llmsFull({ defaults }) { return { ...defaults, title: "Custom full" }; }`,
+          );
+          // manifest.ts, a static opengraph-image with its alt text, and a generated image in a
+          // dynamic segment, which renders with the app's @vercel/og.
+          writeRoute(
+            "manifest.ts",
+            `export const revalidate = 120;
+export default function manifest() { return { name: "Route File Shop", display: "standalone" }; }`,
+          );
+          writeFileSync(path.join(srcDir, "opengraph-image.png"), METADATA_TEST_PNG);
+          writeRoute("opengraph-image.alt.txt", "Route File Shop preview");
+          writeRoute(
+            "products/[id]/page.tsx",
+            `export default async function Page({ params }) { return <main>Product {params.id}</main>; }`,
+          );
+          writeRoute(
+            "products/[id]/opengraph-image.tsx",
+            `export const alt = "Product card";
+export default async function Image({ params }) {
+  return <div style={{ display: "flex", fontSize: 64 }}>Product {params.id}</div>;
+}`,
+          );
+          // A prerendered page carries the same head tags.
+          writeRoute(
+            "prerendered/page.tsx",
+            `export const dynamic = "force-static";
+export default function Page() { return <main>Prerendered route file page</main>; }`,
+          );
+        }
+        if (name === "base-path") {
+          // basePath "/console": a page at its route path, one nested under app/console/ as RSC
+          // apps had to before, and a <Link> that core renders below the basePath.
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "about/page.tsx",
+            `export default function Page() { return <main>About below the basePath</main>; }`,
+          );
+          writeRoute(
+            "console/legacy/page.tsx",
+            `export default function Page() { return <main>Nested under the basePath</main>; }`,
+          );
+          writeRoute(
+            "links/page.tsx",
+            `import { Link } from "@farm.js/core/client";
+export default function Page() { return <Link href="/about">About link</Link>; }`,
+          );
+          // Revalidating pages: one a shared cache may store, one behind a guard, one behind
+          // middleware that opts back into shared caching and sets its own Cache-Control, and one
+          // whose layout reads the request.
+          writeRoute(
+            "isr/page.tsx",
+            `export const revalidate = 300;
+export default async function Page() { return <main>Revalidating page</main>; }`,
+          );
+          writeRoute(
+            "isr/guarded/page.tsx",
+            `export const revalidate = 300;
+export default function Page() { return <main>Guarded revalidating page</main>; }`,
+          );
+          writeRoute("isr/guarded/middleware.ts", `export function middleware() {}`);
+          writeRoute(
+            "isr/public/page.tsx",
+            `export const revalidate = 300;
+export default function Page() { return <main>Public revalidating page</main>; }`,
+          );
+          writeRoute(
+            "isr/public/middleware.ts",
+            `export const config = { cache: "public" };
+export function middleware(request, context) { context.headers.set("cache-control", "public, max-age=5"); }`,
+          );
+          writeRoute(
+            "isr/layout-reads/layout.tsx",
+            `import { headers } from "@farm.js/core";
+export default async function Layout({ children }) { return <section data-agent={headers().get("user-agent") ? "1" : "0"}>{children}</section>; }`,
+          );
+          writeRoute(
+            "isr/layout-reads/page.tsx",
+            `export const revalidate = 300;
+export default function Page() { return <main>Layout reads the request</main>; }`,
+          );
+        }
+        if (name === "i18n") {
+          // basePath "/console" with en and fr: pages read the request locale from core's runtime,
+          // whether they answer at their route path or under a [lang] folder.
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute("messages/en.json", JSON.stringify({ greeting: "Hello" }));
+          writeRoute("messages/fr.json", JSON.stringify({ greeting: "Bonjour" }));
+          writeRoute(
+            "about/page.tsx",
+            `import { getLocale, getLocaleSource, t } from "@farm.js/core/i18n/server";
+export default function Page() { return <main>{"Locale " + getLocale() + " from " + getLocaleSource() + ": " + t("greeting")}</main>; }`,
+          );
+          writeRoute(
+            "console/[lang]/legacy/page.tsx",
+            `import { getLocale } from "@farm.js/core/i18n/server";
+export default function Page({ params }) { return <main>{"Legacy " + params.lang + " in " + getLocale()}</main>; }`,
+          );
+          writeRoute(
+            "components/greeting.tsx",
+            `"use client";
+import { useLocale, useTranslations } from "@farm.js/core/i18n/client";
+export function Greeting() { const t = useTranslations(); return <p>{"Client " + useLocale().locale + ": " + t("greeting")}</p>; }`,
+          );
+          writeRoute(
+            "links/page.tsx",
+            `import { Link } from "@farm.js/core/client";
+import { Greeting } from "../components/greeting";
+export default function Page() { return <><Link href="/about">About link</Link><Greeting /></>; }`,
+          );
+          writeRoute(
+            "static/page.tsx",
+            `import { getLocale } from "@farm.js/core/i18n/server";
+export const dynamic = "force-static";
+export default function Page() { return <main>{"Static " + getLocale()}</main>; }`,
+          );
+          writeRoute(
+            "go/page.tsx",
+            `import { redirect } from "@farm.js/core/navigation";
+export default async function Page() { redirect("/about"); }`,
+          );
+          writeRoute(
+            "form/actions.ts",
+            `"use server";
+import { redirect } from "@farm.js/core/navigation";
+export async function goAbout() { redirect("/about"); }`,
+          );
+          writeRoute(
+            "form/page.tsx",
+            `import { goAbout } from "./actions";
+export default function Page() { return <form action={goAbout}><button type="submit">Go</button></form>; }`,
+          );
+          writeRoute(
+            "api/locale/route.ts",
+            `import { getLocale, getLocaleSource } from "@farm.js/core/i18n/server";
+export function GET() { return Response.json({ locale: getLocale(), source: getLocaleSource() }); }`,
+          );
+        }
         for (const packageName of [
           "@farm.js/core",
           "@vitejs/plugin-rsc",
@@ -543,10 +798,13 @@ export default defineConfig({
           "react-server-dom-webpack",
           "rsc-html-stream",
           "vite",
+          // Generated metadata images render with @vercel/og, which the app installs.
+          ...(name === "metadata-routes" ? ["@vercel/og"] : []),
         ]) {
           const linkPath = path.join(fixtureModules, packageName);
           const packagePath = [
             path.join(packageRoot, "node_modules", packageName),
+            path.resolve(packageRoot, "../farm/node_modules", packageName),
             path.resolve(packageRoot, "../../examples/rsc-demo/node_modules", packageName),
           ].find((candidate) => existsSync(candidate));
           if (!packagePath) throw new Error(`Missing fixture dependency: ${packageName}`);
@@ -561,7 +819,7 @@ export default defineConfig({
           path.join(srcDir, "layout.tsx"),
           `${name === "nested-layouts" ? 'import { Provider } from "./components/provider";' : ""}
 export default function Layout({ children }) {
-  return ${name === "nested-layouts" ? "<section>Root layout marker <Provider>{children}</Provider></section>" : "<html><body>{children}</body></html>"};
+  return ${name === "nested-layouts" ? "<section>Root layout marker <Provider>{children}</Provider></section>" : name === "i18n" ? '<html lang="en"><body>{children}</body></html>' : "<html><body>{children}</body></html>"};
 }`,
         );
         writeFileSync(
@@ -658,6 +916,61 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           outDir: "dist",
           esbuild: { jsxDev: false },
           experimental: { serverComponents: true, serverActions: true },
+          ...(name === "base-path" ? { basePath: "/console" } : {}),
+          ...(name === "i18n"
+            ? { basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" } }
+            : {}),
+          ...(name === "metadata-routes"
+            ? { basePath: "/console", agent: { crawlers: true, llmsTxt: true } }
+            : {}),
+          ...(name === "trailing-slash"
+            ? {
+                basePath: "/console",
+                trailingSlash: true,
+                agent: { crawlers: { training: "block" } },
+              }
+            : {}),
+          ...(name === "config-routes"
+            ? {
+                basePath: "/console",
+                // A generated robots.txt, which a config rewrite yields to as well.
+                agent: { crawlers: true },
+                redirects: async () => [
+                  { source: "/old", destination: "/about", permanent: true },
+                  { source: "/cfg/:slug", destination: "/:slug" },
+                ],
+                rewrites: () => [
+                  { source: "/alias", destination: "/about" },
+                  // /about is a page, so this never applies.
+                  { source: "/about", destination: "/" },
+                  { source: "/hello-alias", destination: "/api/hello" },
+                  { source: "/alias-guarded", destination: "/guarded" },
+                  // Agent files and route files answer these, so they never apply.
+                  { source: "/robots.txt", destination: "/about" },
+                  { source: "/sitemap.xml", destination: "/about" },
+                  { source: "/llms.txt", destination: "/about" },
+                  { source: "/docs/:section/sitemap.xml", destination: "/about" },
+                ],
+                headers: () => [
+                  { source: "/robots.txt", headers: [{ key: "x-config-header", value: "robots" }] },
+                  {
+                    source: "/docs/:section/sitemap.xml",
+                    headers: [{ key: "x-config-header", value: "route-file" }],
+                  },
+                  { source: "/about", headers: [{ key: "x-config-header", value: "about" }] },
+                  { source: "/api/:path*", headers: [{ key: "x-config-header", value: "api" }] },
+                  { source: "/old", headers: [{ key: "x-config-header", value: "old" }] },
+                  { source: "/static", headers: [{ key: "x-config-header", value: "static" }] },
+                  {
+                    source: "/alias-guarded",
+                    headers: [
+                      { key: "x-config-header", value: "guarded" },
+                      { key: "cache-control", value: "public, max-age=60" },
+                    ],
+                  },
+                ],
+              }
+            : {}),
           api,
           middleware: name === "config-middleware" ? { matcher: "/", handler() {} } : undefined,
           plugins,
@@ -698,6 +1011,49 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
         expect(existsSync(path.join(outputDir, "server", "node_modules", "@farm.js", "core"))).toBe(
           false,
         );
+
+        if (name === "i18n") {
+          // A static page prerenders at the URL that names its locale. The default locale's URL
+          // redirects visitors who prefer French, so it stays server-rendered.
+          const publicDir = path.join(outputDir, "public", "console");
+          const prerenderedHtml = readFileSync(
+            path.join(publicDir, "fr", "static", "index.html"),
+            "utf8",
+          );
+          expect(prerenderedHtml).toContain("Static fr");
+          // No visitor's request drives a prerender, so its hreflang links name paths only, as
+          // core's background regeneration renders them without a metadataBase.
+          expect(prerenderedHtml).toContain(
+            '<link rel="alternate" hreflang="fr" href="/console/fr/static">',
+          );
+          expect(readFileSync(path.join(publicDir, "fr", "static.rsc"), "utf8")).toContain(
+            "Static fr",
+          );
+          expect(existsSync(path.join(publicDir, "static", "index.html"))).toBe(false);
+        }
+
+        if (name === "metadata-routes") {
+          // A prerendered page names the manifest and the nearest image in its head too.
+          const prerenderedHtml = readFileSync(
+            path.join(outputDir, "public", "console", "prerendered", "index.html"),
+            "utf8",
+          );
+          expect(prerenderedHtml).toContain("Prerendered route file page");
+          expect(prerenderedHtml).toContain(
+            '<link rel="manifest" href="/console/manifest.webmanifest">',
+          );
+          expect(prerenderedHtml).toMatch(
+            /<meta property="og:image" content="\/console\/opengraph-image\?v=[0-9a-f]{16}">/,
+          );
+        }
+
+        if (name === "config-routes") {
+          // A static page config headers apply to stays server-rendered; another prerenders.
+          const publicDir = path.join(outputDir, "public", "console");
+          expect(existsSync(path.join(publicDir, "prerendered", "index.html"))).toBe(true);
+          expect(existsSync(path.join(publicDir, "static", "index.html"))).toBe(false);
+          expect(existsSync(path.join(publicDir, "static.rsc"))).toBe(false);
+        }
 
         const isolatedOutput = path.join(isolatedRoot, ".output");
         cpSync(outputDir, isolatedOutput, { recursive: true });
@@ -762,6 +1118,34 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           expect(handled.headers.get("x-config-middleware")).toBe("active");
         }
         if (name === "default") {
+          // A page that stays out of shared caches stores its deployment in the cookie, renewing
+          // another deployment's cookie a document load sends; one that names another deployment
+          // is refused and keeps its cookie.
+          const document = await fetch(origin + "/", {
+            headers: { accept: "text/html", cookie: "__farm_deployment=stale-release" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(document.status, logs).toBe(200);
+          expect(document.headers.get("cache-control")).toBe("private, no-store");
+          const deploymentId = document.headers.get("x-farm-deployment-id");
+          expect(deploymentId).toBeTruthy();
+          expect(document.headers.getSetCookie()).toEqual([
+            `__farm_deployment=${encodeURIComponent(deploymentId!)}; Path=/; HttpOnly; SameSite=Lax`,
+          ]);
+          const stale = await fetch(origin + "/", {
+            headers: { accept: "text/html", "x-farm-deployment-id": "stale-release" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(stale.status, logs).toBe(409);
+          expect(stale.headers.get("x-farm-deployment-id")).toBe(deploymentId);
+          expect(stale.headers.getSetCookie()).toEqual([]);
+          const navigation = await fetch(origin + "/", {
+            headers: { accept: "text/x-component" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(navigation.status, logs).toBe(200);
+          expect(navigation.headers.getSetCookie()).toEqual([]);
+
           for (const [pathname, expected, excluded] of [
             ["/accounts/new", "Route error rendered", "Dynamic account error rendered"],
             ["/accounts/alice", "Dynamic account error rendered", "Route error rendered"],
@@ -915,6 +1299,9 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(page.headers.get("content-type")).toContain(accept);
             expect(await page.text(), logs).toContain("RSC root runtime fixture");
             expect(page.headers.get("cache-control")).toBe("public, max-age=60");
+            // A CDN may store this page, so it never sets the deployment cookie.
+            expect(page.headers.get("x-farm-deployment-id")).toBeTruthy();
+            expect(page.headers.getSetCookie()).toEqual([]);
             const fields = page.headers.get("vary")?.toLowerCase().split(/,\s*/);
             // Nitro only adds Accept-Encoding when it actually negotiates a
             // compressed representation; these are the app-owned variants.
@@ -957,6 +1344,469 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           ]) {
             expect(body, logs).toContain(marker);
           }
+        }
+        if (name === "base-path") {
+          for (const [pathname, accept, marker] of [
+            ["/console", "text/html", "RSC root runtime fixture"],
+            ["/console/about", "text/html", "About below the basePath"],
+            ["/console/about", "text/x-component", "About below the basePath"],
+            // Client navigation requests '<page>.rsc'.
+            ["/console/about.rsc", "*/*", "About below the basePath"],
+            ["/console/legacy", "text/html", "Nested under the basePath"],
+            ["/console/legacy.rsc", "*/*", "Nested under the basePath"],
+            ["/console/links", "text/html", 'href="/console/about"'],
+            // Core's renderers answer without the basePath too.
+            ["/about", "text/html", "About below the basePath"],
+          ] as const) {
+            const response = await fetch(origin + pathname, {
+              headers: { accept },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            expect(await response.text(), pathname).toContain(marker);
+          }
+          expect((await fetch(origin + "/console/missing")).status).toBe(404);
+          // Without trailingSlash, a page's trailing-slash URL redirects to the one without.
+          for (const [pathname, location] of [
+            ["/console/about/?tab=1", "/console/about?tab=1"],
+            ["/console/", "/console"],
+            ["/console/about/index.rsc", "/console/about.rsc"],
+          ]) {
+            const response = await fetch(origin + pathname, { redirect: "manual" });
+            expect(response.status, `${pathname} ${logs}`).toBe(308);
+            expect(response.headers.get("location"), pathname).toBe(location);
+          }
+          // llms.txt answers below the basePath and lists each page's public Markdown URL.
+          const llms = await fetch(origin + "/console/llms.txt");
+          expect(llms.status, logs).toBe(200);
+          const llmsBody = await llms.text();
+          for (const url of ["/console/index.md", "/console/about.md", "/console/legacy.md"]) {
+            expect(llmsBody, url).toContain(`(${origin}${url})`);
+          }
+          expect(llmsBody).not.toContain("/console/console");
+          // So does sitemap.xml, on by default as in core, with each page's lastmod.
+          const sitemap = await fetch(origin + "/console/sitemap.xml");
+          expect(sitemap.status, logs).toBe(200);
+          const sitemapBody = await sitemap.text();
+          // Each at the URL it answers at: '/console/' redirects to '/console'.
+          for (const url of ["/console", "/console/about", "/console/legacy"]) {
+            expect(sitemapBody, url).toContain(`<loc>${origin}${url}</loc>`);
+          }
+          expect(sitemapBody).toContain("<lastmod>");
+          expect(sitemapBody).not.toContain("/console/console");
+          // The head advertises each page's Markdown mirror, as the Link header does.
+          for (const [pathname, mirror] of [
+            ["/console", "/console/index.md"],
+            ["/console/about", "/console/about.md"],
+            ["/console/legacy", "/console/legacy.md"],
+          ]) {
+            const html = await (await fetch(origin + pathname)).text();
+            expect(html, pathname).toContain(
+              `<link rel="alternate" href="${mirror}" type="text/markdown">`,
+            );
+          }
+
+          // A revalidating page gets core's shared Cache-Control on its HTML, its Flight payload
+          // and its '.rsc' payload, which vary by Accept and never set the deployment cookie. A
+          // browser holding only that cookie still gets the shared response.
+          const SHARED = "public, s-maxage=300, stale-while-revalidate=300";
+          const isrRequest = (pathname: string, headers: Record<string, string> = {}) =>
+            fetch(origin + pathname, { headers, signal: AbortSignal.timeout(10_000) });
+          const home = await isrRequest("/console");
+          const deploymentId = home.headers.get("x-farm-deployment-id");
+          expect(deploymentId).toBeTruthy();
+          for (const [pathname, headers] of [
+            ["/console/isr", { accept: "text/html" }],
+            ["/console/isr", { accept: "text/x-component" }],
+            ["/console/isr.rsc", { accept: "*/*" }],
+            ["/console/isr", { accept: "text/html", cookie: `__farm_deployment=${deploymentId}` }],
+            // A cache: "public" middleware's own Cache-Control yields to the page's, as in core.
+            ["/console/isr/public", { accept: "text/html" }],
+            ["/console/isr/public.rsc", { accept: "*/*" }],
+          ] as const) {
+            const response = await isrRequest(pathname, headers);
+            const label = `${pathname} ${JSON.stringify(headers)}`;
+            expect(response.status, `${label} ${logs}`).toBe(200);
+            expect(await response.text(), label).toContain("evalidating page");
+            expect(response.headers.get("cache-control"), label).toBe(SHARED);
+            expect(response.headers.get("vary")?.toLowerCase(), label).toContain("accept");
+            expect(response.headers.get("x-farm-deployment-id"), label).toBe(deploymentId);
+            expect(response.headers.getSetCookie(), label).toEqual([]);
+          }
+          // One visitor's render stays private, as core keeps it: a session cookie, credentials,
+          // middleware that let the request through, and a layout that read the request.
+          for (const [pathname, headers] of [
+            ["/console/isr", { accept: "text/html", cookie: "session=abc" }],
+            ["/console/isr", { accept: "text/x-component", authorization: "Bearer token" }],
+            ["/console/isr/guarded", { accept: "text/html" }],
+            ["/console/isr/guarded.rsc", { accept: "*/*" }],
+            ["/console/isr/layout-reads", { accept: "text/html" }],
+            ["/console/isr/layout-reads.rsc", { accept: "*/*" }],
+          ] as const) {
+            const response = await isrRequest(pathname, headers);
+            const label = `${pathname} ${JSON.stringify(headers)}`;
+            expect(response.status, `${label} ${logs}`).toBe(200);
+            await response.text();
+            expect(response.headers.get("cache-control"), label).toBe("private, no-store");
+          }
+          // Revalidating pages render on each request: none is prerendered.
+          expect(existsSync(path.join(isolatedOutput, "public", "console", "isr.rsc"))).toBe(false);
+        }
+        if (name === "trailing-slash") {
+          for (const [pathname, accept, marker] of [
+            ["/console/", "text/html", "RSC root runtime fixture"],
+            ["/console/about/", "text/html", "About with a trailing slash"],
+            ["/console/about/", "text/x-component", "About with a trailing slash"],
+            ["/console/about/index.rsc", "*/*", "About with a trailing slash"],
+            ["/console/links/", "text/html", 'href="/console/about/"'],
+            ["/console/static/", "text/html", "Static with a trailing slash"],
+            ["/console/static/index.rsc", "*/*", "Static with a trailing slash"],
+          ] as const) {
+            const response = await fetch(origin + pathname, {
+              headers: { accept },
+              redirect: "manual",
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            expect(await response.text(), pathname).toContain(marker);
+          }
+          for (const [pathname, location] of [
+            ["/console/about?tab=1", "/console/about/?tab=1"],
+            ["/console", "/console/"],
+            // A navigation's payload request goes to the canonical page's payload.
+            ["/console/about.rsc", "/console/about/index.rsc"],
+          ]) {
+            const response = await fetch(origin + pathname, { redirect: "manual" });
+            expect(response.status, `${pathname} ${logs}`).toBe(308);
+            expect(response.headers.get("location"), pathname).toBe(location);
+          }
+          // A prerendered page is a file served to every visitor, without the deployment cookie;
+          // a page rendered on request sets it.
+          for (const pathname of ["/console/static/", "/console/about/"]) {
+            const response = await fetch(origin + pathname, {
+              headers: { accept: "text/html" },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            expect(response.headers.getSetCookie(), pathname).toEqual(
+              pathname === "/console/static/"
+                ? []
+                : [expect.stringMatching(/^__farm_deployment=[^;]+; Path=\/console; HttpOnly/)],
+            );
+          }
+          // sitemap.xml lists each page at the URL it answers at, so none of them redirects.
+          const sitemapResponse = await fetch(origin + "/console/sitemap.xml");
+          // Agent files are not page documents, so they never set the deployment cookie.
+          expect(sitemapResponse.headers.getSetCookie()).toEqual([]);
+          const sitemapBody = await sitemapResponse.text();
+          const listed = [...sitemapBody.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+          for (const url of ["/console/", "/console/about/", "/console/static/"]) {
+            expect(listed, url).toContain(origin + url);
+            const response = await fetch(origin + url, { redirect: "manual" });
+            expect(response.status, `${url} ${logs}`).toBe(200);
+          }
+          expect(listed.filter((url) => !url.endsWith("/"))).toEqual([]);
+          // agent.crawlers serves a generated robots.txt below the basePath, as in core.
+          const robots = await fetch(origin + "/console/robots.txt");
+          expect(robots.status, logs).toBe(200);
+          expect(robots.headers.getSetCookie()).toEqual([]);
+          expect(await robots.text()).toMatch(/User-agent: GPTBot\n[\s\S]*Disallow: \//);
+          // The static page and its payload were written at the trailing-slash URL.
+          for (const file of ["index.html", "index.rsc"]) {
+            expect(
+              existsSync(path.join(isolatedOutput, "public", "console", "static", file)),
+              file,
+            ).toBe(true);
+          }
+        }
+        if (name === "config-routes") {
+          const send = (pathname: string, init: RequestInit = {}) =>
+            fetch(origin + pathname, {
+              redirect: "manual",
+              signal: AbortSignal.timeout(10_000),
+              ...init,
+            });
+          // Redirects answer before any route, for any method, below the basePath, and
+          // headers() apply to them.
+          for (const method of ["GET", "POST"]) {
+            const redirected = await send("/console/old?tab=1", { method });
+            expect(redirected.status, `${method} ${logs}`).toBe(308);
+            expect(redirected.headers.get("location")).toBe("/console/about?tab=1");
+            expect(redirected.headers.get("x-config-header")).toBe("old");
+            expect(await redirected.text()).toBe("Redirecting to /console/about?tab=1");
+          }
+          // An encoded slash stays encoded, so the target never becomes another origin.
+          const encoded = await send("/console/cfg/%2F%2Fexample.com?q=1");
+          expect(encoded.status, logs).toBe(307);
+          expect(encoded.headers.get("location")).toBe("/console/%2F%2Fexample.com?q=1");
+          // A payload request is sent to the destination's payload.
+          const payloadRedirect = await send("/console/old.rsc");
+          expect(payloadRedirect.status, logs).toBe(308);
+          expect(payloadRedirect.headers.get("location")).toBe("/console/about.rsc");
+
+          // A rewrite applies where no route answers, page and payload alike.
+          const rewritten = await send("/console/alias");
+          expect(rewritten.status, logs).toBe(200);
+          expect(await rewritten.text()).toContain("About page");
+          const rewrittenPayload = await send("/console/alias.rsc");
+          expect(rewrittenPayload.status, logs).toBe(200);
+          expect(rewrittenPayload.headers.get("content-type")).toContain("text/x-component");
+          expect(await rewrittenPayload.text()).toContain("About page");
+          const about = await send("/console/about");
+          expect(about.status, logs).toBe(200);
+          expect(about.headers.get("x-config-header")).toBe("about");
+          expect(await about.text()).toContain("About page");
+          const apiAlias = await send("/console/hello-alias");
+          expect(apiAlias.status, logs).toBe(200);
+          expect(await apiAlias.json()).toEqual({ hello: "/api/hello" });
+
+          // Middleware runs on the destination, and the response it let through stays private
+          // whatever Cache-Control headers() give it.
+          const guarded = await send("/console/alias-guarded");
+          expect(guarded.status, logs).toBe(200);
+          expect(guarded.headers.get("x-mw-path")).toMatch(/\/guarded$/);
+          expect(guarded.headers.get("x-config-header")).toBe("guarded");
+          expect(guarded.headers.get("cache-control")).toBe("private, no-store");
+          expect(await guarded.text()).toContain("Guarded page");
+
+          const api = await send("/api/hello");
+          expect(api.status, logs).toBe(200);
+          expect(api.headers.get("x-config-header")).toBe("api");
+
+          const staticPage = await send("/console/static");
+          expect(staticPage.status, logs).toBe(200);
+          expect(staticPage.headers.get("x-config-header")).toBe("static");
+          expect(await staticPage.text()).toContain("Static with config headers");
+
+          // Generated agent files and route files are local routes, which config rewrites yield
+          // to, and config headers apply to their responses.
+          const robots = await send("/console/robots.txt");
+          expect(robots.status, logs).toBe(200);
+          expect(robots.headers.get("x-config-header")).toBe("robots");
+          expect(await robots.text()).toContain("User-agent:");
+          const sitemap = await send("/console/sitemap.xml");
+          expect(sitemap.status, logs).toBe(200);
+          expect(await sitemap.text()).toContain("<urlset");
+          const llms = await send("/console/llms.txt");
+          expect(llms.status, logs).toBe(200);
+          expect(await llms.text()).not.toContain("About page");
+          const routeFile = await send("/console/docs/guides/sitemap.xml");
+          expect(routeFile.status, logs).toBe(200);
+          expect(routeFile.headers.get("x-config-header")).toBe("route-file");
+          expect(await routeFile.text()).toContain(
+            "<loc>https://shop.example/console/docs/guides</loc>",
+          );
+        }
+        if (name === "metadata-routes") {
+          const get = (pathname: string) =>
+            fetch(origin + pathname, { signal: AbortSignal.timeout(10_000) });
+          // sitemap.ts replaces the generated sitemap, below the basePath and at the origin root.
+          for (const pathname of ["/console/sitemap.xml", "/sitemap.xml"]) {
+            const sitemap = await get(pathname);
+            expect(sitemap.status, `${pathname} ${logs}`).toBe(200);
+            expect(sitemap.headers.get("content-type")).toBe("application/xml; charset=utf-8");
+            expect(sitemap.headers.get("cache-control")).toContain("s-maxage=60");
+            const xml = await sitemap.text();
+            expect(xml).toContain("<loc>https://shop.example/console/custom</loc>");
+            expect(xml).toContain("<loc>https://shop.example/at/</loc>");
+            expect(xml).not.toContain("/console/about");
+          }
+          // A nested dynamic sitemap.ts answers at its segment with its params.
+          expect(await (await get("/console/docs/guides/sitemap.xml")).text()).toContain(
+            "<loc>https://shop.example/console/docs/guides?section=guides</loc>",
+          );
+          // robots.ts wins over the robots.txt agent.crawlers generates.
+          const robots = await (await get("/console/robots.txt")).text();
+          expect(robots).toBe("User-agent: *\nDisallow: /private\n");
+          // llms.ts gets the generated pages and defaults to build on.
+          const llms = await (await get("/console/llms.txt")).text();
+          expect(llms).toMatch(/^# Custom index\n/);
+          expect(llms).toContain("Paths: /, /about");
+          expect(llms).toContain(`(${origin}/console/about.md)`);
+          // An llms-full.ts object inlines each page's Markdown.
+          const full = await (await get("/console/llms-full.txt")).text();
+          expect(full).toMatch(/^# Custom full\n/);
+          expect(full).toContain("About from a route file app");
+          // manifest.ts answers at manifest.webmanifest, with its revalidate.
+          const manifest = await get("/console/manifest.webmanifest");
+          expect(manifest.status, logs).toBe(200);
+          expect(manifest.headers.get("content-type")).toBe(
+            "application/manifest+json; charset=utf-8",
+          );
+          expect(manifest.headers.get("cache-control")).toContain("s-maxage=120");
+          expect(await manifest.json()).toEqual({ name: "Route File Shop", display: "standalone" });
+          // The head names the manifest and the nearest image, below the basePath.
+          const aboutHtml = await (await get("/console/about")).text();
+          expect(aboutHtml).toContain('<link rel="manifest" href="/console/manifest.webmanifest">');
+          const ogImage = aboutHtml.match(/<meta property="og:image" content="([^"]+)">/)?.[1];
+          expect(ogImage, aboutHtml).toMatch(/^\/console\/opengraph-image\?v=[0-9a-f]{16}$/);
+          expect(aboutHtml).toContain(
+            '<meta property="og:image:alt" content="Route File Shop preview">',
+          );
+          // The static image, inlined by the build, with core's caching.
+          const staticImage = await get(ogImage!);
+          expect(staticImage.status, logs).toBe(200);
+          expect(staticImage.headers.get("content-type")).toBe("image/png");
+          expect(staticImage.headers.get("cache-control")).toBe(
+            "public, max-age=31536000, immutable",
+          );
+          expect(Buffer.from(await staticImage.arrayBuffer())).toEqual(METADATA_TEST_PNG);
+          const unversioned = await get("/console/opengraph-image");
+          expect(unversioned.headers.get("cache-control")).toBe(
+            "public, max-age=0, must-revalidate",
+          );
+          // A dynamic segment's generated image, in the head and rendered as a 1200x630 PNG.
+          const productHtml = await (await get("/console/products/42")).text();
+          expect(productHtml).toContain(
+            '<meta property="og:image" content="/console/products/42/opengraph-image">',
+          );
+          expect(productHtml).toContain('<meta property="og:image:alt" content="Product card">');
+          const generated = await get("/console/products/42/opengraph-image");
+          expect(generated.status, logs).toBe(200);
+          expect(generated.headers.get("content-type")).toBe("image/png");
+          const png = Buffer.from(await generated.arrayBuffer());
+          expect(png.subarray(1, 4).toString()).toBe("PNG");
+          expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630]);
+          // Route files are not page documents, so only the page sets the deployment cookie.
+          for (const pathname of [
+            "/console/sitemap.xml",
+            "/sitemap.xml",
+            "/console/docs/guides/sitemap.xml",
+            "/console/robots.txt",
+            "/console/llms.txt",
+            "/console/llms-full.txt",
+            "/console/manifest.webmanifest",
+            "/console/opengraph-image",
+            "/console/products/42/opengraph-image",
+            "/console/about",
+          ]) {
+            const response = await get(pathname);
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            expect(response.headers.getSetCookie(), pathname).toEqual(
+              pathname === "/console/about"
+                ? [expect.stringMatching(/^__farm_deployment=[^;]+; Path=\/console; HttpOnly/)]
+                : [],
+            );
+          }
+        }
+        if (name === "i18n") {
+          const get = (pathname: string, headers: Record<string, string> = {}) =>
+            fetch(origin + pathname, {
+              headers,
+              redirect: "manual",
+              signal: AbortSignal.timeout(10_000),
+            });
+          for (const [pathname, accept, markers] of [
+            // The root layout renders <html lang="en">: Farm sets the request's lang and dir on it.
+            [
+              "/console/fr/about",
+              "text/html",
+              ["Locale fr from url: Bonjour", '<html lang="fr" dir="ltr">'],
+            ],
+            ["/console/fr/about.rsc", "*/*", ["Locale fr from url: Bonjour", '"locale":"fr"']],
+            [
+              "/console/about",
+              "text/html",
+              ["Locale en from default: Hello", '<html lang="en" dir="ltr">'],
+            ],
+            ["/console/fr/legacy", "text/html", ["Legacy fr in fr"]],
+            // Client components render and hydrate with the request's locale and catalog.
+            ["/console/fr/links", "text/html", ['href="/console/fr/about"', "Client fr: Bonjour"]],
+          ] as const) {
+            // An unsupported language leaves the default locale (fetch sends "*" otherwise).
+            const response = await get(pathname, { accept, "accept-language": "de" });
+            expect(response.status, `${pathname} ${logs}`).toBe(200);
+            const body = await response.text();
+            for (const marker of markers) expect(body, `${pathname} ${logs}`).toContain(marker);
+          }
+
+          // hreflang alternates name the page in each locale and x-default on the request's
+          // origin, in the document and in the payload client navigation reads.
+          const alternates = await (
+            await get("/console/fr/about", { "accept-language": "de" })
+          ).text();
+          for (const [hreflang, pathname] of [
+            ["en", "/console/about"],
+            ["fr", "/console/fr/about"],
+            ["x-default", "/console/about"],
+          ]) {
+            expect(alternates, logs).toContain(
+              `<link rel="alternate" hreflang="${hreflang}" href="${origin}${pathname}">`,
+            );
+          }
+          expect(
+            await (await get("/console/fr/about.rsc", { "accept-language": "de" })).text(),
+          ).toContain(`hreflang=\\"fr\\" href=\\"${origin}/console/fr/about\\"`);
+
+          // A page URL without a locale goes to the visitor's, varying on the signal it used.
+          const detected = await get("/console/about", { "accept-language": "fr" });
+          expect(detected.status, logs).toBe(307);
+          expect(detected.headers.get("location")).toBe("/console/fr/about");
+          expect(detected.headers.get("vary")).toContain("Accept-Language");
+          expect(detected.headers.get("cache-control")).toBe("private, no-store");
+          // Client navigation asks for the payload, and is sent to the localized one.
+          const payload = await get("/console/about.rsc", { "accept-language": "fr" });
+          expect(payload.status, logs).toBe(307);
+          expect(payload.headers.get("location")).toBe("/console/fr/about.rsc");
+          // The default locale's prefix is not canonical.
+          const canonical = await get("/console/en/about");
+          expect(canonical.status, logs).toBe(307);
+          expect(canonical.headers.get("location")).toBe("/console/about");
+
+          // API routes keep their URL and read the locale from the same signals.
+          const api = await get("/api/locale", { "accept-language": "fr" });
+          expect(api.status, logs).toBe(200);
+          expect(await api.json()).toEqual({ locale: "fr", source: "accept-language" });
+          expect(api.headers.get("vary")).toContain("Accept-Language");
+          expect(api.headers.get("set-cookie")).toContain("farm_locale=fr");
+
+          // The prerendered page and payload are served as files; the default locale's is rendered.
+          for (const pathname of ["/console/fr/static", "/console/fr/static.rsc"]) {
+            const prerendered = await get(pathname);
+            expect(prerendered.status, `${pathname} ${logs}`).toBe(200);
+            expect(prerendered.headers.get("last-modified"), pathname).toBeTruthy();
+            expect(await prerendered.text()).toContain("Static fr");
+          }
+          const rendered = await get("/console/static", { "accept-language": "de" });
+          expect(rendered.status, logs).toBe(200);
+          expect(rendered.headers.get("last-modified")).toBeNull();
+          expect(await rendered.text()).toContain("Static en");
+
+          // redirect("/about") goes to the page in the request's locale, below the basePath.
+          for (const [pathname, location] of [
+            ["/console/fr/go", "/console/fr/about"],
+            ["/console/go", "/console/about"],
+          ]) {
+            const redirected = await get(pathname, { "accept-language": "de" });
+            expect(redirected.status, `${pathname} ${logs}`).toBe(307);
+            expect(redirected.headers.get("location"), pathname).toBe(location);
+          }
+          // So does a server action's, submitted without JavaScript or called by the router.
+          const form = await (await get("/console/fr/form", { "accept-language": "de" })).text();
+          const actionField = /name="(\$ACTION_ID_[^"]+)"/.exec(form)?.[1];
+          expect(actionField, form).toBeDefined();
+          const formData = new FormData();
+          formData.set(actionField!, "");
+          const submitted = await fetch(origin + "/console/fr/form", {
+            method: "POST",
+            headers: { origin },
+            body: formData,
+            redirect: "manual",
+          });
+          expect(submitted.status, logs).toBe(303);
+          expect(submitted.headers.get("location")).toBe("/console/fr/about");
+          const called = await fetch(origin + "/console/fr/form", {
+            method: "POST",
+            headers: {
+              origin,
+              accept: "text/x-component",
+              "content-type": "text/plain; charset=utf-8",
+              "x-farm-action-id": actionField!.slice("$ACTION_ID_".length),
+            },
+            body: "[]",
+          });
+          expect(called.status, logs).toBe(200);
+          expect(await called.text()).toContain('"redirect":{"url":"/console/fr/about"');
         }
         // A custom API prefix is not a server-action URL, even with actions enabled.
         const post = await fetch(`${origin}${mount}/echo`, {

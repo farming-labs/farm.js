@@ -1,3 +1,4 @@
+import { applyFarmBasePath, normalizeFarmBasePath } from "./base-path";
 import type { HeaderConfig, RedirectConfig } from "./config";
 import { isFarmRedirectStatus, type FarmRedirectStatus } from "./navigation-errors";
 import type { FarmRouteRuntimeConfig } from "./route-runtime";
@@ -44,6 +45,7 @@ export function normalizeRouteRules(routeRules: FarmRouteRules | undefined): Far
     if (!rule) continue;
     const normalizedSource = normalizeRuleSource(source);
     validateConfigRouteSource(normalizedSource, `Route rule "${source}" source`);
+    assertSingleCatchAll(normalizedSource);
     const existingSource = normalizedSources.get(normalizedSource);
     if (existingSource !== undefined) {
       throw new Error(
@@ -152,6 +154,39 @@ export function routeRulesToNitroRouteRules(routeRules: FarmRouteRules): Record<
 }
 
 /**
+ * Nitro matches route rules against the full request path, and a Farm app is served below its
+ * basePath, so each rule also applies at `basePath + source`: a `swr`, `cache`, `cors` or
+ * `redirect` rule written for `/about` must cover the `/console/about` visitors request. The app
+ * path keeps its rule, as before. Local API routes are not served below the basePath, so a rule for
+ * the API path is not copied, and an app-relative redirect target moves below the basePath as
+ * Farm's own redirects do.
+ */
+export function nitroRouteRulesBelowBasePath(
+  nitroRules: Record<string, any>,
+  basePath: string | undefined,
+  apiServerBasePath: string,
+): Record<string, any> {
+  const prefix = normalizeFarmBasePath(basePath);
+  if (!prefix) return nitroRules;
+  const isAPISource = (source: string) =>
+    source === apiServerBasePath || source.startsWith(`${apiServerBasePath}/`);
+
+  const rules: Record<string, any> = { ...nitroRules };
+  for (const [source, rule] of Object.entries(nitroRules)) {
+    if (isAPISource(source)) continue;
+    const publicSource = applyFarmBasePath(source, prefix);
+    // A rule the app wrote for the public path itself is kept as written.
+    if (publicSource in nitroRules) continue;
+    const to = rule.redirect?.to;
+    rules[publicSource] =
+      typeof to === "string" && to.startsWith("/") && !to.startsWith("//")
+        ? { ...rule, redirect: { ...rule.redirect, to: applyFarmBasePath(to, prefix) } }
+        : rule;
+  }
+  return rules;
+}
+
+/**
  * The headers a production server answers a CORS preflight (`OPTIONS` with `Origin` and
  * `Access-Control-Request-Method`) for `pathname` with, before app middleware or routes run, or
  * `undefined` when no `cors` rule covers the path. Matching rules merge from broadest to most
@@ -196,6 +231,43 @@ function normalizeCorsHeaders(cors: FarmRouteRuleCors | undefined): Record<strin
 function normalizeList(value: string | readonly string[] | undefined): string | undefined {
   if (!value || typeof value === "string") return value;
   return value.join(", ");
+}
+
+/**
+ * Nitro matches route rules with rou3, where `*` spans any number of segments as `**` does, and a
+ * pattern may hold only one of `*`, `**`, `:name*` or `:name+`. Its own error names neither the
+ * rule nor the fix, and only once the build reaches Nitro, so check here and name both.
+ */
+function assertSingleCatchAll(source: string): void {
+  let catchAlls = 0;
+  for (const segment of source.split("/")) {
+    if (/^:[A-Za-z_]\w*[*+]$/.test(segment)) {
+      catchAlls += 1;
+      continue;
+    }
+    const withoutDoubleStars = segment.replace(/\*\*/g, () => {
+      catchAlls += 1;
+      return "";
+    });
+    catchAlls += withoutDoubleStars.split("*").length - 1;
+  }
+  if (catchAlls <= 1) return;
+
+  const segments = source.split("/");
+  let last = segments.length - 1;
+  while (last > 0 && !segments[last].includes("*")) last -= 1;
+  let names = 0;
+  const suggestion = segments
+    .map((segment, index) =>
+      segment === "*" && index !== last ? `:segment${++names === 1 ? "" : names}` : segment,
+    )
+    .join("/");
+  throw new Error(
+    `Route rule "${source}" has more than one catch-all. A route rule may use one "*", "**", ` +
+      `":name*" or ":name+", and "*" matches any number of segments, as "**" does. Match one ` +
+      `segment with a named parameter instead` +
+      (suggestion !== source ? `: "${suggestion}".` : `, as in "/:locale/docs/**".`),
+  );
 }
 
 function normalizeRuleSource(source: string): string {

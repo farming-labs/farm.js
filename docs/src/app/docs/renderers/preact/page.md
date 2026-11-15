@@ -107,6 +107,28 @@ React Server Components remain React-only. Programmatic UI routes, Markdown/MDX 
 docs adapter, generated JSX metadata images, and integration UI providers should be treated as
 compatibility surfaces until their Preact paths are covered by dedicated tests.
 
+## Experimental AOT compiler
+
+`preact({ compiler })` runs Farm's experimental [AOT compiler](/docs/renderers/react#aot-compiler)
+on Preact. Eligible components compile to direct DOM updates, as they do with `react({ compiler })`,
+and run on `preact/compat` instead of React DOM. Components the compiler cannot prove safe keep the
+normal rendering path.
+
+Install `@farm.js/react` next to `@farm.js/preact`: it provides the compiler and its runtime.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { preact } from "@farm.js/preact";
+
+export default defineConfig({
+  renderer: preact({ compiler: true }),
+});
+```
+
+The option takes the same values as `react({ compiler })`. Write compiled components with React's
+API, such as `useState` from `react`: with this renderer those imports resolve to `preact/compat`
+in both the browser and the server build. The compiler is off by default.
+
 The Better Auth starter includes native Preact routes and forms:
 
 ```bash

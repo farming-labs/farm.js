@@ -93,6 +93,20 @@ describe("generated server action security", () => {
     expect(entry).not.toContain("returnValue = { ok: false, data: e }");
   });
 
+  it("checks an action's origin against a trusted proxy's forwarded origin under trustProxy", () => {
+    const untrusted = generateRscEntry(context);
+    expect(untrusted).toContain("const serverActionRequestOptions = { trustProxy: false };");
+
+    const trusted = generateRscEntry({ ...context, server: { trustProxy: true } });
+    expect(trusted).toContain("const serverActionRequestOptions = { trustProxy: true };");
+    expect(trusted).toContain(
+      "validateServerActionRequest(request, serverActionSecurity, serverActionRequestOptions);",
+    );
+    expect(trusted).toMatch(
+      /prepareServerActionRequest\(\s*request,\s*serverActionSecurity,[^;]*actionId,\s*serverActionRequestOptions,\s*\)/,
+    );
+  });
+
   it("keeps browser action requests same-origin and turns failures into Errors", () => {
     const entry = generateClientEntry(context);
 
@@ -161,6 +175,7 @@ describe("generated server action security", () => {
       "handleFarmRequest",
       "farmApiBasePath",
       "farmMarkdownConfig",
+      "withFarmDeploymentCookie",
       `${entry.slice(start, end)}; return handler;`,
     )(
       _runWithAPIRequestRuntime,
@@ -170,6 +185,7 @@ describe("generated server action security", () => {
       async () => Response.json(await api.hello.get()),
       "/backend",
       { enabled: false },
+      (_request: Request, response: Response) => response,
     );
     const response = await handle(
       new Request("https://farm.test/page", { headers: { cookie: "session=rsc" } }),
@@ -366,14 +382,12 @@ describe("generated server action security", () => {
       { title: "Nearest" },
     ]);
 
-    expect(serverEntry).toContain("title: metadataTitle,");
-    expect(serverEntry).toContain("description: typeof metadata.description === 'string'");
-    expect(clientEntry).toContain("document.title = payload.metadata.title");
-    expect(clientEntry).toContain("document.title = ''");
+    expect(serverEntry).toContain("metadata: { title: metadataTitle },");
+    expect(serverEntry).toContain("    metadataHead,\n");
     expect(clientEntry).toContain(
-      "description.setAttribute('content', payload.metadata.description)",
+      "document.title = typeof payload.metadata?.title === 'string' ? payload.metadata.title : '';",
     );
-    expect(clientEntry).toContain("description?.remove()");
+    expect(clientEntry).toContain("applyMetadataHead(payload.metadataHead ?? '');");
   });
 
   it("rejects stale actions before decoding and only reloads safe navigation", () => {
@@ -381,7 +395,7 @@ describe("generated server action security", () => {
     const clientEntry = generateClientEntry(context);
 
     expect(serverEntry).toContain('const farmDeploymentId = "release-2"');
-    expect(serverEntry).toContain("createFarmDeploymentCookie(");
+    expect(serverEntry).toContain("_withFarmDeploymentCookie(request, response, farmDeploymentId");
     expect(serverEntry.indexOf("getFarmDeploymentMismatch(request")).toBeLessThan(
       serverEntry.indexOf("validateServerActionRequest(request"),
     );

@@ -43,10 +43,16 @@ describe("keyed target runtime selection", () => {
     ],
     // Compiler-owned host blocks render the conditional and delegate the row's click.
     ["", '{row.id === "a" ? <span>First</span> : null}', "keyedRowsHostFilterHintedRuntimeFeature"],
-    // An event inside the branch keeps the rows React-owned.
+    // An event inside the branch is delegated to the rows container as well.
     [
       "",
       '{row.id === "a" ? <span onClick={() => setSelected("")}>First</span> : null}',
+      "keyedRowsHostFilterHintedRuntimeFeature",
+    ],
+    // The container cannot receive an event that does not bubble, so the rows stay React-owned.
+    [
+      "",
+      '{row.id === "a" ? <span onMouseEnter={() => setSelected("")}>First</span> : null}',
       "keyedListRuntimeFeature",
     ],
   ])("retains shared target and conditional capabilities", async (sibling, child, feature) => {

@@ -37,6 +37,8 @@ interface StateBinding {
   setterName: string;
   index: number;
   initialValue?: t.Expression;
+  /** A useRef object: a cell that is never set, read only by handlers and ref attributes. */
+  ref?: true;
 }
 
 interface HandlerBinding {
@@ -129,7 +131,13 @@ interface PendingStaticRangeBinding extends PendingKeyedRowBinding {
 
 interface PendingKeyedRowEvent {
   id: number;
-  path: number[];
+  /**
+   * Static host-element path from the row root, by which the rows container finds the element.
+   * Absent in host-block rows: the runtime records each element's events when it mounts the row.
+   */
+  path?: number[];
+  /** The element's location from forEachKeyedRowElement, which names it in any clone of the row. */
+  location: string;
   name: string;
   value: t.ArrowFunctionExpression | t.FunctionExpression;
 }
@@ -200,6 +208,8 @@ interface KeyedRowsPlan {
   events: PendingKeyedRowEvent[];
   conditionals: PendingKeyedRowConditional[];
   descriptorBlocks?: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
+  /** Host-block row elements that carry events, with their event ids. */
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>;
   syntax: "map" | "list";
 }
 
@@ -427,6 +437,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-conditional-structural-prepend-map-hinted"
   | "keyed-rows-conditional-prepend-hinted"
   | "keyed-rows-conditional-filter-prepend-hinted"
+  | "effects"
   | "keyed-rows-host"
   | "keyed-rows-host-hinted"
   | "keyed-rows-host-position-hinted"
@@ -578,6 +589,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-ranges": "keyedRangesRuntimeFeature",
   "mixed-ranges": "mixedRangesRuntimeFeature",
   component: "componentRuntimeFeature",
+  effects: "effectsRuntimeFeature",
 };
 
 function runtimeFeaturesForPlans(
@@ -788,6 +800,182 @@ function isUseStateCall(
     reactNames.has(expression.callee.object.name) &&
     t.isIdentifier(expression.callee.property, { name: "useState" })
   );
+}
+
+type MemoHook = "useMemo" | "useCallback";
+type EffectHook = "useEffect" | "useLayoutEffect";
+type ReactHook = MemoHook | "useRef" | EffectHook;
+
+/** The local hook name a call uses, whether imported from react or called on React. */
+function reactHookCall(
+  expression: t.Node | null | undefined,
+  hookNames: ReadonlyMap<string, ReactHook>,
+  reactNames: ReadonlySet<string>,
+): ReactHook | undefined {
+  if (!t.isCallExpression(expression)) return undefined;
+  const callee = expression.callee;
+  if (t.isIdentifier(callee)) return hookNames.get(callee.name);
+  return t.isMemberExpression(callee) &&
+    !callee.computed &&
+    t.isIdentifier(callee.object) &&
+    reactNames.has(callee.object.name) &&
+    t.isIdentifier(callee.property) &&
+    (callee.property.name === "useMemo" ||
+      callee.property.name === "useCallback" ||
+      callee.property.name === "useRef" ||
+      callee.property.name === "useEffect" ||
+      callee.property.name === "useLayoutEffect")
+    ? (callee.property.name as ReactHook)
+    : undefined;
+}
+
+/**
+ * The value a useMemo or useCallback call stands for, when a compiled component can use it in
+ * place of the call: useMemo's computed expression is read as a derived value, recomputed where
+ * it is read, and useCallback's function is a handler. Memoization is a performance hint, so this
+ * holds only when the dependency list names every reactive value the callback reads (checked by
+ * the caller); undefined means the declaration is not such a call.
+ */
+function memoHookValue(
+  expression: t.Expression,
+  hookNames: ReadonlyMap<string, ReactHook>,
+  reactNames: ReadonlySet<string>,
+): { hook: MemoHook; value: t.Expression; dependencies?: string[] } | string | undefined {
+  const hook = reactHookCall(expression, hookNames, reactNames);
+  if (hook !== "useMemo" && hook !== "useCallback") return undefined;
+  if (!t.isCallExpression(expression)) return undefined;
+  const [callback, dependencyList, ...rest] = expression.arguments;
+  if (
+    rest.length > 0 ||
+    (!t.isArrowFunctionExpression(callback) && !t.isFunctionExpression(callback)) ||
+    callback.async ||
+    callback.generator
+  ) {
+    return `${hook} needs one inline synchronous callback`;
+  }
+  let dependencies: string[] | undefined;
+  if (dependencyList) {
+    if (
+      !t.isArrayExpression(dependencyList) ||
+      !dependencyList.elements.every((element) => t.isIdentifier(element))
+    ) {
+      return `${hook} dependencies must be an array of names`;
+    }
+    dependencies = dependencyList.elements.map((element) => (element as t.Identifier).name);
+  }
+  if (hook === "useCallback") return { hook, value: callback, dependencies };
+  if (callback.params.length > 0) return "useMemo callbacks take no parameters";
+  const body = callback.body;
+  const value = t.isExpression(body)
+    ? body
+    : body.body.length === 1 && t.isReturnStatement(body.body[0]) && body.body[0].argument
+      ? body.body[0].argument
+      : undefined;
+  if (!value) return "useMemo callbacks must return one expression";
+  return { hook, value, dependencies };
+}
+
+/**
+ * The component's render scope for its effects: its props, state and refs read from the cells,
+ * its derived values and handlers, then each effect callback with its dependency values. Effects
+ * close over these as React's close over a render, stale closures included.
+ */
+function effectScope(
+  path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>,
+  effects: ReadonlyArray<{
+    callback: t.ArrowFunctionExpression | t.FunctionExpression;
+    dependencies?: t.ArrayExpression;
+    layout: boolean;
+  }>,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  locals: readonly LocalBinding[],
+  propsParameter: t.Identifier,
+  stateParameter: t.Identifier,
+): t.BlockStatement {
+  const cell = (index: number, member: "get" | "set") =>
+    t.memberExpression(
+      t.memberExpression(t.cloneNode(stateParameter), t.numericLiteral(index), true),
+      t.identifier(member),
+    );
+  const statements: t.Statement[] = [];
+  const parameter = path.node.params[0];
+  if (parameter && !t.isIdentifier(parameter)) {
+    statements.push(
+      t.variableDeclaration("const", [
+        t.variableDeclarator(t.cloneNode(parameter, true) as t.LVal, t.cloneNode(propsParameter)),
+      ]),
+    );
+  }
+  const localsByName = new Map(locals.map((local) => [local.name, local]));
+  for (const statement of (path.node.body as t.BlockStatement).body) {
+    if (t.isFunctionDeclaration(statement)) {
+      statements.push(t.cloneNode(statement, true));
+      continue;
+    }
+    if (!t.isVariableDeclaration(statement)) continue;
+    const id = statement.declarations[0].id;
+    if (t.isArrayPattern(id)) {
+      const [value, setter] = id.elements as [t.Identifier, t.Identifier];
+      const index = statesByValue.get(value.name)!.index;
+      statements.push(
+        t.variableDeclaration("const", [
+          t.variableDeclarator(t.identifier(value.name), t.callExpression(cell(index, "get"), [])),
+          t.variableDeclarator(t.identifier(setter.name), cell(index, "set")),
+        ]),
+      );
+      continue;
+    }
+    if (!t.isIdentifier(id)) continue;
+    const ref = statesByValue.get(id.name);
+    const local = localsByName.get(id.name);
+    const value = ref?.ref
+      ? t.callExpression(cell(ref.index, "get"), [])
+      : local
+        ? t.cloneNode(local.value, true)
+        : undefined;
+    if (value) {
+      statements.push(
+        t.variableDeclaration("const", [t.variableDeclarator(t.identifier(id.name), value)]),
+      );
+    }
+  }
+  statements.push(
+    t.returnStatement(
+      t.arrayExpression(
+        effects.map((effect) =>
+          t.arrayExpression([
+            t.cloneNode(effect.callback, true),
+            effect.dependencies
+              ? t.cloneNode(effect.dependencies, true)
+              : t.identifier("undefined"),
+            ...(effect.layout ? [t.booleanLiteral(true)] : []),
+          ]),
+        ),
+      ),
+    ),
+  );
+  return t.blockStatement(statements);
+}
+
+/** A ref the JSX reads outside a handler or a ref attribute, if there is one. */
+function refReadDuringRender(
+  root: t.JSXElement,
+  refNames: ReadonlySet<string>,
+): string | undefined {
+  let read: string | undefined;
+  traverse(expressionFile(cloneExpression(root)), {
+    Identifier(path) {
+      if (read || !refNames.has(path.node.name) || !path.isReferencedIdentifier()) return;
+      if (path.findParent((parent) => parent.isFunction())) return;
+      const attribute = path.parentPath?.isJSXExpressionContainer()
+        ? path.parentPath.parentPath
+        : undefined;
+      if (attribute?.isJSXAttribute() && jsxAttributeName(attribute.node) === "ref") return;
+      read = path.node.name;
+      path.stop();
+    },
+  });
+  return read;
 }
 
 function cloneExpression<T extends t.Expression>(expression: T): T {
@@ -5675,6 +5863,38 @@ function reactOwnedAttribute(name: string, attribute: t.JSXAttribute): boolean {
   );
 }
 
+/** Why a keyed row form field needs React to own it, if it does. */
+function keyedRowFieldReason(element: t.JSXElement): string | undefined {
+  const tag = (element.openingElement.name as t.JSXIdentifier).name;
+  const attributeNames = new Set(
+    element.openingElement.attributes
+      .filter((attribute): attribute is t.JSXAttribute => t.isJSXAttribute(attribute))
+      .map(jsxAttributeName)
+      .filter((name): name is string => name !== undefined),
+  );
+  const controlled = attributeNames.has("value") || attributeNames.has("checked");
+  if (attributeNames.has("contentEditable")) {
+    return "content-editable keyed rows require React ownership";
+  }
+  if (tag === "input" && controlled) {
+    const type = jsxAttribute(element, "type");
+    const staticType = staticJsxAttributeString(type);
+    if (type && staticType === undefined) {
+      return "controlled keyed row inputs require a static type";
+    }
+    if (attributeNames.has("value") && staticType?.toLowerCase() === "file") {
+      return "file inputs require React ownership";
+    }
+  }
+  if (tag === "textarea" && controlled && meaningfulJsxChildren(element).length > 0) {
+    return "controlled keyed row textareas cannot also use children";
+  }
+  if (tag === "select" && controlled && controlledSelectHasDynamicOptions(element)) {
+    return "controlled keyed row selects require static options";
+  }
+  return undefined;
+}
+
 /** The inline handler a keyed row event can run from its rows block, or why it cannot. */
 function keyedRowEventHandler(
   attribute: t.JSXAttribute,
@@ -5699,38 +5919,78 @@ function keyedRowEventHandler(
 }
 
 /**
- * Events on a row's static elements, in the order the keyed-row analysis assigns ids. Rows whose
- * conditional content recursive host blocks own need them collected apart from that analysis,
- * which stops at the conditional's container. Handlers inside branches are not static and stay out.
+ * Visits a keyed row's host elements in document order, including the elements of its logical
+ * and ternary branches. Lists and components are not entered: their own rows and fibers own their
+ * events. The location names an element the same way in every clone of the row. A static
+ * element's location is its element path joined by dots; a branch adds `/<child index><t|f>`.
  */
-function staticKeyedRowEvents(
+function forEachKeyedRowElement(
+  row: t.JSXElement,
+  visit: (element: t.JSXElement, location: string) => void,
+): void {
+  const walk = (element: t.JSXElement, location: string): void => {
+    visit(element, location);
+    let elementIndex = 0;
+    element.children.forEach((child, childIndex) => {
+      if (t.isJSXElement(child)) {
+        if (isHostElement(child))
+          walk(child, location ? `${location}.${elementIndex}` : `${elementIndex}`);
+        elementIndex += 1;
+        return;
+      }
+      if (!t.isJSXExpressionContainer(child) || t.isJSXEmptyExpression(child.expression)) return;
+      const shape = conditionalBlockShape(child.expression);
+      if (shape?.truthy) walk(shape.truthy, `${location}/${childIndex}t`);
+      if (shape?.falsy) walk(shape.falsy, `${location}/${childIndex}f`);
+    });
+  };
+  walk(row, "");
+}
+
+/**
+ * Events of a row whose conditional content compiler-owned host blocks render: on its static
+ * elements and inside its branches. Each element's descriptor lists its event ids, so the runtime
+ * records them when it mounts the element and the rows container needs no static path. Returns
+ * undefined when a handler cannot run from the rows block.
+ */
+function hostBlockKeyedRowEvents(
   row: t.JSXElement,
   compilerSetters: ReadonlySet<string>,
-): PendingKeyedRowEvent[] | undefined {
+):
+  | {
+      events: PendingKeyedRowEvent[];
+      elements: Map<t.JSXElement, number[]>;
+      attributes: Set<t.JSXAttribute>;
+    }
+  | undefined {
   const events: PendingKeyedRowEvent[] = [];
-  const visit = (element: t.JSXElement, path: number[]): boolean => {
+  const elements = new Map<t.JSXElement, number[]>();
+  const attributes = new Set<t.JSXAttribute>();
+  let supported = true;
+  forEachKeyedRowElement(row, (element, location) => {
+    // The keyed-row analysis can stop at a conditional before reaching later fields, and branch
+    // fields are interactive now that their events run here, so check every field.
+    if (keyedRowFieldReason(element)) supported = false;
     for (const attribute of element.openingElement.attributes) {
       if (!t.isJSXAttribute(attribute)) continue;
       const name = jsxAttributeName(attribute);
       if (!name || !/^on[A-Z]/.test(name)) continue;
       const handler = keyedRowEventHandler(attribute);
-      if (typeof handler === "string") return false;
+      if (typeof handler === "string") {
+        supported = false;
+        continue;
+      }
+      elements.set(element, [...(elements.get(element) || []), events.length]);
+      attributes.add(attribute);
       events.push({
         id: events.length,
-        path: [...path],
+        location,
         name,
         value: stabilizeDeferredEventCurrentTarget(handler, compilerSetters),
       });
     }
-    let elementIndex = 0;
-    for (const child of element.children) {
-      if (!t.isJSXElement(child)) continue;
-      if (!visit(child, [...path, elementIndex])) return false;
-      elementIndex += 1;
-    }
-    return true;
-  };
-  return visit(row, []) ? events : undefined;
+  });
+  return supported ? { events, elements, attributes } : undefined;
 }
 
 function analyzeKeyedRowTree(
@@ -5782,32 +6042,8 @@ function analyzeKeyedRowTree(
     if (tag.name === "title" || tag.name === "meta") {
       return "document metadata requires React ownership";
     }
-    const attributeNames = new Set(
-      element.openingElement.attributes
-        .filter((attribute): attribute is t.JSXAttribute => t.isJSXAttribute(attribute))
-        .map(jsxAttributeName)
-        .filter((name): name is string => name !== undefined),
-    );
-    const controlled = attributeNames.has("value") || attributeNames.has("checked");
-    if (attributeNames.has("contentEditable")) {
-      return "content-editable keyed rows require React ownership";
-    }
-    if (tag.name === "input" && controlled) {
-      const type = jsxAttribute(element, "type");
-      const staticType = staticJsxAttributeString(type);
-      if (type && staticType === undefined) {
-        return "controlled keyed row inputs require a static type";
-      }
-      if (attributeNames.has("value") && staticType?.toLowerCase() === "file") {
-        return "file inputs require React ownership";
-      }
-    }
-    if (tag.name === "textarea" && controlled && meaningfulJsxChildren(element).length > 0) {
-      return "controlled keyed row textareas cannot also use children";
-    }
-    if (tag.name === "select" && controlled && controlledSelectHasDynamicOptions(element)) {
-      return "controlled keyed row selects require static options";
-    }
+    const fieldReason = keyedRowFieldReason(element);
+    if (fieldReason) return fieldReason;
 
     for (const attribute of element.openingElement.attributes) {
       if (t.isJSXSpreadAttribute(attribute)) {
@@ -5830,6 +6066,7 @@ function analyzeKeyedRowTree(
         events.push({
           id: events.length,
           path: [...path],
+          location: path.join("."),
           name,
           value: stabilizeDeferredEventCurrentTarget(handler, compilerSetters),
         });
@@ -6668,6 +6905,7 @@ function analyzeRecursiveHostTree(
               listNames,
               id,
               allocateId,
+              delegatedEvents,
             )
           : {
               bindings: [],
@@ -6682,6 +6920,7 @@ function analyzeRecursiveHostTree(
               listNames,
               id,
               allocateId,
+              delegatedEvents,
             )
           : {
               bindings: [],
@@ -6876,56 +7115,6 @@ function analyzeRecursiveHostTree(
   return { bindings, plans, blocks, reason };
 }
 
-function jsxCanRenderElements(expression: t.Expression): boolean {
-  let found = false;
-  traverse(expressionFile(cloneExpression(expression)), {
-    JSXElement(path) {
-      found = true;
-      path.stop();
-    },
-    JSXFragment(path) {
-      found = true;
-      path.stop();
-    },
-  });
-  return found;
-}
-
-/**
- * True when, at every level of the path, only host elements precede the next element: no
- * conditional, list or component that renders a varying number of elements. Counting static
- * elements then finds the same DOM element.
- */
-function keyedRowEventPathIsStable(row: t.JSXElement, path: readonly number[]): boolean {
-  let element = row;
-  for (const index of path) {
-    let seen = 0;
-    let next: t.JSXElement | undefined;
-    for (const child of element.children) {
-      if (t.isJSXElement(child)) {
-        if (!isHostElement(child)) return false;
-        if (seen === index) {
-          next = child;
-          break;
-        }
-        seen += 1;
-        continue;
-      }
-      if (t.isJSXFragment(child)) return false;
-      if (
-        t.isJSXExpressionContainer(child) &&
-        !t.isJSXEmptyExpression(child.expression) &&
-        jsxCanRenderElements(child.expression)
-      ) {
-        return false;
-      }
-    }
-    if (!next) return false;
-    element = next;
-  }
-  return true;
-}
-
 function analyzeCompilerOwnedKeyedRowHostBlocks(
   shape: KeyedRowsShape,
   container: t.JSXElement,
@@ -6942,43 +7131,26 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
       descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
       nestedPlans: HostDescriptorBlockPlan[];
       events: PendingKeyedRowEvent[];
+      eventElements: ReadonlyMap<t.JSXElement, readonly number[]>;
     }
   | undefined {
-  const events = shape.rowReason
-    ? staticKeyedRowEvents(
-        shape.row,
-        new Set([...statesByValue.values()].map((state) => state.setterName)),
-      )
-    : shape.events;
-  // The rows container dispatches each event by its element's static path, so that path must
-  // also be its DOM path: no child that can render elements may come before the element.
-  if (
-    !events ||
-    (events.length > 0 &&
-      (!canDelegateKeyedRowEvents(
-        { events, conditionals: [], source: container },
-        delegateWithoutReact,
-      ) ||
-        !events.every((event) => keyedRowEventPathIsStable(shape.row, event.path))))
-  ) {
-    return undefined;
-  }
-
   const row = t.cloneNode(shape.row, true);
   row.openingElement.attributes = row.openingElement.attributes.filter(
     (attribute) => !t.isJSXAttribute(attribute) || jsxAttributeName(attribute) !== "key",
   );
-  const delegatedEvents = new Set<t.JSXAttribute>();
-  for (const event of events) {
-    let element = row;
-    for (const index of event.path) {
-      element = element.children.filter((child) => t.isJSXElement(child))[index] as t.JSXElement;
-    }
-    for (const attribute of element.openingElement.attributes) {
-      if (t.isJSXAttribute(attribute) && jsxAttributeName(attribute) === event.name) {
-        delegatedEvents.add(attribute);
-      }
-    }
+  const rowEvents = hostBlockKeyedRowEvents(
+    row,
+    new Set([...statesByValue.values()].map((state) => state.setterName)),
+  );
+  if (
+    !rowEvents ||
+    (rowEvents.events.length > 0 &&
+      !canDelegateKeyedRowEvents(
+        { events: rowEvents.events, conditionals: [], source: container },
+        delegateWithoutReact,
+      ))
+  ) {
+    return undefined;
   }
   const analysis = analyzeRecursiveHostTree(
     row,
@@ -6987,7 +7159,7 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
     listNames,
     parent,
     allocateId,
-    delegatedEvents,
+    rowEvents.attributes,
   );
   if (analysis.reason || analysis.plans.length === 0) {
     return undefined;
@@ -6997,7 +7169,8 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
     bindings: analysis.bindings,
     descriptorBlocks: analysis.blocks,
     nestedPlans: analysis.plans,
-    events,
+    events: rowEvents.events,
+    eventElements: rowEvents.elements,
   };
 }
 
@@ -7301,6 +7474,7 @@ function analyzeMixedRangesContainer(
               listNames,
               parent,
               allocateId,
+              delegatedEvents,
             )
           : {
               bindings: [],
@@ -7315,6 +7489,7 @@ function analyzeMixedRangesContainer(
               listNames,
               parent,
               allocateId,
+              delegatedEvents,
             )
           : {
               bindings: [],
@@ -7438,6 +7613,8 @@ function keyedListBoundary(
 function hostElementDescriptor(
   element: t.JSXElement,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan> = new Map(),
+  /** Host-block row elements that carry events; the runtime records their ids on mount. */
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.ObjectExpression {
   const tag = element.openingElement.name as t.JSXIdentifier;
   const attributes: t.ObjectExpression[] = [];
@@ -7510,13 +7687,15 @@ function hostElementDescriptor(
           children.push(keyedRangeDescriptorChildren(keyedRange, descriptorBlocks));
         }
       } else {
-        children.push(hostElementDescriptor(child, descriptorBlocks));
+        children.push(hostElementDescriptor(child, descriptorBlocks, eventElements));
       }
     } else if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
       const conditionalRange = conditionalBySource.get(child.expression);
       const keyedRange = keyedBySource.get(child.expression);
       if (conditionalRange) {
-        children.push(conditionalRangeDescriptorChild(conditionalRange, descriptorBlocks));
+        children.push(
+          conditionalRangeDescriptorChild(conditionalRange, descriptorBlocks, eventElements),
+        );
       } else if (keyedRange) {
         if (block?.kind !== "nested-host-keyed-ranges") {
           children.push(keyedRangeDescriptorChildren(keyedRange, descriptorBlocks));
@@ -7534,9 +7713,21 @@ function hostElementDescriptor(
     t.objectProperty(t.identifier("styles"), t.arrayExpression(styles)),
     t.objectProperty(t.identifier("children"), t.arrayExpression(children)),
   ];
+  const events = eventElements?.get(element);
+  if (events) {
+    properties.push(
+      t.objectProperty(
+        t.identifier("events"),
+        t.arrayExpression(events.map((id) => t.numericLiteral(id))),
+      ),
+    );
+  }
   if (block) {
     properties.push(
-      t.objectProperty(t.identifier("block"), nestedHostBlockObject(block, descriptorBlocks)),
+      t.objectProperty(
+        t.identifier("block"),
+        nestedHostBlockObject(block, descriptorBlocks, eventElements),
+      ),
     );
   }
   return t.objectExpression(properties);
@@ -7545,9 +7736,10 @@ function hostElementDescriptor(
 function conditionalRangeDescriptorChild(
   range: ConditionalRangePlan,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.Expression {
   const truthy = range.truthy
-    ? hostElementDescriptor(range.truthy, descriptorBlocks)
+    ? hostElementDescriptor(range.truthy, descriptorBlocks, eventElements)
     : t.nullLiteral();
   if (range.logical) {
     return t.logicalExpression("&&", cloneExpression(range.test), truthy);
@@ -7555,7 +7747,9 @@ function conditionalRangeDescriptorChild(
   return t.conditionalExpression(
     cloneExpression(range.test),
     truthy,
-    range.falsy ? hostElementDescriptor(range.falsy, descriptorBlocks) : t.nullLiteral(),
+    range.falsy
+      ? hostElementDescriptor(range.falsy, descriptorBlocks, eventElements)
+      : t.nullLiteral(),
   );
 }
 
@@ -7701,14 +7895,14 @@ function rewriteKeyedRowEventAttributes(
   extraArguments: readonly t.Expression[] = [],
 ): void {
   const eventByLocation = new Map(
-    events.map((event) => [`${event.path.join(".")}:${event.name}`, event] as const),
+    events.map((event) => [`${event.location}:${event.name}`, event] as const),
   );
-  const visit = (element: t.JSXElement, path: number[]): void => {
+  forEachKeyedRowElement(row, (element, location) => {
     for (const attribute of element.openingElement.attributes) {
       if (!t.isJSXAttribute(attribute)) continue;
       const name = jsxAttributeName(attribute);
       if (!name || !/^on[A-Z]/.test(name)) continue;
-      const event = eventByLocation.get(`${path.join(".")}:${name}`);
+      const event = eventByLocation.get(`${location}:${name}`);
       if (!event) continue;
       attribute.value = t.jsxExpressionContainer(
         t.callExpression(t.cloneNode(eventFactory), [
@@ -7719,15 +7913,7 @@ function rewriteKeyedRowEventAttributes(
         ]),
       );
     }
-
-    let elementIndex = 0;
-    for (const child of element.children) {
-      if (!t.isJSXElement(child)) continue;
-      visit(child, [...path, elementIndex]);
-      elementIndex += 1;
-    }
-  };
-  visit(row, []);
+  });
 }
 
 function rewriteKeyedRowConditionalExpressions(
@@ -7839,10 +8025,14 @@ function keyedRowEventObject(
   const parameters = [t.cloneNode(renderParameters[0], true), index, syntheticEvent];
   return t.objectExpression([
     t.objectProperty(t.identifier("name"), t.stringLiteral(event.name)),
-    t.objectProperty(
-      t.identifier("path"),
-      t.arrayExpression(event.path.map((part) => t.numericLiteral(part))),
-    ),
+    ...(event.path
+      ? [
+          t.objectProperty(
+            t.identifier("path"),
+            t.arrayExpression(event.path.map((part) => t.numericLiteral(part))),
+          ),
+        ]
+      : []),
     t.objectProperty(
       t.identifier("invoke"),
       t.arrowFunctionExpression(
@@ -8103,7 +8293,7 @@ function keyedRowsBoundary(
           t.jsxExpressionContainer(
             t.arrowFunctionExpression(
               parameters.map((parameter) => t.cloneNode(parameter, true)),
-              hostElementDescriptor(plan.row, plan.descriptorBlocks),
+              hostElementDescriptor(plan.row, plan.descriptorBlocks, plan.eventElements),
             ),
           ),
         ),
@@ -8353,11 +8543,12 @@ function hostConditionalBranchObject(
   branch: t.JSXElement,
   bindings: readonly PendingKeyedRowBinding[],
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan> = new Map(),
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.ObjectExpression {
   return t.objectExpression([
     t.objectProperty(
       t.identifier("create"),
-      t.arrowFunctionExpression([], hostElementDescriptor(branch, descriptorBlocks)),
+      t.arrowFunctionExpression([], hostElementDescriptor(branch, descriptorBlocks, eventElements)),
     ),
     t.objectProperty(
       t.identifier("bindings"),
@@ -8412,6 +8603,7 @@ function hostConditionalBoundary(
 function conditionalRangeObject(
   range: ConditionalRangePlan,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan> = new Map(),
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.ObjectExpression {
   const properties: t.ObjectProperty[] = [
     t.objectProperty(t.identifier("before"), t.numericLiteral(range.before)),
@@ -8427,7 +8619,12 @@ function conditionalRangeObject(
     properties.push(
       t.objectProperty(
         t.identifier("truthy"),
-        hostConditionalBranchObject(range.truthy, range.truthyBindings, descriptorBlocks),
+        hostConditionalBranchObject(
+          range.truthy,
+          range.truthyBindings,
+          descriptorBlocks,
+          eventElements,
+        ),
       ),
     );
   }
@@ -8435,7 +8632,12 @@ function conditionalRangeObject(
     properties.push(
       t.objectProperty(
         t.identifier("falsy"),
-        hostConditionalBranchObject(range.falsy, range.falsyBindings, descriptorBlocks),
+        hostConditionalBranchObject(
+          range.falsy,
+          range.falsyBindings,
+          descriptorBlocks,
+          eventElements,
+        ),
       ),
     );
   }
@@ -8445,6 +8647,7 @@ function conditionalRangeObject(
 function nestedHostBlockObject(
   plan: HostDescriptorBlockPlan,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.ObjectExpression {
   const kind =
     plan.kind === "nested-host-conditional-ranges"
@@ -8459,10 +8662,12 @@ function nestedHostBlockObject(
       t.identifier("ranges"),
       t.arrayExpression(
         plan.kind === "nested-host-conditional-ranges"
-          ? plan.ranges.map((range) => conditionalRangeObject(range, descriptorBlocks))
+          ? plan.ranges.map((range) =>
+              conditionalRangeObject(range, descriptorBlocks, eventElements),
+            )
           : plan.kind === "nested-host-keyed-ranges"
             ? plan.ranges.map((range) => keyedRangeObject(range, descriptorBlocks))
-            : plan.ranges.map((range) => mixedRangeObject(range, descriptorBlocks)),
+            : plan.ranges.map((range) => mixedRangeObject(range, descriptorBlocks, eventElements)),
       ),
     ),
     t.objectProperty(t.identifier("trailing"), t.numericLiteral(plan.trailing)),
@@ -8479,10 +8684,11 @@ function nestedHostBlockObject(
 function mixedRangeObject(
   range: MixedRangePlan,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
+  eventElements?: ReadonlyMap<t.JSXElement, readonly number[]>,
 ): t.ObjectExpression {
   const value =
     range.rangeKind === "conditional"
-      ? conditionalRangeObject(range, descriptorBlocks)
+      ? conditionalRangeObject(range, descriptorBlocks, eventElements)
       : keyedRangeObject(range, descriptorBlocks);
   value.properties.unshift(
     t.objectProperty(t.identifier("kind"), t.stringLiteral(range.rangeKind)),
@@ -8972,6 +9178,7 @@ function analyzeComposableBlocks(
               events: hostBlocks?.events || keyedRows.events,
               conditionals: hostBlocks ? [] : keyedRows.conditionals,
               descriptorBlocks: hostBlocks?.descriptorBlocks,
+              eventElements: hostBlocks?.eventElements,
               syntax: keyedRows.syntax,
             });
             plans.push(...(hostBlocks?.nestedPlans || []));
@@ -9155,6 +9362,58 @@ function analyzeComposableBlocks(
     };
   }
 
+  // A root list whose rows hold conditional content, which keyed ranges do not support: the rows
+  // block renders the root container itself and hands it to the component through rootRef.
+  const rootKeyedRowsStart = nextId;
+  const rootKeyedRowsId = nextId++;
+  const rootKeyedRows = analyzeKeyedRowsContainer(root, statesByValue, safeGlobals, listNames);
+  const rootHostBlocks =
+    rootKeyedRows &&
+    analyzeCompilerOwnedKeyedRowHostBlocks(
+      rootKeyedRows,
+      root,
+      statesByValue,
+      safeGlobals,
+      listNames,
+      rootKeyedRowsId,
+      () => nextId++,
+      delegateWithoutReact,
+    );
+  if (rootKeyedRows && rootHostBlocks) {
+    plans.push({
+      kind: "keyed-rows",
+      id: rootKeyedRowsId,
+      dependencies: rootKeyedRows.dependencies,
+      source: root,
+      collection: rootKeyedRows.collection,
+      collectionDependency: rootKeyedRows.collectionDependency,
+      structureDependencies: rootKeyedRows.structureDependencies,
+      keyCallback: rootKeyedRows.keyCallback,
+      renderCallback: rootKeyedRows.renderCallback,
+      row: rootHostBlocks.row,
+      bindings: rootHostBlocks.bindings,
+      events: rootHostBlocks.events,
+      conditionals: [],
+      descriptorBlocks: rootHostBlocks.descriptorBlocks,
+      eventElements: rootHostBlocks.eventElements,
+      syntax: rootKeyedRows.syntax,
+    });
+    plans.push(...rootHostBlocks.nestedPlans);
+    const list = meaningfulJsxChildren(root)[0];
+    if (t.isJSXElement(list)) ownedElements.add(list);
+    else if (t.isJSXExpressionContainer(list) && !t.isJSXEmptyExpression(list.expression)) {
+      keyedExpressions.add(list.expression);
+    }
+    return {
+      plans,
+      componentElements,
+      conditionalExpressions,
+      ownedElements,
+      keyedExpressions,
+    };
+  }
+  nextId = rootKeyedRowsStart;
+
   const rootConditionalRangeStart = nextId;
   const rootConditionalRangeId = nextId++;
   const rootConditionalRanges = analyzeConditionalRangesContainer(
@@ -9252,6 +9511,17 @@ function lowerComposableBlocks(
   }
   if (rootPlan?.kind === "conditional-ranges") {
     return conditionalRangesBoundary(blockRuntime, rootPlan);
+  }
+  if (rootPlan?.kind === "keyed-rows") {
+    return keyedRowsBoundary(
+      blockRuntime,
+      rootPlan,
+      keyedMapUpdateHints,
+      keyedArrayFilterHintedStateIndices,
+      keyedArrayPrependHintedStateIndices,
+      keyedArrayPositionHintedStateIndices,
+      keyedArrayReorderHintedStateIndices,
+    );
   }
 
   const visit = (element: t.JSXElement): void => {
@@ -9367,13 +9637,26 @@ function lowerStableBindingTargets(
   const visit = (element: t.JSXElement, path: number[]): void => {
     const target = targetByPath.get(path.join("."));
     if (target !== undefined && path.length > 0) {
-      element.openingElement.attributes.push(
+      // A useRef object on the same element goes through the binding target's ref, which also
+      // sets it, since an element takes one ref.
+      const attributes = element.openingElement.attributes;
+      const userRefIndex = attributes.findIndex(
+        (attribute) => t.isJSXAttribute(attribute) && jsxAttributeName(attribute) === "ref",
+      );
+      const userRef =
+        userRefIndex >= 0
+          ? (
+              (attributes.splice(userRefIndex, 1)[0] as t.JSXAttribute)
+                .value as t.JSXExpressionContainer
+            ).expression
+          : undefined;
+      attributes.push(
         t.jsxAttribute(
           t.jsxIdentifier("ref"),
           t.jsxExpressionContainer(
             t.callExpression(
               t.memberExpression(t.cloneNode(blockRuntime), t.identifier("target")),
-              [t.numericLiteral(target)],
+              [t.numericLiteral(target), ...(userRef && t.isExpression(userRef) ? [userRef] : [])],
             ),
           ),
         ),
@@ -9450,9 +9733,18 @@ function analyzeHostTree(
       const name = jsxAttributeName(attribute);
       if (!name) return "namespaced JSX attributes are not supported yet";
       if (name === "is") return "customized built-in elements require React ownership";
-      if (name === "ref" || name === "dangerouslySetInnerHTML") {
-        return `${name} requires React ownership`;
+      if (name === "ref") {
+        // A useRef object on a static element below the root, which the component's own root
+        // ref replaces: React, or the compiled root, attaches it.
+        const value = t.isJSXExpressionContainer(attribute.value)
+          ? attribute.value.expression
+          : undefined;
+        if (path.length > 0 && t.isIdentifier(value) && statesByValue.get(value.name)?.ref) {
+          continue;
+        }
+        return "ref requires React ownership";
       }
+      if (name === "dangerouslySetInnerHTML") return `${name} requires React ownership`;
       if (
         !t.isJSXExpressionContainer(attribute.value) ||
         t.isJSXEmptyExpression(attribute.value.expression)
@@ -9788,6 +10080,7 @@ function compileCandidate(
     keyedArrayWindowReplaceHints: number;
   },
   useStateNames: ReadonlySet<string>,
+  hookNames: ReadonlyMap<string, ReactHook>,
   reactNames: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
   moduleId: string,
@@ -9811,12 +10104,53 @@ function compileCandidate(
 
   const states: StateBinding[] = [];
   const locals: LocalBinding[] = [];
+  const effects: Array<{
+    callback: t.ArrowFunctionExpression | t.FunctionExpression;
+    dependencies?: t.ArrayExpression;
+    layout: boolean;
+  }> = [];
+  const memoDeclarations: Array<{
+    name: string;
+    hook: MemoHook;
+    value: t.Expression;
+    dependencies?: string[];
+  }> = [];
   let returned: t.ReturnStatement | undefined;
   for (const statement of path.node.body.body) {
     if (t.isReturnStatement(statement)) {
       if (returned) return "components must have one unconditional return";
       returned = statement;
       continue;
+    }
+    if (t.isExpressionStatement(statement)) {
+      const hook = reactHookCall(statement.expression, hookNames, reactNames);
+      if (hook === "useEffect" || hook === "useLayoutEffect") {
+        const [callback, dependencyList, ...rest] = (statement.expression as t.CallExpression)
+          .arguments;
+        if (
+          rest.length > 0 ||
+          (!t.isArrowFunctionExpression(callback) && !t.isFunctionExpression(callback)) ||
+          callback.async ||
+          callback.generator ||
+          callback.params.length > 0
+        ) {
+          return `${hook} needs one inline synchronous callback`;
+        }
+        if (containsDirectHookCall(callback)) return `Hooks cannot be called inside ${hook}`;
+        if (
+          dependencyList &&
+          (!t.isArrayExpression(dependencyList) ||
+            !dependencyList.elements.every((element) => t.isIdentifier(element)))
+        ) {
+          return `${hook} dependencies must be an array of names`;
+        }
+        effects.push({
+          callback,
+          dependencies: dependencyList as t.ArrayExpression | undefined,
+          layout: hook === "useLayoutEffect",
+        });
+        continue;
+      }
     }
     if (t.isFunctionDeclaration(statement)) {
       if (!statement.id) return "named event handler declarations must have a name";
@@ -9861,21 +10195,47 @@ function compileCandidate(
     if (!t.isIdentifier(declaration.id) || !t.isExpression(declaration.init)) {
       return "derived const values and event handlers must use one identifier and one expression";
     }
-    if (t.isArrowFunctionExpression(declaration.init) || t.isFunctionExpression(declaration.init)) {
-      if (declaration.init.generator) {
+    let init = declaration.init;
+    if (reactHookCall(init, hookNames, reactNames) === "useRef") {
+      const [initial, ...rest] = (init as t.CallExpression).arguments;
+      if (rest.length > 0 || (initial && !t.isExpression(initial))) {
+        return "useRef takes at most one initial value";
+      }
+      states.push({
+        valueName: declaration.id.name,
+        setterName: path.scope.generateUidIdentifier("farmRef").name,
+        index: states.length,
+        initialValue: t.objectExpression([
+          t.objectProperty(
+            t.identifier("current"),
+            initial ? (initial as t.Expression) : t.identifier("undefined"),
+          ),
+        ]),
+        ref: true,
+      });
+      continue;
+    }
+    const memo = memoHookValue(init, hookNames, reactNames);
+    if (typeof memo === "string") return memo;
+    if (memo) {
+      memoDeclarations.push({ name: declaration.id.name, ...memo });
+      init = memo.value;
+    }
+    if (t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)) {
+      if (init.generator) {
         return `event handler ${declaration.id.name} cannot be a generator`;
       }
       locals.push({
         kind: "handler",
         name: declaration.id.name,
-        value: declaration.init,
+        value: init,
         statesBefore: states.length,
       });
     } else {
       locals.push({
         kind: "derived",
         name: declaration.id.name,
-        value: declaration.init,
+        value: init,
         statesBefore: states.length,
       });
     }
@@ -9890,6 +10250,36 @@ function compileCandidate(
   const statesBySetter = new Map(states.map((state) => [state.setterName, state]));
   const localNames = new Set(locals.map((binding) => binding.name));
   if (localNames.size !== locals.length) return "local binding names must be unique";
+  // A memoized value read where it is used matches React only when its dependency list names
+  // every reactive value it reads; a shorter list keeps a stale value on purpose.
+  const reactiveNames = [
+    ...states.map((state) => state.valueName),
+    ...propsPlan.destructuredNames,
+    ...(propsPlan.wrapperProps ? [propsPlan.definitionParameter.name] : []),
+    ...localNames,
+  ];
+  for (const memo of memoDeclarations) {
+    if (!memo.dependencies) continue;
+    const listed = new Set(memo.dependencies);
+    const missing = reactiveNames.find(
+      (name) => name !== memo.name && !listed.has(name) && referencesIdentifier(memo.value, name),
+    );
+    if (missing) {
+      return `${memo.hook} ${memo.name} reads ${missing} without listing it as a dependency`;
+    }
+  }
+  // A ref changes without rendering, so React reads it only in handlers and attaches it through
+  // a ref attribute; a compiled binding that read it would never update.
+  const refNames = new Set(states.filter((state) => state.ref).map((state) => state.valueName));
+  if (refNames.size > 0) {
+    for (const binding of locals) {
+      if (binding.kind !== "derived") continue;
+      const ref = [...refNames].find((name) => referencesIdentifier(binding.value, name));
+      if (ref) return `derived local ${binding.name} cannot read the ref ${ref} during render`;
+    }
+    const ref = refReadDuringRender(returned.argument, refNames);
+    if (ref) return `the ref ${ref} cannot be read during render`;
+  }
   for (const state of states) {
     if (
       state.initialValue &&
@@ -10962,6 +11352,7 @@ function compileCandidate(
     appliedKeyedMapUpdateHints > 0 || appliedKeyedArrayAppendHints > 0,
     appliedKeyedArrayAppendHints > 0 && appliedKeyedMapUpdateHints === 0,
   );
+  if (effects.length > 0) runtimeFeatures.push("effects");
   // Reserve only features this module actually uses, once per program. Babel
   // still owns collision avoidance for bindings and referenced global names.
   for (const feature of runtimeFeatures) {
@@ -11077,6 +11468,17 @@ function compileCandidate(
           rewrittenRoot,
         ),
       ),
+      ...(effects.length > 0
+        ? [
+            t.objectProperty(
+              t.identifier("effects"),
+              t.arrowFunctionExpression(
+                [t.cloneNode(propsParameter), t.cloneNode(stateParameter)],
+                effectScope(path, effects, statesByValue, locals, propsParameter, stateParameter),
+              ),
+            ),
+          ]
+        : []),
       t.objectProperty(
         t.identifier("bindings"),
         t.arrayExpression(
@@ -11212,6 +11614,7 @@ export async function compileReactModule(
         const moduleDirectives = new Set(directiveValues(programPath.node));
         markForeignContent(programPath);
         const useStateNames = new Set<string>();
+        const hookNames = new Map<string, ReactHook>();
         const reactNames = new Set<string>();
         const listNames = new Set<string>();
         for (const statement of programPath.node.body) {
@@ -11236,6 +11639,16 @@ export async function compileReactModule(
               t.isIdentifier(specifier.imported, { name: "useState" })
             ) {
               useStateNames.add(specifier.local.name);
+            } else if (
+              t.isImportSpecifier(specifier) &&
+              t.isIdentifier(specifier.imported) &&
+              (specifier.imported.name === "useMemo" ||
+                specifier.imported.name === "useCallback" ||
+                specifier.imported.name === "useRef" ||
+                specifier.imported.name === "useEffect" ||
+                specifier.imported.name === "useLayoutEffect")
+            ) {
+              hookNames.set(specifier.local.name, specifier.imported.name);
             }
           }
         }
@@ -11368,6 +11781,7 @@ export async function compileReactModule(
             optimizationCounts,
             compilerUsage,
             useStateNames,
+            hookNames,
             reactNames,
             listNames,
             id,

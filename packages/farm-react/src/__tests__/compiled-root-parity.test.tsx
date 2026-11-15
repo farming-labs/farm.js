@@ -564,6 +564,152 @@ describe("compiled root parity with React DOM", () => {
     expect(fallbacks).toEqual([]);
   });
 
+  it("row events inside branches, including branches and rows created after mount", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: 1, done: false, open: false }, { id: 2, done: true, open: true }]);
+        const [log, setLog] = useState("");
+        const patch = (id, change) => setTodos(todos.map((todo) => todo.id === id ? { ...todo, ...change } : todo));
+        return (
+          <section>
+            <button id="add" onClick={() => setTodos([...todos, { id: todos.length + 1, done: false, open: false }])}>Add</button>
+            <ul>
+              {todos.map((todo) => (
+                <li key={todo.id} data-id={todo.id} onClick={() => setLog((current) => current + "|row:" + todo.id)}>
+                  {todo.done ? (
+                    <s className="undo" onClick={() => patch(todo.id, { done: false })}>{todo.id}</s>
+                  ) : (
+                    <button className="done" onClick={(event) => { event.stopPropagation(); patch(todo.id, { done: true }); }}>{todo.id}</button>
+                  )}
+                  <div className="details">
+                    {todo.open && <p className="body" onClick={() => patch(todo.id, { open: false })}><b className="inner" onClick={() => setLog((current) => current + "|inner:" + todo.id)}>close</b></p>}
+                  </div>
+                  <button className="expand" onClick={() => patch(todo.id, { open: true })}>expand</button>
+                </li>
+              ))}
+            </ul>
+            <p id="log">{log}</p>
+          </section>
+        );
+      }`,
+      "Todos",
+      [
+        click('li[data-id="1"] .done'),
+        click('li[data-id="1"] .undo'),
+        click('li[data-id="2"] .inner'),
+        click('li[data-id="1"] .expand'),
+        click('li[data-id="1"] .inner'),
+        click("#add"),
+        click('li[data-id="3"] .done'),
+        click('li[data-id="3"] .expand'),
+        click('li[data-id="3"] .body'),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("onChange fields inside row branches, including branches and rows created after mount", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Editor() {
+        const [rows, setRows] = useState([{ id: 1, label: "One", editing: true, done: false }]);
+        const patch = (id, change) => setRows(rows.map((row) => row.id === id ? { ...row, ...change } : row));
+        return (
+          <section>
+            <button id="add" onClick={() => setRows([...rows, { id: rows.length + 1, label: "", editing: false, done: false }])}>Add</button>
+            <ul>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  {row.editing ? (
+                    <div className="form">
+                      <input className="label" value={row.label} onChange={(event) => { if (event.target.value.length <= 5) patch(row.id, { label: event.target.value }); }} />
+                      <input className="done" type="checkbox" checked={row.done} onChange={(event) => patch(row.id, { done: event.target.checked })} />
+                      <select className="size" value={row.size || "s"} onChange={(event) => patch(row.id, { size: event.target.value })}>
+                        <option value="s">S</option>
+                        <option value="l">L</option>
+                      </select>
+                      <button className="save" onClick={() => patch(row.id, { editing: false })}>save</button>
+                    </div>
+                  ) : (
+                    <span className="view" onClick={() => patch(row.id, { editing: true })}>{row.label}:{row.done ? "done" : "open"}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      }`,
+      "Editor",
+      [
+        type('li[data-id="1"] .label', "One!"),
+        type('li[data-id="1"] .label', "Toolong"),
+        click('li[data-id="1"] .done'),
+        choose('li[data-id="1"] .size', "l"),
+        click('li[data-id="1"] .save'),
+        click('li[data-id="1"] .view'),
+        type('li[data-id="1"] .label', "Uno"),
+        click("#add"),
+        click('li[data-id="2"] .view'),
+        type('li[data-id="2"] .label', "Two"),
+        type('li[data-id="2"] .label', "Twotwo"),
+        click('li[data-id="2"] .done'),
+        click('li[data-id="2"] .save'),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("a list that is the component's root, with row conditionals and row events", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Todos() {
+        const [todos, setTodos] = useState([{ id: 1, done: false }, { id: 2, done: true }]);
+        const toggle = (id) => setTodos(todos.map((todo) => todo.id === id ? { ...todo, done: !todo.done } : todo));
+        return (
+          <ul className="todos">
+            {todos.map((todo) => (
+              <li key={todo.id} data-id={todo.id}>
+                <button className="toggle" onClick={() => toggle(todo.id)}>toggle</button>
+                {todo.done ? <s className="undo" onClick={() => toggle(todo.id)}>{todo.id}</s> : <i>{todo.id}</i>}
+                <button className="add" onClick={() => setTodos([...todos, { id: todos.length + 1, done: false }])}>add</button>
+              </li>
+            ))}
+          </ul>
+        );
+      }`,
+      "Todos",
+      [
+        click('li[data-id="1"] .toggle'),
+        click('li[data-id="2"] .undo'),
+        click('li[data-id="1"] .add'),
+        click('li[data-id="3"] .toggle'),
+        click('li[data-id="3"] .undo'),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("useMemo values and useCallback handlers with complete dependencies", async () => {
+    const fallbacks = await expectParity(
+      `import { useCallback, useMemo, useState } from "react";
+      export function Cart() {
+        const [items, setItems] = useState([{ id: 1, price: 3 }]);
+        const total = useMemo(() => items.filter((item) => item.price > 0).length, [items]);
+        const add = useCallback(() => setItems((current) => [...current, { id: current.length + 1, price: current.length }]), []);
+        return (
+          <section>
+            <button id="add" onClick={add}>add</button>
+            <output>{total} of {items.length}</output>
+          </section>
+        );
+      }`,
+      "Cart",
+      [click("#add"), click("#add"), click("#add")],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
   it("a keyed list between static siblings with bindings and events", async () => {
     const fallbacks = await expectParity(
       `import { useState } from "react";
@@ -652,6 +798,151 @@ describe("compiled root parity with React DOM", () => {
             .querySelector("#field")!
             .dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true })),
         (root) => root.querySelector<HTMLInputElement>("#field")!.blur(),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+});
+
+describe("compiled root controlled fields after a change the state does not take", () => {
+  it("restores text inputs, textareas, checkboxes, radios and selects", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Form() {
+        const [name, setName] = useState("Ada");
+        const [code, setCode] = useState("ab");
+        const [bio, setBio] = useState("Hi");
+        const [agree, setAgree] = useState(false);
+        const [size, setSize] = useState("s");
+        const [color, setColor] = useState("red");
+        const [log, setLog] = useState("");
+        return (
+          <form>
+            <input id="name" value={name} onChange={(event) => { if (event.target.value.length <= 4) setName(event.target.value); }} />
+            <input id="code" value={code} onChange={(event) => setCode(event.target.value.slice(0, 3))} />
+            <textarea id="bio" value={bio} onChange={(event) => { if (!event.target.value.includes("!")) setBio(event.target.value); }} />
+            <input id="agree" type="checkbox" checked={agree} onChange={() => setLog(log + "|agree")} />
+            <input id="small" type="radio" name="size" checked={size === "s"} onChange={() => setSize("s")} />
+            <input id="large" type="radio" name="size" checked={size === "l"} onChange={() => setLog(log + "|large")} />
+            <select id="color" value={color} onChange={(event) => { if (event.target.value !== "blue") setColor(event.target.value); }}>
+              <option value="red">Red</option>
+              <option value="green">Green</option>
+              <option value="blue">Blue</option>
+            </select>
+            <output>{name}|{code}|{bio}|{String(agree)}|{size}|{color}|{log}</output>
+          </form>
+        );
+      }`,
+      "Form",
+      [
+        type("#name", "Grace"),
+        type("#name", "Gra"),
+        type("#code", "abcd"),
+        type("#code", "x"),
+        type("#bio", "Hi!"),
+        type("#bio", "Hello"),
+        click("#agree"),
+        click("#large"),
+        choose("#color", "blue"),
+        choose("#color", "green"),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("lets checkbox and radio handlers read the state a browser click gave them", async () => {
+    // A browser runs microtasks between a checkbox's click and its input and change events. A
+    // plain click Event toggles nothing itself, so the step sets checked as a browser would.
+    const browserClick =
+      (selector: string): Step =>
+      async (root) => {
+        const field = root.querySelector<HTMLInputElement>(selector)!;
+        // The prototype setter, as a browser does, so React's value tracker sees a user change.
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked")!.set!.call(
+          field,
+          field.type === "radio" ? true : !field.checked,
+        );
+        field.dispatchEvent(new Event("click", { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Choices() {
+        const [agree, setAgree] = useState(false);
+        const [size, setSize] = useState("s");
+        return (
+          <form>
+            <input id="agree" type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} />
+            <input id="small" type="radio" name="size" checked={size === "s"} onChange={(event) => event.target.checked && setSize("s")} />
+            <input id="large" type="radio" name="size" checked={size === "l"} onChange={(event) => event.target.checked && setSize("l")} />
+            <output>{String(agree)}|{size}</output>
+          </form>
+        );
+      }`,
+      "Choices",
+      [
+        browserClick("#agree"),
+        browserClick("#large"),
+        browserClick("#agree"),
+        browserClick("#small"),
+      ],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("restores a read-only checkbox whose click handler leaves its state", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      export function Toggle() {
+        const [clicks, setClicks] = useState(0);
+        return (
+          <section>
+            <input id="locked" type="checkbox" readOnly checked={true} onClick={() => setClicks(clicks + 1)} />
+            <output>{clicks}</output>
+          </section>
+        );
+      }`,
+      "Toggle",
+      [click("#locked"), click("#locked")],
+    );
+    expect(fallbacks).toEqual([]);
+  });
+
+  it("restores fields in keyed rows and in child components", async () => {
+    const fallbacks = await expectParity(
+      `import { useState } from "react";
+      function Field({ value, onValue }) {
+        return <input className="child" value={value} onChange={(event) => onValue(event.target.value)} />;
+      }
+      export function Editor() {
+        const [rows, setRows] = useState([{ id: 1, label: "One" }, { id: 2, label: "Two" }]);
+        const [title, setTitle] = useState("Rows");
+        const update = (id, label) => {
+          if (label.length <= 5) setRows(rows.map((row) => (row.id === id ? { ...row, label } : row)));
+        };
+        return (
+          <section>
+            <Field value={title} onValue={(value) => { if (value.length <= 6) setTitle(value); }} />
+            <ul>
+              {rows.map((row) => (
+                <li key={row.id} data-id={row.id}>
+                  <input className="label" value={row.label} onChange={(event) => update(row.id, event.target.value)} />
+                </li>
+              ))}
+            </ul>
+            <output>{title}|{rows[0].label}|{rows[1].label}</output>
+          </section>
+        );
+      }`,
+      "Editor",
+      [
+        type('li[data-id="1"] .label', "Uno"),
+        type('li[data-id="2"] .label', "Twotwo"),
+        type(".child", "Rows!!!"),
+        type(".child", "Rows!"),
       ],
     );
     expect(fallbacks).toEqual([]);

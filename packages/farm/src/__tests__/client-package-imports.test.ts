@@ -139,6 +139,26 @@ describe("packages the server graph bundles", () => {
   });
 });
 
+describe("test files", () => {
+  it("are not scanned: their packages run under the test runner, never in the app's graphs", () => {
+    const root = project({
+      "node_modules/test-styles/package.json": '{"name":"test-styles","main":"index.js"}',
+      "node_modules/test-styles/index.js": 'import "./a.css";\nexport const s = 1;\n',
+      "node_modules/test-client/package.json": '{"name":"test-client","main":"index.js"}',
+      "node_modules/test-client/index.js": '"use client";\nexport function Probe() {}\n',
+      "node_modules/app-styles/package.json": '{"name":"app-styles","main":"index.js"}',
+      "node_modules/app-styles/index.js": 'import "./a.css";\nexport const s = 1;\n',
+      "src/page.tsx": 'import { s } from "app-styles";\nexport default () => s;\n',
+      "src/page.test.tsx":
+        'import { s } from "test-styles";\nimport { Probe } from "test-client";\n',
+      "src/lib/util.spec.ts": 'import { s } from "test-styles";\n',
+      "src/__tests__/helpers.ts": '"use client";\nimport { Probe } from "test-client";\n',
+    });
+    expect(collectFarmServerBundledPackages(root)).toEqual(["app-styles"]);
+    expect(collectFarmClientPackageImports(path.join(root, "src"), root)).toEqual([]);
+  });
+});
+
 describe("server-bundled packages development pre-bundles", () => {
   it("are module-entry packages without dependencies whose required peers the app has", () => {
     const dual = (name: string, extra: Record<string, unknown> = {}) =>

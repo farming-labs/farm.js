@@ -32,7 +32,7 @@ describe("Farm layers", () => {
   it("lets the RSC check see the protections a layer adds", async () => {
     const root = createProject();
     createLayer(root, "admin", {
-      config: `export default { auth: { protectedRoutes: ["/admin/**"] }, headers: [{ source: "/admin/:path*", headers: [{ key: "X-Frame-Options", value: "DENY" }] }] };`,
+      config: `export default { auth: { protectedRoutes: ["/admin/**"] }, routeRules: { "/admin/**": { headers: { "X-Frame-Options": "DENY" } } } };`,
     });
     // The RSC packages, so the check does not fall back for missing ones.
     for (const name of ["@farm.js/plugin", "@vitejs/plugin-rsc", "react-server-dom-webpack"]) {
@@ -48,7 +48,7 @@ describe("Farm layers", () => {
     expect(farmAppUsesRscPipeline(config, root)).toBe(true);
     const merged = await resolveFarmRscCheckConfig(config, root, "production");
     expect(() => farmAppUsesRscPipeline(merged, root)).toThrow(
-      "does not run `auth`, `headers` yet",
+      "does not run `auth`, `routeRules` yet",
     );
     // Without layers it reads the config as it is.
     const plain = { experimental: { serverComponents: { mode: "rsc" as const } } };
@@ -392,9 +392,12 @@ describe("Farm layers", () => {
     });
     const configHook = plugin.config as (...args: any[]) => any;
 
-    const viteConfig = await configHook({}, { command: "serve", mode: "development" });
+    // Farm merges its aliases after the app's into the config itself: Vite would put returned
+    // aliases first.
+    const userConfig: { resolve?: { alias?: unknown } } = {};
+    const viteConfig = await configHook(userConfig, { command: "serve", mode: "development" });
 
-    expect(viteConfig.resolve.alias).toEqual({
+    expect(userConfig.resolve?.alias).toEqual({
       "#layers/commerce": path.join(layerRoot, "src"),
       // `@/` resolves to the app's source directory, as in production builds.
       "@": path.resolve(root, "src"),

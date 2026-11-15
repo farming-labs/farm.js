@@ -2,21 +2,12 @@ import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { RedirectConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
-import { isFarmRedirectStatus } from "../navigation-errors";
-import { appendFarmRedirectQuery } from "../redirect-query";
 import { resolveFarmRequestURL } from "../server/request";
-import {
-  compileConfigRoutePattern,
-  interpolateConfigRouteDestination,
-  resolveConfigRedirectDestination,
-  resolveConfigRoutePathname,
-} from "./route-pattern";
+import { createConfigRedirectMatcher, type FarmConfigRedirectMatcher } from "./config-routes";
+
+export type { FarmConfigRedirectMatcher } from "./config-routes";
 
 export const FARM_CONFIG_REDIRECTS_PLUGIN_NAME = "farm:redirects";
-
-export type FarmConfigRedirectMatcher = (
-  url: URL,
-) => { destination: string; statusCode: number } | null;
 
 const configRedirectMatchers = new WeakMap<FarmPlugin, FarmConfigRedirectMatcher>();
 
@@ -43,36 +34,7 @@ export function createRedirectsPlugin(
     basePath?: string;
   } = {},
 ): FarmPlugin {
-  for (const redirect of redirects) {
-    if (redirect.statusCode !== undefined && !isFarmRedirectStatus(redirect.statusCode)) {
-      throw new RangeError(
-        `Redirect "${redirect.source}" statusCode must be one of 301, 302, 303, 307, or 308.`,
-      );
-    }
-  }
-  const compiledRedirects = redirects.map((redirect) => ({
-    redirect,
-    pattern: compileConfigRoutePattern(redirect.source),
-  }));
-
-  const matchRedirect: FarmConfigRedirectMatcher = (url) => {
-    const routePath = resolveConfigRoutePathname(url.pathname, i18n, basePath);
-    for (const { redirect, pattern } of compiledRedirects) {
-      const match = routePath.pathname.match(pattern.regex);
-      if (!match) continue;
-      const localizedDestination = resolveConfigRedirectDestination(
-        interpolateConfigRouteDestination(redirect.destination, match, pattern.tokens),
-        routePath.locale,
-        i18n,
-        basePath,
-      );
-      return {
-        destination: appendFarmRedirectQuery(localizedDestination, url.search),
-        statusCode: redirect.statusCode ?? (redirect.permanent ? 308 : 307),
-      };
-    }
-    return null;
-  };
+  const matchRedirect = createConfigRedirectMatcher(redirects, { i18n, basePath });
 
   const plugin: FarmPlugin = {
     name: FARM_CONFIG_REDIRECTS_PLUGIN_NAME,

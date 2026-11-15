@@ -9,6 +9,12 @@ export const CLIENT_ENTRY_CORE_IMPORTS = [
   "@farm.js/core/server-query/client",
 ] as const;
 
+/** What the browser entry of an app with i18n imports as well. */
+export const CLIENT_ENTRY_I18N_IMPORTS = [
+  "@farm.js/core/i18n",
+  "@farm.js/core/i18n/client",
+] as const;
+
 export const serverFnTransportErrorClientRuntime = `function createFarmServerFnTransportError(value) {
   const message = value && typeof value === 'object' && typeof value.message === 'string'
     ? value.message
@@ -72,8 +78,50 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment';
-import { createFarmRouteAnnouncer, runFarmNavigationDelegates } from '@farm.js/core/internal/client-runtime';
+import {
+  createFarmMetadataHeadReconciler,
+  createFarmRouteAnnouncer,
+  runFarmNavigationDelegates,
+} from '@farm.js/core/internal/client-runtime';
 `;
+  // <Link href="/about"> renders /console/about under basePath "/console", as the RSC server
+  // rendered it, so the page hydrates with the same href.
+  if (!["", "/"].includes(ctx.basePath.trim())) {
+    imports += `import { setFarmBasePath } from '@farm.js/core/internal/client-runtime';
+setFarmBasePath(${JSON.stringify(ctx.basePath)});
+`;
+  }
+  // trailingSlash: <Link href="/about"> renders /about/, as the RSC server rendered it.
+  if (ctx.trailingSlash) {
+    imports += `import { setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime';
+setFarmTrailingSlashPreference(true);
+`;
+  }
+
+  const i18n = ctx.i18n?.enabled === true;
+  if (i18n) {
+    imports += `import { localizeFarmHref, resolveFarmLocalePath } from '@farm.js/core/i18n';
+import { _setFarmI18nClientSnapshot } from '@farm.js/core/i18n/client';
+
+// A link to another locale loads as a document, as Farm's <Link> does in other apps, so the page
+// and the catalog its client components read change together.
+function farmIsLocaleChange(url) {
+  const snapshot = window.__FARM_I18N__;
+  if (!snapshot || snapshot.routing === 'none') return false;
+  const target = resolveFarmLocalePath(url.pathname, snapshot);
+  return (target.locale || snapshot.defaultLocale) !== snapshot.locale;
+}
+
+// A redirect() thrown while a navigation renders goes to its target in the page's locale, as the
+// server localizes the redirects it answers.
+function farmLocalizeRedirect(url) {
+  const snapshot = window.__FARM_I18N__;
+  return snapshot && url.startsWith('/') && !url.startsWith('//')
+    ? localizeFarmHref(url, snapshot.locale, snapshot)
+    : url;
+}
+`;
+  }
 
   // farm dev --mobile: every page runs in the shell's WebView, so this entry is the mobile client.
   if (ctx.mobileClient === "inline") {
@@ -273,7 +321,7 @@ class FarmNavigationErrorBoundary extends React.Component {
   componentDidCatch(error) {
     const digest = error && typeof error.digest === 'string' ? error.digest : '';
     if (digest.startsWith('FARM_REDIRECT;')) {
-      farmNavigateRef.current?.(digest.split(';').slice(2).join(';'), 'replace');
+      farmNavigateRef.current?.(${i18n ? "farmLocalizeRedirect(digest.split(';').slice(2).join(';'))" : "digest.split(';').slice(2).join(';')"}, 'replace');
       return;
     }
     location.reload();
@@ -308,10 +356,18 @@ async function main() {
     console.error('[Farm.js] Failed to deserialize RSC payload:', e);
     return;
   }
-  
+
   // The page the document loaded with is the baseline: it is never announced.
   const announceRoute = createFarmRouteAnnouncer();
-
+  // The head tags the server rendered from the page's metadata, which navigations replace.
+  const applyMetadataHead = createFarmMetadataHeadReconciler(initial.metadataHead ?? '');
+${
+  i18n
+    ? `  // The locale the server rendered with, before anything hydrates (window.__FARM_I18N__).
+  if (initial.i18n) _setFarmI18nClientSnapshot(initial.i18n);
+`
+    : ""
+}
   // Root component that manages RSC state
   function BrowserRoot() {
     const [payload, set] = React.useState(initial);
@@ -329,26 +385,24 @@ async function main() {
       }
     }, []);
 
-    // Keep document metadata in sync when an RSC navigation swaps only #root.
+    // Keep the document head in sync when an RSC navigation swaps only #root: the title, and the
+    // tags the server renders from the route's metadata (description, canonical, alternates,
+    // robots, Open Graph...), replaced as a page load of the route renders them.
     React.useEffect(() => {
-      if (typeof payload.metadata?.title === 'string') {
-        document.title = payload.metadata.title;
-      } else {
-        document.title = '';
-      }
-      let description = document.querySelector('meta[name="description"]');
-      if (typeof payload.metadata?.description === 'string') {
-        if (!description) {
-          description = document.createElement('meta');
-          description.setAttribute('name', 'description');
-          document.head.appendChild(description);
-        }
-        description.setAttribute('content', payload.metadata.description);
-      } else {
-        description?.remove();
-      }
-    }, [payload.metadata?.title, payload.metadata?.description]);
-
+      document.title = typeof payload.metadata?.title === 'string' ? payload.metadata.title : '';
+      applyMetadataHead(payload.metadataHead ?? '');
+    }, [payload]);
+${
+  i18n
+    ? `
+    // A payload from back/forward or a refresh carries its locale (and, in development, edited
+    // messages): client components re-read it before the browser paints.
+    React.useLayoutEffect(() => {
+      if (payload !== initial && payload.i18n) _setFarmI18nClientSnapshot(payload.i18n);
+    }, [payload]);
+`
+    : ""
+}
     // Announce a client navigation to screen readers once its page and title are in place.
     React.useEffect(() => {
       if (payload !== initial) announceRoute();
@@ -422,7 +476,7 @@ ${withPlugins(`
   // Back/forward, refreshes and same-page moves are not offered; other origins load as documents.
   async function navigate(href, action) {
     const url = new URL(href, location.href);
-    if (url.origin !== location.origin) {
+    if (url.origin !== location.origin${i18n ? " || farmIsLocaleChange(url)" : ""}) {
       location.assign(url.href);
       return;
     }
