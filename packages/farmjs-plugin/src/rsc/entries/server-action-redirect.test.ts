@@ -43,6 +43,21 @@ describe("server action redirect reaches the browser", () => {
     expect(entry.slice(start, end)).toContain("status: 303,");
   });
 
+  it("answers a no-JS form submission whose action calls notFound() with a 404", () => {
+    const entry = generateRscEntry(context);
+
+    const formCatch = entry.indexOf("const formRedirect = getFarmRedirectError(e);");
+    const notFound = entry.indexOf("if (isFarmNotFoundError(e)) {", formCatch);
+    const sanitized = entry.indexOf("const actionError = sanitizeServerActionError(e);", formCatch);
+    expect(notFound).toBeGreaterThan(formCatch);
+    // Recognised before the sanitizer, which would answer a 500 and log it as a crash.
+    expect(notFound).toBeLessThan(sanitized);
+    const handled = entry.slice(notFound, sanitized);
+    expect(handled).toContain("return new Response('Not Found', {");
+    expect(handled).toContain("status: 404,");
+    expect(handled).toContain("'Cache-Control': 'no-store',");
+  });
+
   it("navigates through the client router when the action redirected", async () => {
     const entry = generateClientEntry(context);
     const start = entry.indexOf("if (!p.returnValue || !p.returnValue.ok) {");

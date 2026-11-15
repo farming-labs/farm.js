@@ -1681,6 +1681,18 @@ ${
             headers: { location: ${i18n ? "localizeFarmRedirectUrl(formRedirect.url)" : "formRedirect.url"}, 'Cache-Control': 'no-store' },
           });
         }
+        // notFound() is control flow too: the plain 404 a page that calls it gets, not a crash.
+        if (isFarmNotFoundError(e)) {
+          debug('Form action not found');
+          return new Response('Not Found', {
+            status: 404,
+            headers: {
+              'Cache-Control': 'no-store',
+              'Content-Type': 'text/plain; charset=utf-8',
+              'X-Content-Type-Options': 'nosniff',
+            },
+          });
+        }
         const actionError = sanitizeServerActionError(e);
         if (actionError.name === 'ServerActionError') {
           console.error('[Farm.js] Form action failed:', e);
