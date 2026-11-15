@@ -7,12 +7,18 @@
  *
  * Only server-side metadata leaves the app: the route template (see route-label.ts), the path
  * that was requested below the base path, method, status, duration, registered MCP tool
- * outcomes and a self-reported agent category. No query strings, fragments, origins,
+ * outcomes and the client the request declares (see classifyFarmClient: a category and a name
+ * from Farm's own list, never the header itself). No query strings, fragments, origins,
  * headers, cookies, bodies, IPs or errors.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { FarmPlugin, FarmPluginRuntimeAfterEvent } from "../plugin";
-import { classifyFarmAgent, type FarmAgentIdentity } from "../agent-identity";
+import {
+  classifyFarmAgent,
+  classifyFarmClient,
+  type FarmAgentIdentity,
+  type FarmClientIdentity,
+} from "../agent-identity";
 import { onFarmEvent } from "../observability";
 import { getCurrentRequestOrNull } from "../server/request";
 import { getFarmRouteLabel } from "../route-label";
@@ -52,7 +58,7 @@ interface EventBase {
   /** `/products/42` for the route `/products/[id]`; absent when Farm Infra would refuse it. */
   path?: string;
   requestId: string;
-  agent: FarmInfraAgentIdentity;
+  agent: FarmClientIdentity;
 }
 
 export type FarmInfraAnalyticsEvent = EventBase &
@@ -389,7 +395,7 @@ interface State {
 
 interface RequestMetadata {
   id: string;
-  agent: FarmInfraAgentIdentity;
+  agent: FarmClientIdentity;
   /** Read from the request as it arrived, before a handler can rewrite it. */
   path: string | undefined;
   /** Read when an event is made: a handler may label the route while it answers. */
@@ -407,7 +413,7 @@ function beginRequest(
 ): RequestMetadata {
   return {
     id: uuid(),
-    agent: classifyFarmInfraAgent(request.headers.get("user-agent")),
+    agent: classifyFarmClient(request),
     path: requestPath(request),
     route,
     completed: false,

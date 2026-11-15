@@ -93,13 +93,37 @@ Removing `FARMJS_API_KEY` also turns it off.
   response status and the time until Farm returned the response.
 - For each registered MCP tool call: the tool name, whether it succeeded, and its duration, linked
   to its request.
-- A self-reported agent category when the user-agent declares one of OpenAI's or Anthropic's
-  crawlers or agents (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot,
-  Claude-User). This is the user-agent's claim, not a verified identity. Anything else is
-  `unknown`.
+- The kind of client that sent each request, and its name when Farm knows it. See
+  [Which client sent a request](#which-client-sent-a-request).
 
 Farm never sends query strings, fragments, origins, headers, cookies, IP addresses, full
 user-agents, request or response bodies, tool arguments or results, or error messages.
+
+### Which client sent a request
+
+Farm reads the request's headers in the app and sends only the result: a kind, a vendor and a
+name from Farm's own list. The user-agent itself never leaves the app.
+
+| Kind      | How Farm tells                                                                                                              | Examples                                                  |
+| --------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `agent`   | A user-agent token an AI vendor documents for fetches a person asked for, or ChatGPT agent's Web Bot Auth `Signature-Agent` | ChatGPT-User, Claude-User, Perplexity-User, ChatGPT agent |
+| `crawler` | A documented AI crawler token                                                                                               | GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, CCBot    |
+| `harness` | A coding agent's token, or MCP's Streamable HTTP headers (`Mcp-Protocol-Version`, `Mcp-Session-Id`)                         | Claude Code, Codex, any MCP client                        |
+| `search`  | A search engine crawler token                                                                                               | Googlebot, Bingbot, Applebot, DuckDuckBot                 |
+| `preview` | A link preview token                                                                                                        | Slackbot, facebookexternalhit, Twitterbot, Discordbot     |
+| `monitor` | An uptime check or scheduler token                                                                                          | UptimeRobot, Vercel Cron, Farm.js clock                   |
+| `bot`     | Any other client that calls itself a bot or carries a contact URL, or a headless browser                                    | AhrefsBot, Headless Chrome                                |
+| `script`  | An HTTP library or command-line tool                                                                                        | curl, Node.js `fetch`, Bun, python-requests               |
+| `browser` | A browser user-agent **and** the `Sec-Fetch-Site` and `Sec-Fetch-Dest` headers every browser sends                          | Chrome, Safari, Firefox, Edge                             |
+| `unknown` | None of the above, or tokens from two vendors at once                                                                       |                                                           |
+
+Farm Infra counts `agent`, `crawler` and `harness` as agent traffic. A browser user-agent without
+fetch metadata is `unknown`, not `browser`: scripts copy browser user-agents, but Node's `fetch`,
+curl and most scrapers don't send `Sec-Fetch-Site` or `Sec-Fetch-Dest`.
+
+Every kind is the client's own claim, not a verified identity: any client can send any header.
+Use it to understand traffic, never to grant access. `classifyFarmClient(request)` from
+`@farm.js/core` returns the same result anywhere you have the request, such as middleware.
 
 ### What `path` contains
 

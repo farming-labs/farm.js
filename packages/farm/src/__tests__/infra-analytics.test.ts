@@ -572,10 +572,46 @@ describe("recorder for servers without a plugin runtime", () => {
         path: "/users/42",
         method: "POST",
         status: 201,
-        agent: { family: "openai", category: "crawler", identity: "self-reported" },
+        agent: {
+          family: "openai",
+          category: "crawler",
+          identity: "self-reported",
+          name: "GPTBot",
+        },
       }),
     ]);
     await recorder.close();
+  });
+
+  it("reports which kind of client sent each request, never its user-agent", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const recorder = farmInfraAnalyticsRecorder(options, send);
+    const work: Promise<unknown>[] = [];
+    const chrome =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    for (const headers of [
+      { "user-agent": chrome, "sec-fetch-site": "none", "sec-fetch-dest": "document" },
+      { "user-agent": "curl/8.7.1" },
+      { "user-agent": "node", "mcp-protocol-version": "2025-06-18" },
+      { "user-agent": chrome },
+    ])
+      await recorder.record(
+        new Request("https://app.example/", { headers }),
+        { kind: "page", route: { pattern: "/" } },
+        (job) => work.push(job),
+        async () => new Response("ok"),
+      );
+    await Promise.all(work);
+    await recorder.close();
+    const body = send.mock.calls.map((call) => call[1]!.body as string).join("\n");
+    expect(body).not.toContain("Macintosh");
+    expect(body).not.toContain("curl/8");
+    expect(sentEvents(send).map(({ agent }) => agent)).toEqual([
+      { family: "unknown", category: "browser", identity: "self-reported", name: "Chrome" },
+      { family: "unknown", category: "script", identity: "self-reported", name: "curl" },
+      { family: "unknown", category: "harness", identity: "self-reported", name: "MCP client" },
+      { family: "unknown", category: "unknown", identity: "unknown" },
+    ]);
   });
 
   it("reports the path below the base path, and leaves out one Farm Infra would refuse", async () => {
@@ -681,7 +717,12 @@ describe("recorder for servers without a plugin runtime", () => {
           outcome: call.split(":")[1],
           requestId: recorded.requestId,
           route: "/api/mcp",
-          agent: { family: "anthropic", category: "agent", identity: "self-reported" },
+          agent: {
+            family: "anthropic",
+            category: "agent",
+            identity: "self-reported",
+            name: "Claude-User",
+          },
         }),
       ),
     );
