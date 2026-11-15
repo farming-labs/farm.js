@@ -39,6 +39,8 @@ export interface ResolvedFarmI18nConfig {
   enabled: boolean;
   /** Normalized public pathname where the application is mounted. */
   basePath: string;
+  /** The app's `trailingSlash`: locale URLs Farm builds (hreflang, redirects) follow it. */
+  trailingSlash?: boolean;
   locales: readonly string[];
   defaultLocale: string;
   messages: string;
@@ -61,6 +63,8 @@ export interface FarmI18nClientSnapshot {
   routing: FarmI18nRouting;
   /** Public application mount path. Optional for compatibility with older snapshots. */
   basePath?: string;
+  /** The app's `trailingSlash`. Optional for compatibility with older snapshots. */
+  trailingSlash?: boolean;
   cookie: ResolvedFarmI18nCookieConfig;
   direction: FarmI18nDirection;
   messages: FarmI18nCatalog;

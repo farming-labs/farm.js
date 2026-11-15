@@ -1,3 +1,4 @@
+import { resolveConfig } from "../config";
 import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -776,6 +777,41 @@ describe("Farm i18n with trailingSlash", () => {
     }
     // trailingSlash: true settles on the slashed locale URL.
     expect(pathname).toBe("/en/about/");
+  });
+
+  it("redirects a detected locale straight to its slashed URL, in one hop", () => {
+    const slashed = resolveFarmI18nConfig(
+      { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-except-default" },
+      { basePath: "/app", trailingSlash: true },
+    );
+    const resolution = resolveFarmLocaleRequest(
+      new Request("https://farm.test/app/about/?ref=1", { headers: { "accept-language": "fr" } }),
+      slashed,
+    );
+    expect(resolution.redirect).toBe("/app/fr/about/?ref=1");
+    // No trailing-slash redirect is left to make after it.
+    expect(
+      resolveFarmTrailingSlashRedirect(new URL(`https://farm.test${resolution.redirect}`), true),
+    ).toBeNull();
+    // Without trailingSlash, the redirect stays slash-free.
+    const plain = resolveFarmI18nConfig(
+      { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-except-default" },
+      { basePath: "/app" },
+    );
+    expect(
+      resolveFarmLocaleRequest(
+        new Request("https://farm.test/app/about", { headers: { "accept-language": "fr" } }),
+        plain,
+      ).redirect,
+    ).toBe("/app/fr/about");
+  });
+
+  it("carries the app's trailingSlash into the resolved i18n config", async () => {
+    const resolved = await resolveConfig(
+      { root: "/test", trailingSlash: true, i18n: { locales: ["en", "fr"], defaultLocale: "en" } },
+      "production",
+    );
+    expect(resolved.i18n.trailingSlash).toBe(true);
   });
 
   it("still canonicalizes a non-trailing-slash locale difference", () => {

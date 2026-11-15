@@ -6,6 +6,7 @@ export interface FarmLocalePathConfig {
   defaultLocale: string;
   routing: FarmI18nRouting;
   basePath?: string;
+  trailingSlash?: boolean;
 }
 
 export interface FarmLocalePathMatch {

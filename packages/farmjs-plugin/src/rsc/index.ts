@@ -1427,6 +1427,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           root,
           mode: env.command === "serve" ? "development" : "production",
           basePath: c.basePath ?? "/",
+          trailingSlash: c.trailingSlash === true,
         });
         // The config redirects(), rewrites() and headers(), called once and checked as core's
         // config resolution checks them. An app without any generates the same entries as before.
