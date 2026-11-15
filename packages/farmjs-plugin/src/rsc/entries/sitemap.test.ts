@@ -146,6 +146,24 @@ describe("RSC sitemap.xml", () => {
     expect(body).toContain("<lastmod>2026-01-02T03:04:05.000Z</lastmod>");
   });
 
+  it("leaves out the pages a root middleware.ts's own matcher guards", async () => {
+    const respond = createSitemap(true, {
+      pages: {
+        "/page.tsx": { metadata: { title: "Home" } },
+        "/pricing/page.tsx": {},
+        "/dashboard/payroll/page.tsx": { metadata: { title: "Payroll export" } },
+      },
+      // The loaded module, as import.meta.glob hands it to the entry.
+      middlewares: {
+        "/middleware.ts": { config: { matcher: ["/dashboard/:path*"] }, middleware() {} },
+      },
+    });
+    expect(await locs(respond(new Request("https://shop.test/sitemap.xml")))).toEqual([
+      "https://shop.test/",
+      "https://shop.test/pricing",
+    ]);
+  });
+
   it("lists public URLs below the basePath, on the root layout's metadataBase", async () => {
     const respond = createSitemap(
       { exclude: ["/admin"] },

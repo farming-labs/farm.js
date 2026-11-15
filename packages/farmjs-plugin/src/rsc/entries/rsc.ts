@@ -2158,8 +2158,9 @@ async function handleFarmLlmsTxtRequest(request, context) {
 function getFarmAgentListedPages() {
   const guard = {
     config: { middleware: farmConfigMiddleware },
+    // With its module, so a root middleware.ts's own config.matcher names the pages it guards.
     middlewareRoutes: Object.keys(middlewares)
-      .map((filePath) => ({ path: middlewarePathToRoute(filePath) }))
+      .map((filePath) => ({ path: middlewarePathToRoute(filePath), module: middlewares[filePath] }))
       .filter((route) => route.path !== null),
   };
   const listed = new Map();
