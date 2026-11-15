@@ -162,7 +162,7 @@ route        screen  tier     reason
 | --------------- | ------------------------------------------------------------------------------------- |
 | `auto`          | `"report"` (default) prints the report in builds; `"on"` applies it; `"off"` skips it |
 | `routes`        | Per route: `screen` (`web`, `native`), `android`, `ios`, `presentation`               |
-| `engine`        | `"react-native"` (default) or `"platform"` for `page.kt` / `page.swift` (RFC 0007)    |
+| `engine`        | `"react-native"` (default) or `"platform"` for `page.kt` / `page.swift` (RFC 0008)    |
 | `prefetch`      | Reserved: recorded in the route manifest, but nothing prefetches yet                  |
 
 `islands`, `budgets`, and `layout.native.tsx` files are reserved too: the build accepts them and

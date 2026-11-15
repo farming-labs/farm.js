@@ -38,6 +38,7 @@ import {
   validateIntegrationRequestOrigin,
 } from "../integration-request-security";
 import { isMultipartSchema } from "./transport";
+import { getZodArrayFieldKeys } from "../zod-schema";
 
 const CROSS_SITE_JSON_BODY_MESSAGE =
   "This endpoint reads a JSON body, so a request from another origin must send Content-Type: " +
@@ -179,6 +180,13 @@ async function invokeAPIRouteEndpointInContext(
   };
 
   const types = endpoint.__types || {};
+  // A query string names one value the same way for a string field and a one-element array, so
+  // a field the query schema declares as an array gets its single value as an array, as the
+  // generated client and the OpenAPI document send it.
+  for (const key of getZodArrayFieldKeys(types.query)) {
+    const value = query[key];
+    if (typeof value === "string") query[key] = [value];
+  }
   let body: any = undefined;
   if (request.method.toUpperCase() !== "GET" && request.method.toUpperCase() !== "HEAD") {
     // A JSON body schema is the contract the generated client sends. Form bodies stay readable

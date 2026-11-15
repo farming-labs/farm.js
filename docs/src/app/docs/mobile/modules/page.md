@@ -167,6 +167,6 @@ at once, each with its key and the fix.
 
 Fully native `page.kt` and `page.swift` screens, which would call platform SDKs directly, are not
 being built; their design is under discussion in
-[RFC 0007](https://github.com/farming-labs/farm.js/blob/main/rfcs/0007-platform-screens.md). For
+[RFC 0008](https://github.com/farming-labs/farm.js/blob/main/rfcs/0008-platform-screens.md). For
 a fully custom screen today, eject the generated project and register it in `FarmNativeScreens`.
 Event subscriptions from modules are not built yet.

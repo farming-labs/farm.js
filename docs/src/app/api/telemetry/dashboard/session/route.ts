@@ -5,6 +5,9 @@ import {
   safeSecretEqual,
 } from "../../../../../lib/dashboard-session";
 
+// The operator's dashboard login. It is not an API, so it stays out of /openapi.json.
+export const openapi = { hidden: true };
+
 const MAX_FORM_BYTES = 4 * 1024;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_ATTEMPTS = 20;

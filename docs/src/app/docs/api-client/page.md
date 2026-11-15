@@ -266,7 +266,10 @@ await apiClient.posts.get({ query: { tag: ["react", "vite"] } });
 // GET /api/posts?tag=react&tag=vite
 ```
 
-This is the same array representation that API route query schemas receive.
+This is the same array representation that API route query schemas receive. A one-element array
+is sent as a single parameter (`?tag=react`), and a field the route's query schema declares as an
+array (`z.array(...)`, optional or with a default) receives it as `["react"]`. An empty array sends
+no parameter, so give such a field `.default([])` or `.optional()`.
 Query values must be strings, numbers, booleans, bigints, or arrays of those scalar values;
 `null` and `undefined` entries are omitted. Nested objects are rejected instead of being silently
 encoded as `[object Object]`. Untyped callers may also pass `URLSearchParams` directly when they

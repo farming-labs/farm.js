@@ -6,6 +6,10 @@ import {
   fetchAgentCheck,
 } from "../../../../lib/agents-check";
 
+// Public, but a plain handler carries no request or response schema, so the
+// operation is described by hand in src/lib/openapi.ts instead.
+export const openapi = { hidden: true };
+
 const MAX_BODY_BYTES = 8 * 1024;
 const MAX_URL_LENGTH = 2048;
 

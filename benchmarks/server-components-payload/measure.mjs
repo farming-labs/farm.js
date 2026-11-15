@@ -107,6 +107,13 @@ async function build(mode) {
 }
 
 async function serve(mode, port) {
+  // Another server on the port would answer for this build.
+  try {
+    await fetch(`http://127.0.0.1:${port}/`);
+    throw new Error(`port ${port} is already in use; stop the server on it first`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("port ")) throw error;
+  }
   const child = spawn(
     process.execPath,
     [path.join(app, ".farm", `.output-${mode}`, "server", "index.mjs")],
@@ -129,9 +136,13 @@ async function serve(mode, port) {
   throw new Error(`${mode} server did not start`);
 }
 
-/** Records decoded response bodies by resource type while `action` runs. */
-async function record(page, action) {
-  const bodies = [];
+/**
+ * Records decoded response bodies by resource type from now on. `take()` waits for the network to
+ * go idle and returns the bodies since the last take, so a request made between two takes (a
+ * prefetch after the network went idle) counts toward the next one instead of going unrecorded.
+ */
+async function startRecording(page) {
+  let bodies = [];
   // Fetched here rather than read back with `response.body()`: Chrome can discard a large body
   // before the protocol asks for it, which lost one navigation in most runs.
   const handler = async (route) => {
@@ -143,11 +154,25 @@ async function record(page, action) {
     await route.fulfill({ response });
   };
   await page.route("**/*", handler);
+  return {
+    async take() {
+      await page.waitForLoadState("networkidle");
+      const taken = bodies;
+      bodies = [];
+      return taken;
+    },
+    // A chunk requested just before the network went idle can still be in the handler; wait for
+    // it so it is counted and fulfilled before the page closes.
+    stop: () => page.unrouteAll({ behavior: "wait" }),
+  };
+}
+
+/** Records decoded response bodies by resource type while `action` runs. */
+async function record(page, action) {
+  const recording = await startRecording(page);
   await action();
-  await page.waitForLoadState("networkidle");
-  // A chunk requested just before the network went idle can still be in the handler; wait for it
-  // so it is counted and fulfilled before the page closes.
-  await page.unrouteAll({ behavior: "wait" });
+  const bodies = await recording.take();
+  await recording.stop();
   return bodies;
 }
 
@@ -182,24 +207,29 @@ async function measure(mode, url, browser, scenario) {
   await page.goto(url + scenario.start);
   await page.waitForLoadState("networkidle");
   const navigations = [];
+  // Pages a prefetch fetched during an earlier navigation, whose bytes that navigation counted.
+  const fetched = new Set();
+  const recording = await startRecording(page);
   for (let index = 0; index < NAVIGATIONS; index++) {
     const expected = scenario.page(index + 1);
-    const bodies = await record(page, async () => {
-      await page.click("[data-next]");
-      await page.waitForURL(`**${expected}`);
-      await page.waitForFunction(
-        (title) => document.querySelector("h1")?.textContent === title,
-        await (await fetch(`${url}${expected}`)).text().then((html) => {
-          const match = /<h1>([^<]*)<\/h1>/.exec(html);
-          return match ? match[1] : "";
-        }),
-      );
-    });
+    await page.click("[data-next]");
+    await page.waitForURL(`**${expected}`);
+    await page.waitForFunction(
+      (title) => document.querySelector("h1")?.textContent === title,
+      await (await fetch(`${url}${expected}`)).text().then((html) => {
+        const match = /<h1>([^<]*)<\/h1>/.exec(html);
+        return match ? match[1] : "";
+      }),
+    );
+    const bodies = await recording.take();
     if (bodies.some((entry) => entry.type === "document")) {
       throw new Error(`${mode}: navigation to ${expected} reloaded the document`);
     }
-    // Data fetched outside the click would count as a free navigation and lower the average.
-    if (!bodies.some((entry) => entry.type === "fetch" || entry.type === "xhr")) {
+    const data = bodies.filter((entry) => entry.type === "fetch" || entry.type === "xhr");
+    for (const entry of data) fetched.add(new URL(entry.url).pathname);
+    // Data fetched outside the measured navigations would count as a free navigation and lower
+    // the average. A page prefetched while the previous one was measured was counted there.
+    if (data.length === 0 && !fetched.has(expected)) {
       throw new Error(`${mode}: navigation to ${expected} recorded no data`);
     }
     navigations.push({
@@ -208,6 +238,7 @@ async function measure(mode, url, browser, scenario) {
       javascript: sum(bodies, ["script"]),
     });
   }
+  await recording.stop();
   await context.close();
   return { mode, scenario: scenario.name, firstLoad, navigations, errors };
 }

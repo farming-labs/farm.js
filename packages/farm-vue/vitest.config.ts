@@ -8,5 +8,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Run by vitest.production.config.ts, against Vue's production build.
+    exclude: ["**/node_modules/**", "**/*.production.test.ts"],
   },
 });

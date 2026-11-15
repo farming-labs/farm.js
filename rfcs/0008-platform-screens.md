@@ -1,4 +1,4 @@
-# RFC 0007: Platform screens (`page.kt`, `page.swift`)
+# RFC 0008: Platform screens (`page.kt`, `page.swift`)
 
 - Status: Draft, open for discussion. Not scheduled; nothing here is being built.
 - Split out of: [RFC 0004](./0004-platforms.md), section 7.2 ("Native screens: platform") and

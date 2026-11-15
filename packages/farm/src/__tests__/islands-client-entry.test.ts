@@ -135,3 +135,63 @@ describe("splitFarmClientRouter", () => {
     expect(code).toContain("const spaRouter = {");
   });
 });
+
+describe("Link prefetch without hydration", () => {
+  const install = "installFarmLinkPrefetch();";
+  const clientPage = {
+    pattern: "/",
+    modulePath: "/app/src/app/page.tsx",
+    relativePath: "page.tsx",
+    pageShouldHydrate: true,
+    islandStrategy: "load" as const,
+    hasIsolatedClientBoundaries: false,
+    isolatedBoundaries: [],
+  };
+
+  it("is installed by the entry of an app without client components", () => {
+    const entry = generate(false);
+    expect(entry).toContain("Client Runtime (no client components)");
+    expect(entry).toContain(install);
+    expect(entry).toMatch(
+      /import \{[^}]*\binstallFarmLinkPrefetch\b[^}]*\} from "@farm.js\/core\/internal\/client-runtime"/,
+    );
+  });
+
+  it.each([false, true])(
+    "is installed with the router by the entry of an app with client pages (islands: %s)",
+    (islandValues) => {
+      const code = generateClientHydrationEntry(
+        [clientPage],
+        [],
+        [],
+        "/app",
+        "src",
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        [],
+        undefined,
+        undefined,
+        false,
+        [],
+        "/",
+        undefined,
+        undefined,
+        islandValues,
+      );
+      expect(code.indexOf(install)).toBeGreaterThan(
+        code.indexOf("window.__FARM_SPA_ROUTER__ = spaRouter;"),
+      );
+      if (!islandValues) return;
+      // Islands mode loads the router when a navigation first needs it, and Link prefetch with it.
+      const { entry, router } = splitFarmClientRouter(code);
+      expect(entry).not.toContain(install);
+      expect(router).toContain(install);
+      expect(router).toMatch(
+        /import \{ installFarmLinkPrefetch \} from "@farm.js\/core\/internal\/client-runtime";/,
+      );
+    },
+  );
+});

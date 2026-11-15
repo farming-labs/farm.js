@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/jobs",
-  "version": "0.1.73",
+  "version": "0.1.74",
   "description": "Jobs integration primitives for Farm.js",
   "license": "MIT",
   "repository": {

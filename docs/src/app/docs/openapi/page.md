@@ -33,7 +33,13 @@ would reinterpret. Integration route paths and `workflows.route` use the same va
 
 ## What gets documented
 
-Farm scans API route files and generates an OpenAPI 3.0.3 spec from the discovered routes, methods, route params, query schemas, body schemas, and response metadata it can infer.
+Farm generates an OpenAPI 3.0.3 spec from the API routes it mounts under `/api`:
+`src/app/api/**/route.ts` files, root `routes.ts` endpoints, programmatic API routes, and routes
+that [plugins](/docs/plugins/create-plugin#typed-api-routes) register. Each operation carries the
+route params, query schemas, body schemas, and response metadata its endpoint declares.
+Programmatic routes outside `/api`, such as a sitemap, are not served beneath the API server and
+are left out. The development server and `farm build` read the same route table, so
+`/openapi.json` describes the same operations in both.
 
 **src/app/api/users/route.ts**
 
@@ -68,6 +74,65 @@ Path Item Object does not have a native `query` field. To keep the document vali
 `QUERY` Operation Object under the registered `x-oai-additionalOperations.QUERY` extension. This
 maps directly to the native `query` field available in OpenAPI 3.2 without mislabeling the route as
 `GET` or `POST`.
+
+## Hide a route
+
+Every mounted route is documented unless it opts out. Leave internal routes, such as an admin
+login or a telemetry collector, out of the document with `hidden`:
+
+**src/app/api/admin/session/route.ts**
+
+```ts
+export const openapi = { hidden: true };
+
+export async function POST(request: Request) {
+  return signIn(request);
+}
+```
+
+A route file's `openapi` export applies to every method that file exports, including plain
+`export function GET` handlers. Type it with `RouteOpenAPIConfig` from `@farm.js/core/api` if
+you want the editor to check it. Farm rejects any other option in this export, so a misspelled
+`{ hide: true }` fails discovery instead of publishing the route.
+
+A typed endpoint can hide one method instead:
+
+```ts
+export const DELETE = createEndpoint({ method: "DELETE", openapi: { hidden: true } }, async () => ({
+  deleted: true,
+}));
+```
+
+Endpoint metadata wins over the file export. Plugin routes take the same `openapi` option in
+their route definition. Hiding a route only removes it from the document: the route is still
+served, so protect it with middleware or authentication.
+
+## Describe routes Farm does not mount
+
+Some routes are served outside Farm's route table, for example the docs engine's `/api/docs`.
+Describe them with `openapi.paths`, written as OpenAPI 3.0 Path Item Objects:
+
+```ts
+export default defineConfig({
+  openapi: {
+    enabled: true,
+    paths: {
+      "/docs": {
+        get: {
+          summary: "Search the documentation",
+          parameters: [{ name: "query", in: "query", schema: { type: "string" } }],
+          responses: { 200: { description: "Matching sections" } },
+        },
+      },
+    },
+  },
+});
+```
+
+Keys are relative to the API server, like the generated paths, so `/docs` is `/api/docs` on the
+default `/api` server. Farm adds these entries as written. An operation that Farm already
+generates from a mounted route is an error rather than a silent override; hide the route first
+if you want to describe it by hand.
 
 ## Add metadata
 
@@ -179,7 +244,8 @@ farm build
 ## Production notes
 
 - Enable OpenAPI for APIs you want to document publicly or internally.
-- Keep private admin routes out of public docs unless the site is protected.
+- Hide private admin and machine-to-machine routes with `openapi: { hidden: true }` unless the
+  document is for internal readers only.
 - Use Zod schemas on API routes for better generated parameter and body details.
 - Farm recognizes Zod schemas structurally, including Zod 3/4 schemas loaded from another package
   copy. Standard Schema validators without portable schema metadata remain valid at runtime, but

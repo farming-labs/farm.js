@@ -43,7 +43,7 @@ describe("restoreLiteralModuleSpecifiers", () => {
     );
   });
 
-  it("restores import() in a chunk with Rolldown's __require() helper without decoding the AST", () => {
+  it("restores import() in a chunk with Rolldown's __require() helper without parsing it", () => {
     const entry = findCase("Rolldown entry chunk with CommonJS interop and page loaders");
     const { counts, utils } = createCountingUtils();
 
@@ -51,7 +51,7 @@ describe("restoreLiteralModuleSpecifiers", () => {
 
     expect(code).toContain('import("./home-DLgwQDLE.js")');
     expect(code).toContain("__require(`events`)");
-    expect(counts).toEqual({ parses: 1, programReads: 0 });
+    expect(counts).toEqual({ parses: 0, programReads: 0 });
   });
 
   it.each([
@@ -69,7 +69,7 @@ describe("restoreLiteralModuleSpecifiers", () => {
     expect(counts.programReads).toBe(1);
   });
 
-  it("leaves identifier-prefixed require() templates to the module record", () => {
+  it("leaves identifier-prefixed require() templates to the lexer", () => {
     const entry = findCase("only identifier-prefixed require() templates");
     const { counts, utils } = createCountingUtils();
 
@@ -78,6 +78,6 @@ describe("restoreLiteralModuleSpecifiers", () => {
     expect(code).toContain('import("./page.mjs")');
     expect(code).toContain("_require(`./y.cjs`)");
     expect(code).toContain("$require(`./z.cjs`)");
-    expect(counts.programReads).toBe(0);
+    expect(counts).toEqual({ parses: 0, programReads: 0 });
   });
 });
