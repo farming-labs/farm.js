@@ -2167,6 +2167,7 @@ if (document.readyState === 'loading') {
                     headers: createDevRequestHeaders(req.headers),
                   }),
                   entryContext.serverActions,
+                  { trustProxy: entryContext.server?.trustProxy === true },
                 );
               }
               let body: Buffer | undefined;

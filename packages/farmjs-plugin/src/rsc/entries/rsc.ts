@@ -600,6 +600,8 @@ const farmPageLastModified = ${JSON.stringify(ctx.pageLastModified ?? {})};
 } from '@farm.js/core/server-action-security';
 
 const serverActionSecurity = ${JSON.stringify(ctx.serverActions)};
+// Under server.trustProxy, a proxy's forwarded origin is the origin a same-origin action posts from.
+const serverActionRequestOptions = { trustProxy: ${JSON.stringify(ctx.server?.trustProxy === true)} };
 `;
   }
 
@@ -1441,7 +1443,7 @@ ${
     ctx.actionsEnabled
       ? `if (request.method === 'POST' && !isInitialApiRequest) {
     try {
-      validateServerActionRequest(request, serverActionSecurity);
+      validateServerActionRequest(request, serverActionSecurity, serverActionRequestOptions);
     } catch (error) {
       const rejection = createServerActionRequestErrorResponse(error);
       if (rejection) return rejection;
@@ -1572,6 +1574,7 @@ ${
         serverActionSecurity,
         actionId ? 'javascript' : 'form',
         actionId,
+        serverActionRequestOptions,
       );
     } catch (error) {
       if (request.signal.aborted) {

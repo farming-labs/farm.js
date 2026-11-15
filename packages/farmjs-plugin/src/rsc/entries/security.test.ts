@@ -93,6 +93,20 @@ describe("generated server action security", () => {
     expect(entry).not.toContain("returnValue = { ok: false, data: e }");
   });
 
+  it("checks an action's origin against a trusted proxy's forwarded origin under trustProxy", () => {
+    const untrusted = generateRscEntry(context);
+    expect(untrusted).toContain("const serverActionRequestOptions = { trustProxy: false };");
+
+    const trusted = generateRscEntry({ ...context, server: { trustProxy: true } });
+    expect(trusted).toContain("const serverActionRequestOptions = { trustProxy: true };");
+    expect(trusted).toContain(
+      "validateServerActionRequest(request, serverActionSecurity, serverActionRequestOptions);",
+    );
+    expect(trusted).toMatch(
+      /prepareServerActionRequest\(\s*request,\s*serverActionSecurity,[^;]*actionId,\s*serverActionRequestOptions,\s*\)/,
+    );
+  });
+
   it("keeps browser action requests same-origin and turns failures into Errors", () => {
     const entry = generateClientEntry(context);
 
