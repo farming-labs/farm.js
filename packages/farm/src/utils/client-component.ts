@@ -19,6 +19,10 @@ import {
   type FarmServerBundledPackage,
 } from "../islands-react-server-exports";
 import { isFarmIslandStrategy, type FarmIslandStrategy } from "../island";
+import {
+  ensureFarmIslandContainerReference,
+  findFarmIslandContainers,
+} from "../islands-containers";
 import { isReactRenderer, type FarmRenderer } from "../renderer";
 import type { FarmIsolatedClientHydrationMode } from "../types";
 import { logger } from "../utils";
@@ -695,6 +699,24 @@ function resolveOwnerSourcePath(resolvedPath: string | null, root?: string): str
     current = target;
   }
   return current;
+}
+
+/**
+ * Islands mode: the local names in a server module `code` (at `file`) that render client
+ * components, directly or through the server components they import. Their uses inside a container
+ * element grow the island to it (RFC 0006).
+ */
+export function getFarmClientRenderingBindings(code: string, file: string, root: string): string[] {
+  const bindings: string[] = [];
+  for (const [specifier, locals] of getStaticImportBindings(code)) {
+    const imported = resolveImportedModule(file, specifier, root);
+    if (!imported.path) continue;
+    const metadata = imported.local
+      ? inspectClientModuleMetadata(imported.path, root, new Set([path.resolve(file)]), false)
+      : inspectPackageClientBoundary(imported.path, root, new Set());
+    if (metadata.isClientComponent || metadata.shouldHydrate) bindings.push(...locals);
+  }
+  return bindings;
 }
 
 /**
@@ -1802,7 +1824,16 @@ function collectIsolatedClientBoundaries(
       const localBindings = importedBindings.get(specifier) ?? [];
       const staticUses = countStaticJsxUses(content, localBindings);
       if (staticUses > 0) {
-        const container = findParserSensitiveJsxContainer(content, localBindings);
+        // Islands mode: the element around the component becomes the island (RFC 0006).
+        const grows =
+          options.packageReferences === true &&
+          projectRoot !== undefined &&
+          (findFarmIslandContainers(content ?? "", moduleSourcePath, localBindings)?.length ?? 0) >
+            0;
+        if (grows) visit(ensureFarmIslandContainerReference(projectRoot!));
+        const container = grows
+          ? undefined
+          : findParserSensitiveJsxContainer(content, localBindings);
         if (container) {
           fallbackReason = `the client boundary imported from ${specifier} renders inside <${container}>, where the HTML parser relocates its hydration marker`;
           fallbackHint = `Move "use client" up to a component that renders the whole <${container}>${PARSER_SENSITIVE_FLOW_HINTS[container] ?? ""}`;

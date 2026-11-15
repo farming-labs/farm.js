@@ -297,9 +297,7 @@ Islands have the same limits as [isolated client leaves](#isolated-client-leaves
   elsewhere that one client component keeps its server HTML and Farm logs it once.
 - A client component must export each component by name (`export function Name`,
   `export { Name }`, `export { Name } from "./name"`, or `export default`), not through
-  `export *`, and must not sit where the HTML parser moves it: directly inside `<table>`, `<tbody>`,
-  `<tr>`, `<select>` or `<svg>`. Inside a `<td>`, `<th>`, `<caption>` or `<foreignObject>` it is
-  fine.
+  `export *`.
 - An integration provider that wraps the whole route, and does not declare
   `supportsIsolatedHydration: true`, keeps its routes route-wide.
 
@@ -307,6 +305,15 @@ When one of these applies, the route stays server-rendered, its client component
 interactive, and Farm logs a warning naming the module and the reason. Fix the reason, or render
 the interactive part from a synchronous page. Preact, Solid, Vue, and Svelte keep async pages
 server-only.
+
+A client component directly inside `<table>`, `<thead>`, `<tbody>`, `<tfoot>`, `<tr>`,
+`<select>`, `<optgroup>`, `<datalist>`, `<svg>`, `<ul>` or `<ol>` cannot have an `<f-island>`
+around it: the HTML parser moves or drops it there, and `ul > li` selectors stop matching. Farm
+makes the outermost such element the island instead, so the browser gets the same table, options,
+SVG shapes and list items as under React Server Components. The element's server-rendered parts
+travel as a server tree, so moving `"use client"` up to a component that renders the whole
+element is still the cheaper choice for a large table. Inside a `<td>`, `<th>`, `<caption>`,
+`<li>` or `<foreignObject>` a client component is an island of its own.
 
 In [islands mode](#react-server-components) every page is a server component, so hydrating a page whole
 would ship its module and its server-only imports to the browser. Islands mode never does that:
