@@ -806,3 +806,63 @@ describe("OpenAPIGenerator transformed request schemas", () => {
     ]);
   });
 });
+
+describe("OpenAPIGenerator form bodies and operation ids", () => {
+  it("documents a multipart() body as form data with binary file parts", async () => {
+    const { multipart } = await import("../api/transport");
+    const module = {
+      POST: createEndpoint(
+        {
+          method: "POST",
+          body: multipart(
+            z.object({ title: z.string(), file: z.instanceof(File), attachment: z.file() }),
+          ),
+        } as any,
+        async () => Response.json({ ok: true }),
+      ),
+    };
+    const generator = new OpenAPIGenerator(
+      os.tmpdir(),
+      { title: "Upload API" },
+      { loadModule: async () => module },
+    );
+    const spec = await generator.generateSpec([
+      {
+        path: "/api/upload",
+        methods: ["POST"],
+        filePath: path.join(os.tmpdir(), "upload-route.ts"),
+        relativePath: "api/upload/route.ts",
+      },
+    ]);
+
+    const content = spec.paths["/upload"].post.requestBody.content;
+    expect(Object.keys(content)).toEqual(["multipart/form-data"]);
+    expect(content["multipart/form-data"].schema.properties).toMatchObject({
+      title: { type: "string" },
+      file: { type: "string", format: "binary" },
+      attachment: { type: "string", format: "binary" },
+    });
+  });
+
+  it("gives routes whose paths differ only in separators distinct operation ids", async () => {
+    const module = {
+      GET: createEndpoint({ method: "GET" } as any, async () => Response.json({ ok: true })),
+    };
+    const generator = new OpenAPIGenerator(
+      os.tmpdir(),
+      { title: "Ids API" },
+      { loadModule: async () => module },
+    );
+    const spec = await generator.generateSpec(
+      ["/api/a_b", "/api/a/b"].map((routePath) => ({
+        path: routePath,
+        methods: ["GET"],
+        filePath: path.join(os.tmpdir(), "ids-route.ts"),
+        relativePath: `${routePath.slice(1)}/route.ts`,
+      })),
+    );
+
+    expect(spec.paths["/a_b"].get.operationId).toBe("get_a_b");
+    expect(spec.paths["/a/b"].get.operationId).toBe("get_a_b_2");
+  });
+});

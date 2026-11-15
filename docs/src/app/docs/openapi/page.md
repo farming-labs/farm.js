@@ -63,6 +63,11 @@ Dynamic API segments use OpenAPI path parameters. Optional catch-all routes such
 parameters themselves must always be required. Required catch-all routes produce only the
 parameterized operation.
 
+A body declared with `multipart()` is documented as `multipart/form-data`, and its file fields
+(`z.file()`, `z.instanceof(File)`, or `z.instanceof(Blob)`) as `format: binary` parts. Each operation
+has a unique `operationId` (`get_users_id`). When two routes would share one, as `/api/a_b` and
+`/api/a/b` do, the later operation gets a numbered suffix (`get_a_b_2`).
+
 `QUERY` routes include their request-body schema too. Farm currently emits OpenAPI 3.0.3, whose
 Path Item Object does not have a native `query` field. To keep the document valid, Farm places each
 `QUERY` Operation Object under the registered `x-oai-additionalOperations.QUERY` extension. This
