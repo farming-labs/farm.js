@@ -2,6 +2,7 @@
   "$schema": "node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
     "benchmarks/compiler/src/lib/api.generated.ts",
+    "benchmarks/frameworks/apps/tanstack/src/routeTree.gen.ts",
     "dist/**",
     "examples/**",
     "packages/farm-cli/test/fixtures/**"
