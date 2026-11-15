@@ -13,11 +13,12 @@ export interface PrefetchOptions {
    * to `50`, the same as `Link`'s `prefetchDelay`. */
   intentDelayMs?: number;
   /** Route patterns that may be prefetched, in Farm route syntax
-   * (`/posts/[id]`, `/docs/[...slug]`). Empty (the default) allows every
-   * path. */
+   * (`/posts/[id]`, `/docs/[...slug]`). Applies to every prefetch, `Link`'s
+   * included. Patterns match the path the browser requests, so a `basePath`
+   * or locale prefix is part of it. Empty (the default) allows every path. */
   allow?: string[];
-  /** Route patterns that are never prefetched. Checked before `allow`, so
-   * `deny` wins. Defaults to `[]`. */
+  /** Route patterns that are never prefetched, `Link`'s included. Checked
+   * before `allow`, so `deny` wins. Defaults to `[]`. */
   deny?: string[];
 }
 

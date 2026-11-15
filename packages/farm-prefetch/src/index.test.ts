@@ -30,7 +30,8 @@ describe("prefetch Farm plugin", () => {
   it("starts the runtime on the framework router and closes it", async () => {
     document.body.innerHTML = `<a href="/about" data-farm-prefetch="render">About</a>`;
     const plugin = prefetch({ mode: "none" });
-    const router = { navigate: vi.fn(), prefetch: vi.fn(async () => {}) };
+    const fetched = vi.fn(async (_href: string) => {});
+    const router = { navigate: vi.fn(), prefetch: fetched as (href: string) => unknown };
 
     const client = plugin.client;
     if (!client?.setup || !client.close) throw new Error("prefetch() must define client hooks");
@@ -38,9 +39,10 @@ describe("prefetch Farm plugin", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(router.prefetch).toHaveBeenCalledWith("/about");
+    expect(fetched).toHaveBeenCalledWith("/about");
     expect(typeof runtime.close).toBe("function");
     (client.close as Function)({ state: runtime });
+    expect(router.prefetch).toBe(fetched);
     document.body.innerHTML = "";
   });
 

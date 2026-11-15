@@ -18,8 +18,61 @@ export interface PrefetchRouter {
   unobserveForPrefetch?(element: HTMLAnchorElement): void;
 }
 
+type RouterWithPrefetch = PrefetchRouter & { prefetch(href: string): unknown };
+
 const ANCHOR_SELECTOR = "a[href]";
 const ignore = () => {};
+
+/**
+ * Put the plugin's rules in front of `router.prefetch`. Every prefetch in the
+ * app calls that one method: `Link`'s intent and render prefetches, the
+ * router's viewport queue (which serves `Link` and this plugin), the
+ * `prefetch()` helper and this plugin's own links. So `allow`, `deny` and
+ * data saving apply to all of them, not only to plain anchors.
+ *
+ * A blocked prefetch resolves without fetching. Anything the rules do not
+ * name, such as a cross-origin href, goes to the router unchanged. Returns
+ * the function that takes the rules out again.
+ */
+export function gateRouterPrefetch(
+  router: RouterWithPrefetch,
+  options: Pick<ResolvedPrefetchOptions, "allow" | "deny">,
+  runtimeWindow: Window & typeof globalThis = window,
+): () => void {
+  const original = router.prefetch;
+  const ownMethod = Object.prototype.hasOwnProperty.call(router, "prefetch");
+  let active = true;
+
+  function blocks(href: string): boolean {
+    if (isDataSaving(runtimeWindow)) return true;
+    let url: URL;
+    try {
+      url = new URL(href, runtimeWindow.location.href);
+    } catch {
+      return false;
+    }
+    if (url.origin !== runtimeWindow.location.origin) return false;
+    try {
+      return !isPathAllowed(url.pathname, options.allow, options.deny);
+    } catch {
+      // A path core's route matcher cannot read is not an app route to prefetch.
+      return true;
+    }
+  }
+
+  const gated = (href: string): unknown =>
+    active && blocks(href) ? Promise.resolve() : original.call(router, href);
+  router.prefetch = gated;
+
+  return () => {
+    active = false;
+    // A wrapper installed after this one still calls `gated`, which now passes
+    // every href through, so only an untouched method is restored.
+    if (router.prefetch !== gated) return;
+    if (ownMethod) router.prefetch = original;
+    else delete (router as PrefetchRouter).prefetch;
+  };
+}
 
 /**
  * Start the browser runtime for app-wide link prefetching.
@@ -29,21 +82,24 @@ const ignore = () => {};
  * router: `router.prefetch` for intent and render, `router.observeForPrefetch`
  * for viewport. Fetching, caching, dedupe and the viewport queue stay in core.
  *
+ * - `allow`, `deny` and data saving apply to every router prefetch, `Link`'s
+ *   included (see `gateRouterPrefetch`).
  * - Intent uses one delegated listener per event on the document, so links
  *   added later need no setup.
  * - Viewport and render links are found on start and by a MutationObserver;
  *   a removed viewport link is handed back with `unobserveForPrefetch`.
- * - `Save-Data` or `prefers-reduced-data` keeps the runtime off.
+ * - `Save-Data` or `prefers-reduced-data` at start leaves plain links alone.
  */
 export function startPrefetchRuntime(
   options: ResolvedPrefetchOptions,
   runtimeWindow: Window & typeof globalThis = window,
   router?: PrefetchRouter | null,
 ): PrefetchRuntime {
-  if (isDataSaving(runtimeWindow) || typeof router?.prefetch !== "function") {
-    return { close: ignore };
-  }
+  if (typeof router?.prefetch !== "function") return { close: ignore };
+  // Plain links call the router's own method; their rules are checked below.
   const prefetch = router.prefetch.bind(router);
+  const removeGate = gateRouterPrefetch(router as RouterWithPrefetch, options, runtimeWindow);
+  if (isDataSaving(runtimeWindow)) return { close: removeGate };
   const observe = router.observeForPrefetch?.bind(router);
   const unobserve = router.unobserveForPrefetch?.bind(router);
   const document = runtimeWindow.document;
@@ -163,6 +219,7 @@ export function startPrefetchRuntime(
       for (const anchor of observed) unobserve?.(anchor);
       observed.clear();
       cancelIntent();
+      removeGate();
     },
   };
 }

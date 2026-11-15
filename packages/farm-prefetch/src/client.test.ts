@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startPrefetchRuntime, type PrefetchRouter } from "./client.js";
+import { gateRouterPrefetch, startPrefetchRuntime, type PrefetchRouter } from "./client.js";
 import type { PrefetchRuntime, ResolvedPrefetchOptions } from "./types.js";
 
 const wait = (ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -8,9 +8,13 @@ function options(overrides: Partial<ResolvedPrefetchOptions> = {}): ResolvedPref
   return { mode: "intent", intentDelayMs: 0, allow: [], deny: [], ...overrides };
 }
 
+/** A router whose `prefetch` is a spy. The runtime puts its rules in front of
+ * `prefetch`, so tests assert on `fetched`, the method underneath. */
 function createRouter() {
+  const fetched = vi.fn(async (_href: string) => {});
   return {
-    prefetch: vi.fn(async (_href: string) => {}),
+    fetched,
+    prefetch: fetched as (href: string) => unknown,
     observeForPrefetch: vi.fn((_element: HTMLAnchorElement) => {}),
     unobserveForPrefetch: vi.fn((_element: HTMLAnchorElement) => {}),
   };
@@ -59,8 +63,8 @@ describe("startPrefetchRuntime", () => {
     hover(link("#about span"));
     await wait();
 
-    expect(router.prefetch).toHaveBeenCalledTimes(1);
-    expect(router.prefetch).toHaveBeenCalledWith("/about");
+    expect(router.fetched).toHaveBeenCalledTimes(1);
+    expect(router.fetched).toHaveBeenCalledWith("/about");
   });
 
   it("cancels the intent when the pointer leaves before the delay", async () => {
@@ -72,7 +76,7 @@ describe("startPrefetchRuntime", () => {
     leave(link("#about"), document.body);
     await wait(40);
 
-    expect(router.prefetch).not.toHaveBeenCalled();
+    expect(router.fetched).not.toHaveBeenCalled();
   });
 
   it("keeps the intent timer running while the pointer moves inside the link", async () => {
@@ -91,7 +95,7 @@ describe("startPrefetchRuntime", () => {
       await Promise.resolve();
 
       // Fires 30ms after the first hover, not 30ms after entering the span.
-      expect(router.prefetch).toHaveBeenCalledTimes(1);
+      expect(router.fetched).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
@@ -107,7 +111,7 @@ describe("startPrefetchRuntime", () => {
     link("#b").dispatchEvent(new Event("touchstart", { bubbles: true }));
     await wait();
 
-    expect(router.prefetch.mock.calls).toEqual([["/a"], ["/b"]]);
+    expect(router.fetched.mock.calls).toEqual([["/a"], ["/b"]]);
   });
 
   async function hoverEach(selector: string): Promise<void> {
@@ -133,11 +137,11 @@ describe("startPrefetchRuntime", () => {
     start(options(), router);
 
     await hoverEach("a:not(#ok)");
-    expect(router.prefetch).not.toHaveBeenCalled();
+    expect(router.fetched).not.toHaveBeenCalled();
 
     hover(link("#ok"));
     await wait();
-    expect(router.prefetch.mock.calls).toEqual([["/current?tab=2"]]);
+    expect(router.fetched.mock.calls).toEqual([["/current?tab=2"]]);
   });
 
   it("applies allow and deny route patterns, with deny winning", async () => {
@@ -153,11 +157,11 @@ describe("startPrefetchRuntime", () => {
     );
 
     await hoverEach("a:not(#ok)");
-    expect(router.prefetch).not.toHaveBeenCalled();
+    expect(router.fetched).not.toHaveBeenCalled();
 
     hover(link("#ok"));
     await wait();
-    expect(router.prefetch.mock.calls).toEqual([["/posts/1"]]);
+    expect(router.fetched.mock.calls).toEqual([["/posts/1"]]);
   });
 
   it("skips every link while the docs runtime owns navigation", async () => {
@@ -169,7 +173,7 @@ describe("startPrefetchRuntime", () => {
     hover(link("#about"));
     await wait();
 
-    expect(router.prefetch).not.toHaveBeenCalled();
+    expect(router.fetched).not.toHaveBeenCalled();
   });
 
   it("lets a link choose its own mode with data-farm-prefetch", async () => {
@@ -184,13 +188,13 @@ describe("startPrefetchRuntime", () => {
     await wait();
 
     expect(router.observeForPrefetch.mock.calls).toEqual([[link("#viewport")]]);
-    expect(router.prefetch.mock.calls).toEqual([["/render"]]);
+    expect(router.fetched.mock.calls).toEqual([["/render"]]);
 
     hover(link("#none"));
     await wait();
     hover(link("#typo"));
     await wait();
-    expect(router.prefetch.mock.calls).toEqual([["/render"]]);
+    expect(router.fetched.mock.calls).toEqual([["/render"]]);
   });
 
   it("hands viewport links to the router's observer, including links added later", async () => {
@@ -216,7 +220,7 @@ describe("startPrefetchRuntime", () => {
 
     hover(link("#first"));
     await wait();
-    expect(router.prefetch).not.toHaveBeenCalled();
+    expect(router.fetched).not.toHaveBeenCalled();
   });
 
   it("re-observes a viewport link after it moves", async () => {
@@ -233,11 +237,11 @@ describe("startPrefetchRuntime", () => {
 
   it("skips viewport links when the router has no observer", async () => {
     document.body.innerHTML = `<a href="/about">About</a>`;
-    const router = { prefetch: vi.fn(async () => {}) };
+    const fetched = vi.fn(async () => {});
 
-    expect(() => start(options({ mode: "viewport" }), router)).not.toThrow();
+    expect(() => start(options({ mode: "viewport" }), { prefetch: fetched })).not.toThrow();
     await wait();
-    expect(router.prefetch).not.toHaveBeenCalled();
+    expect(fetched).not.toHaveBeenCalled();
   });
 
   it("prefetches render links once each", async () => {
@@ -245,7 +249,7 @@ describe("startPrefetchRuntime", () => {
     const router = createRouter();
     start(options({ mode: "render" }), router);
     await wait();
-    expect(router.prefetch.mock.calls).toEqual([["/one"]]);
+    expect(router.fetched.mock.calls).toEqual([["/one"]]);
 
     const one = link("#one");
     one.remove();
@@ -253,7 +257,7 @@ describe("startPrefetchRuntime", () => {
     link("#list").insertAdjacentHTML("beforeend", `<a href="/two">Two</a>`);
     await wait();
 
-    expect(router.prefetch.mock.calls).toEqual([["/one"], ["/two"]]);
+    expect(router.fetched.mock.calls).toEqual([["/one"], ["/two"]]);
   });
 
   it("close() stops listening, cancels the pending intent and hands back observed links", async () => {
@@ -269,7 +273,7 @@ describe("startPrefetchRuntime", () => {
     runtime.close();
     await wait(40);
 
-    expect(router.prefetch).not.toHaveBeenCalled();
+    expect(router.fetched).not.toHaveBeenCalled();
     expect(router.unobserveForPrefetch.mock.calls).toEqual([[link("#viewport")]]);
 
     hover(link("#intent"));
@@ -278,7 +282,7 @@ describe("startPrefetchRuntime", () => {
       `<a data-farm-prefetch="render" href="/after">After</a>`,
     );
     await wait(40);
-    expect(router.prefetch).not.toHaveBeenCalled();
+    expect(router.fetched).not.toHaveBeenCalled();
   });
 
   it("stays off without router.prefetch", async () => {
@@ -309,22 +313,20 @@ describe("startPrefetchRuntime", () => {
     hover(link("#about"));
     await wait();
 
-    expect(router.prefetch).not.toHaveBeenCalled();
+    expect(router.fetched).not.toHaveBeenCalled();
     expect(router.observeForPrefetch).not.toHaveBeenCalled();
   });
 
   it("leaves a failed prefetch to the click", async () => {
     document.body.innerHTML = `<a id="a" href="/a">A</a><a id="b" href="/b">B</a>`;
-    const router = {
-      prefetch: vi
-        .fn()
-        .mockImplementationOnce(() => {
-          throw new Error("sync failure");
-        })
-        .mockImplementationOnce(() => Promise.reject(new Error("async failure")))
-        .mockImplementation(async () => {}),
-    };
-    start(options(), router);
+    const fetched = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("sync failure");
+      })
+      .mockImplementationOnce(() => Promise.reject(new Error("async failure")))
+      .mockImplementation(async () => {});
+    start(options(), { prefetch: fetched });
 
     hover(link("#a"));
     await wait();
@@ -333,6 +335,141 @@ describe("startPrefetchRuntime", () => {
     hover(link("#a"));
     await wait();
 
-    expect(router.prefetch.mock.calls).toEqual([["/a"], ["/b"], ["/a"]]);
+    expect(fetched.mock.calls).toEqual([["/a"], ["/b"], ["/a"]]);
+  });
+});
+
+describe("rules on router.prefetch", () => {
+  const runtimes: PrefetchRuntime[] = [];
+
+  function start(resolved: ResolvedPrefetchOptions, router: PrefetchRouter) {
+    const runtime = startPrefetchRuntime(resolved, window, router);
+    runtimes.push(runtime);
+    return runtime;
+  }
+
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/current");
+  });
+
+  afterEach(() => {
+    for (const runtime of runtimes.splice(0)) runtime.close();
+    delete (window.navigator as unknown as Record<string, unknown>).connection;
+  });
+
+  it("applies deny to every caller of router.prefetch, Link included", async () => {
+    const router = createRouter();
+    start(options({ mode: "none", deny: ["/admin/[...rest]"] }), router);
+
+    // Link, the viewport queue and the prefetch() helper all call this method.
+    await expect(router.prefetch("/admin/users")).resolves.toBeUndefined();
+    await router.prefetch("/about");
+    await router.prefetch("about?tab=2");
+
+    expect(router.fetched.mock.calls).toEqual([["/about"], ["about?tab=2"]]);
+  });
+
+  it("applies allow to every caller of router.prefetch", async () => {
+    const router = createRouter();
+    start(options({ mode: "none", allow: ["/posts/[id]"] }), router);
+
+    await router.prefetch("/about");
+    await router.prefetch("/posts/1?ref=home");
+
+    expect(router.fetched.mock.calls).toEqual([["/posts/1?ref=home"]]);
+  });
+
+  it("leaves hrefs its rules do not name to the router", async () => {
+    const router = createRouter();
+    start(options({ mode: "none", deny: ["/[[...all]]"] }), router);
+
+    await router.prefetch("https://example.com/admin");
+    await router.prefetch("/anything");
+
+    expect(router.fetched.mock.calls).toEqual([["https://example.com/admin"]]);
+  });
+
+  it("stops every prefetch while the browser saves data, also when that starts later", async () => {
+    const router = createRouter();
+    start(options({ mode: "none" }), router);
+    await router.prefetch("/before");
+
+    Object.defineProperty(window.navigator, "connection", {
+      configurable: true,
+      value: { saveData: true },
+    });
+    await router.prefetch("/during");
+
+    expect(router.fetched.mock.calls).toEqual([["/before"]]);
+  });
+
+  it("puts the rules in place when the browser already saves data at start", async () => {
+    Object.defineProperty(window.navigator, "connection", {
+      configurable: true,
+      value: { saveData: true },
+    });
+    const router = createRouter();
+    const runtime = start(options(), router);
+
+    await router.prefetch("/about");
+    expect(router.fetched).not.toHaveBeenCalled();
+
+    runtime.close();
+    expect(router.prefetch).toBe(router.fetched);
+  });
+
+  it("restores the router's own method on close", async () => {
+    const router = createRouter();
+    const runtime = start(options({ deny: ["/admin/[...rest]"] }), router);
+    expect(router.prefetch).not.toBe(router.fetched);
+
+    runtime.close();
+    expect(router.prefetch).toBe(router.fetched);
+    await router.prefetch("/admin/users");
+    expect(router.fetched.mock.calls).toEqual([["/admin/users"]]);
+  });
+
+  it("calls a class router's method on the router and removes its own property on close", async () => {
+    class ClassRouter {
+      calls: string[] = [];
+      prefetch(href: string): Promise<void> {
+        this.calls.push(href);
+        return Promise.resolve();
+      }
+    }
+    const router = new ClassRouter();
+    const runtime = start(options({ deny: ["/admin/[...rest]"] }), router);
+
+    await router.prefetch("/admin/users");
+    await router.prefetch("/about");
+    expect(router.calls).toEqual(["/about"]);
+
+    runtime.close();
+    expect(Object.prototype.hasOwnProperty.call(router, "prefetch")).toBe(false);
+  });
+
+  it("lets a wrapper installed after it keep working once it closes", async () => {
+    const router = createRouter();
+    const runtime = start(options({ deny: ["/admin/[...rest]"] }), router);
+    const gated = router.prefetch;
+    const outer = vi.fn((href: string) => gated(href));
+    router.prefetch = outer;
+
+    runtime.close();
+    expect(router.prefetch).toBe(outer);
+    await router.prefetch("/admin/users");
+    expect(router.fetched.mock.calls).toEqual([["/admin/users"]]);
+  });
+
+  it("can be used on its own and removed once", async () => {
+    const router = createRouter();
+    const remove = gateRouterPrefetch(router, { allow: [], deny: ["/admin/[...rest]"] }, window);
+
+    await router.prefetch("/admin/users");
+    expect(router.fetched).not.toHaveBeenCalled();
+
+    remove();
+    remove();
+    expect(router.prefetch).toBe(router.fetched);
   });
 });

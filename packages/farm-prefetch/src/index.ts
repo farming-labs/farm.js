@@ -19,9 +19,10 @@ export type {
  *   overridden per link with `data-farm-prefetch`.
  * - `intentDelayMs` (default 50) before a hover, focus or touch prefetch.
  * - `allow` / `deny` route patterns (`/posts/[id]`, `/docs/[...slug]`);
- *   `deny` wins, an empty `allow` allows every path.
- * - `Save-Data` and `prefers-reduced-data` keep the runtime off, as does a
- *   router without `prefetch`.
+ *   `deny` wins, an empty `allow` allows every path. They apply to every
+ *   prefetch, `Link`'s included.
+ * - `Save-Data` and `prefers-reduced-data` stop every prefetch, `Link`'s
+ *   included. A router without `prefetch` keeps the plugin off.
  */
 export function prefetch(options: PrefetchOptions = {}) {
   const resolved = resolvePrefetchOptions(options);
