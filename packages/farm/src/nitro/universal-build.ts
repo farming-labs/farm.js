@@ -8660,9 +8660,12 @@ async function farmKeptLayoutsRender(ReactDOMServer, layouts, keptCount, params)
     if (Layout) element = React.createElement(Layout, { children: element, params });
   }
   try {
+    // The markup is thrown away, so client components render as plain components, as in a root
+    // that hydrates whole: their props are not encoded for a browser that never receives them.
+    // Server components, guards included, run as usual.
     const rendered = await renderFarmElement(
       ReactDOMServer,
-      wrapWithFarmIntegrationProviders(element),
+      wrapWithFarmIntegrationProviders(wrapFarmRouteClientGraph(element)),
     );
     if (rendered.stream) {
       const reader = rendered.stream.getReader();

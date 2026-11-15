@@ -2264,8 +2264,10 @@ export class ServerRenderer {
                 }
               }
               try {
+                // The markup is thrown away, so client components render as plain components:
+                // their props are not encoded for a browser that never receives them.
                 await this.renderElementToCompleteHTML(
-                  await this.wrapWithIntegrationProviders(keptElement),
+                  await this.wrapWithIntegrationProviders(this.wrapClientGraph(keptElement)),
                   { rejectLateErrors: true },
                 );
               } catch {
