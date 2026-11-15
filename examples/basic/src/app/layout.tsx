@@ -30,7 +30,8 @@ export default function RootLayout({ children }: LayoutProps) {
             <Link href="/query-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
               Query Demo
             </Link>
-            <Link href="/farm-query-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            {/* Its middleware allows 10 requests a minute, so prefetch it on intent, not on every page view. */}
+            <Link href="/farm-query-demo" prefetch="intent" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
               Farm Query
             </Link>
             <Link href="/api-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">

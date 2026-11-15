@@ -6950,7 +6950,7 @@ ${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { isFarmBlockedNavigationURL, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { installFarmLinkPrefetch, isFarmBlockedNavigationURL, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -8923,6 +8923,9 @@ document.addEventListener('click', function(event) {
   
   spaRouter.navigate(href, { replace, scroll, viewTransition });
 });
+
+// Link anchors on a page that does not hydrate prefetch through the router as Link would.
+installFarmLinkPrefetch();
 
 if (import.meta.hot) {
   import.meta.hot.on('vite:beforeUpdate', () => {

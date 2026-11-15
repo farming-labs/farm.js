@@ -197,6 +197,40 @@ describe("Link", () => {
       expect(prefetch).not.toHaveBeenCalled();
     });
 
+    it.each([
+      [undefined, null],
+      [true, null],
+      ["intent", "intent"],
+      ["hover", "intent"],
+      ["viewport", "viewport"],
+      ["render", "render"],
+      ["none", "none"],
+      [false, "none"],
+    ] as const)(
+      "writes prefetch=%s into the HTML as %s, for a page that does not hydrate",
+      (prefetch, written) => {
+        const html = renderToString(createElement(Link, { href: "/about", prefetch } as LinkProps));
+        const anchor = new DOMParser().parseFromString(html, "text/html").querySelector("a")!;
+        expect(anchor.getAttribute("data-farm-prefetch")).toBe(written);
+        expect(anchor.hasAttribute("data-farm-prefetch-delay")).toBe(false);
+      },
+    );
+
+    it("writes a prefetchDelay other than 50ms only when intent uses it", () => {
+      const read = (props: Partial<LinkProps>) =>
+        new DOMParser()
+          .parseFromString(
+            renderToString(createElement(Link, { href: "/about", ...props } as LinkProps)),
+            "text/html",
+          )
+          .querySelector("a")!
+          .getAttribute("data-farm-prefetch-delay");
+      expect(read({ prefetchDelay: 200 })).toBe("200");
+      expect(read({ prefetch: "intent", prefetchDelay: 0 })).toBe("0");
+      expect(read({ prefetch: "intent", prefetchDelay: 50 })).toBeNull();
+      expect(read({ prefetch: "viewport", prefetchDelay: 200 })).toBeNull();
+    });
+
     it("does not prefetch external href", () => {
       render(createElement(Link, { href: "https://example.com", prefetch: "render" }));
       expect(prefetch).not.toHaveBeenCalled();

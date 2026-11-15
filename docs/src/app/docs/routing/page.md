@@ -246,8 +246,13 @@ schemes such as `customapp:open` are validated from their URI grammar and work w
 Viewport prefetch uses a short scroll guard and is cancelled if its link unmounts before the guard
 expires. Intent prefetches are deduplicated while active; after an attempt settles, a later hover,
 focus, or touch can retry while successful route data remains deduplicated by the router cache.
-In a production islands build, the client router loads when a viewport-prefetch link first nears
-the viewport, or on the first link hover, focus, tap, or navigation, and then prefetches.
+A `Link` prefetches the same way on a page that never hydrates, such as a page with no client
+component or a server component in islands mode. It writes a mode other than the default into its
+HTML (`data-farm-prefetch="intent"`, and `data-farm-prefetch-delay` for a `prefetchDelay` other
+than 50ms), and the router follows it.
+In a production islands build, the client router loads when a viewport-prefetch link in a hydrated
+island first nears the viewport, or on the first link hover, focus, tap, or navigation, and then
+prefetches. `Link`s in server components follow their modes once the router has loaded.
 The development page-data router reuses a successfully decoded JSON prefetch response when
 navigation overlaps it with the same URL, interception origin, and active layout chain.
 Refreshes and different contexts fetch independently, and failed prefetches are retried by
