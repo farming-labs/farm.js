@@ -4,6 +4,9 @@ import { expect, test, type Page } from "@playwright/test";
 // route's: at 1,000 routes the whole manifest was about 650 KB per page. A navigation to a route
 // the document did not inline still runs in the same document.
 
+// Production keeps its route table in the hashed client entry and inlines no manifest.
+test.skip(process.env.FARM_E2E_MODE === "prod", "Development route manifest");
+
 type InlinedManifest = { routes: string[]; layouts: string[]; module?: string };
 
 function readInlinedManifest(page: Page): Promise<InlinedManifest> {
