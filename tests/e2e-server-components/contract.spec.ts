@@ -355,7 +355,10 @@ test("generateMetadata sets the head", async ({ request }) => {
 
 test("static pages are prerendered at build time", async ({ request }) => {
   test.skip(dev, "build output only");
-  expect(existsSync(path.join(publicDir, "static/a/index.html"))).toBe(true);
+  // Cloudflare serves a directory index at the trailing-slash URL, so the page is written as
+  // static/a.html there and answers at /static/a.
+  const prerendered = target === "cloudflare" ? "static/a.html" : "static/a/index.html";
+  expect(existsSync(path.join(publicDir, prerendered))).toBe(true);
   expect(await (await request.get("/static/b")).text()).toContain("Static b");
 });
 
