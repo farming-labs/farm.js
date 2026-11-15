@@ -23,6 +23,19 @@ import {
 } from "../plugins/route-pattern";
 import { resolveFarmI18nConfig } from "../i18n/config";
 
+// The history key helpers the router properties call, taken from the generated runtime.
+const HISTORY_KEY_HELPER_NAMES = [
+  "readHistoryKey",
+  "createHistoryKey",
+  "historyScrollKey",
+  "FARM_HISTORY_KEY",
+];
+function readHistoryKeyHelpers(): unknown[] {
+  return new Function(
+    `${generateUniversalRouterStateRuntime()}; return [${HISTORY_KEY_HELPER_NAMES.join(", ")}];`,
+  )();
+}
+
 describe("generateConfiguredResponseHeadersRuntimeSource", () => {
   it("preserves handler and configured Set-Cookie fields separately", () => {
     const source = generateConfiguredResponseHeadersRuntimeSource();
@@ -325,6 +338,7 @@ describe("generateUniversalRouterStateProperties", () => {
       "FARM_HISTORY_INDEX_KEY",
       "URL",
       "CustomEvent",
+      ...HISTORY_KEY_HELPER_NAMES,
       `return ({${runtime}});`,
     );
     const createHistoryState = (path: string, pageState: unknown, currentState?: unknown) => ({
@@ -340,6 +354,7 @@ describe("generateUniversalRouterStateProperties", () => {
       "__farmHistoryIndex",
       URL,
       Event,
+      ...readHistoryKeyHelpers(),
     );
     router.currentHistoryIndex = 2;
 
@@ -598,6 +613,7 @@ describe("generateUniversalRouterStateProperties", () => {
       "FARM_HISTORY_INDEX_KEY",
       "URL",
       "CustomEvent",
+      ...HISTORY_KEY_HELPER_NAMES,
       `return ({${runtime}});`,
     );
     const createHistoryState = (path: string, pageState: unknown, currentState?: unknown) => ({
@@ -621,6 +637,7 @@ describe("generateUniversalRouterStateProperties", () => {
       "__farmHistoryIndex",
       URL,
       Event,
+      ...readHistoryKeyHelpers(),
     );
 
     router.initializeHistory();
@@ -649,7 +666,7 @@ describe("generateUniversalRouterStateProperties", () => {
 
   it("restores registered scroll elements with the current query string", () => {
     expect(runtime).toContain(
-      "this.restoreScrollElement(window.location.pathname + window.location.search, key, element)",
+      "historyScrollKey(this.currentHistoryState, window.location.pathname + window.location.search)",
     );
     expect(runtime).not.toContain(
       "this.restoreScrollElement(window.location.pathname, key, element)",

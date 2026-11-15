@@ -2644,6 +2644,7 @@ export function generateUniversalRouterStateRuntime(streamNavigations = false): 
   return `
 const FARM_PAGE_STATE_KEY = "__farmPageState";
 const FARM_HISTORY_INDEX_KEY = "__farmHistoryIndex";
+const FARM_HISTORY_KEY = "__farmHistoryKey";
 const IDLE_NAVIGATION_STATE = {
   state: "idle",
   pending: false,
@@ -2663,8 +2664,8 @@ function createNavigationLocation(url) {
   };
 }
 
-function scrollElementStorageKey(pathname, key) {
-  return "farm-scroll-" + pathname + ":" + key;
+function scrollElementStorageKey(scrollKey, key) {
+  return "farm-scroll-" + scrollKey + ":" + key;
 }
 
 function createHistoryState(path, pageState, currentState) {
@@ -2721,6 +2722,23 @@ function readHistoryIndex(state) {
   if (!state || typeof state !== "object") return null;
   const value = state[FARM_HISTORY_INDEX_KEY];
   return Number.isSafeInteger(value) ? value : null;
+}
+
+function readHistoryKey(state) {
+  if (!state || typeof state !== "object") return null;
+  const value = state[FARM_HISTORY_KEY];
+  return typeof value === "string" && value.length > 0 && value.length <= 64 ? value : null;
+}
+
+// The time keeps keys unique across the reloads and documents that share a tab's sessionStorage.
+function createHistoryKey() {
+  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+}
+
+// Scroll positions are saved per history entry, so the same URL twice in history keeps two
+// positions. An entry Farm did not write has no key and falls back to its path.
+function historyScrollKey(state, path) {
+  return readHistoryKey(state) || path;
 }
 
 /*farm-router-end*/
@@ -3079,7 +3097,8 @@ ${
 
   initializeHistory: function() {
     const existingIndex = readHistoryIndex(window.history.state);
-    if (existingIndex != null) {
+    const existingKey = readHistoryKey(window.history.state);
+    if (existingIndex != null && existingKey != null) {
       this.currentHistoryIndex = existingIndex;
       this.currentHistoryState = window.history.state;
       return;
@@ -3089,14 +3108,15 @@ ${
         ...(window.history.state && typeof window.history.state === "object"
           ? window.history.state
           : {}),
-        [FARM_HISTORY_INDEX_KEY]: 0,
+        [FARM_HISTORY_INDEX_KEY]: existingIndex != null ? existingIndex : 0,
+        [FARM_HISTORY_KEY]: existingKey || createHistoryKey(),
       };
       window.history.replaceState(initialState, "", window.location.href);
-      this.currentHistoryIndex = 0;
+      this.currentHistoryIndex = initialState[FARM_HISTORY_INDEX_KEY];
       this.currentHistoryState = initialState;
     } catch {
-      this.currentHistoryIndex = null;
-      this.currentHistoryState = null;
+      this.currentHistoryIndex = existingIndex;
+      this.currentHistoryState = existingIndex != null ? window.history.state : null;
     }
   },
 
@@ -3397,6 +3417,9 @@ ${
         ? this.currentHistoryIndex
         : this.currentHistoryIndex + 1;
     if (nextIndex != null) nextState[FARM_HISTORY_INDEX_KEY] = nextIndex;
+    // A push is a new entry; createHistoryState copied the current entry's key into it.
+    nextState[FARM_HISTORY_KEY] =
+      (action === "replace" && readHistoryKey(nextState)) || createHistoryKey();
     if (action === "replace") window.history.replaceState(nextState, "", url);
     else window.history.pushState(nextState, "", url);
     this.currentHistoryIndex = nextIndex;
@@ -3412,43 +3435,54 @@ ${
 
   registerScrollElement: function(key, element) {
     this.scrollElements.set(key, element);
-    this.restoreScrollElement(window.location.pathname + window.location.search, key, element);
+    this.restoreScrollElement(
+      historyScrollKey(this.currentHistoryState, window.location.pathname + window.location.search),
+      key,
+      element,
+    );
     return () => {
       if (this.scrollElements.get(key) === element) this.scrollElements.delete(key);
     };
   },
 
-  saveScrollPosition: function(pathname) {
+  // Without a key, saves the entry on screen (the unload handler, which may run on a stand-in).
+  saveScrollPosition: function(scrollKey) {
+    if (scrollKey === undefined) {
+      scrollKey = historyScrollKey(
+        this.currentHistoryState,
+        window.location.pathname + window.location.search,
+      );
+    }
     try {
       sessionStorage.setItem(
-        "farm-scroll-" + pathname,
+        "farm-scroll-" + scrollKey,
         JSON.stringify({ x: window.scrollX, y: window.scrollY }),
       );
       for (const [key, element] of this.scrollElements) {
         sessionStorage.setItem(
-          scrollElementStorageKey(pathname, key),
+          scrollElementStorageKey(scrollKey, key),
           JSON.stringify({ x: element.scrollLeft, y: element.scrollTop }),
         );
       }
     } catch {}
   },
 
-  restoreScrollPosition: function(pathname) {
+  restoreScrollPosition: function(scrollKey) {
     try {
-      const saved = sessionStorage.getItem("farm-scroll-" + pathname);
+      const saved = sessionStorage.getItem("farm-scroll-" + scrollKey);
       if (saved) {
         const position = JSON.parse(saved);
         setTimeout(() => window.scrollTo(position.x, position.y), 0);
       }
       for (const [key, element] of this.scrollElements) {
-        this.restoreScrollElement(pathname, key, element);
+        this.restoreScrollElement(scrollKey, key, element);
       }
     } catch {}
   },
 
-  restoreScrollElement: function(pathname, key, element) {
+  restoreScrollElement: function(scrollKey, key, element) {
     try {
-      const saved = sessionStorage.getItem(scrollElementStorageKey(pathname, key));
+      const saved = sessionStorage.getItem(scrollElementStorageKey(scrollKey, key));
       if (!saved) return;
       const position = JSON.parse(saved);
       setTimeout(() => {
@@ -4011,13 +4045,14 @@ ${generateUniversalRouterStateProperties()}
       this.cancelActiveNavigation();
       return;
     }
+    // The entry still on screen: on Back/Forward the URL and history.state already name the destination.
+    const fromScrollKey = historyScrollKey(this.currentHistoryState, from);
     if (action === "pop") {
       this.currentHistoryIndex = readHistoryIndex(options.popState);
       this.currentHistoryState = options.popState;
     }
 
-    // Save under the page still on screen: on Back/Forward the URL already names the destination.
-    this.saveScrollPosition(from);
+    this.saveScrollPosition(fromScrollKey);
     const navigation = this.startNavigation(from, url, action);
     let clientNavigation;
     try {
@@ -4048,7 +4083,7 @@ ${generateUniversalRouterStateProperties()}
           if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
           else window.scrollTo(0, 0);
         } else {
-          this.restoreScrollPosition(to);
+          this.restoreScrollPosition(historyScrollKey(this.currentHistoryState, to));
         }
       });
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
@@ -4191,7 +4226,7 @@ window.addEventListener("beforeunload", function(event) {
     event.preventDefault();
     event.returnValue = "";
   }
-  spaRouter.saveScrollPosition(window.location.pathname + window.location.search);
+  spaRouter.saveScrollPosition();
 });
 
 // Handle popstate (back/forward)
@@ -5302,6 +5337,8 @@ ${
       this.cancelActiveNavigation();
       return;
     }
+    // The entry still on screen: on Back/Forward the URL and history.state already name the destination.
+    const fromScrollKey = historyScrollKey(this.currentHistoryState, from);
     if (action === "pop") {
       this.currentHistoryIndex = readHistoryIndex(options.popState);
       this.currentHistoryState = options.popState;
@@ -5310,8 +5347,7 @@ ${
     // A route transition invalidates any trigger waiting on the previous DOM boundary.
     cancelPendingPageHydration();
     this.stopNavigationStream();
-    // Save under the page still on screen: on Back/Forward the URL already names the destination.
-    this.saveScrollPosition(from);
+    this.saveScrollPosition(fromScrollKey);
     const navigation = this.startNavigation(from, url, action);
     // A refresh keeps the islands still on the page (islands mode).
     navigation.refresh = options.refresh === true;
@@ -5480,7 +5516,7 @@ ${
         if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
       } else {
-        this.restoreScrollPosition(to);
+        this.restoreScrollPosition(historyScrollKey(this.currentHistoryState, to));
       }
       await farmClientRuntime.resolveNavigation(clientNavigation);
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
@@ -5735,7 +5771,7 @@ window.addEventListener("beforeunload", function(event) {
     event.preventDefault();
     event.returnValue = "";
   }
-  spaRouter.saveScrollPosition(window.location.pathname + window.location.search);
+  spaRouter.saveScrollPosition();
 });
 
 // Handle popstate (back/forward)

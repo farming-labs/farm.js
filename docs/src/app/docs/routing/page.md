@@ -472,8 +472,9 @@ Page state is stored in `history.state`, so back/forward navigation restores the
 ## Scroll restoration
 
 Farm restores window scroll during SPA navigation. Register nested scroll areas when a layout owns its own scroll container.
-Locations with different query strings keep independent positions, so browser history restores the
-correct filtered, searched, or paginated view.
+Positions are saved per history entry, like the browser does: Back and Forward return to where you
+left each visit, even when the same URL is in history twice, and locations with different query
+strings keep independent positions. A link with `scroll={false}` keeps the current scroll.
 
 ```tsx
 "use client";

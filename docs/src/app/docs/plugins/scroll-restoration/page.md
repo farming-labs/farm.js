@@ -60,5 +60,3 @@ That is the whole setup.
   `useScrollRestoration` hook.
 - It does not change pushes. To keep the current scroll on a link click, use
   `<Link scroll={false}>`.
-- Core's own restore is still keyed by URL. When the same URL is in history twice, core can land
-  on the other entry's position first, and the plugin moves to the right one two frames later.
