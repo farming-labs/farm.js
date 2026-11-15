@@ -256,6 +256,18 @@ describe("route rendering config", () => {
       ]),
     });
 
+    // Characters outside the BMP are two UTF-16 units: masking must stay aligned past them.
+    expect(
+      analyzeStaticRouteCandidate(
+        {},
+        `import { cookies } from "@farm.js/core";
+         export default function Launch() {
+           const label = "🚀🚀🚀🚀"; cookies(); // 🌾
+           return \`${"${label}"} 🌱\` + headers();
+         }`,
+      ),
+    ).toMatchObject({ candidate: false, blockers: ["the route reads request cookies"] });
+
     expect(
       analyzeStaticRouteCandidate(
         {},
