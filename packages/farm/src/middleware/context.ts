@@ -12,6 +12,7 @@ import {
   serializeMiddlewareCookie as serializeCookie,
   serializeMiddlewareCookieDeletion,
 } from "./cookie-header";
+import { setFarmMiddlewareClientAddress } from "./client-address";
 import { toMiddlewareRoutePathname } from "./matcher";
 
 /**
@@ -76,6 +77,16 @@ export function createContext(
   toRoutePathname?: (pathname: string) => string,
 ): MiddlewareContext {
   const url = resolveFarmRequestURL(req, { trustProxy: server?.trustProxy });
+  if (server?.trustProxy) {
+    // The trusted proxy appends the address it saw, so that hop is the last one, as production
+    // resolves it; anything before it was sent by the client.
+    const forwardedFor = req.headers["x-forwarded-for"];
+    const lastHop = (Array.isArray(forwardedFor) ? forwardedFor.join(",") : forwardedFor)
+      ?.split(",")
+      .at(-1)
+      ?.trim();
+    if (lastHop) setFarmMiddlewareClientAddress(req, lastHop);
+  }
   const headers = new Map<string, string>();
   const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
   const locals = parent?.locals ? new Map(parent.locals) : new Map<string, any>();
