@@ -302,10 +302,11 @@ describe("production integration middleware dispatch", () => {
       runtime.withFarmIntegrationSetCookies(undefined, setCookies),
     );
 
+    // The page's own cookies come last, so a page that signs out wins over the refresh.
     expect(pageResponse.headers.getSetCookie()).toEqual([
-      "theme=dark; Path=/",
       "sb-access-token=fresh; Path=/; HttpOnly",
       "sb-refresh-token=rotated; Path=/; HttpOnly",
+      "theme=dark; Path=/",
     ]);
   });
 
