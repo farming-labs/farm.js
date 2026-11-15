@@ -28,6 +28,10 @@ export interface AnalyzerOptions {
   limits?: AnalyzerLimits;
   /** Whether an exceeded limit fails the build or prints a warning. */
   onLimit?: AnalyzerLimitAction;
+  /** Check internal links in emitted pages against the route manifest. Defaults to true. */
+  links?: boolean;
+  /** Fail the build when the link check reports a dead link. Defaults to false. */
+  strict?: boolean;
 }
 
 export interface ResolvedAnalyzerLimits {
@@ -44,6 +48,8 @@ export interface ResolvedAnalyzerOptions {
   metric: AnalyzerMetric;
   limits: ResolvedAnalyzerLimits;
   onLimit: AnalyzerLimitAction;
+  links: boolean;
+  strict: boolean;
 }
 
 const DEFAULT_OUTPUT = ".farm/analyze.html";
@@ -69,6 +75,12 @@ export function resolveAnalyzerOptions(options: AnalyzerOptions = {}): ResolvedA
     throw new TypeError('Analyzer onLimit must be "error" or "warn"');
   }
 
+  const links = options.links ?? true;
+  const strict = options.strict ?? false;
+  if (strict && !links) {
+    throw new TypeError("Analyzer strict needs the link check");
+  }
+
   return {
     output,
     json: resolveJsonOutput(options.json ?? false, output),
@@ -76,6 +88,8 @@ export function resolveAnalyzerOptions(options: AnalyzerOptions = {}): ResolvedA
     metric,
     limits: resolveLimits(options.limits ?? {}),
     onLimit,
+    links,
+    strict,
   };
 }
 
