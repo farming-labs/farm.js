@@ -18,6 +18,7 @@ import type {
   RouteManager,
 } from "../routing/route-manager";
 import { logger, toViteModuleId } from "../utils";
+import { createFarmDevClientManifest, type FarmDevClientManifest } from "./dev-client-manifest";
 import { collectDevStylesheetUrls, resolveDevGlobalStylesheetHref } from "./dev-styles";
 import {
   composeFarmFullDocument,
@@ -880,6 +881,39 @@ export class ServerRenderer {
   private collectDevStyleLinks(): string[] {
     return this.collectDevStyleHrefs().map(
       (href) => `<link rel="stylesheet" href="${escapeHtmlAttribute(href)}">`,
+    );
+  }
+
+  /**
+   * The client manifest a development document inlines: the entries its page reads before the
+   * first navigation. Inlining every route made each document grow with the app (about 650 KB at
+   * 1,000 routes); the client imports the whole manifest only when a navigation needs it.
+   */
+  private createDevBootClientManifest(
+    req: FarmRequest,
+    options: {
+      routeManifest?: ReturnType<RouteManager["generateClientManifest"]>;
+      clientRoutePattern?: string;
+    },
+  ): FarmDevClientManifest {
+    const layouts: Array<{ pattern?: unknown }> = (req as any).__FARM_LAYOUTS__ || [];
+    return createFarmDevClientManifest(
+      options.routeManifest ?? this.routeManager.generateClientManifest(this.config.root),
+      {
+        sharedAssets: [
+          ...this.devGlobalStylesheetAssets(),
+          ...this.collectDevStyleHrefs().map((href) => ({
+            tag: "link",
+            attrs: { rel: "stylesheet", href },
+          })),
+        ],
+        boot: {
+          routePattern: options.clientRoutePattern,
+          layoutPatterns: layouts.flatMap((layout) =>
+            typeof layout.pattern === "string" ? [layout.pattern] : [],
+          ),
+        },
+      },
     );
   }
 
@@ -2327,6 +2361,7 @@ export class ServerRenderer {
               {
                 responseHeaders: pprHeaders,
                 routeManifest,
+                clientRoutePattern: route.pattern,
                 captureStaticShell: Boolean(pprShellOptions),
                 observabilityRoute: pathname,
                 onSuspenseHoleDetected: pprShellOptions
@@ -3339,6 +3374,8 @@ export class ServerRenderer {
     options: {
       responseHeaders?: Record<string, string> | undefined;
       routeManifest?: ReturnType<RouteManager["generateClientManifest"]>;
+      /** The rendered route, whose entry the document inlines for the client to boot with. */
+      clientRoutePattern?: string;
       onComplete?: (html: string) => void | Promise<void>;
       captureStaticShell?: boolean;
       observabilityRoute?: string;
@@ -3354,55 +3391,7 @@ export class ServerRenderer {
     }
 
     try {
-      const manifest =
-        options.routeManifest ?? this.routeManager.generateClientManifest(this.config.root);
-      const clientManifest = {
-        clientEntry: "/@farm/client.js",
-        routes: {} as Record<string, any>,
-        layouts: {} as Record<string, any>,
-        slots: [] as Array<Record<string, any>>,
-        sharedAssets: [
-          ...this.devGlobalStylesheetAssets(),
-          ...this.collectDevStyleHrefs().map((href) => ({
-            tag: "link",
-            attrs: { rel: "stylesheet", href },
-          })),
-        ],
-      };
-
-      for (const routeEntry of manifest.routes) {
-        clientManifest.routes[routeEntry.pattern] = {
-          modulePath: routeEntry.modulePath,
-          pattern: routeEntry.pattern,
-          segments: routeEntry.segments,
-          search: routeEntry.search,
-          isClientComponent: routeEntry.isClientComponent,
-          shouldHydrate: routeEntry.shouldHydrate,
-          islandStrategy: routeEntry.islandStrategy,
-          renderPlan: routeEntry.renderPlan,
-          preloads: [routeEntry.modulePath],
-          assets: [],
-        };
-      }
-      for (const layoutEntry of manifest.layouts) {
-        clientManifest.layouts[layoutEntry.pattern] = {
-          modulePath: layoutEntry.modulePath,
-          pattern: layoutEntry.pattern,
-          shouldHydrate: layoutEntry.shouldHydrate,
-          islandStrategy: layoutEntry.islandStrategy,
-          // Islands mode: rebuilt from its server tree, so its module is never preloaded.
-          ...(layoutEntry.serverTree ? { serverTree: true } : {}),
-          preloads: layoutEntry.serverTree ? [] : [layoutEntry.modulePath],
-          assets: [],
-        };
-      }
-      for (const slotEntry of manifest.slots ?? []) {
-        clientManifest.slots.push({
-          ...slotEntry,
-          preloads: [slotEntry.modulePath],
-          assets: [],
-        });
-      }
+      const clientManifest = this.createDevBootClientManifest(req, options);
 
       const routeSlots = ((req as any).__FARM_ROUTE_SLOTS__ || []).map(
         (slot: Record<string, any>) => ({
@@ -3635,6 +3624,8 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     options: {
       responseHeaders?: Record<string, string> | undefined;
       routeManifest?: ReturnType<RouteManager["generateClientManifest"]>;
+      /** The rendered route, whose entry the document inlines for the client to boot with. */
+      clientRoutePattern?: string;
       onComplete?: (html: string) => void | Promise<void>;
       captureStaticShell?: boolean;
       observabilityRoute?: string;
@@ -3712,66 +3703,11 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         ? toViteModuleId(pagePath, this.config.root)
         : "/src/app/page.tsx";
 
-      // Generate manifest for client-side SPA navigation (TanStack Start pattern)
-      // This manifest is inlined in HTML - no separate file or API endpoint
-      const manifest =
-        options.routeManifest ?? this.routeManager.generateClientManifest(this.config.root);
+      // The route entries this page boots with; the client imports the rest from
+      // the manifest module when a navigation first needs another route.
+      const clientManifest = this.createDevBootClientManifest(req, options);
 
-      // Convert to object format for client
-      const clientManifest = {
-        clientEntry: "/@farm/client.js",
-        routes: {} as Record<string, any>,
-        layouts: {} as Record<string, any>,
-        slots: [] as Array<Record<string, any>>,
-        sharedAssets: [
-          ...this.devGlobalStylesheetAssets(),
-          ...this.collectDevStyleHrefs().map((href) => ({
-            tag: "link",
-            attrs: { rel: "stylesheet", href },
-          })),
-        ],
-      };
-
-      // Convert routes array to object keyed by pattern
-      for (const routeEntry of manifest.routes) {
-        clientManifest.routes[routeEntry.pattern] = {
-          modulePath: routeEntry.modulePath,
-          pattern: routeEntry.pattern,
-          segments: routeEntry.segments,
-          search: routeEntry.search,
-          isClientComponent: routeEntry.isClientComponent,
-          shouldHydrate: routeEntry.shouldHydrate,
-          islandStrategy: routeEntry.islandStrategy,
-          renderPlan: routeEntry.renderPlan,
-          preloads: [routeEntry.modulePath],
-          assets: [],
-        };
-      }
-
-      // Convert layouts array to object
-      for (const layoutEntry of manifest.layouts) {
-        clientManifest.layouts[layoutEntry.pattern] = {
-          modulePath: layoutEntry.modulePath,
-          pattern: layoutEntry.pattern,
-          shouldHydrate: layoutEntry.shouldHydrate,
-          islandStrategy: layoutEntry.islandStrategy,
-          // Islands mode: rebuilt from its server tree, so its module is never preloaded.
-          ...(layoutEntry.serverTree ? { serverTree: true } : {}),
-          preloads: layoutEntry.serverTree ? [] : [layoutEntry.modulePath],
-          assets: [],
-        };
-      }
-
-      for (const slotEntry of manifest.slots ?? []) {
-        clientManifest.slots.push({
-          ...slotEntry,
-          preloads: [slotEntry.modulePath],
-          assets: [],
-        });
-      }
-
-      // Inject page props, component info, and MANIFEST for client-side SPA
-      // __FARM_MANIFEST__ contains the full route manifest (TanStack Start pattern)
+      // Inject page props, component info, and the boot manifest for client-side SPA
       const routeSlotPayload = ((req as any).__FARM_ROUTE_SLOTS__ || []).map(
         (slot: Record<string, any>) => ({
           ...slot,

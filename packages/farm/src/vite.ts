@@ -187,7 +187,7 @@ import * as path from "path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
-import { getRouteGroupScope, stripRouteGroups } from "./routing/route-groups";
+import { createFarmDevClientManifest } from "./server/dev-client-manifest";
 import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
 import { FARM_VERSION } from "./version";
 import { createDeferredDataResponse } from "./deferred";
@@ -5295,8 +5295,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         return generateServerCode();
       }
 
-      // Virtual manifest module - TanStack Start pattern
-      // Manifest is generated at build time and inlined
+      // The development client route manifest (FARM_DEV_CLIENT_MANIFEST_MODULE)
       if (id === "/@farm/manifest") {
         const routeManager = farmApp?.getRouteManager();
         if (!routeManager) {
@@ -5311,71 +5310,30 @@ export const getManifest = () => ({
 `;
         }
 
-        const manifest = routeManager.generateClientManifest(server.config.root);
         const globalStylesheetHref = resolveDevGlobalStylesheetHref(
           server.config.root,
           farmApp?.getConfig().srcDir,
         );
+        const fullManifest = createFarmDevClientManifest(
+          routeManager.generateClientManifest(server.config.root),
+          {
+            sharedAssets: globalStylesheetHref
+              ? [{ tag: "link", attrs: { rel: "stylesheet", href: globalStylesheetHref } }]
+              : [],
+          },
+        );
 
-        // Convert to full manifest format
-        const fullManifest = {
-          clientEntry: "/@farm/client.js",
-          routes: {} as Record<string, any>,
-          layouts: {} as Record<string, any>,
-          slots: [] as Array<Record<string, any>>,
-          sharedAssets: globalStylesheetHref
-            ? [{ tag: "link", attrs: { rel: "stylesheet", href: globalStylesheetHref } }]
-            : [],
+        // The whole client manifest, which a document's client imports the first time a
+        // navigation needs a route the document did not inline (see dev-client-manifest.ts).
+        // Parsed from a string: V8 parses large JSON faster than an object literal. No source
+        // map: one would repeat the manifest several times over.
+        return {
+          code: `const manifest = JSON.parse(${JSON.stringify(JSON.stringify(fullManifest))});
+export const getManifest = () => manifest;
+export { manifest };
+`,
+          map: { mappings: "" },
         };
-
-        // Convert routes array to object keyed by pattern
-        for (const route of manifest.routes) {
-          fullManifest.routes[route.pattern] = {
-            modulePath: route.modulePath,
-            pattern: route.pattern,
-            ...(route.directory ? { directory: route.directory } : {}),
-            segments: route.segments,
-            search: route.search,
-            isClientComponent: route.isClientComponent,
-            shouldHydrate: route.shouldHydrate,
-            islandStrategy: route.islandStrategy,
-            renderPlan: route.renderPlan,
-            preloads: [route.modulePath], // In dev, preload is just the module
-            assets: [],
-          };
-        }
-
-        // Convert layouts array to object keyed by pattern
-        for (const layout of manifest.layouts) {
-          const groupScope = getRouteGroupScope(layout.pattern);
-          fullManifest.layouts[layout.pattern] = {
-            modulePath: layout.modulePath,
-            pattern: layout.pattern,
-            ...(groupScope ? { urlPattern: stripRouteGroups(layout.pattern), groupScope } : {}),
-            shouldHydrate: layout.shouldHydrate,
-            islandStrategy: layout.islandStrategy,
-            // Islands mode: rebuilt from its server tree, so its module is never preloaded.
-            ...(layout.serverTree ? { serverTree: true } : {}),
-            preloads: layout.serverTree ? [] : [layout.modulePath],
-            assets: [],
-          };
-        }
-
-        for (const slot of manifest.slots) {
-          fullManifest.slots.push({
-            ...slot,
-            preloads: [slot.modulePath],
-            assets: [],
-          });
-        }
-
-        return `
-// Auto-generated manifest for SPA navigation (TanStack Start pattern)
-// This manifest is inlined in the server bundle - no file on disk
-// Client receives this via window.__FARM_MANIFEST__ in HTML
-export const getManifest = () => (${JSON.stringify(fullManifest, null, 2)});
-export const manifest = getManifest();
-`;
       }
     },
 
@@ -6977,6 +6935,35 @@ function wrapFarmClientRouteGraph(element) {
 // Fallback to empty manifest if not available yet
 const getManifest = () => window.__FARM_MANIFEST__ || { routes: {}, layouts: {}, slots: [], clientEntry: '', sharedAssets: [] };
 
+// A document inlines only the entries its page boots with and names the module that has the
+// whole manifest (manifest.module), as production keeps its route table out of the HTML. Code
+// that matches another route awaits this first; it imports the module once. A failed import
+// keeps the inlined entries, so the router treats other routes as it treats an unknown one.
+let farmManifestLoad = null;
+function ensureFarmManifest() {
+  const inlined = window.__FARM_MANIFEST__;
+  if (!inlined || typeof inlined.module !== 'string') return Promise.resolve();
+  if (!farmManifestLoad) {
+    farmManifestLoad = import(/* @vite-ignore */ new URL(inlined.module, location.origin).href)
+      .then((loaded) => {
+        const manifest = loaded.getManifest();
+        if (window.__FARM_MANIFEST__ !== inlined) return;
+        const { module: _module, ...boot } = inlined;
+        window.__FARM_MANIFEST__ = {
+          ...boot,
+          routes: manifest.routes,
+          layouts: manifest.layouts,
+          slots: manifest.slots,
+        };
+      })
+      .catch((error) => {
+        farmManifestLoad = null;
+        console.warn('[Farm.js] Could not load the route manifest: ' + inlined.module, error);
+      });
+  }
+  return farmManifestLoad;
+}
+
 // ====== CLIENT-SIDE ROUTE MATCHING ======
 // Matches URL to route using manifest (no server request!)
 
@@ -8193,6 +8180,7 @@ async function fetchFarmNavigationDocument(path, context) {
   // A prefetch reads the page whole for the router's cache, and leaves a page that streams alone.
   if (!context.prefetch) farmNavigationStreamGeneration++;
   const url = new URL(path, window.location.href);
+  await ensureFarmManifest();
   const match = farmDocumentNavigationRoute(url.pathname);
   const container = document.getElementById('root');
   if (!match || !container) return null;
@@ -8349,6 +8337,9 @@ async function renderPage(pageData, info) {
     return;
   }
 
+  // Page data carries the route's render plan, which the manifest entry only backs up. Islands
+  // mode also reads which layouts render as server trees (loadLayoutComponents).
+  if (${islandValues ? "true" : "!pageData.renderPlan"}) await ensureFarmManifest();
   const manifestRoute = findRoute(window.location.pathname)?.route;
   const renderPlan = pageData.renderPlan || manifestRoute?.renderPlan;
   const hydrationMode = renderPlan?.hydration;
