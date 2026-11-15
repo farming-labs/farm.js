@@ -8,6 +8,7 @@ const DOCS_HINT =
 describe("@farming-labs/docs as an optional peer", () => {
   afterEach(() => {
     vi.doUnmock("@farming-labs/docs");
+    vi.doUnmock("@farming-labs/docs/server");
     vi.resetModules();
   });
 
@@ -32,9 +33,37 @@ describe("@farming-labs/docs as an optional peer", () => {
     vi.doUnmock("@farming-labs/docs");
     await expect(loadFarmDocsEngine()).resolves.toMatchObject({
       renderDocsLlmsTxt: expect.any(Function),
-      resolveApiReferenceOpenApiDiscovery: expect.any(Function),
     });
     expect(docsEngine().renderDocsLlmsTxt).toBeTypeOf("function");
+  });
+
+  it("loads @farming-labs/docs/server only when API reference discovery needs it", async () => {
+    vi.resetModules();
+    let serverLoads = 0;
+    vi.doMock("@farming-labs/docs/server", () => {
+      serverLoads += 1;
+      throw Object.assign(
+        new Error(
+          "Cannot find package '@farming-labs/docs' imported from /app/node_modules/@farm.js/core/dist/x.mjs",
+        ),
+        { code: "ERR_MODULE_NOT_FOUND" },
+      );
+    });
+    const { loadFarmDocsEngine, loadFarmDocsOpenApiDiscovery } = await import("../docs/engine");
+
+    // Startup loads the engine without the server module, which brings the MCP and OpenAPI tooling.
+    await loadFarmDocsEngine();
+    expect(serverLoads).toBe(0);
+
+    await expect(loadFarmDocsOpenApiDiscovery()).rejects.toThrow(
+      `docs is enabled, but @farming-labs/docs is not installed. ${DOCS_HINT}`,
+    );
+    expect(serverLoads).toBe(1);
+
+    vi.doUnmock("@farming-labs/docs/server");
+    const discover = await loadFarmDocsOpenApiDiscovery();
+    expect(discover).toBeTypeOf("function");
+    expect(await loadFarmDocsOpenApiDiscovery()).toBe(discover);
   });
 
   it("keeps the docs modules free of a static @farming-labs/docs value import", async () => {

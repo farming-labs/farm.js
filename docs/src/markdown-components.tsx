@@ -14,7 +14,7 @@ import { AgentWaitlist } from "./components/agents/waitlist";
 import { BlogCodeCopy } from "./components/blog/code-copy-button";
 import { BlogFigure } from "./components/blog/figures";
 import { BlogVideo } from "./components/blog/video";
-import { getLaunchSectionId } from "./lib/blog";
+import { getSectionId } from "./lib/blog";
 
 // Farm loads this map only on the server for source-authored Markdown routes.
 // Load the blog's grammars once, with the same dark palette as the docs.
@@ -110,7 +110,7 @@ const textOf = (node: ReactNode): string =>
 // A section heading links to its own anchor, the target the contents use, so a reader can click or
 // copy it to share the section. The heading text is the link; no "#" is shown.
 function H2({ children, ...props }: ComponentPropsWithoutRef<"h2">) {
-  const id = getLaunchSectionId(textOf(children));
+  const id = getSectionId(textOf(children));
   return (
     <h2 {...props}>
       {id ? (

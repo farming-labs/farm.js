@@ -84,13 +84,23 @@ function claimServerQueryKey(owner: ServerQueryOwner, key: string): boolean {
 const RAW_SERVER_QUERY_SYMBOL = Symbol.for("farm.server-query");
 
 /**
+ * The browser query cache is one module-level store. On the server that store
+ * is shared by every request in the process, so a result cached for one
+ * visitor would be served to the next. Server reads bypass it and call the
+ * query directly; the query's own server cache honors its declared key.
+ */
+export function isFarmServerQueryBrowserRuntime(): boolean {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+/**
  * A query reaching the browser should be a transformed server reference. The
  * raw implementation carries the server query symbol; executing it here would
  * run the server handler in the browser (#408). During SSR the raw
  * implementation is expected and runs directly.
  */
 function assertNotRawServerQueryInBrowser(query: unknown): void {
-  if (typeof window === "undefined" || typeof document === "undefined") return;
+  if (!isFarmServerQueryBrowserRuntime()) return;
   if (!(query as Record<symbol, unknown> | null)?.[RAW_SERVER_QUERY_SYMBOL]) return;
   throw new Error(
     [
@@ -188,6 +198,7 @@ export async function fetchServerQuery<TInput, TData>(
   input: TInput,
   options: ServerQueryFetchOptions = {},
 ): Promise<TData> {
+  if (!isFarmServerQueryBrowserRuntime()) return query(input);
   const cache = getFarmClientDataCache();
   const provisionalKey = createServerQueryCallKey(query, input);
   const entry = cache.get<TData>(provisionalKey);

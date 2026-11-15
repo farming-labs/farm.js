@@ -7,7 +7,7 @@ import type {
   TunnelResponseMessage,
 } from "./protocol.js";
 import { isRelayToAgentMessage } from "./protocol.js";
-import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
+import { getHopByHopHeaderNames, getRecordHeader, PREVIEW_REQUEST_HEADER } from "./headers.js";
 import { closeWebSocket } from "./websocket.js";
 
 export interface TypeScriptPreviewAgentOptions {
@@ -212,6 +212,9 @@ async function forwardRequest(
     for (const [name, value] of Object.entries(request.headers)) {
       if (!requestHopByHopHeaders.has(name.toLowerCase())) headers.set(name, value);
     }
+    // The relay sets this too; setting it here keeps the dev server's preview checks on with an
+    // older relay.
+    headers.set(PREVIEW_REQUEST_HEADER, "1");
     const method = request.method.toUpperCase();
     const result = await fetch(resolveTargetUrl(options.targetUrl, request.path), {
       method,

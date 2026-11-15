@@ -475,7 +475,7 @@ function countWords(body: string): number {
   return normalized ? normalized.split(/\s+/).length : 0;
 }
 
-function normalizePath(value: string): string {
+export function normalizePath(value: string): string {
   return value.replace(/\\/g, "/");
 }
 

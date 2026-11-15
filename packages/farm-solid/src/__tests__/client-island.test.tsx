@@ -1,7 +1,7 @@
 import { createSignal, createUniqueId, sharedConfig } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as clientRuntime from "../client";
-import { UNIQUE_ID_ISLAND_HTML } from "./unique-id-island.fixture";
+import { SERVER_LAYOUT_ISLAND_HTML, UNIQUE_ID_ISLAND_HTML } from "./unique-id-island.fixture";
 
 interface SolidHydrationBootstrap {
   events: Array<[Element, Event]> | null;
@@ -73,6 +73,21 @@ describe("Solid island hydration", () => {
 
   it("hydrates an island whose root creates an id before its first element", () => {
     const container = mountServerHtml(UNIQUE_ID_ISLAND_HTML);
+    const serverButton = container.querySelector("button")!;
+
+    const root = clientRuntime.hydrateRoot(container, clientRuntime.createElement(UniqueIdIsland));
+
+    const button = container.querySelector("button")!;
+    expect(button).toBe(serverButton);
+    button.click();
+    expect(button.textContent).toBe("count: 1");
+
+    root.unmount();
+  });
+
+  it("hydrates a page island inside a server-only layout", () => {
+    const layout = mountServerHtml(SERVER_LAYOUT_ISLAND_HTML);
+    const container = layout.querySelector<HTMLElement>("#__farm_page__")!;
     const serverButton = container.querySelector("button")!;
 
     const root = clientRuntime.hydrateRoot(container, clientRuntime.createElement(UniqueIdIsland));

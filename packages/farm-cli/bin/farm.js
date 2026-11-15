@@ -27,7 +27,7 @@ const banner = `
 
 program
   .name("farm")
-  .description("Farm.js CLI - A framework for product-integrated apps")
+  .description("Farm.js CLI - the framework for the web and agents")
   .version(version);
 program.addHelpText("beforeAll", `${banner}\n`);
 
@@ -44,6 +44,28 @@ function parsePortOption(value) {
     throw new Error("--port must be an integer between 1 and 65535.");
   }
   return port;
+}
+
+// Expected platform failures (missing config or shell package) carry their own fix; skip the stack.
+function formatCommandError(error) {
+  return error?.name === "FarmDesktopError" || error?.name === "FarmMobileError"
+    ? error.message
+    : error;
+}
+
+function resolvePlatformOption(options) {
+  const chosen = ["web", "desktop", "mobile"].filter((platform) => options[platform]);
+  if (chosen.length > 1) {
+    throw new Error(
+      `Choose one platform: ${chosen.map((platform) => `--${platform}`).join(" or ")}.`,
+    );
+  }
+  if (options.profile !== undefined && !options.desktop && !options.mobile) {
+    throw new Error(
+      "--profile selects a desktop or mobile build profile; use it with --desktop or --mobile.",
+    );
+  }
+  return chosen[0] ?? "web";
 }
 
 function telemetryCommandPath(command) {
@@ -83,16 +105,61 @@ program
   .command("dev")
   .description("Start development server")
   .option("-p, --port <port>", "Override the port to run the server on")
+  .option("-H, --host [host]", "Listen on every interface, or on the given address")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("--cron", "Run configured cron routes in-process during development")
+  .option("--desktop", "Open the app in its desktop shell, guarded like the packaged app")
+  .option(
+    "--mobile",
+    "Open the app in its mobile shell on an emulator, device, or simulator (preview)",
+  )
+  .option("--os <os>", "With --mobile: android (default) or ios")
+  .option("--web", "Develop the web app (the default)")
+  .option(
+    "--profile <name>",
+    "Profile passed to a function-valued desktop or mobile block",
+    undefined,
+  )
   .action(async (options) => {
     try {
+      const platform = resolvePlatformOption(options);
+      if (options.os !== undefined && platform !== "mobile") {
+        throw new Error("--os needs --mobile.");
+      }
+      if (platform === "mobile") {
+        if (options.cron) throw new Error("--cron is not available with --mobile.");
+        const { devFarmMobile } = require("../dist/mobile.js");
+        await devFarmMobile({
+          root: options.root,
+          port: options.port === undefined ? undefined : parsePortOption(options.port),
+          host: options.host,
+          profile: options.profile,
+          os: options.os,
+        });
+        return;
+      }
+      if (platform === "desktop") {
+        if (options.cron) throw new Error("--cron is not available with --desktop.");
+        if (options.host !== undefined) {
+          throw new Error("--host is not available with --desktop; the desktop app is local only.");
+        }
+        const { devFarmDesktop } = require("../dist/desktop.js");
+        await devFarmDesktop({
+          root: options.root,
+          port: options.port === undefined ? undefined : parsePortOption(options.port),
+          profile: options.profile,
+        });
+        process.exit(0);
+      }
+      // The flag alone picks the platform; a stale FARM_PLATFORM never turns a web build desktop.
+      delete process.env.FARM_PLATFORM;
       const { startDevServer } = require("../dist/dev.js");
       const server = await startDevServer(
         {
           root: options.root,
         },
         options.port === undefined ? undefined : parsePortOption(options.port),
+        options.host,
       );
       if (options.cron) {
         const { startFarmCronScheduler } = require("../dist/index.js");
@@ -106,7 +173,7 @@ program
         server.httpServer?.once("close", () => scheduler.stop());
       }
     } catch (error) {
-      console.error("Failed to start development server:", error);
+      console.error("Failed to start development server:", formatCommandError(error));
       process.exit(1);
     }
   });
@@ -116,16 +183,129 @@ program
   .description("Build for production")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("-p, --preset <preset>", "Nitro preset (node-server, vercel, cloudflare, etc.)")
+  .option("--desktop", "Build a native desktop app with its own local server")
+  .option("--mobile", "Build the mobile client and generate the native project (preview)")
+  .option(
+    "--os <os>",
+    "With --mobile: android (default) or ios (also builds the simulator app when Xcode is installed)",
+  )
+  .option("--apk", "With --mobile, also build the debug APK with Gradle")
+  .option("--web", "Build for a web deployment (the default)")
+  .option(
+    "--profile <name>",
+    "Profile passed to a function-valued desktop or mobile block",
+    undefined,
+  )
   .action(async (options) => {
     try {
+      const platform = resolvePlatformOption(options);
+      if (options.apk && platform !== "mobile") throw new Error("--apk needs --mobile.");
+      if (options.os !== undefined && platform !== "mobile") {
+        throw new Error("--os needs --mobile.");
+      }
+      if (platform === "mobile") {
+        if (options.preset) {
+          throw new Error(
+            "--preset is not available with --mobile; the app loads pages from mobile.server.",
+          );
+        }
+        const { buildFarmMobile } = require("../dist/mobile.js");
+        await buildFarmMobile({
+          root: options.root,
+          profile: options.profile,
+          os: options.os,
+          apk: options.apk,
+        });
+        return;
+      }
+      if (platform === "desktop") {
+        if (options.preset) {
+          throw new Error("--preset is not available with --desktop; the desktop shell picks it.");
+        }
+        const { buildFarmDesktop } = require("../dist/desktop.js");
+        await buildFarmDesktop({ root: options.root, profile: options.profile });
+        return;
+      }
+      // The flag alone picks the platform; a stale FARM_PLATFORM never turns a web build desktop.
+      delete process.env.FARM_PLATFORM;
       const { buildFarm } = require("../dist/build.js");
       await buildFarm({
         root: options.root,
         preset: options.preset,
       });
     } catch (error) {
-      console.error("Failed to build:", error);
+      console.error("Failed to build:", formatCommandError(error));
       process.exit(1);
+    }
+  });
+
+const configCommand = program.command("config").description("Inspect resolved configuration");
+
+configCommand
+  .command("inspect")
+  .description("Print a resolved platform block, such as farm config inspect --desktop")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("--desktop", "Print the desktop block")
+  .option("--mobile", "Print the mobile block and its farm-routes.json (preview)")
+  .option("--os <os>", "Target OS: macos, windows, linux (--desktop) or android, ios (--mobile)")
+  .option("--profile <name>", "Profile passed to a function-valued block")
+  .option("--command <command>", "Resolve as for dev or build (default: build)")
+  .option(
+    "--report",
+    "With --mobile: run the native screen analyzer and write .farm/output/mobile/native-report.json",
+  )
+  .action(async (options) => {
+    try {
+      if (options.report && !options.mobile) {
+        throw new Error("--report needs --mobile.");
+      }
+      if (options.desktop && options.mobile) {
+        throw new Error("Choose one block: --desktop or --mobile.");
+      }
+      if (!options.desktop && !options.mobile) {
+        throw new Error("Choose a block to inspect: farm config inspect --desktop or --mobile.");
+      }
+      if (
+        options.command !== undefined &&
+        options.command !== "dev" &&
+        options.command !== "build"
+      ) {
+        throw new Error("--command must be dev or build.");
+      }
+      if (options.mobile && options.report) {
+        const { reportFarmMobileNative } = require("../dist/mobile.js");
+        const { table, warnings } = await reportFarmMobileNative({
+          root: options.root,
+          os: options.os,
+          profile: options.profile,
+          command: options.command,
+        });
+        console.log(table);
+        for (const warning of warnings) console.warn(`warning: ${warning}`);
+        return;
+      }
+      if (options.mobile) {
+        const { inspectFarmMobileConfig } = require("../dist/mobile.js");
+        const result = await inspectFarmMobileConfig({
+          root: options.root,
+          os: options.os,
+          profile: options.profile,
+          command: options.command,
+        });
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      const { inspectFarmDesktopConfig } = require("../dist/desktop.js");
+      const result = await inspectFarmDesktopConfig({
+        root: options.root,
+        os: options.os,
+        profile: options.profile,
+        command: options.command,
+      });
+      console.log(JSON.stringify(result, null, 2));
+    } catch (error) {
+      console.error("Failed to inspect config:", formatCommandError(error));
+      process.exitCode = 1;
     }
   });
 
@@ -389,6 +569,12 @@ program
     }
   });
 
+// The hosted gateway is the only one sent an API key unless the developer vouches for theirs.
+const trustGatewayOption = [
+  "--trust-gateway",
+  "Send your Farm.js Infrastructure API key to a --gateway you run",
+];
+
 program
   .command("preview")
   .description("Create a public URL for a running local Farm app")
@@ -403,6 +589,7 @@ program
     "Advanced: override the hosted Farm Preview gateway URL",
     process.env.FARM_PREVIEW_GATEWAY_URL,
   )
+  .option(...trustGatewayOption)
   .option(
     "--provider <provider>",
     "Advanced: preview provider to use (farm, local)",
@@ -428,6 +615,7 @@ program
         project: options.project,
         expires: options.expires,
         login: options.login,
+        trustGateway: options.trustGateway,
         dryRun: options.dryRun,
         // Commander stores --no-probe as `probe: false`.
         noProbe: options.probe === false,
@@ -450,10 +638,15 @@ program
   .description("Sign in to Farm Preview without starting a preview")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option(...gatewayOption)
+  .option(...trustGatewayOption)
   .action(async (options) => {
     try {
       const { loginToFarmPreview } = require("../dist/index.js");
-      await loginToFarmPreview({ root: options.root, gatewayUrl: options.gateway });
+      await loginToFarmPreview({
+        root: options.root,
+        gatewayUrl: options.gateway,
+        trustGateway: options.trustGateway,
+      });
     } catch (error) {
       console.error("Failed to sign in:", error instanceof Error ? error.message : error);
       process.exit(1);
@@ -480,11 +673,17 @@ program
   .description("Show which credential farm preview uses")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option(...gatewayOption)
+  .option(...trustGatewayOption)
   .action(async (options) => {
     try {
       const { whoamiFarmPreview } = require("../dist/index.js");
       // Exits 1 when farm preview would need a browser sign-in, for scripts.
-      if (!(await whoamiFarmPreview({ root: options.root, gatewayUrl: options.gateway }))) {
+      const signedIn = await whoamiFarmPreview({
+        root: options.root,
+        gatewayUrl: options.gateway,
+        trustGateway: options.trustGateway,
+      });
+      if (!signedIn) {
         process.exit(1);
       }
     } catch (error) {
@@ -525,7 +724,51 @@ program
 
 const cronCommand = program
   .command("cron")
-  .description("Inspect and manually run framework-native cron routes");
+  .description("Inspect, invoke, and synchronize framework-native cron routes");
+
+cronCommand
+  .command("sync")
+  .description("Plan or apply the deployed manifest's Farm.js Infra schedules")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("--manifest <path>", "Built cron manifest", ".farm/cron-manifest.json")
+  .requiredOption("--url <url>", "Deployed app's public HTTPS origin")
+  .option("--apply", "Replace the endpoint's Infra schedules")
+  .option("--allow-delete", "Allow an applied sync to clear all endpoint schedules")
+  .option("--json", "Print the versioned plan or result as JSON")
+  .addHelpText(
+    "after",
+    '\nWith cron: { provider: "farmjs" }, run after each deployment:\n  farm cron sync --url https://app.example.com          # plan, no network\n  farm cron sync --url https://app.example.com --apply  # replace the endpoint\'s jobs\nNeeds FARMJS_ENVIRONMENT; --apply also needs FARMJS_API_KEY with cron:jobs.\nOptional: FARMJS_PROJECT_ID, FARMJS_API_URL.',
+  )
+  .action(async (options) => {
+    try {
+      const { syncFarmCronJobs } = require("../dist/index.js");
+      const result = await syncFarmCronJobs(options);
+      console.log(
+        options.json
+          ? JSON.stringify(result, null, 2)
+          : [
+              `${result.applied ? "Applied" : "Plan"}: ${result.jobs.length} Infra cron job(s) for ${result.endpoint}`,
+              `Environment: ${result.environment}; project: ${result.projectId || "key scope"}; service: ${result.apiUrl}`,
+              ...result.jobs.map(
+                (job) => `  ${job.name}: ${job.schedule.join(", ")} -> ${job.path}`,
+              ),
+              ...(result.applied
+                ? []
+                : [
+                    result.jobs.length
+                      ? "Run again with --apply after deploying this artifact."
+                      : "This clears the endpoint's Infra schedules. Apply with --apply --allow-delete.",
+                  ]),
+            ].join("\n"),
+      );
+    } catch (error) {
+      const code = error?.name === "FarmCronSyncError" ? ` [${error.code}]` : "";
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to sync cron routes${code}: ${message}`);
+      if (error?.cause instanceof Error) console.error(`Cause: ${error.cause.message}`);
+      process.exitCode = 1;
+    }
+  });
 
 cronCommand
   .command("list")

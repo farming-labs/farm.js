@@ -338,17 +338,21 @@ describe("production preload response processing", () => {
 
   it("preserves nonce rewriting without buffering the rewritten stream", async () => {
     const r = runtime();
-    const original = r.response("<script>hello()</script><p>🌱</p>");
+    const original = r.response(
+      '<script nonce="abc123">hello()</script><p>🌱</p><script>x()</script>',
+    );
     const secured = applyFarmCspNonceToResponse(
       original,
       resolveFarmSecurityConfig({
         csp: { policy: "script-src 'self'", nonce: true },
       }),
+      "abc123",
     );
     const output = await r.applyFarmPreloadBudget(secured, "/");
     expect(output.body).toBe(secured.body);
-    const nonce = output.headers.get("content-security-policy")!.match(/'nonce-([^']+)'/)![1];
-    expect(await output.text()).toBe(`<script nonce="${nonce}">hello()</script><p>🌱</p>`);
+    expect(await output.text()).toBe(
+      '<script nonce="abc123">hello()</script><p>🌱</p><script>x()</script>',
+    );
   });
 
   it("forwards cancellation and late errors without eagerly consuming streams", async () => {

@@ -34,7 +34,7 @@ export interface HealthPaths {
 }
 
 export interface HealthOptions {
-  /** Checks evaluated on every readiness request. */
+  /** Checks evaluated for readiness. Concurrent requests share one run; see `cache`. */
   checks?: Record<string, HealthCheckDefinition>;
   /** Checks evaluated until required startup work succeeds, then latched for this runtime. */
   startupChecks?: Record<string, HealthCheckDefinition>;
@@ -42,6 +42,11 @@ export interface HealthOptions {
   paths?: HealthPaths;
   /** Default timeout for each check. Defaults to one second. */
   timeout?: HealthDuration;
+  /**
+   * How long a readiness result is reused for later requests. Concurrent requests always share one
+   * pending run. Defaults to one second; `false` reruns checks for every request after the run settles.
+   */
+  cache?: HealthDuration | false;
   /** Include safe check names, states, and timings in responses. Defaults to false. */
   details?: boolean | ((request: Request) => boolean);
 }
@@ -58,10 +63,12 @@ export interface ResolvedHealthOptions {
   startupChecks: ResolvedHealthCheck[];
   paths: Required<HealthPaths>;
   timeoutMs: number;
+  cacheMs: number;
   details: NonNullable<HealthOptions["details"]>;
 }
 
 const DEFAULT_TIMEOUT = 1_000;
+const DEFAULT_CACHE = 1_000;
 const MAX_TIMEOUT = 2_147_483_647;
 const UNSAFE_CHECK_NAMES = new Set(["__proto__", "prototype", "constructor"]);
 
@@ -79,6 +86,13 @@ export function resolveHealthOptions(options: HealthOptions = {}): ResolvedHealt
     options.timeout === undefined ? DEFAULT_TIMEOUT : options.timeout,
     "health timeout",
   );
+  const cacheMs =
+    options.cache === false
+      ? 0
+      : parseHealthDuration(
+          options.cache === undefined ? DEFAULT_CACHE : options.cache,
+          "health cache",
+        );
   const paths = resolvePaths(options.paths);
   const checks = resolveChecks(options.checks, timeoutMs, "checks");
   const startupChecks = resolveChecks(options.startupChecks, timeoutMs, "startupChecks");
@@ -104,6 +118,7 @@ export function resolveHealthOptions(options: HealthOptions = {}): ResolvedHealt
     startupChecks,
     paths,
     timeoutMs,
+    cacheMs,
     details: options.details ?? false,
   };
 }

@@ -38,7 +38,7 @@ export default defineConfig({
 });
 ```
 
-The key `agent` is a convention and can be renamed. During `farm dev`, Farm starts Eve on an available loopback port and exposes its `/eve` and `/.well-known/workflow` routes through the Farm origin.
+The key `agent` is a convention and can be renamed. During `farm dev`, Farm starts Eve on an available loopback port and exposes its `/eve` and `/.well-known/workflow` routes through the Farm origin. The development proxy refuses cross-site requests to those routes with `403`, so another page open in the browser cannot drive the local Eve process. Same-origin requests, requests without an `Origin` header, and top-level `GET` navigations still pass.
 
 This is the Farm-managed path: omit `origin` and pass runtime options such as `root`, `dev`, and
 `vercel` to the integration. Farm starts or composes the Eve service from that configuration.
@@ -111,7 +111,7 @@ farm build
 farm deploy --vercel
 ```
 
-For the `vercel` and `vercel-edge` presets, `@farm.js/eve` builds the Eve service and adds its functions, routes, and assets to Farm's Vercel output. The application and agent ship from one project and keep the same public `/eve` routes.
+For the `vercel` preset, `@farm.js/eve` builds the Eve service and adds its functions, routes, and assets to Farm's Vercel output. The application and agent ship from one project and keep the same public `/eve` routes.
 
 To run Eve as an independently deployed service, set an origin instead. Farm will proxy the same public routes to it and skip managed Vercel composition.
 

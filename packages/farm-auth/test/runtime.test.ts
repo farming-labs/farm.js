@@ -65,6 +65,19 @@ describe("Farm Auth runtime", () => {
     });
 
     expect(session.user.email).toBe("person@farm.test");
+
+    // Farm's session contract, which mobile session tokens read.
+    const contract = await integration.session(
+      new Request("http://localhost:3000/dashboard", { headers: { cookie: cookie! } }),
+    );
+    expect(contract).toEqual({
+      id: session.session.id,
+      userId: session.user.id,
+      expiresAt: new Date(session.session.expiresAt),
+    });
+    await expect(
+      integration.session(new Request("http://localhost:3000/dashboard")),
+    ).resolves.toBeNull();
   });
 
   it("returns a 401 response for a required anonymous session", async () => {

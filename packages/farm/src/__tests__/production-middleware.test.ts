@@ -270,9 +270,8 @@ describe("production middleware runtime", () => {
       );
       expect(staticImageResponse.status).toBe(200);
       expect(staticImageResponse.headers.get("content-type")).toBe("image/png");
-      expect(staticImageResponse.headers.get("cache-control")).toBe(
-        "public, max-age=31536000, immutable",
-      );
+      // dashboard/middleware.ts let this request through, so no shared cache keeps the image.
+      expect(staticImageResponse.headers.get("cache-control")).toBe("private, no-store");
       expect(staticImageResponse.headers.get("x-content-type-options")).toBe("nosniff");
       const staticImageEtag = staticImageResponse.headers.get("etag");
       expect(staticImageEtag).toMatch(/^"[a-f0-9]{16}"$/);
@@ -327,17 +326,12 @@ describe("production middleware runtime", () => {
           "# Farm production fixture\n\n> Pages served by the production fixture.\n\n## Pages\n\n",
         ),
       ).toBe(true);
-      expect(llmsText).toContain(
-        "- [Explicit image](https://example.test/dashboard/explicit.md)\n",
-      );
-      expect(llmsText).toContain("- [Dashboard notes](https://example.test/dashboard/notes.md)\n");
+      expect(llmsText).toContain("- [Context ppr](https://example.test/context-ppr.md)\n");
       expect(llmsText).toContain("- [Public notes](https://example.test/public-notes.md)\n");
       expect(llmsText).not.toContain("rewrite-target");
       expect(llmsText).not.toContain("[id]");
-      // Listed even though it answers 401: the index only names pages.
-      expect(llmsText).toContain(
-        "- [Private notes](https://example.test/dashboard/private-notes.md)\n",
-      );
+      // dashboard/middleware.ts guards every /dashboard page, so none is listed (#2285).
+      expect(llmsText).not.toContain("/dashboard");
 
       // llms-full.txt inlines each listed page's .md mirror, read through the same server.
       const llmsFullResponse = await serverModule.default.fetch(
@@ -356,7 +350,7 @@ describe("production middleware runtime", () => {
         "## Public notes\n\nURL: https://example.test/public-notes.md\n\n# Public notes\n\npublic-notes-source\n",
       );
       expect(llmsFull).toContain(
-        "## Explicit image\n\nURL: https://example.test/dashboard/explicit.md\n\n# Explicit image\n\nSource: /dashboard/explicit\n\nexplicit image page",
+        "## Context ppr\n\nURL: https://example.test/context-ppr.md\n\n# Farm.js App\n\nSource: /context-ppr\n\nconfigured context PPR route",
       );
       // Concurrent requests share one render, and HEAD reads no pages.
       const concurrent = await Promise.all(
@@ -375,12 +369,11 @@ describe("production middleware runtime", () => {
           await serverModule.default.fetch(new Request("https://example.test/llms-full.txt"))
         ).text(),
       ).toBe(llmsFull);
-      // /dashboard/private-notes answers 401 without credentials. Its block stays,
-      // but the body is never read into a file anyone can fetch.
-      expect(llmsFull).toContain(
-        "## Private notes\n\nURL: https://example.test/dashboard/private-notes.md\n\n---",
-      );
+      // Guarded /dashboard pages have no block, and their bodies are never read into a
+      // file anyone can fetch.
+      expect(llmsFull).not.toContain("/dashboard");
       expect(llmsFull).not.toContain("dashboard-private-notes-source");
+      expect(llmsFull).not.toContain("members-only-source");
       expect(llmsFull).not.toContain("rewrite-target");
 
       // A nested llms-full.ts that returns a string is served exactly as written.
@@ -405,8 +398,6 @@ describe("production middleware runtime", () => {
           "",
           "## Notes",
           "",
-          "- [Dashboard notes](https://example.test/dashboard/notes.md)",
-          "- [Private notes](https://example.test/dashboard/private-notes.md)",
           "- [Public notes](https://example.test/public-notes.md)",
           "",
           "## Optional",
@@ -540,9 +531,8 @@ describe("production middleware runtime", () => {
       );
       expect(dynamicImageResponse.status).toBe(200);
       expect(dynamicImageResponse.headers.get("content-type")).toBe("image/png");
-      expect(dynamicImageResponse.headers.get("cache-control")).toBe(
-        "public, s-maxage=120, stale-while-revalidate=300",
-      );
+      // users/[id]/middleware.ts matched, so the image's s-maxage gives way to a private policy.
+      expect(dynamicImageResponse.headers.get("cache-control")).toBe("private, no-store");
       const dynamicImageBytes = Buffer.from(await dynamicImageResponse.arrayBuffer());
       expect(dynamicImageBytes.subarray(0, 8)).toEqual(
         Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -641,12 +631,99 @@ describe("production middleware runtime", () => {
       expect(allowedMarkdownResponse.headers.get("x-farm-middleware")).toBe("yes");
       await expect(allowedMarkdownResponse.text()).resolves.toContain("dashboard-notes-source");
 
+      // A guard matching /members does not match /members.md. The source is
+      // only served when an anonymous visitor may open the page, so a guarded
+      // page has no .md version, with or without a session.
+      for (const headers of [{}, { cookie: "member=1" }] as Record<string, string>[]) {
+        const membersMarkdown = await serverModule.default.fetch(
+          new Request("https://example.test/members.md", { headers }),
+        );
+        expect(membersMarkdown.status).toBe(404);
+        expect(membersMarkdown.headers.get("cache-control")).toBe("private, no-store");
+        expect(await membersMarkdown.text()).not.toContain("members-only-source");
+      }
+      const membersNegotiated = await serverModule.default.fetch(
+        new Request("https://example.test/members", { headers: { accept: "text/markdown" } }),
+      );
+      expect(membersNegotiated.status).toBe(401);
+      expect(await membersNegotiated.text()).not.toContain("members-only-source");
+      // The page itself still renders for a member.
+      const membersPage = await serverModule.default.fetch(
+        new Request("https://example.test/members", { headers: { cookie: "member=1" } }),
+      );
+      expect(membersPage.status).toBe(200);
+      await expect(membersPage.text()).resolves.toContain("members-only-source");
+
       // Routes outside every matcher keep serving their markdown source.
       const publicMarkdownResponse = await serverModule.default.fetch(
         new Request("https://example.test/public-notes.md"),
       );
       expect(publicMarkdownResponse.status).toBe(200);
       await expect(publicMarkdownResponse.text()).resolves.toContain("public-notes-source");
+      // A public page's source is the same for a signed-in caller.
+      const signedInPublicMarkdown = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes.md", { headers: { cookie: "member=1" } }),
+      );
+      expect(signedInPublicMarkdown.status).toBe(200);
+      await expect(signedInPublicMarkdown.text()).resolves.toContain("public-notes-source");
+
+      // A guard trusting a custom header sees the anonymous check without it, so a key
+      // holder cannot put the page's source under a public cache.
+      const keyed = { "x-api-key": "partner-key" };
+      const partnersMarkdown = await serverModule.default.fetch(
+        new Request("https://example.test/partners.md", { headers: keyed }),
+      );
+      expect(partnersMarkdown.status).toBe(404);
+      expect(partnersMarkdown.headers.get("cache-control")).toBe("private, no-store");
+      expect(await partnersMarkdown.text()).not.toContain("partners-only-source");
+      const partnersNegotiated = await serverModule.default.fetch(
+        new Request("https://example.test/partners", {
+          headers: { ...keyed, accept: "text/markdown" },
+        }),
+      );
+      // The key holder may read the page; whatever represents it stays out of shared caches.
+      expect(partnersNegotiated.headers.get("cache-control") ?? "").not.toContain("public");
+      await partnersNegotiated.body?.cancel();
+      // An IP allowlist sees the anonymous check from an outside address, so an allowed
+      // caller cannot put the page's source under a public cache either. On Vercel the
+      // adapter's client address is X-Real-IP too, so the check must not reuse it.
+      for (const headers of [
+        { "x-real-ip": "10.0.0.5" },
+        { "x-forwarded-for": "10.0.0.5", "x-real-ip": "10.0.0.5" },
+      ]) {
+        const officeMarkdown = await serverModule.default.fetch(
+          new Request("https://example.test/office.md", { headers }),
+        );
+        expect(officeMarkdown.status).toBe(404);
+        expect(officeMarkdown.headers.get("cache-control")).toBe("private, no-store");
+        expect(await officeMarkdown.text()).not.toContain("office-only-source");
+        const officeNegotiated = await serverModule.default.fetch(
+          new Request("https://example.test/office", {
+            headers: { ...headers, accept: "text/markdown" },
+          }),
+        );
+        expect(officeNegotiated.headers.get("cache-control") ?? "").not.toContain("public");
+        await officeNegotiated.body?.cancel();
+      }
+      const officeHtml = await serverModule.default.fetch(
+        new Request("https://example.test/office", { headers: { "x-real-ip": "10.0.0.5" } }),
+      );
+      expect(officeHtml.status).toBe(200);
+      await officeHtml.body?.cancel();
+      const officeIpPublicMarkdown = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes.md", {
+          headers: { "x-real-ip": "10.0.0.5" },
+        }),
+      );
+      expect(officeIpPublicMarkdown.status).toBe(200);
+      expect(officeIpPublicMarkdown.headers.get("cache-control")).toContain("public");
+      await officeIpPublicMarkdown.body?.cancel();
+      const keyedPublicMarkdown = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes.md", { headers: keyed }),
+      );
+      expect(keyedPublicMarkdown.status).toBe(200);
+      expect(keyedPublicMarkdown.headers.get("cache-control")).toContain("public");
+      await expect(keyedPublicMarkdown.text()).resolves.toContain("public-notes-source");
 
       const generatedMetadataResponse = await serverModule.default.fetch(
         new Request("https://example.test/metadata/42?variant=featured"),

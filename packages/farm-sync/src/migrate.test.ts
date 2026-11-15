@@ -95,12 +95,17 @@ describe("sync forwards the database the app gave it", () => {
       client: {},
       dialect: "mysql",
       models: { tasks: "read" },
+      where: false,
     });
     expect(readSchemaTables(withDialect)?.dialect).toBe("mysql");
   });
 
   it("explains a missing data source when migrate asks for one", async () => {
-    const unconfigured = sync({ schema: schema as never, models: { tasks: "read" } });
+    const unconfigured = sync({
+      schema: schema as never,
+      models: { tasks: "read" },
+      where: false,
+    });
     await expect(
       findSchemaTableOwners({ plugins: [unconfigured] })[0]!.resolveClient({}),
     ).rejects.toThrow(/sync\(\): no data source is configured/);

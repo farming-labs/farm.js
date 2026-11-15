@@ -15,6 +15,7 @@ import type { ServerQuery } from "./server-query";
 import {
   createServerQueryCallKey,
   fetchServerQuery,
+  isFarmServerQueryBrowserRuntime,
   type ServerQueryFetchOptions,
 } from "./server-query-runtime";
 import { getTheme, setTheme, subscribeTheme, toggleTheme } from "./theme/runtime";
@@ -29,6 +30,11 @@ import {
 import type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
 
 export type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
+export { delegateNavigation } from "./client/navigation-delegate";
+export type {
+  FarmNavigationDelegate,
+  FarmNavigationDelegateContext,
+} from "./client/navigation-delegate";
 import {
   applyFarmBasePath,
   getFarmBasePath,
@@ -292,6 +298,26 @@ export function createRendererQuery<TInput, TData>(
   input: TInput,
   options: FarmRendererQueryOptions = {},
 ): FarmRendererQuery<TData> {
+  // Vue, Solid, and Svelte run setup (and subscribe) during server rendering.
+  // Like React's server snapshot, a server render never reads or fills the
+  // process-wide browser cache: it renders idle and the browser fetches.
+  if (!isFarmServerQueryBrowserRuntime()) {
+    const snapshot: FarmRendererQuerySnapshot<TData> = {
+      data: undefined,
+      error: null,
+      status: "idle",
+      pending: false,
+      fetching: false,
+      stale: true,
+    };
+    return {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      refetch: () => fetchServerQuery(query, input),
+      dispose() {},
+    };
+  }
+
   const cache = getFarmClientDataCache();
   const key = createServerQueryCallKey(query, input);
   const listeners = new Set<() => void>();
@@ -402,7 +428,11 @@ function readRendererRouterSnapshot(
   const url = new URL(window.location.href);
   const pathname = stripFarmBasePath(url.pathname, basePath);
   const i18n = getFarmI18nClientState();
-  const routePathname = i18n ? stripFarmLocaleFromPathname(pathname, i18n) : pathname;
+  // `pathname` is already basePath-relative; the snapshot's basePath must not
+  // strip a second time, or `/console/console/x` matches the `/x` route.
+  const routePathname = i18n
+    ? stripFarmLocaleFromPathname(pathname, { ...i18n, basePath: "/" })
+    : pathname;
 
   return {
     pathname,

@@ -64,7 +64,7 @@ describe("development runtime response bridge", () => {
   redirects: async () => [{ source: "/redirect", destination: "/" }],
   headers: async () => [{
     source: "/redirect",
-    headers: [{ key: "x-late-config-header", value: "must-not-run" }],
+    headers: [{ key: "x-config-header", value: "applied" }],
   }],
   plugins: [{
     name: "binary-runtime-response",
@@ -117,11 +117,78 @@ export default function Page() { return <main>home</main>; }`,
     });
     expect(redirectResponse.status).toBe(307);
     expect(redirectResponse.headers.get("location")).toBe("/");
-    expect(redirectResponse.headers.get("x-late-config-header")).toBeNull();
-    expect(redirectResponse.headers.get("x-runtime-body")).toBe("");
+    // As in production: configured headers apply to the redirect, which passes through
+    // runtime.after with its "Redirecting to" body.
+    expect(redirectResponse.headers.get("x-config-header")).toBe("applied");
+    expect(redirectResponse.headers.get("x-runtime-body")).toBe(
+      Buffer.from("Redirecting to /").toString("hex"),
+    );
 
     const pageResponse = await fetch(`http://localhost:${address.port}/`);
     expect(pageResponse.headers.get("x-runtime-body")).toMatch(/^[a-f0-9]+$/);
     await expect(pageResponse.text()).resolves.toContain("home");
+  }, 30_000);
+
+  it("streams a response through a runtime.after hook that does not read the body", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-runtime-stream-"));
+    temporaryRoots.add(root);
+    await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+    await fs.writeFile(
+      path.join(root, "farm.config.ts"),
+      `export default {
+  plugins: [{
+    name: "slow-stream",
+    beforeRequest(req, res) {
+      if (req.url !== "/slow") return;
+      res.statusCode = 200;
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.write("<p>first</p>");
+      return new Promise((resolve) => setTimeout(() => {
+        res.end("<p>second</p>");
+        resolve();
+      }, 1500));
+    },
+  }, {
+    // Like the mobile session plugin: looks at the response, never at its body.
+    name: "header-only-after",
+    runtime: {
+      after({ response }) {
+        const headers = new Headers(response.headers);
+        headers.set("x-runtime-after", "seen");
+        return new Response(response.body, { status: response.status, headers });
+      },
+    },
+  }],
+};`,
+    );
+    await writeModule(
+      root,
+      "src/app/page.tsx",
+      `export default function Page() { return <main>home</main>; }`,
+    );
+
+    const server = await createServer({ root, images: { provider: "none" } });
+    servers.add(server);
+    await server.listen(await getAvailablePort());
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+
+    const startedAt = Date.now();
+    const response = await fetch(`http://localhost:${address.port}/slow`);
+    expect(response.headers.get("x-runtime-after")).toBe("seen");
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    const first = decoder.decode((await reader.read()).value);
+    // The first chunk arrives while the rest is still being written, not with it.
+    expect(first).toContain("first");
+    expect(first).not.toContain("second");
+    expect(Date.now() - startedAt).toBeLessThan(1400);
+    let rest = "";
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      rest += decoder.decode(chunk.value, { stream: true });
+    }
+    expect(rest).toContain("second");
   }, 30_000);
 });

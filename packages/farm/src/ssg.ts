@@ -49,7 +49,9 @@
  * ```
  */
 
+import { readFileSync } from "fs";
 import { readFile } from "fs/promises";
+import { isFarmMarkdownPageFile } from "./app-markdown-runtime";
 import {
   mergeRouteRenderingDirectiveConfig,
   type DirectiveRenderingConfig,
@@ -57,13 +59,12 @@ import {
   type RouteRenderingDynamic,
   type RouteRenderingOptions,
 } from "./route-rendering";
-import type {
-  RouteModule,
-  SSGPage,
-  SSGCollectionResult,
-  StaticPathParams,
-  StaticPathPrimitive,
-} from "./types";
+import {
+  getOptionalCatchAllParameterNames,
+  materializeSSGRoutePath,
+  normalizeStaticPathParams,
+} from "./ssg-paths";
+import type { RouteModule, SSGPage, SSGCollectionResult } from "./types";
 
 interface RouteEntry {
   path: string;
@@ -83,10 +84,6 @@ export interface StaticRouteCandidateAnalysis {
   candidate: boolean;
   blockers: string[];
 }
-
-const OPTIONAL_CATCH_ALL_SEGMENT = /^\[\[\.\.\.([^\]]+)\]\]$/;
-const REQUIRED_CATCH_ALL_SEGMENT = /^\[\.\.\.([^\]]+)\]$/;
-const REQUIRED_DYNAMIC_SEGMENT = /^\[([^\]]+)\]$/;
 
 const REQUEST_API_LABELS = new Map<string, string>([
   ["cookies", "request cookies"],
@@ -308,27 +305,28 @@ function stripComments(source: string): string {
 }
 
 function sanitizeSource(source: string, maskLiterals: boolean): string {
-  const output = [...source];
-  const mask = (index: number) => {
-    if (output[index] !== "\n" && output[index] !== "\r") output[index] = " ";
+  // Masked [start, end) UTF-16 ranges, in source order. Indexing code units keeps masks aligned
+  // with `source[index]` when the file contains characters outside the BMP, such as emoji.
+  const ranges: number[] = [];
+  const mask = (start: number, end: number) => {
+    end = Math.min(end, source.length);
+    if (end <= start) return;
+    if (ranges[ranges.length - 1] === start) ranges[ranges.length - 1] = end;
+    else ranges.push(start, end);
   };
 
   const scanQuoted = (start: number, quote: "'" | '"'): number => {
-    let index = start;
-    if (maskLiterals) mask(index);
-    index += 1;
+    let index = start + 1;
     while (index < source.length) {
       if (source[index] === "\\") {
-        if (maskLiterals) mask(index);
-        if (index + 1 < source.length && maskLiterals) mask(index + 1);
         index += 2;
         continue;
       }
       const character = source[index];
-      if (maskLiterals) mask(index);
       index += 1;
       if (character === quote) break;
     }
+    if (maskLiterals) mask(start, index);
     return index;
   };
 
@@ -339,22 +337,17 @@ function sanitizeSource(source: string, maskLiterals: boolean): string {
       const character = source[index];
       const next = source[index + 1];
       if (character === "/" && next === "/") {
-        while (index < source.length && source[index] !== "\n" && source[index] !== "\r") {
-          mask(index++);
-        }
+        let end = index;
+        while (end < source.length && source[end] !== "\n" && source[end] !== "\r") end += 1;
+        mask(index, end);
+        index = end;
         continue;
       }
       if (character === "/" && next === "*") {
-        mask(index++);
-        mask(index++);
-        while (index < source.length) {
-          const closesComment = source[index] === "*" && source[index + 1] === "/";
-          mask(index++);
-          if (closesComment) {
-            mask(index++);
-            break;
-          }
-        }
+        const close = source.indexOf("*/", index + 2);
+        const end = close === -1 ? source.length : close + 2;
+        mask(index, end);
+        index = end;
         continue;
       }
       if (character === "'" || character === '"') {
@@ -362,35 +355,30 @@ function sanitizeSource(source: string, maskLiterals: boolean): string {
         continue;
       }
       if (character === "`") {
-        if (maskLiterals) mask(index);
+        let segmentStart = index;
         index += 1;
         while (index < source.length) {
           if (source[index] === "\\") {
-            if (maskLiterals) mask(index);
-            if (index + 1 < source.length && maskLiterals) mask(index + 1);
             index += 2;
           } else if (source[index] === "`") {
-            if (maskLiterals) mask(index);
             index += 1;
             break;
           } else if (source[index] === "$" && source[index + 1] === "{") {
-            if (maskLiterals) {
-              mask(index);
-              mask(index + 1);
-            }
+            if (maskLiterals) mask(segmentStart, index + 2);
             index = scanCode(index + 2, true);
+            segmentStart = index;
           } else {
-            if (maskLiterals) mask(index);
             index += 1;
           }
         }
+        if (maskLiterals) mask(segmentStart, index);
         continue;
       }
       if (character === "{") {
         braceDepth += 1;
       } else if (character === "}") {
         if (stopAtTemplateBrace && braceDepth === 0) {
-          if (maskLiterals) mask(index);
+          if (maskLiterals) mask(index, index + 1);
           return index + 1;
         }
         braceDepth = Math.max(0, braceDepth - 1);
@@ -401,7 +389,17 @@ function sanitizeSource(source: string, maskLiterals: boolean): string {
   };
 
   scanCode(0, false);
-  return output.join("");
+  let output = "";
+  let cursor = 0;
+  for (let index = 0; index < ranges.length; index += 2) {
+    const start = ranges[index]!;
+    const end = ranges[index + 1]!;
+    output +=
+      source.slice(cursor, start) +
+      source.slice(start, end).replace(/[^\r\n]+/g, (run) => " ".repeat(run.length));
+    cursor = end;
+  }
+  return output + source.slice(cursor);
 }
 
 function escapeRegExp(value: string): string {
@@ -437,6 +435,27 @@ export function parseRouteRenderingDirective(
   }
 
   return undefined;
+}
+
+/**
+ * A route's rendering directive as the production runtime needs it: the parsed directive plus
+ * whether its source reads request state. The runtime only sees module exports, so the build
+ * decides `requestBound` here and bakes it into the generated server entry, where
+ * `mergeRouteRenderingDirectiveConfig` combines it with the module's exports.
+ */
+export function readRouteRenderingDirectiveFromFile(
+  modulePath: string,
+): DirectiveRenderingConfig | undefined {
+  try {
+    const source = readFileSync(modulePath, "utf8");
+    const directive = parseRouteRenderingDirective(source);
+    // Without requestBound the runtime merge happily resolves ssg for a route the build already
+    // demoted to per-request rendering, and stamps a shared cache-control on it.
+    if (findRequestBoundSourceBlockers(source).length === 0) return directive;
+    return { ...(directive ?? { ssg: false, ppr: false, directive: "" }), requestBound: true };
+  } catch {
+    return undefined;
+  }
 }
 
 function parseKnownRenderingDirective(directive: string): DirectiveRenderingConfig | undefined {
@@ -581,11 +600,19 @@ function skipHorizontalWhitespace(source: string, start: number): number {
 export async function collectSSGPages(
   routes: RouteEntry[],
   loadModule: (filePath: string) => Promise<RouteModule>,
-  options: { suggestStaticRendering?: boolean } = {},
+  options: {
+    suggestStaticRendering?: boolean;
+    /**
+     * Routes a docs adapter renders, which ignore route config: a static candidate among them
+     * is pointed at `docs.prerender` instead of `force-static`, or not at all once it is set.
+     */
+    docsAdapterRoutes?: { owns: (routePath: string) => boolean; prerender: boolean };
+  } = {},
 ): Promise<SSGCollectionResult> {
   const ssgPages: SSGPage[] = [];
   const ssrRoutes: string[] = [];
   const staticCandidateRoutes: string[] = [];
+  let staticCandidateDocsPages = 0;
 
   for (const route of routes) {
     try {
@@ -597,6 +624,18 @@ export async function collectSSGPages(
       }
 
       const source = await readFile(route.filePath, "utf8").catch(() => undefined);
+      // The docs runtime answers its Markdown pages before any page route, so their route config
+      // does not apply to them: `docs.prerender` decides whether they are written as files.
+      if (options.docsAdapterRoutes?.owns(route.path) && isFarmMarkdownPageFile(route.filePath)) {
+        ssrRoutes.push(route.path);
+        if (
+          options.suggestStaticRendering !== false &&
+          analyzeStaticRouteCandidate(null, source, { isDynamic: route.isDynamic }).candidate
+        ) {
+          staticCandidateDocsPages += 1;
+        }
+        continue;
+      }
       const configuredRendering = resolveConfiguredRouteRenderingConfig(mod, source);
       const rendering = resolveRouteRenderingConfig(mod, source);
 
@@ -654,7 +693,8 @@ export async function collectSSGPages(
           options.suggestStaticRendering !== false &&
           analyzeStaticRouteCandidate(mod, source, { isDynamic: route.isDynamic }).candidate
         ) {
-          staticCandidateRoutes.push(route.path);
+          if (options.docsAdapterRoutes?.owns(route.path)) staticCandidateDocsPages += 1;
+          else staticCandidateRoutes.push(route.path);
         }
       }
     } catch (error) {
@@ -678,162 +718,16 @@ export async function collectSSGPages(
     );
   }
 
+  if (staticCandidateDocsPages > 0 && !options.docsAdapterRoutes?.prerender) {
+    console.warn(
+      `[Farm.js] ${staticCandidateDocsPages} docs page${
+        staticCandidateDocsPages === 1 ? " renders" : "s render"
+      } on each request. Set \`docs.prerender: true\` in farm.config.ts to prerender docs ` +
+        `pages on Node and serverless targets.`,
+    );
+  }
+
   return { ssg: ssgPages, ssr: ssrRoutes };
-}
-
-function materializeSSGRoutePath(routePattern: string, params: StaticPathParams): string {
-  const outputSegments: string[] = [];
-
-  for (const segment of routePattern.split("/")) {
-    if (!segment) {
-      continue;
-    }
-
-    const optionalCatchAll = segment.match(OPTIONAL_CATCH_ALL_SEGMENT);
-    if (optionalCatchAll) {
-      const parameterName = optionalCatchAll[1]!;
-      const value = params[parameterName];
-      const values = readCatchAllSegments(value, {
-        optional: true,
-        parameterName,
-        routePattern,
-      });
-      outputSegments.push(...values.map(encodePathSegment));
-      continue;
-    }
-
-    const requiredCatchAll = segment.match(REQUIRED_CATCH_ALL_SEGMENT);
-    if (requiredCatchAll) {
-      const parameterName = requiredCatchAll[1]!;
-      const value = params[parameterName];
-      const values = readCatchAllSegments(value, {
-        optional: false,
-        parameterName,
-        routePattern,
-      });
-      outputSegments.push(...values.map(encodePathSegment));
-      continue;
-    }
-
-    const requiredDynamic = segment.match(REQUIRED_DYNAMIC_SEGMENT);
-    if (requiredDynamic) {
-      const parameterName = requiredDynamic[1]!;
-      const value = params[parameterName];
-      if (isStaticPathArray(value)) {
-        throw new Error(
-          `Cannot materialize SSG route "${routePattern}": parameter "${parameterName}" ` +
-            "must be a scalar value; arrays are only supported for catch-all segments.",
-        );
-      }
-      if (isMissingPathValue(value)) {
-        throw missingRequiredParameterError(routePattern, parameterName);
-      }
-      outputSegments.push(encodePathSegment(value));
-      continue;
-    }
-
-    outputSegments.push(segment);
-  }
-
-  return outputSegments.length > 0 ? `/${outputSegments.join("/")}` : "/";
-}
-
-function readCatchAllSegments(
-  value: StaticPathParams[string] | undefined,
-  options: {
-    optional: boolean;
-    parameterName: string;
-    routePattern: string;
-  },
-): StaticPathPrimitive[] {
-  if (isMissingPathValue(value) || (isStaticPathArray(value) && value.length === 0)) {
-    if (options.optional) {
-      return [];
-    }
-    throw missingRequiredParameterError(options.routePattern, options.parameterName);
-  }
-
-  const segments = isStaticPathArray(value) ? [...value] : [value as StaticPathPrimitive];
-  if (segments.some(isMissingPathValue)) {
-    throw new Error(
-      `Cannot materialize SSG route "${options.routePattern}": catch-all parameter ` +
-        `"${options.parameterName}" contains an empty path segment.`,
-    );
-  }
-
-  return segments;
-}
-
-function getOptionalCatchAllParameterNames(routePattern: string): ReadonlySet<string> {
-  return new Set(
-    routePattern
-      .split("/")
-      .map((segment) => segment.match(OPTIONAL_CATCH_ALL_SEGMENT)?.[1])
-      .filter((name): name is string => Boolean(name)),
-  );
-}
-
-function normalizeStaticPathParams(
-  params: StaticPathParams,
-  optionalCatchAllParams: ReadonlySet<string>,
-): Record<string, string> {
-  const entries = Object.entries(params).map(([key, value]): [string, string] => {
-    const emptyOptionalCatchAll =
-      optionalCatchAllParams.has(key) &&
-      (isMissingPathValue(value) || (isStaticPathArray(value) && value.length === 0));
-    return [
-      key,
-      emptyOptionalCatchAll
-        ? ""
-        : isStaticPathArray(value)
-          ? value.map(String).join("/")
-          : String(value),
-    ];
-  });
-
-  for (const name of optionalCatchAllParams) {
-    if (!Object.prototype.hasOwnProperty.call(params, name)) {
-      entries.push([name, ""]);
-    }
-  }
-
-  return Object.fromEntries(entries);
-}
-
-function isMissingPathValue(value: unknown): value is "" | null | undefined {
-  return value === "" || value === null || typeof value === "undefined";
-}
-
-function isStaticPathArray(
-  value: StaticPathParams[string] | undefined,
-): value is readonly StaticPathPrimitive[] {
-  return Array.isArray(value);
-}
-
-function missingRequiredParameterError(routePattern: string, parameterName: string): Error {
-  return new Error(
-    `Cannot materialize SSG route "${routePattern}": required parameter ` +
-      `"${parameterName}" is missing or empty.`,
-  );
-}
-
-function encodePathSegment(value: StaticPathPrimitive): string {
-  const encoded = encodeURIComponent(String(value)).replace(
-    /[!'()*]/g,
-    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
-  );
-
-  // Dot-only URL segments are normalized as navigation by URL parsers and
-  // filesystem joins. Pre-rendering them could therefore escape the intended
-  // route directory or overwrite a parent artifact. They cannot faithfully be
-  // represented as a static URL segment, so keep the route server-rendered.
-  if (encoded === "." || encoded === "..") {
-    throw new Error(
-      `Cannot materialize SSG path segment "${encoded}": dot-only segments are unsafe to prerender.`,
-    );
-  }
-
-  return encoded;
 }
 
 /**

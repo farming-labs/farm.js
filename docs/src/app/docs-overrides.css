@@ -466,10 +466,12 @@
 
 /* ---------- tables: a code-panel frame, mono column labels, quiet row rules ---------- */
 
+/* The theme sets .fd-table-wrapper { border-radius: 0 !important }, so the code-block radius
+   has to be important too. */
 #farm-docs-root .fd-docs-content .fd-table-wrapper {
   margin: 28px 0;
   border: 1px solid var(--farm-code-line);
-  border-radius: 3px;
+  border-radius: 3px !important;
   background: var(--farm-code-bg);
 }
 #farm-docs-root .fd-docs-content .fd-table-wrapper > table {
@@ -556,6 +558,18 @@
 }
 
 /* ---------- lists, dividers, images ---------- */
+
+/* The CSS reset sets list-style: none on every list and the docs theme doesn't put markers back,
+   so Markdown lists (which have no class) get theirs here. Styled lists keep their own. */
+#farm-docs-root .fd-docs-content ul:not([class]) {
+  list-style-type: disc;
+}
+#farm-docs-root .fd-docs-content ul:not([class]) ul:not([class]) {
+  list-style-type: circle;
+}
+#farm-docs-root .fd-docs-content ol:not([class]) {
+  list-style-type: decimal;
+}
 
 #farm-docs-root .fd-docs-content :is(ol, ul) > li::marker {
   color: var(--farm-code-dim);
@@ -862,16 +876,37 @@ html[data-farm-docs-runtime] .farm-docs-announcement a:is(:hover, :focus-visible
 html[data-farm-docs-runtime] #nd-subnav {
   top: var(--fd-banner-height) !important;
 }
-/* The fixed llms.txt cell sits below the announcement like the rest of the header. */
-html[data-farm-docs-runtime] .fd-agent-llms-directive {
-  top: 28px !important;
-  color: var(--farm-code-legend) !important;
-  font-size: 11px !important;
-  letter-spacing: 0.08em !important;
-  transition: color 150ms;
+/* farmjs.dev's own llms.txt link (src/components/docs-llms-link.ts): a fixed cell in the header's
+   top-right corner, below the announcement, beside search. Below 1024px the header holds the
+   search and menu buttons, so the cell is not shown there. */
+#farm-docs-root > .farm-docs-llms-link {
+  display: none;
 }
-html[data-farm-docs-runtime] .fd-agent-llms-directive:is(:hover, :focus-visible) {
-  color: #ededed !important;
+@media (min-width: 1024px) {
+  #farm-docs-root > .farm-docs-llms-link {
+    position: fixed;
+    top: 28px;
+    right: 0;
+    z-index: 90;
+    display: inline-flex;
+    width: 105px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+    border-left: 1px solid var(--color-fd-border);
+    border-bottom: 1px solid var(--color-fd-border);
+    background: color-mix(in srgb, var(--color-fd-background) 94%, transparent);
+    color: var(--farm-code-legend);
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-decoration: none;
+    text-transform: uppercase;
+    transition: color 150ms;
+  }
+  #farm-docs-root > .farm-docs-llms-link:is(:hover, :focus-visible) {
+    color: #ededed;
+  }
 }
 /* Desktop: the header's search control becomes a field (icon, label, the theme's ⌘K chip) in the
    page-action style. Phones keep the theme's icon button. */

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveFarmImageConfig } from "../image-config";
 import { createNodeImageFetcher } from "../image-sharp";
 import {
+  _withFarmImageSourceClientAddress,
   createCloudflareImageTransformer,
   createFarmImageHandler,
   isPrivateImageAddress,
@@ -141,6 +142,58 @@ describe("Farm image optimizer", () => {
     expect(fetchRemote).not.toHaveBeenCalled();
   });
 
+  it("does not treat a source that matches a spoofed Host as local", async () => {
+    const fetch = vi.fn(async () => new Response(PNG));
+    const fetchRemote = vi.fn(
+      async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler(
+      resolveFarmImageConfig({ remotePatterns: [{ hostname: "cdn.trusted.example" }] }),
+      {
+        fetch: fetch as typeof globalThis.fetch,
+        fetchRemote: fetchRemote as typeof globalThis.fetch,
+        validateRemoteUrl: vi.fn(),
+        transform: passthroughTransformer(),
+      },
+    );
+    const query = new URLSearchParams({
+      url: "http://attacker.example/x.png",
+      w: "640",
+      q: "75",
+    });
+
+    // The Node server builds request.url from the client's Host header.
+    const response = await handler(new Request(`http://attacker.example/_farm/image?${query}`), {
+      trustedLocalOrigin: "http://127.0.0.1:3000",
+    });
+
+    expect(response?.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(fetchRemote).not.toHaveBeenCalled();
+  });
+
+  it("still allows a remote source that matches remotePatterns, whatever the Host", async () => {
+    const fetchRemote = vi.fn(
+      async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler(
+      resolveFarmImageConfig({ remotePatterns: [{ hostname: "cdn.trusted.example" }] }),
+      {
+        fetch: vi.fn() as unknown as typeof globalThis.fetch,
+        fetchRemote: fetchRemote as typeof globalThis.fetch,
+        validateRemoteUrl: vi.fn(),
+        transform: passthroughTransformer(),
+      },
+    );
+
+    const response = await handler(new Request(optimizerUrl("https://cdn.trusted.example/a.png")), {
+      trustedLocalOrigin: "http://127.0.0.1:3000",
+    });
+
+    expect(response?.status).toBe(200);
+    expect(fetchRemote).toHaveBeenCalledTimes(1);
+  });
+
   it("uses an adapter-owned origin for local asset requests", async () => {
     const fetch = vi.fn(
       async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
@@ -165,6 +218,47 @@ describe("Farm image optimizer", () => {
     );
     expect(fetchRemote).not.toHaveBeenCalled();
     expect(validateRemoteUrl).not.toHaveBeenCalled();
+  });
+
+  it("marks only its own local source fetch as an anonymous visitor", async () => {
+    const fetch = vi.fn(
+      async (_url: URL, _init?: RequestInit) =>
+        new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const fetchRemote = vi.fn(
+      async (_url: URL, _init?: RequestInit) =>
+        new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler(
+      resolveFarmImageConfig({ remotePatterns: [{ hostname: "cdn.example.test" }] }),
+      {
+        fetch: fetch as typeof globalThis.fetch,
+        fetchRemote: fetchRemote as typeof globalThis.fetch,
+        validateRemoteUrl: vi.fn(),
+        transform: passthroughTransformer(),
+      },
+    );
+    const context = { trustedLocalOrigin: "http://127.0.0.1:4173" };
+    await handler(new Request(optimizerUrl("/assets/product.png")), context);
+    await handler(new Request(optimizerUrl("https://cdn.example.test/product.png")), context);
+
+    const localHeaders = new Headers(fetch.mock.calls[0]![1]!.headers);
+    const remoteHeaders = new Headers(fetchRemote.mock.calls[0]![1]!.headers);
+    expect(localHeaders.get("x-farm-image-source")).toBeTruthy();
+    // The marker never leaves the server.
+    expect(remoteHeaders.has("x-farm-image-source")).toBe(false);
+
+    const loopback = { clientAddress: "127.0.0.1" };
+    const sourceRequest = new Request("http://127.0.0.1:4173/assets/product.png", {
+      headers: localHeaders,
+    });
+    expect(_withFarmImageSourceClientAddress(sourceRequest, loopback)).toEqual({
+      clientAddress: "192.0.2.1",
+    });
+    const forged = new Request("http://127.0.0.1:4173/assets/product.png", {
+      headers: { "x-farm-image-source": "guess" },
+    });
+    expect(_withFarmImageSourceClientAddress(forged, loopback)).toBe(loopback);
   });
 
   it("handles HEAD without returning image bytes", async () => {
@@ -398,6 +492,50 @@ describe("Farm image optimizer", () => {
 
     expect(oversized?.status).toBe(413);
     expect(svg?.status).toBe(415);
+  });
+
+  describe("transformed results", () => {
+    const SVG_BYTES = new TextEncoder().encode(
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+    );
+    const WEBP_BYTES = new TextEncoder().encode("RIFF\0\0\0\0WEBPVP8 ");
+    // The edge's reply to the transform request: what Cloudflare (or anything
+    // pretending to be it) says it produced.
+    const cloudflareHandler = (body: Uint8Array, contentType: string) =>
+      createFarmImageHandler(resolveFarmImageConfig(undefined), {
+        fetch: vi.fn(
+          async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+        ) as typeof fetch,
+        transform: createCloudflareImageTransformer(
+          vi.fn(
+            async () => new Response(body, { headers: { "content-type": contentType } }),
+          ) as typeof fetch,
+        ),
+      });
+
+    it.each([
+      ["a type list ending in SVG", SVG_BYTES, "image/png, image/svg+xml"],
+      ["SVG bytes claimed as PNG", SVG_BYTES, "image/png"],
+      ["PNG bytes claimed as WebP", PNG, "image/webp"],
+      ["HTML claimed as an icon", new TextEncoder().encode("<html><script>"), "image/x-icon"],
+    ])("refuses %s", async (_label, body, contentType) => {
+      const response = await cloudflareHandler(
+        body,
+        contentType,
+      )(new Request(optimizerUrl("/photo.png"), { headers: { accept: "image/webp" } }));
+      expect(response?.status).toBe(500);
+      expect(response?.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    });
+
+    it("serves a result that is the type it claims, sandboxed", async () => {
+      const response = await cloudflareHandler(
+        WEBP_BYTES,
+        "image/webp; charset=binary",
+      )(new Request(optimizerUrl("/photo.png"), { headers: { accept: "image/webp" } }));
+      expect(response?.status).toBe(200);
+      expect(response?.headers.get("content-type")).toBe("image/webp");
+      expect(response?.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    });
   });
 
   it("returns a sanitized cancellation response", async () => {

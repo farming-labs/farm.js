@@ -22,14 +22,15 @@ function runtime(config = resolveMarkdownConfig(undefined)) {
     "createMarkdownMirrorResponse",
     "matchPageRoute",
     "getFarmRoutePathname",
-    "handleFarmRequest",
+    "fetchFarmInnerRequest",
     "applyProductionMiddlewareHeaders",
     `return async function(request) {
       const url = new URL(request.url);
       const adapterContext = {};
       const middlewareHeaders = undefined;
-      // A top-level constant of the generated server.
+      // Top-level constants of the generated server (an app without trailingSlash).
       const farmLocalAPIBasePath = "/api";
+      const toFarmMarkdownPageRequest = (request) => request;
       ${source.slice(start, end)}
       return null;
     };`,

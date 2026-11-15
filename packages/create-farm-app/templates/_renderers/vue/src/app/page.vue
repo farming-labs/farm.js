@@ -82,6 +82,14 @@ async function callServer() {
               is listed in /llms.txt, and carries JSON-LD and Open Graph from your metadata.
             </p>
           </li>
+          <li>
+            <span>05</span>
+            <p>
+              <strong>Server functions.</strong> src/app/api/greeting/route.ts runs only on the
+              server. The button above calls it through a typed client, so a change to its input or
+              output shows up as a type error here.
+            </p>
+          </li>
         </ul>
 
         <ResourceLinks class="resource-links" />

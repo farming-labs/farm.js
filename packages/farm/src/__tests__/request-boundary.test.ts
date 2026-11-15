@@ -66,7 +66,7 @@ describe("dev request boundary", () => {
     await settle();
 
     expect(res.statusCode).toBe(500);
-    expect(chunks.join("")).toContain("Internal server error");
+    expect(JSON.parse(chunks.join(""))).toEqual({ error: "Internal Server Error" });
     // The throw must not escape as an unhandled rejection — that is what
     // killed the dev server in #481.
     expect(unhandled).toEqual([]);
@@ -86,7 +86,7 @@ describe("dev request boundary", () => {
     await settle();
 
     expect(res.statusCode).toBe(500);
-    expect(chunks.join("")).toContain("Internal server error");
+    expect(JSON.parse(chunks.join(""))).toEqual({ error: "Internal Server Error" });
     expect(unhandled).toEqual([]);
   });
 

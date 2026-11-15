@@ -15,9 +15,7 @@ const authBaseUrl =
 
 export const auth = betterAuth({
   baseURL: authBaseUrl,
-  secret:
-    getExampleEnv("BETTER_AUTH_SECRET") ??
-    "farm-example-better-auth-secret-for-local-dev-only",
+  secret: getExampleEnv("BETTER_AUTH_SECRET"),
   database: authDatabase,
   trustedOrigins: [authBaseUrl, "http://127.0.0.1:3001"],
   emailAndPassword: {

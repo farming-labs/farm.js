@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { definePlugin, type FarmPlugin, type FarmPluginClientConfig } from "@farm.js/core/plugin";
+import { isFarmRendererDisabled } from "@farm.js/core/renderer";
 import type { RequestHandler } from "msw";
 import {
   resolveMswOptions,
@@ -125,6 +126,16 @@ export function msw(options: MswPluginOptions) {
       publicConfig.workerUrl = `${basePath === "/" ? "" : basePath}/${DEFAULT_WORKER_FILE}`;
       publicConfig.scope = basePath === "/" ? "/" : `${basePath}/`;
 
+      // A backend-only app has no pages to register a browser worker on; server mocking still runs.
+      if (isFarmRendererDisabled(config.renderer)) {
+        if (options.browser === true) {
+          throw new Error(
+            "[farm:msw] `browser: true` mocks requests from rendered pages, but this app sets " +
+              "`renderer: false` and has no pages. Remove `browser: true`; server mocking still runs.",
+          );
+        }
+        return;
+      }
       if (!resolved.browser) return;
 
       const vite = config.vite ?? {};

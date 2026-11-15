@@ -50,7 +50,17 @@ async function createProject(): Promise<string> {
     {
       matcher: "/private/:path*",
       handler() {
-        return new Response(null, { status: 307, headers: { location: "/login" } });
+        return new Response("Redirecting", {
+          status: 307,
+          headers: { location: "/login", "set-cookie": "next=private; Path=/" },
+        });
+      },
+    },
+    {
+      matcher: "/moved",
+      handler(ctx) {
+        ctx.headers.set("x-moved-guard", "yes");
+        ctx.redirect("https://accounts.example.com/sign-in", 302);
       },
     },
     {
@@ -106,13 +116,31 @@ describe("development page-data middleware", () => {
     expect(document.status).toBe(307);
     expect(document.headers.get("location")).toBe("/login");
 
-    // ...and so is the page data a client navigation to it fetches.
+    // ...and so is the page data a client navigation to it fetches. The
+    // redirect comes back as an instruction: fetch would follow a real 3xx to
+    // the target's HTML, which the router cannot use.
     const guarded = await fetch(`${origin}/__farm/page-data?path=/private`, {
       redirect: "manual",
     });
-    expect(guarded.status).toBe(307);
-    expect(guarded.headers.get("location")).toBe("/login");
-    await expect(guarded.text()).resolves.not.toContain("private-page-content");
+    expect(guarded.status).toBe(200);
+    expect(guarded.headers.get("location")).toBeNull();
+    expect(guarded.headers.get("x-farm-navigation")).toBe("redirect");
+    expect(guarded.headers.get("cache-control")).toBe("no-store");
+    expect(guarded.headers.get("set-cookie")).toBe("next=private; Path=/");
+    await expect(guarded.json()).resolves.toEqual({
+      redirect: { location: "/login", status: 307 },
+    });
+
+    // ctx.redirect() writes the response itself; it is held back the same way.
+    const moved = await fetch(`${origin}/__farm/page-data?path=/moved`, { redirect: "manual" });
+    expect(moved.status).toBe(200);
+    expect(moved.headers.get("x-moved-guard")).toBe("yes");
+    await expect(moved.json()).resolves.toEqual({
+      redirect: { location: "https://accounts.example.com/sign-in", status: 302 },
+    });
+    const movedDocument = await fetch(`${origin}/moved`, { redirect: "manual" });
+    expect(movedDocument.status).toBe(302);
+    expect(movedDocument.headers.get("location")).toBe("https://accounts.example.com/sign-in");
 
     // Pass-through middleware still contributes headers and data.
     const account = await fetch(`${origin}/__farm/page-data?path=/account`);

@@ -1,9 +1,10 @@
 // @vitest-environment node
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createFarmMarkdownRouteModuleFromFile } from "../app-markdown";
 import {
   analyzeStaticRouteCandidate,
   collectSSGPages,
@@ -255,6 +256,18 @@ describe("route rendering config", () => {
       ]),
     });
 
+    // Characters outside the BMP are two UTF-16 units: masking must stay aligned past them.
+    expect(
+      analyzeStaticRouteCandidate(
+        {},
+        `import { cookies } from "@farm.js/core";
+         export default function Launch() {
+           const label = "🚀🚀🚀🚀"; cookies(); // 🌾
+           return \`${"${label}"} 🌱\` + headers();
+         }`,
+      ),
+    ).toMatchObject({ candidate: false, blockers: ["the route reads request cookies"] });
+
     expect(
       analyzeStaticRouteCandidate(
         {},
@@ -311,6 +324,83 @@ describe("route rendering config", () => {
 
     expect(result).toEqual({ ssg: [], ssr: ["/about"] });
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("points docs adapter pages at docs.prerender instead of route config", async () => {
+    const dir = await createTempDir("farm-static-candidate-docs-");
+    const docsPage = path.join(dir, "docs-page.mdx");
+    const appPage = path.join(dir, "page.tsx");
+    await writeFile(docsPage, "# Guide\n");
+    await writeFile(appPage, `export default function About() { return <main>About</main>; }`);
+    const routes = [
+      { path: "/docs/guide", filePath: docsPage, isDynamic: false, pattern: "/docs/guide" },
+      { path: "/about", filePath: appPage, isDynamic: false, pattern: "/about" },
+    ];
+    const owns = (routePath: string) => routePath.startsWith("/docs/");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await collectSSGPages(routes, async () => ({}) as RouteModule, {
+      docsAdapterRoutes: { owns, prerender: false },
+    });
+
+    const messages = warn.mock.calls.map(([message]) => String(message));
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toContain("/about");
+    expect(messages[0]).not.toContain("/docs/guide");
+    expect(messages[1]).toBe(
+      "[Farm.js] 1 docs page renders on each request. Set `docs.prerender: true` in farm.config.ts to prerender docs pages on Node and serverless targets.",
+    );
+
+    warn.mockClear();
+    await collectSSGPages(routes, async () => ({}) as RouteModule, {
+      docsAdapterRoutes: { owns, prerender: true },
+    });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(String(warn.mock.calls[0]?.[0])).not.toContain("docs");
+  });
+
+  it("collects a Markdown page that exports static route config", async () => {
+    const dir = await createTempDir("farm-ssg-markdown-");
+    const page = async (name: string, source: string) => {
+      const filePath = path.join(dir, name, "page.mdx");
+      await mkdir(path.dirname(filePath), { recursive: true });
+      await writeFile(filePath, source);
+      return { path: `/${name}`, filePath, isDynamic: false, pattern: `/${name}` };
+    };
+    const routes = [
+      await page("installation", 'export const dynamic = "force-static";\n\n# Installation\n'),
+      await page("changelog", "export const revalidate = 300;\n\n# Changelog\n"),
+      await page("about", "# About\n"),
+      await page(
+        "account",
+        [
+          'import { cookies } from "@farm.js/core/headers";',
+          'export const dynamic = "force-static";',
+          "",
+          '# Hello {cookies().get("user")?.value}',
+        ].join("\n"),
+      ),
+      await page("docs", 'export const dynamic = "force-static";\n\n# Docs\n'),
+    ];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const result = await collectSSGPages(
+      routes,
+      (filePath) => createFarmMarkdownRouteModuleFromFile(filePath),
+      {
+        docsAdapterRoutes: { owns: (routePath) => routePath === "/docs", prerender: false },
+      },
+    );
+
+    expect(result.ssg).toEqual([
+      { urlPath: "/installation", filePath: routes[0].filePath, params: {}, revalidate: undefined },
+      { urlPath: "/changelog", filePath: routes[1].filePath, params: {}, revalidate: 300 },
+    ]);
+    // A page that reads cookies stays per request, and the docs runtime renders its own pages.
+    expect(result.ssr).toEqual(["/about", "/account", "/docs"]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Static rendering disabled for "/account"'),
+    );
   });
 
   it("keeps explicitly static routes dynamic when they read request data", async () => {

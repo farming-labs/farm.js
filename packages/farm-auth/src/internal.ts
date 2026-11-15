@@ -4,6 +4,7 @@ import {
   disposeFarmAuth as runDispose,
   getFarmAuthRuntime,
   migrateFarmAuth as runMigration,
+  withFarmAuthClientAddress,
   compileFarmAuthMigration as runCompileMigration,
 } from "./runtime.js";
 
@@ -22,6 +23,13 @@ interface FarmAuthIntegration {
     methods: readonly ["GET", "POST"];
     handler(request: Request): Promise<Response>;
   }>;
+  session(request: Request): Promise<FarmAuthIntegrationSession | null>;
+}
+
+interface FarmAuthIntegrationSession {
+  id: string;
+  userId: string;
+  expiresAt: Date;
 }
 
 export function createFarmAuthIntegration(
@@ -41,10 +49,24 @@ export function createFarmAuthIntegration(
         methods: ["GET", "POST"],
         async handler(request) {
           const runtime = await getFarmAuthRuntime();
-          return runtime.handler(request);
+          return runtime.handler(withFarmAuthClientAddress(request));
         },
       },
     ],
+    // Farm's session contract: who the request's cookies sign in. Mobile session tokens use it.
+    async session(request) {
+      const runtime = await getFarmAuthRuntime();
+      const result = (await runtime.api.getSession({ headers: request.headers })) as {
+        session?: { id?: unknown; userId?: unknown; expiresAt?: unknown };
+      } | null;
+      const session = result?.session;
+      if (!session || typeof session.id !== "string") return null;
+      return {
+        id: session.id,
+        userId: String(session.userId),
+        expiresAt: new Date(session.expiresAt as string | number | Date),
+      };
+    },
   };
 }
 

@@ -46,7 +46,22 @@ export class DeferredDataError extends Error {
   }
 }
 
-const deferredStates = new WeakMap<object, DeferredState>();
+// A deferred carries its settled state on itself, under a `Symbol.for` key, rather than in a
+// module WeakMap. In development the route's data runs under Vite's SSR runner, which loads its
+// own copy of this module, while the dev server's copy snapshots the state for the client.
+const FARM_DEFERRED_STATE = Symbol.for("farm.deferred.state");
+
+type DeferredWithState = Deferred<unknown> & { [FARM_DEFERRED_STATE]?: DeferredState };
+
+function setDeferredState(promise: Deferred<unknown>, state: DeferredState): void {
+  // Reflect, not Object: a promise the app froze keeps working, read through React's fields.
+  Reflect.defineProperty(promise, FARM_DEFERRED_STATE, {
+    configurable: true,
+    enumerable: false,
+    value: state,
+    writable: true,
+  });
+}
 
 export function defer<T>(value: PromiseLike<T>): Deferred<Awaited<T>> {
   if (isDeferred(value)) {
@@ -60,10 +75,10 @@ export function defer<T>(value: PromiseLike<T>): Deferred<Awaited<T>> {
     value: true,
     writable: false,
   });
-  deferredStates.set(promise, { status: "pending" });
+  setDeferredState(promise, { status: "pending" });
   promise.then(
-    (resolved) => deferredStates.set(promise, { status: "fulfilled", value: resolved }),
-    (reason) => deferredStates.set(promise, { status: "rejected", reason }),
+    (resolved) => setDeferredState(promise, { status: "fulfilled", value: resolved }),
+    (reason) => setDeferredState(promise, { status: "rejected", reason }),
   );
   return promise;
 }
@@ -469,7 +484,7 @@ function getControlledDeferred(
 }
 
 function readDeferredState(promise: Deferred<unknown>): DeferredState {
-  const tracked = deferredStates.get(promise);
+  const tracked = (promise as DeferredWithState)[FARM_DEFERRED_STATE];
   if (tracked && tracked.status !== "pending") return tracked;
 
   const reactState = promise as Deferred<unknown> & {

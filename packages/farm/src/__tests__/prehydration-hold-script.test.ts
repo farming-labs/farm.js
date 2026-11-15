@@ -51,6 +51,23 @@ describe("inline pre-hydration hold script", () => {
     ]);
   });
 
+  it("queues every click on a control, and a repeated click on a submit button once", () => {
+    document.body.innerHTML =
+      '<button type="button" id="add">Add</button><form><button id="save">Save</button></form>';
+    const add = document.getElementById("add")!;
+    const save = document.getElementById("save")!;
+    for (const target of [add, add, save, save]) {
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+      target.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    }
+    expect(holdWindow.__FARM_PREHYDRATION_CLICK_QUEUE__!.map((item) => item.target)).toEqual([
+      add,
+      add,
+      save,
+    ]);
+  });
+
   it("lets submits through natively once the document is marked hydrated", () => {
     const form = document.getElementById("form") as HTMLFormElement;
     holdWindow.__FARM_HYDRATED__ = true;

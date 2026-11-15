@@ -74,7 +74,14 @@ grant minted for its exact preview name through `token`.
 agent must pass that secret through its `token` option. Managed deployments should instead mint a
 short-lived grant, validate it in `authorizeAgent`, and pass that grant through the same agent option.
 
-When the relay can run on multiple server instances, provide a shared `PersistentPreviewRelayCoordinator`. Same-instance requests continue to use the direct in-memory path; the coordinator carries requests and responses only when the HTTP request lands on another instance. The hosted Vercel gateway uses Redis lists and expiring session ownership for this path.
+When `authorizeAgent` returns a verified `ownerId`, the relay binds the name to that owner while the
+agent is connected and for `nameReservationMs` (default 5 minutes) after it disconnects. Another
+owner's registration is refused in that window, so a dropped socket can reconnect before anyone else
+takes the hostname and its visitors' cookies. When a polling gateway serves the same domain, pass its
+`isPreviewNameClaimed` to the relay and the relay's `isPreviewNameClaimed(name, ownerId)` back to
+the gateway, so neither transport accepts a name the other holds.
+
+When the relay can run on multiple server instances, provide a shared `PersistentPreviewRelayCoordinator`. Implement its optional `reserveName` and `findNameOwner` methods to share owner bindings across instances. Same-instance requests continue to use the direct in-memory path; the coordinator carries requests and responses only when the HTTP request lands on another instance. The hosted Vercel gateway uses Redis lists and expiring session ownership for this path.
 
 The agent closes automatically when the local target becomes unreachable. The relay then removes its public route.
 

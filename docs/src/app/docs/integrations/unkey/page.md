@@ -131,8 +131,8 @@ unkey({
   apiId: process.env.UNKEY_API_ID,
   protectedRoutes: ["/api/public/[...path]"],
   protection: {
-    header: "authorization",
-    permissions: ["documents.read"],
+    headers: "authorization",
+    permissions: "documents.read",
   },
 });
 ```

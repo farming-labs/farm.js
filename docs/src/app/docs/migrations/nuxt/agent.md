@@ -62,7 +62,7 @@ Run the phases in order. Do not start a phase until the previous phase's verific
 Pin exact versions: pnpm 11+ applies `minimumReleaseAge`, which can resolve `latest` to an older
 Farm release right after a publish. Keep `@farm.js/core` and `@farm.js/cli` on the same version.
 If pnpm refuses a version younger than the release-age window, add that exact `package@version` to
-`minimumReleaseAgeExclude` in `pnpm-workspace.yaml`. `@farm.js/vue` requires `vue@^3.5.41`.
+`minimumReleaseAgeExclude` in `pnpm-workspace.yaml`. `@farm.js/vue` requires `vue@^3.5.44`.
 
 ```bash
 FARM_VERSION=$(npm view @farm.js/core version)

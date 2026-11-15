@@ -35,6 +35,7 @@ describe("ai integration", () => {
     const streamTextCalls: unknown[] = [];
     const POST = aiChatRoute({
       model: "openai/gpt-4o-mini",
+      allowUnauthenticated: true,
       system: "You are a helpful Farm.js assistant.",
       convertToModelMessages: async (messages) => {
         expect(messages).toEqual(chatMessages);
@@ -121,6 +122,7 @@ describe("ai integration", () => {
               return {
                 POST: aiChatRoute({
                   model: "openai/gpt-4o-mini",
+                  allowUnauthenticated: true,
                   convertToModelMessages: async (messages) => {
                     expect(messages).toEqual(chatMessages);
                     return [
@@ -187,6 +189,7 @@ describe("ai integration", () => {
   it("returns 400 for invalid chat route request bodies", async () => {
     const POST = aiChatRoute({
       model: "openai/gpt-4o-mini",
+      allowUnauthenticated: true,
       streamText: (() => {
         throw new Error("streamText should not run for invalid input.");
       }) as any,

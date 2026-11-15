@@ -249,7 +249,8 @@ describe("Vercel route runtime output", () => {
     const routes = await createFarmVercelRouteRuntimeFunctions(outputDir, manifest, fsPromises);
 
     expect(routes).toEqual([
-      expect.objectContaining({ src: "/api/eu", dest: "/__farm_runtime_1" }),
+      // API routes get no injected wildcard CORS headers; routeRules.cors owns CORS.
+      { src: "/api/eu", dest: "/__farm_runtime_1" },
       { src: "/products/([^/]+)", dest: "/__nitro" },
       { src: "/reports", dest: "/__farm_runtime_2" },
       { src: "/admin(?:/(.*))?", dest: "/__farm_runtime_1" },

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isFarmRendererDisabled } from "./renderer";
 import { getDeployTargetForPreset } from "./config";
 import { resolveCronConfig, type FarmCronJob } from "./cron";
 import {
@@ -532,7 +533,9 @@ export async function createFarmDevtoolsSnapshot(
   );
   const env = input.env || process.env;
 
-  if (pageRoutes.length === 0) {
+  // `renderer: false` serves API routes only, so pages and layouts are not expected.
+  const servesPages = !isFarmRendererDisabled(config.renderer);
+  if (servesPages && pageRoutes.length === 0) {
     diagnostics.push({
       severity: "warning",
       code: "NO_PAGE_ROUTES",
@@ -541,7 +544,7 @@ export async function createFarmDevtoolsSnapshot(
       action: `Add ${input.srcDir}/app/page.tsx or a programmatic page route.`,
     });
   }
-  if (layoutRoutes.length === 0) {
+  if (servesPages && layoutRoutes.length === 0) {
     diagnostics.push({
       severity: "warning",
       code: "ROOT_LAYOUT_MISSING",

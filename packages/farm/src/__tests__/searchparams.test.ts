@@ -238,15 +238,15 @@ describe("SearchParams in the production runtime", () => {
     expect(source).toContain("const searchParamsObj = searchParamsToObject(url.searchParams);");
     expect(source).not.toContain("Object.fromEntries(url.searchParams.entries())");
     expect(readSource("nitro", "production-runtime.ts")).toContain(
-      'export { searchParamsToObject } from "../search-params";',
+      'export { createFarmSearchParams, searchParamsToObject } from "../search-params";',
     );
   });
 
   it("hydrates and client-navigates with array-aware search params", () => {
     const source = readSource("nitro", "universal-build.ts");
 
-    expect(source).toContain(
-      'import { createClientCancellation, createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";',
+    expect(source).toMatch(
+      /import \{[^}]*\bsearchParamsToObject\b[^}]*\} from "@farm\.js\/core\/internal\/client-runtime";/,
     );
     expect(source).toContain(
       "const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));",
@@ -255,7 +255,7 @@ describe("SearchParams in the production runtime", () => {
     expect(source).not.toContain("Object.fromEntries(targetUrl.searchParams)");
     expect(source).not.toContain("Object.fromEntries(new URLSearchParams(window.location.search))");
     expect(readSource("client", "production-runtime.ts")).toContain(
-      'export { searchParamsToObject } from "../search-params";',
+      'export { createFarmSearchParams, searchParamsToObject } from "../search-params";',
     );
   });
 
@@ -282,7 +282,9 @@ describe("SearchParams in the production runtime", () => {
   it("shares the dev renderer's helper", () => {
     const source = readSource("server", "renderer.ts");
 
-    expect(source).toContain('import { searchParamsToObject } from "../search-params";');
+    expect(source).toContain(
+      'import { createFarmSearchParams, searchParamsToObject } from "../search-params";',
+    );
   });
 
   it("shares the helper with secondary production, dev navigation, and test runtimes", () => {
@@ -291,7 +293,7 @@ describe("SearchParams in the production runtime", () => {
     const testingSource = readSource("testing.ts");
 
     expect(nitroSource).toContain(
-      "import { searchParamsToObject } from '@farm.js/core/internal/production-runtime';",
+      "import { createFarmSearchParams, searchParamsToObject } from '@farm.js/core/internal/production-runtime';",
     );
     expect(nitroSource).toContain(
       "const searchParamsObject = searchParamsToObject(url.searchParams);",

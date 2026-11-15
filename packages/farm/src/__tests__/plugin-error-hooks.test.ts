@@ -191,3 +191,49 @@ describe("plugin error hook isolation", () => {
     },
   );
 });
+
+describe("runtime request scope reportError", () => {
+  it("runs runtime.error for a failure the handler answers, then runtime.after", async () => {
+    const manager = createManager();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failure = new Error("route failed");
+    const afterFailure = new Error("after failed");
+    const trace: string[] = [];
+    manager.addPlugin({
+      name: "observer",
+      runtime: {
+        after({ response }) {
+          trace.push(`after ${response.status}`);
+          if (response.headers.has("x-fail-after")) throw afterFailure;
+        },
+        error({ error }) {
+          trace.push(`error ${(error as Error).message}`);
+        },
+      },
+    });
+    try {
+      const response = await manager.runRuntimeRequest(
+        new Request("http://localhost/api/boom"),
+        async (_request, { reportError }) => {
+          await reportError(failure);
+          return new Response(null, { status: 500 });
+        },
+      );
+      expect(response.status).toBe(500);
+      expect(trace).toEqual(["error route failed", "after 500"]);
+
+      // A reported failure does not mark the request failed: an after hook that throws later
+      // is still reported.
+      trace.length = 0;
+      await expect(
+        manager.runRuntimeRequest(new Request("http://localhost/api/boom"), async (_r, scope) => {
+          await scope.reportError(failure);
+          return new Response(null, { status: 500, headers: { "x-fail-after": "1" } });
+        }),
+      ).rejects.toBe(afterFailure);
+      expect(trace).toEqual(["error route failed", "after 500", "error after failed"]);
+    } finally {
+      await manager.closeRuntime();
+    }
+  });
+});

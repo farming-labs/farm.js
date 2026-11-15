@@ -32,6 +32,27 @@ export function resolveFarmAPICanonicalPathname(
   return pathname;
 }
 
+/**
+ * @internal The pathnames middleware matches for one request. A local API route answers at its
+ * canonical `/api` path and at the configured public path, so a `src/app/api/**` middleware file
+ * (named for the canonical path) and a config matcher written for either form guard both.
+ */
+export function createFarmAPIMiddlewarePathnames(
+  serverBasePath = DEFAULT_FARM_API_BASE_PATH,
+): (pathname: string) => readonly string[] {
+  const basePath = normalizeFarmAPIBasePath(serverBasePath);
+  if (basePath === DEFAULT_FARM_API_BASE_PATH) return (pathname) => [pathname];
+
+  const prefix = DEFAULT_FARM_API_BASE_PATH;
+  return (pathname) => {
+    const canonical = resolveFarmAPICanonicalPathname(pathname, basePath);
+    if (canonical !== prefix && !canonical.startsWith(`${prefix}/`)) return [pathname];
+    const suffix = canonical.slice(prefix.length);
+    const publicPath = basePath === "/" ? suffix || "/" : `${basePath}${suffix}`;
+    return [...new Set([pathname, canonical, publicPath])];
+  };
+}
+
 /** Resolve a canonical `/api` route to the path served by this application. */
 export function resolveFarmAPIServerRoutePath(
   routePath: string,

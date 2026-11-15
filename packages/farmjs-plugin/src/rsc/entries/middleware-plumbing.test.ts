@@ -1,8 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { IncomingMessage, ServerResponse } from "node:http";
+import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import farmRsc from "../index.js";
+import { pathToFileURL } from "node:url";
+import { createProductionMiddlewareRunner } from "@farm.js/core/internal/production-runtime";
+import { describe, expect, it, vi } from "vitest";
+import farmRsc, { defineConfig } from "../index.js";
 import { linkRscFixtureDependencies } from "../test-fixture-dependencies.js";
 
 type ConfigHook = (
@@ -17,7 +21,12 @@ type ConfigHook = (
  */
 async function generateEntry(
   userConfig: Record<string, unknown>,
-  options: { command?: "serve" | "build"; configSource?: string } = {},
+  options: {
+    command?: "serve" | "build";
+    configSource?: string;
+    /** The entries of farm.config.ts's `plugins` for the server to load. */
+    serverPlugins?: { indexes: number[]; count: number };
+  } = {},
 ): Promise<string> {
   const root = mkdtempSync(path.join(tmpdir(), "farm-rsc-middleware-"));
   try {
@@ -25,7 +34,20 @@ async function generateEntry(
     if (options.configSource) {
       writeFileSync(path.join(root, "farm.config.ts"), options.configSource);
     }
-    const plugin = farmRsc().find((candidate) => candidate.name === "@farm.js/plugin/rsc:config");
+    // A build reads each locale's catalog, as core's build does.
+    const i18n = userConfig.i18n as { locales?: string[] } | undefined;
+    if (i18n?.locales) {
+      mkdirSync(path.join(root, "src/messages"), { recursive: true });
+      for (const locale of i18n.locales) {
+        writeFileSync(path.join(root, `src/messages/${locale}.json`), "{}");
+      }
+    }
+    const serverPlugins = options.serverPlugins && {
+      [path.join(root, "farm.config.ts")]: options.serverPlugins,
+    };
+    const plugin = farmRsc({ serverPlugins }).find(
+      (candidate) => candidate.name === "@farm.js/plugin/rsc:config",
+    );
     await (plugin!.config as ConfigHook)(
       { root, experimental: { serverComponents: true }, ...userConfig },
       {
@@ -109,6 +131,120 @@ export default defineConfig({
   it("fails loudly when live config middleware has no importable config module", async () => {
     await expect(
       generateEntry({ middleware: { matcher: "/private", handler() {} } }),
-    ).rejects.toThrow(/requires an importable farm\.config file/);
+    ).rejects.toThrow(/requires an importable farm\.config or vite\.config file/);
+  });
+});
+
+describe("plugins reach the production RSC entry", () => {
+  const configSource = `import { recorder } from "./recorder";
+export default { plugins: [recorder()] };`;
+  const serverPlugins = { indexes: [0], count: 1 };
+
+  it("imports the config's plugins when `farm build` asks for them", async () => {
+    const entry = await generateEntry({}, { configSource, serverPlugins });
+    expect(entry).toMatch(/^import ".*farm\.config\.ts\?farm-rsc-plugins";$/m);
+  });
+
+  it("leaves them out of development and of builds that don't ask", async () => {
+    for (const options of [
+      { configSource, serverPlugins, command: "serve" as const },
+      { configSource },
+    ]) {
+      expect(await generateEntry({}, options)).not.toContain("farm-rsc-plugins");
+    }
+  });
+
+  it("fails when the build can't read plugins from the config", async () => {
+    await expect(
+      generateEntry(
+        {},
+        {
+          configSource: `const shared = { plugins: [] };\nexport default { ...shared };`,
+          serverPlugins,
+        },
+      ),
+    ).rejects.toThrow(
+      /Cannot read plugins for the RSC server from .*farm\.config\.ts: plugins may be supplied through a config spread/,
+    );
+  });
+});
+
+describe("defineConfig({ middleware }) from @farm.js/plugin/rsc", () => {
+  const guard = {
+    matcher: "/admin/:path*",
+    handler: () => new Response("Unauthorized", { status: 401 }),
+  };
+  const viteConfigSource = `import { defineConfig } from "@farm.js/plugin/rsc";
+export default defineConfig({
+  srcDir: "src",
+  middleware: {
+    matcher: "/admin/:path*",
+    handler: () => new Response("Unauthorized", { status: 401 }),
+  },
+});`;
+
+  it("guards the generated production entry", async () => {
+    const userConfig = defineConfig({ middleware: guard }) as Record<string, unknown>;
+    expect(userConfig.middleware).toBe(guard);
+
+    const root = mkdtempSync(path.join(tmpdir(), "farm-rsc-define-config-middleware-"));
+    try {
+      linkRscFixtureDependencies(root);
+      writeFileSync(path.join(root, "vite.config.ts"), viteConfigSource);
+      const plugins = farmRsc();
+      const configPlugin = plugins.find((plugin) => plugin.name === "@farm.js/plugin/rsc:config");
+      await (configPlugin!.config as ConfigHook)(
+        { ...userConfig, root, plugins: undefined },
+        { command: "build", mode: "production" },
+      );
+      const entry = readFileSync(path.join(root, ".farm/rsc-entries/entry.rsc.tsx"), "utf8");
+      const moduleId = entry.match(
+        /import \* as FarmMiddlewareConfigModule0 from "(.*vite\.config\.ts\?farm-rsc-middleware)";/,
+      )?.[1];
+      expect(moduleId).toBeTruthy();
+      expect(entry).toContain("const farmRuntimeConfigs = [(FarmMiddlewareConfigModule0.default");
+
+      // Run the module the entry imports, as the entry does, through core's runner.
+      const loader = plugins.find(
+        (plugin) => plugin.name === "@farm.js/plugin/rsc:middleware-config",
+      ) as { load(id: string): string | null };
+      const modulePath = path.join(root, "extracted-middleware.mjs");
+      writeFileSync(modulePath, loader.load(moduleId!)!);
+      const extracted = await import(pathToFileURL(modulePath).href);
+      const runner = createProductionMiddlewareRunner({ config: extracted.default.middleware });
+      const blocked = await runner(new Request("https://example.test/admin/users"));
+      expect(blocked.response?.status).toBe(401);
+      expect((await runner(new Request("https://example.test/"))).response).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("guards development requests through the standalone middleware plugin", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-rsc-define-config-middleware-dev-"));
+    try {
+      const config = defineConfig({ middleware: guard });
+      const middlewarePlugin = (config.plugins as Array<{ name?: string }>).find(
+        (plugin) => plugin.name === "@farm.js/core:middleware",
+      ) as { configureServer(server: unknown): void };
+      const server = {
+        config: { root, mode: "development" },
+        environments: { ssr: { runner: { import: vi.fn() } } },
+        moduleGraph: { invalidateModule: vi.fn() },
+        ws: { send: vi.fn() },
+      } as Record<string, any>;
+      middlewarePlugin.configureServer(server);
+      await server.__farmMiddleware__.waitForDiscovery();
+
+      const request = new IncomingMessage(new Socket());
+      request.url = "/admin/users";
+      request.method = "GET";
+      request.headers = { host: "localhost" };
+      const response = new ServerResponse(request);
+      expect(await server.__farmMiddleware__.execute(request, response)).toBe(true);
+      expect(response.statusCode).toBe(401);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

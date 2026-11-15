@@ -62,9 +62,15 @@ FARMJS owns the catch-all integration route, so the starter does not need a manu
 
 | Variable             | Purpose                                   |
 | -------------------- | ----------------------------------------- |
-| `BETTER_AUTH_URL`    | Public origin used by Better Auth         |
+| `BETTER_AUTH_URL`    | Public origin, required in production     |
 | `BETTER_AUTH_SECRET` | Secret used to sign and encrypt auth data |
 | `DATABASE_URL`       | Pooled Postgres connection string         |
+
+Without `BETTER_AUTH_URL`, `farm dev` trusts the origin it is serving the request on when the host
+is `localhost`, `*.localhost`, or an IP address, so another port, the Android emulator's
+`http://10.0.2.2:<port>`, and LAN devices under `farm dev --host` can sign in. A page on another
+origin is still rejected. Set `BETTER_AUTH_URL` for a custom dev hostname; production trusts only
+that origin.
 
 Never commit `.env.local` or expose the database connection string.
 

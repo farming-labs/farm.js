@@ -71,7 +71,10 @@ export interface ResolvedFarmServerHealthConfig {
 export interface FarmServerConfig {
   /** Maximum request body size for API routes, integrations, workflows, and uploads. */
   bodySizeLimit?: number | string;
-  /** Trust proxy-provided client address and request authority headers. Enable only behind a trusted proxy. */
+  /**
+   * Trust proxy-provided client address and request authority headers. Enable only behind a trusted proxy.
+   * The client address is the last `X-Forwarded-For` hop, the one the closest proxy appended.
+   */
   trustProxy?: boolean;
   /** Maximum time for a Node client to send complete request headers. */
   headersTimeout?: FarmServerDuration;
@@ -96,6 +99,16 @@ export interface ResolvedFarmServerConfig {
 }
 
 export type FarmRequestBodyErrorCode = "BODY_TOO_LARGE" | "INVALID_CONTENT_LENGTH";
+
+/** A weak ETag for a body: FNV-1a, since an ETag is opaque and need not be cryptographic. */
+export function createFarmWeakETag(body: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < body.length; index++) {
+    hash ^= body.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `W/"${(hash >>> 0).toString(16).padStart(8, "0")}"`;
+}
 
 /** Apply the weak entity-tag comparison required by If-None-Match. */
 export function matchesFarmIfNoneMatch(
@@ -318,8 +331,65 @@ export function parseBodySizeLimit(value: number | string, optionName = "bodySiz
   return bytes;
 }
 
-export function cloneFarmRequestWithContext(request: Request): Request {
+/**
+ * Attach the caller's address as `request.socket.remoteAddress`, the shape Farm's
+ * middleware and integrations read it from.
+ *
+ * A web Request carries no socket, so the address comes from a trusted proxy or
+ * from the server adapter's own connection. Never invent one: reporting
+ * `127.0.0.1` used to make every visitor look like the same client, which
+ * collapsed per-client rate limiting into one shared bucket. Leave it undefined
+ * so a consumer can tell that it does not know.
+ */
+export function withFarmRequestClientAddress<T extends Request>(
+  request: T,
+  trustProxy: boolean,
+  clientAddress: string | undefined,
+): T {
+  const requestWithShape = request as T & {
+    socket?: { remoteAddress?: string };
+  };
+
+  if (!requestWithShape.socket) {
+    // The trusted proxy appends the address it saw, so that hop is the last
+    // one. Anything before it was sent by the client and can be anything.
+    const forwardedFor = trustProxy
+      ? request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim()
+      : undefined;
+    try {
+      requestWithShape.socket = { remoteAddress: forwardedFor || clientAddress || undefined };
+    } catch {
+      // Some Request implementations may not be extensible.
+    }
+  }
+
+  return requestWithShape;
+}
+
+/**
+ * Clones of a request, kept alive for as long as the request itself.
+ *
+ * The undici in Node 22.13 to 22.20 (before undici 6.22.0) and early Node 24 registers a clone for
+ * finalization with the original's body stream: once the clone is garbage collected, an original
+ * nobody has read yet is cancelled and reads as an empty or already-used body. Farm reads a clone
+ * (to parse typed input, or to let a guard see the body) and hands the original on to the route,
+ * so a collection in between lost the route's body.
+ */
+const liveRequestClones = new WeakMap<Request, Request[]>();
+
+/** `request.clone()` whose clone cannot cancel the original's body when it is collected. */
+export function cloneFarmRequest(request: Request): Request {
   const cloned = request.clone();
+  if (request.body) {
+    const clones = liveRequestClones.get(request);
+    if (clones) clones.push(cloned);
+    else liveRequestClones.set(request, [cloned]);
+  }
+  return cloned;
+}
+
+export function cloneFarmRequestWithContext(request: Request): Request {
+  const cloned = cloneFarmRequest(request);
   copyRequestContext(request, cloned);
   return cloned;
 }
@@ -394,7 +464,31 @@ export async function readFarmRequestBody(request: Request, limit: number): Prom
   return body;
 }
 
+/**
+ * A Node request's body can be read once. A guard that reads it (an integration's
+ * protectedRoutes check, say) and the handler that runs next both call readNodeRequestBody,
+ * so the bytes are kept per request and the second reader gets the same ones instead of
+ * waiting on a stream that already ended.
+ */
+const nodeRequestBodies = new WeakMap<object, Promise<Buffer>>();
+
 export async function readNodeRequestBody(
+  request: Parameters<typeof readNodeRequestBodyOnce>[0],
+  limit: number,
+): Promise<Buffer> {
+  let body = nodeRequestBodies.get(request);
+  if (!body) {
+    body = readNodeRequestBodyOnce(request, limit);
+    nodeRequestBodies.set(request, body);
+  }
+  const bytes = await body;
+  if (bytes.byteLength > limit) {
+    throw new FarmRequestBodyError("BODY_TOO_LARGE", 413, "Request body is too large");
+  }
+  return bytes;
+}
+
+async function readNodeRequestBodyOnce(
   request: {
     headers: Record<string, string | string[] | undefined>;
     on(event: "data", listener: (chunk: unknown) => void): unknown;
@@ -452,6 +546,36 @@ export async function readNodeRequestBody(
     request.on("end", onEnd);
     request.on("error", onError);
   });
+}
+
+/**
+ * A Web body over a Node request that reads nothing until it is pulled, so a handler that
+ * declines the request without reading its body leaves the stream to the next handler.
+ */
+export function createFarmNodeRequestBodyStream(
+  request: AsyncIterable<unknown>,
+): ReadableStream<Uint8Array> {
+  let iterator: AsyncIterator<unknown> | undefined;
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        iterator ??= request[Symbol.asyncIterator]();
+        const { value, done } = await iterator.next();
+        if (done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(
+          value instanceof Uint8Array ? value : new TextEncoder().encode(String(value)),
+        );
+      },
+      async cancel(reason) {
+        await iterator?.return?.(reason);
+      },
+    },
+    // No eager pull: the request stays untouched until the handler reads it.
+    { highWaterMark: 0 },
+  );
 }
 
 export function createFarmRequestBodyErrorResponse(error: unknown): Response | null {

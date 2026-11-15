@@ -27,15 +27,29 @@ const notFound = () =>
     headers: { "content-type": "text/html" },
   });
 
+const prose = "Acme bills small teams by usage, with invoices agents can read. ".repeat(10);
+const organization = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "Acme",
+  contactPoint: { "@type": "ContactPoint", contactType: "support", email: "hi@acme.test" },
+  address: { "@type": "PostalAddress", addressLocality: "Berlin", addressCountry: "DE" },
+};
 const page = `<!doctype html><html lang="en"><head><title>Acme</title>
 <meta name="description" content="Billing for small teams.">
 <link rel="canonical" href="https://acme.test/">
 <link rel="alternate" type="text/markdown" href="/index.md">
-<script type="application/ld+json">{"@type":"Organization"}</script></head>
-<body><main><h1>Acme</h1></main></body></html>`;
+<script type="application/ld+json">${JSON.stringify(organization)}</script></head>
+<body><main><h1>Acme</h1><h2>Pricing</h2><p>${prose}</p></main>
+<footer><a href="/company">About us</a><a href="https://legal.acme.test/privacy-policy">Privacy</a></footer></body></html>`;
+const article = (title) =>
+  `<!doctype html><html><body><main><h1>${title}</h1><p>${prose}</p></main></body></html>`;
 
-/** A complete Farm app, served under `base`. */
-function completeApp(base = "") {
+/**
+ * A complete Farm app, served under `base`. `mcpInLlms` controls whether llms.txt carries the
+ * "MCP" section core generates beside the pages, which also makes the endpoint discoverable.
+ */
+function completeApp(base = "", { mcpInLlms = true } = {}) {
   return async (input, init = {}) => {
     const url = new URL(String(input));
     const accept = new Headers(init.headers).get("accept") ?? "";
@@ -56,12 +70,34 @@ function completeApp(base = "") {
         return markdown("# Invalid max_tokens\n", 400);
       case "GET /__farm-agent-check-missing.md":
         return markdown("# Not found\n", 404);
+      case "GET /__farm-agent-check-missing":
+        return accept.includes("text/markdown") ? markdown("# Not found\n", 404) : notFound();
+      case "GET /company":
+      case "GET /contact":
+        return html(article(route));
+      case "GET /sitemap.xml":
+        return new Response(
+          '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://acme.test/</loc><lastmod>2026-10-01</lastmod></url></urlset>',
+          { headers: { "content-type": "application/xml" } },
+        );
+      case "GET /.well-known/ai-catalog.json":
+        return Response.json({
+          specVersion: "1.0",
+          entries: [
+            { type: "application/mcp-server-card+json", url: `${base}/api/mcp/server-card` },
+          ],
+        });
       case "GET /llms.txt":
+        // Core lists its MCP endpoint and AI catalog in an "MCP" section beside the pages.
+        // Those links are endpoints an agent calls, not pages it reads.
         return text(
-          "# Acme\n\n## Pages\n\n- [Home](https://acme.test/index.md)\n- [Pricing](https://acme.test/pricing.md)\n",
+          "# Acme\n\n## Pages\n\n- [Home](https://acme.test/index.md)\n- [Pricing](https://acme.test/pricing.md)\n" +
+            (mcpInLlms
+              ? `\n## MCP\n\n- [acme](${base}/api/mcp): Streamable HTTP MCP endpoint\n` +
+                `- [AI catalog](${base}/.well-known/ai-catalog.json): MCP server cards for this site\n`
+              : ""),
         );
       case "HEAD /llms-full.txt":
-      case "HEAD /sitemap.xml":
         return new Response(null, { status: 200 });
       case "GET /robots.txt":
         return text("User-agent: GPTBot\nAllow: /\n\nUser-agent: *\nAllow: /\n");
@@ -107,18 +143,24 @@ test("passes every check for an app with all agent surfaces on", async () => {
     [
       "pass AGENT_METADATA",
       "pass AGENT_JSON_LD",
+      "pass AGENT_READABLE",
+      "pass AGENT_STRUCTURE",
       "pass AGENT_MARKDOWN_ADVERTISED",
       "pass AGENT_MARKDOWN_MIRROR",
       "pass AGENT_MARKDOWN_NEGOTIATION",
       "pass AGENT_MARKDOWN_404",
       "pass AGENT_MARKDOWN_VIEWS",
+      "pass AGENT_NOT_FOUND",
       "pass AGENT_LLMS_TXT",
       "pass AGENT_LLMS_FULL",
       "pass AGENT_ROBOTS",
       "pass AGENT_SITEMAP",
+      "pass AGENT_ORGANIZATION",
+      "pass AGENT_TRUST_PAGES",
       "pass AGENT_API_CATALOG",
       "pass AGENT_OPENAPI",
       "pass AGENT_MCP",
+      "pass AGENT_MCP_DISCOVERY",
     ],
   );
   assert.match(report.checks.find((check) => check.code === "AGENT_LLMS_TXT").message, /2 pages/);
@@ -146,9 +188,37 @@ test("points each missing surface at the config that turns it on", async () => {
   assert.match(byCode.AGENT_API_CATALOG.action, /apiCatalog: true/);
   assert.match(byCode.AGENT_OPENAPI.action, /openapi: \{ enabled: true \}/);
   assert.equal(byCode.AGENT_MCP.title, "No MCP endpoint");
+  assert.equal(byCode.AGENT_STRUCTURE.status, "warn");
+  assert.match(byCode.AGENT_STRUCTURE.message, /^No H1/);
+  assert.equal(byCode.AGENT_READABLE.status, "warn");
+  assert.equal(byCode.AGENT_READABLE.title, "The page is an empty shell without JavaScript");
+  assert.equal(byCode.AGENT_NOT_FOUND.status, "warn");
+  assert.equal(byCode.AGENT_NOT_FOUND.title, "Missing pages answer 404 only in HTML");
+  assert.equal(byCode.AGENT_SITEMAP.status, "warn");
+  assert.equal(byCode.AGENT_ORGANIZATION.status, "info");
+  assert.equal(byCode.AGENT_TRUST_PAGES.status, "info");
+  assert.match(byCode.AGENT_TRUST_PAGES.message, /\/about, \/contact, \/privacy/);
   // Checks that need an earlier surface are skipped rather than reported twice.
+  assert.equal(byCode.AGENT_MCP_DISCOVERY, undefined);
   assert.equal(byCode.AGENT_MARKDOWN_VIEWS, undefined);
   assert.equal(byCode.AGENT_LLMS_FULL, undefined);
+});
+
+test("warns when the server HTML has too little text for an agent", async () => {
+  const shortPage = page.replace(prose, "Acme bills small teams by usage. ".repeat(6));
+  const fetch = completeApp();
+  const report = await runFarmAgentCheck({
+    url: "https://acme.test",
+    fetch: (input, init) =>
+      new URL(String(input)).pathname === "/" &&
+      !new Headers(init?.headers).get("accept")?.includes("text/markdown")
+        ? html(shortPage)
+        : fetch(input, init),
+  });
+  const readable = report.checks.find((check) => check.code === "AGENT_READABLE");
+  assert.equal(readable.status, "warn");
+  assert.equal(readable.title, "Little server text");
+  assert.match(readable.message, /at least 500/);
 });
 
 test("probes beneath the URL's basePath", async () => {
@@ -191,6 +261,29 @@ test("reports broken surfaces as failures or warnings", async () => {
   assert.equal(byCode.AGENT_ROBOTS.status, "warn");
   assert.equal(byCode.AGENT_MCP.status, "warn");
   assert.match(byCode.AGENT_MCP.message, /without WWW-Authenticate/);
+});
+
+test("falls back to the default MCP server at /mcp", async () => {
+  const app = completeApp();
+  const requested = [];
+  const report = await runFarmAgentCheck({
+    url: "https://acme.test",
+    fetch: async (input, init) => {
+      const { pathname } = new URL(String(input));
+      requested.push(`${init?.method ?? "GET"} ${pathname}`);
+      if (pathname === "/.well-known/api-catalog") return notFound();
+      if (pathname === "/api/mcp") return Response.json({ error: "not found" }, { status: 404 });
+      if (pathname === "/mcp" && init?.method === "POST") {
+        return Response.json({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18" } });
+      }
+      return app(input, init);
+    },
+  });
+  const byCode = Object.fromEntries(report.checks.map((check) => [check.code, check]));
+  assert.ok(requested.indexOf("POST /api/mcp") < requested.indexOf("POST /mcp"));
+  assert.equal(byCode.AGENT_MCP.title, "MCP endpoint is public");
+  assert.match(byCode.AGENT_MCP.message, /https:\/\/acme\.test\/mcp accepted/);
+  assert.ok(requested.includes("GET /mcp/server-card"));
 });
 
 test("finds the MCP endpoint in another catalog by its title, or at --mcp", async () => {
@@ -238,6 +331,81 @@ test("finds the MCP endpoint in another catalog by its title, or at --mcp", asyn
   );
 });
 
+test("checks agent-facing site gaps the way the farmjs.dev agent check does", async () => {
+  // Nothing advertises the MCP endpoint here, so llms.txt does not list it either.
+  const app = completeApp("", { mcpInLlms: false });
+  // A heading level skipped, and an Organization without an address.
+  const home = page
+    .replace("<h2>Pricing</h2>", "<h3>Pricing</h3>")
+    .replace(JSON.stringify(organization), JSON.stringify({ ...organization, address: undefined }));
+  const report = await runFarmAgentCheck({
+    url: "https://acme.test",
+    fetch: async (input, init) => {
+      const { pathname } = new URL(String(input));
+      const accept = new Headers(init?.headers).get("accept") ?? "";
+      // A catch-all that renders the homepage for every unknown path.
+      if (
+        pathname === "/__farm-agent-check-missing" ||
+        pathname === "/contact" ||
+        pathname === "/"
+      ) {
+        if (pathname === "/" && accept.includes("text/markdown")) return app(input, init);
+        return html(home, { link: '</index.md>; rel="alternate"; type="text/markdown"' });
+      }
+      if (pathname === "/robots.txt")
+        return text("User-agent: *\nAllow: /\nSitemap: https://acme.test/maps/site.xml\n");
+      if (pathname === "/maps/site.xml") {
+        return new Response("<urlset><url><loc>https://acme.test/</loc></url></urlset>", {
+          headers: { "content-type": "application/xml" },
+        });
+      }
+      if (pathname === "/.well-known/ai-catalog.json") return notFound();
+      return app(input, init);
+    },
+  });
+  const byCode = Object.fromEntries(report.checks.map((check) => [check.code, check]));
+  assert.equal(byCode.AGENT_STRUCTURE.status, "warn");
+  assert.match(byCode.AGENT_STRUCTURE.message, /headings skip from H1 to H3/i);
+  assert.equal(byCode.AGENT_NOT_FOUND.status, "fail");
+  assert.match(byCode.AGENT_NOT_FOUND.message, /answered 200/);
+  assert.equal(byCode.AGENT_SITEMAP.status, "warn");
+  assert.match(byCode.AGENT_SITEMAP.message, /maps\/site\.xml lists 1 pages, none with <lastmod>/);
+  assert.equal(byCode.AGENT_ORGANIZATION.status, "info");
+  assert.equal(byCode.AGENT_ORGANIZATION.message, "The Organization has no address.");
+  // The catch-all homepage at /contact is not a contact page.
+  assert.equal(byCode.AGENT_TRUST_PAGES.status, "info");
+  assert.match(byCode.AGENT_TRUST_PAGES.message, /\/contact\.$/);
+  assert.equal(byCode.AGENT_MCP_DISCOVERY.status, "info");
+  assert.equal(report.health, "error");
+});
+
+test("counts the pages an llms.txt lists, not the endpoints beside them", async () => {
+  const app = completeApp();
+  const count = async (body) => {
+    const report = await runFarmAgentCheck({
+      url: "https://acme.test",
+      fetch: async (input, init) =>
+        new URL(String(input)).pathname === "/llms.txt"
+          ? new Response(body, { headers: { "content-type": "text/plain; charset=utf-8" } })
+          : app(input, init),
+    });
+    return report.checks.find((check) => check.code === "AGENT_LLMS_TXT").message;
+  };
+
+  // The "MCP" section lists endpoints an agent calls, so they are not pages.
+  assert.equal(
+    await count("# Acme\n\n## Pages\n\n- [Home](/index.md)\n\n## MCP\n\n- [acme](/api/mcp)\n"),
+    "Lists 1 pages.",
+  );
+  // Every other section is pages, whatever an app's own llms.ts calls it.
+  assert.equal(
+    await count("# Acme\n\n## Docs\n\n- [A](/a.md)\n\n## Optional\n\n- [B](/b.md)\n"),
+    "Lists 2 pages.",
+  );
+  // Links before any section still count.
+  assert.equal(await count("# Acme\n\n- [Home](/index.md)\n"), "Lists 1 pages.");
+});
+
 test("fails clearly when nothing answers", async () => {
   const report = await runFarmAgentCheck({
     url: "http://localhost:3999",
@@ -279,7 +447,7 @@ test("farm agent check probes a real server and exits by health", async () => {
     ]);
     const report = JSON.parse(stdout);
     assert.equal(report.health, "ready");
-    assert.equal(report.checks.length, 14);
+    assert.equal(report.checks.length, 20);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

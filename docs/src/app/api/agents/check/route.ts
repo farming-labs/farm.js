@@ -1,4 +1,10 @@
-import { agentCheckApi, fetchAgentCheck } from "../../../../lib/agents-check";
+import {
+  AGENT_CHECK_REPORT_COOKIE,
+  AGENT_CHECK_REPORT_COOKIE_MAX_AGE,
+  agentCheckApi,
+  agentCheckPath,
+  fetchAgentCheck,
+} from "../../../../lib/agents-check";
 
 // Public, but a plain handler carries no request or response schema, so the
 // operation is described by hand in src/lib/openapi.ts instead.
@@ -45,9 +51,10 @@ async function readCapped(request: Request): Promise<string | null> {
 }
 
 /**
- * Start an agent-ready check. The form posts here without JavaScript and gets
- * a 303 to the report (or back to the form with the error); the enhanced form
- * sends JSON and gets the finished report as JSON.
+ * Start an agent-ready check. The form posts here without JavaScript and gets a 303 to
+ * /agents/check?url=<site>, with the report's id in a short-lived cookie so that page can show
+ * it (or back to the form with the error); the enhanced form sends JSON and gets the finished
+ * report as JSON. Report ids never appear in a page address.
  */
 export async function POST(request: Request) {
   const isForm = (request.headers.get("content-type") ?? "").includes(
@@ -110,9 +117,18 @@ export async function POST(request: Request) {
       url,
     );
   }
-  if (isForm) return Response.redirect(new URL(`/agents/check/${result.id}`, request.url), 303);
-  // The check page shows the report in place, so send it along. Without it the page opens
-  // the saved report at /agents/check/[id] instead.
   const scan = await fetchAgentCheck(result.id).catch(() => null);
-  return Response.json(scan ? { id: result.id, scan } : { id: result.id });
+  // The scan ran but its report can't be read, so there is nothing to show.
+  if (!scan) return fail(502, "unavailable", url);
+  if (isForm) {
+    const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: new URL(agentCheckPath(scan.report.url), request.url).href,
+        "set-cookie": `${AGENT_CHECK_REPORT_COOKIE}=${scan.id}; Path=/agents/check; Max-Age=${AGENT_CHECK_REPORT_COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax${secure}`,
+      },
+    });
+  }
+  return Response.json({ id: result.id, scan });
 }

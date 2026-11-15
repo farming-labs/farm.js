@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createInterface } from "node:readline/promises";
 import { logger } from "@farm.js/core/internal/cli-runtime";
-import type { PreviewGatewayPlan } from "./preview-gateway";
+import { DEFAULT_GATEWAY_URL, type PreviewGatewayPlan } from "./preview-gateway";
 import { formatCompactPreviewDuration } from "./preview-duration";
 
 export const PREVIEW_EXPIRY_CLOCK_SKEW_MS = 1000 * 60 * 5;
@@ -26,11 +26,20 @@ export interface AuthorizePreviewPlanOptions {
   expiresInMs?: number;
   forceLogin?: boolean;
   runtime?: PreviewAuthRuntime;
-  /** The app whose .env gets the project picked after a new sign-in. */
+  /**
+   * Send a Farm.js Infrastructure API key to a gateway other than the hosted one
+   * (`--trust-gateway`). Only for a gateway you run: the gateway's own description of
+   * itself never decides this.
+   */
+  trustGateway?: boolean;
+  /**
+   * @deprecated Sign-in no longer writes FARMJS_PROJECT_ID to the app's .env, so this is
+   * unused. Previews never read it, and analytics keys name their own project.
+   */
   root?: string;
 }
 
-/** An existing Farm.js Infrastructure project, offered after signing in. */
+/** @deprecated Sign-in no longer offers projects; previews never needed one. */
 export interface PreviewProject {
   id: string;
   name: string;
@@ -46,8 +55,8 @@ export interface PreviewAuthRuntime {
   promptDuration(config: PreviewAuthPublicConfig): Promise<number | undefined>;
   /** A yes/no question; Enter means yes. */
   confirm(question: string): Promise<boolean>;
-  /** Pick one of the account's projects for this app, or none. */
-  chooseProject(projects: PreviewProject[]): Promise<PreviewProject | undefined>;
+  /** @deprecated Never called: sign-in no longer offers projects. */
+  chooseProject?(projects: PreviewProject[]): Promise<PreviewProject | undefined>;
 }
 
 /** The developer chose not to create an API key after signing in. */
@@ -109,6 +118,23 @@ export function previewCredentialFromEnvironment(
   return { token: legacy, source: "FARM_PREVIEW_TOKEN" };
 }
 
+/**
+ * Whether a Farm.js Infrastructure API key may go to this gateway: the hosted gateway, or
+ * one the developer vouched for with --trust-gateway. Any gateway can claim to sign in
+ * through Infrastructure, so that claim alone never sends it a key.
+ */
+function previewGatewayTrusted(gatewayUrl: string, trustGateway = false) {
+  return trustGateway || sameOrigin(gatewayUrl, DEFAULT_GATEWAY_URL);
+}
+
+/** Why an untrusted gateway gets no API key, and how to send it one when you run it. */
+function untrustedGatewayMessage(gatewayUrl: string) {
+  return (
+    `${originOf(gatewayUrl)} isn't the hosted Farm Preview gateway (${DEFAULT_GATEWAY_URL}), ` +
+    "so farm preview won't send it a Farm.js Infrastructure API key. If you run this gateway, pass --trust-gateway."
+  );
+}
+
 function sameOrigin(left: string | undefined, right: string) {
   try {
     return !!left && new URL(left).origin === new URL(right).origin;
@@ -130,7 +156,8 @@ interface PreviewAccountExchange {
   token: string;
   expiresAt: number;
   user: { login: string };
-  projects?: PreviewProject[];
+  /** Where the account creates API keys, for a Farm.js Infrastructure sign-in. */
+  keysPage?: string;
 }
 
 export async function authorizePreviewGatewayPlan(
@@ -151,14 +178,20 @@ export async function authorizePreviewGatewayPlan(
     throw new Error("The Farm Preview gateway returned an unsupported login configuration.");
   }
 
-  const environment = options.forceLogin ? undefined : previewCredentialFromEnvironment(config);
+  // A key saved for this gateway was made for it, so only the environment's key and a new
+  // sign-in depend on trusting the gateway.
+  const trusted = previewGatewayTrusted(plan.gatewayUrl, options.trustGateway);
+  const environment =
+    options.forceLogin || (config.provider === "device" && !trusted)
+      ? undefined
+      : previewCredentialFromEnvironment(config);
   let accountToken = options.forceLogin
     ? undefined
     : environment?.token || (await runtime.credentials.get(plan.gatewayUrl));
   if (!accountToken) {
-    const account = await loginWithPreviewDeviceFlow(plan.gatewayUrl, config, runtime);
+    const account = await loginWithPreviewDeviceFlow(plan.gatewayUrl, config, runtime, trusted);
     accountToken = account.token;
-    await finishPreviewSignIn(plan.gatewayUrl, account, runtime, options.root);
+    await finishPreviewSignIn(plan.gatewayUrl, account, runtime);
   }
 
   const expiresInMs =
@@ -172,9 +205,9 @@ export async function authorizePreviewGatewayPlan(
       );
     }
     await runtime.credentials.delete(plan.gatewayUrl);
-    const account = await loginWithPreviewDeviceFlow(plan.gatewayUrl, config, runtime);
+    const account = await loginWithPreviewDeviceFlow(plan.gatewayUrl, config, runtime, trusted);
     accountToken = account.token;
-    await finishPreviewSignIn(plan.gatewayUrl, account, runtime, options.root);
+    await finishPreviewSignIn(plan.gatewayUrl, account, runtime);
     grant = await requestTunnelGrant(plan, accountToken, expiresInMs, runtime.fetch);
   }
 
@@ -282,6 +315,8 @@ export interface PreviewSignInStatus {
   savedOverridden: boolean;
   /** Why FARMJS_API_KEY is set but not used, when it is. */
   ignoredKey?: string;
+  /** Whether farm preview would send this gateway a Farm.js Infrastructure API key. */
+  trusted: boolean;
 }
 
 /** Which credential farm preview would use for this gateway, from its public config only. */
@@ -289,24 +324,32 @@ export async function previewSignInStatus(
   gatewayUrl: string,
   runtime: PreviewAuthRuntime = createDefaultPreviewAuthRuntime(),
   env: Record<string, string | undefined> = process.env,
+  options: { trustGateway?: boolean } = {},
 ): Promise<PreviewSignInStatus> {
   const config = await loadPreviewAuthConfig(gatewayUrl, runtime.fetch);
-  if (!config.enabled) return { gatewayUrl, mode: "none", savedOverridden: false };
+  const trusted = previewGatewayTrusted(gatewayUrl, options.trustGateway);
+  if (!config.enabled) return { gatewayUrl, mode: "none", savedOverridden: false, trusted };
   const mode = config.provider === "device" ? "infrastructure" : "github";
   // whoami reports the deprecation itself rather than warning.
-  const environment = previewCredentialFromEnvironment(config, env, () => {});
+  const environment =
+    mode === "infrastructure" && !trusted
+      ? undefined
+      : previewCredentialFromEnvironment(config, env, () => {});
   const saved = await runtime.credentials.get(gatewayUrl);
   const keyIgnored = !!env.FARMJS_API_KEY?.trim() && environment?.source !== "FARMJS_API_KEY";
   const status: PreviewSignInStatus = {
     gatewayUrl,
     mode,
     savedOverridden: !!environment && !!saved,
+    trusted,
     ...(keyIgnored
       ? {
           ignoredKey:
             mode === "github"
               ? "this gateway uses GitHub sign-in, which doesn't accept API keys"
-              : `it's for ${originOf(env.FARMJS_API_URL?.trim() || DEFAULT_INFRA_URL)}, but this gateway signs in through ${originOf(config.issuer)}. If the key is from there, set FARMJS_API_URL=${originOf(config.issuer)}`,
+              : !trusted
+                ? `this gateway isn't the hosted one (${DEFAULT_GATEWAY_URL}). If you run it, pass --trust-gateway`
+                : `it's for ${originOf(env.FARMJS_API_URL?.trim() || DEFAULT_INFRA_URL)}, but this gateway signs in through ${originOf(config.issuer)}. If the key is from there, set FARMJS_API_URL=${originOf(config.issuer)}`,
         }
       : {}),
   };
@@ -330,37 +373,48 @@ export async function previewSignInStatus(
 export async function signInToPreviewGateway(
   gatewayUrl: string,
   runtime: PreviewAuthRuntime = createDefaultPreviewAuthRuntime(),
-  options: { root?: string } = {},
+  options: {
+    /** @deprecated Unused: sign-in no longer writes the app's .env. */
+    root?: string;
+    /** Sign in for a gateway other than the hosted one (`--trust-gateway`). */
+    trustGateway?: boolean;
+  } = {},
 ): Promise<{ login: string }> {
   const config = await loadPreviewAuthConfig(gatewayUrl, runtime.fetch);
   if (!config.enabled) throw new Error("This preview gateway doesn't use sign-in.");
   if ((config.provider !== "github" && config.provider !== "device") || !config.clientId) {
     throw new Error("The Farm Preview gateway returned an unsupported login configuration.");
   }
-  const account = await loginWithPreviewDeviceFlow(gatewayUrl, config, runtime);
-  await finishPreviewSignIn(gatewayUrl, account, runtime, options.root);
+  const account = await loginWithPreviewDeviceFlow(
+    gatewayUrl,
+    config,
+    runtime,
+    previewGatewayTrusted(gatewayUrl, options.trustGateway),
+  );
+  await finishPreviewSignIn(gatewayUrl, account, runtime);
   return { login: account.user.login };
 }
 
-/** Saves a new sign-in, then offers the account's projects for this app. */
+/**
+ * Saves a new sign-in. The key farm login makes is for previews only, so it no longer
+ * writes FARMJS_PROJECT_ID either: previews never read it, and analytics needs its own key.
+ */
 async function finishPreviewSignIn(
   gatewayUrl: string,
   account: PreviewAccountExchange,
   runtime: PreviewAuthRuntime,
-  root = process.cwd(),
 ) {
   await runtime.credentials.set(gatewayUrl, account.token);
   logger.success(`Signed in to Farm Preview as ${account.user.login}.`);
-  // An app that already names its project keeps it.
-  if (!account.projects?.length || process.env.FARMJS_PROJECT_ID?.trim()) return;
-  const project = await runtime.chooseProject(account.projects);
-  if (!project) return;
-  const file = join(root, ".env");
-  const existing = await readFile(file, "utf8").catch(() => "");
-  const separator = existing && !existing.endsWith("\n") ? "\n" : "";
-  await writeFile(file, `${existing}${separator}FARMJS_PROJECT_ID=${project.id}\n`);
-  process.env.FARMJS_PROJECT_ID = project.id;
-  logger.success(`Saved FARMJS_PROJECT_ID for ${project.name} to .env.`);
+  if (account.keysPage) logger.info(previewKeyNote(account.keysPage));
+}
+
+/** What the farm login key is for, and where an analytics key comes from instead. */
+export function previewKeyNote(keysPage: string) {
+  return (
+    "This key is for farm preview. To send analytics, create a Site analytics key on " +
+    `the API keys page (${keysPage}) and set it as FARMJS_API_KEY where the app runs.`
+  );
 }
 
 /** farm logout: forget this machine's saved sign-in. A saved API key stays valid in Infrastructure. */
@@ -407,7 +461,11 @@ async function loginWithPreviewDeviceFlow(
   gatewayUrl: string,
   config: PreviewAuthPublicConfig,
   runtime: PreviewAuthRuntime,
+  trusted: boolean,
 ): Promise<PreviewAccountExchange> {
+  // The new key would go to this gateway with every preview; refuse before anyone signs in.
+  if (config.provider === "device" && !trusted)
+    throw new Error(untrustedGatewayMessage(gatewayUrl));
   if (runtime.interactive === false)
     throw new Error(
       config.provider === "device"
@@ -490,16 +548,12 @@ async function loginWithPreviewDeviceFlow(
       const expiresAt = Date.now() + result.expires_in! * 1000;
       if (!(await runtime.confirm("Create an API key for this machine? (Y/n) ")))
         throw new PreviewApiKeyDeclinedError();
-      const { key, projects } = await createPreviewApiKey(
-        issuer.origin,
-        deviceToken,
-        runtime.fetch,
-      );
+      const key = await createPreviewApiKey(issuer.origin, deviceToken, runtime.fetch);
       return {
         token: key,
         expiresAt,
         user: { login: "your Farm.js Infrastructure account" },
-        projects,
+        keysPage: `${issuer.origin}/dashboard/settings`,
       };
     }
     if (poll.status === 400 && result.error === "authorization_pending") continue;
@@ -531,36 +585,20 @@ async function createPreviewApiKey(origin: string, deviceToken: string, request:
   const body = (await response.json().catch(() => ({}))) as {
     key?: unknown;
     message?: unknown;
-    projects?: unknown;
   };
   if (response.status === 201 && typeof body.key === "string" && body.key.startsWith("farmjs_"))
-    return { key: body.key, projects: previewProjects(body.projects) };
+    return body.key;
+  // 409: the account has as many keys as it can. 403: it left the organization it chose.
   throw new Error(
-    response.status === 409 && typeof body.message === "string"
+    (response.status === 409 || response.status === 403) &&
+      typeof body.message === "string" &&
+      body.message.trim()
       ? body.message
+          .replace(/\p{Cc}/gu, " ")
+          .trim()
+          .slice(0, 300)
       : `Farm.js Infrastructure couldn't create an API key (${response.status}). Run farm login again.`,
   );
-}
-
-/** Only well-formed projects: the id is written into the app's .env. */
-function previewProjects(value: unknown): PreviewProject[] {
-  if (!Array.isArray(value)) return [];
-  const text = (field: unknown) =>
-    typeof field === "string" ? field.replace(/\p{Cc}/gu, "").slice(0, 120) : "";
-  return value
-    .filter(
-      (project): project is Record<string, unknown> =>
-        !!project &&
-        typeof project.id === "string" &&
-        /^[\w-]{1,128}$/.test(project.id) &&
-        !!text(project.name),
-    )
-    .slice(0, 100)
-    .map((project) => ({
-      id: project.id as string,
-      name: text(project.name),
-      organization: text(project.organization),
-    }));
 }
 
 export function parsePreviewDuration(value: string | number | undefined): number | undefined {
@@ -609,6 +647,8 @@ async function requestTunnelGrant(
     },
     body: JSON.stringify({ name: plan.requestedName, project: plan.project, expiresInMs }),
     signal: AbortSignal.timeout(10_000),
+    // The key is for this origin only; never carry it along a redirect.
+    redirect: "error",
   });
   if (response.status === 401) {
     await response.body?.cancel();
@@ -734,7 +774,6 @@ function createDefaultPreviewAuthRuntime(): PreviewAuthRuntime {
     credentials: new FilePreviewCredentialStore(),
     promptDuration: promptPreviewDuration,
     confirm: confirmInTerminal,
-    chooseProject: chooseProjectInTerminal,
   };
 }
 
@@ -779,22 +818,6 @@ async function confirmInTerminal(question: string) {
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return !/^\s*n/i.test(await prompt.question(question));
-  } finally {
-    prompt.close();
-  }
-}
-
-async function chooseProjectInTerminal(projects: PreviewProject[]) {
-  if (!process.stdin.isTTY) return undefined;
-  logger.info("Use one of your Farm.js Infrastructure projects for this app?");
-  for (const [index, project] of projects.entries())
-    process.stdout.write(
-      `  ${index + 1}) ${project.name}${project.organization ? ` (${project.organization})` : ""}\n`,
-    );
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const choice = Number((await prompt.question("Project number, or Enter to skip: ")).trim());
-    return Number.isInteger(choice) && choice >= 1 ? projects[choice - 1] : undefined;
   } finally {
     prompt.close();
   }

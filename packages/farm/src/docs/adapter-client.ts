@@ -32,15 +32,16 @@ async function hydrateFarmDocsAdapterRuntime() {
 async function hydrateFarmDocsAdapterRuntime() {
   const runtime = window.__FARM_DOCS_ADAPTER__;
   if (!runtime) return false;
-  const FarmDocsAdapterReact = await import(${JSON.stringify(reactModule)});
+  // The docs server flags pages whose config holds what its JSON copy cannot (icons,
+  // MDX components, callbacks); the adapter restores those from the module itself.
+  // Fetch it alongside the adapter rather than after it: they don't depend on each other.
+  const [FarmDocsAdapterReact, configModule] = await Promise.all([
+    import(${JSON.stringify(reactModule)}),
+    runtime.configModule ? ${configModule ? `import(${JSON.stringify(configModule)})` : "undefined"} : undefined,
+  ]);
   if (typeof FarmDocsAdapterReact.hydrateFarmDocs !== "function") {
     throw new Error("The configured Farm docs adapter does not export hydrateFarmDocs().");
   }
-  // The docs server flags pages whose config holds what its JSON copy cannot (icons,
-  // MDX components, callbacks); the adapter restores those from the module itself.
-  const configModule = runtime.configModule
-    ? ${configModule ? `await import(${JSON.stringify(configModule)})` : "undefined"}
-    : undefined;
   FarmDocsAdapterReact.hydrateFarmDocs({
     config: runtime.config || {},
     data: runtime.data,

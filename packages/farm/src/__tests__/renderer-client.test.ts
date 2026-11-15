@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getFarmClientDataCache } from "../client-cache";
 import { _hydrateFarmI18n } from "../i18n/client-runtime";
@@ -13,6 +15,7 @@ import {
 import type { ServerFn } from "../server-fn";
 import type { ServerQuery } from "../server-query";
 import { setFarmBasePath } from "../base-path";
+import { useRouter } from "../client/router";
 import { getRouter } from "../client/spa-router";
 
 describe("renderer-neutral client primitives", () => {
@@ -173,5 +176,45 @@ describe("renderer-neutral client primitives", () => {
     const i18n = createRendererI18n();
     expect(i18n.getSnapshot()?.locale).toBe("en");
     expect(i18n.t("greeting", { name: "FARMJS" })).toBe("Hello FARMJS");
+  });
+
+  it("strips the base path once before the locale when matching params", () => {
+    setFarmBasePath("/console");
+    _hydrateFarmI18n({
+      locale: "de",
+      source: "path",
+      locales: ["en", "de"],
+      defaultLocale: "en",
+      routing: "prefix-except-default",
+      basePath: "/console",
+      cookie: { name: "farm-locale", path: "/", sameSite: "lax", secure: false },
+      direction: "ltr",
+      messages: {},
+    });
+    const params = (url: string) => {
+      window.history.replaceState(null, "", url);
+      return createRendererRouter({ routes: ["/products/[id]"] }).getSnapshot().params;
+    };
+    expect(params("/console/de/products/42")).toEqual({ id: "42" });
+    expect(params("/console/products/42")).toEqual({ id: "42" });
+    // The server routes this to `/console/products/42`, not `/products/42`.
+    expect(params("/console/console/products/42")).toEqual({});
+
+    // React's useRouter reads params through the same strip.
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const hookParams = (url: string) => {
+      window.history.replaceState(null, "", url);
+      let read: Record<string, string> | undefined;
+      const Probe = () => {
+        read = useRouter({ routes: ["/products/[id]"] }).params as Record<string, string>;
+        return null;
+      };
+      const root = createRoot(document.createElement("div"));
+      act(() => root.render(createElement(Probe)));
+      act(() => root.unmount());
+      return read;
+    };
+    expect(hookParams("/console/de/products/42")).toEqual({ id: "42" });
+    expect(hookParams("/console/console/products/42")).toEqual({});
   });
 });

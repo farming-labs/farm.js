@@ -34,6 +34,9 @@ function createRequestMiddlewareContext(
     get pathname() {
       return ctx.pathname;
     },
+    get routePathname() {
+      return ctx.routePathname;
+    },
     get searchParams() {
       return ctx.searchParams;
     },

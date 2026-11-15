@@ -1,59 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "@farm.js/core/navigation";
+import { useSearchParams } from "@farm.js/core/navigation";
 import { agentCheckErrorMessage } from "../../lib/agents-check-messages";
 import { runAgentCheck, useAgentCheck } from "./check-store";
 
-// What the scan is doing, roughly in order, while the request runs.
-const STEPS = [
-  "Fetching the page",
-  "Looking for a Markdown version",
-  "Reading llms.txt",
-  "Reading robots.txt",
-  "Asking for an MCP server",
-  "Looking for OpenAPI",
-  "Reading structured data",
-  "Scoring",
-];
-
 /**
  * The agent-ready check form, in the waitlist's bar. Once hydrated it runs the check in place:
- * progress here, then the report replaces the page's intro (see AgentCheckIntro). Without
- * JavaScript it posts to /api/agents/check, which redirects to the saved report (or back here
- * with `?error=`). `?url=` prefills it.
+ * the report replaces the page's intro (see AgentCheckIntro). Without JavaScript it posts to
+ * /api/agents/check, which redirects back here with `?url=` and the report (or with `?error=`).
+ * `?url=` prefills it.
  */
 export function AgentCheckForm() {
   const search = useSearchParams();
-  const router = useRouter();
   const check = useAgentCheck();
   const prefill = (check.url || search.get("url") || "").slice(0, 2048);
   const errorCode = check.runs === 0 ? search.get("error") : null;
-  const [step, setStep] = useState(0);
-  // Set when the scan started but its report didn't come back, so the saved report opens.
-  const [opening, setOpening] = useState(false);
-  const busy = check.pending || opening;
-
-  useEffect(() => {
-    if (!check.pending) return;
-    setStep(0);
-    const ticker = setInterval(
-      () => setStep((current) => Math.min(current + 1, STEPS.length - 1)),
-      650,
-    );
-    return () => clearInterval(ticker);
-  }, [check.pending]);
+  const busy = check.pending;
 
   const failure = check.error
     ? agentCheckErrorMessage(check.error)
     : errorCode
       ? agentCheckErrorMessage(errorCode)
       : undefined;
-  const status = check.pending
-    ? `${STEPS[step]}…`
-    : opening
-      ? "Opening the report…"
-      : (failure ?? "Public pages only. About fifteen requests to the site.");
+  const status =
+    (!check.pending && failure) || "Public pages only. About fifteen requests to the site.";
   const label = busy ? "Checking…" : "Run the check";
 
   return (
@@ -67,11 +37,7 @@ export function AgentCheckForm() {
         event.preventDefault();
         if (busy) return;
         const url = String(new FormData(event.currentTarget).get("url") ?? "").trim();
-        void runAgentCheck(url).then((id) => {
-          if (!id) return;
-          setOpening(true);
-          router.push(`/agents/check/${id}`);
-        });
+        void runAgentCheck(url);
       }}
     >
       <label htmlFor="agent-check-url">Website address</label>

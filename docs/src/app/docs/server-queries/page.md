@@ -114,6 +114,12 @@ export function ProductPrice({ id }: { id: string }) {
 
 The hook returns `data`, `error`, `status`, `pending`, `fetching`, `stale`, and `refetch`. Stale data remains visible while Farm refreshes it in the background. Stale queries also refresh on window focus and reconnect unless those options are disabled.
 
+The browser cache lives only in the browser. During server rendering, `useServerQuery` (and the
+Solid, Vue, and Svelte bindings) returns an idle snapshot and starts no read; the browser loads the
+query after hydration. `fetchServerQuery` and `prefetchServerQuery` called on the server run the
+query directly for that request, so the query's own `key` and `staleTime` decide what is shared
+between requests. One visitor's result never reaches another visitor through the browser cache.
+
 Set `enabled: false` to pause automatic reads, invalidation refetches, and focus/reconnect refresh.
 An already-running read is not cancelled. Switching back to `enabled: true` checks the cache again:
 missing or stale data refreshes, fresh data is reused, and pending work is deduplicated. This does

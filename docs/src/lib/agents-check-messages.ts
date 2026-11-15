@@ -1,4 +1,4 @@
-// Client-safe: the form script imports this, so it holds no server code.
+// Client-safe: the check page's client components import this, so it holds no server code.
 
 /** Messages for the codes the scan API returns, shared by the server page and the form script. */
 export const AGENT_CHECK_ERRORS: Record<string, string> = {
@@ -22,4 +22,9 @@ export const AGENT_CHECK_ERRORS: Record<string, string> = {
 
 export function agentCheckErrorMessage(code: string | undefined): string {
   return (code && AGENT_CHECK_ERRORS[code]) || "The check couldn't run. Try again in a moment.";
+}
+
+/** The check page for a site. Opening it with JavaScript runs the check for that address. */
+export function agentCheckPath(url: string): string {
+  return `/agents/check?url=${encodeURIComponent(url)}`;
 }

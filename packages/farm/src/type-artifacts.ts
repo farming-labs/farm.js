@@ -13,10 +13,11 @@ import { generateFarmI18nTypes, renderFarmI18nTypes } from "./i18n/type-generato
 import { readFarmI18nCatalogs } from "./i18n/catalog";
 import type { ResolvedFarmI18nConfig } from "./i18n/types";
 import { getFarmAppDirectories, getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
-import { writeFileIfChanged } from "./write-file-if-changed";
+import { isGeneratedFileCurrent, writeFileIfChanged } from "./write-file-if-changed";
 import type { FarmPlugin } from "./plugin";
 import { resolvePluginRoutes } from "./api/route";
 import { createSyncModelTypeDeclarations } from "./schema-model-types";
+import { FARM_NATIVE_SERVER_FN_PLUGIN } from "./mobile/native-server-fn-names";
 
 export { generateFarmI18nTypes };
 
@@ -117,7 +118,11 @@ export async function generateFarmTypeArtifacts(
     const apiTypesPath = options.apiTypesOutFile
       ? resolve(root, options.apiTypesOutFile)
       : join(root, srcDir, "lib", "api.generated.ts");
-    const pluginRoutes = resolvePluginRoutes(options.plugins);
+    // The native server function endpoint is Farm's transport for native screens, not part of the
+    // app's API: it stays out of the typed client.
+    const pluginRoutes = resolvePluginRoutes(
+      options.plugins?.filter((plugin) => plugin.name !== FARM_NATIVE_SERVER_FN_PLUGIN),
+    );
     const configFiles = [
       ...(options.layers ?? [])
         .map((layer) => layer.configFile)
@@ -241,6 +246,16 @@ export async function generateFarmTypeArtifacts(
     if (syncModelTypes) unifiedSections.push(syncModelTypes);
   }
 
+  // Only an app with native module specs loads the mobile code, so other apps never pay for it.
+  if (shouldRefreshUnifiedTypes && existsSync(join(root, srcDir, "native"))) {
+    const [{ scanFarmMobileAppModules }, { createFarmNativeModuleTypeDeclarations }] =
+      await Promise.all([import("./mobile/modules"), import("./mobile/native-specs")]);
+    const appModules = scanFarmMobileAppModules({ root, srcDir });
+    const nativeTypes =
+      appModules && createFarmNativeModuleTypeDeclarations(appModules.specs, { root });
+    if (nativeTypes) unifiedSections.push(nativeTypes);
+  }
+
   if (shouldRefreshUnifiedTypes) {
     unifiedSections.push(
       createContentTypeDeclarations(
@@ -317,7 +332,7 @@ function writeOrCheckGeneratedFile(
 }
 
 function checkGeneratedFile(filePath: string, content: string, stalePaths: string[]): void {
-  if (!existsSync(filePath) || readFileSync(filePath, "utf8") !== content) {
+  if (!existsSync(filePath) || !isGeneratedFileCurrent(readFileSync(filePath, "utf8"), content)) {
     stalePaths.push(filePath);
   }
 }

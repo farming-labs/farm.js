@@ -2,7 +2,6 @@ import type React from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
   keyedRowsConditionalRuntimeFeature,
-  keyedRowsRuntimeFeature,
   type CompilerKeyedRowsBlockProps,
   type CompilerRuntimeFeature,
 } from "../compiler-runtime";
@@ -12,13 +11,17 @@ import {
 interface KeyedCleanup {
   instances: Map<string, unknown>;
   eventHandlers: Map<string, Map<number, () => void>>;
-  conditionalListeners: Map<string, Map<number, () => void>>;
   pruneEventHandlers(): void;
-  pruneConditionalListeners(): void;
-  conditionalOwner?: { subscribe(key: string, id: number, refresh: () => void): () => void };
+  conditionals: {
+    listeners: Map<string, Map<number, () => void>>;
+    prune(instances: Map<string, unknown>): void;
+    owner: { subscribe(key: string, id: number, refresh: () => void): () => void };
+  };
 }
 
-function createBlock(feature: CompilerRuntimeFeature = keyedRowsRuntimeFeature): KeyedCleanup {
+function createBlock(
+  feature: CompilerRuntimeFeature = keyedRowsConditionalRuntimeFeature,
+): KeyedCleanup {
   const Component = feature.create({ setRoot() {}, subscribe: () => () => {} })
     .KeyedRows as React.ComponentClass<CompilerKeyedRowsBlockProps>;
   return new Component({
@@ -46,10 +49,11 @@ function countSets(run: () => void): number {
   return count;
 }
 
-describe.each([
-  ["eventHandlers", "pruneEventHandlers"],
-  ["conditionalListeners", "pruneConditionalListeners"],
-] as const)("keyed cleanup for %s", (registryName, pruneName) => {
+describe.each(["events", "conditionals"] as const)("keyed cleanup for %s", (kind) => {
+  const registry = (block: KeyedCleanup) =>
+    kind === "events" ? block.eventHandlers : block.conditionals.listeners;
+  const prune = (block: KeyedCleanup) =>
+    kind === "events" ? block.pruneEventHandlers() : block.conditionals.prune(block.instances);
   it.each([0, 1_000, 10_000])(
     "does not allocate a Set for an empty registry and %i keys",
     (size) => {
@@ -59,10 +63,10 @@ describe.each([
       const iterate = vi.spyOn(block.instances, "keys");
       const has = vi.spyOn(block.instances, "has");
 
-      expect(countSets(() => block[pruneName]())).toBe(0);
+      expect(countSets(() => prune(block))).toBe(0);
       expect(iterate).not.toHaveBeenCalled();
       expect(has).not.toHaveBeenCalled();
-      expect(block[registryName].size).toBe(0);
+      expect(registry(block).size).toBe(0);
     },
   );
 
@@ -74,31 +78,31 @@ describe.each([
       ["active", {}],
       ["new", {}],
     ]);
-    block[registryName].set("active", active);
-    block[registryName].set("removed", removed);
+    registry(block).set("active", active);
+    registry(block).set("removed", removed);
 
-    expect(countSets(() => block[pruneName]())).toBe(0);
-    expect([...block[registryName]]).toEqual([["active", active]]);
-    expect(block[registryName].get("active")).toBe(active);
+    expect(countSets(() => prune(block))).toBe(0);
+    expect([...registry(block)]).toEqual([["active", active]]);
+    expect(registry(block).get("active")).toBe(active);
     expect(active.get(0)).not.toHaveBeenCalled();
     expect(removed.get(0)).not.toHaveBeenCalled();
   });
 
   it("cleans up a populated registry, then supports registration after it becomes empty", () => {
     const block = createBlock();
-    block[registryName].set("reused", new Map([[0, vi.fn()]]));
-    block[pruneName]();
-    expect(block[registryName].size).toBe(0);
+    registry(block).set("reused", new Map([[0, vi.fn()]]));
+    prune(block);
+    expect(registry(block).size).toBe(0);
     block.instances.set("reused", {});
-    expect(countSets(() => block[pruneName]())).toBe(0);
+    expect(countSets(() => prune(block))).toBe(0);
 
     const replacement = new Map([[0, vi.fn()]]);
-    block[registryName].set("reused", replacement);
-    block[pruneName]();
-    expect(block[registryName].get("reused")).toBe(replacement);
+    registry(block).set("reused", replacement);
+    prune(block);
+    expect(registry(block).get("reused")).toBe(replacement);
     block.instances.clear();
-    block[pruneName]();
-    expect(block[registryName].size).toBe(0);
+    prune(block);
+    expect(registry(block).size).toBe(0);
   });
 
   it.each([1_000, 10_000])("checks membership without copying %i committed keys", (size) => {
@@ -108,18 +112,18 @@ describe.each([
       (_, index) => [`row-${index}`, new Map([[0, vi.fn()]])] as const,
     );
     block.instances = new Map(callbacks.map(([key]) => [key, {}]));
-    block[registryName] = new Map(callbacks);
-    block[registryName].set("removed", new Map([[0, vi.fn()]]));
+    for (const [key, callback] of callbacks) registry(block).set(key, callback);
+    registry(block).set("removed", new Map([[0, vi.fn()]]));
     const keys = vi.spyOn(block.instances, "keys");
     const iterate = vi.spyOn(block.instances, Symbol.iterator);
     const has = vi.spyOn(block.instances, "has");
 
-    expect(countSets(() => block[pruneName]())).toBe(0);
+    expect(countSets(() => prune(block))).toBe(0);
     expect(keys).not.toHaveBeenCalled();
     expect(iterate).not.toHaveBeenCalled();
     expect(has).toHaveBeenCalledTimes(size + 1);
-    expect([...block[registryName]]).toEqual(callbacks);
-    for (const [key, callback] of callbacks) expect(block[registryName].get(key)).toBe(callback);
+    expect([...registry(block)]).toEqual(callbacks);
+    for (const [key, callback] of callbacks) expect(registry(block).get(key)).toBe(callback);
   });
 });
 
@@ -127,16 +131,16 @@ it("checks each registry independently", () => {
   const block = createBlock();
   block.instances.set("active", {});
   const callback = new Map([[0, vi.fn()]]);
-  block.conditionalListeners.set("active", callback);
+  block.conditionals.listeners.set("active", callback);
   expect(countSets(() => block.pruneEventHandlers())).toBe(0);
-  expect(block.conditionalListeners.get("active")).toBe(callback);
-  expect(countSets(() => block.pruneConditionalListeners())).toBe(0);
+  expect(block.conditionals.listeners.get("active")).toBe(callback);
+  expect(countSets(() => block.conditionals.prune(block.instances))).toBe(0);
   block.instances.clear();
-  block.pruneConditionalListeners();
+  block.conditionals.prune(block.instances);
 
   block.instances.set("active", {});
   block.eventHandlers.set("active", callback);
-  expect(countSets(() => block.pruneConditionalListeners())).toBe(0);
+  expect(countSets(() => block.conditionals.prune(block.instances))).toBe(0);
   expect(block.eventHandlers.get("active")).toBe(callback);
   expect(countSets(() => block.pruneEventHandlers())).toBe(0);
   expect(block.eventHandlers.get("active")).toBe(callback);
@@ -146,28 +150,28 @@ it("does not let a stale conditional unsubscribe remove a replacement registrati
   const block = createBlock(keyedRowsConditionalRuntimeFeature);
   block.instances.set("reused", {});
   const previous = vi.fn();
-  const stopPrevious = block.conditionalOwner!.subscribe("reused", 0, previous);
-  block.pruneConditionalListeners();
-  expect(block.conditionalListeners.get("reused")?.get(0)).toBe(previous);
+  const stopPrevious = block.conditionals.owner.subscribe("reused", 0, previous);
+  block.conditionals.prune(block.instances);
+  expect(block.conditionals.listeners.get("reused")?.get(0)).toBe(previous);
 
   block.instances.clear();
-  block.pruneConditionalListeners();
-  expect(block.conditionalListeners.size).toBe(0);
+  block.conditionals.prune(block.instances);
+  expect(block.conditionals.listeners.size).toBe(0);
   block.instances.set("reused", {});
   const next = vi.fn();
-  const stopNext = block.conditionalOwner!.subscribe("reused", 0, next);
+  const stopNext = block.conditionals.owner.subscribe("reused", 0, next);
   const sibling = vi.fn();
-  const stopSibling = block.conditionalOwner!.subscribe("reused", 1, sibling);
+  const stopSibling = block.conditionals.owner.subscribe("reused", 1, sibling);
   stopPrevious();
-  block.pruneConditionalListeners();
-  expect([...block.conditionalListeners.get("reused")!]).toEqual([
+  block.conditionals.prune(block.instances);
+  expect([...block.conditionals.listeners.get("reused")!]).toEqual([
     [0, next],
     [1, sibling],
   ]);
   stopNext();
-  expect([...block.conditionalListeners.get("reused")!]).toEqual([[1, sibling]]);
+  expect([...block.conditionals.listeners.get("reused")!]).toEqual([[1, sibling]]);
   stopSibling();
-  expect(block.conditionalListeners.size).toBe(0);
+  expect(block.conditionals.listeners.size).toBe(0);
   expect(previous).not.toHaveBeenCalled();
   expect(next).not.toHaveBeenCalled();
   expect(sibling).not.toHaveBeenCalled();
@@ -180,15 +184,15 @@ it("keeps cleanup membership isolated between blocks with the same row keys", ()
   for (const block of [left, right]) {
     block.instances.set("shared", {});
     block.eventHandlers.set("shared", callback);
-    block.conditionalListeners.set("shared", callback);
+    block.conditionals.listeners.set("shared", callback);
   }
   left.instances.clear();
   for (const block of [left, right]) {
     block.pruneEventHandlers();
-    block.pruneConditionalListeners();
+    block.conditionals.prune(block.instances);
   }
   expect(left.eventHandlers.size).toBe(0);
-  expect(left.conditionalListeners.size).toBe(0);
+  expect(left.conditionals.listeners.size).toBe(0);
   expect(right.eventHandlers.get("shared")).toBe(callback);
-  expect(right.conditionalListeners.get("shared")).toBe(callback);
+  expect(right.conditionals.listeners.get("shared")).toBe(callback);
 });

@@ -25,6 +25,7 @@ const buildEnv = {
   AUTUMN_SECRET_KEY: process.env.AUTUMN_SECRET_KEY || "am_sk_ci",
   BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || "ci-better-auth-secret",
   CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY || "sk_test_ci",
+  CONVEX_URL: process.env.CONVEX_URL || "https://farm-ci-example.convex.cloud",
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "pk_test_ci",
   INNGEST_APP_ID: process.env.INNGEST_APP_ID || "farm-ci",
   INNGEST_EVENT_KEY: process.env.INNGEST_EVENT_KEY || "ci-inngest-event-key",
@@ -38,6 +39,7 @@ const buildEnv = {
   SUPABASE_URL: process.env.SUPABASE_URL || "https://ci.supabase.co",
   TRIGGER_PROJECT_REF: process.env.TRIGGER_PROJECT_REF || "proj_ci",
   TRIGGER_SECRET_KEY: process.env.TRIGGER_SECRET_KEY || "tr_ci",
+  TURNSTILE_SITE_KEY: process.env.TURNSTILE_SITE_KEY || "ci-turnstile-site-key",
   WORKOS_API_KEY: process.env.WORKOS_API_KEY || "sk_test_ci",
   WORKOS_CLIENT_ID: process.env.WORKOS_CLIENT_ID || "client_ci",
   WORKOS_COOKIE_PASSWORD:

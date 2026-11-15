@@ -9,6 +9,8 @@ import path from "path";
  */
 export const FARM_CLIENT_CSS_HREF_PLACEHOLDER = "/__farm_client_css_href__";
 export const FARM_CLIENT_JS_SRC_PLACEHOLDER = "/__farm_client_js_src__";
+/** Islands mode's boot entry (RFC 0003, section 10). */
+export const FARM_CLIENT_BOOT_SRC_PLACEHOLDER = "/__farm_client_boot_src__";
 
 async function hashAndCopy(
   sourcePath: string,
@@ -63,6 +65,21 @@ export async function findFingerprintedClientEntry(
   try {
     const entries = await fs.readdir(clientOutputDir);
     return entries.find((name) => /^farm-client-h[0-9a-f]+\.js$/.test(name)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The src of islands mode's boot entry (farm-client-boot-h<hash>.js), which a document that
+ * hydrates nothing at load starts with instead of the client entry; null when the build has none.
+ */
+export async function resolveClientBootSrc(clientOutputDir: string): Promise<string | null> {
+  const fs = await import("fs/promises");
+  try {
+    const entries = await fs.readdir(clientOutputDir);
+    const name = entries.find((entry) => /^farm-client-boot-h[0-9a-f]+\.js$/.test(entry));
+    return name ? `/${name}` : null;
   } catch {
     return null;
   }

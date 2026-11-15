@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
+  clearRequestCookie,
+  createRequestCookie,
   getCookieValue,
   parseCookieHeaderList,
   parseCookieHeaderMap,
@@ -130,5 +132,61 @@ describe("integration request-cookie duplicate handling", () => {
 
   it("uses the first value for WorkOS single-cookie lookup", () => {
     expect(getCookieValue(new Headers({ cookie: header }), "sid")).toBe("path-specific");
+  });
+});
+
+describe("integration request-cookie serialization", () => {
+  const httpRequest = new Request("http://localhost:3000/auth/callback");
+
+  it("forces Secure for SameSite=None on an http request", () => {
+    // A browser rejects SameSite=None without Secure, so the cookie would
+    // never be stored in local development.
+    const header = createRequestCookie("state", "value", httpRequest, { sameSite: "None" });
+
+    expect(header).toContain("SameSite=None");
+    expect(header).toContain("Secure");
+    expect(
+      createRequestCookie("state", "value", httpRequest, { sameSite: "None", secure: false }),
+    ).toContain("Secure");
+    expect(clearRequestCookie("state", httpRequest, { sameSite: "None" })).toContain("Secure");
+  });
+
+  it("keeps Lax cookies on http requests without Secure", () => {
+    const header = createRequestCookie("state", "value", httpRequest);
+
+    expect(header).toContain("SameSite=Lax");
+    expect(header).not.toContain("Secure");
+  });
+});
+
+describe("integration Set-Cookie attributes browsers require", () => {
+  const http = new Request("http://app.example.com/auth/callback");
+  const https = new Request("https://app.example.com/auth/callback");
+
+  it("applies the __Host- and __Secure- prefix rules", () => {
+    const host = createRequestCookie("__Host-sid", "v", http, {
+      path: "/auth",
+      domain: "example.com",
+    });
+    expect(host).toContain("Path=/;");
+    expect(host).not.toContain("Domain=");
+    expect(host).toContain("; Secure");
+    expect(clearRequestCookie("__Host-sid", http, { path: "/auth" })).toContain("; Secure");
+
+    expect(createRequestCookie("__Secure-sid", "v", http, { secure: false })).toContain("; Secure");
+  });
+
+  it("marks cookies Secure behind a TLS-terminating proxy", () => {
+    const proxied = new Request("http://10.0.0.5:3000/auth/callback", {
+      headers: { "x-forwarded-proto": "https, http" },
+    });
+    expect(createRequestCookie("sid", "v", proxied)).toContain("; Secure");
+    expect(createRequestCookie("sid", "v", http)).not.toContain("Secure");
+    expect(createRequestCookie("sid", "v", https)).toContain("; Secure");
+  });
+
+  it("encodes the name and rejects a non-finite maxAge", () => {
+    expect(createRequestCookie("a;b", "v", https)).toMatch(/^a%3Bb=v;/);
+    expect(() => createRequestCookie("sid", "v", https, { maxAge: Number.NaN })).toThrow(TypeError);
   });
 });

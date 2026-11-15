@@ -87,6 +87,9 @@ Farm uses its shipped dual-Vite path: Vite 5.4.20 powers development, while Vite
 powers the measured production build. Reports disclose both versions in Farm's stack label.
 SvelteKit's static-asset precompression is disabled because this dynamic-HTML fixture does not
 measure or request precompressed assets; no framework receives a timed asset-precompression phase.
+Farm's route only declares `render: "dynamic"`. Farm sends `Cache-Control: private, no-store` for
+such pages itself, so the fixture adds no route-rule headers, which would also take the page off
+Farm's single-write Node response path.
 
 Production boot and response measurements use the normal framework server path:
 

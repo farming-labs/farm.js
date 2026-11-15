@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
@@ -93,6 +93,27 @@ export default function Page() { redirect("/"); }`,
     "src/app/async-missing/page.tsx",
     `${navigation}
 export default async function Page() { ${wait} notFound(); }`,
+  );
+  await writeModule(
+    root,
+    "src/app/async-redirect/page.tsx",
+    `${navigation}
+export default async function Page() { ${wait} redirect("/"); }`,
+  );
+  await writeModule(
+    root,
+    "src/app/metadata-redirect/page.tsx",
+    `import React from "react";
+${navigation}
+export async function generateMetadata() { redirect("/", 308); }
+export default function Page() { return <main>should not render</main>; }`,
+  );
+  await writeModule(
+    root,
+    "src/app/response-redirect/page.tsx",
+    `export default function Page() {
+  throw new Response(null, { status: 303, headers: { location: "/sign-in" } });
+}`,
   );
   // A nested async component behind its own boundary finishes after the shell.
   for (const [name, call] of [
@@ -184,6 +205,39 @@ describe("development redirect() and notFound()", () => {
     const lateScriptRedirect = await get("/late-script-redirect");
     expect(lateScriptRedirect.status).toBe(200);
     expect(await lateScriptRedirect.text()).not.toContain("window.location.replace");
+  }, 60_000);
+
+  it("answers client navigation page data for a redirect with an instruction fetch does not follow", async () => {
+    const origin = await startProject();
+    const errors = vi.spyOn(console, "error");
+    const pageData = (pathname: string) =>
+      fetch(`${origin}/__farm/page-data?path=${encodeURIComponent(pathname)}`, {
+        redirect: "manual",
+      });
+
+    // Before, page data answered a redirect thrown while rendering with a 500,
+    // and one from middleware with a real 3xx that fetch followed to HTML.
+    for (const [pathname, redirect] of [
+      ["/sync-redirect", { location: "/", status: 307 }],
+      ["/async-redirect", { location: "/", status: 307 }],
+      ["/late-redirect", { location: "/", status: 307 }],
+      ["/metadata-redirect", { location: "/", status: 308 }],
+      ["/response-redirect", { location: "/sign-in", status: 303 }],
+      ["/middleware-redirect", { location: "/", status: 307 }],
+    ] as const) {
+      const response = await pageData(pathname);
+      expect(response.status, pathname).toBe(200);
+      expect(response.headers.get("x-farm-navigation"), pathname).toBe("redirect");
+      expect(response.headers.get("cache-control"), pathname).toBe("no-store");
+      expect(response.headers.get("location"), pathname).toBeNull();
+      await expect(response.json(), pathname).resolves.toEqual({ redirect });
+    }
+    expect(errors).not.toHaveBeenCalledWith("[Farm.js] Page data error:", expect.anything());
+
+    // Ordinary page data is unchanged.
+    const home = await pageData("/");
+    expect(home.status).toBe(200);
+    expect(home.headers.get("x-farm-navigation")).toBe("html-fragment");
   }, 60_000);
 
   it("answers the Markdown mirror of a redirecting page with the redirect, as production does", async () => {

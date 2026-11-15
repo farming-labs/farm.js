@@ -17,6 +17,7 @@ import { discoverMiddlewareRoutes, hasFarmRuntimeConfigModule } from "../nitro/u
 import { RouteManager } from "../routing/route-manager";
 import { createProgrammaticRouteModuleId } from "../routes-shared";
 import { toViteModuleId } from "../utils";
+import { farmAppUsesRscPipeline, resolveFarmRscCheckConfig } from "../server-components-status";
 import { farmPlugin } from "../vite";
 
 const temporaryRoots: string[] = [];
@@ -28,6 +29,32 @@ afterEach(() => {
 });
 
 describe("Farm layers", () => {
+  it("lets the RSC check see the protections a layer adds", async () => {
+    const root = createProject();
+    createLayer(root, "admin", {
+      config: `export default { auth: { protectedRoutes: ["/admin/**"] }, routeRules: { "/admin/**": { headers: { "X-Frame-Options": "DENY" } } } };`,
+    });
+    // The RSC packages, so the check does not fall back for missing ones.
+    for (const name of ["@farm.js/plugin", "@vitejs/plugin-rsc", "react-server-dom-webpack"]) {
+      const dir = path.join(root, "node_modules", ...name.split("/"));
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name }));
+    }
+    const config = {
+      extends: ["./layers/admin"],
+      experimental: { serverComponents: { mode: "rsc" as const } },
+    };
+    // The project config alone sets neither.
+    expect(farmAppUsesRscPipeline(config, root)).toBe(true);
+    const merged = await resolveFarmRscCheckConfig(config, root, "production");
+    expect(() => farmAppUsesRscPipeline(merged, root)).toThrow(
+      "does not run `auth`, `routeRules` yet",
+    );
+    // Without layers it reads the config as it is.
+    const plain = { experimental: { serverComponents: { mode: "rsc" as const } } };
+    expect(await resolveFarmRscCheckConfig(plain, root, "development")).toBe(plain);
+  });
+
   it("consumes layers directly from an application's farm.config.ts", async () => {
     const root = createProject();
     createLayer(root, "commerce", {
@@ -365,9 +392,12 @@ describe("Farm layers", () => {
     });
     const configHook = plugin.config as (...args: any[]) => any;
 
-    const viteConfig = await configHook({}, { command: "serve", mode: "development" });
+    // Farm merges its aliases after the app's into the config itself: Vite would put returned
+    // aliases first.
+    const userConfig: { resolve?: { alias?: unknown } } = {};
+    const viteConfig = await configHook(userConfig, { command: "serve", mode: "development" });
 
-    expect(viteConfig.resolve.alias).toEqual({
+    expect(userConfig.resolve?.alias).toEqual({
       "#layers/commerce": path.join(layerRoot, "src"),
       // `@/` resolves to the app's source directory, as in production builds.
       "@": path.resolve(root, "src"),
@@ -383,7 +413,10 @@ describe("Farm layers", () => {
     const plugin = farmPlugin({ root });
     const moduleId = createProgrammaticRouteModuleId(routeFile, "page", "/reports");
 
-    const source = await (plugin.load as (id: string) => Promise<string>)(moduleId);
+    // The server copy imports the routes file; the browser copy never does.
+    const source = await (
+      plugin.load as (id: string, options: { ssr: boolean }) => Promise<string>
+    )(moduleId, { ssr: true });
 
     expect(source).toContain(`from ${JSON.stringify(toViteModuleId(routeFile, root))}`);
     expect(source).not.toContain(`from ${JSON.stringify(routeFile)}`);

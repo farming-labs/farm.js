@@ -1,0 +1,1165 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "farmjs.dev public APIs",
+    "version": "1.0.0",
+    "summary": "Search and read the Farm.js documentation, talk to the docs MCP server, and run the agent-ready check.",
+    "description": "The public HTTP APIs farmjs.dev serves to people and agents. None needs a key. The docs API and the docs MCP server come from the docs engine; `/.well-known/api-catalog` (RFC 9727) lists them with the rest of the site's discovery documents. Endpoints the site uses for its own operation are not part of this description.",
+    "contact": {
+      "name": "Farming Labs",
+      "url": "https://github.com/farming-labs/farm.js/issues",
+      "email": "contact@farming-labs.dev"
+    },
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://farmjs.dev"
+    }
+  ],
+  "security": [],
+  "externalDocs": {
+    "description": "Farm.js documentation",
+    "url": "https://farmjs.dev/docs"
+  },
+  "tags": [
+    {
+      "name": "Docs",
+      "description": "Search and read the Farm.js documentation."
+    },
+    {
+      "name": "MCP",
+      "description": "The documentation as a Model Context Protocol server."
+    },
+    {
+      "name": "Agent check",
+      "description": "Check how ready a public website is for AI agents."
+    }
+  ],
+  "paths": {
+    "/api/docs": {
+      "get": {
+        "tags": ["Docs"],
+        "operationId": "readDocs",
+        "summary": "Search or read the documentation",
+        "description": "One endpoint with several modes, picked by the query string:\n\n- `query=<text>`: search. Returns an array of results, or with `audience=agent&response=structured` a paginated `docs-search.v1` envelope.\n- `audience=agent&response=facets`: the filter values the index knows.\n- `audience=agent&response=changes[&since=<indexGeneration>]`: what changed since an index generation (`docs-content-changes.v1`).\n- `format=markdown&path=<slug>`: one docs page as Markdown; add `sections=1` for its section index or `section=<id>` for one section.\n- `format=llms`, `llms-full`, `agents`, `skill`, `sitemap-md`, `sitemap-xml`, `api-catalog`: the docs engine's discovery documents.\n- `agent=spec`: the agent discovery manifest (also at `/.well-known/agent.json`).\n- `feedback=agent&schema=1`: the JSON Schema for agent feedback (see the POST operation).\n\nWith no recognized parameter the response is an empty array.",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "description": "Search text.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "routing"
+          },
+          {
+            "name": "audience",
+            "in": "query",
+            "description": "Who the results are for. `agent` enables the structured, facets and changes responses.",
+            "schema": {
+              "type": "string",
+              "enum": ["human", "agent"],
+              "default": "human"
+            }
+          },
+          {
+            "name": "response",
+            "in": "query",
+            "description": "Response shape for `audience=agent`.",
+            "schema": {
+              "type": "string",
+              "enum": ["structured", "facets", "changes"]
+            }
+          },
+          {
+            "name": "explain",
+            "in": "query",
+            "description": "With `response=structured`, add a scoring explanation to each result.",
+            "schema": {
+              "type": "string",
+              "enum": ["true"]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Results per page for structured search and facets.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "`nextCursor` from the previous page. Only with `response=structured` or `response=facets`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "description": "Filter by framework. Repeat to match any of several.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "Filter by version. Repeat to match any of several.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "package",
+            "in": "query",
+            "description": "Filter by package. Repeat to match any of several.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "description": "Filter by tag. Repeat to match any of several.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "facet",
+            "in": "query",
+            "description": "With `response=facets`, the one facet to page through.",
+            "schema": {
+              "type": "string",
+              "enum": ["framework", "version", "package", "tags"]
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "With `response=changes`, the `indexGeneration` the caller last saw.",
+            "schema": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Return a document instead of search results.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "markdown",
+                "llms",
+                "llms-full",
+                "agents",
+                "skill",
+                "sitemap-md",
+                "sitemap-xml",
+                "api-catalog"
+              ]
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "description": "With `format=markdown`, the page's slug under /docs.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "getting-started"
+          },
+          {
+            "name": "sections",
+            "in": "query",
+            "description": "With `format=markdown`, return the page's section index instead of its text.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "section",
+            "in": "query",
+            "description": "With `format=markdown`, return one section by its id.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "description": "Locale, for sites that publish more than one.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agent",
+            "in": "query",
+            "description": "`spec` returns the agent discovery manifest.",
+            "schema": {
+              "type": "string",
+              "enum": ["spec"]
+            }
+          },
+          {
+            "name": "feedback",
+            "in": "query",
+            "description": "`agent` with `schema=1` returns the agent feedback JSON Schema.",
+            "schema": {
+              "type": "string",
+              "enum": ["agent"]
+            }
+          },
+          {
+            "name": "schema",
+            "in": "query",
+            "description": "With `feedback=agent`, return the feedback schema.",
+            "schema": {
+              "type": "string",
+              "enum": ["1"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results or the requested document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "description": "Search results (`query=` without `response=structured`).",
+                      "items": {
+                        "$ref": "#/components/schemas/SearchResult"
+                      }
+                    },
+                    {
+                      "$ref": "#/components/schemas/StructuredSearch"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SearchFacets"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ContentChanges"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MarkdownSectionIndex"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AgentManifest"
+                    }
+                  ]
+                }
+              },
+              "text/markdown": {
+                "schema": {
+                  "type": "string",
+                  "description": "A page or section (`format=markdown`), AGENTS.md (`format=agents`), skill.md (`format=skill`), or the Markdown sitemap (`format=sitemap-md`)."
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "llms.txt or llms-full.txt (`format=llms`, `format=llms-full`)."
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string",
+                  "description": "The XML sitemap (`format=sitemap-xml`)."
+                }
+              },
+              "application/linkset+json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The RFC 9727 API catalog (`format=api-catalog`).",
+                  "required": ["linkset"],
+                  "properties": {
+                    "linkset": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "application/schema+json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The JSON Schema for agent feedback (`feedback=agent&schema=1`)."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid search or content-change parameters, such as a bad cursor or `since`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocsError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No docs page has that path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "pathname": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Docs"],
+        "operationId": "sendAgentFeedback",
+        "summary": "Send feedback about the docs",
+        "description": "Tell the maintainers how the docs held up for a task. Requires `feedback=agent` in the query string. The body is validated against the schema at `/api/docs?feedback=agent&schema=1`.",
+        "parameters": [
+          {
+            "name": "feedback",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["agent"]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentFeedback"
+              },
+              "example": {
+                "context": {
+                  "page": "/docs/routing"
+                },
+                "payload": {
+                  "task": "Add a dynamic route",
+                  "outcome": "implemented",
+                  "confidence": 0.9
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Feedback recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    },
+                    "handled": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Feedback accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    },
+                    "handled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body does not match the feedback schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/docs/mcp": {
+      "post": {
+        "tags": ["MCP"],
+        "operationId": "docsMcp",
+        "summary": "Docs MCP server",
+        "description": "A Model Context Protocol server over Streamable HTTP with tools to search the docs, list and read pages and sections, read navigation, code examples, and content changes, and send feedback. Send JSON-RPC 2.0 messages, starting with `initialize`. `/mcp` and `/.well-known/mcp` serve the same server.",
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": true,
+            "description": "MCP clients accept both JSON and server-sent events.",
+            "schema": {
+              "type": "string",
+              "example": "application/json, text/event-stream"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JsonRpcRequest"
+              },
+              "example": {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                  "protocolVersion": "2025-06-18",
+                  "capabilities": {},
+                  "clientInfo": {
+                    "name": "example",
+                    "version": "1.0.0"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The JSON-RPC response, as JSON or as a server-sent event stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonRpcResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON-RPC.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonRpcResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "The Accept header does not include both application/json and text/event-stream.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonRpcResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/check": {
+      "post": {
+        "tags": ["Agent check"],
+        "operationId": "runAgentCheck",
+        "summary": "Check a site for agent readiness",
+        "description": "Scans a public website the way an agent finds it (Markdown, llms.txt, discovery documents, structured data, MCP, OpenAPI, and more) and returns the scored report. A scan makes about fifteen requests to the site and can take up to 30 seconds. The report is also viewable at `/agents/check?url=<site>`. A form post (`application/x-www-form-urlencoded`) gets a 303 to that page instead of JSON.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["url"],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "description": "The site to check, with or without the scheme.",
+                    "example": "farmjs.dev"
+                  }
+                }
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": ["url"],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The finished report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "scan"],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9]{12}$"
+                    },
+                    "scan": {
+                      "$ref": "#/components/schemas/AgentCheck"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "303": {
+            "description": "Form posts only: redirect to the report page, or back to the form with `?error=<code>`.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/AgentCheckError"
+          },
+          "413": {
+            "$ref": "#/components/responses/AgentCheckError"
+          },
+          "429": {
+            "description": "Too many checks from this address, or of this site, in the last few minutes.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCheckError"
+                }
+              }
+            }
+          },
+          "502": {
+            "$ref": "#/components/responses/AgentCheckError"
+          },
+          "503": {
+            "$ref": "#/components/responses/AgentCheckError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SearchResult": {
+        "type": "object",
+        "required": ["id", "url", "content", "type"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "Site-relative URL of the page or heading."
+          },
+          "content": {
+            "type": "string",
+            "description": "Title of the match."
+          },
+          "description": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "examples": ["page", "heading", "text"]
+          },
+          "score": {
+            "type": "number"
+          },
+          "section": {
+            "type": "string"
+          },
+          "trust": {
+            "type": "object"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "canonicalUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "lastModified": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "digest": {
+                "type": "string"
+              },
+              "indexGeneration": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "StructuredSearch": {
+        "type": "object",
+        "required": ["format", "results"],
+        "properties": {
+          "format": {
+            "const": "docs-search.v1"
+          },
+          "query": {
+            "type": "string"
+          },
+          "audience": {
+            "type": "string"
+          },
+          "filters": {
+            "type": "object"
+          },
+          "indexGeneration": {
+            "type": "string"
+          },
+          "resultCount": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": ["string", "null"]
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {}
+          }
+        }
+      },
+      "SearchFacets": {
+        "type": "object",
+        "required": ["format", "facets"],
+        "properties": {
+          "format": {
+            "const": "docs-search-facets.v1"
+          },
+          "audience": {
+            "type": "string"
+          },
+          "filters": {
+            "type": "object"
+          },
+          "indexGeneration": {
+            "type": "string"
+          },
+          "matchedPageCount": {
+            "type": "integer"
+          },
+          "facets": {
+            "type": "object"
+          }
+        }
+      },
+      "ContentChanges": {
+        "type": "object",
+        "required": ["format", "indexGeneration", "mode"],
+        "properties": {
+          "format": {
+            "const": "docs-content-changes.v1"
+          },
+          "audience": {
+            "type": "string"
+          },
+          "since": {
+            "type": ["string", "null"]
+          },
+          "indexGeneration": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["snapshot", "delta", "reset"]
+          },
+          "resetRequired": {
+            "type": "boolean"
+          },
+          "documentCount": {
+            "type": "integer"
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "added": {
+                "type": "integer"
+              },
+              "changed": {
+                "type": "integer"
+              },
+              "deleted": {
+                "type": "integer"
+              }
+            }
+          },
+          "added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChangedDocument"
+            }
+          },
+          "changed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChangedDocument"
+            }
+          },
+          "deleted": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "ChangedDocument": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "canonicalUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "lastModified": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MarkdownSectionIndex": {
+        "type": "object",
+        "required": ["format", "sections"],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer"
+          },
+          "format": {
+            "const": "docs-markdown-sections.v2"
+          },
+          "canonicalUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "markdownUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "sectionCount": {
+            "type": "integer"
+          },
+          "estimatedTokens": {
+            "type": "integer"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "heading": {
+                  "type": "string"
+                },
+                "level": {
+                  "type": "integer"
+                },
+                "estimatedTokens": {
+                  "type": "integer"
+                },
+                "markdownUrl": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          }
+        }
+      },
+      "AgentManifest": {
+        "type": "object",
+        "description": "The agent discovery manifest (`farming-labs-agent-manifest.v2`).",
+        "required": ["format"],
+        "properties": {
+          "format": {
+            "const": "farming-labs-agent-manifest.v2"
+          },
+          "capabilities": {
+            "type": "object"
+          },
+          "api": {
+            "type": "object"
+          }
+        }
+      },
+      "DocsError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "AgentFeedback": {
+        "type": "object",
+        "required": ["payload"],
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "page": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "locale": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            }
+          },
+          "payload": {
+            "type": "object",
+            "required": ["task", "outcome"],
+            "additionalProperties": false,
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "What the agent was trying to do."
+              },
+              "understanding": {
+                "type": "string",
+                "description": "How well the docs supported the task."
+              },
+              "outcome": {
+                "type": "string",
+                "description": "What happened, e.g. \"implemented\" or \"blocked\"."
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "neededCodeReading": {
+                "type": "boolean"
+              },
+              "missingContext": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "docIssues": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "suggestedImprovement": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "JsonRpcRequest": {
+        "type": "object",
+        "required": ["jsonrpc", "method"],
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "id": {
+            "type": ["string", "integer"]
+          },
+          "method": {
+            "type": "string",
+            "examples": ["initialize", "tools/list", "tools/call"]
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
+      "JsonRpcResponse": {
+        "type": "object",
+        "required": ["jsonrpc"],
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "id": {
+            "type": ["string", "integer", "null"]
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "AgentCheck": {
+        "type": "object",
+        "required": ["id", "createdAt", "report"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latestFarmVersion": {
+            "type": "string",
+            "description": "The newest Farm.js release when the report was served."
+          },
+          "report": {
+            "type": "object",
+            "required": ["url", "finalUrl", "scannedAt", "score", "checks"],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "finalUrl": {
+                "type": "string"
+              },
+              "scannedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "durationMs": {
+                "type": "integer"
+              },
+              "score": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "farm": {
+                "type": "boolean",
+                "description": "Whether the site runs Farm.js."
+              },
+              "framework": {
+                "type": ["string", "null"]
+              },
+              "farmVersion": {
+                "type": ["string", "null"]
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["id", "title", "status", "summary"],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["pass", "warn", "fail", "info"]
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "weight": {
+                      "type": "number"
+                    },
+                    "fix": {
+                      "type": "object",
+                      "properties": {
+                        "summary": {
+                          "type": "string"
+                        },
+                        "farm": {
+                          "type": "object",
+                          "properties": {
+                            "file": {
+                              "type": "string"
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "docs": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "AgentCheckError": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "An error code.",
+            "examples": [
+              "invalid_url",
+              "body_too_large",
+              "address_blocked",
+              "dns_failed",
+              "timeout",
+              "not_html",
+              "host_busy",
+              "rate_limited",
+              "unavailable"
+            ]
+          }
+        }
+      }
+    },
+    "responses": {
+      "AgentCheckError": {
+        "description": "The check could not run: an invalid address (400), a body over 8 KB (413), a site the scanner can't reach or read (4xx/502 with the scanner's code), or the scanner being unavailable (503).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AgentCheckError"
+            }
+          }
+        }
+      }
+    }
+  }
+}

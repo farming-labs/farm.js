@@ -1,7 +1,20 @@
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
+import type { ResolvedFarmI18nConfig } from "@farm.js/core/i18n";
 import type { EntryContext } from "../types.js";
+import {
+  FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER,
+  FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER,
+} from "../mobile-client.js";
 
 const require_ = createRequire(import.meta.url);
+
+/**
+ * The import query the entry globs static `opengraph-image`/`twitter-image` files with. The
+ * plugin's loader answers it with the file's info and bytes (index.ts).
+ */
+export const FARM_METADATA_IMAGE_QUERY = "?farm-metadata-image";
 
 /** Core's production source for the \`mcp\` plugin, so both servers merge config the same way. */
 function generateMCPPluginSource(): { importSource: string; registerSource: string } {
@@ -9,6 +22,271 @@ function generateMCPPluginSource(): { importSource: string; registerSource: stri
     "@farm.js/core/internal/production-runtime",
   ) as typeof import("@farm.js/core/internal/production-runtime");
   return generateNativeMCPPluginSource({ enabled: true });
+}
+
+/** Each locale's catalog file, where core's i18n config resolves it (resolveFarmI18nMessagePath). */
+function farmI18nCatalogFiles(i18n: ResolvedFarmI18nConfig): string[] {
+  return i18n.locales.map((locale) =>
+    i18n.messages.includes("{locale}")
+      ? i18n.messages.split("{locale}").join(locale)
+      : path.join(i18n.messages, `${locale}.json`),
+  );
+}
+
+/**
+ * The request locale of an app with i18n, from core's runtime: each request resolves its locale
+ * as in core's servers, so `getLocale()`, `t()` and `format` from `@farm.js/core/i18n/server`
+ * work in server components, server actions, route handlers and middleware, and client
+ * components read the same locale.
+ */
+function generateI18nRuntime(ctx: EntryContext, i18n: ResolvedFarmI18nConfig): string {
+  const catalogs =
+    ctx.development === true
+      ? `// Development reads the catalogs from disk, as core's dev server does. Importing them makes an
+// edited catalog reload this entry; a missing one fails initialize() with core's error.
+${farmI18nCatalogFiles(i18n)
+  .filter((file) => existsSync(file))
+  .map((file) => `import ${JSON.stringify(`${file.replace(/\\/g, "/")}?raw`)};`)
+  .join("\n")}
+const farmI18nRuntime = createFarmI18nRuntime(farmRouteI18n);
+await farmI18nRuntime.initialize();`
+      : `// The catalogs the build read and validated, inlined as core's build inlines them.
+const farmI18nRuntime = createFarmI18nRuntime(farmRouteI18n, ${JSON.stringify(ctx.i18nCatalogs ?? {})});`;
+  return `import {
+  _runWithFarmI18nRequest,
+  _setDefaultFarmI18nRuntime,
+  createFarmI18nRuntime,
+  getFarmI18nClientSnapshot,
+} from '@farm.js/core/i18n/server';
+import {
+  createFarmLocaleCookie,
+  getFarmLocaleVaryHeaders,
+  localizeFarmHref,
+  localizeFarmPathname,
+  renderFarmLocaleAlternateLinks,
+  resolveFarmWebRequestOrigin as resolveFarmI18nRequestOrigin,
+} from '@farm.js/core/internal/production-runtime';
+${catalogs}
+// createTranslator(locale) and runWithLocale() outside a request.
+_setDefaultFarmI18nRuntime(farmI18nRuntime);
+
+/**
+ * Runs a request in its locale, as core's servers do. A page GET whose URL lacks the locale the
+ * visitor's cookie or Accept-Language picks is redirected to it (307), and a payload request to
+ * that page's payload; a response that depends on those signals varies on them and stays out of
+ * shared caches. API routes keep their URLs, as in core, and so does the image optimizer, which
+ * this server answers only at its path. Core's resolver answers site-level agent files
+ * (llms.txt, sitemap.xml, robots.txt) where they are asked for, without a redirect, as in core.
+ */
+async function runFarmLocalizedRequest(request, payloadRequested, render) {
+  const { pathname } = new URL(request.url);
+  const redirect =
+    !isFarmAPIPathname(pathname, farmApiBasePath) &&
+    !isFarmAPIPathname(pathname) &&
+    pathname !== farmImagePath;
+  return _runWithFarmI18nRequest(farmI18nRuntime, request, async (resolution) => {
+    if (resolution.redirect && (request.method === 'GET' || request.method === 'HEAD')) {
+      let location = resolution.redirect;${
+        ctx.trailingSlash
+          ? `
+      // With trailingSlash a page answers at '/fr/about/': send the visitor there at once rather
+      // than through the trailing-slash 308 that would follow (core's renderers redirect twice).
+      const localized = new URL(location, request.url);
+      if (matchRoute(localized.pathname)) {
+        location = normalizeFarmTrailingSlashPathname(localized.pathname, true) + localized.search;
+      }`
+          : ""
+      }
+      if (payloadRequested) {
+        const target = new URL(location, request.url);
+        location = farmPayloadPath(target.pathname) + target.search;
+      }
+      return applyFarmI18nResponse(new Response(null, { status: 307, headers: { location } }), resolution);
+    }
+    return applyFarmI18nResponse(await render(), resolution);
+  }, { redirect });
+}
+
+/**
+ * redirect('/about') from a French page sends /fr/about, below the basePath, as core's servers
+ * localize a redirect: pages, server actions and form submissions alike. A URL that is not
+ * app-relative stays as written.
+ */
+function localizeFarmRedirectUrl(url) {
+  const snapshot = getFarmI18nClientSnapshot();
+  return snapshot && url.startsWith('/') && !url.startsWith('//')
+    ? localizeFarmHref(url, snapshot.locale, snapshot)
+    : url;
+}
+
+/**
+ * The page's \`<link rel="alternate" hreflang>\` tags, as core's servers render them: its URL in each
+ * locale and x-default, absolute on the route's metadataBase, else on the request's origin (under
+ * server.trustProxy). A prerendered page, which no visitor's request drives, uses metadataBase
+ * only, as core's background regeneration does.
+ */
+function renderFarmI18nAlternateLinks(request, pathname, metadata) {
+  const snapshot = getFarmI18nClientSnapshot();
+  if (!snapshot) return '';
+  return renderFarmLocaleAlternateLinks(pathname, snapshot, {
+    metadataBase: metadata.metadataBase,
+    origin: isFarmPrerenderRequest(request)
+      ? undefined
+      : resolveFarmI18nRequestOrigin(request, { trustProxy: ${JSON.stringify(ctx.server?.trustProxy === true)} }),
+  });
+}
+
+/**
+ * A root layout that renders \`<html>\` gets the request's \`lang\` and \`dir\` on it, replacing its
+ * own, as core's servers set them on any document. They go on the element the layout returns, so
+ * the browser hydrates the attributes the HTML has. FarmLocaleDocument renders a synchronous
+ * layout in its place, within the render, as React would.
+ */
+function FarmLocaleDocument({ Layout, layoutProps }) {
+  const element = Layout(layoutProps);
+  return element && typeof element.then === 'function'
+    ? element.then(withFarmDocumentLocale)
+    : withFarmDocumentLocale(element);
+}
+
+function withFarmDocumentLocale(element) {
+  const snapshot = getFarmI18nClientSnapshot();
+  return snapshot && React.isValidElement(element) && element.type === 'html'
+    ? React.cloneElement(element, { lang: snapshot.locale, dir: snapshot.direction })
+    : element;
+}
+
+function applyFarmI18nResponse(response, resolution) {
+  const varyHeaders = getFarmLocaleVaryHeaders(farmRouteI18n, resolution);
+  if (!resolution.persist && varyHeaders.length === 0) return response;
+  const headers = new Headers(response.headers);
+  if (resolution.persist) {
+    headers.append('set-cookie', createFarmLocaleCookie(resolution.locale, farmRouteI18n));
+  }
+  if (varyHeaders.length > 0) {
+    const vary = new Set((headers.get('vary') || '').split(',').map((entry) => entry.trim()).filter(Boolean));
+    for (const header of varyHeaders) vary.add(header);
+    headers.set('vary', [...vary].join(', '));
+    headers.set('cache-control', 'private, no-store');
+  }
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+`;
+}
+
+/**
+ * The config `redirects()`, `rewrites()` and `headers()` in the production server, with core's
+ * matchers: sources match the path below the basePath and locale, a redirect keeps the query and
+ * an internal destination stays below the basePath (in the request's locale under i18n), and a
+ * rewrite keeps the query when its destination names none. A payload request ('<page>.rsc')
+ * matches as its page and is sent to the destination's payload. Development gets only the check
+ * for a local route, which its dev server asks before a rewrite.
+ */
+export function generateConfigRoutesRuntime(
+  ctx: EntryContext,
+  configRoutes: EntryContext["configRoutes"],
+  localRouteCheck: boolean,
+): string {
+  if (!configRoutes && !localRouteCheck) return "";
+  const llms = ctx.llmsTxt?.enabled === true;
+  const localRoute = localRouteCheck
+    ? `
+// Whether this server answers the URL itself: a page, an API route, the image optimizer, a
+// metadata route file or image, or a generated agent file. A config rewrite applies only when
+// none does, as in core's servers.
+function farmHasLocalRequestRoute(url) {
+  const pathname = url.pathname;
+  if (matchRoute(pathname)) return true;
+  if (matchAPIRouteAtBasePath(apiRouteMap, pathname, farmApiBasePath)) return true;
+  if (farmImageHandler && pathname === farmImagePath) return true;
+  const routePathname = getFarmRoutePathname(pathname.replace(/\\/+$/, '') || '/');${
+    ctx.appMetadataRoutes === true
+      ? `
+  if (matchFarmAppMetadataRoute(routePathname)) return true;`
+      : ""
+  }${
+    ctx.metadataImages?.static || ctx.metadataImages?.generated
+      ? `
+  if (matchFarmMetadataImageRequest(routePathname)) return true;`
+      : ""
+  }${
+    llms
+      ? `
+  if (routePathname === '/llms.txt' || (farmLlmsTxtConfig.full && routePathname === '/llms-full.txt')) return true;`
+      : ""
+  }${
+    ctx.sitemap?.enabled
+      ? `
+  if (routePathname === '/sitemap.xml') return true;`
+      : ""
+  }${
+    ctx.crawlers?.enabled === true
+      ? `
+  if (routePathname === '/robots.txt') return true;`
+      : ""
+  }
+  return false;
+}
+${
+  ctx.development === true
+    ? `// farm dev applies config rewrites ahead of this entry, and asks it first.
+export function __farmHasLocalRequestRoute(href) {
+  return farmHasLocalRequestRoute(new URL(href));
+}
+`
+    : ""
+}`
+    : "";
+  if (!configRoutes) return localRoute;
+  return `
+import {
+  applyConfigResponseHeaders,
+  createConfigHeadersMatcher,
+  createConfigRedirectMatcher,
+  createConfigRewriteMatcher,
+  fetchFarmExternalRewrite,
+} from '@farm.js/core/internal/production-runtime';
+
+// The config redirects(), rewrites() and headers(), resolved by the build as core resolves them.
+const farmConfigRouteOptions = { i18n: farmRouteI18n, basePath: ${JSON.stringify(ctx.basePath)} };
+const matchFarmConfigRedirect = createConfigRedirectMatcher(${JSON.stringify(configRoutes.redirects)}, farmConfigRouteOptions);
+const matchFarmConfigRewrite = createConfigRewriteMatcher(${JSON.stringify(configRoutes.rewrites)}, farmConfigRouteOptions);
+const matchFarmConfigHeaders = createConfigHeadersMatcher(${JSON.stringify(configRoutes.headers)}, farmConfigRouteOptions);
+${localRoute}
+/**
+ * A config redirect's response, the Request a config rewrite replaces this one with (a payload
+ * request's stays one), the proxied response of a rewrite to another origin, or null.
+ */
+async function resolveFarmConfigRoute(request, payloadRequested) {
+  const url = new URL(request.url);
+  const redirect = matchFarmConfigRedirect(url);
+  if (redirect) {
+    let location = redirect.destination;
+    if (payloadRequested) {
+      const target = new URL(location, url);
+      if (target.origin === url.origin) location = farmPayloadPath(target.pathname) + target.search;
+    }
+    return new Response('Redirecting to ' + location, {
+      status: redirect.statusCode,
+      headers: { Location: location },
+    });
+  }
+  const destination = matchFarmConfigRewrite(url);
+  if (!destination${localRouteCheck ? " || farmHasLocalRequestRoute(url)" : ""}) return null;
+  const rewritten = new Request(destination, request);
+  if (destination.origin !== url.origin) return fetchFarmExternalRewrite(rewritten);
+  if (payloadRequested) farmPayloadRequests.add(rewritten);
+  return rewritten;
+}
+
+// A prerendered page is a file the platform serves without this server, so a page a config
+// redirect or rewrite may answer, or that config headers apply to, stays server-rendered.
+function farmConfigRouteMayHandlePath(pathname) {
+  const url = new URL(pathname, 'http://farm.invalid');
+  return Boolean(matchFarmConfigRedirect(url) || matchFarmConfigRewrite(url)) ||
+    matchFarmConfigHeaders(url).length > 0;
+}
+`;
 }
 
 /**
@@ -43,6 +321,19 @@ export function generateRscMiddlewareResultHandling(): string {
  * - Either returns the stream directly (for client navigation) or delegates to SSR (for initial page load)
  */
 export function generateRscEntry(ctx: EntryContext): string {
+  // A root-mounted app without i18n matches pages on the path as received, with no extra work.
+  const hasBasePath = !["", "/"].includes(ctx.basePath.trim());
+  const i18n = ctx.i18n?.enabled === true ? ctx.i18n : undefined;
+  const routesBelowPrefix = hasBasePath || i18n !== undefined;
+  // The config redirects(), rewrites() and headers(). This server applies them in production; in
+  // development the dev server does, ahead of Vite and the API routes, as core's dev server does.
+  const configRoutes = ctx.development === true ? undefined : ctx.configRoutes;
+  const configHeaders = (configRoutes?.headers.length ?? 0) > 0;
+  // A static or revalidating page gets core's shared Cache-Control in production. farm dev keeps
+  // pages out of shared caches, as core's dev server never sends an s-maxage.
+  const sharedPageCache = ctx.development !== true;
+  const pageCacheArg = sharedPageCache ? ", farmPageCacheControl" : "";
+  const localRouteCheck = (ctx.configRoutes?.rewrites.length ?? 0) > 0;
   // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
   const appSegment = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
   const glob = appSegment ? `/${ctx.srcDir}/${appSegment}` : `/${ctx.srcDir}`;
@@ -75,6 +366,10 @@ export function generateRscEntry(ctx: EntryContext): string {
         )};`,
     )
     .join("\n");
+  // Imported for their factories, which register what a plugin's server functions use.
+  const pluginsConfigImports = (ctx.pluginsConfigPaths ?? [])
+    .map((configPath) => `import ${JSON.stringify(configPath.replace(/\\/g, "/"))};`)
+    .join("\n");
   const mcpSource = ctx.mcpConfigPaths?.length ? generateMCPPluginSource() : null;
   const middlewareConfigValues = (ctx.middlewareConfigPaths ?? []).map(
     (_configPath, index) =>
@@ -85,6 +380,7 @@ import React from 'react';
 import ServerErrorFallback from '/.farm/rsc-entries/error-fallback.tsx';
 ${middlewareConfigImports}
 ${mcpConfigImports}
+${pluginsConfigImports}
 ${mcpSource ? `${mcpSource.importSource}\nimport { mergePluginAPIRoutes } from '@farm.js/core/api/runtime';` : ""}
 import { registerAPIRouteShape } from '@farm.js/core/api/runtime';
 import {
@@ -101,7 +397,6 @@ import {
   }
   code += `} from '@vitejs/plugin-rsc/rsc';
 import {
-  createFarmDeploymentCookie,
   createFarmDeploymentMismatchResponse,
   getFarmDeploymentMismatch,
 } from '@farm.js/core/deployment';
@@ -111,14 +406,15 @@ import {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
 } from '@farm.js/core/middleware';
-import {
+import { _withFarmDeploymentCookie, _withFarmGuardedResponseCache } from '@farm.js/core/internal/production-runtime';
+${ctx.mobileClient === "entry" ? "import { _applyFarmMobileShellClient, createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';\n" : ctx.mobileClient === "inline" ? "import { createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';\n" : ""}import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   isFarmAPIPathname,
   matchAPIRouteAtBasePath,
 } from '@farm.js/core/api/runtime';
 import { _runWithAfterRequest } from '@farm.js/core/after';
-import { _runWithAPIRequestRuntime, _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
+import { _runWithAPIRequestRuntime, _runWithCurrentRequest, cloneFarmRequestWithContext, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 import { getFarmRedirectError, isFarmNotFoundError } from '@farm.js/core/internal/production-runtime';
 import {
   parseRoutePath,
@@ -126,7 +422,26 @@ import {
   compareRouteSpecificity,
   getRoutePatternSpecificity,
 } from '@farm.js/core/internal/production-runtime';
-
+import {
+  appMiddlewareMayHandlePath,
+  configMiddlewareMayHandlePath,
+  materializeSSGRoutePath,
+  mergeMetadata,
+  mergeModuleViewport,
+  mergeRouteRenderingDirectiveConfig,
+  renderMetadataHead,
+  resolveMetadataTitle,
+} from '@farm.js/core/internal/production-runtime';
+${
+  sharedPageCache
+    ? `import {
+  _getRequestReadCount,
+  _hasPrivateFarmRequestHeaders,
+  resolveRouteSharedCacheControl,
+} from '@farm.js/core/internal/production-runtime';
+${i18n ? "import { getLocaleSource } from '@farm.js/core/i18n/server';\n" : ""}`
+    : ""
+}
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
   applyMarkdownNegotiationHeaders,
@@ -134,23 +449,144 @@ import {
   createMarkdownMirrorResponse,
   farmRequestWantsMarkdown,
 } from '@farm.js/core/markdown';
+${
+  ctx.markdown?.enabled
+    ? `import { getFarmMarkdownAlternatePath } from '@farm.js/core/markdown';
+import { addMetadataMarkdownAlternate } from '@farm.js/core/internal/production-runtime';
+`
+    : ""
+}import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';
+import { resolveFarmTrailingSlashRedirect } from '@farm.js/core/internal/production-runtime';
+${
+  ctx.trailingSlash
+    ? `import { normalizeFarmTrailingSlashPathname, setFarmTrailingSlashPreference } from '@farm.js/core/internal/production-runtime';
 
+// trailingSlash: <Link href="/about"> renders /about/, as in core's renderers. Client components
+// render in the SSR environment, which shares this process; the browser entry sets it too.
+setFarmTrailingSlashPreference(true);
+`
+    : ""
+}
+${
+  hasBasePath
+    ? `import { applyFarmBasePath, setFarmBasePath } from '@farm.js/core/internal/production-runtime';
+
+// <Link href="/about"> renders /console/about, as in core's renderers. Client components render in
+// the SSR environment, which shares this process; the browser entry sets it for hydration.
+setFarmBasePath(${JSON.stringify(ctx.basePath)});
+`
+    : ""
+}
+${
+  ctx.images && ctx.images.runtime !== "none"
+    ? `import { createCloudflareImageTransformer, createFarmImageHandler } from '@farm.js/core/image/server';
+${
+  ctx.images.runtime === "node"
+    ? "import { createNodeImageFetcher, createNodeImageUrlValidator, createSharpImageTransformer } from '@farm.js/core/image/sharp';"
+    : ""
+}
+const farmImageConfig = ${JSON.stringify(ctx.images.config)};
+const farmImageHandler = createFarmImageHandler(farmImageConfig, ${
+        ctx.images.runtime === "cloudflare"
+          ? `{
+  transform: createCloudflareImageTransformer(),
+  onError(error) { console.error('[Farm Image]', error); },
+}`
+          : `{
+  transform: createSharpImageTransformer(),
+  fetchRemote: createNodeImageFetcher(farmImageConfig),
+  validateRemoteUrl: createNodeImageUrlValidator(farmImageConfig),
+  onError(error) { console.error('[Farm Image]', error); },
+}`
+      });`
+    : "const farmImageHandler = null;"
+}
+const farmImagePath = ${JSON.stringify(ctx.images?.path ?? "/_farm/image")};
+${
+  ctx.images
+    ? `// <Image> reads this when @farm.js/core/image is not bundled (dev, or an external dependency),
+// where the __FARM_IMAGE_CONFIG__ define never reaches it. The SSR environment shares the process.
+globalThis.__FARM_IMAGE_CONFIG__ = ${JSON.stringify(ctx.images.public)};`
+    : ""
+}
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 const farmApiBasePath = ${JSON.stringify(ctx.apiBasePath ?? "/api")};
 const farmMarkdownConfig = ${JSON.stringify(ctx.markdown ?? { enabled: false, expose: [], cache: false, includeMetadata: true })};
+const farmRouteI18n = ${JSON.stringify(ctx.i18n ?? { enabled: false, basePath: ctx.basePath })};
+
+/**
+ * A request path without the app's basePath and locale prefix, as core's servers and the
+ * middleware runner read it: '/console/fr/about' is '/about'. Pages match it (matchRoute), and
+ * Markdown names a home page '<prefix>/index.md' and matches md.expose on it.
+ */
+function getFarmRoutePathname(pathname) {
+  return farmRouteI18n.enabled
+    ? stripFarmLocaleFromPathname(pathname, farmRouteI18n)
+    : stripFarmBasePath(pathname, farmRouteI18n.basePath);
+}
+${i18n ? generateI18nRuntime(ctx, i18n) : ""}`;
+  // sitemap.ts, robots.ts, llms.ts and llms-full.ts route files, served as core serves them. An
+  // llms.ts receives the pages and defaults the generated llms.txt would list.
+  const servesAppMetadataRoutes = ctx.appMetadataRoutes === true;
+  const buildsLlmsTxt = ctx.llmsTxt?.enabled === true || servesAppMetadataRoutes;
+  // The generated agent files list the app's static pages.
+  const listsAgentPages =
+    ctx.llmsTxt?.enabled === true || ctx.sitemap?.enabled === true || servesAppMetadataRoutes;
+  // agent.crawlers: a generated robots.txt, as core serves it.
+  const servesAgentRobots = ctx.crawlers?.enabled === true;
+  // opengraph-image and twitter-image files: static images and generated modules, served and
+  // added to the page head as core does.
+  const staticMetadataImages = ctx.metadataImages?.static === true;
+  const generatedMetadataImages = ctx.metadataImages?.generated === true;
+  const servesMetadataImages = staticMetadataImages || generatedMetadataImages;
+  if (servesMetadataImages) {
+    code += `import { addMetadataImageReference, matchesFarmIfNoneMatch } from '@farm.js/core/internal/production-runtime';
 `;
-  if (ctx.llmsTxt?.enabled) {
+  }
+  if (generatedMetadataImages) {
+    // Loads @vercel/og only when a generated image renders, as in core's servers.
+    code += `import { createFarmSearchParams } from '@farm.js/core/internal/production-runtime';
+import { createFarmMetadataImageResponse } from '@farm.js/core/internal/metadata-image-runtime';
+`;
+  }
+  if (listsAgentPages || servesAgentRobots) {
+    code += `import { createFarmMetadataRouteResponse } from '@farm.js/core/internal/production-runtime';
+`;
+  }
+  if (servesAgentRobots) {
+    code += `import { createFarmAgentRobots } from '@farm.js/core/internal/production-runtime';
+
+const farmAgentCrawlers = ${JSON.stringify(ctx.crawlers)};
+`;
+  }
+  if (listsAgentPages) {
+    code += `import {
+  farmPathGuardCoversPage,
+  isFarmPageNoIndex,
+  resolveFarmAgentOrigin,
+} from '@farm.js/core/internal/production-runtime';
+`;
+  }
+  if (buildsLlmsTxt) {
     code += `import {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsFullRenderer,
   createFarmLlmsMarkdownReader,
-  createFarmMetadataRouteResponse,
   renderFarmLlmsFullTxt,
 } from '@farm.js/core/internal/production-runtime';
+import { FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS } from '@farm.js/core/internal/app-markdown-runtime';
 
-const farmLlmsTxtConfig = ${JSON.stringify(ctx.llmsTxt)};
+const farmLlmsTxtConfig = ${JSON.stringify(ctx.llmsTxt ?? { enabled: false, include: [], exclude: [], full: false })};
 const farmLlmsFullRenderer = createFarmLlmsFullRenderer({ revalidate: farmLlmsTxtConfig.revalidate });
+`;
+  }
+  if (ctx.sitemap?.enabled) {
+    code += `import { createFarmDefaultSitemap } from '@farm.js/core/internal/production-runtime';
+
+const farmAgentSitemapConfig = ${JSON.stringify(ctx.sitemap)};
+// Each page file's last change, read by the build (by farm dev when it starts).
+const farmPageLastModified = ${JSON.stringify(ctx.pageLastModified ?? {})};
 `;
   }
   if (ctx.actionsEnabled) {
@@ -164,6 +600,8 @@ const farmLlmsFullRenderer = createFarmLlmsFullRenderer({ revalidate: farmLlmsTx
 } from '@farm.js/core/server-action-security';
 
 const serverActionSecurity = ${JSON.stringify(ctx.serverActions)};
+// Under server.trustProxy, a proxy's forwarded origin is the origin a same-origin action posts from.
+const serverActionRequestOptions = { trustProxy: ${JSON.stringify(ctx.server?.trustProxy === true)} };
 `;
   }
 
@@ -226,23 +664,36 @@ function debug(...args) {
   ${debugLog}
 }
 
-function applyActionResponseHeaders(headers, request) {
+/**
+ * Store the deployment ID in the deployment cookie on a page document a browser loads, so a form
+ * posted from it before JavaScript runs names its deployment. Core's _withFarmDeploymentCookie
+ * decides, as on its production server: only a GET page response that names this deployment and
+ * stays out of shared caches carries it, and a request naming another deployment keeps its cookie.
+ * A Flight payload is fetched by the client router, which names its deployment in a header, so it
+ * never carries the cookie.
+ */
+function withFarmDeploymentCookie(request, response) {
+  if ((request.headers.get('accept') || '').includes('text/x-component')) return response;
+  return _withFarmDeploymentCookie(request, response, farmDeploymentId, ${JSON.stringify(ctx.basePath)});
+}
+
+function applyActionResponseHeaders(headers, request, pageCacheControl) {
   // The same page URL serves HTML or Flight depending on Accept.
   const vary = (headers.get('vary') || '').split(',').map(value => value.trim().toLowerCase());
   if (!vary.includes('*') && !vary.includes('accept')) headers.append('vary', 'Accept');
+  // handler() sets the deployment cookie once the response's cache policy is final.
   headers.set('x-farm-deployment-id', farmDeploymentId);
-  const accept = request.headers.get('accept') || '';
-  if (request.method === 'GET' && !accept.includes('text/x-component')) {
-    headers.append('set-cookie', createFarmDeploymentCookie(
-      farmDeploymentId,
-      ${JSON.stringify(ctx.basePath)},
-      new URL(request.url).protocol === 'https:',
-    ));
-  }
+  // A static or revalidating page's own policy (getFarmPageCacheControl) wins over a Cache-Control
+  // middleware set, as a page's own headers do in core's server.
+  if (pageCacheControl) headers.set('cache-control', pageCacheControl);
   if (${ctx.actionsEnabled ? "true" : "false"} && request.method === 'POST') {
     headers.set('cache-control', 'no-store');
     headers.set('x-content-type-options', 'nosniff');
   }
+  // A page renders per request (cookies, headers, client address), so a shared
+  // cache must not keep its HTML or Flight payload unless middleware chose a
+  // policy. Core's server defaults pages the same way.
+  if (!headers.has('cache-control')) headers.set('cache-control', 'private, no-store');
 }
 
 // Auto-discover all route modules. Every glob remains a literal so Vite can analyze it.
@@ -261,7 +712,21 @@ const routeDefinitionModules${index} = import.meta.glob(${JSON.stringify(
             `${root.sourceGlob}/{farm.route,farm.routes,routes}.{tsx,jsx,ts,js}`,
             `${root.glob}/{farm.route,farm.routes,routes}.{tsx,jsx,ts,js}`,
           ],
-    )}, { eager: true });`,
+    )}, { eager: true });${
+      servesAppMetadataRoutes
+        ? `\nconst appMetadataRoutes${index} = ${uiRouteGlob(`${root.glob}/**/{sitemap,robots,manifest,llms,llms-full}.{ts,js}`)};`
+        : ""
+    }${
+      generatedMetadataImages
+        ? `\nconst metadataImageModules${index} = ${uiRouteGlob(`${root.glob}/**/{opengraph-image,twitter-image}.{tsx,jsx,ts,js}`)};`
+        : ""
+    }${
+      staticMetadataImages
+        ? // Each file's dimensions, alt text, hash and bytes, read by the plugin's loader as core's
+          // router reads them (and inlined by a build, as core's build inlines them).
+          `\nconst metadataImageFiles${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/{opengraph-image,twitter-image}.{png,jpg,jpeg,gif,webp}`)}, { query: ${JSON.stringify(FARM_METADATA_IMAGE_QUERY)}, import: 'default', eager: true });`
+        : ""
+    }`,
   )
   .join("\n")}
 
@@ -307,6 +772,14 @@ const pages = mergeRouteModules([${routeRoots
 const layouts = mergeRouteModules([${routeRoots
     .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: layouts${index} }`)
     .join(", ")}]);
+// Root layouts that render <html> themselves own the document, as in Next.js.
+const farmDocumentLayoutKeys = new Set(${JSON.stringify(ctx.documentLayouts ?? [])});
+const farmDocumentLayoutModules = new Set(
+  Object.entries(layouts)
+    .filter(([key]) => farmDocumentLayoutKeys.has(key))
+    .map(([, module]) => module),
+);
+
 const loadings = mergeRouteModules([${routeRoots
     .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: loadings${index} }`)
     .join(", ")}]);
@@ -422,8 +895,11 @@ if (farmNativeMCPPlugin) {
     methods: [...route.methods],
     endpoints: { ...route.handlers },
   }));
-  // Rejects a plugin route that would replace an app endpoint.
-  for (const route of mergePluginAPIRoutes(mountedRoutes, [farmNativeMCPPlugin])) {
+  // Rejects a plugin route that would replace an app endpoint. An MCP tool calls its
+  // endpoint through handler(), so the middleware guarding that path runs for it.
+  for (const route of mergePluginAPIRoutes(mountedRoutes, [farmNativeMCPPlugin], undefined, {
+    dispatch: (request) => handler(request),
+  })) {
     for (const method of route.pluginMethods ?? []) {
       let target = apiRouteMap.get(route.path);
       if (!target) {
@@ -486,9 +962,21 @@ const farmMiddlewareRunner = createProductionMiddlewareRunner({
     .filter((entry) => entry.path !== null)
     // Root first, as core runs them: a nested guard can rely on what its
     // parent middleware set, and glob order is alphabetical, not by depth.
-    .sort((left, right) => middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path)),
+    // Route groups share a URL path; the shallower file runs first, so
+    // '/middleware.ts' precedes '/(app)/middleware.ts'.
+    .sort(
+      (left, right) =>
+        middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path) ||
+        left.path.localeCompare(right.path) ||
+        middlewareRouteDepth(left.filePath) - middlewareRouteDepth(right.filePath) ||
+        left.filePath.localeCompare(right.filePath),
+    ),
   i18n: ${JSON.stringify(ctx.i18n) ?? "undefined"},
   server: ${JSON.stringify(ctx.server) ?? "undefined"},
+  apiBasePath: farmApiBasePath,
+  // matchRoute() can select a page by the path as received (a page under app/<basePath>/ or
+  // app/[lang]/) as well as by the route path, so middleware guards both.
+  rawPathRouting: true,
 });
 
 debug('Discovered pages:', Object.keys(pages));
@@ -501,22 +989,37 @@ debug('Discovered API routes:', Array.from(apiRouteMap.keys()));
 /**
  * Convert an app-relative middleware file path to the route it guards, with the
  * same rules as core's middleware discovery: a route group such as
- * '(protected)' adds no URL segment, and a '_private' or dot-prefixed folder
+ * '(protected)' or a parallel route slot such as '@team' adds no URL segment,
+ * an intercepting folder guards the URL it intercepts, a '_private' folder
+ * routes its pages so its middleware guards them, and a dot-prefixed folder
  * holds no routes, so its middleware never runs (null).
  * e.g., '/middleware.ts' -> '/'
  * e.g., '/(protected)/dashboard/middleware.ts' -> '/dashboard'
+ * e.g., '/dashboard/@team/middleware.ts' -> '/dashboard'
+ * e.g., '/feed/@modal/(.)photo/middleware.ts' -> '/feed/photo'
  */
 function middlewarePathToRoute(filePath) {
   const segments = filePath
     .replace(/\\/middleware\\.[tj]sx?$/, '')
     .split('/')
     .filter(Boolean);
-  if (segments.some((segment) => segment.startsWith('_') || segment.startsWith('.'))) {
+  if (segments.some((segment) => segment.startsWith('.'))) {
     return null;
   }
-  const routeSegments = segments.filter(
-    (segment) => !(segment.startsWith('(') && segment.endsWith(')')),
-  );
+  const routeSegments = [];
+  for (const segment of segments) {
+    const marker = /^((?:\\(\\.\\.\\))+|\\(\\.\\.\\.\\)|\\(\\.\\))(.*)$/.exec(segment);
+    if (marker) {
+      if (marker[1] === '(...)') routeSegments.length = 0;
+      else if (marker[1] !== '(.)') routeSegments.splice(-(marker[1].length / 4));
+      if (marker[2]) routeSegments.push(marker[2]);
+      continue;
+    }
+    if ((segment.startsWith('(') && segment.endsWith(')')) || /^@[A-Za-z][A-Za-z0-9_-]*$/.test(segment)) {
+      continue;
+    }
+    routeSegments.push(segment);
+  }
   return routeSegments.length === 0 ? '/' : '/' + routeSegments.join('/');
 }
 
@@ -575,7 +1078,12 @@ const RouteErrorBoundary = React.Component
 
 // Parse and rank once per entry initialization, not on every request. Use the
 // same validation, decoding and specificity rules as Farm's ordinary router.
-const pageRoutes = Object.entries(pages).map(([filePath, module]) => ({
+// RSC renders no parallel route slots, so a page inside '@modal/...' would otherwise
+// answer at its literal folder path ('/feed/@modal/(.)photo/1'), past the middleware
+// that guards the URL it intercepts.
+const pageRoutes = Object.entries(pages)
+  .filter(([filePath]) => !filePath.split('/').some((segment) => /^@[A-Za-z][A-Za-z0-9_-]*$/.test(segment)))
+  .map(([filePath, module]) => ({
   filePath,
   module,
   segments: parseRoutePath(filePath).segments,
@@ -586,34 +1094,239 @@ const pageRoutes = Object.entries(pages).map(([filePath, module]) => ({
  * Simple file-based router
  * Converts URL pathname to matching page component
  */
-function matchRoute(pathname) {
+${
+  routesBelowPrefix
+    ? `function matchRoute(pathname) {
   const normalized = pathname.replace(/\\/$/, '') || '/';
-  
+  const routePathname = getFarmRoutePathname(normalized);
+  if (routePathname === normalized) return matchFarmPagePath(normalized);
+  // Pages answer at their route path, as in core's renderers: app/about/page.tsx at
+  // '/console/about' under basePath "/console", and at '/console/fr/about' with an 'fr' locale.
+  // A page whose folders spell out the prefix the request carries (app/console/about, or
+  // app/[lang]/about for the locale) keeps the URL it had when RSC matched the path as received,
+  // and any other page matching only that path still answers there. Middleware runs for both
+  // paths (rawPathRouting), so the page that renders keeps its guards.
+  const asReceived = matchFarmPagePath(normalized);
+  if (asReceived && farmPageSpellsRoutePrefix(asReceived.segments, normalized, routePathname)) {
+    return asReceived;
+  }
+  return matchFarmPagePath(routePathname) ?? asReceived;
+}
+
+/**
+ * Whether a page matched on the path as received takes the prefix with its own folders: a static
+ * folder for each basePath segment, then any folder but a catch-all for the locale. A catch-all
+ * or dynamic folder that merely absorbs the basePath ('[...slug]' at the root) does not.
+ */
+function farmPageSpellsRoutePrefix(segments, pathname, routePathname) {
+  const count = (path) => path.split('/').filter(Boolean).length;
+  const prefixLength = count(pathname) - count(routePathname);
+  const basePathLength = count(pathname) - count(stripFarmBasePath(pathname, farmRouteI18n.basePath));
+  for (let index = 0; index < prefixLength; index++) {
+    const segment = segments[index];
+    if (!segment || segment.isCatchAll || (index < basePathLength && segment.isDynamic)) return false;
+  }
+  return true;
+}
+`
+    : `function matchRoute(pathname) {
+  return matchFarmPagePath(pathname.replace(/\\/$/, '') || '/');
+}
+`
+}
+function matchFarmPagePath(normalized) {
   for (const { filePath, module, segments } of pageRoutes) {
     const match = matchFarmPageRoute(normalized, segments);
-    
+
     if (match.matches) {
       debug('Matched route:', filePath, 'for path:', normalized);
       return {
         Page: module.default,
         pattern: filePath,
         params: match.params,
-        pageMetadata: module.metadata,
+        module,
+        segments,
       };
     }
   }
-  
+
   debug('No route matched for:', normalized);
   return null;
 }
 
-function mergeDocumentMetadata(...sources) {
-  const metadata = {};
-  for (const source of sources) {
-    if (typeof source?.title === 'string') metadata.title = source.title;
-    if (typeof source?.description === 'string') metadata.description = source.description;
+// Each page's parsed rendering directive and whether its source reads request state, baked by
+// the build because module exports cannot tell.
+const farmPageRenderingDirectives = ${JSON.stringify(ctx.pageRenderingDirectives ?? {})};
+${
+  sharedPageCache
+    ? `
+/**
+ * The Cache-Control of a page a shared cache may store (\`revalidate\`, or a static page this server
+ * renders), as core's production server decides it: core's policy for the route, or
+ * \`private, no-store\` when this render is one visitor's (a cookie other than the deployment
+ * cookie, \`Authorization\`, middleware request data, or a request read since \`readsBefore\`).
+ * Null for any other page, which keeps the default. Decided before the page streams, so its HTML
+ * and its Flight payload get the same policy; middleware that let the request through makes it
+ * private afterwards, as in core.
+ */
+function getFarmPageCacheControl(request, matched, readsBefore, middlewareData, middlewareContext) {
+  const shared = resolveRouteSharedCacheControl(
+    mergeRouteRenderingDirectiveConfig(farmPageRenderingDirectives[matched.pattern], matched.module),
+  );
+  if (!shared) return null;
+  const method = request.method.toUpperCase();
+  const perRequest =
+    (method !== 'GET' && method !== 'HEAD') ||
+    _hasPrivateFarmRequestHeaders(request${
+      i18n
+        ? `, getLocaleSource() === 'url'
+      ? { name: farmRouteI18n.cookie.name, locales: farmRouteI18n.locales }
+      : undefined`
+        : ""
+    }) ||
+    middlewareData.size > 0 ||
+    middlewareContext.size > 0 ||
+    _getRequestReadCount(request) !== readsBefore;
+  return perRequest ? 'private, no-store' : shared;
+}
+`
+    : ""
+}
+/**
+ * The URL paths the build prerenders, by core's SSG rules: a page asks to be static
+ * (dynamic = "force-static", generateStaticParams, "use ssg"), does not read request
+ * state, and does not revalidate. A prerendered page is a static file the server never sees, so a
+ * path any middleware may handle stays server-rendered.
+ */
+async function collectFarmStaticPages() {
+  ${
+    i18n?.routing === "none"
+      ? `// As in core's SSG: one URL serves every locale, by the visitor's cookie or Accept-Language.
+  console.info('[Farm.js] Prerendering is off: with i18n routing "none" one URL serves every locale.');
+  return [];`
+      : ""
   }
-  return metadata;
+  const middlewareRoutes = Object.keys(middlewares)
+    .map((filePath) => ({ path: middlewarePathToRoute(filePath) }))
+    .filter((route) => route.path !== null);
+  const paths = new Set();
+  for (const { filePath, module, segments } of pageRoutes) {
+    const rendering = mergeRouteRenderingDirectiveConfig(farmPageRenderingDirectives[filePath], module);
+    if (!rendering.ssg || rendering.revalidate !== undefined) continue;
+    const pattern = '/' + segments
+      .map((part) => part.isCatchAll
+        ? (part.isOptional ? '[[...' + part.segment + ']]' : '[...' + part.segment + ']')
+        : part.isDynamic ? '[' + part.segment + ']' : part.segment)
+      .join('/');
+    let pagePaths;
+    try {
+      if (!segments.some((part) => part.isDynamic)) {
+        pagePaths = [pattern];
+      } else {
+        const getStaticPaths = module.getStaticPaths || module.generateStaticParams;
+        if (typeof getStaticPaths !== 'function') {
+          throw new Error('a static route with dynamic segments needs generateStaticParams()');
+        }
+        pagePaths = (await getStaticPaths()).map((params) => materializeSSGRoutePath(pattern, params));
+      }
+    } catch (error) {
+      console.error('[Farm.js] Rendering ' + filePath + ' on each request: could not list its static paths.', error);
+      continue;
+    }
+    for (const pagePath of pagePaths) {
+      if (
+        appMiddlewareMayHandlePath(middlewareRoutes, pagePath) ||
+        configMiddlewareMayHandlePath(farmConfigMiddleware, pagePath)
+      ) {
+        continue;
+      }
+      ${
+        i18n
+          ? `for (const publicPath of farmLocalizedStaticPaths(pagePath)) {
+        // Only where the server would render this page, and no middleware may handle the URL.
+        const routePath = getFarmRoutePathname(publicPath);
+        if (
+          matchRoute(publicPath)?.pattern !== filePath ||
+          appMiddlewareMayHandlePath(middlewareRoutes, routePath) ||
+          configMiddlewareMayHandlePath(farmConfigMiddleware, routePath) ||
+          appMiddlewareMayHandlePath(middlewareRoutes, publicPath) ||
+          configMiddlewareMayHandlePath(farmConfigMiddleware, publicPath)
+        ) {
+          continue;
+        }
+        paths.add(publicPath);
+      }`
+          : hasBasePath
+            ? `// The platform serves a prerendered file only at the URL it was written for, below the
+      // basePath, as core's build writes it. A page nested under app/<basePath>/ already is.
+      const publicPath = applyFarmBasePath(pagePath, ${JSON.stringify(ctx.basePath)});
+      paths.add(${
+        ctx.trailingSlash
+          ? "normalizeFarmTrailingSlashPathname(publicPath, true)"
+          : "publicPath.length > 1 ? publicPath.replace(/\\/$/, '') : publicPath"
+      });`
+            : ctx.trailingSlash
+              ? // With trailingSlash the page's URL is '/about/', which Nitro writes as about/index.html.
+                "paths.add(normalizeFarmTrailingSlashPathname(pagePath, true));"
+              : "paths.add(pagePath);"
+      }
+    }
+  }
+  return [...paths]${configRoutes ? ".filter((path) => !farmConfigRouteMayHandlePath(path))" : ""};
+}
+${
+  i18n
+    ? `/**
+ * The URLs a static page prerenders at with i18n, as core's SSG lists them: the page at each
+ * locale's URL below the basePath (localizeFarmPathname). A page whose folders name the locale
+ * (app/[lang]/...) listed its URLs itself; one the server redirects to its canonical URL (the
+ * default locale's prefix under "prefix-except-default") is left out. A URL without a locale (the
+ * default locale's, under "prefix-except-default") answers by the visitor's cookie or
+ * Accept-Language and redirects those that pick another locale, so it stays server-rendered while
+ * the app detects either.
+ */
+function farmLocalizedStaticPaths(pagePath) {
+  const namesLocale = (pathname) =>
+    stripFarmLocaleFromPathname(pathname, farmRouteI18n) !==
+    stripFarmBasePath(pathname, farmRouteI18n.basePath);
+  const canonical = (pathname) =>
+    farmRouteI18n.locales.some(
+      (locale) => localizeFarmPathname(pathname, locale, farmRouteI18n) === pathname,
+    );
+  const detects = farmRouteI18n.detection.some((signal) => signal !== 'url');
+  const urls = namesLocale(pagePath)
+    ? [${hasBasePath ? `applyFarmBasePath(pagePath, ${JSON.stringify(ctx.basePath)})` : "pagePath"}]
+    : farmRouteI18n.locales.map((locale) => localizeFarmPathname(pagePath, locale, farmRouteI18n));
+  return urls
+    .map((url) => (url.length > 1 ? url.replace(/\\/$/, '') : url))
+    .filter((url) => canonical(url) && (namesLocale(url) || !detects))${
+      ctx.trailingSlash
+        ? `
+    // With trailingSlash the page's URL is '/fr/about/', which Nitro writes as fr/about/index.html.
+    .map((url) => normalizeFarmTrailingSlashPathname(url, true))`
+        : ""
+    };
+}
+
+`
+    : ""
+}
+// The route's metadata as core's server resolves it: layouts root to leaf, then the page, each
+// module's \`metadata\`, \`generateMetadata()\` and viewport exports merged in order.
+async function resolveFarmRouteMetadata(layoutModules, pageModule, pageProps) {
+  let metadata = {};
+  for (const layoutModule of layoutModules) {
+    metadata = mergeMetadata(metadata, layoutModule.metadata);
+    if (typeof layoutModule.generateMetadata === 'function') {
+      metadata = mergeMetadata(metadata, await layoutModule.generateMetadata({ params: pageProps.params }));
+    }
+    metadata = await mergeModuleViewport(metadata, layoutModule, { params: pageProps.params });
+  }
+  metadata = mergeMetadata(metadata, pageModule?.metadata);
+  if (typeof pageModule?.generateMetadata === 'function') {
+    metadata = mergeMetadata(metadata, await pageModule.generateMetadata(pageProps));
+  }
+  return mergeModuleViewport(metadata, pageModule ?? {}, pageProps);
 }
 
 /**
@@ -654,6 +1367,14 @@ function getLayoutModules(pageFilePath) {
   return getRouteModules(pageFilePath, layouts, 'layout');
 }
 
+// Flight keeps only the digest onError returns for a server error. A notFound() or redirect() keeps
+// its own, so the request handler still answers 404 or the redirect; other errors are logged as
+// React's default handler logs them.
+function farmRscOnError(error) {
+  if (getFarmRedirectError(error) || isFarmNotFoundError(error)) return error.digest;
+  console.error(error);
+}
+
 function getMatchingBoundary(pageFilePath, modules, kind) {
   // Before page selection (for example, middleware failure), only the root
   // boundary applies. Do not guess a route from a partially processed URL.
@@ -664,16 +1385,51 @@ function getMatchingBoundary(pageFilePath, modules, kind) {
 /**
  * Main request handler - entry point for both dev and production (Nitro).
  * Exported as { fetch: handler } for the RSC/Nitro contract (see vite-plugin-rsc-deploy-example).
+ *
+ * Middleware that let a request through may have been a guard: an IP allowlist, an API key
+ * header, a VPN header. A CDN keys its copy by URL and never runs the guard on a hit, so
+ * whatever such a request answers stays out of shared caches, as in core's server. Only
+ * middleware declaring cache: "public" leaves the policy alone.
  */
 async function handleFarmRequest(request, context) {
+  const farmCacheGuard = { guarded: false };
+  const response = await resolveFarmRequest(farmCacheGuard, request, context);${
+    configHeaders
+      ? `
+  // Tells handler(), whose config headers() must not make this response shareable again.
+  if (farmCacheGuard.guarded) context?.onGuardedResponse?.();`
+      : ""
+  }
+  return farmCacheGuard.guarded ? _withFarmGuardedResponseCache(response) : response;
+}
+
+async function resolveFarmRequest(farmCacheGuard, request, context${configRoutes ? ", farmConfigRewritten = false" : ""}) {
   let url = new URL(request.url);
+  const isFarmPayloadRequest = farmPayloadRequests.has(request);
   let matchedPage = null;
   let errorData = new Map();
   let errorContext = new Map();
   let errorHeaders = new Headers();
   try {
   debug('Handling request:', request.method, url.pathname);
-
+${
+  configRoutes
+    ? `
+  // Config redirects() answer before any route or middleware, and a config rewrite applies when
+  // no route of this server answers the URL, once: its destination runs through middleware and
+  // routing again, as in core's servers.
+  if (!farmConfigRewritten) {
+    const configRoute = await resolveFarmConfigRoute(request, isFarmPayloadRequest);
+    if (configRoute instanceof Response) return configRoute;
+    if (configRoute) {
+      return await _runWithCurrentRequest(configRoute, () =>
+        resolveFarmRequest(farmCacheGuard, configRoute, context, true)
+      );
+    }
+  }
+`
+    : ""
+}
   const deploymentMismatch = getFarmDeploymentMismatch(request, farmDeploymentId);
   if (deploymentMismatch) {
     return createFarmDeploymentMismatchResponse(deploymentMismatch);
@@ -687,7 +1443,7 @@ async function handleFarmRequest(request, context) {
     ctx.actionsEnabled
       ? `if (request.method === 'POST' && !isInitialApiRequest) {
     try {
-      validateServerActionRequest(request, serverActionSecurity);
+      validateServerActionRequest(request, serverActionSecurity, serverActionRequestOptions);
     } catch (error) {
       const rejection = createServerActionRequestErrorResponse(error);
       if (rejection) return rejection;
@@ -707,6 +1463,7 @@ async function handleFarmRequest(request, context) {
   // Execute middleware first
   const middlewareResult = await executeMiddleware(request, context);
   ${generateRscMiddlewareResultHandling()}
+  if (middlewareResult.guarded) farmCacheGuard.guarded = true;
 
   request = middlewareResult.request;
   url = new URL(request.url);
@@ -729,15 +1486,53 @@ async function handleFarmRequest(request, context) {
       _runWithMiddlewareContext(middlewareContext, async () => {
   const glob = '';
 
-  const apiResponse = await handleAPIRequest(request.clone());
+  if (farmImageHandler && url.pathname === farmImagePath) {
+    const imageResponse = await farmImageHandler(request);
+    if (imageResponse) return imageResponse;
+  }
+
+  // A plain clone of the request would let some undici versions cancel the original's body when the
+  // declined clone is collected, before a server action reads it.
+  const apiResponse = await handleAPIRequest(cloneFarmRequestWithContext(request));
   if (apiResponse) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
   ${
+    servesMetadataImages
+      ? `// opengraph-image and twitter-image: answered after middleware, as in core's servers.
+  const metadataImageResponse = await handleFarmMetadataImageRequest(request);
+  if (metadataImageResponse) return applyProductionMiddlewareHeaders(metadataImageResponse, middlewareHeaders);
+  `
+      : ""
+  }${
+    servesAppMetadataRoutes
+      ? `// sitemap.ts, robots.ts, manifest.ts, llms.ts and llms-full.ts: answered after middleware, as
+  // in core's servers, and before the generated files they replace.
+  const appMetadataResponse = await handleFarmAppMetadataRoute(request, context);
+  if (appMetadataResponse) return applyProductionMiddlewareHeaders(appMetadataResponse, middlewareHeaders);
+  `
+      : ""
+  }${
     ctx.llmsTxt?.enabled
       ? `// agent.llmsTxt: answered after middleware, so its redirects and headers apply.
   const llmsResponse = await handleFarmLlmsTxtRequest(request, context);
   if (llmsResponse) return applyProductionMiddlewareHeaders(llmsResponse, middlewareHeaders);
+  `
+      : ""
+  }${
+    ctx.sitemap?.enabled
+      ? `// agent.sitemap: answered after middleware, as in core's servers.
+  if (getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/') === '/sitemap.xml') {
+    return applyProductionMiddlewareHeaders(createFarmAgentSitemapResponse(request), middlewareHeaders);
+  }
+  `
+      : ""
+  }${
+    servesAgentRobots
+      ? `// agent.crawlers: answered after middleware, as in core's servers.
+  if (getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/') === '/robots.txt') {
+    return applyProductionMiddlewareHeaders(createFarmAgentRobotsResponse(request), middlewareHeaders);
+  }
   `
       : ""
   }if (isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname)) {
@@ -745,6 +1540,20 @@ async function handleFarmRequest(request, context) {
       JSON.stringify({ error: 'API route not found', pathname: url.pathname }),
       { status: 404, headers: { 'Content-Type': 'application/json' } },
     ), middlewareHeaders);
+  }
+
+  // A page answers at one spelling of its URL, as in core's servers: '/about/' with trailingSlash,
+  // '/about' without. Any other spelling gets a 308 to it, before a server action runs, and a
+  // '<page>.rsc' request is sent to the payload URL of that page.
+  const trailingSlashLocation = resolveFarmTrailingSlashRedirect(url, ${JSON.stringify(ctx.trailingSlash === true)});
+  if (trailingSlashLocation && matchRoute(url.pathname)) {
+    const target = new URL(trailingSlashLocation, url);
+    return applyProductionMiddlewareHeaders(new Response(null, {
+      status: 308,
+      headers: {
+        location: isFarmPayloadRequest ? farmPayloadPath(target.pathname) + target.search : trailingSlashLocation,
+      },
+    }), middlewareHeaders);
   }
 `;
 
@@ -765,6 +1574,7 @@ async function handleFarmRequest(request, context) {
         serverActionSecurity,
         actionId ? 'javascript' : 'form',
         actionId,
+        serverActionRequestOptions,
       );
     } catch (error) {
       if (request.signal.aborted) {
@@ -821,7 +1631,7 @@ async function handleFarmRequest(request, context) {
         // sanitizeServerActionError untouched.
         const actionRedirect = getFarmRedirectError(e);
         if (actionRedirect) {
-          returnValue = { ok: false, redirect: { url: actionRedirect.url, status: actionRedirect.status } };
+          returnValue = { ok: false, redirect: { url: ${i18n ? "localizeFarmRedirectUrl(actionRedirect.url)" : "actionRedirect.url"}, status: actionRedirect.status } };
           debug('Server action redirected:', actionId, actionRedirect.url);
         } else {
           const actionError = sanitizeServerActionError(e);
@@ -861,13 +1671,26 @@ async function handleFarmRequest(request, context) {
           return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
         }
         // No client router here, so the redirect has to be a real HTTP
-        // redirect the browser follows on its own.
+        // redirect the browser follows on its own. 303 makes it a GET, as islands mode
+        // answers: a 307 or 308 would post the form again to the target.
         const formRedirect = getFarmRedirectError(e);
         if (formRedirect) {
           debug('Form action redirected:', formRedirect.url);
           return new Response(null, {
-            status: formRedirect.status,
-            headers: { location: formRedirect.url, 'Cache-Control': 'no-store' },
+            status: 303,
+            headers: { location: ${i18n ? "localizeFarmRedirectUrl(formRedirect.url)" : "formRedirect.url"}, 'Cache-Control': 'no-store' },
+          });
+        }
+        // notFound() is control flow too: the plain 404 a page that calls it gets, not a crash.
+        if (isFarmNotFoundError(e)) {
+          debug('Form action not found');
+          return new Response('Not Found', {
+            status: 404,
+            headers: {
+              'Cache-Control': 'no-store',
+              'Content-Type': 'text/plain; charset=utf-8',
+              'X-Content-Type-Options': 'nosniff',
+            },
           });
         }
         const actionError = sanitizeServerActionError(e);
@@ -889,6 +1712,11 @@ async function handleFarmRequest(request, context) {
 `;
   }
 
+  // The nearest manifest.ts and metadata images join the route's metadata, as in core's servers.
+  const routeMetadata =
+    servesAppMetadataRoutes || servesMetadataImages
+      ? "addFarmMetadataFileReferences(await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps), url.pathname)"
+      : "await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps)";
   // Route matching and rendering
   code += `
   // Match the URL to a page component
@@ -911,7 +1739,7 @@ async function handleFarmRequest(request, context) {
     return new Response('Not Found', { status: 404 });
   }
   
-  const { Page, pattern, params, pageMetadata } = matched;
+  const { Page, pattern, params, module: pageModule } = matched;
   ${
     isolateRouteModules
       ? `const routeLoadError = findFarmRouteLoadError(matched);
@@ -919,10 +1747,6 @@ async function handleFarmRequest(request, context) {
   `
       : ""
   }const LayoutModules = getLayoutModules(pattern);
-  const metadata = mergeDocumentMetadata(
-    ...LayoutModules.map((layoutModule) => layoutModule.metadata),
-    pageMetadata,
-  );
   const configuredRoutesDir = ${ctx.routesDir === undefined ? "undefined" : JSON.stringify(ctx.routesDir)};
   const routesDir = configuredRoutesDir === undefined ? 'app' : configuredRoutesDir.trim();
   const routesPath = routesDir ? '/' + routesDir : '';
@@ -933,8 +1757,32 @@ async function handleFarmRequest(request, context) {
   // every non-RSC environment produces (see core's search-params.ts).
   const searchParams = searchParamsToObject(url.searchParams);
   
-  // Page props passed to components (includes middleware shared data)
+  ${
+    sharedPageCache
+      ? `// A request read from here on (metadata, the page, its layouts) makes the render one visitor's,
+  // as in core's server; reads in middleware do not count.
+  const farmReadsBeforeRender = _getRequestReadCount(request);
+  `
+      : ""
+  }// Page props passed to components (includes middleware shared data)
   const pageProps = { params, searchParams, middlewareData };
+  ${
+    ctx.markdown?.enabled
+      ? `// The head advertises the page's Markdown mirror as the Link header does, as in core's servers.
+  const metadata = addMetadataMarkdownAlternate(
+    ${routeMetadata},
+    getFarmMarkdownAlternatePath(farmMarkdownConfig, url.pathname, { routePathname: getFarmRoutePathname }),
+  );`
+      : `const metadata = ${routeMetadata};`
+  }
+  const renderedHead = renderMetadataHead(metadata, { pathname: url.pathname });
+  // Injected into <head> by the SSR entry (React renders only the charset), and swapped in by the
+  // browser entry on client navigation.
+  const metadataHead =
+    (renderedHead.hasExplicitTitle ? '<title>' + renderedHead.title + '</title>' : '') +
+    renderedHead.viewport +
+    renderedHead.tags${i18n ? " + renderFarmI18nAlternateLinks(request, url.pathname, metadata)" : ""};
+  const metadataTitle = resolveMetadataTitle(metadata.title);
   
   debug('Rendering page:', pattern, 'with props:', pageProps);
   
@@ -968,40 +1816,75 @@ async function handleFarmRequest(request, context) {
     });
   }
   
+  // A native-tier screen reads only the page (RFC 0004): mark it, for the server's own render of
+  // the tree only (the handler strips this header from every other request).
+  if (request.headers.get('x-farm-native-tree') === '1') {
+    pageContent = h('div', { id: '__farm_page__', 'data-farm-segment': 'page' }, pageContent);
+  }
+
   // Render layouts inside out so every ancestor wraps its descendants.
   let layoutContent = pageContent;
   for (let index = LayoutModules.length - 1; index >= 0; index--) {
     const Layout = LayoutModules[index].default;
     const layoutProps = { params: pageProps.params, children: layoutContent };
     if (Layout.constructor.name === 'AsyncFunction') {
-      layoutContent = await Layout(layoutProps);
+      layoutContent = await Layout(layoutProps);${
+        i18n
+          ? `
+      if (index === 0 && farmDocumentLayoutModules.has(LayoutModules[0])) {
+        layoutContent = withFarmDocumentLocale(layoutContent);
+      }`
+          : ""
+      }
     } else {
-      layoutContent = h(Layout, layoutProps);
+      layoutContent = ${
+        i18n
+          ? `index === 0 &&
+        farmDocumentLayoutModules.has(LayoutModules[0]) &&
+        Layout.$$typeof !== Symbol.for('react.client.reference')
+        ? h(FarmLocaleDocument, { Layout, layoutProps })
+        : `
+          : ""
+      }h(Layout, layoutProps);
     }
   }
   
-  // Single wrapper so #root has exactly one child (avoids duplicate block / "two pages" in DOM).
-  const rootInner = h('div', { 'data-farm-root': 'true' }, layoutContent);
-  // Build the full page. root = full document (for SSR). rootContent = single wrapper + layout (for client hydration).
+  // A root layout that renders <html> owns the document, as in Next.js: the head elements below
+  // are hoisted into its <head> by React, and the browser hydrates the whole document.
+  const ownsDocument =
+    LayoutModules.length > 0 && farmDocumentLayoutModules.has(LayoutModules[0]);
+  // Otherwise a single wrapper, so #root has exactly one child (avoids a duplicate block in the DOM).
+  const rootInner = ownsDocument
+    ? h(
+        React.Fragment,
+        null,
+        h('meta', { charSet: 'utf-8' }),
+        layoutContent,
+      )
+    : h('div', { 'data-farm-root': 'true' }, layoutContent);
+  ${
+    i18n
+      ? `// The request's locale, as core's renderers serialize it for hydration: client components
+  // (Link, useLocale(), useTranslations()) read it in the browser as they did during SSR.
+  const farmI18nSnapshot = getFarmI18nClientSnapshot() ?? null;
+  `
+      : ""
+  }// Build the full page. root = full document (for SSR). rootContent = what the browser hydrates.
   const payload = {
-    root: h('html', null,
+    ownsDocument,
+    root: ownsDocument ? rootInner : h('html', ${i18n ? "farmI18nSnapshot && { lang: farmI18nSnapshot.locale, dir: farmI18nSnapshot.direction }" : "null"},
         h('head', null,
           h('meta', { charSet: 'utf-8' }),
-          h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
-          h('link', { rel: 'icon', href: 'data:,' }),
-          metadata?.title ? h('title', null, metadata.title) : null,
-          metadata?.description ? h('meta', { name: 'description', content: metadata.description }) : null
+          renderedHead.hasFavicon ? null : h('link', { rel: 'icon', href: 'data:,' }),
         ),
       h('body', null,
         h('div', { id: 'root' }, rootInner)
       )
     ),
     rootContent: rootInner,
-    metadata: {
-      title: typeof metadata?.title === 'string' ? metadata.title : undefined,
-      description: typeof metadata?.description === 'string' ? metadata.description : undefined,
-    },
-`;
+    metadataHead,
+    metadata: { title: metadataTitle },
+${i18n ? "    i18n: farmI18nSnapshot,\n" : ""}`;
 
   // Include action results in payload if actions are enabled
   if (ctx.actionsEnabled) {
@@ -1015,19 +1898,30 @@ async function handleFarmRequest(request, context) {
   // Check if this is a client-side navigation request
   // Client sends Accept: text/x-component header for RSC requests
   const acceptHeader = request.headers.get('accept') || '';
-  
+  ${
+    sharedPageCache
+      ? `const farmPageCacheControl = getFarmPageCacheControl(
+    request,
+    matched,
+    farmReadsBeforeRender,
+    middlewareResult.data,
+    middlewareContext,
+  );
+  `
+      : ""
+  }
   if (renderToReadableStream) {
     // Full RSC mode with streaming
     debug('Using RSC streaming mode');
     
-    const rscStream = renderToReadableStream(payload${ctx.actionsEnabled ? ", { temporaryReferences }" : ""});
+    const rscStream = renderToReadableStream(payload, { onError: farmRscOnError${ctx.actionsEnabled ? ", temporaryReferences" : ""} });
     
     if (acceptHeader.includes('text/x-component')) {
       debug('Returning RSC stream for client navigation');
       // Merge middleware headers with response headers
       const responseHeaders = new Headers(middlewareHeaders);
       responseHeaders.set('content-type', 'text/x-component');
-      applyActionResponseHeaders(responseHeaders, request);
+      applyActionResponseHeaders(responseHeaders, request${pageCacheArg});
       return new Response(rscStream, { headers: responseHeaders });
     }
 
@@ -1047,7 +1941,7 @@ async function handleFarmRequest(request, context) {
       // Merge middleware headers with response headers
       const responseHeaders = new Headers(middlewareHeaders);
       responseHeaders.set('content-type', 'text/html');
-      applyActionResponseHeaders(responseHeaders, request);
+      applyActionResponseHeaders(responseHeaders, request${pageCacheArg});
       return new Response(html, { headers: responseHeaders });
     }
   }
@@ -1059,8 +1953,8 @@ async function handleFarmRequest(request, context) {
       h('meta', { charSet: 'utf-8' }),
       h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
       h('link', { rel: 'icon', href: 'data:,' }),
-      metadata?.title ? h('title', null, metadata.title) : null,
-      metadata?.description ? h('meta', { name: 'description', content: metadata.description }) : null,
+      metadataTitle ? h('title', null, metadataTitle) : null,
+      typeof metadata.description === 'string' ? h('meta', { name: 'description', content: metadata.description }) : null,
       h('link', { rel: 'stylesheet', href: globalsCssPath, as: 'style', precedence: 'default' }),
       h('script', { type: 'module', src: '/@vite/client' })
     ),
@@ -1073,7 +1967,7 @@ async function handleFarmRequest(request, context) {
   // Merge middleware headers with response headers
   const responseHeaders = new Headers(middlewareHeaders);
   responseHeaders.set('content-type', 'text/html');
-  applyActionResponseHeaders(responseHeaders, request);
+  applyActionResponseHeaders(responseHeaders, request${pageCacheArg});
   return new Response(html, { headers: responseHeaders });
       })
     )
@@ -1086,7 +1980,7 @@ async function handleFarmRequest(request, context) {
     `
         : ""
     }const redirect = getFarmRedirectError(err);
-    if (redirect) return new Response(null, { status: redirect.status, headers: { location: redirect.url, 'cache-control': 'no-store' } });
+    if (redirect) return new Response(null, { status: redirect.status, headers: { location: ${i18n ? "localizeFarmRedirectUrl(redirect.url)" : "redirect.url"}, 'cache-control': 'no-store' } });
     if (isFarmNotFoundError(err)) return new Response('Not Found', { status: 404, headers: { 'cache-control': 'no-store' } });
     console.error('[RSC] Handler error:', err);
     if (request.method === 'POST') {
@@ -1132,9 +2026,11 @@ async function handleFarmRequest(request, context) {
                   h('head', null, h('meta', { charSet: 'utf-8' }), h('title', null, 'Error')),
                   h('body', null, h('div', { id: 'root' }, rootInner))),
                 rootContent: rootInner,
-                metadata: { title: 'Error' },
+                metadata: { title: 'Error' },${
+                  i18n ? "\n                i18n: getFarmI18nClientSnapshot() ?? null," : ""
+                }
               };
-              const rscStream = renderToReadableStream(payload);
+              const rscStream = renderToReadableStream(payload, { onError: farmRscOnError });
               const headers = new Headers(errorHeaders);
               headers.set('cache-control', 'private, no-store');
               headers.set('x-content-type-options', 'nosniff');
@@ -1172,50 +2068,63 @@ async function handleFarmRequest(request, context) {
 }
 
 ${
-  ctx.llmsTxt?.enabled
+  buildsLlmsTxt
     ? `/**
  * agent.llmsTxt, built the same way as core's production server: /llms.txt
  * lists the app's static pages and links to their Markdown mirrors, and
  * /llms-full.txt inlines each mirror.
  */
 function createFarmLlmsTxtContext(request, context, full) {
-  const origin = new URL(request.url).origin;
+  const origin = getFarmAgentOrigin(request);
+  // Each page links to its public URL below the basePath ('/console/index.md' for the home page),
+  // and include and exclude match its route path, as in core's servers.
   const pages = collectFarmLlmsTxtPages(
-    pageRoutes.map(({ module, segments }) => ({
-      // Dynamic routes have no single URL, so the collector skips them.
-      pattern: '/' + segments
-        .map((part) => (part.isDynamic ? '[' + part.segment + ']' : part.segment))
-        .join('/'),
+    getFarmAgentListedPages().map(({ pattern, module }) => ({
+      pattern,
       metadata: module && module.metadata,
     })),
     {
       origin,
+      basePath: ${JSON.stringify(ctx.basePath)},
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
-      exclude: farmLlmsTxtConfig.exclude,
+      exclude: farmLlmsTxtConfig.exclude,${ctx.trailingSlash ? "\n      // A page without a mirror is linked at the URL it answers at ('/console/about/').\n      trailingSlash: true," : ""}
+      // With i18n, in the default locale's URL ('/en/about.md' under routing "prefix-always").
+      i18n: farmRouteI18n,
     },
   );
   const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
   return {
+    origin,
+    pages,
     defaults: createFarmDefaultLlmsTxt({
       origin,
       pages,
       config: farmLlmsTxtConfig,
       rootMetadata: rootLayout && rootLayout.metadata,
     }),
-    // Pages are read in-process through the full handler with a fresh request,
-    // so the caller's cookies never shape the file. HEAD reads nothing.
+    // Pages are read in-process through the full handler as an anonymous
+    // visitor: a fresh request, so the caller's cookies never shape the file,
+    // and a neutral client address, so an IP allowlist never admits the read.
+    // The body is shared across callers. HEAD reads nothing.
     markdown: full && request.method.toUpperCase() !== 'HEAD'
-      ? createFarmLlmsMarkdownReader((page) => handler(page, context))
+      ? createFarmLlmsMarkdownReader((page) =>
+          handler(page, {
+            waitUntil: context && context.waitUntil,
+            clientAddress: FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
+          }),
+        )
       : async () => null,
   };
 }
 
 async function handleFarmLlmsTxtRequest(request, context) {
   const { origin, pathname } = new URL(request.url);
-  const kind = pathname === '/llms.txt'
+  // Served at the path routes see, as core serves it: /console/llms.txt under basePath "/console".
+  const routePathname = getFarmRoutePathname(pathname.replace(/\\/+$/, '') || '/');
+  const kind = routePathname === '/llms.txt'
     ? 'llms'
-    : farmLlmsTxtConfig.full && pathname === '/llms-full.txt' ? 'llms-full' : null;
+    : farmLlmsTxtConfig.full && routePathname === '/llms-full.txt' ? 'llms-full' : null;
   if (!kind) return null;
   const method = request.method.toUpperCase();
   if (method !== 'GET' && method !== 'HEAD') {
@@ -1226,7 +2135,7 @@ async function handleFarmLlmsTxtRequest(request, context) {
   let complete = true;
   const renderFull = (shared) =>
     renderFarmLlmsFullTxt(llmsContext.defaults, {
-      origin,
+      origin: llmsContext.origin,
       readMarkdown: llmsContext.markdown,
       onIncomplete: () => {
         complete = false;
@@ -1253,7 +2162,437 @@ async function handleFarmLlmsTxtRequest(request, context) {
 
 `
     : ""
-}/**
+}${
+    listsAgentPages
+      ? `/**
+ * The static pages the generated agent files list, as core's servers pick them: each at its route
+ * path, below the basePath and locale, leaving out a page a path-specific guard (a non-root
+ * middleware.ts, a config middleware matcher naming the path) or a route guard covers, and one
+ * that renders noindex through its own robots or, without one, its nearest layout's.
+ */
+function getFarmAgentListedPages() {
+  const guard = {
+    config: { middleware: farmConfigMiddleware },
+    // With its module, so a root middleware.ts's own config.matcher names the pages it guards.
+    middlewareRoutes: Object.keys(middlewares)
+      .map((filePath) => ({ path: middlewarePathToRoute(filePath), module: middlewares[filePath] }))
+      .filter((route) => route.path !== null),
+  };
+  const listed = new Map();
+  for (const { filePath, module, segments } of pageRoutes) {
+    // Dynamic routes have no single URL.
+    if (segments.some((part) => part.isDynamic)) continue;
+    const filePattern = '/' + segments.map((part) => part.segment).join('/');
+    ${
+      routesBelowPrefix
+        ? `// A page nested under app/<basePath>/ answers at the path without it, and wins there, as
+    // matchRoute() selects it.
+    const routePathname = getFarmRoutePathname(filePattern);
+    const nested = routePathname !== filePattern &&
+      farmPageSpellsRoutePrefix(segments, filePattern, routePathname);
+    const pattern = nested ? routePathname : filePattern;
+    const current = listed.get(pattern);
+    if (current && (current.nested || !nested)) continue;`
+        : `const pattern = filePattern;
+    const nested = false;
+    if (listed.has(pattern)) continue;`
+    }
+    listed.set(pattern, { filePath, filePattern, pattern, module, nested });
+  }
+  // Middleware runs for both the path as received and the route path, so either may guard it.
+  return [...listed.values()].filter(({ filePath, filePattern, pattern, module }) =>
+    !farmPathGuardCoversPage(guard, filePattern) &&
+    !farmPathGuardCoversPage(guard, pattern) &&
+    !(module && module.__farmRouteGuard) &&
+    !isFarmPageNoIndex(
+      module && module.metadata,
+      getRouteModules(filePath, layouts, 'layout').map((layout) => layout.metadata),
+    ),
+  );
+}
+
+${
+  ctx.sitemap?.enabled
+    ? `/**
+ * agent.sitemap, built the same way as core's servers build it: the pages llms.txt lists, each at
+ * its URL below the basePath, on the root layout's metadataBase or the request's origin.
+ */
+function createFarmAgentSitemapResponse(request) {
+  const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
+  return createFarmMetadataRouteResponse(
+    'sitemap',
+    createFarmDefaultSitemap(
+      getFarmAgentListedPages().map(({ filePath, pattern, module }) => ({
+        pattern,
+        module,
+        lastModified: farmPageLastModified[filePath],
+      })),
+      {
+        origin: new URL(request.url).origin,
+        config: farmAgentSitemapConfig,
+        metadataBase: rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
+        basePath: ${JSON.stringify(ctx.basePath)},${ctx.trailingSlash ? "\n        // Each page at the URL it answers at: '/console/about/'.\n        trailingSlash: true," : ""}
+        i18n: farmRouteI18n,
+      },
+    ),
+    {},
+    { method: request.method },
+  );
+}
+
+`
+    : ""
+}// Agent files link to the root layout's metadataBase when it is an absolute URL, else to the
+// request's origin, as in core's servers.
+function getFarmAgentOrigin(request) {
+  const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
+  return resolveFarmAgentOrigin(
+    rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
+    new URL(request.url).origin,
+  );
+}
+
+`
+      : ""
+  }${
+    servesAgentRobots
+      ? `/**
+ * agent.crawlers, built the same way as core's servers build it: rules for AI search and training
+ * crawlers, and a Sitemap line for the app's sitemap.xml below the basePath when the root layout
+ * has a metadataBase (the request's host is not trusted in a file crawlers and CDNs cache).
+ */
+function createFarmAgentRobotsResponse(request) {
+  const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
+  return createFarmMetadataRouteResponse(
+    'robots',
+    createFarmAgentRobots({
+      crawlers: farmAgentCrawlers,
+      sitemapPath: ${
+        ctx.sitemap?.enabled
+          ? "'/sitemap.xml'"
+          : servesAppMetadataRoutes
+            ? "farmAppMetadataRoutes.some((route) => route.kind === 'sitemap' && route.segments.length === 0)\n        ? '/sitemap.xml'\n        : undefined"
+            : "undefined"
+      },
+      metadataBase: rootLayout && rootLayout.metadata ? rootLayout.metadata.metadataBase : undefined,
+      basePath: ${JSON.stringify(ctx.basePath)},
+    }),
+    {},
+    { method: request.method },
+  );
+}
+
+`
+      : ""
+  }${
+    servesAppMetadataRoutes
+      ? `const FARM_APP_METADATA_OUTPUTS = {
+  sitemap: 'sitemap.xml',
+  robots: 'robots.txt',
+  manifest: 'manifest.webmanifest',
+  llms: 'llms.txt',
+  'llms-full': 'llms-full.txt',
+};
+
+// The app's metadata route files, most specific first, as core's router ranks them.
+const farmAppMetadataRoutes = Object.entries(
+  mergeRouteModules([${routeRoots
+    .map(
+      (root, index) => `{ base: ${JSON.stringify(root.base)}, modules: appMetadataRoutes${index} }`,
+    )
+    .join(", ")}]),
+)
+  .map(([filePath, module]) => {
+    const fileName = filePath.slice(filePath.lastIndexOf('/') + 1);
+    const kind = fileName.slice(0, fileName.lastIndexOf('.'));
+    return {
+      filePath,
+      module,
+      kind,
+      outputName: FARM_APP_METADATA_OUTPUTS[kind],
+      segments: parseRoutePath(filePath).segments,
+      specificity: getRoutePatternSpecificity(filePath.slice(0, filePath.lastIndexOf('/')) || '/'),
+    };
+  })
+  .sort((left, right) => compareRouteSpecificity(left.specificity, right.specificity));
+
+/**
+ * A sitemap.ts, robots.ts, manifest.ts, llms.ts or llms-full.ts route file, served as core
+ * serves it: at '<segment>/<file>' on the route path (below the basePath and locale), from its
+ * default export, a value or a function given the request, params, search params and the
+ * segment's path. llms.ts and llms-full.ts also receive the pages and defaults the generated llms.txt would use, and
+ * llms-full.ts the Markdown reader; an llms-full.ts object inlines each page's Markdown.
+ */
+async function handleFarmAppMetadataRoute(request, context) {
+  const url = new URL(request.url);
+  const matched = matchFarmAppMetadataRoute(
+    getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/'),
+  );
+  if (matched) {
+    const { route, routePath, match } = matched;
+    const method = request.method.toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+      return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } });
+    }
+    try {
+      const routeModule = route.module;
+      if (!routeModule || routeModule.default === undefined) {
+        throw new Error('Metadata route module does not export a default value or handler');
+      }
+      const full = route.kind === 'llms-full';
+      const llms = route.kind === 'llms' || full
+        ? createFarmLlmsTxtContext(request, context, full)
+        : undefined;
+      const value = typeof routeModule.default === 'function'
+        ? await routeModule.default({
+            request,
+            params: match.params,
+            searchParams: url.searchParams,
+            path: routePath,
+            ...(llms ? { pages: llms.pages, defaults: llms.defaults } : {}),
+            ...(full ? { markdown: llms.markdown } : {}),
+          })
+        : routeModule.default;
+      const body = full && !(value instanceof Response)
+        ? await renderFarmLlmsFullTxt(value, { origin: llms.origin, readMarkdown: llms.markdown })
+        : value;
+      return createFarmMetadataRouteResponse(route.kind, body, routeModule, { method, request });
+    } catch (error) {
+      console.error('[Farm.js] Metadata route ' + route.filePath + ' failed:', error);
+      return new Response('Internal Server Error', {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    }
+  }
+  return null;
+}
+
+/** The route file that answers a route path ('<segment>/<file>'), most specific first, or null. */
+function matchFarmAppMetadataRoute(pathname) {
+  for (const route of farmAppMetadataRoutes) {
+    const suffix = '/' + route.outputName;
+    if (pathname !== suffix && !pathname.endsWith(suffix)) continue;
+    const routePath = pathname.slice(0, -suffix.length) || '/';
+    const match = matchFarmPageRoute(routePath, route.segments);
+    if (match.matches) return { route, routePath, match };
+  }
+  return null;
+}
+
+`
+      : ""
+  }${
+    servesMetadataImages
+      ? `const FARM_METADATA_IMAGE_KINDS = { 'opengraph-image': 'opengraph', 'twitter-image': 'twitter' };
+
+/** A metadata image route from its file path ('/products/[id]/opengraph-image.png'). */
+function createFarmMetadataImageRoute(filePath, image) {
+  const directory = filePath.slice(0, filePath.lastIndexOf('/'));
+  const baseName = filePath.slice(directory.length + 1);
+  const fileName = baseName.slice(0, baseName.indexOf('.'));
+  return {
+    ...image,
+    filePath,
+    kind: FARM_METADATA_IMAGE_KINDS[fileName],
+    fileName,
+    segments: parseRoutePath(filePath).segments,
+    specificity: getRoutePatternSpecificity(directory || '/'),
+  };
+}
+
+// The app's opengraph-image and twitter-image files, most specific first: generated modules and
+// static images, whose dimensions, alt text and hash were read as core's router reads them.
+const farmMetadataImages = [${
+          generatedMetadataImages
+            ? `
+  ...Object.entries(mergeRouteModules([${routeRoots
+    .map(
+      (root, index) =>
+        `{ base: ${JSON.stringify(root.base)}, modules: metadataImageModules${index} }`,
+    )
+    .join(
+      ", ",
+    )}])).map(([filePath, module]) => createFarmMetadataImageRoute(filePath, { sourceType: 'module', module })),`
+            : ""
+        }${
+          staticMetadataImages
+            ? `
+  ...Object.entries(mergeRouteModules([${routeRoots
+    .map(
+      (root, index) =>
+        `{ base: ${JSON.stringify(root.base)}, modules: metadataImageFiles${index} }`,
+    )
+    .join(
+      ", ",
+    )}])).map(([filePath, file]) => createFarmMetadataImageRoute(filePath, { sourceType: 'static', staticInfo: file.info, data: file.data })),`
+            : ""
+        }
+].sort((left, right) => compareRouteSpecificity(left.specificity, right.specificity));
+
+/**
+ * An opengraph-image or twitter-image request, served as core serves it: at '<segment>/<file>' on
+ * the route path (below the basePath and locale), GET and HEAD only. A static image answers with
+ * its bytes, an ETag, and immutable caching when the URL names its hash (the head's
+ * '?v=<hash>'); a generated module renders through core's metadata image response, given the
+ * segment's params, search params and path.
+ */
+async function handleFarmMetadataImageRequest(request) {
+  const url = new URL(request.url);
+  const matched = matchFarmMetadataImageRequest(
+    getFarmRoutePathname(url.pathname.replace(/\\/+$/, '') || '/'),
+  );
+  if (matched) {
+    const { image, match, pagePath } = matched;
+    const method = request.method.toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+      return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } });
+    }
+    if (image.sourceType === 'static') {
+      const etag = '"' + image.staticInfo.hash + '"';
+      const headers = new Headers({
+        'Content-Type': image.staticInfo.contentType,
+        'Content-Length': String(image.staticInfo.byteLength),
+        'Cache-Control': url.searchParams.get('v') === image.staticInfo.hash
+          ? 'public, max-age=31536000, immutable'
+          : 'public, max-age=0, must-revalidate',
+        ETag: etag,
+        'X-Content-Type-Options': 'nosniff',
+      });
+      if (matchesFarmIfNoneMatch(request.headers.get('if-none-match'), etag)) {
+        return new Response(null, { status: 304, headers });
+      }
+      if (!image.bytes) image.bytes = Uint8Array.from(atob(image.data), (char) => char.charCodeAt(0));
+      return new Response(method === 'HEAD' ? null : image.bytes, { status: 200, headers });
+    }
+    ${
+      generatedMetadataImages
+        ? `try {
+      const imageModule = image.module;
+      if (!imageModule || !imageModule.default) {
+        throw new Error('Metadata image module does not export a default component or handler');
+      }
+      const value = typeof imageModule.default === 'function'
+        ? await imageModule.default({
+            params: match.params,
+            searchParams: createFarmSearchParams(searchParamsToObject(url.searchParams)),
+            path: pagePath,
+          })
+        : imageModule.default;
+      return await createFarmMetadataImageResponse(value, imageModule, {
+        method,
+        ifNoneMatch: request.headers.get('if-none-match'),
+      });
+    } catch (error) {
+      console.error('[Farm.js] Metadata image ' + image.filePath + ' failed:', error);
+      return new Response('Internal Server Error', {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    }`
+        : ""
+    }
+  }
+  return null;
+}
+
+/** The image that answers a route path ('<segment>/opengraph-image'), most specific first, or null. */
+function matchFarmMetadataImageRequest(pathname) {
+  const fileName = ['opengraph-image', 'twitter-image'].find(
+    (candidate) => pathname === '/' + candidate || pathname.endsWith('/' + candidate),
+  );
+  if (!fileName) return null;
+  const pagePath = pathname.slice(0, -fileName.length - 1) || '/';
+  for (const image of farmMetadataImages) {
+    if (image.fileName !== fileName) continue;
+    const match = matchFarmPageRoute(pagePath, image.segments);
+    if (match.matches) return { image, match, pagePath };
+  }
+  return null;
+}
+
+`
+      : ""
+  }${
+    servesAppMetadataRoutes || servesMetadataImages
+      ? `/**
+ * The nearest file of a kind for a route path, as core's servers pick it for the head: the deepest
+ * segment whose path prefixes the route path, with that prefix's params.
+ */
+function findFarmNearestMetadataFile(files, routePathname) {
+  const segments = routePathname.split('/').filter(Boolean);
+  let nearest = null;
+  for (const file of files) {
+    const depth = file.segments.length;
+    if (depth > segments.length) continue;
+    const routePath = depth === 0 ? '/' : '/' + segments.slice(0, depth).join('/');
+    if (!matchFarmPageRoute(routePath, file.segments).matches) continue;
+    if (!nearest || depth > nearest.file.segments.length) nearest = { file, routePath };
+  }
+  return nearest;
+}
+
+/** A metadata file's URL in the head: below its segment, in the request's locale and basePath. */
+function farmMetadataFileHref(routePath, file) {
+  const href = (routePath === '/' ? '' : routePath) + '/' + file;${
+    i18n
+      ? `
+  const snapshot = getFarmI18nClientSnapshot();
+  const localized = snapshot ? localizeFarmHref(href, snapshot.locale, snapshot) : href;`
+      : `
+  const localized = href;`
+  }
+  return ${hasBasePath ? `applyFarmBasePath(localized, ${JSON.stringify(ctx.basePath)})` : "localized"};
+}
+
+/**
+ * The route's metadata with the nearest manifest.ts as its manifest and the nearest
+ * opengraph-image and twitter-image as Open Graph and Twitter images, unless the metadata sets
+ * them, as core's servers add them.
+ */
+function addFarmMetadataFileReferences(metadata, pathname) {
+  const routePathname = getFarmRoutePathname(pathname.replace(/\\/+$/, '') || '/');${
+    servesAppMetadataRoutes
+      ? `
+  if (!metadata.manifest) {
+    const manifest = findFarmNearestMetadataFile(
+      farmAppMetadataRoutes.filter((route) => route.kind === 'manifest'),
+      routePathname,
+    );
+    if (manifest) {
+      metadata = { ...metadata, manifest: farmMetadataFileHref(manifest.routePath, 'manifest.webmanifest') };
+    }
+  }`
+      : ""
+  }${
+    servesMetadataImages
+      ? `
+  for (const kind of ['opengraph', 'twitter']) {
+    const nearest = findFarmNearestMetadataFile(
+      farmMetadataImages.filter((image) => image.kind === kind),
+      routePathname,
+    );
+    if (!nearest) continue;
+    const image = nearest.file;
+    const info = image.sourceType === 'static' ? image.staticInfo : image.module;
+    const version = image.sourceType === 'static' ? '?v=' + image.staticInfo.hash : '';
+    metadata = addMetadataImageReference(metadata, {
+      kind,
+      href: farmMetadataFileHref(nearest.routePath, image.fileName + version),
+      width: info?.width ?? info?.size?.width,
+      height: info?.height ?? info?.size?.height,
+      alt: info?.alt,
+      contentType: info?.contentType,
+    });
+  }`
+      : ""
+  }
+  return metadata;
+}
+
+`
+      : ""
+  }/**
  * Serves a page's Markdown mirror (\`/page.md\` or \`Accept: text/markdown\`) by
  * rendering the page through the normal request path, so middleware and sign-in
  * gates apply; every other request renders as usual, and HTML pages advertise
@@ -1264,8 +2603,10 @@ async function handleFarmPageOrMarkdown(request, context) {
   const markdown = await createMarkdownMirrorResponse({
     request,
     config: farmMarkdownConfig,
+    routePathname: getFarmRoutePathname,
+    // The page the render below selects for the mirrored URL, below the basePath and locale.
     routeExists: (pathname) => Boolean(matchRoute(pathname)),
-    renderPage: (pageRequest) => handleFarmRequest(pageRequest, context),
+    renderPage: (pageRequest) => handleFarmRequest(${ctx.trailingSlash ? "toFarmTrailingSlashPageRequest(pageRequest)" : "pageRequest"}, context),
     apiServerBasePath: farmApiBasePath,
   });
   if (markdown) return markdown;
@@ -1273,17 +2614,201 @@ async function handleFarmPageOrMarkdown(request, context) {
   return applyMarkdownNegotiationHeaders(response, {
     config: farmMarkdownConfig,
     pathname: new URL(request.url).pathname,
+    routePathname: getFarmRoutePathname,
   });
 }
+${
+  ctx.trailingSlash
+    ? `
+// The mirror reads the page at its canonical URL ('/about/'), so the trailing-slash redirect never
+// answers in its place.
+function toFarmTrailingSlashPageRequest(request) {
+  const url = new URL(request.url);
+  const pathname = normalizeFarmTrailingSlashPathname(url.pathname, true);
+  if (pathname === url.pathname) return request;
+  url.pathname = pathname;
+  return new Request(url, request);
+}
+`
+    : ""
+}
+// Client navigation addresses a page's RSC payload as '<page>.rsc' ('<dir>/index.rsc' for a
+// trailing slash), so a prerendered page can be a static HTML file next to a static payload file.
+// 'Accept: text/x-component' on the page URL keeps working.
+function farmPayloadPath(pathname) {
+  return pathname.endsWith('/') ? pathname + 'index.rsc' : pathname + '.rsc';
+}
 
-async function handler(request, context) {
-  return _runWithAPIRequestRuntime({
+// The requests made from a '<page>.rsc' URL, whose redirects name a payload URL too.
+const farmPayloadRequests = new WeakSet();
+
+function toFarmPayloadRequest(request) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return request;
+  const url = new URL(request.url);
+  if (!url.pathname.endsWith('.rsc')) return request;
+  if (isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname)) return request;
+  const page = url.pathname.slice(0, -'.rsc'.length);
+  url.pathname = page.endsWith('/index') ? page.slice(0, -'index'.length) : page;
+  const headers = new Headers(request.headers);
+  headers.set('accept', 'text/x-component');
+  const payloadRequest = new Request(url, { method: request.method, headers, signal: request.signal });
+  farmPayloadRequests.add(payloadRequest);
+  return payloadRequest;
+}
+${generateConfigRoutesRuntime(ctx, configRoutes, localRouteCheck)}
+// The build's prerender pass (Nitro) runs this server with FARM_RSC_PRERENDER set. It seeds one
+// route that lists the static pages, and each prerendered page queues its payload, both through
+// Nitro's x-nitro-prerender response header. Production servers never answer either.
+const FARM_PRERENDER_ROUTES_PATH = '/__farm/rsc-prerender-routes';
+function isFarmPrerenderRequest(request) {
+  return globalThis.process?.env?.FARM_RSC_PRERENDER === '1' && request.headers.has('x-nitro-prerender');
+}
+
+${
+  ctx.mobileClient
+    ? `// The server's own renders of a page for a native-tree answer: only these mark the page.
+const farmNativeTreeRenders = new WeakSet();
+`
+    : ""
+}async function handler(request, context) {${
+    ctx.mobileClient
+      ? `
+  if (request.headers.has('x-farm-native-tree') && !farmNativeTreeRenders.has(request)) {
+    const headers = new Headers(request.headers);
+    headers.delete('x-farm-native-tree');
+    request = new Request(request, { headers });
+  }`
+      : ""
+  }
+  const prerendering = isFarmPrerenderRequest(request);
+  if (prerendering && new URL(request.url).pathname === FARM_PRERENDER_ROUTES_PATH) {
+    const pages = await collectFarmStaticPages();
+    return new Response('<!doctype html>', {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'x-nitro-prerender': pages.map(encodeURIComponent).join(','),
+      },
+    });
+  }
+${
+  ctx.mobileClient
+    ? `  // A native-tier screen of the mobile app (RFC 0004): the page, rendered as for a browser,
+  // read into a tree of native views. A POST is a form the screen submitted, such as a server
+  // action's: it runs as the browser's no-JavaScript submission would.
+  if (
+    (request.method === 'GET' || request.method === 'HEAD' || request.method === 'POST') &&
+    (request.headers.get('accept') || '').includes('application/vnd.farm.native+json')
+  ) {
+    return createFarmNativeTreeResponse({
+      request,
+      renderPage: (target) => {
+        farmNativeTreeRenders.add(target);
+        return handler(target, context);
+      },
+      // Behind a proxy that terminates TLS, links and server-action forms use the forwarded
+      // origin (under server.trustProxy), so the shell posts to https:// as the browser does.
+      origin: resolveFarmWebRequestOrigin(request, {
+        trustProxy: ${JSON.stringify(ctx.server?.trustProxy === true)},
+      }),
+      loadStylesheet: ${
+        ctx.mobileClient === "entry"
+          ? "(href) => farmNativeStylesheets[href]"
+          : `async (href) => {
+        // farm dev: Vite serves the CSS, so ask this dev server for it over loopback.
+        const url = new URL(href, request.url);
+        url.hostname = '127.0.0.1';
+        const response = await fetch(url, { headers: { accept: 'text/css,*/*;q=0.1' } }).catch(() => null);
+        return response?.ok && (response.headers.get('content-type') || '').includes('text/css')
+          ? response.text()
+          : undefined;
+      }`
+      },
+    });
+  }
+`
+    : ""
+}  const pageRequest = toFarmPayloadRequest(request);${
+    configHeaders
+      ? `
+  // Config headers() apply to whatever answers the URL as requested (a payload's page), redirects
+  // included, after middleware let it through, so a guarded response stays private.
+  const farmConfigHeaders = matchFarmConfigHeaders(new URL(pageRequest.url));
+  let farmGuardedResponse = false;
+  if (farmConfigHeaders.length > 0) {
+    const adapterContext = context;
+    context = {
+      ...adapterContext,
+      onGuardedResponse() {
+        farmGuardedResponse = true;
+        adapterContext?.onGuardedResponse?.();
+      },
+    };
+  }`
+      : ""
+  }
+  ${configHeaders ? "let" : "const"} response = await handleFarmRequestWithRuntime(pageRequest, context${i18n ? ", pageRequest !== request" : ""});${
+    configHeaders
+      ? `
+  if (farmConfigHeaders.length > 0) {
+    response = applyConfigResponseHeaders(response, farmConfigHeaders);
+    if (farmGuardedResponse) response = _withFarmGuardedResponseCache(response);
+  }`
+      : ""
+  }
+  if (
+    prerendering &&
+    pageRequest === request &&
+    response.status === 200 &&
+    (response.headers.get('content-type') || '').includes('text/html')
+  ) {
+    const headers = new Headers(response.headers);
+    headers.set('x-nitro-prerender', encodeURIComponent(farmPayloadPath(new URL(request.url).pathname)));
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
+  const finalResponse = ${ctx.mobileClient === "entry" ? "_applyFarmMobileShellClient(request, response, farmMobileShellClient)" : "response"};
+  // A prerendered page is a file served to every visitor, so it never sets the cookie.
+  return prerendering ? finalResponse : withFarmDeploymentCookie(pageRequest, finalResponse);
+}
+${
+  ctx.mobileClient === "entry"
+    ? `
+// The mobile client (RFC 0004): the documents a mobile shell asks for (X-Farm-Shell) load its
+// entry instead of the web one, privately, and every HTML response varies on the header. The
+// Nitro build fills this in once the client is built; null leaves responses as they are.
+function readFarmMobileShellClient() {
+  try {
+    return JSON.parse("${FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER}");
+  } catch {
+    return null;
+  }
+}
+const farmMobileShellClient = readFarmMobileShellClient();
+// The client CSS by href, embedded by the build for native-tier screens.
+const farmNativeStylesheets = (() => {
+  try {
+    return JSON.parse("${FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER}");
+  } catch {
+    return {};
+  }
+})();
+`
+    : ""
+}
+
+${
+  i18n
+    ? `async function handleFarmRequestWithRuntime(request, context, payloadRequested) {
+  // Outermost, so middleware, after() callbacks and local API calls read the locale too.
+  return runFarmLocalizedRequest(request, payloadRequested, () => _runWithAPIRequestRuntime({`
+    : `async function handleFarmRequestWithRuntime(request, context) {
+  return _runWithAPIRequestRuntime({`
+}
     basePath: farmApiBasePath,
     dispatch: async (localRequest) =>
       (await handleAPIRequest(localRequest)) ?? Response.json({ error: 'Not Found' }, { status: 404 }),
   }, () => _runWithCurrentRequest(request, () =>
     _runWithAfterRequest(request, () => handleFarmPageOrMarkdown(request, context), context)
-  ));
+  ))${i18n ? ")" : ""};
 }
 
 export default { fetch: handler };

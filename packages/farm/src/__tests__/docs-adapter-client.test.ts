@@ -12,7 +12,7 @@ type Hydrate = () => Promise<boolean>;
 
 /** Run the generated runtime with `import()` routed to a stub loader. */
 function evaluate(runtime: string, load: (specifier: string) => Promise<unknown>): Hydrate {
-  const source = runtime.replaceAll("await import(", "await __load(");
+  const source = runtime.replaceAll("import(", "__load(");
   return new Function("__load", `${source}\nreturn hydrateFarmDocsAdapterRuntime;`)(load);
 }
 
@@ -25,11 +25,9 @@ describe("Farm docs adapter client runtime", () => {
     const runtime = generateFarmDocsAdapterClientRuntime(ADAPTER);
 
     expect(runtime).not.toMatch(/^\s*import\s/m);
-    expect(runtime).toContain(`await import(${JSON.stringify(ADAPTER)})`);
+    expect(runtime).toContain(`import(${JSON.stringify(ADAPTER)})`);
     // The import happens only after the page is known to be a docs page.
-    expect(runtime.indexOf("if (!runtime) return false;")).toBeLessThan(
-      runtime.indexOf("await import("),
-    );
+    expect(runtime.indexOf("if (!runtime) return false;")).toBeLessThan(runtime.indexOf("import("));
   });
 
   it("leaves pages the docs server did not render alone", async () => {
@@ -81,6 +79,34 @@ describe("Farm docs adapter client runtime", () => {
       config: { entry: "docs" },
       data: {},
       configModule: configModule.default,
+    });
+  });
+
+  it("requests the config module alongside the adapter instead of after it", async () => {
+    const CONFIG = "/app/docs.config.tsx";
+    (globalThis as { window?: unknown }).window = {
+      __FARM_DOCS_ADAPTER__: { config: {}, data: {}, configModule: true },
+    };
+    const requested: string[] = [];
+    const pending = new Map<string, (value: unknown) => void>();
+    const load = (specifier: string) => {
+      requested.push(specifier);
+      return new Promise((resolve) => pending.set(specifier, resolve));
+    };
+
+    const hydrated = evaluate(generateFarmDocsAdapterClientRuntime(ADAPTER, CONFIG), load)();
+    await Promise.resolve();
+    // Both are in flight before either has loaded.
+    expect(requested).toEqual([ADAPTER, CONFIG]);
+
+    const hydrateFarmDocs = vi.fn();
+    pending.get(CONFIG)!({ default: { icons: {} } });
+    pending.get(ADAPTER)!({ hydrateFarmDocs });
+    await expect(hydrated).resolves.toBe(true);
+    expect(hydrateFarmDocs).toHaveBeenCalledWith({
+      config: {},
+      data: {},
+      configModule: { icons: {} },
     });
   });
 

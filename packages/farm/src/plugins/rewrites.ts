@@ -3,12 +3,7 @@ import type { RewriteConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { resolveFarmRequestURL } from "../server/request";
-import {
-  compileConfigRoutePattern,
-  interpolateConfigRouteDestination,
-  localizeConfigRouteDestination,
-  resolveConfigRoutePathname,
-} from "./route-pattern";
+import { createConfigRewriteMatcher } from "./config-routes";
 
 export const FARM_CONFIG_REWRITES_PLUGIN_NAME = "farm:rewrites";
 
@@ -18,6 +13,7 @@ export function createRewritesPlugin(
     beforeRequest: overrideBeforeRequest,
     afterResponse: overrideAfterResponse,
     i18n,
+    basePath,
   }: {
     beforeRequest?: (
       req: FarmRequest,
@@ -30,12 +26,11 @@ export function createRewritesPlugin(
       context: FarmPluginContext,
     ) => void | Promise<void>;
     i18n?: ResolvedFarmI18nConfig;
+    /** Sources match the app-relative path, as in production. */
+    basePath?: string;
   } = {},
 ): FarmPlugin {
-  const compiledRewrites = rewrites.map((rewrite) => ({
-    rewrite,
-    pattern: compileConfigRoutePattern(rewrite.source),
-  }));
+  const matchRewrite = createConfigRewriteMatcher(rewrites, { i18n, basePath });
 
   return {
     name: FARM_CONFIG_REWRITES_PLUGIN_NAME,
@@ -46,27 +41,12 @@ export function createRewritesPlugin(
         await overrideBeforeRequest(req, res, context);
       }
       const url = resolveFarmRequestURL(req);
-      const routePath = resolveConfigRoutePathname(url.pathname, i18n);
-      const pathname = routePath.pathname;
-
-      for (const { rewrite, pattern } of compiledRewrites) {
-        const match = pathname.match(pattern.regex);
-        if (match) {
-          const newPath = localizeConfigRouteDestination(
-            interpolateConfigRouteDestination(rewrite.destination, match, pattern.tokens),
-            routePath.locale,
-            i18n,
-          );
-          const destinationUrl = new URL(newPath, url);
-          if (!destinationUrl.search && url.search) {
-            destinationUrl.search = url.search;
-          }
-          req.url =
-            destinationUrl.origin === url.origin
-              ? destinationUrl.pathname + destinationUrl.search
-              : destinationUrl.href;
-          break;
-        }
+      const destinationUrl = matchRewrite(url);
+      if (destinationUrl) {
+        req.url =
+          destinationUrl.origin === url.origin
+            ? destinationUrl.pathname + destinationUrl.search
+            : destinationUrl.href;
       }
     },
 

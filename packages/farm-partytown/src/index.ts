@@ -1,4 +1,5 @@
 import { definePlugin } from "@farm.js/core/plugin";
+import { isFarmRendererDisabled } from "@farm.js/core/renderer";
 import {
   injectPartytownBootstrap,
   normalizeBasePath,
@@ -27,6 +28,14 @@ export function partytown(options: PartytownOptions = {}) {
     enforce: "pre",
 
     configure(config) {
+      // Partytown runs page scripts in a worker; a backend-only app has no pages to inject into.
+      if (isFarmRendererDisabled(config.renderer)) {
+        throw new Error(
+          "[farm:partytown] Partytown moves scripts off the main thread of rendered pages, but " +
+            "this app sets `renderer: false` and has no pages. Remove partytown(), or remove " +
+            "`renderer: false` to render pages.",
+        );
+      }
       configuredBasePath = normalizeBasePath(config.basePath);
       configuredOutputDir = `${config.root ?? "."}/.farm/.output`;
       const vitePlugin = createPartytownDevPlugin(configuredBasePath, resolved);

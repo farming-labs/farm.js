@@ -1,14 +1,55 @@
+import type { FarmIntegrationHandlerContext, FarmIntegrationLogger } from "@farm.js/core";
 import {
+  api,
   defineIntegration,
   defineIntegrationAPI,
+  FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY,
   integrationRoute,
-  type FarmIntegrationLogger,
-} from "@farm.js/core";
-import { api } from "@farm.js/core/client";
+} from "@farm.js/core/integrations";
 import type { FarmIntegrationAPIOperation } from "@farm.js/core/client";
 import { integrationConfig } from "@farm.js/integration-utils";
+import { JobsRuntimeError } from "./errors.js";
+import {
+  adaptCustomRuntime,
+  isCustomJobsRuntimeDefinition,
+  type CustomJobsRuntimeDefinition,
+} from "./runtime.js";
+import { resolveScheduledTimestamp } from "./time.js";
 
+export { JobsRuntimeError } from "./errors.js";
+export {
+  defineJobsRuntime,
+  JOBS_RUNTIME_CONTRACT,
+  type CustomJobsRuntimeDefinition,
+  type DefineJobsRuntimeInput,
+  type JobsExecuteInput,
+  type JobsExecuteResult,
+  type JobsRuntime,
+  type JobsRuntimeBatchLaunch,
+  type JobsRuntimeContext,
+  type JobsRuntimeLaunch,
+  type JobsRuntimeLogger,
+  type JobsRuntimeRoute,
+  type JobsRuntimeRouteVerdict,
+  type JobsRuntimeRunStatus,
+  type JobsRuntimeTask,
+  type JobsSerializedError,
+} from "./runtime.js";
+export {
+  local,
+  type JobsKeyValueStorage,
+  type LocalJobsRuntimeOptions,
+  type LocalJobsTickResult,
+} from "./local.js";
+
+/**
+ * The provider runtimes `jobs()` builds itself. `local()` is made with
+ * `defineJobsRuntime()`, so its results report the literal `"local"`.
+ */
 export type JobsRuntimeKind = "trigger" | "inngest";
+
+/** A built-in runtime kind, or the `kind` of a runtime made with `defineJobsRuntime()`. */
+export type JobsRuntimeName = JobsRuntimeKind | (string & {});
 
 export type JobsRunStatus =
   | "queued"
@@ -62,12 +103,19 @@ export interface JobsTaskScheduleDefinition {
 export type JobsTaskSchedule = string | JobsTaskScheduleDefinition;
 
 export interface JobsTaskContext {
-  runtime: JobsRuntimeKind;
+  runtime: JobsRuntimeName;
   task: {
     key: string;
     id: string;
   };
   logger: Pick<Console, "debug" | "info" | "warn" | "error">;
+  /** The run being executed. Set when a runtime such as `local()` calls `run`. */
+  run?: {
+    id: string;
+    attempt: number;
+  };
+  /** Aborts when the runtime gives up on this attempt, for example when its lease ends. */
+  signal?: AbortSignal;
 }
 
 export interface JobsTaskDefaults<TInput> {
@@ -204,15 +252,17 @@ export interface JobsTriggerOptions {
   tags?: readonly string[];
 }
 
-export interface JobsTriggerResult {
+export interface JobsTriggerResult<TKind extends string = JobsRuntimeKind> {
   handleId: string;
   task: string;
-  runtime: JobsRuntimeKind;
+  runtime: TKind;
   queuedAt: string;
   providerTaskId: string;
 }
 
-export interface JobsScheduleResult extends JobsTriggerResult {
+export interface JobsScheduleResult<
+  TKind extends string = JobsRuntimeKind,
+> extends JobsTriggerResult<TKind> {
   scheduledFor: string | number;
 }
 
@@ -222,10 +272,10 @@ export interface JobsBatchTriggerRunResult {
   queuedAt: string;
 }
 
-export interface JobsBatchTriggerResult {
+export interface JobsBatchTriggerResult<TKind extends string = JobsRuntimeKind> {
   batchId: string | null;
   task: string;
-  runtime: JobsRuntimeKind;
+  runtime: TKind;
   providerTaskId: string;
   runs: JobsBatchTriggerRunResult[];
 }
@@ -238,11 +288,11 @@ export interface JobsCancelBody {
   handleId: string;
 }
 
-export interface JobsRunStatusResult<TOutput = unknown> {
+export interface JobsRunStatusResult<TOutput = unknown, TKind extends string = JobsRuntimeKind> {
   handleId: string;
   providerRunId: string | null;
   task: string;
-  runtime: JobsRuntimeKind;
+  runtime: TKind;
   status: JobsRunStatus;
   providerStatus: string | null;
   queuedAt: string | null;
@@ -254,20 +304,20 @@ export interface JobsRunStatusResult<TOutput = unknown> {
   raw: unknown;
 }
 
-export interface JobsCancelResult {
+export interface JobsCancelResult<TKind extends string = JobsRuntimeKind> {
   handleId: string;
   task: string;
-  runtime: JobsRuntimeKind;
+  runtime: TKind;
   canceled: true;
 }
 
-export interface JobsTaskMetadata {
+export interface JobsTaskMetadata<TKind extends string = JobsRuntimeKind> {
   key: string;
   id: string;
   remoteId: string;
   description: string | null;
   schedule: JobsTaskSchedule | null;
-  runtime: JobsRuntimeKind;
+  runtime: TKind;
   configured: boolean;
   capabilities: JobsRuntimeCapabilities;
   paths: {
@@ -315,6 +365,13 @@ export interface InngestJobsRuntimeDefinition {
 
 export type JobsRuntimeDefinition = TriggerJobsRuntimeDefinition | InngestJobsRuntimeDefinition;
 
+/** Anything `jobs({ runtime })` accepts: a built-in runtime or one made with `defineJobsRuntime()`. */
+export type JobsRuntimeInput = JobsRuntimeDefinition | CustomJobsRuntimeDefinition<string>;
+
+/** The `runtime` field results carry for a given runtime input. Built-in runtimes keep `JobsRuntimeKind`. */
+export type InferJobsRuntimeKind<TRuntime> =
+  TRuntime extends CustomJobsRuntimeDefinition<infer TKind> ? TKind : JobsRuntimeKind;
+
 interface ResolvedTriggerJobsConfig {
   kind: "trigger";
   projectRef: string;
@@ -335,14 +392,59 @@ interface ResolvedInngestJobsConfig {
 
 type ResolvedJobsConfig = ResolvedTriggerJobsConfig | ResolvedInngestJobsConfig;
 
+export type JobsRouteOperation =
+  | "tasks"
+  | "trigger"
+  | "batchTrigger"
+  | "schedule"
+  | "status"
+  | "cancel";
+
+export interface JobsAuthorizeContext {
+  /** The task key, or `null` for the task list. */
+  task: string | null;
+  operation: JobsRouteOperation;
+}
+
+/**
+ * Allows an HTTP request and names who sent it. An `idempotencyKey` the caller
+ * passes is then kept to that caller, so one user can never claim another's key.
+ */
+export interface JobsAuthorizeCaller {
+  caller: string;
+}
+
+export type JobsAuthorizeDecision = boolean | Response | JobsAuthorizeCaller;
+
+/**
+ * Decides whether an HTTP request may use a job route. Return `true` to allow
+ * it, `{ caller }` to allow it and name the caller, `false` to answer 403, or a
+ * Response to answer with. The request is a clone, so its body can be read.
+ */
+export type JobsAuthorize = (
+  request: Request,
+  context: JobsAuthorizeContext,
+) => JobsAuthorizeDecision | Promise<JobsAuthorizeDecision>;
+
+/** Who launched a run: trusted server code, or an HTTP caller `authorize` let in. */
+type JobsCaller = { kind: "server" } | { kind: "http"; id?: string };
+
 export interface JobsIntegrationInputBase<TTasks extends JobsTaskMap> {
   basePath?: string;
   tasks: TTasks;
   log?: FarmIntegrationLogger;
+  /**
+   * Job routes answer only server calls (`api`) by default. Set this to let
+   * HTTP requests, such as `apiClient` in the browser, reach them.
+   */
+  authorize?: JobsAuthorize;
 }
 
-type JobsIntegrationRuntimeInput<TTasks extends JobsTaskMap> = JobsIntegrationInputBase<TTasks> & {
-  runtime: JobsRuntimeDefinition;
+type JobsIntegrationRuntimeInput<
+  TTasks extends JobsTaskMap,
+  TRuntime extends JobsRuntimeInput,
+> = JobsIntegrationInputBase<TTasks> & {
+  runtime: TRuntime;
   trigger?: never;
   inngest?: never;
 };
@@ -359,49 +461,61 @@ type JobsIntegrationLegacyInput<TTasks extends JobsTaskMap> =
       runtime?: never;
     });
 
-export type JobsIntegrationInput<TTasks extends JobsTaskMap> =
-  | JobsIntegrationRuntimeInput<TTasks>
-  | JobsIntegrationLegacyInput<TTasks>;
+export type JobsIntegrationInput<
+  TTasks extends JobsTaskMap,
+  TRuntime extends JobsRuntimeInput = JobsRuntimeDefinition,
+> = JobsIntegrationRuntimeInput<TTasks, TRuntime> | JobsIntegrationLegacyInput<TTasks>;
 
-type JobsAPI<TTasks extends JobsTaskMap> = {
+type JobsAPI<TTasks extends JobsTaskMap, TKind extends string = JobsRuntimeKind> = {
   [TKey in keyof TTasks & string]: {
     trigger: FarmIntegrationAPIOperation<
       JobsTriggerBody<InferJobsTaskInput<TTasks[TKey]>>,
       never,
-      JobsTriggerResult,
+      JobsTriggerResult<TKind>,
       false,
       "POST"
     >;
     schedule: FarmIntegrationAPIOperation<
       JobsScheduleBody<InferJobsTaskInput<TTasks[TKey]>>,
       never,
-      JobsScheduleResult,
+      JobsScheduleResult<TKind>,
       false,
       "POST"
     >;
     batchTrigger: FarmIntegrationAPIOperation<
       JobsBatchTriggerBody<InferJobsTaskInput<TTasks[TKey]>>,
       never,
-      JobsBatchTriggerResult,
+      JobsBatchTriggerResult<TKind>,
       false,
       "POST"
     >;
     status: FarmIntegrationAPIOperation<
       never,
       JobsStatusQuery,
-      JobsRunStatusResult<InferJobsTaskOutput<TTasks[TKey]>>,
+      JobsRunStatusResult<InferJobsTaskOutput<TTasks[TKey]>, TKind>,
       false,
       "GET"
     >;
-    cancel: FarmIntegrationAPIOperation<JobsCancelBody, never, JobsCancelResult, false, "POST">;
+    cancel: FarmIntegrationAPIOperation<
+      JobsCancelBody,
+      never,
+      JobsCancelResult<TKind>,
+      false,
+      "POST"
+    >;
   };
 } & {
   tasks: {
-    list: FarmIntegrationAPIOperation<never, never, JobsTaskMetadata[], false, "GET">;
+    list: FarmIntegrationAPIOperation<never, never, JobsTaskMetadata<TKind>[], false, "GET">;
   };
 };
 
-type JobsResolvedLaunchOptions = {
+/**
+ * Launch options after Farm merged task defaults with the call's options,
+ * as a runtime's `trigger` receives them. `delayMode` is set by `schedule`:
+ * `"at"` for an absolute time and `"after"` for a relative one.
+ */
+export type JobsResolvedLaunchOptions = {
   queue?: JobsTaskQueueDefinition;
   retryAttempts?: number;
   ttl?: string | number;
@@ -416,7 +530,7 @@ type JobsResolvedLaunchOptions = {
   };
 };
 
-type JobsResolvedBatchItem = {
+export type JobsResolvedBatchItem = {
   input: unknown;
   options: JobsResolvedLaunchOptions;
 };
@@ -427,13 +541,13 @@ type JobsNormalizedTask = {
   pathSegment: string;
   remoteId: string;
   definition: JobsTaskDefinition<any, any>;
-  metadata: JobsTaskMetadata;
+  metadata: JobsTaskMetadata<string>;
 };
 
-type JobsRuntimeStatusResult = Omit<JobsRunStatusResult<unknown>, "task" | "runtime">;
+type JobsRuntimeStatusResult = Omit<JobsRunStatusResult<unknown, string>, "task" | "runtime">;
 
 type JobsRuntimeAdapter = {
-  kind: JobsRuntimeKind;
+  kind: string;
   capabilities: JobsRuntimeCapabilities;
   isConfigured(): boolean;
   resolveRemoteId(taskId: string): string;
@@ -454,7 +568,10 @@ type JobsRuntimeAdapter = {
     runs: JobsBatchTriggerRunResult[];
   }>;
   status(task: JobsNormalizedTask, handleId: string): Promise<JobsRuntimeStatusResult>;
-  cancel(task: JobsNormalizedTask, handleId: string): Promise<JobsCancelResult>;
+  cancel(task: JobsNormalizedTask, handleId: string): Promise<JobsCancelResult<string>>;
+  routes?: ReturnType<typeof adaptCustomRuntime>["routes"];
+  start?(): Promise<void>;
+  dispose?(): Promise<void>;
 };
 
 const TRIGGER_CAPABILITIES: JobsRuntimeCapabilities = {
@@ -484,18 +601,6 @@ const INNGEST_CAPABILITIES: JobsRuntimeCapabilities = {
   concurrencyKey: false,
   idempotencyKey: true,
 };
-
-class JobsRuntimeError extends Error {
-  readonly status: number;
-  readonly data?: unknown;
-
-  constructor(message: string, status = 500, data?: unknown) {
-    super(message);
-    this.name = "JobsRuntimeError";
-    this.status = status;
-    this.data = data;
-  }
-}
 
 export function task<TInput, TOutput>(
   input: JobsTaskInput<TInput, TOutput>,
@@ -715,10 +820,36 @@ function resolveDebounceOptions(input: JobsDebounceOptions | undefined) {
   };
 }
 
+/**
+ * The idempotency key a launch runs under. Server code is trusted with any key.
+ * An HTTP caller cannot override the task's own key, and a key it picks is
+ * namespaced to the task and to the caller `authorize` named: on Inngest the
+ * key is the event id and on Trigger.dev it returns the existing run, so a raw
+ * caller key could suppress, or read the handle of, someone else's run.
+ */
+function resolveIdempotencyKey(
+  task: JobsNormalizedTask,
+  payload: unknown,
+  requested: string | undefined,
+  caller: JobsCaller,
+): string | undefined {
+  const taskKey = evaluateComputedValue(
+    task.definition.defaults?.idempotencyKey as string | ((value: unknown) => string) | undefined,
+    payload,
+  );
+  if (caller.kind === "server") return requested || taskKey;
+  if (taskKey) return taskKey;
+  if (!requested) return undefined;
+  // encodeURIComponent never emits ":", and an unnamed caller is empty, so no
+  // caller id can forge another caller's namespace.
+  return `farm-http:${task.id}:${caller.id ? encodeURIComponent(caller.id) : ""}:${requested}`;
+}
+
 function resolveLaunchOptions(
   task: JobsNormalizedTask,
   payload: unknown,
   options: JobsTriggerOptions | undefined,
+  caller: JobsCaller,
 ): JobsResolvedLaunchOptions {
   const defaults = task.definition.defaults;
   const resolvedTags = dedupeTags([...(defaults?.tags || []), ...(options?.tags || [])]);
@@ -731,12 +862,7 @@ function resolveLaunchOptions(
       defaults?.concurrencyKey as string | ((value: unknown) => string) | undefined,
       payload,
     ),
-    idempotencyKey:
-      options?.idempotencyKey ||
-      evaluateComputedValue(
-        defaults?.idempotencyKey as string | ((value: unknown) => string) | undefined,
-        payload,
-      ),
+    idempotencyKey: resolveIdempotencyKey(task, payload, options?.idempotencyKey, caller),
     tags: resolvedTags.length > 0 ? resolvedTags : undefined,
     delay: normalizeDelayValue(options?.delay, "delay"),
     debounce: resolveDebounceOptions(options?.debounce),
@@ -751,6 +877,7 @@ function resolveScheduleLaunchOptions(
     after?: string | number;
     options?: JobsScheduleOptions;
   },
+  caller: JobsCaller,
 ) {
   const hasAt = body.at != null;
   const hasAfter = body.after != null;
@@ -767,12 +894,17 @@ function resolveScheduleLaunchOptions(
     throw new JobsRuntimeError("Schedule requests must include exactly one of at or after.", 400);
   }
 
-  const launch = resolveLaunchOptions(task, payload, {
-    delay: scheduledFor,
-    debounce: body.options?.debounce,
-    idempotencyKey: body.options?.idempotencyKey,
-    tags: body.options?.tags,
-  });
+  const launch = resolveLaunchOptions(
+    task,
+    payload,
+    {
+      delay: scheduledFor,
+      debounce: body.options?.debounce,
+      idempotencyKey: body.options?.idempotencyKey,
+      tags: body.options?.tags,
+    },
+    caller,
+  );
   launch.delayMode = hasAt ? "at" : "after";
 
   return {
@@ -838,7 +970,7 @@ function createMetadata(task: JobsNormalizedTask, runtime: JobsRuntimeAdapter) {
       hasConcurrencyKey: !!task.definition.defaults?.concurrencyKey,
       hasIdempotencyKey: !!task.definition.defaults?.idempotencyKey,
     },
-  } satisfies JobsTaskMetadata;
+  } satisfies JobsTaskMetadata<string>;
 }
 
 function normalizeStatus(status: string | null | undefined) {
@@ -906,23 +1038,6 @@ async function requestJSON(url: string, init: RequestInit) {
   return data;
 }
 
-const INNGEST_DURATION_UNITS = {
-  ms: 1,
-  s: 1_000,
-  m: 60_000,
-  h: 3_600_000,
-  d: 86_400_000,
-} as const;
-const INNGEST_MAX_TIMESTAMP = 8_640_000_000_000_000;
-
-function inngestScheduleError(message: string, value: string | number) {
-  return new JobsRuntimeError(message, 400, {
-    code: "JOBS_INVALID_SCHEDULE",
-    runtime: "inngest",
-    value,
-  });
-}
-
 function inngestCapabilityError(
   capability: JobsRuntimeCapability,
   message: string,
@@ -934,67 +1049,13 @@ function inngestCapabilityError(
   });
 }
 
-function parseInngestDuration(value: string | number): number | undefined {
-  if (typeof value === "number") {
-    return Number.isFinite(value) && value > 0 ? Math.ceil(value) : undefined;
-  }
-
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/i.exec(value);
-  if (!match) return undefined;
-  const amount = Number(match[1]);
-  const unit = match[2].toLowerCase() as keyof typeof INNGEST_DURATION_UNITS;
-  const duration = Math.ceil(amount * INNGEST_DURATION_UNITS[unit]);
-  return Number.isFinite(duration) && duration > 0 ? duration : undefined;
-}
-
-function parseInngestAbsoluteTime(value: string | number): number | undefined {
-  if (typeof value !== "string") return undefined;
-  if (!/^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) return undefined;
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : undefined;
-}
+const INNGEST_SCHEDULE_RUNTIME = { kind: "inngest", label: "Inngest" } as const;
 
 function resolveInngestEventTimestamp(
   options: JobsResolvedLaunchOptions,
   now = Date.now(),
 ): number | undefined {
-  if (options.delay == null) return undefined;
-
-  const absolute =
-    options.delayMode === "after" ? undefined : parseInngestAbsoluteTime(options.delay);
-  if (absolute != null) {
-    if (absolute <= now) {
-      throw inngestScheduleError(
-        "Inngest at/delay timestamps must be in the future.",
-        options.delay,
-      );
-    }
-    return absolute;
-  }
-
-  if (options.delayMode === "at") {
-    throw inngestScheduleError(
-      "Inngest at must be an ISO timestamp with an explicit Z or UTC offset.",
-      options.delay,
-    );
-  }
-
-  const duration = parseInngestDuration(options.delay);
-  if (duration == null) {
-    throw inngestScheduleError(
-      "Inngest after/delay must be positive milliseconds or a duration ending in ms, s, m, h, or d.",
-      options.delay,
-    );
-  }
-
-  const timestamp = now + duration;
-  if (!Number.isSafeInteger(timestamp) || timestamp > INNGEST_MAX_TIMESTAMP) {
-    throw inngestScheduleError(
-      "Inngest after/delay exceeds the supported date range.",
-      options.delay,
-    );
-  }
-  return timestamp;
+  return resolveScheduledTimestamp(options, now, INNGEST_SCHEDULE_RUNTIME);
 }
 
 function createInngestEvent(
@@ -1036,6 +1097,30 @@ function createTriggerRuntime(config: TriggerJobsRuntimeConfig): JobsRuntimeAdap
     };
   }
 
+  // The secret key reaches every run in the project, so a task's status and
+  // cancel routes only act on that task's own runs.
+  async function retrieveRun(
+    resolved: ReturnType<typeof resolve>,
+    task: JobsNormalizedTask,
+    handleId: string,
+  ) {
+    const data = await requestJSON(
+      `${resolved.apiBaseUrl}/api/v3/runs/${encodeURIComponent(handleId)}`,
+      {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${resolved.apiKey}`,
+          accept: "application/json",
+        },
+      },
+    );
+    const taskIdentifier =
+      typeof data === "object" && data ? (data as Record<string, unknown>).taskIdentifier : null;
+    if (typeof taskIdentifier === "string" && taskIdentifier !== task.remoteId) {
+      throw new JobsRuntimeError(`Run ${handleId} was not found for task "${task.key}".`, 404);
+    }
+    return data;
+  }
   return {
     kind: "trigger",
     capabilities: TRIGGER_CAPABILITIES,
@@ -1171,17 +1256,7 @@ function createTriggerRuntime(config: TriggerJobsRuntimeConfig): JobsRuntimeAdap
         );
       }
 
-      const data = await requestJSON(
-        `${resolved.apiBaseUrl}/api/v3/runs/${encodeURIComponent(handleId)}`,
-        {
-          method: "GET",
-          headers: {
-            authorization: `Bearer ${resolved.apiKey}`,
-            accept: "application/json",
-          },
-        },
-      );
-
+      const data = await retrieveRun(resolved, task, handleId);
       const run = typeof data === "object" && data ? (data as Record<string, unknown>) : {};
       return {
         handleId,
@@ -1208,6 +1283,7 @@ function createTriggerRuntime(config: TriggerJobsRuntimeConfig): JobsRuntimeAdap
         );
       }
 
+      await retrieveRun(resolved, task, handleId);
       await requestJSON(
         `${resolved.apiBaseUrl}/api/v2/runs/${encodeURIComponent(handleId)}/cancel`,
         {
@@ -1227,6 +1303,32 @@ function createTriggerRuntime(config: TriggerJobsRuntimeConfig): JobsRuntimeAdap
       };
     },
   };
+}
+
+async function assertInngestEventForTask(
+  resolved: { apiBaseUrl: string; signingKey: string },
+  task: JobsNormalizedTask,
+  handleId: string,
+) {
+  const notFound = () =>
+    new JobsRuntimeError(`Run ${handleId} was not found for task "${task.key}".`, 404);
+  let data: unknown;
+  try {
+    data = await requestJSON(`${resolved.apiBaseUrl}/v1/events/${encodeURIComponent(handleId)}`, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${resolved.signingKey}`,
+        accept: "application/json",
+      },
+    });
+  } catch (error) {
+    // Never pass the provider's body for someone else's event through.
+    if (error instanceof JobsRuntimeError && error.status === 404) throw notFound();
+    throw error;
+  }
+  const record = typeof data === "object" && data ? (data as { data?: unknown }).data : undefined;
+  const event = (Array.isArray(record) ? record[0] : record) as { name?: unknown } | undefined;
+  if (!event || typeof event !== "object" || event.name !== task.remoteId) throw notFound();
 }
 
 function createInngestRuntime(config: InngestJobsRuntimeConfig): JobsRuntimeAdapter {
@@ -1357,6 +1459,10 @@ function createInngestRuntime(config: InngestJobsRuntimeConfig): JobsRuntimeAdap
         );
       }
 
+      // The signing key reads every event in the environment, so a task's
+      // status route only answers for events this task sent.
+      await assertInngestEventForTask(resolved, task, handleId);
+
       const data = await requestJSON(
         `${resolved.apiBaseUrl}/v1/events/${encodeURIComponent(handleId)}/runs`,
         {
@@ -1415,9 +1521,9 @@ function createInngestRuntime(config: InngestJobsRuntimeConfig): JobsRuntimeAdap
   };
 }
 
-function resolveRuntimeDefinition<TTasks extends JobsTaskMap>(
-  input: JobsIntegrationInput<TTasks>,
-): JobsRuntimeDefinition {
+function resolveRuntimeDefinition<TTasks extends JobsTaskMap, TRuntime extends JobsRuntimeInput>(
+  input: JobsIntegrationInput<TTasks, TRuntime>,
+): JobsRuntimeInput {
   if ("runtime" in input && input.runtime) {
     return input.runtime;
   }
@@ -1429,15 +1535,41 @@ function resolveRuntimeDefinition<TTasks extends JobsTaskMap>(
   return inngest(input.inngest as InngestJobsRuntimeConfig);
 }
 
-function createRuntime(runtime: JobsRuntimeDefinition) {
+/** Where a runtime route is mounted. Task segments are kebab-case, so `_runtime` cannot collide. */
+function runtimeRoutePath(basePath: string, kind: string, path: string) {
+  return joinPath(basePath, "_runtime", kind, path);
+}
+
+function createRuntime(
+  runtime: JobsRuntimeInput,
+  basePath: string,
+  registry: ReadonlyMap<string, JobsNormalizedTask>,
+): JobsRuntimeAdapter {
+  if (isCustomJobsRuntimeDefinition(runtime)) {
+    return adaptCustomRuntime(runtime, {
+      basePath,
+      routePath: (kind, path) => runtimeRoutePath(basePath, kind, path),
+      getTask: (key) => registry.get(key),
+    });
+  }
+
   if (runtime.kind === "trigger") {
     return createTriggerRuntime(runtime.config);
   }
 
-  return createInngestRuntime(runtime.config);
+  if (runtime.kind === "inngest") {
+    return createInngestRuntime(runtime.config);
+  }
+
+  throw new TypeError(
+    `Unknown jobs runtime ${JSON.stringify((runtime as { kind?: unknown }).kind)}. Pass trigger(), inngest(), local(), or a runtime made with defineJobsRuntime() as \`jobs({ runtime })\`.`,
+  );
 }
 
-function resolveJobsIntegrationConfig(runtime: JobsRuntimeDefinition) {
+function resolveJobsIntegrationConfig(runtime: JobsRuntimeInput) {
+  // A custom runtime reads its own configuration; Farm has no env keys to report for it.
+  if (isCustomJobsRuntimeDefinition(runtime)) return undefined;
+
   if (runtime.kind === "trigger") {
     const resolved = {
       kind: "trigger" as const,
@@ -1479,7 +1611,7 @@ function resolveJobsIntegrationConfig(runtime: JobsRuntimeDefinition) {
   });
 }
 
-function createJobsApi<TTasks extends JobsTaskMap>(
+function createJobsApi<TTasks extends JobsTaskMap, TKind extends string>(
   tasks: readonly JobsNormalizedTask[],
   tasksPath: string,
 ) {
@@ -1523,7 +1655,7 @@ function createJobsApi<TTasks extends JobsTaskMap>(
     };
   }
 
-  return defineIntegrationAPI(definition as any) as unknown as JobsAPI<TTasks>;
+  return defineIntegrationAPI(definition as any) as unknown as JobsAPI<TTasks, TKind>;
 }
 
 function normalizeTasks<TTasks extends JobsTaskMap>(
@@ -1559,7 +1691,7 @@ function normalizeTasks<TTasks extends JobsTaskMap>(
     }
     seenIds.add(id);
 
-    const metadata: JobsTaskMetadata = {
+    const metadata: JobsTaskMetadata<string> = {
       key,
       id,
       remoteId: runtime.resolveRemoteId(id),
@@ -1753,28 +1885,100 @@ function normalizeCancelInput(body: unknown) {
   return (body === undefined ? {} : readJsonBody(body)) as unknown as JobsCancelBody;
 }
 
-export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInput<TTasks>) {
+async function authorizeJobsRequest(
+  authorize: JobsAuthorize | undefined,
+  request: Request,
+  context: FarmIntegrationHandlerContext,
+  authorizeContext: JobsAuthorizeContext,
+): Promise<Response | JobsCaller> {
+  // Server code calling `api` dispatches in-process and is already trusted.
+  if (context.req.get(FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY) === true) {
+    return { kind: "server" };
+  }
+  // A job route starts provider runs with the app's credentials, so an HTTP
+  // caller needs the app's say-so.
+  if (!authorize) {
+    return Response.json(
+      {
+        error:
+          "Job routes answer only server calls. Pass jobs({ authorize }) to allow HTTP requests.",
+      },
+      { status: 403 },
+    );
+  }
+  const decision = await authorize(request.clone(), authorizeContext);
+  if (decision instanceof Response) return decision;
+  if (decision === true) return { kind: "http" };
+  if (
+    typeof decision === "object" &&
+    decision !== null &&
+    typeof decision.caller === "string" &&
+    decision.caller.length > 0
+  ) {
+    return { kind: "http", id: decision.caller };
+  }
+  return Response.json({ error: "Forbidden" }, { status: 403 });
+}
+
+function createRuntimeRoutes(runtime: JobsRuntimeAdapter) {
+  return (runtime.routes ?? []).map((route) => {
+    const options = {
+      responseFormat: "json" as const,
+      async handler(request: Request) {
+        try {
+          const verdict = await route.verify(request);
+          if (verdict instanceof Response) return verdict;
+          if (verdict !== true) {
+            return Response.json({ error: "Unauthorized jobs runtime request." }, { status: 401 });
+          }
+          return await route.handler(request);
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+    };
+    return route.method === "GET"
+      ? integrationRoute.get<string, unknown>(route.fullPath, options)
+      : integrationRoute.post<string, unknown, unknown>(route.fullPath, options);
+  });
+}
+
+export function jobs<
+  const TTasks extends JobsTaskMap,
+  const TRuntime extends JobsRuntimeInput = JobsRuntimeDefinition,
+>(input: JobsIntegrationInput<TTasks, TRuntime>) {
+  type TKind = InferJobsRuntimeKind<TRuntime>;
   const basePath = normalizeBasePath(input.basePath);
   const tasksPath = joinPath(basePath, "tasks");
   const runtimeDefinition = resolveRuntimeDefinition(input);
-  const runtime = createRuntime(runtimeDefinition);
+  const registry = new Map<string, JobsNormalizedTask>();
+  const runtime = createRuntime(runtimeDefinition, basePath, registry);
   const normalizedTasks = normalizeTasks(input.tasks, basePath, runtime);
+  for (const task of normalizedTasks) registry.set(task.key, task);
 
   return defineIntegration({
     category: "automation",
     type: "jobs",
     instance: {
-      runtime: runtime.kind,
+      runtime: runtime.kind as TKind,
       configured: runtime.isConfigured(),
-      tasks: normalizedTasks.map((task) => task.metadata),
+      tasks: normalizedTasks.map((task) => task.metadata as JobsTaskMetadata<TKind>),
     },
     config: resolveJobsIntegrationConfig(runtimeDefinition),
-    api: createJobsApi<TTasks>(normalizedTasks, tasksPath),
+    api: createJobsApi<TTasks, TKind>(normalizedTasks, tasksPath),
     log: input.log,
+    ...(runtime.start ? { ready: () => runtime.start!() } : {}),
+    ...(runtime.dispose ? { dispose: () => runtime.dispose!() } : {}),
     routes: [
+      ...createRuntimeRoutes(runtime),
       integrationRoute.get<typeof tasksPath, JobsTaskMetadata[]>(tasksPath, {
         responseFormat: "json",
-        handler() {
+        async handler(request, context) {
+          const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+            task: null,
+            operation: "tasks",
+          });
+          if (blocked instanceof Response) return blocked;
           return Response.json(normalizedTasks.map((task) => task.metadata));
         },
       }),
@@ -1785,13 +1989,18 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
           JobsTriggerResult
         >(task.metadata.paths.trigger, {
           responseFormat: "json",
-          async handler(request) {
+          async handler(request, context) {
+            const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+              task: task.key,
+              operation: "trigger",
+            });
+            if (blocked instanceof Response) return blocked;
             try {
               const parsed = await parseRequestBody(request);
               const body = normalizeTriggerInput(
                 parsed === undefined ? undefined : readTriggerJsonBody(parsed),
               );
-              const launch = resolveLaunchOptions(task, body.input, body.options);
+              const launch = resolveLaunchOptions(task, body.input, body.options, blocked);
               const triggered = await runtime.trigger(task, body.input, launch);
               return Response.json({
                 handleId: triggered.handleId,
@@ -1799,7 +2008,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                 runtime: runtime.kind,
                 queuedAt: triggered.queuedAt,
                 providerTaskId: task.remoteId,
-              } satisfies JobsTriggerResult);
+              } satisfies JobsTriggerResult<string>);
             } catch (error) {
               return errorResponse(error);
             }
@@ -1811,7 +2020,12 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
           JobsBatchTriggerResult
         >(task.metadata.paths.batchTrigger, {
           responseFormat: "json",
-          async handler(request) {
+          async handler(request, context) {
+            const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+              task: task.key,
+              operation: "batchTrigger",
+            });
+            if (blocked instanceof Response) return blocked;
             try {
               const body = normalizeBatchTriggerInput<TTasks[typeof task.key & keyof TTasks]>(
                 await parseRequestBody(request),
@@ -1836,6 +2050,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                     task,
                     normalizedItem?.input,
                     normalizedItem?.options,
+                    blocked,
                   ),
                 } satisfies JobsResolvedBatchItem;
               });
@@ -1846,7 +2061,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                 runtime: runtime.kind,
                 providerTaskId: task.remoteId,
                 runs: triggered.runs,
-              } satisfies JobsBatchTriggerResult);
+              } satisfies JobsBatchTriggerResult<string>);
             } catch (error) {
               return errorResponse(error);
             }
@@ -1858,13 +2073,23 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
           JobsScheduleResult
         >(task.metadata.paths.schedule, {
           responseFormat: "json",
-          async handler(request) {
+          async handler(request, context) {
+            const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+              task: task.key,
+              operation: "schedule",
+            });
+            if (blocked instanceof Response) return blocked;
             try {
               const parsed = await parseRequestBody(request);
               const body = normalizeScheduleInput(
                 parsed === undefined ? undefined : readJsonBody(parsed),
               );
-              const { scheduledFor, launch } = resolveScheduleLaunchOptions(task, body.input, body);
+              const { scheduledFor, launch } = resolveScheduleLaunchOptions(
+                task,
+                body.input,
+                body,
+                blocked,
+              );
               const triggered = await runtime.trigger(task, body.input, launch);
               return Response.json({
                 handleId: triggered.handleId,
@@ -1873,7 +2098,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                 queuedAt: triggered.queuedAt,
                 providerTaskId: task.remoteId,
                 scheduledFor,
-              } satisfies JobsScheduleResult);
+              } satisfies JobsScheduleResult<string>);
             } catch (error) {
               return errorResponse(error);
             }
@@ -1885,7 +2110,12 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
           JobsStatusQuery
         >(task.metadata.paths.status, {
           responseFormat: "json",
-          async handler(request) {
+          async handler(request, context) {
+            const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+              task: task.key,
+              operation: "status",
+            });
+            if (blocked instanceof Response) return blocked;
             try {
               const handleId = new URL(request.url).searchParams.get("handleId") || "";
               if (!handleId) {
@@ -1909,7 +2139,8 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
                 task: task.key,
                 runtime: runtime.kind,
               } satisfies JobsRunStatusResult<
-                InferJobsTaskOutput<TTasks[typeof task.key & keyof TTasks]>
+                InferJobsTaskOutput<TTasks[typeof task.key & keyof TTasks]>,
+                string
               >);
             } catch (error) {
               return errorResponse(error);
@@ -1920,7 +2151,12 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
           task.metadata.paths.cancel,
           {
             responseFormat: "json",
-            async handler(request) {
+            async handler(request, context) {
+              const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+                task: task.key,
+                operation: "cancel",
+              });
+              if (blocked instanceof Response) return blocked;
               try {
                 const body = normalizeCancelInput(await parseRequestBody(request));
                 const handleId = typeof body.handleId === "string" ? body.handleId : "";

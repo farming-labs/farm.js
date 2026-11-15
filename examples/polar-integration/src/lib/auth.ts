@@ -12,9 +12,7 @@ export const authDatabase = new Database(authDatabasePath);
 
 export const auth = betterAuth({
   baseURL: authBaseUrl,
-  secret:
-    process.env.BETTER_AUTH_SECRET ??
-    "farm-example-polar-better-auth-secret-for-local-dev-only",
+  secret: process.env.BETTER_AUTH_SECRET,
   database: authDatabase,
   trustedOrigins: [authBaseUrl, "http://127.0.0.1:3002"],
   emailAndPassword: {

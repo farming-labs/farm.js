@@ -156,3 +156,34 @@ function parseRouteSegment(segment: string): ParsedRoute["segments"][number] {
 
   return { segment, isDynamic: false, isOptional: false, isCatchAll: false };
 }
+
+/**
+ * Where a programmatic route definition was made, recorded while Farm evaluates routes files
+ * on the server so the client build can keep every module that defines routes out of the
+ * browser. `stacks` holds the call stack of each step that made or copied the definition
+ * (page(), defineRoutes()); `raw` is set when the chain starts from an object literal rather
+ * than a route factory, which no stack can locate.
+ */
+export interface ProgrammaticRouteDefinitionSource {
+  stacks: readonly string[];
+  raw: boolean;
+}
+
+/** An enumerable symbol, so `{ ...route }` copies keep where the route came from. */
+export const PROGRAMMATIC_ROUTE_SOURCE = Symbol.for("farm.routes.source");
+export const TRACK_PROGRAMMATIC_ROUTE_SOURCES = Symbol.for("farm.routes.trackSources");
+
+/** Record where route definitions are made. Only Farm's server-side route discovery turns it on. */
+export function trackProgrammaticRouteSources(): void {
+  (globalThis as Record<symbol, unknown>)[TRACK_PROGRAMMATIC_ROUTE_SOURCES] = true;
+}
+
+export function getProgrammaticRouteDefinitionSource(
+  route: unknown,
+): ProgrammaticRouteDefinitionSource | undefined {
+  if (!route || typeof route !== "object") return undefined;
+  const source = (route as Record<symbol, unknown>)[PROGRAMMATIC_ROUTE_SOURCE];
+  return source && typeof source === "object" && Array.isArray((source as any).stacks)
+    ? (source as ProgrammaticRouteDefinitionSource)
+    : undefined;
+}

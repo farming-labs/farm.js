@@ -7,6 +7,11 @@ export const FARM_DOCS_LAST_MODIFIED_MANIFEST = ".farm-docs-last-modified.json";
 export interface FarmDocsLastModifiedManifest {
   version: 1;
   pages: Record<string, string>;
+  /**
+   * Committed pages whose last change predates a shallow clone's history. Their date is unknown,
+   * so none is shown rather than the clone's oldest commit date or the build time.
+   */
+  unknown?: string[];
 }
 
 export interface CreateFarmDocsLastModifiedManifestOptions {
@@ -62,13 +67,39 @@ function discoverDocsSourceFiles(contentDir: string): string[] {
   return files;
 }
 
-function getGitLastModifiedDates(contentDir: string): Record<string, string> {
+interface GitLastModifiedDates {
+  pages: Record<string, string>;
+  /** Pages a shallow clone's history cannot date. */
+  unknown: Set<string>;
+}
+
+/**
+ * The commits a shallow clone's history stops at. Git lists such a commit as adding every file
+ * it contains, since its parents are missing, so its file list says nothing about what it changed.
+ */
+function readShallowBoundaryCommits(gitRoot: string): Set<string> {
+  const shallowFile = execFileSync("git", ["-C", gitRoot, "rev-parse", "--git-path", "shallow"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  const shallowPath = path.resolve(gitRoot, shallowFile);
+  if (!existsSync(shallowPath)) return new Set();
+  return new Set(
+    readFileSync(shallowPath, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+}
+
+function getGitLastModifiedDates(contentDir: string): GitLastModifiedDates {
   try {
     const gitRoot = execFileSync("git", ["-C", contentDir, "rev-parse", "--show-toplevel"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    if (!gitRoot) return {};
+    if (!gitRoot) return { pages: {}, unknown: new Set() };
+    const boundaryCommits = readShallowBoundaryCommits(gitRoot);
 
     const contentPathspec = normalizeRelativePath(path.relative(gitRoot, contentDir)) || ".";
     const contentPrefix = contentPathspec === "." ? "" : `${contentPathspec}/`;
@@ -80,7 +111,7 @@ function getGitLastModifiedDates(contentDir: string): Record<string, string> {
         "-c",
         "core.quotePath=false",
         "log",
-        `--format=${COMMIT_MARKER}%cI`,
+        `--format=${COMMIT_MARKER}%H %cI`,
         "--name-only",
         "--",
         contentPathspec,
@@ -93,27 +124,32 @@ function getGitLastModifiedDates(contentDir: string): Record<string, string> {
     );
 
     const pages: Record<string, string> = {};
+    const unknown = new Set<string>();
     let commitDate: string | undefined;
+    let isBoundaryCommit = false;
 
     for (const rawLine of history.split(/\r?\n/)) {
       const line = normalizeRelativePath(rawLine.trim());
       if (!line) continue;
 
       if (line.startsWith(COMMIT_MARKER)) {
-        commitDate = line.slice(COMMIT_MARKER.length);
+        const [hash, date] = line.slice(COMMIT_MARKER.length).split(" ");
+        commitDate = date;
+        isBoundaryCommit = boundaryCommits.has(hash);
         continue;
       }
       if (!commitDate || (contentPrefix && !line.startsWith(contentPrefix))) continue;
 
       const relativePath = contentPrefix ? line.slice(contentPrefix.length) : line;
-      if (isDocsSourceFile(relativePath) && !pages[relativePath]) {
-        pages[relativePath] = commitDate;
-      }
+      if (!isDocsSourceFile(relativePath) || pages[relativePath]) continue;
+      if (isBoundaryCommit) unknown.add(relativePath);
+      else pages[relativePath] = commitDate;
     }
 
-    return pages;
+    for (const relativePath of Object.keys(pages)) unknown.delete(relativePath);
+    return { pages, unknown };
   } catch {
-    return {};
+    return { pages: {}, unknown: new Set() };
   }
 }
 
@@ -132,7 +168,10 @@ function readManifest(contentDir: string): FarmDocsLastModifiedManifest | null {
         (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0,
       ),
     );
-    return { version: 1, pages };
+    const unknown = Array.isArray(parsed.unknown)
+      ? parsed.unknown.filter((page): page is string => typeof page === "string")
+      : [];
+    return { version: 1, pages, ...(unknown.length > 0 ? { unknown } : {}) };
   } catch {
     return null;
   }
@@ -146,15 +185,22 @@ export function createFarmDocsLastModifiedManifest(
   const gitDates = getGitLastModifiedDates(resolvedContentDir);
   const fallbackDate = (options.now ?? new Date()).toISOString();
   const pages: Record<string, string> = {};
+  const unknown: string[] = [];
 
   for (const sourcePath of discoverDocsSourceFiles(resolvedContentDir)) {
     const relativePath = normalizeRelativePath(path.relative(resolvedContentDir, sourcePath));
-    pages[relativePath] =
-      gitDates[relativePath] ||
-      (options.fallback === "now" ? fallbackDate : statSync(sourcePath).mtime.toISOString());
+    if (gitDates.pages[relativePath]) {
+      pages[relativePath] = gitDates.pages[relativePath];
+    } else if (gitDates.unknown.has(relativePath)) {
+      unknown.push(relativePath);
+    } else {
+      // Not in Git history at all: a page added since the last commit, or no repository.
+      pages[relativePath] =
+        options.fallback === "now" ? fallbackDate : statSync(sourcePath).mtime.toISOString();
+    }
   }
 
-  return { version: 1, pages };
+  return { version: 1, pages, ...(unknown.length > 0 ? { unknown } : {}) };
 }
 
 function getLastModifiedManifest(contentDir: string): FarmDocsLastModifiedManifest {
@@ -173,11 +219,15 @@ function getLastModifiedManifest(contentDir: string): FarmDocsLastModifiedManife
   return manifest;
 }
 
+/**
+ * A page's last-modified date: its frontmatter date, else its last commit, else its file time.
+ * `undefined` when the page was last changed before a shallow clone's history begins.
+ */
 export function resolveFarmDocsPageLastModified(
   contentDir: string,
   sourcePath: string,
   frontmatter: Record<string, string>,
-): string {
+): string | undefined {
   const configured =
     frontmatter.lastModified ||
     frontmatter.lastmod ||
@@ -192,8 +242,10 @@ export function resolveFarmDocsPageLastModified(
     relativePath !== ".." && !relativePath.startsWith("../") && !path.isAbsolute(relativePath);
 
   if (isInsideContentDir) {
-    const generated = getLastModifiedManifest(resolvedContentDir).pages[relativePath];
+    const manifest = getLastModifiedManifest(resolvedContentDir);
+    const generated = manifest.pages[relativePath];
     if (generated) return generated;
+    if (manifest.unknown?.includes(relativePath)) return undefined;
   }
 
   return statSync(resolvedSourcePath).mtime.toISOString();

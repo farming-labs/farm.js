@@ -244,7 +244,7 @@ test("does not resurrect a deleted session when a stale touch lands late", async
   assert.equal(await store.getSessionByName("late-touch"), undefined);
 });
 
-test("replays every Set-Cookie header to the public visitor", async () => {
+test("replays every Set-Cookie header to the public visitor, host-only", async () => {
   const store = new MemoryPreviewGatewayStore();
   const gateway = await createGatewayServer(store);
 
@@ -272,7 +272,12 @@ test("replays every Set-Cookie header to the public visitor", async () => {
           status: 200,
           headers: {
             "content-type": "text/plain",
-            "set-cookie": ["session=abc; Path=/; HttpOnly", "csrf=xyz; Path=/"],
+            "set-cookie": [
+              "session=abc; Path=/; HttpOnly",
+              "csrf=xyz; Path=/",
+              // Would reach every other preview under the gateway's domain.
+              "theme=dark; Domain=.example.test; Path=/",
+            ],
           },
           body: Buffer.from("ok").toString("base64"),
           encoding: "base64",
@@ -283,9 +288,10 @@ test("replays every Set-Cookie header to the public visitor", async () => {
     const response = await publicRequest;
     assert.equal(response.status, 200);
     const setCookie = response.headers.getSetCookie();
-    assert.equal(setCookie.length, 2);
+    assert.equal(setCookie.length, 3);
     assert.ok(setCookie.some((cookie) => cookie.startsWith("session=abc")));
     assert.ok(setCookie.some((cookie) => cookie.startsWith("csrf=xyz")));
+    assert.ok(setCookie.includes("theme=dark; Path=/"));
   } finally {
     await gateway.close();
   }

@@ -1,4 +1,5 @@
 import { resolveFarmThemeConfig } from "./config";
+import { stampFarmCspNonce } from "../security";
 import type {
   FarmThemeConfig,
   FarmThemePreference,
@@ -34,7 +35,9 @@ export function createFarmThemeDocumentParts(
 
   return {
     attributes: ` data-theme="${initialTheme}"`,
-    head: `<style id="${THEME_STYLE_ID}">:root[data-theme="light"]{color-scheme:light}:root[data-theme="dark"]{color-scheme:dark}</style><script id="${THEME_SCRIPT_ID}">${script}</script>`,
+    head: stampFarmCspNonce(
+      `<style id="${THEME_STYLE_ID}">:root[data-theme="light"]{color-scheme:light}:root[data-theme="dark"]{color-scheme:dark}</style><script id="${THEME_SCRIPT_ID}">${script}</script>`,
+    ),
   };
 }
 

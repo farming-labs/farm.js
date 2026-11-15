@@ -133,6 +133,56 @@ describe("client plugin build boundary", () => {
     expect(registrations[0].definition.hydration.before()).toBeUndefined();
   });
 
+  it("keeps async arrows as arrows and still accepts a method named async", async () => {
+    const named = {
+      async(value: number) {
+        return ((next: number) => next + 1)(value);
+      },
+    };
+    const generated = generateFarmClientPluginEntryCode([
+      definePlugin({
+        name: "async-arrows",
+        client: {
+          setup: async (event) => ({ ready: Boolean(event) }),
+          error: async (event) => {
+            void event;
+          },
+          performance: named.async as never,
+          navigation: {
+            before: async (event) => {
+              void event;
+            },
+            rendered: async (event, label = String((() => "/")())) => {
+              void event;
+              void label;
+            },
+          },
+        },
+      }),
+    ]);
+
+    const registrations = Function(`return ${generated.registrations}`)();
+    const definition = registrations[0].definition;
+    await expect(definition.setup({})).resolves.toEqual({ ready: true });
+    await expect(definition.error(new Error("x"))).resolves.toBeUndefined();
+    await expect(definition.navigation.before({})).resolves.toBeUndefined();
+    await expect(definition.navigation.rendered({})).resolves.toBeUndefined();
+    expect(definition.performance(1)).toBe(2);
+  });
+
+  it("rejects a class passed as a lifecycle hook", () => {
+    class Hook {
+      run = () => true;
+    }
+    expect(() =>
+      resolveFarmClientPlugins([
+        definePlugin({ name: "class-hook", client: { setup: Hook as never } }),
+      ]),
+    ).toThrow(
+      'Client plugin "class-hook" client.setup must use a function, method, or arrow function',
+    );
+  });
+
   it("rejects non-JSON public data instead of dropping it", () => {
     expect(() =>
       resolveFarmClientPlugins([

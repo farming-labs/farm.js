@@ -27,6 +27,42 @@ test("workspace scripts use the pnpm binary installed by the caller", () => {
   }
 });
 
+test("production sites build the WebMCP runtime before the docs client", () => {
+  const { scripts } = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+  const steps = scripts["test:e2e:production:sites:run"].split("&&").map((step) => step.trim());
+  const webmcpBuild = steps.indexOf("pnpm --filter @farm.js/webmcp build:runtime");
+  const docsBuild = steps.findIndex((step) => step.includes("pnpm --dir docs exec farm build"));
+
+  assert.ok(webmcpBuild >= 0, "the clean-checkout path must build WebMCP's dist/client.js");
+  assert.ok(docsBuild > webmcpBuild, "build WebMCP before bundling the docs client");
+  for (const entry of ["test:e2e:production:sites", "test:e2e:framework"]) {
+    assert.ok(
+      scripts[entry]
+        .split("&&")
+        .some((step) => step.trim() === "pnpm test:e2e:production:sites:run"),
+      `${entry} must use the shared production-sites prerequisites`,
+    );
+  }
+});
+
+test("release:check runs the workspace tests with the heap CI gives them", () => {
+  const { scripts } = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+  const workflow = fs.readFileSync(path.join(repoRoot, ".github/workflows/ci.yml"), "utf8");
+  const ciHeaps = [...workflow.matchAll(/NODE_OPTIONS:\s*--max-old-space-size=(\d+)/g)].map(
+    (match) => Number(match[1]),
+  );
+  assert.ok(ciHeaps.length > 0, "ci.yml should set a heap size for its jobs");
+
+  // Locally the default V8 heap is a fraction of CI's; the farmjs-plugin RSC
+  // build tests exhaust it and crash a vitest worker part-way through.
+  const testStep = scripts["release:check"]
+    .split("&&")
+    .map((step) => step.trim())
+    .find((step) => /\bpnpm test\b/.test(step));
+  const heap = Number(testStep?.match(/NODE_OPTIONS=--max-old-space-size=(\d+)/)?.[1]);
+  assert.ok(heap >= Math.max(...ciHeaps), `release:check test stage needs CI's heap: ${testStep}`);
+});
+
 /**
  * Runs a package script through pnpm inside a throwaway package that carries
  * the repository's .npmrc, so the test exercises the same script shell the

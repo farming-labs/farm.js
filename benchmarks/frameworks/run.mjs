@@ -111,7 +111,7 @@ const frameworks = [
     id: "farm",
     label: "Farm.js",
     version: farmCorePackage.version,
-    stack: "React 19.2.4 · Vite 8.1.5 (Rolldown)",
+    stack: "React 19.2.4 · Vite 8.3.4 (Rolldown)",
     directory: "farm",
     devHost: "localhost",
     installedPackages: [
@@ -119,8 +119,9 @@ const frameworks = [
       { name: "@farm.js/cli", version: farmCliPackage.version },
       { name: "react", version: "19.2.4" },
       { name: "react-dom", version: "19.2.4" },
-      { name: "sharp", version: "0.34.5" },
-      { name: "vite", version: "8.1.5", from: "@farm.js/core" },
+      // sharp left the fixture in #2112; core takes it as an optional peer, so a default
+      // install does not have it and this image-free workload never calls it.
+      { name: "vite", version: "8.3.4", from: "@farm.js/core" },
     ],
     cli: "node_modules/@farm.js/cli/bin/farm.js",
     devArgs: (port) => ["dev", "--port", String(port)],
@@ -1051,13 +1052,20 @@ async function assertInstalled(framework) {
   }
 }
 
+// Core's declaration build needs more heap than Node's default on a 16 GB machine, and the
+// sanitized environment deliberately drops an ambient NODE_OPTIONS. This sets it only for the
+// package build, which the methodology already excludes from every timed sample.
+const prepareEnv = { NODE_OPTIONS: "--max-old-space-size=12288" };
+
 async function prepareFarm() {
   console.log("Preparing local Farm packages outside timed runs...");
   await runCommand("corepack", ["pnpm", "--filter", "@farm.js/core", "build"], {
     cwd: repoRoot,
+    env: prepareEnv,
   });
   await runCommand("corepack", ["pnpm", "--filter", "@farm.js/cli", "build"], {
     cwd: repoRoot,
+    env: prepareEnv,
   });
 }
 

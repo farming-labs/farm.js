@@ -15,9 +15,14 @@ declare global {
 interface Row {
   id: number;
   label: string;
+  classValue?: unknown;
 }
 
-type Shape = "table" | "hidden-first" | "style";
+type Shape = "table" | "hidden-first" | "style" | "duplicate-class";
+
+function rowClass(row: Row, selected: number): unknown {
+  return Object.hasOwn(row, "classValue") ? row.classValue : selected === row.id ? "danger" : "";
+}
 
 const roots: Root[] = [];
 
@@ -74,7 +79,8 @@ function rowDescriptor(
     kind: "element",
     tag: "tr",
     attributes: [
-      { name: "className", value: selected === row.id ? "danger" : "" },
+      ...(shape === "duplicate-class" ? [{ name: "class", value: row.label }] : []),
+      { name: "className", value: rowClass(row, selected) },
       { name: "data-id", value: row.id },
       { name: "aria-selected", value: selected === row.id },
       ...(shape === "hidden-first" ? [{ name: "hidden", value: row.id % 2 === 0 }] : []),
@@ -97,7 +103,7 @@ function rowBindings(shape: Shape, selected: () => number): CompilerKeyedRowBind
       kind: "attribute",
       path: [],
       name: "className",
-      read: (item) => (selected() === (item as Row).id ? "danger" : ""),
+      read: (item) => rowClass(item as Row, selected()),
     },
     { kind: "attribute", path: [], name: "data-id", read: (item) => (item as Row).id },
     {
@@ -136,10 +142,22 @@ function rowBindings(shape: Shape, selected: () => number): CompilerKeyedRowBind
       read: (item) => ((item as Row).id % 2 ? 0.5 : 1),
     });
   }
+  if (shape === "duplicate-class") {
+    bindings.unshift({
+      kind: "attribute",
+      path: [],
+      name: "class",
+      read: (item) => (item as Row).label,
+    });
+  }
   return bindings;
 }
 
-function mountRows(shape: Shape, cloneRows: boolean) {
+function mountRows(
+  shape: Shape,
+  cloneRows: boolean,
+  targets?: (root: Element) => (Element | null)[],
+) {
   const counters = { creates: 0 };
   const clicks: string[] = [];
   let setRows: (next: (current: Row[]) => Row[]) => void = () => undefined;
@@ -176,6 +194,7 @@ function mountRows(shape: Shape, cloneRows: boolean) {
             ]}
             delegateEvents
             cloneRows={cloneRows}
+            targets={targets}
             render={(event) => (
               <tbody>
                 {items().map((row, index) => (
@@ -222,8 +241,12 @@ function mountRows(shape: Shape, cloneRows: boolean) {
   };
 }
 
-async function runScenario(shape: Shape, cloneRows: boolean) {
-  const view = mountRows(shape, cloneRows);
+async function runScenario(
+  shape: Shape,
+  cloneRows: boolean,
+  targets?: (root: Element) => (Element | null)[],
+) {
+  const view = mountRows(shape, cloneRows, targets);
   const snapshots: string[] = [];
   await view.render();
   await view.rows(() => rows(1, 40));
@@ -255,6 +278,114 @@ async function runScenario(shape: Shape, cloneRows: boolean) {
 }
 
 describe("cloned keyed rows", () => {
+  it("compares against the template DOM rather than a later binding read", async () => {
+    const view = mountRows("table", true);
+    await view.render();
+    let reads = 0;
+    await view.rows(() => [
+      {
+        id: 1,
+        label: "first",
+        get classValue() {
+          return reads++ === 0 ? "template" : "binding";
+        },
+      },
+    ]);
+    expect(view.container.querySelector("tr")!.getAttribute("class")).toBe("template");
+    await view.rows(() => [{ id: 2, label: "second", classValue: "binding" }]);
+    expect(view.container.querySelector("tr")!.getAttribute("class")).toBe("binding");
+  });
+
+  it("preserves class coercions and absent, boolean and changing classes", async () => {
+    const view = mountRows("table", true);
+    await view.render();
+    await view.rows(() => [{ id: 1, label: "first", classValue: "copied" }]);
+    const coercions: string[] = [];
+    const objectClass = {
+      toString() {
+        coercions.push("class");
+        return "copied";
+      },
+    };
+    const values = [objectClass, "changed", "copied", null, undefined, false, true, 0];
+    await view.rows(() =>
+      values.map((classValue, index) => ({ id: index + 2, label: "row", classValue })),
+    );
+    expect(coercions).toEqual(["class"]);
+    expect(
+      [...view.container.querySelectorAll("tr")].map((row) => row.getAttribute("class")),
+    ).toEqual(["copied", "changed", "copied", null, null, null, "", "0"]);
+  });
+
+  it("does not skip a later class binding after an earlier binding changes it", async () => {
+    const view = mountRows("duplicate-class", true);
+    await view.render();
+    await view.rows(() => rows(1, 2));
+    await view.rows(() => rows(100, 3));
+    expect(
+      [...view.container.querySelectorAll("tr")].map((row) => row.getAttribute("class")),
+    ).toEqual(["", "", ""]);
+  });
+
+  it("does not rewrite an unchanged string class copied from the template", async () => {
+    const view = mountRows("table", true);
+    await view.render();
+    await view.rows(() => rows(1, 2));
+    const write = vi.spyOn(Element.prototype, "setAttribute");
+    const read = vi.spyOn(Element.prototype, "getAttribute");
+
+    try {
+      await view.rows(() => rows(100, 20));
+      expect(write.mock.calls.filter(([name]) => name === "class")).toEqual([]);
+      expect(read.mock.calls.filter(([name]) => name === "class")).toEqual([]);
+      expect(view.container.querySelectorAll('tr[class=""]')).toHaveLength(20);
+    } finally {
+      write.mockRestore();
+      read.mockRestore();
+    }
+  });
+
+  it.each([
+    ["incomplete", () => []],
+    ["missing", () => Array.from({ length: 7 }, () => null)],
+    [
+      "sparse",
+      () => {
+        const targets: (Element | null)[] = [];
+        targets.length = 7;
+        return targets;
+      },
+    ],
+  ])("uses the existing walker when generated targets are %s", async (_name, targets) => {
+    let calls = 0;
+    const lookup = (row: Element) => {
+      if (calls++ > 0) return targets();
+      // Seed a valid template before the lookup becomes incomplete.
+      const first = row.firstElementChild;
+      const second = first?.nextElementSibling;
+      const label = second?.firstElementChild ?? null;
+      return [row, row, row, first, label, label, second?.nextElementSibling ?? null];
+    };
+    const built = await runScenario("table", false);
+    const generated = await runScenario("table", true, lookup);
+    expect(generated.snapshots).toEqual(built.snapshots);
+    expect(generated.clicks).toEqual(built.clicks);
+  });
+
+  it("uses generated target lookups without changing row behavior", async () => {
+    const targets = vi.fn((row: Element) => {
+      const first = row.firstElementChild;
+      const second = first?.nextElementSibling;
+      const label = second?.firstElementChild ?? null;
+      return [row, row, row, first, label, label, second?.nextElementSibling ?? null];
+    });
+    const built = await runScenario("table", false);
+    const generated = await runScenario("table", true, targets);
+    expect(generated.snapshots).toEqual(built.snapshots);
+    expect(generated.clicks).toEqual(built.clicks);
+    expect(targets).toHaveBeenCalled();
+  });
+
   it("produces the same DOM as building every row from its descriptor", async () => {
     const built = await runScenario("table", false);
     const cloned = await runScenario("table", true);

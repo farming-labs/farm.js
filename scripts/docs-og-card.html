@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Farm.js link preview</title>
+    <style>
+      @font-face {
+        font-family: "Geist Sans";
+        src: url("{{sansFont}}") format("woff2");
+        font-weight: 100 900;
+        font-display: block;
+      }
+      @font-face {
+        font-family: "Geist Mono";
+        src: url("{{monoFont}}") format("woff2");
+        font-weight: 100 900;
+        font-display: block;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1200px;
+        height: 630px;
+        margin: 0;
+        overflow: hidden;
+        background: #000;
+      }
+      body {
+        color: #fff;
+        font-family: "Geist Sans", sans-serif;
+        font-synthesis: none;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .rail {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 40px;
+        background: repeating-linear-gradient(
+          135deg,
+          rgb(255 255 255 / 0.07) 0 1px,
+          transparent 1px 7px
+        );
+      }
+      .rail.l {
+        left: 0;
+        border-right: 1px solid rgb(255 255 255 / 0.12);
+      }
+      .rail.r {
+        right: 0;
+        border-left: 1px solid rgb(255 255 255 / 0.12);
+      }
+
+      .header {
+        position: absolute;
+        left: 40px;
+        right: 40px;
+        top: 0;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        padding: 0 32px;
+        border-bottom: 1px solid rgb(255 255 255 / 0.09);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-family: "Geist Mono", monospace;
+        font-size: 15px;
+        letter-spacing: 0.02em;
+      }
+      .brand svg {
+        width: 22px;
+        height: 21px;
+        flex: none;
+      }
+      .brand span {
+        color: rgb(255 255 255 / 0.52);
+      }
+
+      #flicker {
+        position: absolute;
+        left: 41px;
+        right: 41px;
+        bottom: 0;
+        height: 300px;
+        -webkit-mask-image: radial-gradient(
+          ellipse 220% 78% at 50% -20%,
+          transparent 55%,
+          rgb(0 0 0 / 0.04) 62%,
+          rgb(0 0 0 / 0.16) 70%,
+          rgb(0 0 0 / 0.42) 80%,
+          rgb(0 0 0 / 0.76) 90%,
+          #000 100%
+        );
+      }
+
+      .hero {
+        position: absolute;
+        left: 40px;
+        right: 40px;
+        top: 64px;
+        bottom: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      .mark svg {
+        display: block;
+        width: 50px;
+        height: 47px;
+        overflow: visible;
+      }
+      .mark path {
+        transform-box: fill-box;
+      }
+      .title {
+        position: relative;
+        margin-top: 4px;
+        padding: 6px 22px 22px;
+      }
+      h1 {
+        margin: 0;
+        text-align: center;
+        font-weight: 500;
+        font-size: 82px;
+        line-height: 1.07;
+        letter-spacing: -0.055em;
+      }
+      h1 > span {
+        display: block;
+      }
+      .sel {
+        position: relative;
+        display: inline-block;
+        white-space: nowrap;
+        text-align: left;
+        clip-path: inset(-0.3em 0 -0.3em 0);
+      }
+      .box {
+        position: absolute;
+        border: 1px dashed rgb(255 255 255 / 0.34);
+      }
+      .ring {
+        position: absolute;
+        width: 28px;
+        height: 28px;
+        margin: -14px 0 0 -14px;
+        border: 1.5px solid rgb(255 255 255 / 0.7);
+        border-radius: 50%;
+        opacity: 0;
+      }
+      .h {
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        border: 1px solid rgb(255 255 255 / 0.42);
+        background: #000;
+      }
+      .h.tl {
+        top: -5px;
+        left: -5px;
+      }
+      .h.tr {
+        top: -5px;
+        right: -5px;
+      }
+      .h.bl {
+        bottom: -5px;
+        left: -5px;
+      }
+      .h.br {
+        bottom: -5px;
+        right: -5px;
+      }
+      .wire {
+        position: absolute;
+        overflow: visible;
+      }
+      .tag {
+        position: absolute;
+        padding: 5px 8px;
+        border: 1px solid transparent;
+        background: #fff;
+        color: #000;
+        font:
+          400 13px/1 "Geist Mono",
+          monospace;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .cmd {
+        margin-top: 58px;
+        width: 470px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 15px 18px;
+        background: #070707;
+        border: 1px solid rgb(255 255 255 / 0.14);
+        border-radius: 3px;
+        font:
+          400 17px/1 "Geist Mono",
+          monospace;
+        color: #a1a1a1;
+        letter-spacing: -0.01em;
+      }
+      .cmd .p {
+        color: #6b6b6b;
+      }
+      .cmd b {
+        font-weight: 400;
+        color: #e8e8e8;
+      }
+      .cmd .cur {
+        display: inline-block;
+        width: 9px;
+        height: 19px;
+        margin-left: 2px;
+        vertical-align: -4px;
+        background: #e8e8e8;
+      }
+      .cmd .copy {
+        margin-left: auto;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: rgb(255 255 255 / 0.5);
+        border: 1px solid rgb(255 255 255 / 0.18);
+        border-radius: 2px;
+        padding: 5px 7px;
+      }
+
+      .tick {
+        position: absolute;
+        width: 9px;
+        height: 9px;
+        border-color: rgb(255 255 255 / 0.28);
+        border-style: solid;
+        border-width: 0;
+      }
+      .tick.tl {
+        left: 52px;
+        top: 76px;
+        border-top-width: 1px;
+        border-left-width: 1px;
+      }
+      .tick.tr {
+        right: 52px;
+        top: 76px;
+        border-top-width: 1px;
+        border-right-width: 1px;
+      }
+      .tick.bl {
+        left: 52px;
+        bottom: 12px;
+        border-bottom-width: 1px;
+        border-left-width: 1px;
+      }
+      .tick.br {
+        right: 52px;
+        bottom: 12px;
+        border-bottom-width: 1px;
+        border-right-width: 1px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="rail l"></div>
+    <div class="rail r"></div>
+    <canvas id="flicker" width="2236" height="600"></canvas>
+    <div class="header">
+      <div class="brand">
+        {{logo}}
+        <b style="font-weight: 400">FARM<span>.JS</span></b>
+      </div>
+    </div>
+    <span class="tick tl"></span><span class="tick tr"></span><span class="tick bl"></span
+    ><span class="tick br"></span>
+    <div id="fx" style="position: absolute; inset: 0; pointer-events: none; z-index: 3">
+      <span class="box" id="box"
+        ><i class="h tl"></i><i class="h tr"></i><i class="h bl"></i><i class="h br"></i></span
+      ><svg
+        id="wires"
+        width="1200"
+        height="630"
+        style="position: absolute; left: 0; top: 0; overflow: visible"
+      >
+        <path id="wp" fill="none" stroke="rgb(255 255 255 / 0.28)" stroke-width="1.2" />
+        <circle id="we" r="2.5" fill="#6a6a6a" /></svg
+      ><span class="ring" id="r1"></span><span class="ring" id="r2"></span
+      ><svg
+        id="cursor"
+        viewBox="0 0 24 24"
+        width="26"
+        height="26"
+        style="position: absolute; left: 0; top: 0; overflow: visible"
+      >
+        <path
+          d="M4 2.5 19.5 10l-6.6 1.9L9.7 18.6z"
+          fill="#fff"
+          stroke="#000"
+          stroke-width="1.2"
+          stroke-linejoin="round"
+        />
+      </svg>
+    </div>
+    <main class="hero">
+      <div class="mark" id="mark">{{logo}}</div>
+      <div class="title" id="title">
+        <h1>
+          <span>the framework for</span
+          ><span
+            >the web and <span class="sel" id="sel"><span id="word">agents</span></span></span
+          >
+        </h1>
+        <span class="tag" id="tag">/agents</span>
+      </div>
+      <div class="cmd">
+        <span class="p">$</span><span id="cmdtext"><b>pnpm create</b> @farm.js/app</span
+        ><span class="copy">Copy</span>
+      </div>
+    </main>
+    <script>
+      const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v)),
+        lerp = (a, b, t) => a + (b - a) * t,
+        win = (t, a, b) => clamp((t - a) / (b - a));
+      const ease = (v) => (v < 0.5 ? 4 * v * v * v : 1 - (-2 * v + 2) ** 3 / 2),
+        out = (v) => 1 - Math.pow(1 - clamp(v), 3);
+      function rng(seed) {
+        return () => {
+          seed |= 0;
+          seed = (seed + 0x6d2b79f5) | 0;
+          let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+      const hash = (a, b) => {
+        const h = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+        return h - Math.floor(h);
+      };
+      const $ = (s) => document.getElementById(s);
+      const DUR = 10,
+        FPS = 30,
+        GLYPHS = "#%&/_<>*+=!?01",
+        WORD = "agents";
+      // The hero's SelectionWire steps (ms), reordered so the loop starts and ends on the lit pose.
+      // The mark's rows retract with the reset, then build back one at a time while the command types.
+      const MARK = { retract: [0.8, 1.15], build: 1.5, row: 0.36, square: 0.24, bar: 0.42 };
+      const farmEase = (v) => {
+        const x = clamp(v);
+        return 1 - Math.pow(1 - x, 4);
+      };
+      function mark(t) {
+        const parts = [...document.querySelectorAll("#mark path")];
+        parts.forEach((p, j) => {
+          const row = j >> 1,
+            isBar = j % 2 === 1;
+          let k;
+          if (t < MARK.retract[0] || t >= MARK.build + 3 * MARK.row + MARK.bar + 0.1) k = 1;
+          else if (t < MARK.retract[1])
+            k =
+              1 -
+              farmEase(
+                win(
+                  t,
+                  MARK.retract[0] + (2 - row) * 0.08,
+                  MARK.retract[0] + (2 - row) * 0.08 + 0.2,
+                ),
+              );
+          else {
+            const a = MARK.build + row * MARK.row + (isBar ? 0.1 : 0);
+            k = farmEase(win(t, a, a + (isBar ? MARK.bar : MARK.square)));
+          }
+          if (k >= 1) {
+            p.style.transform = "";
+            p.style.opacity = "";
+            return;
+          }
+          p.style.opacity = k.toFixed(3);
+          p.style.transformOrigin = isBar ? "0 50%" : "50% 50%";
+          p.style.transform = isBar
+            ? `scaleX(${(0.02 + 0.98 * k).toFixed(4)})`
+            : `scale(${(0.9 + 0.1 * k).toFixed(4)})`;
+        });
+      }
+      const S = {
+        unwire: [0.8, 1.16],
+        deselect: [1.16, 1.78],
+        glide: [3.9, 4.42],
+        press: [4.42, 4.54],
+        drag: [4.54, 5.26],
+        release: [5.26, 5.4],
+        scramble: [5.4, 5.88],
+        toPort: [5.88, 6.34],
+        grab: [6.34, 6.46],
+        wire: [6.46, 7.32],
+        connect: [7.32, 7.5],
+        toTarget: [7.5, 7.88],
+        click: [7.88, 8.04],
+        leave: [8.12, 8.58],
+      };
+      // The install command erases with the reset, then types back in before the selection plays.
+      const CMD = "pnpm create @farm.js/app",
+        BOLD = 11,
+        TYPE = { erase: [0.8, 1.15], type: [1.45, 3.05], cursorOff: 3.65 };
+      const TT = (() => {
+        const r = rng(3),
+          g = [...CMD].map(
+            (c) => (c === " " ? 1.6 : c === "@" || c === "/" ? 1.3 : 1) * (0.6 + r() * 0.8),
+          ),
+          sum = g.reduce((a, b) => a + b, 0);
+        let acc = 0;
+        return g.map((x) => {
+          acc += x;
+          return TYPE.type[0] + (acc / sum) * (TYPE.type[1] - TYPE.type[0]);
+        });
+      })();
+      let CMD_REST = null;
+      function command(t) {
+        const el = $("cmdtext");
+        CMD_REST ??= el.innerHTML;
+        if (t < TYPE.erase[0] || t >= TYPE.cursorOff) {
+          if (el.innerHTML !== CMD_REST) el.innerHTML = CMD_REST;
+          return;
+        }
+        let n;
+        if (t < TYPE.erase[1]) n = Math.round(CMD.length * (1 - win(t, ...TYPE.erase)));
+        else if (t < TYPE.type[0]) n = 0;
+        else n = TT.filter((x) => x <= t).length;
+        const typing = t < TYPE.type[1] + 0.05,
+          on = typing || Math.floor((t - TYPE.type[1]) / 0.3) % 2 === 1;
+        const a = CMD.slice(0, Math.min(n, BOLD)),
+          b = n > BOLD ? CMD.slice(BOLD, n) : "";
+        el.innerHTML = (a ? `<b>${a}</b>` : "") + b + (on ? '<span class="cur"></span>' : "");
+      }
+      const IN = (t, k) => t >= S[k][0] && t < S[k][1],
+        P = (t, k) => win(t, ...S[k]);
+
+      // FlickeringGrid: 2px squares on a 7px gap, opacity up to 0.36; each cell re-rolls about 1.5 times a second.
+      const cv = $("flicker"),
+        cx = cv.getContext("2d"),
+        CELL = (2 + 7) * 2,
+        SQ = 2 * 2,
+        COLS = Math.ceil(cv.width / CELL),
+        ROWS = Math.ceil(cv.height / CELL),
+        K = 12;
+      const PH = [];
+      {
+        const r = rng(5);
+        for (let i = 0; i < COLS * ROWS; i++) PH.push(r() * K);
+      }
+      function grid(t) {
+        cx.clearRect(0, 0, cv.width, cv.height);
+        for (let y = 0; y < ROWS; y++)
+          for (let x = 0; x < COLS; x++) {
+            const i = y * COLS + x,
+              k = Math.floor((t * K) / DUR + PH[i]) % K;
+            cx.fillStyle = `rgb(255 255 255 / ${(hash(i, k) * 0.36).toFixed(3)})`;
+            cx.fillRect(x * CELL, y * CELL, SQ, SQ);
+          }
+      }
+
+      let G = null;
+      function geom() {
+        const sel = $("sel");
+        sel.style.width = sel.getBoundingClientRect().width + "px";
+        const w = $("word").getBoundingClientRect(),
+          tag = $("tag");
+        const box = { l: w.left - 10, t: w.top + 6, r: w.right + 12, b: w.bottom - 2 };
+        const T = $("title").getBoundingClientRect();
+        const tagL = box.r - tag.offsetWidth + 44,
+          tagT = box.b + 30;
+        tag.style.left = tagL - T.left + "px";
+        tag.style.top = tagT - T.top + "px";
+        const port = { x: box.r - 34, y: box.b },
+          tc = { x: tagL + tag.offsetWidth / 2, y: tagT };
+        const d = `M${port.x} ${port.y} V${port.y + 11} Q${port.x} ${port.y + 15} ${port.x + 4} ${port.y + 15} H${tc.x - 4} Q${tc.x} ${port.y + 15} ${tc.x} ${port.y + 19} V${tc.y}`;
+        $("wp").setAttribute("d", d);
+        const L = $("wp").getTotalLength();
+        $("wp").style.strokeDasharray = L;
+        G = {
+          box,
+          port,
+          tc,
+          L,
+          tagL,
+          tagT,
+          tagW: tag.offsetWidth,
+          tagH: tag.offsetHeight,
+          enter: { x: box.r + 120, y: box.b + 170 },
+        };
+      }
+      function setBox(l, t, r, b, op, corners) {
+        const e = $("box");
+        e.style.left = l + "px";
+        e.style.top = t + "px";
+        e.style.width = Math.max(0, r - l) + "px";
+        e.style.height = Math.max(0, b - t) + "px";
+        e.style.opacity = op;
+        e.querySelectorAll(".h").forEach((h) => (h.style.display = corners ? "block" : "none"));
+      }
+      const TAG = {
+        off: ["transparent", "transparent", "rgb(255 255 255 / .5)", "solid"],
+        target: ["rgb(255 255 255 / .34)", "transparent", "rgb(255 255 255 / .5)", "dashed"],
+        linked: ["rgb(255 255 255 / .6)", "transparent", "#fff", "solid"],
+        hover: ["#fff", "rgb(255 255 255 / .14)", "#fff", "solid"],
+        on: ["#fff", "#fff", "#000", "solid"],
+      };
+      function setTag(state, op) {
+        const e = $("tag"),
+          [bc, bg, c, st] = TAG[state];
+        e.style.borderColor = bc;
+        e.style.background = bg;
+        e.style.color = c;
+        e.style.borderStyle = st;
+        e.style.opacity = op;
+      }
+
+      function render(t) {
+        t = ((t % DUR) + DUR) % DUR;
+        geom();
+        grid(t);
+        command(t);
+        mark(t);
+        const { box, port, tc, L } = G;
+        // selection box
+        if (t < S.deselect[1])
+          setBox(box.l, box.t, box.r, box.b, (1 - P(t, "deselect")).toFixed(3), true);
+        else if (t < S.drag[0]) setBox(0, 0, 0, 0, 0, false);
+        else if (t < S.drag[1]) {
+          const k = ease(P(t, "drag"));
+          setBox(box.l, box.t, lerp(box.l, box.r, k), lerp(box.t, box.b, k), 1, false);
+        } else setBox(box.l, box.t, box.r, box.b, 1, t >= S.release[1]);
+        // scramble: each letter runs through the glyphs and settles left to right
+        const w = $("word");
+        if (IN(t, "scramble")) {
+          const k = P(t, "scramble");
+          w.textContent = [...WORD]
+            .map((c, i) => {
+              const at = ((i + 0.5) / WORD.length) * 0.8 + hash(i, 7) * 0.15;
+              return k >= at ? c : GLYPHS[Math.floor(hash(i, Math.floor(t * 30)) * GLYPHS.length)];
+            })
+            .join("");
+        } else if (w.textContent !== WORD) w.textContent = WORD;
+        // wire
+        let wireK;
+        if (t < S.unwire[1]) wireK = 1 - ease(P(t, "unwire"));
+        else if (t < S.wire[0]) wireK = 0;
+        else wireK = t < S.wire[1] ? ease(P(t, "wire")) : 1;
+        $("wp").style.strokeDashoffset = (L * (1 - wireK)).toFixed(2);
+        $("wp").style.opacity = wireK > 0 ? 1 : 0;
+        $("we").setAttribute("cx", port.x);
+        $("we").setAttribute("cy", port.y);
+        $("we").style.opacity = wireK > 0 || IN(t, "grab") ? 1 : 0;
+        // tag
+        if (t < S.unwire[1]) setTag("on", (1 - P(t, "unwire")).toFixed(3));
+        else if (t < S.wire[0]) setTag("off", 0);
+        else if (t < S.connect[0])
+          setTag("target", out(win(t, S.wire[0], S.wire[0] + 0.3)).toFixed(3));
+        else if (t < S.toTarget[1] - 0.06) setTag("linked", 1);
+        else if (t < S.click[1]) setTag("hover", 1);
+        else setTag("on", 1);
+        const tagScale = IN(t, "click") ? 0.96 : 1;
+        $("tag").style.transform = `scale(${tagScale})`;
+        // cursor path: glide to the word's corner, drag, go to the port, pull the wire, click the tag, leave
+        const wl = { x: box.l, y: box.t },
+          br = { x: box.r, y: box.b },
+          tag = { x: G.tagL + G.tagW * 0.55, y: G.tagT + G.tagH * 0.6 };
+        let c = null,
+          op = 0,
+          press = false;
+        if (t >= S.glide[0] && t < S.leave[1]) {
+          op = 1;
+          if (t < S.press[0]) {
+            const k = ease(P(t, "glide"));
+            c = { x: lerp(G.enter.x, wl.x, k), y: lerp(G.enter.y, wl.y, k) };
+            op = out(P(t, "glide") * 2);
+          } else if (t < S.drag[0]) {
+            c = wl;
+            press = true;
+          } else if (t < S.release[1]) {
+            const k = ease(P(t, "drag"));
+            c = { x: lerp(wl.x, br.x, k), y: lerp(wl.y, br.y, k) };
+            press = t < S.drag[1];
+          } else if (t < S.toPort[0]) c = br;
+          else if (t < S.grab[0]) {
+            const k = ease(P(t, "toPort"));
+            c = { x: lerp(br.x, port.x, k), y: lerp(br.y, port.y, k) };
+          } else if (t < S.wire[0]) {
+            c = port;
+            press = true;
+          } else if (t < S.connect[1]) {
+            const p = $("wp").getPointAtLength(L * (t < S.wire[1] ? ease(P(t, "wire")) : 1));
+            c = { x: p.x, y: p.y };
+            press = t < S.wire[1];
+          } else if (t < S.click[0]) {
+            const k = ease(P(t, "toTarget"));
+            c = { x: lerp(tc.x, tag.x, k), y: lerp(tc.y, tag.y, k) };
+          } else if (t < S.leave[0]) {
+            c = tag;
+            press = IN(t, "click");
+          } else {
+            const k = ease(P(t, "leave"));
+            c = { x: lerp(tag.x, tag.x + 60, k), y: lerp(tag.y, tag.y + 70, k) };
+            op = 1 - k;
+          }
+        }
+        const cu = $("cursor");
+        cu.style.opacity = op.toFixed(3);
+        if (c)
+          cu.style.transform = `translate(${(c.x - (4 * 26) / 24).toFixed(1)}px,${(c.y - (2.5 * 26) / 24).toFixed(1)}px) scale(${press ? 0.88 : 1})`;
+        // the click's two rings, a beat apart
+        [
+          ["r1", 0],
+          ["r2", 0.12],
+        ].forEach(([id, d]) => {
+          const e = $(id),
+            k = win(t, S.click[0] + d, S.click[0] + d + 0.7);
+          e.style.left = tag.x + "px";
+          e.style.top = tag.y + "px";
+          e.style.opacity = (k > 0 && k < 1 ? 0.7 * (1 - k) : 0).toFixed(3);
+          e.style.transform = `scale(${(0.3 + 1.4 * out(k)).toFixed(3)})`;
+        });
+      }
+      window.__card = { render, DUR, FPS, ready: false };
+      Promise.all(
+        ['500 82px "Geist Sans"', '400 17px "Geist Mono"'].map((f) => document.fonts.load(f)),
+      )
+        .then(() => document.fonts.ready)
+        .then(() => {
+          render(0);
+          window.__card.ready = true;
+        });
+    </script>
+  </body>
+</html>

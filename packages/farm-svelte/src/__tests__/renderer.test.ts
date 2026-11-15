@@ -2,9 +2,15 @@
 
 import {
   defineRendererDescriptorConformance,
+  defineRendererNativeTreeConformance,
   defineRendererServerConformance,
+  defineRendererServerQueryConformance,
 } from "@farm.js/renderer-tests";
+import { createFarmNativeTreeResponse } from "@farm.js/core/internal/production-runtime";
 import { describe, expect, it } from "vitest";
+import { get } from "svelte/store";
+import type { ServerQuery } from "@farm.js/core/server-query";
+import { createServerQuery } from "../bindings";
 import { svelte } from "../index";
 import * as serverRuntime from "../server";
 import {
@@ -30,6 +36,36 @@ defineRendererDescriptorConformance({
 });
 
 defineRendererServerConformance(serverRuntime);
+defineRendererNativeTreeConformance(serverRuntime, async (html) => {
+  // As a mobile app's server answers a native-tier screen: the page's HTML read into a tree.
+  const response = await createFarmNativeTreeResponse({
+    request: new Request("https://app.example/trails", {
+      headers: { accept: "application/vnd.farm.native+json" },
+    }),
+    renderPage: () =>
+      new Response(
+        `<!DOCTYPE html><html><head><title>Trails</title></head><body><div id="__farm_page__">${html}</div></body></html>`,
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      ),
+    loadStylesheet: () => "",
+  });
+  return response.json();
+});
+
+defineRendererServerQueryConformance({
+  name: "svelte",
+  renderQuery(query) {
+    // `$account` in a server-rendered component subscribes and reads the
+    // store the same way `get` does.
+    const Account = markFunctionComponent(() => {
+      const account = get(
+        createServerQuery(query as unknown as ServerQuery<undefined, { email: string }>, undefined),
+      );
+      return createElement("p", null, `account=${account.data?.email ?? "loading"}`);
+    });
+    return renderToString(createElement(Account, null));
+  },
+});
 
 describe("Svelte renderer", () => {
   it("renders FARMJS elements with Svelte's server runtime", async () => {

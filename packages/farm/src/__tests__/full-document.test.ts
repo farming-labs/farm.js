@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 import {
   classifyFarmDocumentPrefix,
   composeFarmFullDocument,
+  createFarmStreamedDocumentTransform,
+  openFarmStreamedDocument,
   ensureFarmDocumentHead,
   ensureFarmDocumentRoot,
   extractFarmFullDocument,
@@ -16,6 +18,8 @@ import {
   HOISTED_HEAD_ELEMENT,
   isFarmFullDocument,
   opensFarmFullDocument,
+  takeFarmHoistedHead,
+  appendFarmHead,
   removeFarmDocumentTitles,
 } from "../server/full-document";
 
@@ -142,6 +146,15 @@ describe.each([
     );
   });
 
+  it("wraps the body even when page content has id=root", () => {
+    const document =
+      '<html><head></head><body><nav>n</nav><main><h3 id="root"><a href="#root">Root</a></h3></main></body></html>';
+    const wrapped = ensureRoot(document);
+    expect(wrapped).toContain('<body><div id="root"><nav>n</nav>');
+    expect(wrapped).toContain('<h3 id="root">');
+    expect(wrapped.endsWith("</main></div></body></html>")).toBe(true);
+  });
+
   it("leaves a document that already has #root unchanged", () => {
     const document = '<html><head></head><body><div id="root"><main>m</main></div></body></html>';
     expect(ensureRoot(document)).toBe(document);
@@ -177,6 +190,21 @@ describe.each([
     ]) {
       expect(ensureHead(document)).toBe(document);
     }
+  });
+});
+
+describe.each([
+  ["development", extractFarmFullDocument],
+  ["production", productionExtractor()],
+] as const)("%s full-document wrapper styles", (_runtime, extract) => {
+  it("extracts the document from wrappers Preact serializes with a trailing semicolon", () => {
+    const document = '<html lang="en"><head></head><body><main>hello</main></body></html>';
+    expect(
+      extract(
+        '<div data-farm-layout-boundary="true" data-farm-layout-pattern="/" ' +
+          `style="display:contents;">${document}</div>`,
+      ),
+    ).toBe(document);
   });
 });
 
@@ -529,5 +557,111 @@ describe("full-document composition", () => {
     expect(html.match(/\slang=/gi)).toHaveLength(1);
     expect(html.match(/\sdir=/gi)).toHaveLength(1);
     expect(html.match(/\sdata-theme=/gi)).toHaveLength(1);
+  });
+});
+
+describe("streamed full documents", () => {
+  const assets = {
+    fallbackIcon: true,
+    viewport: "",
+    headAssets: '<script type="module" src="/@vite/client"></script>',
+    bodyFooter: "",
+  };
+  const transform = () =>
+    createFarmStreamedDocumentTransform(
+      (opening) => openFarmStreamedDocument(opening, assets),
+      '<!DOCTYPE html><html><head></head><body><div id="root">',
+    );
+
+  it("opens the layout's document at <body> and streams the rest of its body", () => {
+    const stream = transform();
+    const out = [
+      '<div style="display:contents"><html lang="en"><head><ti',
+      'tle>App</title></head><body class="app"><header>top</header><p>',
+      "fallback</p></body></html></div>",
+      "<script>/* a Suspense reveal */</script>",
+    ].map((chunk) => stream.write(chunk));
+    // Nothing goes out before the opening <body>.
+    expect(out[0]).toBe("");
+    expect(out[1]).toMatch(
+      /^<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8"><title>App<\/title>/,
+    );
+    expect(out[1]).toContain('<script type="module" src="/@vite/client"></script>');
+    expect(out[1]).toContain('<link rel="icon" href="data:,">');
+    expect(out[1]).toMatch(/<body class="app"><div id="root"><header>top<\/header><p>$/);
+    // React's closing tags and Farm's wrapper go; what React streams after stays in the body.
+    expect(out[2]).toBe("fallback</p>");
+    expect(out[3]).toBe("<script>/* a Suspense reveal */</script>");
+    expect(stream.end()).toEqual({ text: "", document: true, rootOpened: true });
+  });
+
+  it("keeps a body that opens #root itself", () => {
+    const stream = transform();
+    stream.write('<html><head></head><body><div id="root"><p>x</p></div></body></html>');
+    expect(stream.end().rootOpened).toBe(false);
+  });
+
+  it("streams a fragment after Farm's shell when the layout renders no document", () => {
+    const stream = transform();
+    expect(stream.write('<div style="display:contents"><main>page</main></div>')).toBe(
+      '<!DOCTYPE html><html><head></head><body><div id="root"><div style="display:contents"><main>page</main></div>',
+    );
+    expect(stream.write("<p>more</p>")).toBe("<p>more</p>");
+    expect(stream.end()).toEqual({ text: "", document: false, rootOpened: false });
+    // Too little output to tell is no document either.
+    const empty = transform();
+    expect(empty.write("")).toBe("");
+    expect(empty.end()).toMatchObject({ document: false });
+  });
+});
+
+describe("head elements a component renders outside a full document", () => {
+  async function render(element: React.ReactElement) {
+    let html = "";
+    const sink = new Writable({
+      write(chunk, _encoding, callback) {
+        html += chunk.toString();
+        callback();
+      },
+    });
+    renderToPipeableStream(element, { onAllReady() {} }).pipe(sink);
+    await finished(sink);
+    return html;
+  }
+
+  it("takes the <meta> and <title> React writes ahead of the render", async () => {
+    const html = await render(
+      React.createElement(
+        "div",
+        null,
+        React.createElement("meta", { name: "status", content: "count 0" }),
+        React.createElement("title", null, "Inbox"),
+        React.createElement("p", null, "body"),
+      ),
+    );
+    expect(html.startsWith("<meta")).toBe(true);
+    const split = takeFarmHoistedHead(html, true)!;
+    expect(split.head).toBe('<meta name="status" content="count 0"/><title>Inbox</title>');
+    expect(split.body).toBe("<div><p>body</p></div>");
+    expect(appendFarmHead("<html><head><title>x</title></head>", split.head)).toBe(
+      '<html><head><title>x</title><meta name="status" content="count 0"/><title>Inbox</title>\n</head>',
+    );
+  });
+
+  it("leaves a full document whole, for its own head to take them", () => {
+    const markup = '<meta name="a" content="b"/><html><head></head><body></body></html>';
+    expect(takeFarmHoistedHead(markup, true)).toEqual({ head: "", body: markup });
+  });
+
+  it("waits for the next chunk while a streamed prefix could still be a head element", () => {
+    expect(takeFarmHoistedHead('<meta name="a" content="b"/>', false)).toBeNull();
+    expect(takeFarmHoistedHead('<meta name="a"', false)).toBeNull();
+    expect(takeFarmHoistedHead("<title>In", false)).toBeNull();
+    expect(takeFarmHoistedHead('<meta name="a" content="b"/><title>In', false)).toBeNull();
+    expect(takeFarmHoistedHead('<meta name="a" content="b"/><div>', false)).toEqual({
+      head: '<meta name="a" content="b"/>',
+      body: "<div>",
+    });
+    expect(takeFarmHoistedHead("<div>", false)).toEqual({ head: "", body: "<div>" });
   });
 });

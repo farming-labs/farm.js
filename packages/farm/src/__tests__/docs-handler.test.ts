@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { resolveDocsConfig } from "../config";
 import {
@@ -11,18 +12,18 @@ import {
   createFarmDocsAPIHandler,
   createFarmDocsHandler,
   getFarmDocsDocumentNavigationMatchers,
+  getFarmDocsRouteTypeEntries,
   isFarmDocsAPIRequest,
 } from "../docs";
+import type { FarmDocsAPIOptions } from "../docs/api";
 import {
   createFarmDocsLastModifiedManifest,
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
+  resolveFarmDocsPageLastModified,
 } from "../docs/last-modified";
 import { resolveFarmDocsFontAssets } from "../docs/fonts";
-import {
-  addFarmCspNonceToScriptTags,
-  applyFarmCspHashesToPolicy,
-  createFarmCspScriptHashes,
-} from "../security";
+import { applyFarmCspHashesToPolicy, createFarmCspScriptHashes } from "../security";
+import { _runWithFarmCspNonce } from "../server/request";
 describe("getFarmDocsDocumentNavigationMatchers", () => {
   it("routes enabled docs trees through document navigation", () => {
     expect(
@@ -40,6 +41,32 @@ describe("getFarmDocsDocumentNavigationMatchers", () => {
         config: { entry: "docs" },
       }),
     ).toEqual(["/(.*)"]);
+  });
+
+  it("routes every docs root through document navigation and route types", () => {
+    const docs = {
+      enabled: true,
+      entry: "/docs",
+      config: { entry: "docs" },
+      roots: [
+        { entry: "/statewire/docs", config: { entry: "statewire/docs" } },
+        { entry: "/pinboard/docs", config: { entry: "pinboard/docs" } },
+      ],
+    };
+
+    expect(getFarmDocsDocumentNavigationMatchers(docs)).toEqual([
+      "/docs(.*)",
+      "/statewire/docs(.*)",
+      "/pinboard/docs(.*)",
+    ]);
+    expect(getFarmDocsRouteTypeEntries(docs)).toEqual([
+      "/docs",
+      "/docs/[...docs]",
+      "/statewire/docs",
+      "/statewire/docs/[...docs]",
+      "/pinboard/docs",
+      "/pinboard/docs/[...docs]",
+    ]);
   });
 
   it("does not register document navigation for disabled docs", () => {
@@ -295,8 +322,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('<meta property="og:description" content="Local docs">');
     expect(html).toContain('<meta property="og:url" content="http://farm.test/docs">');
     expect(html).toMatch(
-      /<meta property="og:image" content="http:\/\/farm\.test\/docs\/_social\/index\/opengraph-image\.svg\?v=[a-f0-9]{16}">/,
+      /<meta property="og:image" content="http:\/\/farm\.test\/docs\/_social\/index\/opengraph-image\.png\?v=[a-f0-9]{16}">/,
     );
+    expect(html).toContain('<meta property="og:image:type" content="image/png">');
     expect(html).toContain('<meta property="og:image:width" content="1200">');
     expect(html).toContain('<meta property="og:image:height" content="630">');
     expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
@@ -410,28 +438,29 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="toc-empty"');
   });
 
-  it("renders versioned page-specific docs social images with cache validators", async () => {
+  it("renders versioned page-specific docs social images as PNG with cache validators", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
     const pageResponse = await handler(new Request("http://farm.test/docs/guide"));
     const html = (await pageResponse?.text()) || "";
     const imageUrl = html.match(/property="og:image" content="([^"]+)"/)?.[1];
 
+    // X, LinkedIn, Facebook and Slack ignore an SVG og:image.
     expect(imageUrl).toMatch(
-      /^http:\/\/farm\.test\/docs\/_social\/guide\/opengraph-image\.svg\?v=[a-f0-9]{16}$/,
+      /^http:\/\/farm\.test\/docs\/_social\/guide\/opengraph-image\.png\?v=[a-f0-9]{16}$/,
     );
+    expect(html).toContain('<meta property="og:image:type" content="image/png">');
+    expect(html).toContain(`<meta name="twitter:image" content="${imageUrl}">`);
 
     const imageResponse = await handler(new Request(imageUrl!));
     expect(imageResponse?.status).toBe(200);
-    expect(imageResponse?.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+    expect(imageResponse?.headers.get("content-type")).toBe("image/png");
     expect(imageResponse?.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(imageResponse?.headers.get("x-content-type-options")).toBe("nosniff");
-    const image = await imageResponse?.text();
-    expect(image).toContain('<?xml version="1.0" encoding="UTF-8"?>');
-    expect(image).toContain('<svg xmlns="http://www.w3.org/2000/svg"');
-    expect(image).toContain('role="img"');
-    expect(image).toContain("Guide — Farm.js documentation");
-    expect(image).toContain("PRODUCT ARCHITECTURE");
+    const png = new Uint8Array(await imageResponse!.arrayBuffer());
+    expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const view = new DataView(png.buffer, png.byteOffset);
+    expect([view.getUint32(16), view.getUint32(20)]).toEqual([1200, 630]);
 
     const etag = imageResponse?.headers.get("etag");
     const notModified = await handler(
@@ -442,8 +471,21 @@ describe("createFarmDocsHandler", () => {
 
     const head = await handler(new Request(imageUrl!, { method: "HEAD" }));
     expect(head?.status).toBe(200);
-    expect(head?.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+    expect(head?.headers.get("content-type")).toBe("image/png");
     expect(await head?.text()).toBe("");
+
+    // The SVG source stays available, with its own validator.
+    const svgUrl = imageUrl!.replace("opengraph-image.png", "opengraph-image.svg");
+    const svgResponse = await handler(new Request(svgUrl));
+    expect(svgResponse?.status).toBe(200);
+    expect(svgResponse?.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+    expect(svgResponse?.headers.get("etag")).not.toBe(etag);
+    const image = await svgResponse?.text();
+    expect(image).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+    expect(image).toContain('<svg xmlns="http://www.w3.org/2000/svg"');
+    expect(image).toContain('role="img"');
+    expect(image).toContain("Guide — Farm.js documentation");
+    expect(image).toContain("PRODUCT ARCHITECTURE");
   });
 
   it("supports docs-wide opt-out and page-level social image overrides", async () => {
@@ -481,6 +523,9 @@ describe("createFarmDocsHandler", () => {
     expect(disabledHtml).not.toContain('name="twitter:card"');
     expect(
       await disabledHandler(new Request("http://farm.test/docs/_social/index/opengraph-image.svg")),
+    ).toBeNull();
+    expect(
+      await disabledHandler(new Request("http://farm.test/docs/_social/index/opengraph-image.png")),
     ).toBeNull();
   });
 
@@ -696,6 +741,79 @@ describe("createFarmDocsHandler", () => {
     // default timeout.
   }, 30_000);
 
+  it("dates no page with the commit a shallow clone's history stops at", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-shallow-dates-"));
+    const origin = path.join(root, "origin");
+    const git = (cwd: string, args: string[], date?: string) =>
+      execFileSync("git", args, {
+        cwd,
+        stdio: "ignore",
+        env: date ? { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : undefined,
+      });
+    const commit = async (files: Record<string, string>, date: string) => {
+      for (const [file, contents] of Object.entries(files)) {
+        await fs.mkdir(path.dirname(path.join(origin, file)), { recursive: true });
+        await fs.writeFile(path.join(origin, file), contents);
+      }
+      git(origin, ["add", "."]);
+      git(origin, ["commit", "-m", `change at ${date}`], date);
+    };
+
+    try {
+      await fs.mkdir(origin, { recursive: true });
+      git(origin, ["init"]);
+      git(origin, ["config", "user.email", "farm@example.com"]);
+      git(origin, ["config", "user.name", "Farm Docs"]);
+      await commit(
+        { "docs/old.md": "# Old", "docs/edited.md": "# Edited" },
+        "2026-01-05T10:00:00.000Z",
+      );
+      // The clone's history stops here: Git lists every file as added by this commit.
+      await commit({ "README.md": "readme" }, "2026-03-05T10:00:00.000Z");
+      const editedDate = "2026-05-05T10:00:00.000Z";
+      await commit({ "docs/edited.md": "# Edited again" }, editedDate);
+
+      const clone = path.join(root, "clone");
+      execFileSync("git", ["clone", "--quiet", "--depth", "2", pathToFileURL(origin).href, clone], {
+        stdio: "ignore",
+      });
+      const docsDir = path.join(clone, "docs");
+
+      const manifest = createFarmDocsLastModifiedManifest(docsDir, { fallback: "now" });
+      expect(Object.keys(manifest.pages)).toEqual(["edited.md"]);
+      expect(new Date(manifest.pages["edited.md"]).toISOString()).toBe(editedDate);
+      expect(manifest.unknown).toEqual(["old.md"]);
+
+      // Read from Git at runtime, as a self-hosted server does.
+      expect(resolveFarmDocsPageLastModified(docsDir, path.join(docsDir, "old.md"), {})).toBe(
+        undefined,
+      );
+      // Read from the manifest bundled with copied content, where file times are the copy's.
+      const bundledDir = path.join(root, "bundled");
+      await fs.cp(docsDir, bundledDir, { recursive: true });
+      await fs.writeFile(
+        path.join(bundledDir, FARM_DOCS_LAST_MODIFIED_MANIFEST),
+        JSON.stringify(manifest),
+      );
+      expect(resolveFarmDocsPageLastModified(bundledDir, path.join(bundledDir, "old.md"), {})).toBe(
+        undefined,
+      );
+      expect(
+        new Date(
+          resolveFarmDocsPageLastModified(bundledDir, path.join(bundledDir, "edited.md"), {})!,
+        ).toISOString(),
+      ).toBe(editedDate);
+      // A frontmatter date still applies.
+      expect(
+        resolveFarmDocsPageLastModified(bundledDir, path.join(bundledDir, "old.md"), {
+          lastModified: "2025-12-01",
+        }),
+      ).toBe("2025-12-01");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("renders docs-style breadcrumbs only for nested docs pages", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
@@ -763,18 +881,20 @@ describe("createFarmDocsHandler", () => {
   it("keeps code-copy controls compatible with nonce and static-hash CSP", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
-    const response = await handler(
-      new Request("http://farm.test/docs/guide", { headers: { accept: "text/html" } }),
-    );
-    const html = (await response?.text()) || "";
+    // Rendered for a nonce-mode response: the docs runtime scripts are Farm's own.
+    const html = await _runWithFarmCspNonce("docs-nonce", async () => {
+      const response = await handler(
+        new Request("http://farm.test/docs/guide", { headers: { accept: "text/html" } }),
+      );
+      return (await response?.text()) || "";
+    });
 
     expect(html).toContain("data-code-copy");
     expect((html.match(/<[a-z][^>]*>/gi) || []).some((tag) => /\son[a-z]+\s*=/i.test(tag))).toBe(
       false,
     );
 
-    const nonceHtml = addFarmCspNonceToScriptTags(html, "docs-nonce");
-    const scriptTags = nonceHtml.match(/<script\b[^>]*>/gi) || [];
+    const scriptTags = html.match(/<script\b[^>]*>/gi) || [];
     expect(scriptTags.length).toBeGreaterThan(0);
     expect(scriptTags.every((tag) => tag.includes('nonce="docs-nonce"'))).toBe(true);
 
@@ -964,6 +1084,91 @@ describe("createDocsAPI", () => {
     expect(headResponse?.status).toBe(200);
     expect(headResponse?.headers.get("content-type")).toBe("application/json");
     await expect(headResponse?.text()).resolves.toBe("");
+  });
+
+  it("keeps docs provider credentials and server paths out of config and diagnostics", async () => {
+    const root = await createDocsFixture();
+    const secrets = [
+      "ALGOLIA_ADMIN_SECRET",
+      "ALGOLIA_SEARCH_KEY",
+      "OPENAI_SECRET",
+      "GROQ_SECRET",
+      "MCP_SESSION_SECRET",
+    ];
+    const contentDir = path.join(root, "src", "app", "docs");
+    // The shape a production server receives: env evaluated at build time, absolute paths.
+    const options = {
+      rootDir: root,
+      srcDir: "src",
+      docs: {
+        enabled: true,
+        entry: "/docs",
+        contentDir,
+        configPath: path.join(root, "docs.config.ts"),
+        config: {
+          entry: "docs",
+          docsPath: "/docs",
+          contentDir,
+          nav: { title: "Farm API Docs" },
+          search: {
+            provider: "algolia",
+            appId: "APP",
+            indexName: "docs",
+            searchApiKey: "ALGOLIA_SEARCH_KEY",
+            adminApiKey: "ALGOLIA_ADMIN_SECRET",
+          },
+          ai: {
+            enabled: true,
+            apiKey: "OPENAI_SECRET",
+            providers: { groq: { baseUrl: "https://api.groq.test", apiKey: "GROQ_SECRET" } },
+          },
+          mcp: { headers: { "X-Docs-Session": "MCP_SESSION_SECRET" } },
+          internalOnly: { note: "not a docs config field" },
+        },
+      },
+    } as unknown as FarmDocsAPIOptions;
+    // Production servers and the precompiled runtime build this handler without diagnostics.
+    const handler = createFarmDocsAPIHandler(options);
+
+    for (const query of ["format=config", "type=config", "format=docs-config"]) {
+      const response = await handler(new Request(`http://farm.test/api/docs?${query}`));
+      expect(response?.status).toBe(200);
+      const body = await response!.text();
+      for (const value of [...secrets, root, "not a docs config field"]) {
+        expect(body).not.toContain(value);
+      }
+      expect(JSON.parse(body)).toMatchObject({
+        contentDir: "src/app/docs",
+        config: {
+          contentDir: "src/app/docs",
+          nav: { title: "Farm API Docs" },
+          search: { provider: "algolia", appId: "APP", adminApiKey: "[redacted]" },
+          ai: { enabled: true, providers: { groq: { baseUrl: "https://api.groq.test" } } },
+        },
+        map: { source: { file: "docs.config.ts" } },
+      });
+    }
+
+    const agentSpec = await handler(new Request("http://farm.test/api/docs/agent/spec"));
+    const agentSpecBody = await agentSpec!.text();
+    expect(agentSpecBody).not.toContain(root);
+    expect(JSON.parse(agentSpecBody).pages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourcePath: "./src/app/docs/guide/page.md" }),
+      ]),
+    );
+
+    const diagnostics = await handler(new Request("http://farm.test/api/docs?format=diagnostics"));
+    expect(diagnostics?.status).toBe(404);
+    expect(await diagnostics!.text()).not.toContain(root);
+
+    const devHandler = createFarmDocsAPIHandler({ ...options, diagnostics: true });
+    const devDiagnostics = await devHandler(
+      new Request("http://farm.test/api/docs?format=diagnostics"),
+    );
+    expect(devDiagnostics?.status).toBe(200);
+    const devBody = await devDiagnostics!.text();
+    for (const value of secrets) expect(devBody).not.toContain(value);
   });
 
   it("creates Next-style GET and POST route handlers for Farm API routes", async () => {

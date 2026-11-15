@@ -1,8 +1,12 @@
+"use server";
+
 import { createServerFn } from "@farm.js/core/server-fn";
 import { z } from "zod";
 
 // Server functions run on the server but can be called from forms and client components.
-// Farm adds the underlying React "use server" boundary for createServerFn exports.
+// Farm adds the React "use server" boundary for createServerFn exports on its own. This
+// module also exports plain async actions (getMessages, deleteMessage), so it declares
+// "use server" itself: every export of the module is then a callable action.
 
 // Simulated database
 const messages: { id: number; name: string; message: string; timestamp: string }[] = [];

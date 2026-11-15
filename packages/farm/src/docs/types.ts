@@ -11,6 +11,13 @@ export interface FarmDocsAdapterDescriptor {
    * serializable edge manifest. Older Farm releases safely ignore it.
    */
   edgeCompiler?: string;
+  /**
+   * What the adapter does beyond the protocol; Farm ignores names it does not know.
+   * `guarded-pages`: the runtime handler takes `isPathGuarded` and keeps a page a path guard
+   * covers off every surface that answers without running the guard, so Farm serves docs pages
+   * behind a guard with it on Node and serverless targets.
+   */
+  capabilities?: readonly string[];
 }
 
 export interface FarmDocsSidebarItem {
@@ -36,7 +43,10 @@ export interface FarmDocsSocialImageConfig {
   siteName?: string;
   /** Short brand label drawn in the image header. Defaults to siteName. */
   brand?: string;
-  /** Optional WOFF2 URLs or data URLs embedded into the generated SVG. */
+  /**
+   * Optional WOFF2 URLs or data URLs embedded into the generated SVG. The PNG
+   * that social networks receive (rendered with `sharp`) uses system fonts.
+   */
   fonts?: FarmDocsSocialImageFonts;
 }
 
@@ -85,10 +95,35 @@ export type FarmDocsConfigInput = FarmDocsRuntimeConfig & {
   contentDir?: string;
   /** Set to false to opt out even when a docs config file exists. */
   enabled?: boolean;
+  /**
+   * Render every page of a docs adapter during `farm build` and serve it as a
+   * static file on Node and serverless targets. A static page does not
+   * negotiate `Accept: text/markdown`; agents use the `.md` URL it links to.
+   * Markdown, search, `llms.txt`, and MCP stay server-rendered.
+   */
+  prerender?: boolean;
   /** Inline @farming-labs/docs config object. */
   config?: FarmDocsRuntimeConfig;
   /** Path to docs.config.* or docs.json. */
   configPath?: string;
+  /**
+   * Serializable overrides for the docs roots, each served under its own route. Declare the
+   * roots in the docs config file (`roots`); an entry here applies over that file's root with
+   * the same `entry`, or adds a root. A root inherits the main docs config, and its own fields
+   * replace the main root's. Requires a docs adapter.
+   */
+  roots?: FarmDocsRootInput[];
+};
+
+/** A docs root in `docs.roots`: the root's own docs fields beside its route. */
+export type FarmDocsRootInput = Omit<
+  FarmDocsRuntimeConfig,
+  "entry" | "docsPath" | "contentDir" | "roots"
+> & {
+  /** Public route of this docs set, e.g. "/statewire/docs". */
+  entry: string;
+  /** Source content directory, relative to the project root. Defaults to `src/app/<entry>`. */
+  contentDir?: string;
 };
 
 export type FarmDocsUserConfig = boolean | FarmDocsConfigInput;
@@ -97,6 +132,8 @@ export interface FarmDocsResolvedConfig {
   enabled: boolean;
   entry: string;
   adapter?: FarmDocsAdapterDescriptor;
+  /** `docs.prerender` from `farm.config.ts`. */
+  prerender?: boolean;
   contentDir?: string;
   configPath?: string;
   config: FarmDocsRuntimeConfig & Pick<DocsConfig, "entry">;
@@ -108,4 +145,14 @@ export interface FarmDocsResolvedConfig {
   runtimeConfig?: FarmDocsRuntimeConfig & Pick<DocsConfig, "entry">;
   /** The serializable docs settings from `farm.config.ts`, applied over the config file. */
   configOverrides?: Partial<DocsConfig>;
+  /**
+   * The extra docs roots, from the config file's `roots` and `docs.roots`, served alongside
+   * this root. Absent with a single root.
+   */
+  roots?: FarmDocsResolvedRoot[];
 }
+
+export type FarmDocsResolvedRoot = Pick<
+  FarmDocsResolvedConfig,
+  "entry" | "contentDir" | "config" | "runtimeConfig" | "configOverrides"
+>;

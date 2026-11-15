@@ -23,12 +23,15 @@ function runtime(integration: ReturnType<typeof buildIntegration>) {
   return { integration, config: {}, isDev: false, isProd: true };
 }
 
-// Replicates auth0's internal `signValue` (payload.base64url "." HMAC-SHA256 hex)
-// so an unexpired session cookie can be minted without relying on a non-exported
-// helper. The cookie name (`farm_auth0_session`) matches the integration default.
+// Replicates auth0's internal session `signValue` (payload.base64url "." HMAC-SHA256
+// hex over the purpose-bound payload) so an unexpired session cookie can be minted
+// without relying on a non-exported helper. The cookie name (`farm_auth0_session`)
+// matches the integration default.
 function signSession(payload: object, secret: string): string {
   const payloadPart = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  const signature = createHmac("sha256", secret).update(payloadPart).digest("hex");
+  const signature = createHmac("sha256", secret)
+    .update(`farm-auth0:session.${payloadPart}`)
+    .digest("hex");
   return `${payloadPart}.${signature}`;
 }
 

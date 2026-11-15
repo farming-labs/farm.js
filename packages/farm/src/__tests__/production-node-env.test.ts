@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { withProductionNodeEnv } from "../build/production-node-env";
+import {
+  createReactProductionModePlugin,
+  withProductionNodeEnv,
+} from "../build/production-node-env";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -89,5 +92,33 @@ describe("production NODE_ENV scopes", { concurrent: false }, () => {
       rejectSecond.resolve();
       restoreNodeEnv(originalNodeEnv);
     }
+  });
+});
+
+describe("createReactProductionModePlugin", () => {
+  const entry = `if (process.env.NODE_ENV === "production") module.exports = require("./prod.js");
+else module.exports = require("./dev.js");`;
+
+  it("keeps only the production builds of React, React DOM and React's Flight runtime", () => {
+    const { transform } = createReactProductionModePlugin();
+    for (const id of [
+      "/app/node_modules/.pnpm/react@19.2.8/node_modules/react/index.js",
+      "/app/node_modules/.pnpm/react-dom@19.2.8/node_modules/react-dom/server.edge.js",
+      "/app/node_modules/react-server-dom-webpack/client.edge.js",
+      // The copy @vitejs/plugin-rsc uses when it doesn't take the app's.
+      "/app/node_modules/@vitejs/plugin-rsc/dist/vendor/react-server-dom/client.edge.js",
+    ]) {
+      expect(transform.filter.id.test(id)).toBe(true);
+      expect(transform.handler(entry, id)?.code).toBe(
+        entry.replace("process.env.NODE_ENV", '"production"'),
+      );
+    }
+  });
+
+  it("leaves other packages reading NODE_ENV at runtime", () => {
+    const { transform } = createReactProductionModePlugin();
+    const id = "/app/node_modules/react-markdown/index.js";
+    expect(transform.filter.id.test(id)).toBe(false);
+    expect(transform.handler(entry, id)).toBeNull();
   });
 });

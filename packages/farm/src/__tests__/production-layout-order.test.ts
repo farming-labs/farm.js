@@ -8,7 +8,10 @@ import { createFarmLayoutSelector } from "../routing/layout-selector";
 type Layout = { pattern: string; id: number };
 const source = fs.readFileSync(path.join(process.cwd(), "src/nitro/universal-build.ts"), "utf8");
 
-function runtime(input: Layout[]) {
+function runtime(
+  input: Layout[],
+  getMatchedPageDirectory: (pathname: string) => string | null = () => null,
+) {
   // Execute the actual build-time ordering before instantiating the generated
   // production selector. The client selector has a separate ordering contract.
   const sortStart = source.indexOf("  // Sort layouts by depth (root first)");
@@ -20,18 +23,23 @@ function runtime(input: Layout[]) {
   const layouts = input.map((layout) => ({ ...layout }));
   new Function("layoutRoutes", source.slice(sortStart, sortEnd))(layouts);
 
-  const start = source.lastIndexOf("function getApplicableLayouts(pathname) {");
+  const start = source.lastIndexOf("function getApplicableLayouts(pathname, directory) {");
   const end = source.indexOf("\n}", start) + 2;
   expect(start).toBeGreaterThan(call);
   const emitted = new Function(`return \`${source.slice(start, end)}\`;`)();
-  const setup = "const selectApplicableLayouts = createFarmLayoutSelector(layoutRoutes);";
+  const setup =
+    "const selectApplicableLayouts = createFarmLayoutSelector(layoutRoutes, getMatchedPageDirectory);";
   expect(source).toContain(setup);
   const select = new Function(
     "layoutRoutes",
     "isFarmRouteActive",
     "createFarmLayoutSelector",
+    "getMatchedPageDirectory",
     setup + emitted + "; return getApplicableLayouts;",
-  )(layouts, isFarmRouteActive, createFarmLayoutSelector) as (pathname: string) => Layout[];
+  )(layouts, isFarmRouteActive, createFarmLayoutSelector, getMatchedPageDirectory) as (
+    pathname: string,
+    directory?: string | null,
+  ) => Layout[];
   return { select, layouts };
 }
 
@@ -55,9 +63,12 @@ const input = [
   "/%ZZ",
 ].map((pattern, id) => ({ pattern, id }));
 
+// Selection before route-group scoping. Grouped layouts need a page inside their
+// group, and these requests select none, so they are left out.
 function previous(layouts: Layout[], pathname: string) {
   const normalized = pathname.replace(/\/$/, "") || "/";
   return layouts
+    .filter((layout) => !layout.pattern.includes("("))
     .filter(
       (layout) =>
         layout.pattern === "/" || isFarmRouteActive(layout.pattern, normalized, { exact: false }),
@@ -199,6 +210,49 @@ describe("production layout ordering", () => {
     }
     expect(original).toBeInstanceOf(Error);
     expect(() => createFarmLayoutSelector([{ pattern }])).toThrow(original as Error);
+  });
+
+  it("keeps a grouped layout to the pages inside its group", () => {
+    const layouts = [
+      { pattern: "/", id: 0 },
+      { pattern: "/(auth)", id: 1 },
+      { pattern: "/(shop)", id: 2 },
+      { pattern: "/(shop)/cart", id: 3 },
+      { pattern: "/docs", id: 4 },
+    ];
+    const directories: Record<string, string> = {
+      "/sign-in": "/(auth)/sign-in",
+      "/cart": "/(shop)/cart",
+      "/cart/42": "/(shop)/cart/[id]",
+      "/docs": "/docs",
+    };
+    const resolve = vi.fn((pathname: string) => directories[pathname] ?? null);
+    const r = runtime(layouts, resolve);
+    const ids = (pathname: string, directory?: string | null) =>
+      r.select(pathname, directory).map((layout) => layout.id);
+
+    expect(ids("/sign-in")).toEqual([0, 1]);
+    expect(ids("/cart")).toEqual([0, 2, 3]);
+    expect(ids("/cart/42")).toEqual([0, 2, 3]);
+    expect(ids("/docs")).toEqual([0, 4]);
+    expect(ids("/missing")).toEqual([0]);
+    // A known directory skips the page lookup; null means no page, so no group applies.
+    resolve.mockClear();
+    expect(ids("/sign-in", "/(auth)/sign-in")).toEqual([0, 1]);
+    expect(ids("/sign-in", null)).toEqual([0]);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("looks up the page only when a grouped layout's URL matches", () => {
+    const resolve = vi.fn(() => "/(app)/dashboard");
+    const select = createFarmLayoutSelector(
+      [{ pattern: "/" }, { pattern: "/docs" }, { pattern: "/(app)/dashboard" }],
+      resolve,
+    );
+    expect(select("/docs/start")).toHaveLength(2);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(select("/dashboard/settings")).toHaveLength(2);
+    expect(resolve).toHaveBeenCalledTimes(1);
   });
 
   it("keeps descriptor identity, equal-pattern ties and separate manifest ownership", () => {

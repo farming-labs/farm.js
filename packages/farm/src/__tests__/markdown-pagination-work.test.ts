@@ -38,7 +38,8 @@ describe("Markdown pagination remainder counting", () => {
     "---\ntitle: Guide\n---\n\n# Code\n\n```ts\n" + "const n = 1;\n".repeat(60) + "```\n\nTail\n",
     "# Open fence\n\n~~~~\n" + "Some code\n".repeat(60),
   ])("keeps exact remainder counts across every continuation for %j", (markdown) => {
-    const lines = markdown.replace(/\n$/, "").split("\n");
+    // Views read CRLF documents with LF line endings.
+    const lines = markdown.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n");
     let query = new URLSearchParams("max_tokens=100&lang=en&lang=fr");
     let parts = 0;
     for (;;) {

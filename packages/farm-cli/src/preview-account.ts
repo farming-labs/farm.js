@@ -13,6 +13,8 @@ export interface PreviewAccountOptions {
   root?: string;
   configPath?: string;
   gatewayUrl?: string;
+  /** Send a Farm.js Infrastructure API key to a gateway you run (`--trust-gateway`). */
+  trustGateway?: boolean;
 }
 
 const MODE_LABELS = {
@@ -26,7 +28,7 @@ export async function loginToFarmPreview(options: PreviewAccountOptions = {}) {
   await loadPreviewEnvironment(options.root, options.configPath);
   try {
     await signInToPreviewGateway(resolvePreviewGatewayUrl(options.gatewayUrl), undefined, {
-      root: options.root,
+      trustGateway: options.trustGateway,
     });
   } catch (error) {
     // Saying no is a choice, not a failure.
@@ -54,7 +56,12 @@ export async function logoutOfFarmPreview(options: PreviewAccountOptions = {}) {
 /** farm whoami. Resolves false when farm preview would need a browser sign-in. */
 export async function whoamiFarmPreview(options: PreviewAccountOptions = {}): Promise<boolean> {
   await loadPreviewEnvironment(options.root, options.configPath);
-  const status = await previewSignInStatus(resolvePreviewGatewayUrl(options.gatewayUrl));
+  const status = await previewSignInStatus(
+    resolvePreviewGatewayUrl(options.gatewayUrl),
+    undefined,
+    undefined,
+    { trustGateway: options.trustGateway },
+  );
   logger.info(`Preview gateway: ${status.gatewayUrl} (${MODE_LABELS[status.mode]})`);
   const using = status.using;
   if (status.mode === "none") {
@@ -62,7 +69,9 @@ export async function whoamiFarmPreview(options: PreviewAccountOptions = {}): Pr
   } else if (!using) {
     logger.info(
       // When a key is set but unusable, the line below says why instead.
-      `Not signed in. Run farm login${status.mode === "infrastructure" && !status.ignoredKey ? ", or set FARMJS_API_KEY" : ""}.`,
+      status.mode === "infrastructure" && !status.trusted
+        ? "Not signed in. This gateway isn't the hosted one: if you run it, run farm login --trust-gateway."
+        : `Not signed in. Run farm login${status.mode === "infrastructure" && !status.ignoredKey ? ", or set FARMJS_API_KEY" : ""}.`,
     );
   } else if (using.source === "FARMJS_API_KEY") {
     logger.info(`Using FARMJS_API_KEY (${using.hint}).`);
@@ -71,7 +80,8 @@ export async function whoamiFarmPreview(options: PreviewAccountOptions = {}): Pr
       `Using FARM_PREVIEW_TOKEN, which is deprecated${status.mode === "infrastructure" ? ". Set FARMJS_API_KEY instead" : ""}.`,
     );
   } else if (using.hint) {
-    logger.info(`Signed in with a saved API key (${using.hint}).`);
+    // farm login's key starts previews; analytics needs a Site analytics key.
+    logger.info(`Signed in with a saved API key for previews (${using.hint}).`);
   } else {
     const until = using.expiresAt ? `, until ${formatPreviewExpiration(using.expiresAt)}` : "";
     logger.info(`Signed in as ${using.login ?? "your saved account"}${until}.`);

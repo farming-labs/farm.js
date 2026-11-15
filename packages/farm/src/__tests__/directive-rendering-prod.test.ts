@@ -64,7 +64,7 @@ describe("production entry rendering contract", () => {
     // Directives are parsed from source at build time; production output
     // cannot read route files, so the registration must carry the config or
     // a "use ssg; 60" route silently serves private, no-store.
-    expect(source).toContain("parseRouteRenderingDirectiveFromDisk(route.modulePath)");
+    expect(source).toContain("readRouteRenderingDirectiveFromFile(route.modulePath)");
     expect(source).toContain("rendering: ${JSON.stringify(renderingDirective)}");
   });
 

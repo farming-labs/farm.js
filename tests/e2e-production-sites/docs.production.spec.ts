@@ -98,10 +98,23 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured h3 a > span")).toHaveCSS("display", "inline");
   await expect(page.locator(".blog-featured h3")).toHaveCSS("text-wrap", "balance");
   await expect(page.getByRole("link", { name: /Follow the releases/i })).toHaveCount(0);
-  await expect(page.locator(".blog-art-version")).toHaveAttribute("data-version", "v 0.1.0");
-  await expect(page.locator(".blog-post-meta time")).toHaveText("Oct 2026");
-  await expect(page.locator(".blog-post-meta time")).toHaveAttribute("datetime", "2026-10-01");
-  await expect(page.locator(".blog-post-meta time")).toHaveCSS("font-family", /Geist Sans/);
+  // The index features the newest post and lists the rest, so these follow the collection.
+  await expect(page.locator(".blog-featured h3 a")).toHaveAttribute(
+    "href",
+    "/blog/native-internals",
+  );
+  await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveText("Nov 2026");
+  await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveAttribute(
+    "datetime",
+    "2026-11-08",
+  );
+  await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveCSS(
+    "font-family",
+    /Geist Sans/,
+  );
+  const listed = page.locator('.blog-post-list a[href="/blog/0.1.0"]');
+  await expect(listed).toHaveCount(1);
+  await expect(listed.locator("time")).toHaveText("Oct 2026");
   await expect(page.locator(".blog-author-profile")).toHaveAttribute(
     "href",
     "https://x.com/KinfishT",
@@ -124,7 +137,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured-bottom img")).toHaveAttribute("width", "36");
   await expect(page.locator(".blog-author small")).toHaveCSS("margin-top", "0px");
   await expect(page.locator(".blog-read-link")).toHaveText("Read article");
-  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/0.1.0");
+  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/native-internals");
   await expect(page.locator(".blog-explore a")).toHaveCount(2);
   await expect(page.locator(".blog-explore a").first()).toHaveAttribute(
     "href",
@@ -140,7 +153,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
       .getByRole("link", { name: /Blog/ }),
   ).toHaveAttribute("aria-current", "page");
 
-  await page.locator(".blog-featured").click();
+  await listed.click();
   await expect(page).toHaveURL(/\/blog\/0\.1\.0$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Farm.js v0.1.0");
@@ -229,9 +242,11 @@ test("blog uses Farm.js branding, lighter reading weights, and complete launch g
   page,
 }) => {
   await page.goto("/blog");
-  await expect(page.locator(".blog-featured h3")).toContainText("Farm.js v0.1.0");
+  await expect(page.locator('.blog-post-list a[href="/blog/0.1.0"]')).toContainText(
+    "Farm.js v0.1.0",
+  );
   await expect(page.locator("body")).not.toContainText("FarmJS");
-  await page.locator(".blog-read-link").click();
+  await page.locator('.blog-post-list a[href="/blog/0.1.0"]').click();
   await expect(page).toHaveTitle("Farm.js v0.1.0: Stable, Integrated, and Agent-Native");
   await expect(page.locator("body")).not.toContainText("FarmJS");
   const prose = page.locator(".blog-prose");
@@ -327,8 +342,7 @@ test("blog uses Farm.js branding, lighter reading weights, and complete launch g
 test("blog summarizes MCP composition and links setup and policy details to the docs", async ({
   page,
 }) => {
-  await page.goto("/blog");
-  await page.locator(".blog-read-link").click();
+  await page.goto("/blog/0.1.0");
   const prose = page.locator(".blog-prose");
   await expect(prose).not.toContainText("apiMcp(");
   await expect(prose).not.toContainText('"GET /api/projects"');
@@ -391,13 +405,22 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
     };
   });
 
-  async function checkArtwork() {
+  // Each page has its own header artwork: the index features the newest post's scripted figure,
+  // and the launch post keeps the release reel.
+  async function checkArtwork(where: "index" | "article") {
     expect(await page.evaluate(() => Reflect.get(window, "blogNavigationDocument"))).toBe(true);
-    await expect(page.locator(".blog-release-art")).toHaveAttribute("data-motion", "running");
-    await expect(page.locator(".blog-art-reel").first()).toHaveCSS(
-      "animation-name",
-      "blog-digit-roll",
-    );
+    if (where === "index") {
+      await expect(page.locator(".blog-featured [data-figure]")).toHaveAttribute("data-ready", "");
+    } else {
+      // The reel pauses when it scrolls out of view, and the post list sits below the fold, so
+      // bring it on screen before asking whether it is running.
+      await page.locator(".blog-release-art").scrollIntoViewIfNeeded();
+      await expect(page.locator(".blog-release-art")).toHaveAttribute("data-motion", "running");
+      await expect(page.locator(".blog-art-reel").first()).toHaveCSS(
+        "animation-name",
+        "blog-digit-roll",
+      );
+    }
     expect(
       await page.evaluate(() => {
         const oldArticle = Reflect.get(window, "previousBlogArticle") as HTMLElement | undefined;
@@ -417,7 +440,7 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
 
   async function checkArticle() {
     await expect(page).toHaveURL(/\/blog\/0\.1\.0$/);
-    await checkArtwork();
+    await checkArtwork("article");
     await expect(page.locator(".blog-code-copy:visible")).toHaveCount(3);
     const nav = page.locator(".blog-contents-links").first();
     const link = nav.getByRole("link", { name: "Built with Farm: Viby" });
@@ -441,12 +464,12 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
     .getByRole("navigation", { name: "Primary navigation" })
     .getByRole("link", { name: /Blog/ })
     .click();
-  await checkArtwork();
-  await page.locator(".blog-read-link").click();
+  await checkArtwork("index");
+  await page.locator('.blog-post-list a[href="/blog/0.1.0"]').click();
   await checkArticle();
   await page.getByRole("link", { name: "All posts", exact: true }).click();
-  await checkArtwork();
-  await page.locator(".blog-read-link").click();
+  await checkArtwork("index");
+  await page.locator('.blog-post-list a[href="/blog/0.1.0"]').click();
   await checkArticle();
   await page.getByRole("link", { name: "All posts", exact: true }).click();
   await page.goBack();
@@ -456,14 +479,14 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
     "true",
   );
   await page.goForward();
-  await checkArtwork();
+  await checkArtwork("index");
   expect(errors).toEqual([]);
 });
 
 test("shared artwork rolls down, waves, pauses offscreen, and respects reduced motion", async ({
   page,
 }) => {
-  for (const path of ["/blog", "/blog/0.1.0"]) {
+  for (const path of ["/blog/0.1.0"]) {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.goto(path);
@@ -546,8 +569,7 @@ test("every code block copies exact source and exposes recoverable clipboard fai
   context,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.goto("/blog");
-  await page.locator(".blog-read-link").click();
+  await page.goto("/blog/0.1.0");
   const blocks = page.locator(".blog-code-block");
   await expect(blocks).toHaveCount(3);
   for (const block of await blocks.all()) {
@@ -988,6 +1010,112 @@ test("home keeps its agents link usable without JavaScript", async ({ browser, b
   }
 });
 
+// Figure panels are fixed boxes and their type has a legibility floor, so a layout without room
+// for its text spills out of its boxes. Without JavaScript each figure shows its final frame.
+for (const width of [280, 320, 345, 360, 1440]) {
+  test(`blog and home page figures keep their text inside their boxes at ${width}px`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const context = await browser.newContext({
+      baseURL,
+      viewport: { width, height: 900 },
+      javaScriptEnabled: false,
+      reducedMotion: "reduce",
+    });
+    const page = await context.newPage();
+    try {
+      for (const pathname of [
+        "/blog/0.1.0",
+        "/blog/agent-native",
+        "/blog/web-to-native",
+        "/blog/native-internals",
+        "/blog",
+        "/",
+      ]) {
+        await page.goto(pathname);
+        await page.evaluate(() => document.fonts.ready);
+        const panels = page.locator(".blog-figure[data-figure] .bf-stage .bf-panel");
+        expect(await panels.count()).toBeGreaterThan(0);
+        const spills = await panels.evaluateAll((elements) =>
+          elements.flatMap((panel) => {
+            if (!panel.getClientRects().length) return [];
+            const box = panel.getBoundingClientRect();
+            const range = document.createRange();
+            const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
+            let right = 0;
+            let bottom = 0;
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              if (!node.textContent?.trim()) continue;
+              range.selectNodeContents(node);
+              for (const rect of range.getClientRects()) {
+                right = Math.max(right, rect.right - box.right);
+                bottom = Math.max(bottom, rect.bottom - box.bottom);
+              }
+            }
+            const body = panel.querySelector(".bf-body");
+            const clipped = body ? body.scrollWidth - body.clientWidth : 0;
+            if (right <= 0.5 && bottom <= 0.5 && clipped <= 0.5) return [];
+            const figure = panel.closest<HTMLElement>("[data-figure]")!.dataset.figure;
+            return [`${figure} ${(panel as HTMLElement).dataset.panel}`];
+          }),
+        );
+        expect(spills, pathname).toEqual([]);
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+// A post figure wider than a phone scrolls sideways inside itself; its caption must stay in view.
+test("blog figure captions stay in view while their figures scroll sideways", async ({
+  browser,
+  baseURL,
+}) => {
+  const context = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 900 },
+    javaScriptEnabled: false,
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  try {
+    let scrolled = 0;
+    for (const pathname of [
+      "/blog/0.1.0",
+      "/blog/agent-native",
+      "/blog/web-to-native",
+      "/blog/native-internals",
+    ]) {
+      await page.goto(pathname);
+      const result = await page
+        .locator(".blog-figure:not(.blog-figure--fit)")
+        .evaluateAll((figures) => {
+          const hidden: string[] = [];
+          let count = 0;
+          for (const figure of figures as HTMLElement[]) {
+            const caption = figure.querySelector("figcaption");
+            if (!caption || figure.scrollWidth <= figure.clientWidth) continue;
+            count += 1;
+            figure.scrollLeft = figure.scrollWidth;
+            const box = figure.getBoundingClientRect();
+            const rect = caption.getBoundingClientRect();
+            if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5) {
+              hidden.push(figure.dataset.figure ?? "");
+            }
+          }
+          return { count, hidden };
+        });
+      scrolled += result.count;
+      expect(result.hidden, pathname).toEqual([]);
+    }
+    expect(scrolled).toBeGreaterThan(0);
+  } finally {
+    await context.close();
+  }
+});
+
 for (const width of [320, 390, 768]) {
   test(`blog navigation and reading stay usable at ${width}px without JavaScript`, async ({
     browser,
@@ -1004,12 +1132,16 @@ for (const width of [320, 390, 768]) {
       await page.goto("/blog");
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
+      // The featured card's figure reads without script and stays inside the card.
       expect(
-        await page.locator(".blog-art-version").evaluate((version) => {
-          const text = version.getBoundingClientRect();
-          const artwork = version.closest(".blog-release-art")!.getBoundingClientRect();
-          return text.left >= artwork.left && text.right <= artwork.right;
-        }),
+        await page
+          .locator(".blog-featured [data-figure] .bf-stage")
+          .first()
+          .evaluate((stage) => {
+            const art = stage.getBoundingClientRect();
+            const card = stage.closest(".blog-featured")!.getBoundingClientRect();
+            return art.left >= card.left - 1 && art.right <= card.right + 1;
+          }),
       ).toBe(true);
       const byline = await page.locator(".blog-featured-bottom .blog-author").boundingBox();
       const action = await page.locator(".blog-read-link").boundingBox();
@@ -1021,7 +1153,7 @@ for (const width of [320, 390, 768]) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
-      await page.locator(".blog-featured").click();
+      await page.locator('.blog-post-list a[href="/blog/0.1.0"]').click();
       await expect(page).toHaveURL(/\/blog\/0\.1\.0$/);
       await expect(page.locator(".blog-breadcrumb")).toHaveCSS("height", "52px");
       await expect(page.getByRole("link", { name: "All posts", exact: true })).toHaveCSS(

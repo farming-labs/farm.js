@@ -7,7 +7,12 @@ interface FarmContextValue {
   basePath: string;
 }
 
-const FarmContext = createContext<FarmContextValue | null>(null);
+// Made on first use: importing @farm.js/core must work where React has no createContext (the
+// RSC engine's react-server environment, which loads API routes that import createEndpoint).
+let farmContext: React.Context<FarmContextValue | null> | undefined;
+function getFarmContext(): React.Context<FarmContextValue | null> {
+  return (farmContext ??= createContext<FarmContextValue | null>(null));
+}
 
 interface FarmProviderProps {
   children: ReactNode;
@@ -23,6 +28,7 @@ export function FarmProvider({ children, config }: FarmProviderProps) {
     basePath: normalizeFarmBasePath(config.basePath),
   };
 
+  const FarmContext = getFarmContext();
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 }
 
@@ -30,7 +36,7 @@ export function FarmProvider({ children, config }: FarmProviderProps) {
  * Hook to access Farm.js configuration and utilities
  */
 export function useFarm(): FarmContextValue {
-  const context = useContext(FarmContext);
+  const context = useContext(getFarmContext());
 
   if (!context) {
     throw new Error("useFarm must be used within a FarmProvider");
@@ -41,7 +47,7 @@ export function useFarm(): FarmContextValue {
 
 /** @internal Read Farm context when a component can also use a runtime fallback. */
 export function useOptionalFarm(): FarmContextValue | null {
-  return useContext(FarmContext);
+  return useContext(getFarmContext());
 }
 
 /**

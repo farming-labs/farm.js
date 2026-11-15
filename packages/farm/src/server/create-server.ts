@@ -1,6 +1,14 @@
+import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import type { ViteDevServer } from "vite";
+import { resolveFarmPlatform, validateFarmDesktopConfig } from "../desktop/config";
+import { farmDesktopDevGuardPlugin } from "../desktop/dev-guard-plugin";
 import type { FarmConfig } from "../types";
-import { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
+import {
+  farmI18nClientBridgePlugin,
+  farmIslandContainersPlugin,
+  farmPlugin,
+  farmServerOnlyEntriesPlugin,
+} from "../vite";
 import { logger } from "../utils";
 import { readSchemaTables } from "../schema-owner";
 import {
@@ -25,7 +33,6 @@ import {
   createHeadersPlugin,
   createRewritesPlugin,
   createCompressionPlugin,
-  createLoggerPlugin,
 } from "../plugins";
 import { createFarmInfraAnalyticsPlugin } from "../plugins/infra-analytics";
 import {
@@ -46,7 +53,10 @@ import {
   resolveFarmInstrumentationFile,
   type FarmInstrumentationLifecycle,
 } from "../instrumentation";
-import { loadFarmRendererVitePlugins, resolveFarmRenderer } from "../renderer";
+import { isReactRenderer, loadFarmRendererVitePlugins, resolveFarmRenderer } from "../renderer";
+import { createFarmReactRefreshPlugins } from "../react-refresh";
+import { createFarmDevLoopbackPlugin } from "./dev-loopback";
+import type { FarmDeferredDevSetup } from "../dev/deferred-setup";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 
@@ -82,7 +92,15 @@ function createBrandingPlugin() {
           console.log(
             `  ${pc.dim("➜")}  ${pc.bold("Local:")}   ${pc.cyan(`http://localhost:${resolvedPort}/`)}`,
           );
-          console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.dim("use --host to expose")}`);
+          const network = server.resolvedUrls?.network ?? [];
+          for (const url of network) {
+            console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.cyan(url)}`);
+          }
+          if (network.length === 0) {
+            console.log(
+              `  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.dim("use --host to expose")}`,
+            );
+          }
           console.log("");
         }
         return result;
@@ -142,6 +160,14 @@ function createDevDependencyStubsPlugin() {
  */
 function withPortFlag(vite: FarmConfig["vite"], port: number | undefined): FarmConfig["vite"] {
   return port === undefined ? vite : { ...vite, server: { ...vite?.server, port } };
+}
+
+/** A --host flag outranks the app's config, and is kept in the config for restarts like --port. */
+function withHostFlag(
+  vite: FarmConfig["vite"],
+  host: string | boolean | undefined,
+): FarmConfig["vite"] {
+  return host === undefined ? vite : { ...vite, server: { ...vite?.server, host } };
 }
 
 function inlineEnvScope(scope: Record<string, unknown> | undefined) {
@@ -211,11 +237,41 @@ async function resolveInlineConfig(
 }
 
 /**
+ * A web session still catches a malformed static `desktop` block. A function-valued block is
+ * only called by `--desktop`.
+ */
+function checkWebDesktopBlock(desktop: unknown): void {
+  if (desktop === undefined || typeof desktop === "function") return;
+  if (resolveFarmPlatform() === "web") validateFarmDesktopConfig(desktop);
+}
+
+/**
  * Create a Vite development server with Farm.js integration
  */
 export async function createServer(
   config: FarmConfig | FarmUserConfig = {},
-  options: { port?: number } = {},
+  options: {
+    port?: number;
+    /**
+     * Vite's `server.host`: `true` or `"0.0.0.0"` listens on every interface, for an emulator or a
+     * device on the LAN. Unset, the server stays on loopback (`127.0.0.1` and `::1`).
+     */
+    host?: string | boolean;
+    /**
+     * Installs what `experimental.serverComponents` needs before the server starts. The CLI passes
+     * it; core stays free of package-manager orchestration.
+     */
+    ensureServerComponentsPackages?: (
+      config: FarmConfig | FarmUserConfig,
+      root: string,
+    ) => Promise<unknown>;
+    /**
+     * @internal Return once Vite is created and finish Farm's setup in the background, so the
+     * caller can open the port first. `startDevServer` passes it and awaits the setup after
+     * listening; requests that arrive before then wait for it.
+     */
+    deferSetup?: boolean;
+  } = {},
 ) {
   let pluginManager: PluginManager | null = null;
   let instrumentation: FarmInstrumentationLifecycle | null = null;
@@ -227,6 +283,21 @@ export async function createServer(
     // Load farm.config.ts if it exists
     const mode = process.env.NODE_ENV === "production" ? "production" : "development";
     const userConfig = await loadConfig(root, undefined, mode);
+    checkWebDesktopBlock(userConfig?.desktop);
+    // experimental.serverComponents: the RSC pipeline serves the app instead of Farm's renderer.
+    const rscConfig = userConfig ?? config;
+    if (resolveFarmServerComponentsMode(rscConfig.experimental?.serverComponents)) {
+      const { createFarmRscDevServer, farmAppUsesRscPipeline, resolveFarmRscCheckConfig } =
+        await import("../rsc-pipeline");
+      await options.ensureServerComponentsPackages?.(rscConfig, root);
+      if (farmAppUsesRscPipeline(await resolveFarmRscCheckConfig(rscConfig, root, mode), root)) {
+        return await createFarmRscDevServer(rscConfig, {
+          root,
+          port: options.port,
+          host: options.host,
+        });
+      }
+    }
 
     const resolvedConfig = userConfig
       ? await resolveConfig(userConfig, mode)
@@ -259,16 +330,18 @@ export async function createServer(
     const headers = await resolvedConfig.headers();
     const rewrites = await resolvedConfig.rewrites();
 
+    const configRouteOptions = { i18n: resolvedConfig.i18n, basePath: resolvedConfig.basePath };
+
     if (redirects.length > 0) {
-      pluginManager.addPlugin(createRedirectsPlugin(redirects, { i18n: resolvedConfig.i18n }));
+      pluginManager.addPlugin(createRedirectsPlugin(redirects, configRouteOptions));
     }
 
     if (headers.length > 0) {
-      pluginManager.addPlugin(createHeadersPlugin(headers, { i18n: resolvedConfig.i18n }));
+      pluginManager.addPlugin(createHeadersPlugin(headers, configRouteOptions));
     }
 
     if (rewrites.length > 0) {
-      pluginManager.addPlugin(createRewritesPlugin(rewrites, { i18n: resolvedConfig.i18n }));
+      pluginManager.addPlugin(createRewritesPlugin(rewrites, configRouteOptions));
     }
 
     // Compression is applied by production adapters. Its hook is a no-op in
@@ -283,13 +356,6 @@ export async function createServer(
     const infraAnalytics =
       resolvedConfig.analytics !== false ? createFarmInfraAnalyticsPlugin() : null;
     if (infraAnalytics) pluginManager.addPlugin(infraAnalytics);
-
-    if (mode === "development") {
-      const hasLogger = pluginManager.getPlugins().some((p) => p.name === "farm:logger");
-      if (!hasLogger) {
-        pluginManager.addPlugin(createLoggerPlugin());
-      }
-    }
 
     // Run config hooks
     await pluginManager.runHookParallel("init");
@@ -310,7 +376,11 @@ export async function createServer(
       projectRoot,
       { ssr: true },
     );
+    const reactRefreshPlugins = isReactRenderer(finalConfig.renderer)
+      ? await createFarmReactRefreshPlugins()
+      : [];
 
+    const deferredSetup: FarmDeferredDevSetup | undefined = options.deferSetup ? {} : undefined;
     let tailwindVitePlugin: any = undefined;
     const shouldUseProjectPostcss = hasProjectPostcssConfig(projectRoot);
     if (shouldUseProjectPostcss) {
@@ -325,15 +395,19 @@ export async function createServer(
           root: projectRoot,
           css: shouldUseProjectPostcss ? undefined : { postcss: { plugins: [] } },
           plugins: [
+            farmDesktopDevGuardPlugin(finalConfig.basePath),
             createFarmThemeCssPlugin(finalConfig.theme, finalConfig.basePath),
             ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
             ...(rendererVitePlugins as any[]),
+            ...reactRefreshPlugins,
             createDevDependencyStubsPlugin(),
             farmI18nClientBridgePlugin(),
-            farmServerOnlyEntriesPlugin(),
-            farmPlugin(finalConfig, pluginManager),
-            farmEnvironmentFunctionsPlugin(),
+            farmServerOnlyEntriesPlugin({ prebundleServerPackages: true }),
+            farmIslandContainersPlugin(finalConfig),
+            farmPlugin(finalConfig, pluginManager, deferredSetup),
+            farmEnvironmentFunctionsPlugin(finalConfig),
             createBrandingPlugin(),
+            createFarmDevLoopbackPlugin(),
             createFarmDevLifecyclePlugin(pluginManager, instrumentation),
           ],
           server: {
@@ -386,7 +460,7 @@ export async function createServer(
             hasWarned: false,
           },
         },
-        withPortFlag(finalConfig.vite, options.port),
+        withHostFlag(withPortFlag(finalConfig.vite, options.port), options.host),
       ),
       (candidate) => {
         pendingViteServer = candidate;
@@ -397,19 +471,43 @@ export async function createServer(
     (server as any).__farmPluginManager = pluginManager;
     (server as any).__farmResolvedConfig = resolvedConfig;
     (server as any).__farmInstrumentation = instrumentation;
-    // Update plugin manager with vite server
-    pluginManager.updateContext({ config: finalConfig, viteServer: server });
-    await pluginManager.setupPlugins();
-    await pluginManager.runHookParallel("devServerCreated", server);
+    const createdServer = server;
+    const createdPluginManager = pluginManager;
+    const finishSetup = async () => {
+      // Update plugin manager with vite server
+      createdPluginManager.updateContext({ config: finalConfig, viteServer: createdServer });
+      await createdPluginManager.setupPlugins();
+      await createdPluginManager.runHookParallel("devServerCreated", createdServer);
 
-    // Run configResolved hooks
-    await pluginManager.runHookParallel("configResolved", finalConfig);
+      // Run configResolved hooks
+      await createdPluginManager.runHookParallel("configResolved", finalConfig);
 
-    // Run buildStart hooks
-    await pluginManager.runHookParallel("buildStart");
+      // Run buildStart hooks
+      await createdPluginManager.runHookParallel("buildStart");
+    };
 
+    if (deferredSetup?.setup) {
+      // Farm's routes, plans and middleware are still being set up. The plugin hooks that ran after
+      // them keep running after them, and a failure is cleaned up and reported as before.
+      const startup = deferredSetup.setup.then(finishSetup).catch(async (error: unknown) => {
+        await cleanUpFailedCreation(error);
+        throw error;
+      });
+      deferredSetup.ready = startup;
+      // Awaited by startDevServer; a request waiting on it gets the failure through Vite.
+      startup.catch(() => {});
+      (server as any)[FARM_DEFERRED_STARTUP] = startup;
+      return server;
+    }
+
+    await finishSetup();
     return server;
   } catch (error) {
+    await cleanUpFailedCreation(error);
+    throw error;
+  }
+
+  async function cleanUpFailedCreation(error: unknown) {
     // The caller never receives a server on failure, so creation owns cleanup.
     // Report secondary failures without replacing the original startup error or
     // preventing the remaining resources from being released.
@@ -445,8 +543,15 @@ export async function createServer(
       await attempt("shut down instrumentation", () => instrumentation?.shutdown());
     }
     logger.error(`Failed to create server: ${error}`);
-    throw error;
   }
+}
+
+/** The setup `createServer({ deferSetup: true })` finishes after returning the server. */
+const FARM_DEFERRED_STARTUP = Symbol.for("@farm.js/core/deferred-dev-startup");
+
+/** A deferred setup failure createServer has already reported and cleaned up. */
+class FarmDeferredStartupError {
+  constructor(readonly cause: unknown) {}
 }
 
 /**
@@ -473,17 +578,37 @@ export function noticeSchemaChangesInBackground(
 /**
  * Start the development server
  */
-export async function startDevServer(config: FarmConfig | FarmUserConfig = {}, port?: number) {
-  const server = await createServer(config, { port });
+export async function startDevServer(
+  config: FarmConfig | FarmUserConfig = {},
+  port?: number,
+  options: Omit<Parameters<typeof createServer>[1], "port"> = {},
+) {
+  // Open the port as soon as Vite exists. Farm finishes its setup meanwhile, and requests that
+  // arrive first wait for it, so the browser, Vite's dependency optimizer, and the setup overlap.
+  const server = await createServer(config, { ...options, port, deferSetup: true });
   const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
+  const startup = (server as any)[FARM_DEFERRED_STARTUP] as Promise<void> | undefined;
+  // A setup failure is reported and cleaned up by createServer, as when it awaited the setup.
+  const settleStartup = () =>
+    startup?.catch((error: unknown) => {
+      throw new FarmDeferredStartupError(error);
+    });
 
   try {
-    await server.listen(port);
+    try {
+      await server.listen(port);
+    } catch (error) {
+      // Let the setup settle before cleaning up. If it failed, that failure came first.
+      await settleStartup();
+      throw error;
+    }
+    await settleStartup();
     // Shutdown is owned by the close() installed in createServer, which awaits
     // the plugin runtime and reports failures rather than swallowing them.
     await pluginManager?.startRuntime();
     noticeSchemaChangesInBackground((server as any).__farmResolvedConfig);
   } catch (error) {
+    if (error instanceof FarmDeferredStartupError) throw error.cause;
     // Creation failures are reported by createServer above. Failures in listen
     // or runtime.start need their own notification while plugin state is alive.
     try {

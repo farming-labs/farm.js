@@ -165,7 +165,7 @@ FARM_AUTH_SECRET=...
 FARM_AUTH_URL=https://example.com
 ```
 
-`AUTH_SECRET` and `BETTER_AUTH_SECRET` remain accepted as secret aliases.
+`AUTH_SECRET` and `BETTER_AUTH_SECRET` remain accepted as secret aliases. Without one, development generates a random secret once per app in `.farm/auth-secret` (gitignored) and reuses it across restarts.
 
 On Vercel the auth URL is inferred when `FARM_AUTH_URL` is absent: a production
 deployment uses `VERCEL_PROJECT_PRODUCTION_URL`, the project's canonical domain, and a preview
@@ -173,6 +173,19 @@ uses its own `VERCEL_URL`. The deployment and branch hostnames stay trusted alon
 deployment URL still works for testing. Set `FARM_AUTH_URL` explicitly when the app is served
 from a domain Vercel does not report, such as a proxy in front of the deployment - the auth
 routes reject any origin that is neither the base URL nor a trusted host.
+
+In `farm dev` without `FARM_AUTH_URL`, the auth routes also trust the origin the dev server is
+serving the request on, so any dev port, the Android emulator's `http://10.0.2.2:<port>`, and a
+LAN address under `farm dev --host` can sign in. Only `localhost`, `*.localhost`, and IP addresses
+qualify, the hosts Vite accepts without `server.allowedHosts`. A custom dev hostname still needs
+`FARM_AUTH_URL`, and a page on another origin is still rejected. Production trusts only
+`FARM_AUTH_URL` and the hosts above.
+
+Better Auth's sign-in rate limit keys on the client address Farm resolves for the request: the
+server's peer address, or the last `X-Forwarded-For` hop (the one your proxy appended) only when
+[`server.trustProxy`](/docs/configuration) is on. A client-sent forwarding header never picks the
+bucket on its own. Behind a proxy, enable `trustProxy` so visitors are not all counted as the
+proxy's address.
 
 Apply the production schema before serving traffic:
 
@@ -190,6 +203,62 @@ farm auth migrate --write auth-schema.sql
 ```
 
 Both print or save exactly what `farm auth migrate` would run and change nothing. Better Auth owns this schema, so the statements come from its migrator rather than from the table declarations a plugin makes to `farm <plugin> migrate`.
+
+## Mobile apps
+
+In a [mobile app](/docs/mobile), users sign in once and stay signed in on every screen. Web screens
+sign in exactly as in a browser, with the session cookie in the WebView. Native screens send no
+cookies, so after a sign-in the app trades that session for a **device token**, kept in the
+Keychain on iOS and encrypted with an Android Keystore key on Android. Requests from native screens
+carry it as `Authorization: Bearer`, and on the server they run as the same session:
+`auth.user()`, protected routes, API routes, and server functions all see the signed-in user.
+There is nothing to configure.
+
+React Native screens (`page.native.tsx`) use the same import as the web:
+
+```tsx
+// src/app/account/page.native.tsx
+import { Button, Text } from "react-native";
+import { useAuth } from "@farm.js/auth/client";
+
+export default function Account() {
+  const { user, isPending, signIn, signOut } = useAuth();
+  if (isPending) return <Text>Loading</Text>;
+  if (user) return <Button title={`Sign out ${user.email}`} onPress={() => void signOut()} />;
+  return (
+    <Button
+      title="Sign in"
+      onPress={() => void signIn({ email: "ada@example.com", password: "correct-horse" })}
+    />
+  );
+}
+```
+
+`signIn`, `signUp`, `getSession`, `useAuth` and `signOut` return what they return on the web. A
+sign-in on either kind of screen signs both in, and `signOut()` ends the session and forgets the
+device. Metro resolves the package's React Native build; web bundles do not change.
+
+- **Production storage.** Device tokens are stored with Farm storage under `farm-mobile`. Mount
+  persistent storage there (`storage.mounts`); the in-memory default forgets every device when the
+  server restarts.
+- **Browsers cannot use tokens.** The token endpoints and bearer requests refuse anything a browser
+  sends (`Origin` or `Sec-Fetch-*` headers), so no web page can mint, refresh, or use a token, and
+  browser CSRF protection is unchanged.
+- **Tokens follow the session.** Access tokens last 15 minutes and refresh for up to 30 days, and
+  each refresh checks that the session behind the device still exists. A web sign-out, an expired
+  session, or a reused refresh token ends the device.
+
+| Auth                             | Signed-in native screens                                          |
+| -------------------------------- | ----------------------------------------------------------------- |
+| `auth: true` (this page)         | Supported                                                         |
+| `@farm.js/better-auth`           | Supported                                                         |
+| Auth0, Auth.js, WorkOS, Supabase | Not yet                                                           |
+| Clerk                            | Not yet: Clerk refreshes its session cookie from a browser script |
+| A custom integration             | Add a `session(request)` reader to it                             |
+
+Not yet: social and OAuth sign-in from native screens (they need a browser session; sign in on a
+web screen instead), apps on the RSC pipeline (they cannot use `auth` yet), and proof that a
+request comes from your own app binary (App Attest and Play Integrity are planned).
 
 ## Extend with Better Auth
 

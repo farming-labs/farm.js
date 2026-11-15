@@ -1,10 +1,13 @@
 // @vitest-environment node
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import { applyMarkdownNegotiationHeaders, resolveMarkdownConfig } from "../markdown";
+import { fetchFarmExternalRewrite } from "../server/response";
 
-function runtime(i18n = false) {
+function runtime(i18n = false, rewriteDestination = "/base/fr/new?q=rewritten") {
   const source = fs.readFileSync(path.join(process.cwd(), "src/nitro/universal-build.ts"), "utf8");
   const start = source.indexOf("async function handleFarmRequest(");
   const inner = source.indexOf("async function handleFarmRequestInContext(", start);
@@ -41,6 +44,11 @@ function runtime(i18n = false) {
     "farmI18nConfig",
     "applyFarmI18nResponse",
     "isFarmLocalAPIPathname",
+    "farmPluginRuntimeKeepsResponsesPrivate",
+    "_withFarmGuardedResponseCache",
+    "farmPluginRuntime",
+    "fetchFarmExternalRewrite",
+    "farmRequestedUrls",
     `${handlers}\nreturn handleFarmRequest;`,
   )(
     new Proxy(URL, {
@@ -56,7 +64,7 @@ function runtime(i18n = false) {
     () => null,
     ["/old"],
     (_request: Request, pathname: string) => pathname !== "/old",
-    () => "/base/fr/new?q=rewritten",
+    () => rewriteDestination,
     (incoming: Request, destination: string) => new Request(new URL(destination, incoming.url)),
     (_request: Request, handler: () => unknown) => handler(),
     (_runtime: unknown, _request: Request, handler: (locale: unknown) => unknown) =>
@@ -65,6 +73,11 @@ function runtime(i18n = false) {
     {},
     (response: Response) => response,
     () => false,
+    false,
+    (response: Response) => response,
+    null,
+    fetchFarmExternalRewrite,
+    new WeakMap<Request, string>(),
   ) as (request: Request, adapterContext?: unknown) => Promise<Response>;
   return { request, parses };
 }
@@ -89,6 +102,57 @@ describe("production request URL ownership", () => {
       expect(response.headers.get("link")).toContain("</base/fr/old.md>");
     },
   );
+
+  it("forwards a rewrite to another origin and drops the encoding fetch decoded", async () => {
+    const upstream = http.createServer((req, res) => {
+      res.setHeader("content-encoding", "gzip");
+      res.end(gzipSync(`upstream ${req.url}`));
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const address = upstream.address();
+    if (!address || typeof address === "string") throw new Error("No upstream");
+    try {
+      const r = runtime(false, `http://127.0.0.1:${address.port}/new`);
+      const response = await r.request(new Request("https://farm.test/base/fr/old?q=one"));
+      expect(response.headers.get("content-encoding")).toBeNull();
+      expect(await response.text()).toBe("upstream /new");
+    } finally {
+      await new Promise((resolve) => upstream.close(resolve));
+    }
+  });
+
+  it("passes an upstream redirect through a rewrite to another origin", async () => {
+    let followed = false;
+    const upstream = http.createServer((req, res) => {
+      if (req.url === "/elsewhere") {
+        followed = true;
+        res.end("followed");
+        return;
+      }
+      res.statusCode = 302;
+      res.setHeader("location", "https://login.example/authorize?state=1");
+      res.setHeader("set-cookie", ["oauth_state=1; Path=/", "session=; Max-Age=0"]);
+      res.end();
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const address = upstream.address();
+    if (!address || typeof address === "string") throw new Error("No upstream");
+    try {
+      const r = runtime(false, `http://127.0.0.1:${address.port}/login`);
+      const response = await r.request(new Request("https://farm.test/base/fr/old"));
+      // The visitor gets the upstream's redirect and its cookies, as the docs promise: the
+      // upstream response, not the page it points at fetched on the visitor's behalf.
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("https://login.example/authorize?state=1");
+      expect(response.headers.getSetCookie()).toEqual([
+        "oauth_state=1; Path=/",
+        "session=; Max-Age=0",
+      ]);
+      expect(followed).toBe(false);
+    } finally {
+      await new Promise((resolve) => upstream.close(resolve));
+    }
+  });
 
   it("keeps parsed URLs local to each concurrent request", async () => {
     const r = runtime();

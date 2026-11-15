@@ -5,7 +5,11 @@ export type SyncAccess = "read" | "write";
 
 export type SyncModelConfig = {
   access?: SyncAccess;
-  /** Overrides the global row filter for this model. `false` disables scoping. */
+  /**
+   * Overrides the global row filter for this model. Every exposed model needs
+   * a filter, here or the global one; `false` disables scoping and exposes
+   * every row to every caller.
+   */
   where?: SyncWhere | false;
   /** Persist this model's rows through the configured client cache adapter. */
   persist?: boolean;
@@ -34,6 +38,8 @@ export type SyncRequestBody = {
   input?: Record<string, unknown>;
   /** Incremental cursor for list; the largest `updatedAt` the client already holds. */
   since?: string | null;
+  /** Scope fingerprint `since` was recorded under; a mismatch gets a full snapshot. */
+  scope?: string | null;
 };
 
 export type SyncListResult = {
@@ -46,6 +52,8 @@ export type SyncListResult = {
    * drop rows that were deleted or left its scope since the last list.
    */
   keys?: unknown[];
+  /** Fingerprint of the caller's resolved row filter; see `scopeFingerprint`. */
+  scope: string;
 };
 
 export type SyncErrorCode =
@@ -97,10 +105,13 @@ export function resolveSyncModels(
     const access = config.access ?? "write";
     const where = config.where !== undefined ? config.where : globalWhere;
 
-    if (access === "write" && where === undefined) {
+    // Reads are as sensitive as writes: an unfiltered read model hands every
+    // row to any caller, signed in or not. Both need a filter or an explicit
+    // `where: false`.
+    if (where === undefined) {
       throw new Error(
-        `sync(): models.${name} allows writes but no row filter is configured. ` +
-          `Add a \`where\` to scope rows to the current session, or set \`where: false\` to expose every row deliberately.`,
+        `sync(): models.${name} ${access === "write" ? "allows writes" : "is readable"} but no row filter is configured. ` +
+          `Add a \`where\` to scope rows to the current session, or set \`where: false\` to expose every row to every caller deliberately.`,
       );
     }
 

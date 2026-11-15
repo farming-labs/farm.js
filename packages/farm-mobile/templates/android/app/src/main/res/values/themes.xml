@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.FarmShell" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/farm_accent</item>
+        <item name="colorSecondaryContainer">@color/farm_background</item>
+        <item name="colorSurface">@color/farm_surface</item>
+        <item name="colorSurfaceContainer">@color/farm_surface</item>
+        <item name="android:windowBackground">@color/farm_background</item>
+    </style>
+</resources>

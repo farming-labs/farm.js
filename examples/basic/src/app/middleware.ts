@@ -12,13 +12,15 @@ export default middleware()
   })
   .redirect('/old-about', '/about')
   .redirect('/old-contact', '/contact', true)
-  .when((ctx) => ctx.pathname.startsWith('/api'), async (ctx, next) => {
+  .when((ctx) => ctx.routePathname.startsWith('/api'), async (ctx, next) => {
     ctx.headers.set('X-API-Version', '1.0.0');
     await next();
   });
 
 export const config = {
   matcher: '/:path*',
+  // Only sets headers and redirects, so pages stay CDN cacheable.
+  cache: 'public',
   exclude: [
     '/_next/:path*',
     '/assets/:path*',
