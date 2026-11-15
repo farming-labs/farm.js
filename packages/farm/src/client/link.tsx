@@ -1,3 +1,211 @@
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+/** A route as reported by the `router.generated` plugin hook. */
+export interface LinkRoute {
+  kind: "page" | "layout";
+  pattern: string;
+  modulePath: string;
+}
+
+export interface DeadLink {
+  /** Emitted page the link was found in, relative to the output directory. */
+  page: string;
+  /** The href exactly as written in the markup. */
+  href: string;
+  /** Why the target does not resolve to a route. */
+  reason: "missing-route" | "missing-anchor";
+}
+
+export interface LinkCheckReport {
+  routes: string[];
+  pages: number;
+  links: number;
+  dead: DeadLink[];
+}
+
+export interface LinkCheckInput {
+  routes: LinkRoute[];
+  pages: { path: string; html: string }[];
+}
+
+export interface LinkCheckOptions {
+  routes: LinkRoute[];
+  outputDir: string;
+  json: string | false;
+  strict: boolean;
+}
+
+export interface LinkCheckResult {
+  report: LinkCheckReport;
+  table: string;
+  failed: boolean;
+}
+
+const HREF_PATTERN = /<a\b[^>]*?\shref\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+const ID_PATTERN = /\sid\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+
+/** Normalizes a route pattern or page path to a leading slash and no trailing slash. */
+export function normalizeLinkPath(value: string): string {
+  const withSlash = value.startsWith("/") ? value : `/${value}`;
+  if (withSlash.length > 1 && withSlash.endsWith("/")) return withSlash.slice(0, -1);
+  return withSlash;
+}
+
+/** The page patterns from a route manifest, sorted for a stable report. */
+export function collectRoutePatterns(routes: LinkRoute[]): string[] {
+  const patterns = new Set<string>();
+  for (const route of routes) {
+    if (route.kind !== "page") continue;
+    patterns.add(normalizeLinkPath(route.pattern));
+  }
+  return [...patterns].sort();
+}
+
+/** Whether an href points inside the site. External, protocol and hash-only links are skipped. */
+export function isInternalHref(href: string): boolean {
+  const value = href.trim();
+  if (!value || value.startsWith("#") || value.startsWith("//")) return false;
+  return !/^[a-z][a-z0-9+.-]*:/i.test(value);
+}
+
+/** The internal hrefs of a page, in document order. */
+export function scanPageLinks(html: string): string[] {
+  const hrefs: string[] = [];
+  for (const match of html.matchAll(HREF_PATTERN)) {
+    const href = match[1] ?? match[2] ?? "";
+    if (isInternalHref(href)) hrefs.push(href);
+  }
+  return hrefs;
+}
+
+/** The route pattern that serves a pathname, or null when no route matches. */
+export function matchRoute(pathname: string, patterns: string[]): string | null {
+  const target = normalizeLinkPath(pathname);
+  for (const pattern of patterns) {
+    if (pattern === target || matchesPattern(target, pattern)) return pattern;
+  }
+  return null;
+}
+
+function matchesPattern(target: string, pattern: string): boolean {
+  const targetParts = target.split("/").filter(Boolean);
+  const patternParts = pattern.split("/").filter(Boolean);
+  let index = 0;
+  for (; index < patternParts.length; index += 1) {
+    const part = patternParts[index];
+    if (part.startsWith("[[...") && part.endsWith("]]")) return true;
+    if (part.startsWith("[...") && part.endsWith("]")) return targetParts.length > index;
+    if (targetParts[index] === undefined) return false;
+    if (part.startsWith("[") && part.endsWith("]")) continue;
+    if (part !== targetParts[index]) return false;
+  }
+  return targetParts.length === index;
+}
+
+/** Checks every internal link in the emitted pages against the route manifest. */
+export function checkLinks(input: LinkCheckInput): LinkCheckReport {
+  const routes = collectRoutePatterns(input.routes);
+  const anchors = new Map<string, Set<string>>();
+  for (const page of input.pages) {
+    anchors.set(normalizeLinkPath(page.path), collectAnchors(page.html));
+  }
+
+  const dead: DeadLink[] = [];
+  let links = 0;
+  for (const page of input.pages) {
+    for (const href of scanPageLinks(page.html)) {
+      links += 1;
+      const { pathname, hash } = splitHref(href);
+      const target = pathname || page.path;
+      const matched = matchRoute(target, routes);
+      if (!matched) {
+        dead.push({ page: page.path, href, reason: "missing-route" });
+        continue;
+      }
+      if (hash) {
+        const ids = anchors.get(normalizeLinkPath(target)) ?? anchors.get(matched);
+        if (!ids?.has(hash)) dead.push({ page: page.path, href, reason: "missing-anchor" });
+      }
+    }
+  }
+
+  return { routes, pages: input.pages.length, links, dead };
+}
+
+/** Runs the link check over the emitted pages and writes the JSON artifact CI reads. */
+export function runLinkCheck(options: LinkCheckOptions): LinkCheckResult {
+  const report = checkLinks({
+    routes: options.routes,
+    pages: readEmittedPages(options.outputDir),
+  });
+  if (options.json) writeLinkReport(report, options.json);
+  return {
+    report,
+    table: formatLinkTable(report.dead),
+    failed: options.strict && report.dead.length > 0,
+  };
+}
+
+function splitHref(href: string): { pathname: string; hash: string } {
+  const [beforeHash, hash = ""] = href.split("#", 2);
+  const [pathname] = beforeHash.split("?", 1);
+  return { pathname, hash };
+}
+
+function collectAnchors(html: string): Set<string> {
+  const anchors = new Set<string>();
+  for (const match of html.matchAll(ID_PATTERN)) {
+    const id = match[1] ?? match[2];
+    if (id) anchors.add(id);
+  }
+  return anchors;
+}
+
+/** A fixed-width console table of the dead links, or a one-line all-clear. */
+export function formatLinkTable(dead: DeadLink[]): string {
+  if (dead.length === 0) return "No dead links found.";
+  const header = ["page", "href", "reason"];
+  const rows = dead.map((link) => [link.page, link.href, link.reason]);
+  const widths = header.map((cell, index) =>
+    Math.max(cell.length, ...rows.map((row) => row[index].length)),
+  );
+  const line = (cells: string[]) =>
+    cells.map((cell, index) => cell.padEnd(widths[index])).join("  ").trimEnd();
+  return [
+    line(header),
+    widths.map((width) => "-".repeat(width)).join("  "),
+    ...rows.map(line),
+  ].join("\n");
+}
+
+/** Writes the JSON artifact CI reads. */
+export function writeLinkReport(report: LinkCheckReport, file: string): void {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+/** Reads every emitted HTML page under a directory, keyed by its route path. */
+export function readEmittedPages(dir: string): { path: string; html: string }[] {
+  const pages: { path: string; html: string }[] = [];
+  const walk = (current: string): void => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.name.endsWith(".html")) {
+        const relative = path.relative(dir, full).split(path.sep).join("/");
+        const pagePath = relative.replace(/(?:^|\/)index\.html$/, "") || "/";
+        pages.push({
+          path: normalizeLinkPath(pagePath.replace(/\.html$/, "")),
+          html: readFileSync(full, "utf8"),
+        });
+      }
+    }
+  };
+  walk(dir);
+  return pages;
+}
 "use client";
 
 import type React from "react";
