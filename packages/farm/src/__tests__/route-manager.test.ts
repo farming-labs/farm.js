@@ -423,11 +423,16 @@ export default async function Layout({ children }) {
       await mkdir(path.join(root, "src", "app"), { recursive: true });
       await writeFile(
         path.join(root, "src", "app", "row.tsx"),
-        `"use client";\nexport function Row() { return <tr><td>row</td></tr>; }`,
+        `"use client";\nexport function Row() { return <p>row</p>; }`,
+      );
+      // `export *` names the component only in another module, so it cannot become an island.
+      await writeFile(
+        path.join(root, "src", "app", "rows.tsx"),
+        `"use client";\nexport * from "./row";`,
       );
       await writeFile(
         path.join(root, "src", "app", "page.tsx"),
-        `import { Row } from "./row";\nexport default function Page() { return <table><tbody><Row /></tbody></table>; }`,
+        `import { Row } from "./rows";\nexport default function Page() { return <main><Row /></main>; }`,
       );
       const { globFiles, logger } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) =>
@@ -445,9 +450,7 @@ export default async function Layout({ children }) {
         shouldHydrate: false,
       });
       expect(routeManager.getIslandsErrors(root)).toEqual([
-        expect.stringMatching(
-          /^\/: the client boundary imported from \.\/row renders inside <table>/,
-        ),
+        expect.stringMatching(/^\/: client boundary .*rows\.tsx uses an unsupported export shape/),
       ]);
       routeManager.regenerateClientManifest(root);
       // Development logs it once, not on every plan refresh.

@@ -62,6 +62,11 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   components hydrated. A value that refers to itself arrives with the same cycle, through a
   promise or stream too. A plain function fails the render with an error that names the component
   and the prop.
+- **Tables, selects, SVG and lists.** A client component that renders a row, an option, a shape or
+  a list item directly inside its parent makes that parent (the whole `<table>`, `<select>`,
+  `<svg>` or `<ul>`) the island, since `<f-island>` cannot sit between them. The parent's server
+  parts travel as a server tree and its client components hydrate in its root, so the HTML matches
+  React Server Components'.
 - **Browser.** Farm's client entry hands every `<f-island>` to islx's hydration runtime, which
   imports the island's module when its strategy is due and hydrates it in place. A page whose
   islands all wait loads a 1.7 KB boot script instead of the runtime.
