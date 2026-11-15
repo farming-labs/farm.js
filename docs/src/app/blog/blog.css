@@ -265,9 +265,13 @@
   text-align: center;
   user-select: none;
   pointer-events: none;
+  -webkit-mask-image:
+    linear-gradient(to right, #000 65%, transparent),
+    linear-gradient(to bottom, transparent, #000 14%, #000 86%, transparent);
   mask-image:
     linear-gradient(to right, #000 65%, transparent),
     linear-gradient(to bottom, transparent, #000 14%, #000 86%, transparent);
+  -webkit-mask-composite: source-in, xor;
   mask-composite: intersect;
   transition: color 180ms ease-out;
 }
@@ -356,6 +360,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .blog-release-art[data-motion] .blog-art-digit {
+    -webkit-mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
     mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
   }
   .blog-release-art[data-motion] .blog-art-value {
