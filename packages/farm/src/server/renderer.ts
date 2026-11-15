@@ -120,7 +120,7 @@ import {
   getFarmLayoutKey,
 } from "../navigation/segment-navigation";
 import { sendWebResponse } from "./response";
-import { matchesFarmIfNoneMatch } from "../server-http";
+import { createFarmNodeRequestAbortSignal, matchesFarmIfNoneMatch } from "../server-http";
 import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
 import { createFarmMetadataRouteResponse } from "../metadata-route";
@@ -1505,9 +1505,7 @@ export class ServerRenderer {
       const header = getFarmSecurityHeader(this.security, cspNonce)!;
       res.setHeader(header.key, header.value);
     }
-    const request = createWebRequestFromFarmRequest(req, {
-      trustProxy: this.config.server?.trustProxy,
-    });
+    const request = this.createPageRequest(req, res);
     const runtime = this.i18nRuntime;
 
     if (runtime?.config.enabled) {
@@ -1533,6 +1531,27 @@ export class ServerRenderer {
     return _runWithFarmCspNonce(cspNonce, () =>
       this.runWithRequestContext(request, () => this.renderPageInContext(req, res)),
     );
+  }
+
+  /**
+   * The Request a page, its layouts, and its server functions read. Its signal aborts when the
+   * client goes away before the response finishes, as in production, so rendering that observes
+   * it can stop.
+   */
+  private createPageRequest(req: FarmRequest, res: FarmResponse): Request {
+    // A caller driving the renderer without Node streams (a test double) has no close events.
+    const observable =
+      typeof (req as { once?: unknown }).once === "function" &&
+      typeof (res as { once?: unknown }).once === "function";
+    return createWebRequestFromFarmRequest(req, {
+      trustProxy: this.config.server?.trustProxy,
+      signal: observable
+        ? createFarmNodeRequestAbortSignal(
+            req as Parameters<typeof createFarmNodeRequestAbortSignal>[0],
+            res as Parameters<typeof createFarmNodeRequestAbortSignal>[1],
+          )
+        : undefined,
+    });
   }
 
   private async renderPageInContext(req: FarmRequest, res: FarmResponse): Promise<void> {
@@ -1681,9 +1700,7 @@ export class ServerRenderer {
           this.routeManager.loadRouteModule(route.modulePath),
           ...layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
         ]);
-        actionRequest = createWebRequestFromFarmRequest(req, {
-          trustProxy: this.config.server?.trustProxy,
-        });
+        actionRequest = this.createPageRequest(req, res);
         const formActionRequest = actionRequest;
         // Route middleware has run by now: an action reads its context as the page does.
         const actionResponse = await _runWithMiddlewareData(
@@ -1719,11 +1736,7 @@ export class ServerRenderer {
         exposedOnly: true,
       });
       // The action check above already read the body stream into a Request.
-      const currentRequest =
-        actionRequest ??
-        createWebRequestFromFarmRequest(req, {
-          trustProxy: this.config.server?.trustProxy,
-        });
+      const currentRequest = actionRequest ?? this.createPageRequest(req, res);
       const routeContext = await this.resolveRouteContext({
         request: currentRequest,
         rawRequest: req,

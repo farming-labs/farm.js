@@ -238,7 +238,10 @@ export function resolveFarmWebRequestOrigin(
 
 export function createWebRequestFromFarmRequest(
   req: FarmRequest,
-  options: FarmRequestURLOptions = {},
+  options: FarmRequestURLOptions & {
+    /** Aborts when the client goes away, as a production request's signal does. */
+    signal?: AbortSignal;
+  } = {},
 ): Request {
   const fullUrl = resolveFarmRequestURL(req, options).toString();
 
@@ -262,6 +265,7 @@ export function createWebRequestFromFarmRequest(
   const init: RequestInit & { duplex?: "half" } = {
     method: req.method,
     headers,
+    ...(options.signal ? { signal: options.signal } : {}),
   };
 
   if (method !== "GET" && method !== "HEAD") {
