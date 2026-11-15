@@ -6,6 +6,7 @@ import {
   matchesHostHeader,
   normalizeAllowedOriginPattern,
 } from "./request-origin";
+import { resolveFarmWebRequestOrigin } from "./server/request";
 import { serializeServerFnFailure, type SerializedServerFnFailure } from "./server-fn-error";
 import { parseBodySizeLimit } from "./server-http";
 
@@ -26,6 +27,15 @@ export interface ResolvedFarmServerActionsConfig {
 }
 
 export type ServerActionRequestKind = "javascript" | "form";
+
+export interface ServerActionRequestOptions {
+  /**
+   * The app's `server.trustProxy`. When on, a proxy's `X-Forwarded-Host` and
+   * `X-Forwarded-Proto` name the origin a same-origin action comes from, as they
+   * name the public request URL elsewhere.
+   */
+  trustProxy?: boolean;
+}
 
 export interface PreparedServerActionRequest {
   body: string | FormData;
@@ -106,6 +116,7 @@ export function resolveServerActionsConfig(
 export function validateServerActionRequest(
   request: Request,
   config: ResolvedFarmServerActionsConfig,
+  options: ServerActionRequestOptions = {},
 ): void {
   if (request.method.toUpperCase() !== "POST") {
     throw new ServerActionRequestError(
@@ -115,7 +126,11 @@ export function validateServerActionRequest(
     );
   }
 
-  const requestUrl = new URL(request.url);
+  // Behind a TLS-terminating proxy the adapter sees an http:// URL while the browser posts from
+  // https://, so a trusted proxy's forwarded origin is the one the browser's Origin names.
+  const requestOrigin = resolveFarmWebRequestOrigin(request, {
+    trustProxy: options.trustProxy === true,
+  });
   const sourceOrigin = resolveSourceOrigin(request);
   const fetchSite = request.headers.get("sec-fetch-site")?.trim().toLowerCase();
 
@@ -131,7 +146,7 @@ export function validateServerActionRequest(
   }
 
   const matchesRequest =
-    sourceOrigin === requestUrl.origin || matchesHostHeader(sourceOrigin, request);
+    sourceOrigin === requestOrigin || matchesHostHeader(sourceOrigin, request, requestOrigin);
   const matchesConfiguredOrigin = config.allowedOrigins.some((pattern) =>
     matchesAllowedOrigin(sourceOrigin, pattern),
   );
@@ -158,8 +173,9 @@ export async function prepareServerActionRequest(
   config: ResolvedFarmServerActionsConfig,
   kind: ServerActionRequestKind,
   actionId?: string | null,
+  options: ServerActionRequestOptions = {},
 ): Promise<PreparedServerActionRequest> {
-  validateServerActionRequest(request, config);
+  validateServerActionRequest(request, config, options);
 
   if (kind === "javascript") {
     validateActionId(actionId);

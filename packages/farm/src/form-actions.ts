@@ -13,8 +13,10 @@ import {
   runWithServerActionRequest,
   sanitizeServerActionError,
   type ResolvedFarmServerActionsConfig,
+  type ServerActionRequestOptions,
 } from "./server-action-security";
 import { serializeServerFnFailure } from "./server-fn-error";
+import { resolveFarmWebRequestOrigin } from "./server/request";
 import { _peekCurrentRequest } from "./server/request-bridge";
 
 /** The header carrying the action id for calls from client components. */
@@ -55,11 +57,20 @@ export async function handleFarmFormActionRequest(
   config: ResolvedFarmServerActionsConfig,
   /** The URL the browser posted to, when a rewrite replaced `request`'s. */
   requestedUrl: string = request.url,
+  options: ServerActionRequestOptions = {},
 ): Promise<Response | null> {
   // A redirect() the action chose stays where it points.
   let actionRedirected = false;
+  // Behind a trusted TLS-terminating proxy, the browser posts from the origin the proxy forwards,
+  // not the adapter's http:// URL that islx compares the action's Origin with.
+  const requestOrigin = options.trustProxy
+    ? resolveFarmWebRequestOrigin(request, { trustProxy: true })
+    : undefined;
   const response = await handleAction(request, {
-    allowedOrigins: config.allowedOrigins,
+    allowedOrigins:
+      requestOrigin && requestOrigin !== new URL(request.url).origin
+        ? [...config.allowedOrigins, requestOrigin]
+        : config.allowedOrigins,
     bodySizeLimit: config.bodySizeLimit,
     // The result islx sends is the envelope, not the action's own type.
     run: <T>(actionRequest: Request, action: () => Promise<T>) =>

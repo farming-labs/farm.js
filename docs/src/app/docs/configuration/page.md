@@ -1269,6 +1269,8 @@ serverActions: {
 
 Do not use `allowedOrigins` as a replacement for CORS or as a public API allowlist. Browser action requests must provide a matching `Origin` or `Referer`; Farm accepts `Sec-Fetch-Site: same-origin` when both are unavailable. Explicitly configured origins can cross a trusted proxy boundary.
 
+With [`server.trustProxy`](#server-http-policy) on, an action's origin is checked against the public origin the proxy's `X-Forwarded-Host` and `X-Forwarded-Proto` name, in RSC and islands apps, in development and production. An app behind a TLS-terminating proxy needs no `allowedOrigins` entry for its own public origin.
+
 `bodySizeLimit` accepts bytes or strings such as `"500kb"`, `"2mb"`, and `"2MiB"`. Farm checks `Content-Length` when present and also counts streamed bytes, so chunked requests cannot bypass the limit.
 
 When streamed action input exceeds the limit, Farm cancels it without awaiting producer cleanup or another branch of a cloned request. Cleanup errors do not replace the action's `413` rejection.

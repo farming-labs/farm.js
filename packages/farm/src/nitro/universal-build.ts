@@ -11357,7 +11357,9 @@ ${
   if (matchedRoute && request.method === "POST") {
     const actionResponse = await _runWithMiddlewareData(middlewareData || {}, () =>
       _runWithMiddlewareContext(middlewareContext || {}, () =>
-        handleFarmFormActionRequest(request, farmFormActionsConfig, farmRequestedUrl)
+        handleFarmFormActionRequest(request, farmFormActionsConfig, farmRequestedUrl, {
+          trustProxy: farmServerConfig.trustProxy === true,
+        })
       )
     );
     if (actionResponse) return applyProductionMiddlewareHeaders(actionResponse, middlewareHeaders);
