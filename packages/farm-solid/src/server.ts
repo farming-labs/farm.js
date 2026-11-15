@@ -6,18 +6,30 @@ import {
 import SolidCompat, {
   Fragment,
   Suspense,
-  ErrorBoundary,
   createElement,
   isValidElement,
   materializeSolidDocument,
+  materializeSolidElement,
+  type ErrorBoundary as ClientErrorBoundary,
 } from "./runtime";
 
 export const name = "solid";
 export const capabilities = {
   streaming: { node: true, web: true },
 } as const;
-export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement };
+export { Fragment, Suspense, createElement, isValidElement };
 export { generateHydrationScript };
+
+/**
+ * Solid's server renderer renders a boundary's fallback for a throw inside it, so the response
+ * would be a 200 error page, and a redirect() or notFound() would never reach Farm. On the
+ * server the boundary passes its children through and the throw fails the render, as React's
+ * and Preact's do, so Farm answers with the route's error page and status, as in production. The
+ * client keeps the real boundary, and both take the same props.
+ */
+export function ErrorBoundary(props: Parameters<typeof ClientErrorBoundary>[0]) {
+  return materializeSolidElement(props.children);
+}
 
 /** Farm passes the response's CSP nonce, which Solid puts on its hydration scripts. */
 interface FarmSolidRenderOptions {
