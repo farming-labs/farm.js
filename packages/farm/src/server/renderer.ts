@@ -1257,7 +1257,11 @@ export class ServerRenderer {
       key,
       { html },
       {
-        paths: [options.pathname],
+        // revalidatePath() takes the route path (`/pricing`), as the docs show, while the shell
+        // answers the public one (`/console/fr/pricing`): either clears it, as in production.
+        paths: [
+          ...new Set([options.pathname, this.routeManager.toRoutePathname(options.pathname)]),
+        ],
         tags: ["ppr"],
         revalidate: options.revalidate ?? false,
       },
