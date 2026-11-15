@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@farm.js/prefetch/client": fileURLToPath(new URL("./src/client.ts", import.meta.url)),
+      "@farm.js/core/router": fileURLToPath(new URL("../farm/src/router.ts", import.meta.url)),
     },
   },
   plugins: [

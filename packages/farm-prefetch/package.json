@@ -1,7 +1,7 @@
 {
   "name": "@farm.js/prefetch",
   "version": "0.1.0-beta.1",
-  "description": "App-wide link prefetching for Farm.js: hover and viewport prefetching for plain anchors, as the default policy layer beside core Link",
+  "description": "App-wide link prefetching for Farm.js: core Link's prefetch modes for plain anchors, through the router's own prefetch",
   "keywords": [
     "farm.js",
     "navigation",

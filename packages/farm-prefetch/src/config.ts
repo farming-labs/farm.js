@@ -1,53 +1,64 @@
-import type { PrefetchOptions, PrefetchStrategy, ResolvedPrefetchOptions } from "./types.js";
+import { matchFarmRoute } from "@farm.js/core/router";
+import { PREFETCH_MODES } from "./policy.js";
+import type { PrefetchMode, PrefetchOptions, ResolvedPrefetchOptions } from "./types.js";
 
-const STRATEGIES: readonly PrefetchStrategy[] = ["hover", "viewport", "both"];
+const OPTIONS = new Set(["mode", "intentDelayMs", "allow", "deny"]);
 
+/** Validate `prefetch()` options. Every problem is reported at once, so a
+ * bad config fails the build with the full list of fixes. */
 export function resolvePrefetchOptions(options: PrefetchOptions): ResolvedPrefetchOptions {
   if (!options || typeof options !== "object" || Array.isArray(options)) {
-    throw new TypeError("prefetch options must be an object");
+    throw new TypeError("[farm:prefetch] Pass prefetch() an options object, or nothing.");
   }
 
-  const known = new Set(["strategy", "maxConcurrent", "allow", "deny", "hoverDelayMs"]);
+  const problems: string[] = [];
   for (const key of Object.keys(options)) {
-    if (!known.has(key)) {
-      throw new TypeError(`prefetch does not accept option "${key}"`);
+    if (!OPTIONS.has(key)) {
+      problems.push(`\`${key}\` is not an option. Use ${[...OPTIONS].join(", ")}.`);
     }
   }
 
-  const strategy = (options as PrefetchOptions).strategy ?? "both";
-  if (!STRATEGIES.includes(strategy as PrefetchStrategy)) {
-    throw new TypeError(`prefetch strategy must be one of ${STRATEGIES.join(", ")}`);
+  const mode = options.mode ?? "intent";
+  if (!PREFETCH_MODES.includes(mode as PrefetchMode)) {
+    problems.push(`\`mode\` must be one of ${PREFETCH_MODES.map((m) => `"${m}"`).join(", ")}.`);
   }
 
-  const maxConcurrent = (options as PrefetchOptions).maxConcurrent ?? 6;
-  if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
-    throw new TypeError("prefetch maxConcurrent must be a positive integer");
+  const intentDelayMs = options.intentDelayMs ?? 50;
+  if (typeof intentDelayMs !== "number" || !Number.isFinite(intentDelayMs) || intentDelayMs < 0) {
+    problems.push("`intentDelayMs` must be a number of milliseconds, 0 or more.");
   }
 
-  const allow = (options as PrefetchOptions).allow ?? [];
-  const deny = (options as PrefetchOptions).deny ?? [];
-  for (const [name, list] of [
-    ["allow", allow],
-    ["deny", deny],
-  ] as const) {
-    if (
-      !Array.isArray(list) ||
-      list.some((pattern) => typeof pattern !== "string" || !pattern.trim())
-    ) {
-      throw new TypeError(`prefetch ${name} must be an array of non-empty strings`);
+  const lists = { allow: options.allow ?? [], deny: options.deny ?? [] };
+  for (const [name, list] of Object.entries(lists)) {
+    if (!Array.isArray(list)) {
+      problems.push(`\`${name}\` must be an array of route patterns, such as "/posts/[id]".`);
+      continue;
+    }
+    for (const pattern of list) {
+      if (typeof pattern !== "string" || !pattern.startsWith("/")) {
+        problems.push(
+          `\`${name}\` entry ${JSON.stringify(pattern)} must be a route pattern starting with "/".`,
+        );
+        continue;
+      }
+      try {
+        matchFarmRoute(pattern, "/");
+      } catch (error) {
+        problems.push(
+          `\`${name}\` entry "${pattern}" is not a valid route pattern: ${(error as Error).message}`,
+        );
+      }
     }
   }
 
-  const hoverDelayMs = (options as PrefetchOptions).hoverDelayMs ?? 50;
-  if (typeof hoverDelayMs !== "number" || !Number.isFinite(hoverDelayMs) || hoverDelayMs < 0) {
-    throw new TypeError("prefetch hoverDelayMs must be a non-negative number");
+  if (problems.length > 0) {
+    throw new TypeError(`[farm:prefetch] Invalid options:\n- ${problems.join("\n- ")}`);
   }
 
   return Object.freeze({
-    strategy: strategy as PrefetchStrategy,
-    maxConcurrent,
-    allow: Object.freeze(allow.map((pattern) => pattern.trim())),
-    deny: Object.freeze(deny.map((pattern) => pattern.trim())),
-    hoverDelayMs,
+    mode: mode as PrefetchMode,
+    intentDelayMs,
+    allow: Object.freeze([...lists.allow]),
+    deny: Object.freeze([...lists.deny]),
   });
 }

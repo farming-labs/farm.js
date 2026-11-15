@@ -1,13 +1,15 @@
 # `@farm.js/prefetch`
 
-App-wide link prefetching for Farm.js, as the default policy layer beside
-core `Link`.
+**Give plain `<a>` links the same prefetching as core `Link`, app-wide.**
 
-Core `Link` already prefetches its own links (intent / viewport / render).
-This plugin covers the links core never sees — plain `<a>` elements in
-rendered HTML, Markdown and CMS content — through the same
-`router.prefetch` primitive, so fetching, caching and dedupe stay in one
-place. It does not fetch pages itself.
+Core `Link` prefetches its own anchors. Links in rendered HTML, Markdown and
+CMS content are plain `<a>` elements, so core never sees them. This plugin
+gives them `Link`'s modes (`intent`, `viewport`, `render`, `none`) and sends
+every prefetch through the router: `router.prefetch` for intent and render,
+`router.observeForPrefetch` for viewport.
+
+It does not fetch, cache or queue anything itself. Dedupe, the route data
+cache, the viewport queue and islands-mode router loading are core's.
 
 ## Install
 
@@ -17,46 +19,66 @@ pnpm add @farm.js/prefetch
 
 ```ts
 // farm.config.ts
+import { defineConfig } from "@farm.js/core";
 import { prefetch } from "@farm.js/prefetch";
 
-export default {
-  plugins: [
-    prefetch({
-      strategy: "both",
-      maxConcurrent: 6,
-      allow: ["/posts/[id]", "/docs/[...slug]"],
-      deny: ["/admin/[...rest]"],
-    }),
-  ],
-};
+export default defineConfig({
+  plugins: [prefetch()],
+});
 ```
+
+That prefetches a plain link 50ms after it is hovered, focused or touched.
 
 ## Options
 
-| Option          | Default    | Notes                                                                                                  |
-| --------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
-| `strategy`      | `"both"`   | `"hover"` (pointerenter/focus after `hoverDelayMs`), `"viewport"` (IntersectionObserver), or `"both"`. |
-| `maxConcurrent` | `6`        | Maximum concurrent `router.prefetch` calls. The core router already dedupes in-flight and cached URLs. |
-| `allow`         | `[]` (all) | Route patterns that may be prefetched, in Farm route syntax (`/posts/[id]`, `/docs/[...slug]`).        |
-| `deny`          | `[]`       | Route patterns that are never prefetched. Checked before `allow`, so a denied pattern wins.            |
-| `hoverDelayMs`  | `50`       | Delay after pointerenter/focus before a hover prefetch fires (same default as core `Link`).            |
+```ts
+prefetch({
+  mode: "viewport",
+  intentDelayMs: 50,
+  allow: ["/posts/[id]", "/docs/[[...slug]]"],
+  deny: ["/admin/[...rest]"],
+});
+```
 
-## What is (and is not) prefetched
+| Option          | Default    | Description                                                                                                                                             |
+| --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`          | `"intent"` | When plain links are prefetched: `"intent"` on hover, focus or touch, `"viewport"` when near the viewport, `"render"` once on the page, `"none"` never. |
+| `intentDelayMs` | `50`       | Delay before an intent prefetch. The same default as `Link`'s `prefetchDelay`.                                                                          |
+| `allow`         | `[]`       | Route patterns that may be prefetched, in Farm route syntax. Empty allows every path.                                                                   |
+| `deny`          | `[]`       | Route patterns that are never prefetched. Checked first, so `deny` wins.                                                                                |
 
-- Same-origin `http(s)` links only; cross-origin, `mailto:` and hash-only
-  jumps are skipped.
-- `Link`-managed anchors (`data-farm-link`) are skipped — core already
-  handles them.
-- `download` links, `target="_blank"` (and any non-`_self` target) links
-  and `data-farm-prefetch="off"` links are skipped.
-- When `Save-Data` is on or `prefers-reduced-data` matches, the runtime
-  stays inert: no observers, no prefetches.
-- Dynamically added anchors are picked up through a `MutationObserver`.
-  `close()` (called by the plugin manager) disconnects every observer and
-  drops the queue.
+Invalid options fail the build with every problem listed at once.
 
-## Scope note
+## Per link
 
-This is the app-wide default policy layer the issue asks for, scoped to
-what core `Link` does not do. Per-link behaviour still belongs on `Link`
-itself (`prefetch="viewport"`, `prefetchDelay`, …).
+A link picks its own mode with `data-farm-prefetch`, which takes the same
+values as `Link`'s `prefetch` prop:
+
+```html
+<a href="/pricing" data-farm-prefetch="render">Pricing</a>
+<a href="/export" data-farm-prefetch="none">Export</a>
+```
+
+An unknown value, such as `"off"` or a typo, never prefetches.
+
+## What is skipped
+
+Only links the router would navigate on click are prefetched. These are
+skipped:
+
+- `Link` anchors (`data-farm-link`), which prefetch themselves
+- `download` links and links with a `target` other than `_self`
+- absolute URLs, including same-origin ones (`https://…`, `//…`, `mailto:`):
+  core loads them as a new document
+- `#hash` links and links to the current page and query
+- paths `deny` rejects or `allow` leaves out
+- every link on pages rendered by the built-in docs engine
+
+## Limits
+
+- Server Components mode (`experimental.serverComponents: "rsc"`) has no
+  router prefetch, so the plugin stays off there.
+- `Save-Data` or `prefers-reduced-data: reduce` keeps the plugin off.
+- `"viewport"` needs a router with `observeForPrefetch`. Farm's dev,
+  production and islands routers all have it.
+- Register `prefetch()` once per app. A second instance fails the build.

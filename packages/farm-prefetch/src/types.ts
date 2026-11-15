@@ -1,34 +1,32 @@
-/** Which plain-anchor triggers prefetch a page. */
-export type PrefetchStrategy = "hover" | "viewport" | "both";
+/** When a link is prefetched. The same values as core `Link`'s `prefetch` prop:
+ * `"intent"` on hover, focus or touch, `"viewport"` when it nears the viewport,
+ * `"render"` as soon as it is on the page, `"none"` never. */
+export type PrefetchMode = "intent" | "viewport" | "render" | "none";
 
 /** Options for the `prefetch()` server plugin. Only JSON-safe values travel
  * to the browser (see `packages/farm/src/client-plugin-build.ts`). */
 export interface PrefetchOptions {
-  /** Which triggers prefetch plain anchors. Defaults to `"both"`. */
-  strategy?: PrefetchStrategy;
-  /** Maximum concurrent `router.prefetch` calls. Defaults to `6`. The core
-   * router already dedupes in-flight and cached URLs; the cap bounds how
-   * many page-data fetches run at once. */
-  maxConcurrent?: number;
+  /** How plain same-origin links are prefetched. Defaults to `"intent"`. A
+   * link overrides it with `data-farm-prefetch="intent|viewport|render|none"`. */
+  mode?: PrefetchMode;
+  /** Delay after hover, focus or touch before an intent prefetch. Defaults
+   * to `50`, the same as `Link`'s `prefetchDelay`. */
+  intentDelayMs?: number;
   /** Route patterns that may be prefetched, in Farm route syntax
-   * (`/posts/[id]`, `/docs/[...slug]`, `/pricing`). Empty (the default)
-   * allows every same-origin path. A path matches when any pattern matches. */
+   * (`/posts/[id]`, `/docs/[...slug]`). Empty (the default) allows every
+   * path. */
   allow?: string[];
-  /** Route patterns that are never prefetched. Checked before `allow`, so a
-   * denied pattern wins over an allowed one. Defaults to `[]`. */
+  /** Route patterns that are never prefetched. Checked before `allow`, so
+   * `deny` wins. Defaults to `[]`. */
   deny?: string[];
-  /** Delay in milliseconds after pointerenter/focus before a hover
-   * prefetch fires. Defaults to `50` (the same default as core `Link`). */
-  hoverDelayMs?: number;
 }
 
 /** The resolved, frozen options the browser runtime runs with. */
 export interface ResolvedPrefetchOptions {
-  strategy: PrefetchStrategy;
-  maxConcurrent: number;
+  mode: PrefetchMode;
+  intentDelayMs: number;
   allow: readonly string[];
   deny: readonly string[];
-  hoverDelayMs: number;
 }
 
 /** The browser runtime created by `startPrefetchRuntime`. */

@@ -2,51 +2,55 @@ import { describe, expect, it, vi } from "vitest";
 import { prefetch } from "./index.js";
 
 describe("prefetch Farm plugin", () => {
-  it("registers the plugin with the resolved options", () => {
-    const plugin = prefetch({ strategy: "hover", maxConcurrent: 2 });
+  it("sends the resolved options to the browser", () => {
+    const plugin = prefetch({ mode: "viewport", deny: ["/admin/[...rest]"] });
 
     expect(plugin.name).toBe("farm:prefetch");
     expect(plugin.client?.public).toEqual({
-      strategy: "hover",
-      maxConcurrent: 2,
+      mode: "viewport",
+      intentDelayMs: 50,
       allow: [],
-      deny: [],
-      hoverDelayMs: 50,
+      deny: ["/admin/[...rest]"],
     });
-    expect(JSON.stringify(plugin.client?.public)).not.toContain("function");
   });
 
   it("fills the defaults when no options are given", () => {
-    const plugin = prefetch();
-
-    expect(plugin.client?.public).toEqual({
-      strategy: "both",
-      maxConcurrent: 6,
+    expect(prefetch().client?.public).toEqual({
+      mode: "intent",
+      intentDelayMs: 50,
       allow: [],
       deny: [],
-      hoverDelayMs: 50,
     });
   });
 
-  it("creates a runtime from the public options in setup and closes it", async () => {
-    const plugin = prefetch({ strategy: "hover", hoverDelayMs: 0 });
-    const router = { prefetch: vi.fn(async () => {}) };
+  it("fails at config time for invalid options", () => {
+    expect(() => prefetch({ mode: "hover" } as never)).toThrow("[farm:prefetch] Invalid options");
+  });
 
-    const runtime = await (plugin.client?.setup as Function)?.({
-      public: { strategy: "hover", maxConcurrent: 6, allow: [], deny: [], hoverDelayMs: 0 },
-      router,
-    });
+  it("starts the runtime on the framework router and closes it", async () => {
+    document.body.innerHTML = `<a href="/about" data-farm-prefetch="render">About</a>`;
+    const plugin = prefetch({ mode: "none" });
+    const router = { navigate: vi.fn(), prefetch: vi.fn(async () => {}) };
+
+    const client = plugin.client;
+    if (!client?.setup || !client.close) throw new Error("prefetch() must define client hooks");
+    const runtime = await (client.setup as Function)({ public: client.public, router });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(router.prefetch).toHaveBeenCalledWith("/about");
     expect(typeof runtime.close).toBe("function");
-
-    (plugin.client?.close as Function)?.({ state: runtime });
+    (client.close as Function)({ state: runtime });
+    document.body.innerHTML = "";
   });
 
-  it("rejects multiple prefetch plugin instances", () => {
+  it("rejects a second prefetch() instance", () => {
     const first = prefetch();
     const second = prefetch();
 
     expect(() => first.configure?.({ plugins: [first, second] } as never, {} as never)).toThrow(
-      "one prefetch() instance",
+      "registered more than once",
     );
+    expect(() => first.configure?.({ plugins: [first] } as never, {} as never)).not.toThrow();
   });
 });

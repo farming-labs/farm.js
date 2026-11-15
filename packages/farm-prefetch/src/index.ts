@@ -3,33 +3,28 @@ import { resolvePrefetchOptions } from "./config.js";
 import type { PrefetchOptions, PrefetchRuntime, ResolvedPrefetchOptions } from "./types.js";
 
 export type {
+  PrefetchMode,
   PrefetchOptions,
   PrefetchRuntime,
-  PrefetchStrategy,
   ResolvedPrefetchOptions,
 } from "./types.js";
 
 /**
- * Prefetch plain same-origin links app-wide, as the default policy layer
- * beside core `Link`. Core `Link` already prefetches its own links
- * (intent / viewport / render); this plugin covers the anchors core never
- * sees — plain `<a>` elements in rendered HTML, Markdown and CMS content —
- * through the same `router.prefetch` primitive, so fetching, caching and
- * dedupe stay in one place.
+ * Prefetch plain same-origin links app-wide. Core `Link` prefetches its own
+ * anchors; this plugin gives the anchors core never sees (rendered HTML,
+ * Markdown, CMS content) the same modes, through the same router primitives,
+ * so fetching, caching, dedupe and the viewport queue stay in core.
  *
- * - `strategy: "hover" | "viewport" | "both"` (default `"both"`) — hover
- *   prefetches after `hoverDelayMs` (default 50ms), viewport prefetches
- *   when the link enters view.
+ * - `mode: "intent" | "viewport" | "render" | "none"` (default `"intent"`),
+ *   overridden per link with `data-farm-prefetch`.
+ * - `intentDelayMs` (default 50) before a hover, focus or touch prefetch.
  * - `allow` / `deny` route patterns (`/posts/[id]`, `/docs/[...slug]`);
- *   `deny` wins, an empty `allow` allows everything.
- * - `maxConcurrent` (default 6) caps concurrent page-data fetches.
- * - `Save-Data` and `prefers-reduced-data` disable the runtime entirely.
- * - `Link`-managed, external, download, `_blank` and
- *   `data-farm-prefetch="off"` links are never prefetched.
+ *   `deny` wins, an empty `allow` allows every path.
+ * - `Save-Data` and `prefers-reduced-data` keep the runtime off, as does a
+ *   router without `prefetch`.
  */
 export function prefetch(options: PrefetchOptions = {}) {
   const resolved = resolvePrefetchOptions(options);
-  const publicConfig: ResolvedPrefetchOptions = { ...resolved };
   let plugin: FarmPlugin<
     unknown,
     Record<string, unknown>,
@@ -45,11 +40,13 @@ export function prefetch(options: PrefetchOptions = {}) {
           (config.plugins ?? []).filter((candidate) => candidate.name === "farm:prefetch").length >
           1
         ) {
-          throw new Error("[farm:prefetch] Configure prefetch in one prefetch() instance");
+          throw new Error(
+            "[farm:prefetch] prefetch() is registered more than once. Keep one prefetch() in `plugins` and merge the options into it.",
+          );
         }
       },
       client: {
-        public: publicConfig,
+        public: resolved,
         async setup({ public: config, router }) {
           const runtime = await import("@farm.js/prefetch/client");
           return runtime.startPrefetchRuntime(config, window, router);

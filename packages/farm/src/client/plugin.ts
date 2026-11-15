@@ -21,6 +21,10 @@ export interface FarmClientPluginRouter {
   /** Re-render the current URL from fresh server data without replacing the document shell. */
   refresh?(options?: Record<string, unknown>): MaybePromise<void>;
   prefetch?(href: string): MaybePromise<void>;
+  /** Prefetch an anchor's href once it nears the viewport, through the router's shared queue. */
+  observeForPrefetch?(element: HTMLAnchorElement): void;
+  /** Stop watching an anchor passed to `observeForPrefetch`. */
+  unobserveForPrefetch?(element: HTMLAnchorElement): void;
   clearCache?(): void;
   getNavigationState?(): unknown;
 }
