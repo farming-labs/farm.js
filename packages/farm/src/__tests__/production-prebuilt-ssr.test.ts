@@ -2795,7 +2795,12 @@ export function CopyButton({ text }) {
               method: "GET",
               status: 200,
               durationMs: expect.any(Number),
-              agent: { family: "anthropic", category: "agent", identity: "self-reported" },
+              agent: {
+                family: "anthropic",
+                category: "agent",
+                identity: "self-reported",
+                name: "Claude-User",
+              },
             },
           ],
         });
