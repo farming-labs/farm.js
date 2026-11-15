@@ -20,9 +20,25 @@ export default defineClient({
     }
     // Setup covers initial HTML; rendered covers route entry and history.
     refresh();
+    // Browsers with a model context get the docs search as a WebMCP tool on every page, docs
+    // pages included, through the runtime webmcp() starts. Other browsers never download it.
+    let stopSearchTool: (() => void) | undefined;
+    let closed = false;
+    if ("modelContext" in document || "modelContext" in navigator) {
+      import("./lib/webmcp-docs-search")
+        .then(({ startDocsSearchTool }) => startDocsSearchTool())
+        .then((stop) => {
+          if (closed) stop();
+          else stopSearchTool = stop;
+        })
+        .catch((error: unknown) => console.warn("[farmjs.dev] WebMCP docs search failed", error));
+    }
     return {
       refresh,
       dispose() {
+        closed = true;
+        stopSearchTool?.();
+        stopSearchTool = undefined;
         dispose?.();
         dispose = undefined;
         docsRoot = null;

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { startWebMCPRuntime } from "@farm.js/webmcp/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   parseSearchInput,
@@ -64,18 +65,26 @@ describe("WebMCP docs search", () => {
     expect(searchDocsTool.annotations).toEqual({ readOnlyHint: true });
   });
 
-  it("registers with document.modelContext through Farm's adapter", async () => {
+  it("registers with document.modelContext through the runtime webmcp() starts", async () => {
     const registerTool = vi.fn(async () => undefined);
     vi.stubGlobal("document", { modelContext: { registerTool } });
-    const stop = await startDocsSearchTool();
-    expect(registerTool).toHaveBeenCalledTimes(1);
-    const [tool, options] = registerTool.mock.calls[0] as unknown as [
-      { name: string },
-      { signal: AbortSignal },
-    ];
-    expect(tool.name).toBe("search_docs");
-    stop();
-    expect(options.signal.aborted).toBe(true);
+    // What the webmcp() plugin does on the client before page code runs.
+    const runtime = await startWebMCPRuntime({ unsupported: "ignore" });
+    try {
+      const stop = await startDocsSearchTool();
+      await runtime.sync();
+      expect(registerTool).toHaveBeenCalledTimes(1);
+      const [tool, options] = registerTool.mock.calls[0] as unknown as [
+        { name: string },
+        { signal: AbortSignal },
+      ];
+      expect(tool.name).toBe("search_docs");
+      stop();
+      await runtime.sync();
+      expect(options.signal.aborted).toBe(true);
+    } finally {
+      runtime.close();
+    }
   });
 
   it("falls back to navigator.modelContext", async () => {
