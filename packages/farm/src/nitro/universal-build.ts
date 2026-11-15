@@ -7994,7 +7994,7 @@ const farmUserConfig = ${
 const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
 
-function FarmDefault404Page() {
+function renderFarmDefault404Page() {
   return React.createElement(React.Fragment, null,
     React.createElement("style", null, ${JSON.stringify(DEFAULT_NOT_FOUND_STYLES)}),
     React.createElement("main", {
@@ -8019,6 +8019,12 @@ function FarmDefault404Page() {
     )
   );
 }
+
+// Renderers that compile their own components (Vue, Svelte) render a plain function as a
+// component only once it is marked; unmarked, Vue printed this page as "[object Object]".
+const FarmDefault404Page = typeof React.markFunctionComponent === "function"
+  ? React.markFunctionComponent(renderFarmDefault404Page)
+  : renderFarmDefault404Page;
 
 /** The app's not-found page, or Farm's, without layouts. */
 function createFarmNotFoundElement(pathname) {
