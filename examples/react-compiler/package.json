@@ -8,6 +8,7 @@
     "build": "farm build",
     "start": "farm start",
     "experiment": "pnpm run build && node scripts/verify-experiment.mjs",
+    "experiment:preact": "FARM_RENDERER=preact pnpm run experiment",
     "experiment:heavy": "node scripts/verify-heavy-experiment.mjs",
     "type-check": "tsc --noEmit"
   },
@@ -21,9 +22,11 @@
   },
   "devDependencies": {
     "@farm.js/cli": "workspace:*",
+    "@farm.js/preact": "workspace:*",
     "@playwright/test": "^1.52.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "preact": "10.29.8",
     "typescript": "^5.3.3",
     "vite": "8.3.4"
   }

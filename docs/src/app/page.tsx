@@ -816,14 +816,14 @@ function TerminalRequestLine({
   return (
     <span className="block whitespace-nowrap text-white/54">
       <span className="text-white/28">[</span>
-      <span className="text-white/86">FARM</span>
+      <span>FARM</span>
       <span className="text-white/28">]</span> <span className="text-white/28">[</span>
-      <span className={isApi ? "text-white/86" : "text-white/62"}>{type}</span>
+      <span className={isApi ? undefined : "text-white/62"}>{type}</span>
       <span className="text-white/28">]</span> <span className="text-white/28">[</span>
       <span className="text-white/72">{method}</span>
       <span className="text-white/28">]</span>{" "}
       <span className={isApi ? "text-white/72" : "text-white/66"}>{path}</span>{" "}
-      <span className="text-white/24">-</span> <span className="text-white/84">200</span>{" "}
+      <span className="text-white/24">-</span> <span>200</span>{" "}
       <span className={isApi ? "text-white/38" : "text-white/34"}>({duration}ms)</span>
     </span>
   );
@@ -853,9 +853,9 @@ function TerminalVisual() {
                 </span>
                 <span aria-hidden className="farm-terminal-command-cursor inline-block" />
               </span>
-              <span className="farm-terminal-output mt-1.5 block space-y-1.5">
+              <span className="farm-terminal-output mt-1.5 block *:not-first:mt-1.5">
                 <span className="block whitespace-nowrap">
-                  <span className="font-semibold text-green-400">Farm.js</span>{" "}
+                  <span className="font-semibold text-[#4ade80]">Farm.js</span>{" "}
                   <span className="text-white/34">v{FARM_VERSION}</span>{" "}
                   <span className="text-white/34">ready in 23ms</span>
                 </span>
@@ -1079,7 +1079,7 @@ function FeatureCell({
           <IndexedLabel icon={Icon} index={index} label={label} />
         </div>
         <h3 className="farm-feature-title font-geist-pixel">{title}</h3>
-        <p className="farm-feature-body text-sm leading-6 sm:text-base sm:leading-7">{body}</p>
+        <p className="farm-feature-body text-sm sm:text-base">{body}</p>
       </div>
       {children}
     </article>
@@ -1598,10 +1598,10 @@ function AgentSectionIntro() {
       <div className="relative grid min-w-0 items-center gap-8 overflow-hidden bg-black px-6 py-10 sm:px-10 sm:py-12 md:grid-cols-[minmax(0,1fr)_20rem] lg:min-h-[420px] lg:gap-10 lg:px-12 xl:h-[420px] xl:grid-cols-[minmax(0,1fr)_28rem]">
         <div className="relative z-10 flex min-w-0 items-center">
           <div className="min-w-0 max-w-lg">
-            <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
+            <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl sm:leading-10">
               Bring the agent runtime you already use
             </h2>
-            <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
+            <p className="mt-5 text-sm text-white/48 sm:text-base">
               Run Eve on Vercel or Cloudflare Agents on Workers. Farm joins each runtime to your app
               in development and production while its native SDK stays intact.
             </p>
@@ -1656,10 +1656,10 @@ function VibyCallout() {
 
       <div className="grid min-w-0 items-center gap-10 overflow-hidden bg-black px-6 py-10 sm:px-10 sm:py-12 lg:min-h-[420px] lg:px-12 xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]">
         <div className="max-w-xl">
-          <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
+          <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl sm:leading-10">
             Vibe coding, powered by Farm.js
           </h2>
-          <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
+          <p className="mt-5 text-sm text-white/48 sm:text-base">
             <span className="font-mono text-white">
               <span aria-hidden className="text-white/40">
                 &rsaquo;_{" "}
@@ -1719,10 +1719,10 @@ function IntegrationsSection() {
       <div className="relative grid min-w-0 items-center gap-8 overflow-hidden bg-black px-6 py-10 sm:px-10 sm:py-12 md:grid-cols-[minmax(0,1fr)_20rem] lg:min-h-[440px] lg:gap-10 lg:px-12 xl:h-[440px] xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="relative z-10 flex items-center">
           <div className="max-w-lg">
-            <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
+            <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl sm:leading-10">
               Bring the tools you already use
             </h2>
-            <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
+            <p className="mt-5 text-sm text-white/48 sm:text-base">
               Start with built-in Farm Auth, keep full control with Better Auth, then add
               integrations for billing, email, jobs, KV storage, agents, API keys, and UI—or connect
               your own.
@@ -1794,10 +1794,10 @@ function FinalCta() {
   return (
     <section className="farm-full-rule w-full">
       <div className="px-6 py-10 text-center sm:px-10 sm:py-12">
-        <h2 className="text-balance font-geist-pixel text-xl font-medium leading-[1.15] tracking-normal text-white sm:text-2xl">
+        <h2 className="text-balance font-geist-pixel text-xl font-medium leading-[1.15] tracking-normal text-white sm:text-2xl sm:leading-8">
           One framework. The whole product.
         </h2>
-        <p className="mx-auto mt-2 max-w-2xl text-balance text-sm leading-6 text-white/48 sm:text-base">
+        <p className="mx-auto mt-2 max-w-2xl text-balance text-sm text-white/48 sm:text-base">
           Build routing, APIs, integrations, agents, docs, and deployment together in one React
           framework.
         </p>

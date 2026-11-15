@@ -1,46 +1,18 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
-import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
+import { startProductionServer, type ProductionServer } from "./production-server";
 
 const isWindows = process.platform === "win32";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const farmOTelRoot = path.resolve(packageRoot, "../farm-otel");
-
-async function getAvailablePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : 0;
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return port;
-}
-
-async function waitForServer(url: string, output: () => string): Promise<Response> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 120; attempt++) {
-    try {
-      return await fetch(url);
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  throw new Error(`Production server did not start: ${String(lastError)}\n${output()}`);
-}
 
 describe("production OpenTelemetry tracing", () => {
   // Windows has no POSIX signals: child.kill("SIGTERM") maps to TerminateProcess,
@@ -49,7 +21,7 @@ describe("production OpenTelemetry tracing", () => {
     if (isWindows) ctx.skip();
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-otel-"));
     const traceOutput = path.join(root, "traces.jsonl");
-    let productionServer: ReturnType<typeof spawn> | undefined;
+    let productionServer: ProductionServer | undefined;
 
     try {
       await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
@@ -153,42 +125,30 @@ export function register(context) {
       );
       await build(config, { root, preset: "node-server" });
 
-      const serverDirectory = path.join(root, ".farm", ".output", "server");
-      const port = await getAvailablePort();
-      const output: string[] = [];
-      productionServer = spawn(process.execPath, [path.join(serverDirectory, "index.mjs")], {
-        cwd: serverDirectory,
-        env: {
-          ...process.env,
-          FARM_TRACE_OUTPUT: traceOutput,
-          HOST: "127.0.0.1",
-          PORT: String(port),
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      productionServer.stdout?.on("data", (chunk) => output.push(String(chunk)));
-      productionServer.stderr?.on("data", (chunk) => output.push(String(chunk)));
+      productionServer = await startProductionServer(
+        path.join(root, ".farm", ".output", "server"),
+        { env: { FARM_TRACE_OUTPUT: traceOutput } },
+      );
+      const { origin, output, process: serverProcess } = productionServer;
 
-      const response = await waitForServer(`http://127.0.0.1:${port}/`, () => output.join(""));
+      const response = await fetch(`${origin}/`);
       expect(response.status).toBe(200);
       expect(await response.text()).toContain('data-instrumentation="production:nodejs"');
 
-      const apiResponse = await fetch(`http://127.0.0.1:${port}/api/health`);
+      const apiResponse = await fetch(`${origin}/api/health`);
       expect(apiResponse.status).toBe(200);
       expect(await apiResponse.json()).toEqual({ ok: true });
 
-      productionServer.kill("SIGTERM");
+      serverProcess.kill("SIGTERM");
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(
-          () => reject(new Error(`Production shutdown timed out:\n${output.join("")}`)),
+          () => reject(new Error(`Production shutdown timed out:\n${output()}`)),
           8_000,
         );
-        productionServer?.once("exit", (code, signal) => {
+        serverProcess.once("exit", (code, signal) => {
           clearTimeout(timeout);
           if (code && code !== 0) {
-            reject(
-              new Error(`Production server exited with ${code}/${signal}:\n${output.join("")}`),
-            );
+            reject(new Error(`Production server exited with ${code}/${signal}:\n${output()}`));
           } else resolve();
         });
       });
@@ -233,9 +193,7 @@ export function register(context) {
       expect(apiSpan.parentSpanId).toBe(apiRequestSpan.spanId);
       expect(apiSpan.traceId).toBe(apiRequestSpan.traceId);
     } finally {
-      if (productionServer && productionServer.exitCode === null) {
-        productionServer.kill("SIGKILL");
-      }
+      await productionServer?.stop();
       await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }, 120_000);

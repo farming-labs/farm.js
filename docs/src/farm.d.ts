@@ -60,6 +60,7 @@ export type RoutePath =
   | "/docs/integrations/cf-agent"
   | "/docs/integrations/convex"
   | "/docs/integrations/custom"
+  | "/docs/integrations/durable-workflows"
   | "/docs/integrations/email"
   | "/docs/integrations/eve"
   | "/docs/integrations/inngest"
@@ -92,6 +93,7 @@ export type RoutePath =
   | "/docs/plugins"
   | "/docs/plugins/analyzer"
   | "/docs/plugins/blyp"
+  | "/docs/plugins/bot"
   | "/docs/plugins/client"
   | "/docs/plugins/content"
   | "/docs/plugins/create-plugin"
@@ -106,6 +108,7 @@ export type RoutePath =
   | "/docs/plugins/pwa"
   | "/docs/plugins/schema-tables"
   | "/docs/plugins/scripts"
+  | "/docs/plugins/scroll-restoration"
   | "/docs/plugins/search"
   | "/docs/plugins/sentry"
   | "/docs/plugins/stylex"
@@ -134,7 +137,8 @@ export type RoutePath =
   | "/docs/themes"
   | "/docs/upgrading"
   | "/privacy"
-  | "/telemetry";
+  | "/telemetry"
+  | "/terms";
 export type RoutePattern =
   | "/"
   | "/about"
@@ -183,6 +187,7 @@ export type RoutePattern =
   | "/docs/integrations/cf-agent"
   | "/docs/integrations/convex"
   | "/docs/integrations/custom"
+  | "/docs/integrations/durable-workflows"
   | "/docs/integrations/email"
   | "/docs/integrations/eve"
   | "/docs/integrations/inngest"
@@ -215,6 +220,7 @@ export type RoutePattern =
   | "/docs/plugins"
   | "/docs/plugins/analyzer"
   | "/docs/plugins/blyp"
+  | "/docs/plugins/bot"
   | "/docs/plugins/client"
   | "/docs/plugins/content"
   | "/docs/plugins/create-plugin"
@@ -229,6 +235,7 @@ export type RoutePattern =
   | "/docs/plugins/pwa"
   | "/docs/plugins/schema-tables"
   | "/docs/plugins/scripts"
+  | "/docs/plugins/scroll-restoration"
   | "/docs/plugins/search"
   | "/docs/plugins/sentry"
   | "/docs/plugins/stylex"
@@ -257,7 +264,8 @@ export type RoutePattern =
   | "/docs/themes"
   | "/docs/upgrading"
   | "/privacy"
-  | "/telemetry";
+  | "/telemetry"
+  | "/terms";
 export type RouteModulePattern =
   | "/"
   | "/about"
@@ -306,6 +314,7 @@ export type RouteModulePattern =
   | "/docs/integrations/cf-agent"
   | "/docs/integrations/convex"
   | "/docs/integrations/custom"
+  | "/docs/integrations/durable-workflows"
   | "/docs/integrations/email"
   | "/docs/integrations/eve"
   | "/docs/integrations/inngest"
@@ -338,6 +347,7 @@ export type RouteModulePattern =
   | "/docs/plugins"
   | "/docs/plugins/analyzer"
   | "/docs/plugins/blyp"
+  | "/docs/plugins/bot"
   | "/docs/plugins/client"
   | "/docs/plugins/content"
   | "/docs/plugins/create-plugin"
@@ -352,6 +362,7 @@ export type RouteModulePattern =
   | "/docs/plugins/pwa"
   | "/docs/plugins/schema-tables"
   | "/docs/plugins/scripts"
+  | "/docs/plugins/scroll-restoration"
   | "/docs/plugins/search"
   | "/docs/plugins/sentry"
   | "/docs/plugins/stylex"
@@ -380,7 +391,8 @@ export type RouteModulePattern =
   | "/docs/themes"
   | "/docs/upgrading"
   | "/privacy"
-  | "/telemetry";
+  | "/telemetry"
+  | "/terms";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;

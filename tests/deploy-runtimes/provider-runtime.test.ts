@@ -200,10 +200,23 @@ export default {
     path.join(root, "src", "app", "stream-tail.tsx"),
     `export default function StreamTail() { return <span data-stream-tail="complete">stream complete</span>; }`,
   );
+  // A client component whose dynamic import the client build splits into chunks/.
+  await fs.writeFile(
+    path.join(root, "src", "app", "client-chunk.tsx"),
+    `"use client";
+import { useEffect, useState } from "react";
+export default function ClientChunk() {
+  const [label, setLabel] = useState("client chunk pending");
+  useEffect(() => { void import("./stream-tail").then(() => setLabel("client chunk loaded")); }, []);
+  return <span data-client-chunk>{label}</span>;
+}
+`,
+  );
   await fs.writeFile(
     path.join(root, "src", "app", "page.tsx"),
     `
 import React, { lazy, Suspense } from "react";
+import ClientChunk from "./client-chunk";
 
 const StreamTail = lazy(() =>
   new Promise((resolve) => setTimeout(() => resolve(import("./stream-tail")), 25)),
@@ -215,6 +228,7 @@ export default function Page() {
   return (
     <main data-provider-runtime=${JSON.stringify(target)}>
       Farm provider runtime
+      <ClientChunk />
       <Suspense fallback={<span data-stream-tail="pending">stream pending</span>}>
         <StreamTail />
       </Suspense>
@@ -370,6 +384,111 @@ async function createImageFixture(
 }
 
 /**
+ * Builds an app whose API route reports what server code reads from the
+ * worker's environment: Farm's typed env, `process.env` in the handler and at
+ * module scope, the `CRON_SECRET` check, and a storage mount on the `FARM_CACHE`
+ * KV binding. `FARM_RUNTIME_SECRET` is set while building, so Farm leaves it out
+ * of the bundle and reads it where the server runs.
+ */
+async function createCloudflareEnvFixture(
+  preset: CloudflareWorkerPreset,
+): Promise<{ outputDir: string }> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), `farm-${preset}-env-`));
+  fixtureRoots.push(root);
+
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(
+    corePackageRoot,
+    path.join(root, "node_modules", "@farm.js", "core"),
+    "junction",
+  );
+  for (const name of ["react", "react-dom"]) {
+    await fs.symlink(
+      await fs.realpath(path.join(corePackageRoot, "node_modules", name)),
+      path.join(root, "node_modules", name),
+      "junction",
+    );
+  }
+  await fs.mkdir(path.join(root, "src", "app", "api", "runtime-env"), { recursive: true });
+  await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({ private: true, type: "module" }, null, 2),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "layout.tsx"),
+    `export default function Layout({ children }) { return <html><body>{children}</body></html>; }`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "page.tsx"),
+    `export default function Page() { return <main>Cloudflare env runtime</main>; }`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "lib", "module-env.ts"),
+    `export const moduleScopeSecret = process.env.FARM_RUNTIME_SECRET ?? null;\n`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "api", "runtime-env", "route.ts"),
+    `
+import { authorizeCronRequest } from "@farm.js/core/cron";
+import { getEnv } from "@farm.js/core/env";
+import { getStorage } from "@farm.js/core/storage";
+import { moduleScopeSecret } from "../../../lib/module-env";
+
+export async function GET(request: Request) {
+  let storage: unknown;
+  try {
+    await getStorage("cache").setItem("probe", "stored");
+    storage = await getStorage("cache").getItem("probe");
+  } catch (error) {
+    storage = { error: error instanceof Error ? error.message : String(error) };
+  }
+  return Response.json({
+    getEnv: getEnv("FARM_RUNTIME_SECRET") ?? null,
+    processEnv: process.env.FARM_RUNTIME_SECRET ?? null,
+    moduleScope: moduleScopeSecret,
+    cronAuthorized: await authorizeCronRequest(request),
+    storage,
+  });
+}
+`.trim(),
+  );
+  // The built server reads `storage` from farm.config.ts.
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    `
+export default {
+  env: { server: { FARM_RUNTIME_SECRET: (value: string | undefined) => value } },
+  storage: { mounts: { cache: { driver: "cloudflare-kv-binding", binding: "FARM_CACHE" } } },
+};
+`.trim(),
+  );
+
+  const buildValue = process.env.FARM_RUNTIME_SECRET;
+  process.env.FARM_RUNTIME_SECRET = "build-value";
+  try {
+    const userConfig = await loadConfig(root, undefined, "production");
+    const config = await resolveConfig(
+      {
+        ...userConfig,
+        root,
+        srcDir: "src",
+        images: { provider: "none" },
+        telemetry: false,
+        generateBuildId: () => `${preset}-env-test`,
+        deploy: { target: "cloudflare", preset },
+      },
+      "production",
+    );
+    await build(config, { root, preset });
+    return { outputDir: path.resolve(root, config.deploy.outputDir) };
+  } finally {
+    if (buildValue === undefined) delete process.env.FARM_RUNTIME_SECRET;
+    else process.env.FARM_RUNTIME_SECRET = buildValue;
+  }
+}
+
+/**
  * Calls the netlify-edge function the way Netlify Edge Functions do, from a copy
  * outside the app. Netlify bundles a bare import in an edge function from the
  * app's node_modules with Node conditions, which load @vercel/og's Node build
@@ -435,6 +554,79 @@ function createCloudflareWorkerRuntime(preset: CloudflareWorkerPreset, outputDir
       preset === "cloudflare-pages" ? "index.js" : "index.mjs",
     ),
   });
+}
+
+/**
+ * Builds a cloudflare-module app with a `cron` entry whose route records the
+ * job name in a storage mount on the `CRON_KV` binding.
+ */
+async function createCloudflareCronFixture(): Promise<{ outputDir: string }> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-cloudflare-module-cron-"));
+  fixtureRoots.push(root);
+
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(
+    corePackageRoot,
+    path.join(root, "node_modules", "@farm.js", "core"),
+    "junction",
+  );
+  for (const name of ["react", "react-dom"]) {
+    await fs.symlink(
+      await fs.realpath(path.join(corePackageRoot, "node_modules", name)),
+      path.join(root, "node_modules", name),
+      "junction",
+    );
+  }
+  await fs.mkdir(path.join(root, "src", "app", "api", "cron", "ping"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({ private: true, type: "module" }, null, 2),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "layout.tsx"),
+    `export default function Layout({ children }) { return <html><body>{children}</body></html>; }`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "page.tsx"),
+    `export default function Page() { return <main>Cloudflare cron runtime</main>; }`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "api", "cron", "ping", "route.ts"),
+    `
+import { cronRoute } from "@farm.js/core/cron";
+import { getStorage } from "@farm.js/core/storage";
+
+export const GET = cronRoute(async (request: Request) => {
+  await getStorage("cron").setItem("ping", request.headers.get("x-farm-cron-name"));
+  return Response.json({ ok: true });
+});
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    `
+export default {
+  cron: { ping: { schedule: "*/5 * * * *", path: "/api/cron/ping" } },
+  storage: { mounts: { cron: { driver: "cloudflare-kv-binding", binding: "CRON_KV" } } },
+};
+`.trim(),
+  );
+
+  const userConfig = await loadConfig(root, undefined, "production");
+  const config = await resolveConfig(
+    {
+      ...userConfig,
+      root,
+      srcDir: "src",
+      images: { provider: "none" },
+      telemetry: false,
+      generateBuildId: () => "cloudflare-module-cron-test",
+      deploy: { target: "cloudflare", preset: "cloudflare-module" },
+    },
+    "production",
+  );
+  await build(config, { root, preset: "cloudflare-module" });
+  return { outputDir: path.resolve(root, config.deploy.outputDir) };
 }
 
 async function expectPngResponse(response: Response): Promise<void> {
@@ -602,6 +794,57 @@ async function expectProviderRuntime(
   }
 }
 
+/**
+ * A `_headers` file as Wrangler hands it to the asset worker (assetConfig.headers), so
+ * Miniflare applies the rules Nitro wrote for the Cloudflare output.
+ */
+async function readCloudflareHeaderRules(publicDir: string): Promise<{
+  version: 2;
+  rules: Record<string, { set: Record<string, string> }>;
+}> {
+  const rules: Record<string, { set: Record<string, string> }> = {};
+  const source = await fs.readFile(path.join(publicDir, "_headers"), "utf8").catch(() => "");
+  let current: Record<string, string> | undefined;
+  for (const line of source.split("\n")) {
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+    if (!/^\s/.test(line)) {
+      current = (rules[line.trim()] ??= { set: {} }).set;
+      continue;
+    }
+    const separator = line.indexOf(":");
+    if (current && separator > 0) {
+      current[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
+    }
+  }
+  return { version: 2, rules };
+}
+
+const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/** Hashed client files are cached for a year; public files keep revalidating. */
+async function expectImmutableClientAssets(
+  publicDir: string,
+  request: (path: string, init?: RequestInit) => Promise<Response>,
+): Promise<void> {
+  const files = (await fs.readdir(publicDir, { recursive: true })).map((file) =>
+    file.split(path.sep).join("/"),
+  );
+  const entry = files.find((file) => /^farm-client-h[0-9a-f]+\.js$/.test(file));
+  const chunk = files.find((file) => /^chunks\/.+-h[0-9a-f]+\.js$/.test(file));
+  expect(entry, files.join(", ")).toBeDefined();
+  expect(chunk, files.join(", ")).toBeDefined();
+  for (const file of [entry!, chunk!]) {
+    const response = await request(`/${file}`);
+    expect(response.status, file).toBe(200);
+    expect(response.headers.get("cache-control"), file).toBe(IMMUTABLE_CACHE_CONTROL);
+  }
+  for (const file of ["runtime-marker.txt", "farm-client.js"]) {
+    const response = await request(`/${file}`);
+    expect(response.status, file).toBe(200);
+    expect(response.headers.get("cache-control") ?? "", file).not.toContain("immutable");
+  }
+}
+
 async function readMCPResponse(response: Response): Promise<any> {
   const text = await response.text();
   if (!response.headers.get("content-type")?.startsWith("text/event-stream")) {
@@ -635,11 +878,15 @@ describe("first-class provider runtime output", () => {
         routerConfig: {
           has_user_worker: true,
         },
+        assetConfig: { headers: await readCloudflareHeaderRules(outputDir) },
       },
     });
 
     try {
       await expectProviderRuntime("cloudflare", (requestPath, init) =>
+        runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test"), init),
+      );
+      await expectImmutableClientAssets(outputDir, (requestPath, init) =>
         runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test"), init),
       );
       await expectEdgeDocsRuntime((requestPath, init) =>
@@ -729,6 +976,54 @@ describe("first-class provider runtime output", () => {
     }, 180_000);
   }
 
+  for (const preset of ["cloudflare-pages", "cloudflare-module"] as CloudflareWorkerPreset[]) {
+    it(`reads the worker's bindings in the ${preset} worker at the generated compatibility settings`, async () => {
+      const { outputDir } = await createCloudflareEnvFixture(preset);
+      const workerDirectory = path.join(
+        outputDir,
+        preset === "cloudflare-pages" ? "_worker.js" : "server",
+      );
+      const entry = preset === "cloudflare-pages" ? "index.js" : "index.mjs";
+      // Wrangler deploys with the settings Nitro writes here, not with the
+      // newer date the other runtime tests boot at.
+      const wrangler = JSON.parse(
+        await fs.readFile(path.join(workerDirectory, "wrangler.json"), "utf8"),
+      ) as { compatibility_date: string; compatibility_flags: string[] };
+      // Every module, as Wrangler uploads them: storage drivers load through a
+      // dynamic import that Miniflare cannot follow from the entry.
+      const modules = (await fs.readdir(workerDirectory, { recursive: true }))
+        .filter((file) => /\.m?js$/.test(file))
+        .sort((a, b) => Number(b === entry) - Number(a === entry))
+        .map((file) => ({ type: "ESModule" as const, path: path.join(workerDirectory, file) }));
+      const runtime = new Miniflare({
+        compatibilityDate: wrangler.compatibility_date,
+        compatibilityFlags: wrangler.compatibility_flags,
+        modulesRoot: workerDirectory,
+        modules,
+        bindings: { FARM_RUNTIME_SECRET: "runtime-value", CRON_SECRET: "cron-value" },
+        kvNamespaces: ["FARM_CACHE"],
+      });
+
+      try {
+        const response = await runtime.dispatchFetch("https://farm-runtime.test/api/runtime-env", {
+          headers: { authorization: "Bearer cron-value", "accept-encoding": "identity" },
+        });
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(await response.json()).toEqual({
+          getEnv: "runtime-value",
+          processEnv: "runtime-value",
+          moduleScope: "runtime-value",
+          cronAuthorized: true,
+          storage: "stored",
+        });
+        const cache = await runtime.getKVNamespace("FARM_CACHE");
+        expect(await cache.get("probe")).toBe("stored");
+      } finally {
+        await runtime.dispose();
+      }
+    }, 180_000);
+  }
+
   for (const [label, source] of [
     [
       "a metadata route and a @farm.js/core/og API route",
@@ -788,14 +1083,49 @@ describe("first-class provider runtime output", () => {
 
     try {
       await runtime.start();
-      await expectProviderRuntime("netlify", async (requestPath, init) => {
+      const request = async (requestPath: string, init?: RequestInit) => {
         const response = await runtime.handle(
           new Request(new URL(requestPath, "https://farm-runtime.test"), init),
         );
         return response ?? new Response(null, { status: 404 });
-      });
+      };
+      await expectProviderRuntime("netlify", request);
+      await expectImmutableClientAssets(path.join(root, "dist"), request);
     } finally {
       await runtime.stop();
+    }
+  }, 180_000);
+
+  it("delivers a Cron Trigger to the cron route in the cloudflare-module worker", async () => {
+    const { outputDir } = await createCloudflareCronFixture();
+    const workerDirectory = path.join(outputDir, "server");
+    const wrangler = JSON.parse(
+      await fs.readFile(path.join(workerDirectory, "wrangler.json"), "utf8"),
+    ) as { compatibility_date: string; compatibility_flags: string[]; triggers?: unknown };
+    expect(wrangler.triggers).toEqual({ crons: ["*/5 * * * *"] });
+    // Every module, as Wrangler uploads them: storage drivers load through a
+    // dynamic import that Miniflare cannot follow from the entry.
+    const modules = (await fs.readdir(workerDirectory, { recursive: true }))
+      .filter((file) => /\.m?js$/.test(file))
+      .sort((a, b) => Number(b === "index.mjs") - Number(a === "index.mjs"))
+      .map((file) => ({ type: "ESModule" as const, path: path.join(workerDirectory, file) }));
+    const runtime = new Miniflare({
+      compatibilityDate: wrangler.compatibility_date,
+      compatibilityFlags: wrangler.compatibility_flags,
+      modulesRoot: workerDirectory,
+      modules,
+      bindings: { CRON_SECRET: "cron-value" },
+      kvNamespaces: ["CRON_KV"],
+    });
+
+    try {
+      const worker = await runtime.getWorker();
+      const result = await worker.scheduled({ cron: "*/5 * * * *", scheduledTime: new Date() });
+      expect(result.outcome).toBe("ok");
+      const kv = await runtime.getKVNamespace("CRON_KV");
+      expect(await kv.get("ping")).toBe("ping");
+    } finally {
+      await runtime.dispose();
     }
   }, 180_000);
 });

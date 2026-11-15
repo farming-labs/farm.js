@@ -246,8 +246,8 @@ schemes such as `customapp:open` are validated from their URI grammar and work w
 Viewport prefetch uses a short scroll guard and is cancelled if its link unmounts before the guard
 expires. Intent prefetches are deduplicated while active; after an attempt settles, a later hover,
 focus, or touch can retry while successful route data remains deduplicated by the router cache.
-In a production islands build, viewport prefetch starts once the router has loaded, on the first
-link hover, focus, tap, or navigation.
+In a production islands build, the client router loads when a viewport-prefetch link first nears
+the viewport, or on the first link hover, focus, tap, or navigation, and then prefetches.
 The development page-data router reuses a successfully decoded JSON prefetch response when
 navigation overlaps it with the same URL, interception origin, and active layout chain.
 Refreshes and different contexts fetch independently, and failed prefetches are retried by
@@ -262,6 +262,12 @@ repopulating it. Cancelling navigation does not abort a shared background prefet
 When a production HTML request redirects, Farm hands the original URL to a full document
 navigation so the browser preserves the redirect destination, fragments, and push/replace history.
 Prefetching a redirect never navigates the page or caches destination HTML under the original URL.
+When development page data redirects (a `redirect()` or thrown 3xx `Response` from the page, its
+layouts, metadata, or route data, or route middleware that redirects), the router continues the
+navigation at the target instead of reloading the document. The target takes the history entry
+the redirecting URL would have had and inherits its fragment unless the target has its own; a
+cross-origin target, or a chain of more than 20 redirects, becomes a document navigation.
+Prefetching such a link neither caches nor reports the redirect.
 A same-origin link whose response is not HTML, such as an RSS feed, JSON, or a file served by an API
 route, is handed to the browser the same way, so it opens as its own document. Prefetching such a
 link never caches it as page HTML.
@@ -434,7 +440,7 @@ refresh after a server action, same-page hash links, and document navigations (o
 locale switches, routes that need a full page load), which a WebView's own navigation callback
 sees. A delegate that throws is logged and treated as declining. `delegateNavigation` returns a
 function that removes the delegate, and it is also exported from `@farm.js/core/client`. Apps
-on the RSC pipeline (`experimental.serverComponents`) run the RSC router, which offers link clicks,
+on the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`) run the RSC router, which offers link clicks,
 router `push` and `replace`, and redirects after a server action; it has no client entry, so
 register the delegate from a client component.
 
@@ -466,8 +472,9 @@ Page state is stored in `history.state`, so back/forward navigation restores the
 ## Scroll restoration
 
 Farm restores window scroll during SPA navigation. Register nested scroll areas when a layout owns its own scroll container.
-Locations with different query strings keep independent positions, so browser history restores the
-correct filtered, searched, or paginated view.
+Positions are saved per history entry, like the browser does: Back and Forward return to where you
+left each visit, even when the same URL is in history twice, and locations with different query
+strings keep independent positions. A link with `scroll={false}` keeps the current scroll.
 
 ```tsx
 "use client";
@@ -481,6 +488,31 @@ export function DocsSidebar() {
 ```
 
 Use stable keys per scroll container. If two elements share a key, the latest mounted element owns that stored position.
+
+## Route announcements
+
+A client navigation does not load a new document, so a screen reader has nothing to read on its
+own. Farm announces the page instead. After a navigation renders, Farm puts the page's title into a
+visually hidden live region (`aria-live="assertive"`, `aria-atomic="true"`) at the end of `<body>`.
+When the title is empty it reads the first `h1`, then the pathname.
+
+- The first load is not announced: the screen reader reads that document itself.
+- A navigation is announced when its pathname or title changed. Back and forward are announced.
+  A hash change, or a `router.refresh()` or search-param change that keeps the title, is not.
+- The region is created on the first client navigation, never in server HTML, so SSR output and
+  hydration are unchanged.
+- It works the same in every renderer, in islands mode, and with the RSC pipeline. There is no
+  option to configure.
+- Focus stays where it was. Farm does not move focus after a navigation.
+- Pages of the built-in docs engine navigate with their own runtime and are not announced yet.
+
+Give each page its own `metadata.title` so the announcement says where the user landed:
+
+```tsx
+export const metadata = { title: "Billing | Acme" };
+```
+
+End-to-end tests can read the announcement from `#farm-route-announcer`.
 
 ## Route data cache
 
@@ -1299,6 +1331,12 @@ Farm automatically adds the nearest discovered manifest to rendered page heads u
 
 With the [docs engine](/docs/docs-engine) enabled, a root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` takes its path from the docs engine, which keeps serving the ones the app does not define. An app sitemap replaces the docs engine's instead of extending it, so list the docs pages in it when crawlers should find them there.
 
+[React Server Components](/docs/server-rendering#react-server-components) apps serve `sitemap.ts`,
+`robots.ts`, `manifest.ts`, `llms.ts`, and `llms-full.ts` the same way, after middleware and below
+a `basePath`, in place of the generated files, and add the nearest manifest to the page head. A
+production build bundles these files only when the app has one; `farm dev` serves a file added
+while it runs.
+
 Generated metadata routes accept `GET` and `HEAD` and return `405` for other methods. They revalidate by default. Export `revalidate = 300` for shared CDN caching or `revalidate = false` only for permanently immutable output. A returned `Response` is an escape hatch for custom XML, headers, or status codes.
 
 `feed.ts` is not reserved yet because feeds need an explicit RSS, Atom, or JSON Feed contract. Use an API or programmatic route for feeds until that format is defined.
@@ -1357,6 +1395,12 @@ Farm serves the file through the extensionless `/products/opengraph-image` endpo
 Use `twitter-image.png` when X/Twitter needs a different image. Otherwise, social platforms can use the Open Graph image. An explicit `metadata.openGraph.images` or `metadata.twitter.images` value always wins over a matching file.
 
 Static images inside a dynamic segment are shared by every concrete route. Use a generated image when the preview must depend on route params.
+
+[React Server Components](/docs/server-rendering#react-server-components) apps serve static and
+generated `opengraph-image` and `twitter-image` files the same way, at the same URLs, with the same
+caching and head tags, after middleware and below a `basePath` and locale prefix. A production
+build inlines static images and bundles generated ones only when the app has them; `farm dev`
+serves a file added while it runs.
 
 ### Generated metadata images
 
@@ -1555,7 +1599,8 @@ With experimental RSC enabled, failures before the HTML shell is sent render the
 `error.tsx` through RSC and SSR with status `500` and `Cache-Control: private, no-store`.
 `{ mode: "rsc" }` answers `notFound()` and unmatched URLs with a plain `404` for now, without the
 app's not-found page; `{ mode: "islands" }` renders it. A form posted without JavaScript whose
-action calls `redirect()` gets a `303`, so the browser loads the target with a `GET`.
+action calls `redirect()` gets a `303`, so the browser loads the target with a `GET`; one whose action
+calls `notFound()` gets the same plain `404`.
 RSC loading and error boundaries follow the selected page's file ancestors, including route
 groups and catch-all folders. For example, `/users/[id]/error.tsx` does not handle a sibling
 `/users/new/page.tsx`. Failures before page selection, such as middleware errors, use only the
@@ -1580,6 +1625,12 @@ export default defineConfig({
   },
 });
 ```
+
+The not-found page renders inside the root layouts, and an `error.tsx` page inside its route's
+layouts. Neither streams: Farm sends each document whole, with its `404` or error status, after
+every lazy component, `use()` read, or other Suspense boundary in the page and its layouts has
+resolved, in development and production. A document that does not suspend renders in one
+synchronous pass.
 
 ## Catch-all routes
 

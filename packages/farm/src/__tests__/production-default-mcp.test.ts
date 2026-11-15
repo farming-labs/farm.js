@@ -139,6 +139,11 @@ describe("production default MCP server", () => {
         "/",
         "/about",
       ]);
+      // Without a metadataBase, URLs use the request's origin.
+      expect(listed.structuredContent.pages.map((page: { url: string }) => page.url)).toEqual([
+        "https://acme.test/",
+        "https://acme.test/about",
+      ]);
       expect((await call("read_page", { path: "/about" })).content[0].text).toContain(
         "We ship tools.",
       );
@@ -223,6 +228,120 @@ describe("production default MCP server", () => {
       expect(((await catalog.json()) as any).entries).toEqual([
         expect.objectContaining({ url: "https://acme.test/base/mcp/server-card" }),
       ]);
+    });
+  }, 240_000);
+
+  it("lists each page at a URL that answers without a redirect, and reads it", async () => {
+    const files = {
+      "src/app/(marketing)/pricing/page.tsx": [
+        'export const metadata = { title: "Pricing" };',
+        "export default function Page() { return <p>Plans for teams.</p>; }",
+      ].join("\n"),
+      "src/messages/en.json": "{}",
+      "src/messages/fr.json": "{}",
+    };
+    const expectCanonical = async (
+      config: Partial<FarmConfig>,
+      endpoint: string,
+      expected: string[],
+    ) =>
+      withRoot(async (root) => {
+        const handler = await buildApp(root, config, files);
+        const call = async (name: string, args: Record<string, unknown> = {}) =>
+          (
+            (await (
+              await handler.fetch(mcp("tools/call", { name, arguments: args }, endpoint))
+            ).json()) as any
+          ).result;
+        const pages = (await call("list_pages")).structuredContent.pages;
+        expect(pages.map((page: { url: string }) => page.url)).toEqual(expected);
+        for (const page of pages) {
+          const response = await handler.fetch(new Request(page.url, { redirect: "manual" }));
+          expect({ url: page.url, status: response.status }).toEqual({
+            url: page.url,
+            status: 200,
+          });
+          for (const path of [page.path, page.url]) {
+            const read = await call("read_page", { path });
+            expect({ path, isError: read.isError }).toEqual({ path, isError: undefined });
+          }
+        }
+        expect((await call("read_page", { path: "/pricing" })).content[0].text).toContain(
+          "Plans for teams.",
+        );
+      });
+
+    // '/base/' answers with a 308 to '/base'; a route group adds no URL segment.
+    await expectCanonical({ basePath: "/base" }, "https://acme.test/base", [
+      "https://acme.test/base",
+      "https://acme.test/base/about",
+      "https://acme.test/base/pricing",
+    ]);
+    // trailingSlash: '/base/about' answers with a 308 to '/base/about/'. Every locale is
+    // prefixed: '/base/about/' answers with a 307 to '/base/en/about/', and so does its mirror.
+    await expectCanonical(
+      {
+        basePath: "/base",
+        trailingSlash: true,
+        i18n: { locales: ["en", "fr"], defaultLocale: "en", routing: "prefix-always" },
+      },
+      "https://acme.test/base",
+      [
+        "https://acme.test/base/en/",
+        "https://acme.test/base/en/about/",
+        "https://acme.test/base/en/pricing/",
+      ],
+    );
+    // The default locale is unprefixed, so its pages keep their plain URLs.
+    await expectCanonical(
+      { i18n: { locales: ["en", "fr"], defaultLocale: "en" } },
+      "https://acme.test",
+      ["https://acme.test/", "https://acme.test/about", "https://acme.test/pricing"],
+    );
+  }, 240_000);
+
+  it("links pages on the root layout's metadataBase, as the sitemap and llms.txt do", async () => {
+    await withRoot(async (root) => {
+      const handler = await buildApp(
+        root,
+        { basePath: "/base" },
+        {
+          "src/app/layout.tsx": [
+            'export const metadata = { title: "Acme", metadataBase: new URL("https://www.acme.example") };',
+            "export default function Layout({ children }) { return <main>{children}</main>; }",
+          ].join("\n"),
+        },
+      );
+      const call = async (name: string, args: Record<string, unknown> = {}) =>
+        (
+          (await (
+            await handler.fetch(
+              mcp("tools/call", { name, arguments: args }, "https://acme.test/base"),
+            )
+          ).json()) as any
+        ).result;
+
+      const pages = (await call("list_pages")).structuredContent.pages;
+      expect(pages.map((page: { url: string }) => page.url)).toEqual([
+        "https://www.acme.example/base",
+        "https://www.acme.example/base/about",
+      ]);
+      const sitemap = await (
+        await handler.fetch(new Request("https://acme.test/base/sitemap.xml"))
+      ).text();
+      for (const page of pages) expect(sitemap).toContain(`<loc>${page.url}</loc>`);
+      const llms = await handler.fetch(new Request("https://acme.test/base/llms.txt"));
+      expect(await llms.text()).toContain("(https://www.acme.example/base/about.md)");
+
+      // read_page takes those URLs and reads the page from this server.
+      for (const path of ["https://www.acme.example/base/about", "https://acme.test/base/about"]) {
+        expect((await call("read_page", { path })).content[0].text, path).toContain(
+          "We ship tools.",
+        );
+      }
+      const elsewhere = await call("read_page", { path: "https://evil.test/base/about" });
+      expect(elsewhere.isError).toBe(true);
+      expect(elsewhere.content[0].text).toContain("No public page");
     });
   }, 240_000);
 

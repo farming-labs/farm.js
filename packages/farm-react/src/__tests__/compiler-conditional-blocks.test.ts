@@ -179,7 +179,7 @@ describe("React AOT conditional block compiler", () => {
     {
       name: "a custom component branch",
       body: "{visible && <Details />} ",
-      extra: "function Details() { return <p>Details</p>; }",
+      extra: 'import { Details } from "./details";',
       reason: /host elements only/i,
     },
     {

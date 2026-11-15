@@ -5,13 +5,22 @@ import {
   createFarmMarkdownErrorBody,
   createMarkdownMirrorResponse,
   farmRequestWantsMarkdown,
+  getFarmMarkdownAlternatePath,
   resolveMarkdownConfig,
 } from "@farm.js/core/markdown";
 import {
+  addMetadataMarkdownAlternate,
+  normalizeFarmTrailingSlashPathname,
+  renderMetadataHead,
   resolveFarmI18nConfig,
   stripFarmBasePath,
   stripFarmLocaleFromPathname,
 } from "@farm.js/core/internal/production-runtime";
+import { matchRoute as matchFarmPageRoute, parseRoutePath } from "../../../../farm/src/utils";
+import {
+  compareRouteSpecificity,
+  getRoutePatternSpecificity,
+} from "../../../../farm/src/routing/specificity";
 import type { EntryContext } from "../types.js";
 import {
   createProductionMiddlewareRunner,
@@ -39,26 +48,61 @@ function extractRoutePathname(entry: string): string {
   return entry.slice(start, entry.indexOf("\n}\n", fn) + 2);
 }
 
+/** The entry's generated matchRoute() over these page files, with core's real helpers. */
+function createRouteMatcher(entry: string, pageFiles: string[]) {
+  const start = entry.indexOf("function filePathToRoute(");
+  const end = entry.indexOf("// Each page's parsed rendering directive", start);
+  return new Function(
+    "pages",
+    "React",
+    "debug",
+    "parseRoutePath",
+    "matchFarmPageRoute",
+    "compareRouteSpecificity",
+    "getRoutePatternSpecificity",
+    "stripFarmBasePath",
+    "stripFarmLocaleFromPathname",
+    `${extractRoutePathname(entry)}\n${entry.slice(start, end)}; return matchRoute;`,
+  )(
+    Object.fromEntries(pageFiles.map((file) => [file, { default: () => file }])),
+    {},
+    () => {},
+    parseRoutePath,
+    matchFarmPageRoute,
+    compareRouteSpecificity,
+    getRoutePatternSpecificity,
+    stripFarmBasePath,
+    stripFarmLocaleFromPathname,
+  ) as (pathname: string) => { pattern: string } | null;
+}
+
 /**
  * Runs the generated outer handler with the real core Markdown helpers. `pages` are the request
- * paths RSC's matchRoute() matches; each renders a page titled after its path.
+ * paths matchRoute() matches; each renders a page titled after its path. With `pageFiles`, the
+ * entry's own matchRoute() selects among those files, and a page is titled after its file.
  */
 function createHandler(
   markdownConfig = resolveMarkdownConfig(undefined),
-  options: Partial<Pick<EntryContext, "basePath" | "i18n" | "development">> & {
+  options: Partial<Pick<EntryContext, "basePath" | "i18n" | "development" | "trailingSlash">> & {
     pages?: string[];
+    pageFiles?: string[];
   } = {},
 ) {
-  const { pages = ["/pricing"], ...entryOptions } = options;
+  const { pages = ["/pricing"], pageFiles, ...entryOptions } = options;
   const entry = generateRscEntry({ ...context, ...entryOptions, markdown: markdownConfig });
   const start = entry.indexOf("async function handleFarmPageOrMarkdown(request, context)");
   const end = entry.indexOf("async function handler(request, context)", start);
+  expect(start).toBeGreaterThan(-1);
+  const matchRoute = pageFiles
+    ? createRouteMatcher(entry, pageFiles)
+    : (pathname: string) => (pages.includes(pathname) ? { pattern: pathname } : null);
   const rendered: Request[] = [];
   const handleFarmRequest = vi.fn(async (request: Request) => {
     rendered.push(request);
     const { pathname } = new URL(request.url);
-    if (!pages.includes(pathname)) return new Response("Not Found", { status: 404 });
-    const title = pathname === "/pricing" ? "Pricing" : `Page ${pathname}`;
+    const matched = matchRoute(pathname);
+    if (!matched) return new Response("Not Found", { status: 404 });
+    const title = pathname === "/pricing" ? "Pricing" : `Page ${matched.pattern}`;
     return new Response(
       `<html><head><title>${title}</title></head><body><main><h1>${title}</h1><p>Plans.</p></main></body></html>`,
       { headers: { "content-type": "text/html" } },
@@ -67,22 +111,26 @@ function createHandler(
   const run = new Function(
     "farmMarkdownConfig",
     "createMarkdownMirrorResponse",
+    "farmRequestWantsMarkdown",
     "applyMarkdownNegotiationHeaders",
     "stripFarmBasePath",
     "stripFarmLocaleFromPathname",
     "matchRoute",
     "handleFarmRequest",
     "farmApiBasePath",
+    "normalizeFarmTrailingSlashPathname",
     `${extractRoutePathname(entry)}\n${entry.slice(start, end)}; return handleFarmPageOrMarkdown;`,
   )(
     markdownConfig,
     createMarkdownMirrorResponse,
+    farmRequestWantsMarkdown,
     applyMarkdownNegotiationHeaders,
     stripFarmBasePath,
     stripFarmLocaleFromPathname,
-    (pathname: string) => (pages.includes(pathname) ? { pattern: pathname } : null),
+    matchRoute,
     handleFarmRequest,
     "/api",
+    normalizeFarmTrailingSlashPathname,
   ) as (request: Request, context?: unknown) => Promise<Response>;
   return { run, rendered, handleFarmRequest };
 }
@@ -287,6 +335,30 @@ describe("RSC Markdown mirrors", () => {
     },
   );
 
+  it("lets md.cache share a mirror read with only the deployment cookie", async () => {
+    // The deployment cookie names a release, never a visitor, as core's withoutFarmDeploymentCookie.
+    for (const [cookie, cacheControl] of [
+      [undefined, "public, max-age=300, s-maxage=300"],
+      ["__farm_deployment=release-2", "public, max-age=300, s-maxage=300"],
+      [" __farm_deployment=release-2; ", "public, max-age=300, s-maxage=300"],
+      ["session=abc; __farm_deployment=release-2", "private, no-store"],
+      ["__farm_deployment_x=1", "private, no-store"],
+      // A pair without a name is still another cookie, as core's servers and page cache read it.
+      ["__farm_deployment=release-2; =abc", "private, no-store"],
+      ["session=abc", "private, no-store"],
+    ] as const) {
+      const { run, rendered } = createHandler(resolveMarkdownConfig({ cache: 300 }));
+      const response = await run(
+        new Request("https://farm.test/pricing.md", { headers: cookie ? { cookie } : {} }),
+      );
+      expect(response.status, cookie).toBe(200);
+      expect(response.headers.get("cache-control"), cookie).toBe(cacheControl);
+      // The page renders with the reader's cookies, the deployment cookie included, as in core:
+      // only the mirror's cache policy ignores that cookie. (Headers trim surrounding whitespace.)
+      expect(rendered[0]!.headers.get("cookie"), cookie).toBe(cookie?.trim() ?? null);
+    }
+  });
+
   it("preserves middleware cookies in the published core runtime", async () => {
     const runner = createProductionMiddlewareRunner({
       modules: [
@@ -388,10 +460,10 @@ describe("RSC Markdown mirrors", () => {
   });
 });
 
-// RSC's matchRoute() reads the request path as received, so under a basePath the pages live in
-// app/<basePath>/ (and app/<basePath>/[lang]/ with i18n). Markdown still reads the route path
-// core's servers read: <prefix>/index.md is that prefix's home page, which is what every
-// advertised URL names, and md.expose lists route paths.
+// Under a basePath (and locale), pages answer below the prefix: app/about/page.tsx, or a page
+// nested under app/<basePath>/ (app/<basePath>/[lang]/), answers at /console/about. Markdown
+// reads the route path core's servers read: <prefix>/index.md is that prefix's home page, which is
+// what every advertised URL names, and md.expose lists route paths.
 describe.each([
   ["development", true],
   ["production", false],
@@ -419,6 +491,35 @@ describe.each([
     expect(generateRscEntry({ ...context, ...basePath })).toContain(
       "import { stripFarmBasePath, stripFarmLocaleFromPathname } from '@farm.js/core/internal/production-runtime';",
     );
+  });
+
+  it("finds the page the render selects: at its route path, or nested under the prefix", async () => {
+    for (const options of [
+      { ...basePath, pageFiles: ["/page.tsx", "/about/page.tsx", "/console/legacy/page.tsx"] },
+      {
+        ...localized,
+        pageFiles: ["/page.tsx", "/about/page.tsx", "/console/[lang]/legacy/page.tsx"],
+      },
+    ]) {
+      const prefix = options.i18n.enabled ? "/console/fr" : "/console";
+      const { run } = createHandler(resolveMarkdownConfig(undefined), options);
+      for (const [pathname, title] of [
+        [`${prefix}/index.md`, "# Page /page.tsx"],
+        [`${prefix}/about.md`, "# Page /about/page.tsx"],
+        [`${prefix}/legacy.md`, `# Page ${options.pageFiles[2]}`],
+      ]) {
+        const response = await run(new Request(`https://farm.test${pathname}`));
+        expect(response.status, pathname).toBe(200);
+        expect(response.headers.get("content-location"), pathname).toBe(pathname);
+        expect(await response.text(), pathname).toContain(title);
+      }
+      const page = await run(new Request(`https://farm.test${prefix}/about`));
+      expect(page.headers.get("link")).toBe(
+        `<${prefix}/about.md>; rel="alternate"; type="text/markdown"`,
+      );
+      const missing = await run(new Request(`https://farm.test${prefix}/missing.md`));
+      expect(missing.status).toBe(404);
+    }
   });
 
   it("serves <basePath>/index.md as the home page and advertises it", async () => {
@@ -473,6 +574,29 @@ describe.each([
     );
   });
 
+  // With trailingSlash a page's URL is '/about/', and '/about' redirects there: the mirror reads
+  // the page at that URL, so the redirect never answers in place of the page.
+  it("renders each mirror's page at its trailing-slash URL with trailingSlash", async () => {
+    const { run, rendered } = createHandler(resolveMarkdownConfig(undefined), {
+      ...basePath,
+      trailingSlash: true,
+      pageFiles: ["/page.tsx", "/about/page.tsx"],
+    });
+    for (const [pathname, page] of [
+      ["/console/about.md", "/console/about/"],
+      ["/console/index.md", "/console/"],
+    ]) {
+      const response = await run(new Request(`https://farm.test${pathname}`));
+      expect(response.status, pathname).toBe(200);
+      expect(new URL(rendered.at(-1)!.url).pathname, pathname).toBe(page);
+    }
+    const negotiated = await run(
+      new Request("https://farm.test/console/about/", { headers: { accept: "text/markdown" } }),
+    );
+    expect(negotiated.status).toBe(200);
+    expect(new URL(rendered.at(-1)!.url).pathname).toBe("/console/about/");
+  });
+
   it("matches md.expose against locale-stripped route paths", async () => {
     const { run } = createHandler(resolveMarkdownConfig({ expose: ["/about"] }), localized);
     const response = await run(new Request("https://farm.test/console/fr/about.md"));
@@ -481,5 +605,89 @@ describe.each([
     // The home page is not in the list.
     const home = await run(new Request("https://farm.test/console/fr/index.md"));
     expect(home.status).toBe(404);
+  });
+});
+
+/**
+ * The head the entry renders for a page at `pathname`: its generated metadata statement over
+ * `pageMetadata`, then core's renderMetadataHead, as the request handler runs them.
+ */
+async function renderHeadTags(
+  markdownConfig: ReturnType<typeof resolveMarkdownConfig>,
+  pathname: string,
+  options: Partial<Pick<EntryContext, "basePath" | "i18n">> = {},
+  pageMetadata: Record<string, unknown> = { title: "Page" },
+): Promise<string> {
+  const entry = generateRscEntry({ ...context, ...options, markdown: markdownConfig });
+  const start = entry.indexOf("const metadata = ");
+  const end = entry.indexOf("\n  const renderedHead = ", start);
+  expect(start).toBeGreaterThan(-1);
+  const metadata = await new Function(
+    "farmMarkdownConfig",
+    "resolveFarmRouteMetadata",
+    "addMetadataMarkdownAlternate",
+    "getFarmMarkdownAlternatePath",
+    "stripFarmBasePath",
+    "stripFarmLocaleFromPathname",
+    "url",
+    "LayoutModules",
+    "pageModule",
+    "pageProps",
+    `${extractRoutePathname(entry)}
+return (async () => { ${entry.slice(start, end)}; return metadata; })();`,
+  )(
+    markdownConfig,
+    async () => pageMetadata,
+    addMetadataMarkdownAlternate,
+    getFarmMarkdownAlternatePath,
+    stripFarmBasePath,
+    stripFarmLocaleFromPathname,
+    new URL(pathname, "https://farm.test"),
+    [],
+    {},
+    {},
+  );
+  return renderMetadataHead(metadata, { pathname }).tags;
+}
+
+// Core's servers advertise a page's mirror in the document head as well as the Link header.
+describe("RSC Markdown head link", () => {
+  it("advertises the page's mirror in the head", async () => {
+    expect(await renderHeadTags(resolveMarkdownConfig(undefined), "/pricing")).toContain(
+      '<link rel="alternate" href="/pricing.md" type="text/markdown">',
+    );
+    expect(
+      await renderHeadTags(resolveMarkdownConfig(undefined), "/console", {
+        basePath: "/console",
+        i18n: resolveFarmI18nConfig(false, {
+          root: "/tmp",
+          mode: "production",
+          basePath: "/console",
+        }),
+      }),
+    ).toContain('<link rel="alternate" href="/console/index.md" type="text/markdown">');
+  });
+
+  it("leaves pages without a mirror, and apps with md off, without one", async () => {
+    const exposed = resolveMarkdownConfig({ expose: ["/pricing"] });
+    expect(await renderHeadTags(exposed, "/about")).not.toContain("text/markdown");
+    const off = resolveMarkdownConfig(false);
+    expect(await renderHeadTags(off, "/pricing")).not.toContain("text/markdown");
+    expect(generateRscEntry({ ...context, markdown: off })).not.toContain(
+      "addMetadataMarkdownAlternate",
+    );
+  });
+
+  it("keeps a Markdown alternate the page declares", async () => {
+    const tags = await renderHeadTags(
+      resolveMarkdownConfig(undefined),
+      "/pricing",
+      {},
+      {
+        alternates: { types: { "text/markdown": "/docs/pricing.md" } },
+      },
+    );
+    expect(tags).toContain('href="/docs/pricing.md"');
+    expect(tags).not.toContain('href="/pricing.md"');
   });
 });

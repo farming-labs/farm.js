@@ -384,6 +384,31 @@ describe("local() jobs runtime", () => {
     expect(body.error).toContain('"jobs" storage namespace');
   });
 
+  it("refuses the in-memory default storage on a Cloudflare worker, where NODE_ENV is unset", async () => {
+    // What a built worker sees: no NODE_ENV, and its bindings on globalThis.__env__.
+    vi.stubEnv("NODE_ENV", undefined);
+    vi.stubGlobal("__env__", { CRON_SECRET: "s3cret" });
+    try {
+      const integration = jobs({
+        runtime: local({ pollIntervalMs: false }),
+        tasks: defineTasks({ once: task({ run: () => "done" }) }),
+      });
+      const route = (integration.routes as unknown as JobsTestRoute[]).find((entry) =>
+        entry.path.endsWith("/once/trigger"),
+      );
+      const response = await route!.handler(
+        new Request("http://farm.test/api/jobs/once/trigger", { method: "POST", body: "{}" }),
+        serverContext,
+      );
+      expect(response.status).toBe(500);
+      expect((await response.json()).details).toMatchObject({
+        code: "JOBS_LOCAL_STORAGE_NOT_PERSISTENT",
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("guards the tick route with the cron secret outside development", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("CRON_SECRET", "s3cret");

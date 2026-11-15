@@ -88,32 +88,74 @@ Removing `FARMJS_API_KEY` also turns it off.
 
 ## What is sent
 
-- For each request: a random ID, the matched route **template** (such as `/users/[id]`), the
-  method, the response status and the time until Farm returned the response.
-- For each registered MCP tool call: the tool name, whether it succeeded, and its duration, linked
-  to its request.
-- A self-reported agent category when the user-agent declares one of OpenAI's or Anthropic's
-  crawlers or agents (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot,
-  Claude-User). This is the user-agent's claim, not a verified identity. Anything else is
-  `unknown`.
+- For each request: a random ID, the matched route **template** (such as `/users/[id]`), or a
+  docs page's own path, the **path** that was requested (such as `/users/42`), the method, the
+  response status and the time until Farm returned the response.
+- For each registered MCP tool call, including calls to the [docs engine](/docs/docs-engine)'s
+  MCP endpoint: the tool name, whether it succeeded, and its duration, linked to its request.
+- The kind of client that sent each request, and its name when Farm knows it. See
+  [Which client sent a request](#which-client-sent-a-request).
 
-Farm never sends URLs, query strings, route parameters, headers, cookies, IP addresses, full
+Farm never sends query strings, fragments, origins, headers, cookies, IP addresses, full
 user-agents, request or response bodies, tool arguments or results, or error messages.
+
+### Which client sent a request
+
+Farm reads the request's headers in the app and sends only the result: a kind, a vendor and a
+name from Farm's own list. The user-agent itself never leaves the app.
+
+| Kind      | How Farm tells                                                                                                              | Examples                                                  |
+| --------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `agent`   | A user-agent token an AI vendor documents for fetches a person asked for, or ChatGPT agent's Web Bot Auth `Signature-Agent` | ChatGPT-User, Claude-User, Perplexity-User, ChatGPT agent |
+| `crawler` | A documented AI crawler token                                                                                               | GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, CCBot    |
+| `harness` | A coding agent's token, or MCP's Streamable HTTP headers (`Mcp-Protocol-Version`, `Mcp-Session-Id`)                         | Claude Code, Codex, any MCP client                        |
+| `search`  | A search engine crawler token                                                                                               | Googlebot, Bingbot, Applebot, DuckDuckBot                 |
+| `preview` | A link preview token                                                                                                        | Slackbot, facebookexternalhit, Twitterbot, Discordbot     |
+| `monitor` | An uptime check or scheduler token                                                                                          | UptimeRobot, Vercel Cron, Farm.js clock                   |
+| `bot`     | Any other client that calls itself a bot or carries a contact URL, or a headless browser                                    | AhrefsBot, Headless Chrome                                |
+| `script`  | An HTTP library or command-line tool                                                                                        | curl, Node.js `fetch`, Bun, python-requests               |
+| `browser` | A browser user-agent **and** the `Sec-Fetch-Site` and `Sec-Fetch-Dest` headers every browser sends                          | Chrome, Safari, Firefox, Edge                             |
+| `unknown` | None of the above, or tokens from two vendors at once                                                                       |                                                           |
+
+Farm Infra counts `agent`, `crawler` and `harness` as agent traffic. A browser user-agent without
+fetch metadata is `unknown`, not `browser`: scripts copy browser user-agents, but Node's `fetch`,
+curl and most scrapers don't send `Sec-Fetch-Site` or `Sec-Fetch-Dest`.
+
+Every kind is the client's own claim, not a verified identity: any client can send any header.
+Use it to understand traffic, never to grant access. `classifyFarmClient(request)` from
+`@farm.js/core` returns the same result anywhere you have the request, such as middleware.
+
+### What `path` contains
+
+`path` is the path the request asked for, below the app's `basePath`: `/users/42` for a request to
+`https://shop.example/users/42?ref=mail`. Farm Infra shows it in the request log and keeps the
+template for grouping, so Top routes still count `/users/[id]` once. Anything in your paths
+reaches Farm Infra and is kept for seven days. If your paths carry what shouldn't leave the app,
+such as a token in a reset link (`/reset/<token>`) or an email address, set `analytics: false`.
+
+A path longer than 1,024 characters, or one starting with `//`, is left out and the request is
+reported by its template alone. Farm.js versions before paths send no `path`.
 
 ### What `route` contains
 
-`route` is always a template, never the requested path:
+`route` is a template, never the requested path (that's `path`). The one exception is a docs page:
+its path is part of your docs, not something a visitor typed, so it's reported as itself:
 
 | Request                                                      | `route`                                                 |
 | ------------------------------------------------------------ | ------------------------------------------------------- |
 | A page, API, integration, or plugin endpoint route           | Its pattern: `/users/[id]`, `/api/stats`                |
 | A Markdown mirror (`/blog/hello.md`)                         | The page's pattern plus `.md`: `/blog/[slug].md`        |
-| A docs page (`/docs/routing`)                                | The docs route: `/docs`, `/docs/[...slug]`              |
+| A docs page (`/docs/routing`) or its Markdown                | The page's path: `/docs/routing`, `/docs/routing.md`    |
+| Any other path below the docs (`/docs/missing`)              | The docs route: `/docs/[...slug]`                       |
 | The docs API (`/api/docs?query=...`)                         | `/api/docs`, or `/api/docs/[...path]` below it          |
 | An MCP server Farm or the docs engine serves                 | Its endpoint: `/mcp`, plus `/mcp/server-card`           |
 | `llms.txt`, `sitemap.xml`, `robots.txt`, `.well-known` files | The fixed path: `/llms.txt`, `/.well-known/farmjs.json` |
 | The OpenAPI spec or reference, the image optimizer           | The configured path: `/openapi.json`, `/_farm/image`    |
 | Anything nothing answered (a 404, or a 405 with no route)    | `/[unmatched]`                                          |
+
+Farm lists your docs pages when it builds (in `farm dev`, on the first docs request and again
+after a file is added or removed). A docs adapter that doesn't list its pages, or a page whose path
+has characters other than letters, digits, `-`, `_`, `.` and `/`, stays on `/docs/[...slug]`.
 
 A deeper path the docs engine serves outside its pages keeps only its leading segments, such as
 `/.well-known/mcp/[...path]`. Static assets and the app's own metadata files (`robots.ts`,
@@ -133,7 +175,8 @@ including the ones nothing has called yet, without the app sending anything. It 
   title, description, whether it's an API endpoint, `defineTool` or a server function, the
   read-only, destructive, idempotent and open-world hints, and the input and output JSON Schemas),
   its resources (name, URI or template, MIME type) and its prompts (name, description, argument
-  schema).
+  schema). The [docs engine](/docs/docs-engine)'s MCP endpoint is listed too, with the tools it
+  lists over `tools/list` as standalone tools, without resources or prompts.
 - `webmcp`: whether `@farm.js/webmcp` is on, and the browser tools the app's source defines with
   `defineWebMCPTool` or `registerWebMCPTool`: name, title, description, hints, and the input schema
   when it's written out (`inputSchemaSource: "literal"`). A schema built at runtime, such as

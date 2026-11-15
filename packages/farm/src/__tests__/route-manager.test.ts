@@ -423,11 +423,16 @@ export default async function Layout({ children }) {
       await mkdir(path.join(root, "src", "app"), { recursive: true });
       await writeFile(
         path.join(root, "src", "app", "row.tsx"),
-        `"use client";\nexport function Row() { return <tr><td>row</td></tr>; }`,
+        `"use client";\nexport function Row() { return <p>row</p>; }`,
+      );
+      // `export *` names the component only in another module, so it cannot become an island.
+      await writeFile(
+        path.join(root, "src", "app", "rows.tsx"),
+        `"use client";\nexport * from "./row";`,
       );
       await writeFile(
         path.join(root, "src", "app", "page.tsx"),
-        `import { Row } from "./row";\nexport default function Page() { return <table><tbody><Row /></tbody></table>; }`,
+        `import { Row } from "./rows";\nexport default function Page() { return <main><Row /></main>; }`,
       );
       const { globFiles, logger } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) =>
@@ -445,9 +450,7 @@ export default async function Layout({ children }) {
         shouldHydrate: false,
       });
       expect(routeManager.getIslandsErrors(root)).toEqual([
-        expect.stringMatching(
-          /^\/: the client boundary imported from \.\/row renders inside <table>/,
-        ),
+        expect.stringMatching(/^\/: client boundary .*rows\.tsx uses an unsupported export shape/),
       ]);
       routeManager.regenerateClientManifest(root);
       // Development logs it once, not on every plan refresh.
@@ -1322,5 +1325,54 @@ describe("interpolateRedirectDestination", () => {
     expect(
       interpolateRedirectDestination("/[...path]", { path: "a b//x/y" }, { path: ["a b//x", "y"] }),
     ).toBe("/a%20b%2F%2Fx/y");
+  });
+});
+
+describe("RouteManager markdown route modules", () => {
+  const counterKey = "__farmMarkdownComponentsLoads";
+  let root: string;
+
+  beforeEach(async () => {
+    // Inside the package, where the test runner can import the fixture's components module.
+    root = await mkdtemp(path.join(process.cwd(), ".tmp-markdown-components-"));
+    await mkdir(path.join(root, "src", "app", "guide"), { recursive: true });
+    await writeFile(
+      path.join(root, "src", "app", "guide", "page.md"),
+      ["---", "title: Guide", "---", "# Guide", "", "<Callout>Read me</Callout>"].join("\n"),
+    );
+    // Counts its evaluations, as a components module that imports most of the app would cost.
+    await writeFile(
+      path.join(root, "markdown-components.mjs"),
+      [
+        `globalThis.${counterKey} = (globalThis.${counterKey} ?? 0) + 1;`,
+        `export default { Callout: (props) => "callout: " + props.children };`,
+      ].join("\n"),
+    );
+    delete (globalThis as Record<string, unknown>)[counterKey];
+  });
+
+  afterEach(async () => {
+    delete (globalThis as Record<string, unknown>)[counterKey];
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("loads the MDX components when the page renders, not when its module loads", async () => {
+    const manager = new RouteManager({
+      root,
+      srcDir: "src",
+      mdx: { markdownRoutes: true, components: "./markdown-components.mjs" },
+    } as Required<FarmConfig>);
+    const modulePath = path.join(root, "src", "app", "guide", "page.md");
+
+    // The route runtime manifest and SSG load every page's module for its metadata and
+    // rendering config; neither renders it.
+    const routeModule = await manager.loadRouteModule(modulePath);
+    expect(routeModule.metadata).toMatchObject({ title: "Guide" });
+    expect((globalThis as Record<string, unknown>)[counterKey]).toBeUndefined();
+
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const html = renderToStaticMarkup(await (routeModule.default as any)({}));
+    expect(html).toContain("callout: Read me");
+    expect((globalThis as Record<string, unknown>)[counterKey]).toBe(1);
   });
 });

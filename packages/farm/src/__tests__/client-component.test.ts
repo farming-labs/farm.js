@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../config";
+import { getFarmServerTreeLayoutPatterns } from "../routing/layout-selector";
 import { logger } from "../utils";
 import {
   describeSuppressedAsyncHydration,
@@ -71,6 +72,13 @@ describe("client component path resolution", () => {
     expect(stripped.indexOf("useState(0)")).toBe(source.indexOf("useState(0)"));
   });
 
+  it("detects a directive after a byte order mark or other Unicode whitespace", () => {
+    const body = "export default function Counter() { return null; }\n";
+    expect(hasUseClientDirective(`﻿"use client";\n${body}`)).toBe(true);
+    expect(hasUseClientDirective(`  "use client";　${body}`)).toBe(true);
+    expect(hasUseClientDirective(`é"use client";\n${body}`)).toBe(false);
+  });
+
   it("detects directives preceded by comments or other directives", () => {
     const afterBlockComment =
       '/* Copyright 2026 Acme */\n"use client";\nexport default function Counter() { return null; }\n';
@@ -82,6 +90,9 @@ describe("client component path resolution", () => {
     expect(hasUseClientDirective(afterBlockComment)).toBe(true);
     expect(hasUseClientDirective(afterLineComment)).toBe(true);
     expect(hasUseClientDirective(afterUseStrict)).toBe(true);
+    expect(hasUseClientDirective('"use strict";;\n;"use client"\nconst copy = "use client";')).toBe(
+      true,
+    );
 
     expect(stripUseClientDirective(afterBlockComment)).toBe(
       "/* Copyright 2026 Acme */\n             \nexport default function Counter() { return null; }\n",
@@ -1019,6 +1030,35 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     ]);
   });
 
+  it("renders an async page through the server tree when an island defers its hydration", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-deferred-"));
+    tempDirs.push(root);
+    const appDir = path.join(root, "src", "app");
+    fs.mkdirSync(appDir, { recursive: true });
+    // Both read the layout's provider; one waits until it is visible.
+    fs.writeFileSync(
+      path.join(appDir, "badge.tsx"),
+      '"use client";\nimport { usePlatform } from "./platform";\nexport function Badge() { return <span>{usePlatform()}</span>; }\n',
+    );
+    fs.writeFileSync(
+      path.join(appDir, "chart.tsx"),
+      '"use client";\nimport { usePlatform } from "./platform";\nexport const island = "visible";\nexport function Chart() { return <figure>{usePlatform()}</figure>; }\n',
+    );
+    const page = path.join(appDir, "page.tsx");
+    fs.writeFileSync(
+      page,
+      'import { Badge } from "./badge";\nimport { Chart } from "./chart";\nexport default async function Page() { return <><Badge /><Chart /></>; }\n',
+    );
+
+    const plan = getClientModuleHydrationPlan(page, root, "off", { asyncOwnerIslands: true });
+    expect(plan.isolatedBoundaries.map((boundary) => boundary.islandStrategy)).toEqual([
+      "load",
+      "visible",
+    ]);
+    // As roots of their own, both hydrated outside the layout's provider and threw.
+    expect(usesFarmServerTree(plan)).toBe(true);
+  });
+
   it("keeps an async page's client boundaries that receive React elements", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-elements-"));
     tempDirs.push(root);
@@ -1351,6 +1391,41 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
       }
     });
 
+    it("hydrates workspace client components outside the app root as islands", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-workspace-island-"));
+      tempDirs.push(workspace);
+      const root = path.join(workspace, "apps", "web");
+      const shared = path.join(workspace, "packages", "ui", "src");
+      const pageFile = path.join(root, "src", "app", "demo", "page.tsx");
+      fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+      fs.mkdirSync(shared, { recursive: true });
+      fs.writeFileSync(
+        path.join(root, "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { paths: { "@ui/*": ["../../packages/ui/src/*"] } } }),
+      );
+      const aliased = path.join(shared, "star-button.tsx");
+      const relative = path.join(shared, "badge.tsx");
+      fs.writeFileSync(
+        aliased,
+        '"use client";\nexport function StarButton({ count }) { return <button>{count}</button>; }\n',
+      );
+      fs.writeFileSync(
+        relative,
+        '"use client";\nexport function Badge({ label }) { return <button>{label}</button>; }\n',
+      );
+      fs.writeFileSync(
+        pageFile,
+        'import { StarButton } from "@ui/star-button";\nimport { Badge } from "../../../../../packages/ui/src/badge";\nexport default async function Page() { const stars = await load(); return <main><StarButton count={stars} /><Badge label="new" /></main>; }\n',
+      );
+
+      const plan = getClientModuleHydrationPlan(pageFile, root, "off", islands);
+      expect(plan.fallbackReason).toBeUndefined();
+      expect(plan).toMatchObject({ hasIsolatedClientBoundaries: true, asyncOwnerIslands: true });
+      expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath).sort()).toEqual(
+        [aliased, relative].sort(),
+      );
+    });
+
     it("keeps correctness fallbacks and reports why", () => {
       // Element children no longer reject an async page's islands: below a hydrating layout the
       // server tree carries them, and elsewhere that one boundary keeps its server HTML.
@@ -1385,6 +1460,65 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
       expect(page).toMatchObject({ hasIsolatedClientBoundaries: true, asyncOwnerIslands: true });
       expect(page.isolatedBoundaries.length).toBeGreaterThan(0);
       expect(page.suppressedAsyncHydration).toBeUndefined();
+    });
+
+    it("renders a nested server layout from its tree below a layout that hydrates as one root", () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-tree-layout-"));
+      tempDirs.push(root);
+      const appDir = path.join(root, "src", "app");
+      fs.mkdirSync(path.join(appDir, "(catalog)"), { recursive: true });
+      fs.writeFileSync(
+        path.join(appDir, "shell.tsx"),
+        '"use client";\nexport function Shell({ nav, children }) { return <div>{nav}{children}</div>; }\n',
+      );
+      fs.writeFileSync(
+        path.join(appDir, "star-button.tsx"),
+        '"use client";\nexport function StarButton({ count }) { return <button>{count}</button>; }\n',
+      );
+      fs.writeFileSync(
+        path.join(appDir, "layout.tsx"),
+        'import { Shell } from "./shell";\nexport default function RootLayout({ children }) { return <Shell nav={<nav />}>{children}</Shell>; }\n',
+      );
+      fs.writeFileSync(
+        path.join(appDir, "(catalog)", "layout.tsx"),
+        'import { StarButton } from "../star-button";\nexport default function CatalogLayout({ children }) { return <section><StarButton count={1} />{children}</section>; }\n',
+      );
+      const options = { asyncOwnerIslands: true, serverTreeLayouts: true };
+      const plan = (file: string) =>
+        getClientModuleHydrationPlan(path.join(appDir, file), root, "enabled", options);
+      const owners = () => [
+        { pattern: "/", depth: 0, metadata: plan("layout.tsx") },
+        { pattern: "/(catalog)", depth: 1, metadata: plan("(catalog)/layout.tsx") },
+      ];
+
+      const islands = owners();
+      expect(islands[0]!.metadata).toMatchObject({ shouldHydrate: true, serverTreeLayout: true });
+      expect(islands[1]!.metadata.hasIsolatedClientBoundaries).toBe(true);
+      enforceFarmIsolatedHydrationRouteBudget(islands, [], () => true, { serverOwners: true });
+      // The root's React root rebuilds the nested layout, so the client entry never imports it.
+      expect(islands[1]!.metadata).toMatchObject({
+        shouldHydrate: true,
+        serverTreeLayout: true,
+        hasIsolatedClientBoundaries: false,
+      });
+      expect(
+        islands[1]!.metadata.isolatedBoundaries.map((boundary) => boundary.modulePath),
+      ).toEqual([path.join(appDir, "star-button.tsx")]);
+      expect(
+        getFarmServerTreeLayoutPatterns(
+          islands.map(({ pattern, metadata }) => ({ pattern, ...metadata })),
+        ),
+      ).toEqual(new Set(["/", "/(catalog)"]));
+
+      // Without server owners the nested layout still joins the root route-wide.
+      const routeWide = owners();
+      enforceFarmIsolatedHydrationRouteBudget(routeWide, [], () => true);
+      expect(routeWide[1]!.metadata).toMatchObject({
+        shouldHydrate: true,
+        hasIsolatedClientBoundaries: false,
+        isolatedBoundaries: [],
+      });
+      expect(routeWide[1]!.metadata.serverTreeLayout).toBeUndefined();
     });
 
     it("suppresses an overflowing async layout before keeping a route island", () => {
@@ -1814,7 +1948,7 @@ export function Chart() {}
       "utf-8",
     );
     const docsRoutesStart = source.indexOf("if (syntheticDocsEntry)");
-    const docsRoutesEnd = source.indexOf("\n\n  const clientRouteSlots", docsRoutesStart);
+    const docsRoutesEnd = source.indexOf("\n\n    const clientRouteSlots", docsRoutesStart);
     expect(docsRoutesStart).toBeGreaterThan(-1);
     expect(docsRoutesEnd).toBeGreaterThan(docsRoutesStart);
 
@@ -1822,8 +1956,8 @@ export function Chart() {}
     expect(docsRoutes).toContain("layout.shouldHydrate || layout.hasIsolatedClientBoundaries");
     expect(docsRoutes).toContain("hasIsolatedClientBoundaries: applicableClientLayouts.some(");
     expect(docsRoutes).toContain(".flatMap((layout) => layout.isolatedBoundaries)");
-    const budgetStart = source.indexOf("\n  enforceFarmIsolatedHydrationRouteBudget(");
-    const budgetEnd = source.indexOf("\n  );", budgetStart);
+    const budgetStart = source.indexOf("\n    enforceFarmIsolatedHydrationRouteBudget(");
+    const budgetEnd = source.indexOf("\n    );", budgetStart);
     expect(budgetStart).toBeGreaterThan(-1);
     expect(budgetEnd).toBeGreaterThan(budgetStart);
     expect(source.slice(budgetStart, budgetEnd)).toContain(
@@ -1876,6 +2010,12 @@ export function Chart() {}
     expect(release).toBeGreaterThan(isolatedHydrate);
     expect(isolatedBranch.indexOf("return;", release)).toBeGreaterThan(release);
     expect(isolatedBranch).not.toContain("replayPreHydrationClicks(");
+    // Client plugins see an islands-only page hydrate, as they see any other page.
+    const begin = isolatedBranch.indexOf("farmClientRuntime.beginHydration(");
+    const complete = isolatedBranch.indexOf("farmClientRuntime.completeHydration(");
+    expect(begin).toBeGreaterThan(-1);
+    expect(begin).toBeLessThan(isolatedHydrate);
+    expect(complete).toBeGreaterThan(isolatedHydrate);
     expect(productionSource).toContain("await hydrateFarmIsolatedClientBoundaries(document);");
   });
 
@@ -1896,7 +2036,7 @@ export function Chart() {}
     expect(source).toContain("swapDocument: function(doc)");
     expect(source).toContain("document.body.innerHTML = doc.body.innerHTML;");
     expect(source).toContain("delete window.__farmDocsRuntime;");
-    expect(source).toContain("script.replaceWith(freshScript);");
+    expect(source).toContain("script.replaceWith(createFarmNavigationScript(script));");
     expect(source).toContain('document.documentElement.dataset.farmDocsRuntime === "true"');
     expect(source).toContain("let swapped = await this.swapContent(");
     expect(source).toContain(
@@ -1927,6 +2067,20 @@ export function Chart() {}
     // intercept identity would both miss every real navigation and send the
     // shared-cache bypass header.
     expect(source).toContain("this.fetchPage(pathname, undefined, false, false)");
+  });
+
+  it("hands an islands dev navigation that redirects to page data, which follows it", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const start = source.indexOf("async function fetchFarmNavigationDocument(");
+    const body = source.slice(start, source.indexOf("\nasync function ", start + 1));
+    expect(start).toBeGreaterThan(-1);
+    // fetch's manual redirect hides the target; returning null routes the navigation through
+    // page data, whose redirect signal keeps the document and the history entry.
+    expect(body).toContain("redirect: 'manual'");
+    const opaque = body.indexOf("if (response.type === 'opaqueredirect') return null;");
+    expect(opaque).toBeGreaterThan(-1);
+    expect(opaque).toBeLessThan(body.indexOf("throw new Error('Failed to fetch the page: '"));
+    expect(body).toContain("if (!result) return null;");
   });
 
   it("refreshes hydratable production routes from uncached server HTML", () => {

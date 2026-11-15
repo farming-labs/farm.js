@@ -2786,10 +2786,6 @@ interface RuntimeCell extends CompilerCell {
   replace(next: unknown): void;
 }
 
-type PendingCellUpdate =
-  | { kind: "state"; update: CompilerStateUpdater }
-  | { kind: "value"; value: unknown };
-
 type SelectableTextControl = HTMLInputElement | HTMLTextAreaElement;
 
 interface InputSelectionSnapshot {
@@ -2858,6 +2854,8 @@ export interface CompilerHostElement {
   attributes: readonly { name: string; value: unknown }[];
   styles: readonly { name: string; value: unknown }[];
   children: readonly (CompilerHostElement | unknown)[];
+  /** Ids of the keyed row events this element of a host-block row handles. */
+  events?: readonly number[];
   /** Direct-child structure owned without creating another React fiber. */
   block?: CompilerHostBlock;
 }
@@ -2870,7 +2868,10 @@ const delegatedRowChangePlaceholder: React.EventHandler<React.SyntheticEvent> = 
 
 export interface CompilerKeyedRowEvent {
   name: string;
-  /** Host-element path relative to the keyed row root. */
+  /**
+   * Host-element path relative to the keyed row root. Host-block rows omit it: mounting the row
+   * records each element's events from its descriptor.
+   */
   path?: readonly number[];
   invoke(item: unknown, index: number, event: React.SyntheticEvent): unknown;
 }
@@ -2999,6 +3000,8 @@ export interface CompilerKeyedRowBinding {
 }
 
 export interface CompilerKeyedRowsBlockProps {
+  /** Receives the container when the rows block is the component's root element. */
+  rootRef?: React.RefCallback<Element>;
   id: number;
   render(
     event: (
@@ -3034,6 +3037,12 @@ export interface CompilerKeyedRowsBlockProps {
   events?: readonly CompilerKeyedRowEvent[];
   /** Route compiler-proven bubbling row events through the stable React container. */
   delegateEvents?: boolean;
+  /**
+   * Rows whose only non-delegatable event is onChange. React derives onChange from each row's
+   * own fiber, so these rows stay React-owned under React DOM; a compiled root, which maps
+   * onChange to native events itself, delegates them.
+   */
+  delegateEventsWithoutReact?: boolean;
   conditionals?: readonly CompilerKeyedRowConditional[];
   /** Row descriptors contain compiler-owned nested host scopes. */
   hostBlocks?: boolean;
@@ -3053,7 +3062,17 @@ export interface CompilerKeyedRange {
   rowKey(item: unknown, index: number): React.Key;
   create(item: unknown, index: number): CompilerKeyedRowElement;
   bindings: readonly CompilerKeyedRowBinding[];
+  /** Compiler-proven bubbling row events, delegated to the ranges container. */
+  events?: readonly CompilerKeyedRowEvent[];
 }
+
+/** Returns a row's React handler on React-owned paths, or nothing when the container delegates. */
+export type CompilerKeyedRangeRowEvent = (
+  item: unknown,
+  index: number,
+  eventId: number,
+  rangeIndex: number,
+) => React.EventHandler<React.SyntheticEvent> | undefined;
 
 export type CompilerMixedRange =
   | ({ kind: "conditional" } & CompilerConditionalRange)
@@ -3068,7 +3087,14 @@ export interface CompilerMixedRangesBlockProps {
 
 export interface CompilerKeyedRangesBlockProps {
   id: number;
-  render(): React.ReactElement;
+  render(rowEvent?: CompilerKeyedRangeRowEvent): React.ReactElement;
+  /** Route row events of every range through the stable container. */
+  delegateEvents?: boolean;
+  /**
+   * Route row events through the container only on a root without React DOM, which maps
+   * onChange to native events itself. Under React DOM, React renders the rows.
+   */
+  delegateEventsWithoutReact?: boolean;
   rootRef?: React.RefCallback<Element>;
   ranges: readonly CompilerKeyedRange[];
   /** Number of static direct host siblings after the final keyed range. */
@@ -3090,7 +3116,13 @@ export interface CompilerBlockRuntime {
   KeyedRanges: React.ComponentType<CompilerKeyedRangesBlockProps>;
   MixedRanges: React.ComponentType<CompilerMixedRangesBlockProps>;
   Component: React.ComponentType<CompilerComponentBlockProps>;
-  target(id: number): React.RefCallback<Element>;
+  /** A binding target's ref, which also sets the element's useRef object when it has one. */
+  target(id: number, ref?: { current: unknown }): React.RefCallback<Element>;
+  /**
+   * Runs a component's changed effects after a commit (given its effect list), or cleans them all
+   * up (without one). Only components with effects carry this runtime.
+   */
+  effects?(component: object, effects?: CompilerEffectList): void;
 }
 
 export type CompilerBinding<Props> =
@@ -3119,6 +3151,22 @@ export interface CompiledComponentDefinition<Props> {
     blocks: CompilerBlockRuntime,
   ): React.ReactElement;
   bindings: readonly CompilerBinding<Props>[];
+  /**
+   * The component's useEffect and useLayoutEffect calls, evaluated in its render scope after each
+   * committed update: each callback with its dependency values (undefined runs it every time) and
+   * whether it is a layout effect.
+   */
+  effects?(props: Props, state: readonly CompilerCell[]): CompilerEffectList;
+}
+
+type CompilerEffectList = ReadonlyArray<
+  readonly [() => unknown, readonly unknown[] | undefined, boolean?]
+>;
+
+interface CompilerEffectState {
+  dependencies: readonly unknown[] | undefined;
+  cleanup: (() => void) | undefined;
+  layout: boolean;
 }
 
 interface CompiledDefinitionReference<Props> {
@@ -3312,19 +3360,37 @@ function compilerAttributeName(name: string): string {
   return name === "className" ? "class" : name === "htmlFor" ? "for" : name;
 }
 
+// The value and checked state compiled code last gave each controlled field. A compiled root puts
+// them back after a change event, as React DOM restores controlled fields from their props.
+const compilerControlledValues = /* @__PURE__ */ new WeakMap<Element, unknown>();
+const compilerControlledChecked = /* @__PURE__ */ new WeakMap<Element, unknown>();
+
+function recordControlledField(
+  fields: WeakMap<Element, unknown>,
+  element: Element,
+  value: unknown,
+): void {
+  // React treats a null or undefined value or checked prop as uncontrolled.
+  if (value == null) fields.delete(element);
+  else fields.set(element, value);
+}
+
 function updateAttribute(element: Element, name: string, value: unknown): void {
   const attributeName = compilerAttributeName(name);
   const stringifiesBoolean = attributeName.startsWith("data-") || attributeName.startsWith("aria-");
 
   if (name === "value" && (isInputElement(element) || isTextAreaElement(element))) {
+    recordControlledField(compilerControlledValues, element, value);
     const nextValue = value === null || value === undefined ? "" : String(value);
     if (element.value !== nextValue) element.value = nextValue;
     // React synchronizes controlled input values with the native reset baseline.
     // Focused number inputs defer this to blur to preserve in-progress editing.
+    // React keeps a textarea's default value (its text content) in step with its value too.
     if (
       value != null &&
-      isInputElement(element) &&
-      (element.type !== "number" || element.ownerDocument.activeElement !== element) &&
+      (isTextAreaElement(element) ||
+        (isInputElement(element) &&
+          (element.type !== "number" || element.ownerDocument.activeElement !== element))) &&
       element.defaultValue !== nextValue
     ) {
       element.defaultValue = nextValue;
@@ -3333,11 +3399,13 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
   }
 
   if (name === "value" && isSelectElement(element)) {
+    recordControlledField(compilerControlledValues, element, value);
     updateSelectValue(element, value);
     return;
   }
 
   if (name === "checked" && isInputElement(element)) {
+    recordControlledField(compilerControlledChecked, element, value);
     element.checked = Boolean(value);
     return;
   }
@@ -3542,10 +3610,30 @@ function isCompilerHostElement(value: unknown): value is CompilerHostElement {
   );
 }
 
+/**
+ * When React creates a controlled field it also sets its defaults, so the value and checked
+ * attributes match and a form reset returns to the initial value. Later updates leave
+ * defaultChecked alone, as React does.
+ */
+// Runs after updateAttribute, as React sets a new field's value before its default: assigning a
+// changed value moves the caret to the end, which an earlier default would leave at the start.
+function initializeFieldDefault(element: Element, name: string, value: unknown): void {
+  if (
+    name === "value" &&
+    value != null &&
+    (isInputElement(element) || isTextAreaElement(element))
+  ) {
+    element.defaultValue = String(value);
+  } else if (name === "checked" && isInputElement(element)) {
+    element.defaultChecked = Boolean(value);
+  }
+}
+
 function createCompilerHostElement(document: Document, descriptor: CompilerHostElement): Element {
   const element = document.createElement(descriptor.tag);
   for (const attribute of descriptor.attributes) {
     updateAttribute(element, attribute.name, attribute.value);
+    initializeFieldDefault(element, attribute.name, attribute.value);
   }
   for (const style of descriptor.styles) updateStyle(element, style.name, style.value);
   const appendChild = (child: unknown): void => {
@@ -4968,6 +5056,10 @@ interface CompilerHostTreeScope {
 
 const UNSET_HOST_CONDITIONAL_BINDING = Symbol("unset host conditional binding");
 
+// The keyed row events of each mounted host-block row element, wherever it sits in the row: a
+// branch, or after content of varying length. The rows container finds handlers through it.
+const compilerHostElementEvents = /* @__PURE__ */ new WeakMap<Element, readonly number[]>();
+
 function mountCompilerHostTree(
   owner: Pick<ConditionalBlockOwner, "subscribe">,
   element: Element,
@@ -4975,6 +5067,7 @@ function mountCompilerHostTree(
   onFallback: () => void,
 ): CompilerHostTreeScope | null {
   if (!matchesCompilerHostElement(element, descriptor)) return null;
+  if (descriptor.events) compilerHostElementEvents.set(element, descriptor.events);
   if (descriptor.block?.kind === "conditional-ranges") {
     const controller = new CompilerNestedConditionalRanges(
       owner,
@@ -6902,6 +6995,9 @@ function reorderCompilerKeyedRows(
 }
 
 const RESOLVED_COMPILER_MICROTASK = Promise.resolve();
+// Compiled updates scheduled and not yet run. A compiled root restores controlled fields only once
+// none remain, as React DOM restores them after it has flushed an event's updates.
+let pendingCompilerMicrotasks = 0;
 
 /**
  * Runs `callback` as a microtask, in the same queue and order as `queueMicrotask`. Every compiled
@@ -6910,7 +7006,9 @@ const RESOLVED_COMPILER_MICROTASK = Promise.resolve();
  * `queueMicrotask` so it is reported as an uncaught error, not an unhandled rejection.
  */
 function scheduleCompilerMicrotask(callback: () => void): void {
+  pendingCompilerMicrotasks += 1;
   void RESOLVED_COMPILER_MICROTASK.then(() => {
+    pendingCompilerMicrotasks -= 1;
     try {
       callback();
     } catch (error) {
@@ -7022,6 +7120,24 @@ interface KeyedRowHostRuntime {
     descriptor: CompilerHostElement,
     requestFallback: () => void,
   ): CompilerHostTreeScope | null;
+  /**
+   * Adds the row events named name that the mounted elements from the event target up to the
+   * row root carry, in a branch or not. Their descriptors list them, so they have no path.
+   */
+  matchEvents(
+    row: Element,
+    target: Node,
+    name: string,
+    events: readonly CompilerKeyedRowEvent[],
+    matches: KeyedRowEventMatch[],
+  ): void;
+}
+
+interface KeyedRowEventMatch {
+  descriptor: CompilerKeyedRowEvent;
+  target: Element;
+  /** Elements below the row root, so handlers run innermost first, as in React. */
+  depth: number;
 }
 
 interface KeyedUpdateRuntime {
@@ -9430,6 +9546,22 @@ function createKeyedRowHostRuntime(): KeyedRowHostRuntime {
   return {
     mount: (element, descriptor, requestFallback) =>
       mountCompilerHostTree(owner, element, descriptor, requestFallback),
+    matchEvents(row, target, name, events, matches) {
+      const elements: Element[] = [];
+      let element = target.nodeType === 1 ? (target as Element) : target.parentElement;
+      while (element) {
+        elements.push(element);
+        element = element === row ? null : element.parentElement;
+      }
+      elements.forEach((element, index) => {
+        for (const id of compilerHostElementEvents.get(element) || []) {
+          const descriptor = events[id];
+          if (descriptor?.name === name && descriptor.path === undefined) {
+            matches.push({ descriptor, target: element, depth: elements.length - 1 - index });
+          }
+        }
+      });
+    },
   };
 }
 
@@ -9444,7 +9576,13 @@ function createKeyedRowsBlockComponentCore(
   class FarmKeyedRowsBlock extends React.Component<CompilerKeyedRowsBlockProps, State> {
     static displayName = "FarmCompiledKeyedRows";
 
-    state: State = { fallback: false };
+    // Host-block rows have no React-owned mode, so rows whose events the container cannot run
+    // here (onChange under React DOM) are rendered by React from the start.
+    state: State = {
+      fallback: Boolean(
+        this.props.hostBlocks && this.props.events?.length && !this.props.delegateEvents,
+      ),
+    };
     private root: Element | null = null;
     private mounted = false;
     private fallbackRequested = false;
@@ -9471,6 +9609,7 @@ function createKeyedRowsBlockComponentCore(
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
+      this.currentProps.rootRef?.(root);
     };
 
     private requestHostScopeFallback = () => {
@@ -9589,7 +9728,8 @@ function createKeyedRowsBlockComponentCore(
       return Boolean(
         props.delegateEvents &&
         props.events?.length &&
-        props.events.every((event) => event.path !== undefined),
+        // Host-block rows find an event without a path through the element that mounted it.
+        (props.hostBlocks || props.events.every((event) => event.path !== undefined)),
       );
     }
 
@@ -9642,22 +9782,23 @@ function createKeyedRowsBlockComponentCore(
       if (!instance || !eventTarget) return;
       const capture = name.endsWith("Capture");
       const descriptors = this.currentProps.events || [];
-      const matches: { descriptor: CompilerKeyedRowEvent; target: Element }[] = [];
+      const matches: KeyedRowEventMatch[] = [];
       // Snapshot all matching targets before invoking a handler: a handler can
       // replace the DOM or update the descriptors for the next event.
       for (let index = 0, length = descriptors.length; index < length; index += 1) {
         if (!(index in descriptors)) continue;
         const descriptor = descriptors[index];
         if (descriptor.name !== name || descriptor.path === undefined) continue;
-        const target = findCompilerHostTarget(instance.element, descriptor.path || []);
+        const target = findCompilerHostTarget(instance.element, descriptor.path);
         if (target && (target === eventTarget || target.contains(eventTarget))) {
-          matches.push({ descriptor, target });
+          matches.push({ descriptor, target, depth: descriptor.path.length });
         }
       }
+      if (this.currentProps.hostBlocks) {
+        options.hostBlocks?.matchEvents(instance.element, eventTarget, name, descriptors, matches);
+      }
       matches.sort((left, right) =>
-        capture
-          ? (left.descriptor.path?.length || 0) - (right.descriptor.path?.length || 0)
-          : (right.descriptor.path?.length || 0) - (left.descriptor.path?.length || 0),
+        capture ? left.depth - right.depth : right.depth - left.depth,
       );
 
       for (const match of matches) {
@@ -10610,7 +10751,7 @@ function createKeyedRowsBlockComponentCore(
     componentDidMount(): void {
       this.mounted = true;
       this.listen();
-      if (!this.adopt()) this.activateFallback();
+      if (!this.state.fallback && !this.adopt()) this.activateFallback();
     }
 
     componentWillUnmount(): void {
@@ -10662,6 +10803,43 @@ function createKeyedRowsBlockComponent(
   });
 }
 
+/**
+ * Runs a delegated event on one keyed row: every descriptor whose element contains the target,
+ * innermost first (outermost first for capture), each seeing its own element as currentTarget,
+ * until a handler stops propagation.
+ */
+function dispatchKeyedRowEvent(
+  descriptors: readonly CompilerKeyedRowEvent[],
+  instance: CompilerKeyedRowInstance,
+  name: string,
+  event: React.SyntheticEvent,
+): void {
+  const target = event.target as Node;
+  const capture = name.endsWith("Capture");
+  const matches: { descriptor: CompilerKeyedRowEvent; host: Element }[] = [];
+  for (const descriptor of descriptors) {
+    if (descriptor.name !== name || descriptor.path === undefined) continue;
+    const host = findCompilerHostTarget(instance.element, descriptor.path);
+    if (host && (host === target || host.contains(target))) matches.push({ descriptor, host });
+  }
+  matches.sort((left, right) =>
+    capture
+      ? left.descriptor.path!.length - right.descriptor.path!.length
+      : right.descriptor.path!.length - left.descriptor.path!.length,
+  );
+  for (const { descriptor, host } of matches) {
+    const own = Object.getOwnPropertyDescriptor(event, "currentTarget");
+    try {
+      Object.defineProperty(event, "currentTarget", { configurable: true, value: host });
+      descriptor.invoke(instance.item, instance.index, event);
+    } finally {
+      if (own) Object.defineProperty(event, "currentTarget", own);
+      else Reflect.deleteProperty(event, "currentTarget");
+    }
+    if (event.isPropagationStopped()) break;
+  }
+}
+
 function createKeyedRangesBlockComponent(
   owner: Pick<CompilerRuntimeFeatureOwner, "subscribe" | "getDefinitionVersion">,
 ): React.ComponentType<CompilerKeyedRangesBlockProps> {
@@ -10677,7 +10855,11 @@ function createKeyedRangesBlockComponent(
   class FarmKeyedRangesBlock extends React.Component<CompilerKeyedRangesBlockProps, State> {
     static displayName = "FarmCompiledKeyedRanges";
 
-    state: State = { fallback: false };
+    // Rows whose events the container runs only without React DOM (onChange) are rendered by
+    // React here, from the start, with their own handlers.
+    state: State = {
+      fallback: Boolean(this.props.delegateEventsWithoutReact && !this.props.delegateEvents),
+    };
     private root: Element | null = null;
     private mounted = false;
     private fallbackRequested = false;
@@ -10928,7 +11110,7 @@ function createKeyedRangesBlockComponent(
     componentDidMount(): void {
       this.mounted = true;
       this.listen();
-      if (!this.adopt()) this.activateFallback();
+      if (!this.state.fallback && !this.adopt()) this.activateFallback();
     }
 
     componentDidUpdate(): void {
@@ -10950,14 +11132,53 @@ function createKeyedRangesBlockComponent(
       this.staticValues.length = 0;
     }
 
+    // React renders rows with their handlers only while it owns them (fallback). Otherwise the
+    // container dispatches each event to the row the runtime knows, with its current item.
+    private rowEvent: CompilerKeyedRangeRowEvent = (item, index, eventId, rangeIndex) =>
+      this.state.fallback || !this.currentProps.delegateEvents
+        ? (event) =>
+            this.currentProps.ranges[rangeIndex]?.events?.[eventId]?.invoke(item, index, event)
+        : undefined;
+
+    private dispatchRowEvent(name: string, event: React.SyntheticEvent): void {
+      const target = event.target as Node | null;
+      if (!this.root || !target) return;
+      let element = target.nodeType === 1 ? (target as Element) : target.parentElement;
+      while (element && element.parentElement !== this.root) element = element.parentElement;
+      if (!element) return;
+      for (let rangeIndex = 0; rangeIndex < this.rangeInstances.length; rangeIndex += 1) {
+        for (const instance of this.rangeInstances[rangeIndex].values()) {
+          if (instance.element !== element) continue;
+          dispatchKeyedRowEvent(
+            this.currentProps.ranges[rangeIndex].events || [],
+            instance,
+            name,
+            event,
+          );
+          return;
+        }
+      }
+    }
+
     render(): React.ReactNode {
-      const container = this.currentProps.render();
+      const container = this.currentProps.render(this.rowEvent);
       if (!React.isValidElement(container) || typeof container.type !== "string") {
         throw new TypeError(
           `Compiled keyed ranges ${this.currentProps.id} must own one host container.`,
         );
       }
+      const delegated: Record<string, React.EventHandler<React.SyntheticEvent>> = {};
+      if (this.currentProps.delegateEvents && !this.state.fallback) {
+        for (const range of this.currentProps.ranges) {
+          for (const { name } of range.events || []) {
+            delegated[name] = (event) => {
+              if (!event.isPropagationStopped()) this.dispatchRowEvent(name, event);
+            };
+          }
+        }
+      }
       return React.cloneElement(container, {
+        ...delegated,
         key: this.state.fallback ? `react-${this.fallbackVersion}` : "compiled",
         ref: this.captureRoot,
       } as React.Attributes);
@@ -12064,6 +12285,58 @@ export const mixedRangesRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+/**
+ * Runs effects whose dependencies changed, after their previous cleanups, as React does: layout
+ * effects first. Without an effect list, runs every cleanup, as on unmount.
+ */
+const compilerEffectStates = /* @__PURE__ */ new WeakMap<
+  object,
+  Array<CompilerEffectState | undefined>
+>();
+
+function runCompilerEffects(component: object, effects?: CompilerEffectList): void {
+  let states = compilerEffectStates.get(component);
+  if (!effects) {
+    const mounted = states?.splice(0) ?? [];
+    for (const layout of [true, false]) {
+      for (const state of mounted) if (state?.layout === layout) state.cleanup?.();
+    }
+    return;
+  }
+  if (!states) compilerEffectStates.set(component, (states = []));
+  const changed: number[] = [];
+  for (let index = 0; index < effects.length; index += 1) {
+    const dependencies = effects[index][1];
+    const previous = states[index];
+    if (
+      !previous ||
+      !dependencies ||
+      !previous.dependencies ||
+      dependencies.length !== previous.dependencies.length ||
+      dependencies.some((value, position) => !Object.is(value, previous.dependencies![position]))
+    ) {
+      changed.push(index);
+    }
+  }
+  for (const layout of [true, false]) {
+    const phase = changed.filter((index) => Boolean(effects[index][2]) === layout);
+    for (const index of phase) states[index]?.cleanup?.();
+    for (const index of phase) {
+      const cleanup = effects[index][0]();
+      states[index] = {
+        dependencies: effects[index][1],
+        cleanup: typeof cleanup === "function" ? (cleanup as () => void) : undefined,
+        layout,
+      };
+    }
+  }
+}
+
+export const effectsRuntimeFeature: CompilerRuntimeFeature = {
+  name: "effects",
+  create: () => ({ effects: runCompilerEffects }),
+};
+
 export const componentRuntimeFeature: CompilerRuntimeFeature = {
   name: "component",
   create: (owner) => ({
@@ -12177,7 +12450,12 @@ function createCompiledComponentRuntime<Props>(
       this.propCellOffset = initialState.length;
       this.cells = [...initialState, ...initialProps].map((initialValue, index) => {
         let value = initialValue;
-        const pending: PendingCellUpdate[] = [];
+        // Updates since the last flush. An updater runs when it is set, as React's do before
+        // the end of an event, so it reads the event's target before React DOM restores a
+        // controlled field; get() keeps returning the committed value until the flush.
+        let pending = false;
+        let pendingValue: unknown;
+        let pendingError: { error: unknown } | undefined;
         return {
           get: () => {
             if (this.activeBinding && this.activeDependencies) {
@@ -12186,21 +12464,33 @@ function createCompiledComponentRuntime<Props>(
             return value;
           },
           set: (next) => {
-            pending.push({ kind: "state", update: next });
+            // After a failed updater, later updates are dropped and the flush rethrows.
+            if (!pendingError) {
+              const base = pending ? pendingValue : value;
+              try {
+                pendingValue = typeof next === "function" ? next(base) : next;
+              } catch (error) {
+                pendingValue = base;
+                pendingError = { error };
+              }
+              pending = true;
+            }
             this.scheduleBindingFlush(index);
           },
           replace: (next) => {
-            pending.push({ kind: "value", value: next });
+            pendingValue = next;
+            pending = true;
           },
           flush: () => {
-            if (pending.length === 0) return false;
+            if (!pending) return false;
             const previous = value;
-            for (const next of pending.splice(0)) {
-              if (next.kind === "value") {
-                value = next.value;
-              } else {
-                value = typeof next.update === "function" ? next.update(value) : next.update;
-              }
+            value = pendingValue;
+            pending = false;
+            pendingValue = undefined;
+            if (pendingError) {
+              const { error } = pendingError;
+              pendingError = undefined;
+              throw error;
             }
             return !Object.is(previous, value);
           },
@@ -12212,7 +12502,7 @@ function createCompiledComponentRuntime<Props>(
         getDefinitionVersion: () => definitionReference.current,
       };
       const blockRuntime: Partial<CompilerBlockRuntime> = {
-        target: (id) => this.bindingTarget(id),
+        target: (id, ref) => this.bindingTarget(id, ref),
       };
       for (const feature of runtimeFeatures) {
         Object.assign(blockRuntime, feature.create(featureOwner));
@@ -12352,7 +12642,7 @@ function createCompiledComponentRuntime<Props>(
       if (this.mounted) this.forceUpdate();
     };
 
-    private bindingTarget(id: number): React.RefCallback<Element> {
+    private bindingTarget(id: number, ref?: { current: unknown }): React.RefCallback<Element> {
       const existing = this.bindingTargetRefs.get(id);
       if (existing) return existing;
       const capture: React.RefCallback<Element> = (element) => {
@@ -12361,6 +12651,7 @@ function createCompiledComponentRuntime<Props>(
         } else {
           this.bindingTargets.delete(id);
         }
+        if (ref) ref.current = element;
       };
       this.bindingTargetRefs.set(id, capture);
       return capture;
@@ -12384,15 +12675,24 @@ function createCompiledComponentRuntime<Props>(
       };
     }
 
-    private restoreInputSelection(snapshot: InputSelectionSnapshot | null): void {
+    /**
+     * Runs once compiled DOM updates have committed: restores the focused field's selection, then
+     * runs the effects.
+     */
+    private afterCommit(snapshot: InputSelectionSnapshot | null): void {
       if (
-        !snapshot ||
-        !snapshot.element.isConnected ||
-        snapshot.element.ownerDocument.activeElement !== snapshot.element
+        snapshot &&
+        snapshot.element.isConnected &&
+        snapshot.element.ownerDocument.activeElement === snapshot.element
       ) {
-        return;
+        snapshot.element.setSelectionRange(snapshot.start, snapshot.end, snapshot.direction);
       }
-      snapshot.element.setSelectionRange(snapshot.start, snapshot.end, snapshot.direction);
+      if (this.mounted) {
+        this.blockRuntime.effects?.(
+          this,
+          definitionReference.current.effects?.(this.props, this.cells),
+        );
+      }
     }
 
     private setBlockRoot(id: number, root: Element | null, expectedRoot?: Element | null): void {
@@ -12427,7 +12727,8 @@ function createCompiledComponentRuntime<Props>(
       });
     }
 
-    private flushBindingUpdates(): void {
+    /** Returns true when it committed an update, after which it has run the effects. */
+    private flushBindingUpdates(): true | undefined {
       const inputSelection = this.inputSelection;
       this.inputSelection = null;
       if (!this.mounted) return;
@@ -12477,15 +12778,16 @@ function createCompiledComponentRuntime<Props>(
         for (const refresh of blockRefreshes) {
           refresh(() => {
             pendingBlockCommits -= 1;
-            if (pendingBlockCommits === 0) this.restoreInputSelection(inputSelection);
+            if (pendingBlockCommits === 0) this.afterCommit(inputSelection);
           }, dirty);
         }
-        if (blockRefreshes.length === 0) this.restoreInputSelection(inputSelection);
+        if (blockRefreshes.length === 0) this.afterCommit(inputSelection);
       } catch (error) {
         this.bindingError = error;
         this.hasBindingError = true;
         this.forceUpdate();
       }
+      return true;
     }
 
     private applyBinding(binding: CompilerBinding<Props>, force = false): void {
@@ -12578,10 +12880,13 @@ function createCompiledComponentRuntime<Props>(
           this.applyBinding(binding, true);
         }
       }
-      if (this.dirtyState.size) this.flushBindingUpdates();
+      if (!(this.dirtyState.size && this.flushBindingUpdates())) this.afterCommit(null);
     }
 
     componentWillUnmount(): void {
+      // Hiding also calls this lifecycle; React cleans up effects when it hides a component too,
+      // and the next mount runs them again.
+      this.blockRuntime.effects?.(this);
       this.mounted = false;
       this.inputSelection = null;
       this.blockRefreshListeners.clear();
@@ -12631,13 +12936,15 @@ function createCompiledComponentRuntime<Props>(
       if (
         element.type === this.blockRuntime.KeyedRanges ||
         element.type === this.blockRuntime.ConditionalRanges ||
-        element.type === this.blockRuntime.MixedRanges
+        element.type === this.blockRuntime.MixedRanges ||
+        element.type === this.blockRuntime.KeyedRows
       ) {
         renderedElement = React.cloneElement(
           element as React.ReactElement<
             | CompilerKeyedRangesBlockProps
             | CompilerConditionalRangesBlockProps
             | CompilerMixedRangesBlockProps
+            | CompilerKeyedRowsBlockProps
           >,
           { rootRef: captureCommittedRoot },
         );
@@ -12668,6 +12975,7 @@ const COMPLETE_RUNTIME_FEATURES: readonly CompilerRuntimeFeature[] = [
   keyedRangesRuntimeFeature,
   mixedRangesRuntimeFeature,
   componentRuntimeFeature,
+  effectsRuntimeFeature,
 ];
 
 /**
@@ -12679,4 +12987,560 @@ export function createCompiledComponent<Props>(
   definition: CompiledComponentDefinition<Props>,
 ): React.ComponentType<Props> {
   return createCompiledComponentWithFeatures(definition, COMPLETE_RUNTIME_FEATURES);
+}
+
+// ---------------------------------------------------------------------------------------------
+// createCompiledRoot(): mount a fully compiled tree without loading React DOM.
+// ---------------------------------------------------------------------------------------------
+
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+const REACT_PORTAL_TYPE = Symbol.for("react.portal");
+const REACT_MEMO_TYPE = Symbol.for("react.memo");
+const REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref");
+
+/** React event props the compiled mount attaches natively, by the native event they listen to. */
+const COMPILED_ROOT_EVENTS: Readonly<Record<string, string>> = {
+  onClick: "click",
+  onDoubleClick: "dblclick",
+  onContextMenu: "contextmenu",
+  onMouseDown: "mousedown",
+  onMouseUp: "mouseup",
+  onMouseMove: "mousemove",
+  onMouseOver: "mouseover",
+  onMouseOut: "mouseout",
+  onMouseEnter: "mouseenter",
+  onMouseLeave: "mouseleave",
+  onPointerDown: "pointerdown",
+  onPointerUp: "pointerup",
+  onPointerMove: "pointermove",
+  onPointerOver: "pointerover",
+  onPointerOut: "pointerout",
+  onPointerEnter: "pointerenter",
+  onPointerLeave: "pointerleave",
+  onPointerCancel: "pointercancel",
+  onKeyDown: "keydown",
+  onKeyUp: "keyup",
+  onInput: "input",
+  onSubmit: "submit",
+  onReset: "reset",
+  // React's onFocus and onBlur bubble, like focusin and focusout.
+  onFocus: "focusin",
+  onBlur: "focusout",
+};
+/** Camel-cased HTML props whose React output is the plain lower-cased attribute. */
+const COMPILED_ROOT_CAMEL_ATTRIBUTES = new Set([
+  "className",
+  "htmlFor",
+  "tabIndex",
+  "readOnly",
+  "maxLength",
+  "minLength",
+  "colSpan",
+  "rowSpan",
+  "autoComplete",
+  "inputMode",
+  "enterKeyHint",
+]);
+
+class CompiledRootUnsupported extends Error {}
+
+/**
+ * Renders a function component outside React. A hook call reaches React's current dispatcher,
+ * which is set here to one that rejects every hook, so the root goes to React DOM without React
+ * reporting an invalid hook call. React 19 and 18 keep that dispatcher in different internals;
+ * when neither is found, a hook call still fails and the root still goes to React DOM.
+ */
+function renderWithoutHooks(name: string, render: () => unknown): unknown {
+  const internals = React as unknown as {
+    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: unknown };
+    __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?: {
+      ReactCurrentDispatcher?: { current?: unknown };
+    };
+  };
+  const react19 = internals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const react18 =
+    internals.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?.ReactCurrentDispatcher;
+  const rejectHooks = new Proxy(
+    {},
+    {
+      get() {
+        throw new CompiledRootUnsupported(`${name}, which calls hooks`);
+      },
+    },
+  );
+  const previous = react19 ? react19.H : react18?.current;
+  if (react19) react19.H = rejectHooks;
+  else if (react18) react18.current = rejectHooks;
+  try {
+    return render();
+  } catch (error) {
+    if (error instanceof CompiledRootUnsupported) throw error;
+    throw new CompiledRootUnsupported(`${name}: ${error}`);
+  } finally {
+    if (react19) react19.H = previous;
+    else if (react18) react18.current = previous;
+  }
+}
+
+/**
+ * The compiler runtime's own components: their updates patch the DOM directly, and their React
+ * re-render paths (fallback, error, refresh) hand the root over to React DOM. Every runtime
+ * class carries a FarmCompiled displayName, so this check adds nothing to bundles that do not
+ * use createCompiledRoot().
+ */
+function isFarmCompilerClass(type: unknown): boolean {
+  if (typeof type !== "function" || !type.prototype?.isReactComponent) return false;
+  const displayName = (type as { displayName?: unknown }).displayName;
+  return typeof displayName === "string" && displayName.startsWith("FarmCompiled");
+}
+
+/**
+ * Runtime components whose normal updates patch the DOM without React: compiled components, and
+ * keyed rows without React-owned rows (the rule FarmKeyedRowsBlock.hasReactOwnedRows applies).
+ * Other runtime blocks re-render through React (forceUpdate) as part of normal updates, so a
+ * tree containing them is left to React DOM from the start rather than handed over later.
+ */
+function compiledRootUpdatesWithoutReact(displayName: string, props: unknown): boolean {
+  if (displayName.startsWith("FarmCompiled(")) return true;
+  // Keyed ranges own their rows and static-sibling bindings; React renders them again only on
+  // fallback paths (duplicate keys, failed adoption) or when a parent re-renders through React,
+  // which a compiled parent in this root never does. Their rows carry no React-owned events.
+  if (displayName === "FarmCompiledKeyedRanges") return true;
+  if (displayName !== "FarmCompiledKeyedRows") return false;
+  const rows = props as {
+    conditionals?: readonly unknown[];
+    events?: ReadonlyArray<{ path?: unknown }>;
+    delegateEvents?: boolean;
+    delegateEventsWithoutReact?: boolean;
+    hostBlocks?: boolean;
+  };
+  const delegated = Boolean(
+    (rows.delegateEvents || rows.delegateEventsWithoutReact) &&
+    rows.events?.length &&
+    (rows.hostBlocks || rows.events.every((event) => event.path !== undefined)),
+  );
+  return !rows.conditionals?.length && (!rows.events?.length || delegated);
+}
+
+interface CompiledRootMount {
+  fragment: DocumentFragment;
+  /** Refs and componentDidMount, in React's commit order (children before parents). */
+  effects: Array<() => void>;
+  /** Mounted compiler components, children before parents. */
+  instances: React.Component[];
+}
+
+/** Puts a controlled field back to the value compiled code last gave it, as React DOM does. */
+function restoreCompilerControlledField(element: Element): void {
+  if (compilerControlledValues.has(element)) {
+    const value = compilerControlledValues.get(element);
+    if (isSelectElement(element)) {
+      updateSelectValue(element, value);
+    } else if (isInputElement(element) || isTextAreaElement(element)) {
+      // React compares a number input loosely, so "1." stays while its value is 1.
+      const changed =
+        element.type === "number" && typeof value === "number"
+          ? (value === 0 && element.value === "") || Number(element.value) !== value
+          : element.value !== String(value);
+      if (changed) element.value = String(value);
+    }
+  }
+  if (isInputElement(element) && compilerControlledChecked.has(element)) {
+    element.checked = Boolean(compilerControlledChecked.get(element));
+    // Checking a radio unchecks the others in its group, so React restores those too.
+    if (element.type === "radio" && element.name) {
+      for (const radio of (element.getRootNode() as ParentNode).querySelectorAll(
+        'input[type="radio"]',
+      )) {
+        const other = radio as HTMLInputElement;
+        if (
+          other !== element &&
+          other.name === element.name &&
+          other.form === element.form &&
+          compilerControlledChecked.has(other)
+        ) {
+          other.checked = Boolean(compilerControlledChecked.get(other));
+        }
+      }
+    }
+  }
+}
+
+function restoreControlledFieldOnceSettled(element: Element): void {
+  // Wait for the event's compiled updates: a field whose state took the edit is then current, and
+  // is not written again.
+  queueMicrotask(() =>
+    pendingCompilerMicrotasks > 0
+      ? restoreControlledFieldOnceSettled(element)
+      : restoreCompilerControlledField(element),
+  );
+}
+
+function scheduleControlledFieldRestore(event: Event): void {
+  const target = event.target;
+  // Restore after the event this root runs onChange on: restoring a checkbox after its click,
+  // before its change event, would hide the new state from the handler.
+  if (
+    target instanceof Element &&
+    event.type === compiledRootChangeEvent(target) &&
+    (compilerControlledValues.has(target) || compilerControlledChecked.has(target))
+  ) {
+    restoreControlledFieldOnceSettled(target);
+  }
+}
+
+// The native events this root runs onChange on (compiledRootChangeEvent).
+const COMPILED_ROOT_CONTROLLED_FIELD_EVENTS = ["input", "change"];
+
+function toCompiledRootEvent(nativeEvent: Event, currentTarget: Element, type: string): unknown {
+  let propagationStopped = false;
+  const own: Record<PropertyKey, unknown> = {
+    nativeEvent,
+    currentTarget,
+    type,
+    stopPropagation() {
+      propagationStopped = true;
+      nativeEvent.stopPropagation();
+      // The root's own listener will not see the event now, so restore the field from here.
+      scheduleControlledFieldRestore(nativeEvent);
+    },
+    isPropagationStopped: () => propagationStopped,
+    isDefaultPrevented: () => nativeEvent.defaultPrevented,
+    persist() {},
+  };
+  return new Proxy(own, {
+    get(target, key) {
+      if (key in target) return target[key];
+      const value = (nativeEvent as unknown as Record<PropertyKey, unknown>)[key];
+      return typeof value === "function" ? (value as Function).bind(nativeEvent) : value;
+    },
+  });
+}
+
+function compiledRootChangeEvent(element: Element): string {
+  if (element instanceof HTMLSelectElement) return "change";
+  if (element instanceof HTMLInputElement) {
+    return element.type === "checkbox" || element.type === "radio" || element.type === "file"
+      ? "change"
+      : "input";
+  }
+  return element instanceof HTMLTextAreaElement ? "input" : "";
+}
+
+function setCompiledRootEvent(element: Element, name: string, handler: unknown): void {
+  if (handler === null || handler === undefined) return;
+  if (typeof handler !== "function") throw new CompiledRootUnsupported(`${name} value`);
+  const capture = name.endsWith("Capture");
+  const reactName = capture ? name.slice(0, -"Capture".length) : name;
+  if (reactName === "onChange" && !compiledRootChangeEvent(element)) {
+    // A container's onChange (delegated keyed rows) runs for the controls inside it, on the
+    // native event React's onChange follows for each kind of control.
+    for (const type of ["input", "change"]) {
+      element.addEventListener(
+        type,
+        (event) => {
+          const target = event.target;
+          if (target instanceof Element && compiledRootChangeEvent(target) === type) {
+            (handler as (event: unknown) => void)(toCompiledRootEvent(event, element, "change"));
+          }
+        },
+        capture,
+      );
+    }
+    return;
+  }
+  const nativeType =
+    reactName === "onChange" ? compiledRootChangeEvent(element) : COMPILED_ROOT_EVENTS[reactName];
+  if (!nativeType) throw new CompiledRootUnsupported(`the ${name} event`);
+  const reactType =
+    reactName === "onFocus"
+      ? "focus"
+      : reactName === "onBlur"
+        ? "blur"
+        : reactName === "onChange"
+          ? "change"
+          : nativeType;
+  element.addEventListener(
+    nativeType,
+    (event) =>
+      (handler as (event: unknown) => void)(toCompiledRootEvent(event, element, reactType)),
+    capture,
+  );
+}
+
+function setCompiledRootProp(element: Element, name: string, value: unknown): void {
+  if (name === "children" || name === "key" || name === "ref") return;
+  if (name === "suppressHydrationWarning" || name === "suppressContentEditableWarning") return;
+  if (/^on[A-Z]/.test(name)) return setCompiledRootEvent(element, name, value);
+  if (name === "style") {
+    if (value === null || value === undefined) return;
+    if (typeof value !== "object") throw new CompiledRootUnsupported("a non-object style");
+    for (const [property, styleValue] of Object.entries(value as Record<string, unknown>)) {
+      updateStyle(element, property, styleValue);
+    }
+    return;
+  }
+  if (name === "dangerouslySetInnerHTML") {
+    const html = (value as { __html?: unknown } | null | undefined)?.__html;
+    if (html !== null && html !== undefined) element.innerHTML = String(html);
+    return;
+  }
+  if (value !== null && value !== undefined && typeof value === "object") {
+    throw new CompiledRootUnsupported(`an object ${name} value`);
+  }
+  if (typeof value === "function" || typeof value === "symbol") {
+    throw new CompiledRootUnsupported(`a ${typeof value} ${name} value`);
+  }
+  const svg = element.namespaceURI === SVG_NAMESPACE;
+  if (/[A-Z]/.test(name) && (svg || !COMPILED_ROOT_CAMEL_ATTRIBUTES.has(name))) {
+    // React renames or special-cases these (autoFocus, defaultValue, spellCheck, SVG
+    // presentation attributes, ...): leave them to React DOM.
+    if (!(svg && (name === "className" || name === "viewBox"))) {
+      throw new CompiledRootUnsupported(`the ${name} prop`);
+    }
+  }
+  updateAttribute(element, name, value);
+  initializeFieldDefault(element, name, value);
+}
+
+function mountCompiledRootNode(
+  node: unknown,
+  parent: ParentNode,
+  namespace: string | null,
+  mount: CompiledRootMount,
+  updater: object,
+): void {
+  if (node === null || node === undefined || typeof node === "boolean") return;
+  if (typeof node === "string" || typeof node === "number" || typeof node === "bigint") {
+    parent.appendChild(document.createTextNode(String(node)));
+    return;
+  }
+  if (Array.isArray(node) || (typeof node === "object" && Symbol.iterator in node)) {
+    for (const child of node as Iterable<unknown>) {
+      mountCompiledRootNode(child, parent, namespace, mount, updater);
+    }
+    return;
+  }
+  if (!React.isValidElement(node)) {
+    throw new CompiledRootUnsupported(
+      (node as { $$typeof?: unknown })?.$$typeof === REACT_PORTAL_TYPE ? "a portal" : "a child",
+    );
+  }
+  const { type } = node;
+  const props = node.props as Record<string, unknown>;
+  if (type === React.Fragment || type === React.StrictMode) {
+    return mountCompiledRootNode(props.children, parent, namespace, mount, updater);
+  }
+  if (typeof type === "string") {
+    const elementNamespace = type === "svg" ? SVG_NAMESPACE : namespace;
+    const element = elementNamespace
+      ? document.createElementNS(elementNamespace, type)
+      : document.createElement(type);
+    // React applies type before value, and a <select> value after its options exist.
+    if (props.type !== undefined) setCompiledRootProp(element, "type", props.type);
+    for (const name in props) {
+      if (name === "type" || (name === "value" && type === "select")) continue;
+      setCompiledRootProp(element, name, props[name]);
+    }
+    if (props.dangerouslySetInnerHTML === undefined) {
+      mountCompiledRootNode(
+        props.children,
+        element,
+        type === "foreignObject" ? null : elementNamespace,
+        mount,
+        updater,
+      );
+    }
+    if (type === "select" && props.value !== undefined) {
+      setCompiledRootProp(element, "value", props.value);
+    }
+    parent.appendChild(element);
+    const ref = props.ref ?? (node as { ref?: unknown }).ref;
+    if (typeof ref === "function") mount.effects.push(() => ref(element));
+    else if (ref && typeof ref === "object") {
+      mount.effects.push(() => {
+        (ref as { current: unknown }).current = element;
+      });
+    }
+    return;
+  }
+  if (isFarmCompilerClass(type)) {
+    const displayName = (type as unknown as { displayName: string }).displayName;
+    if (!compiledRootUpdatesWithoutReact(displayName, props)) {
+      throw new CompiledRootUnsupported(`${displayName}, which updates through React`);
+    }
+    const Component = type as unknown as new (props: unknown) => React.Component & {
+      componentDidMount?(): void;
+    };
+    // This root maps onChange to native events itself (setCompiledRootEvent), so rows that are
+    // React-owned only for onChange can use the delegated row path here.
+    const instanceProps = (props as { delegateEventsWithoutReact?: boolean })
+      .delegateEventsWithoutReact
+      ? { ...props, delegateEvents: true }
+      : props;
+    const instance = new Component(instanceProps);
+    (instance as unknown as { props: unknown }).props = instanceProps;
+    (instance as unknown as { updater: object }).updater = updater;
+    const derived = (
+      type as { getDerivedStateFromProps?: (props: unknown, state: unknown) => unknown }
+    ).getDerivedStateFromProps;
+    if (derived) {
+      const next = derived(props, instance.state);
+      if (next) (instance as { state: unknown }).state = { ...instance.state, ...next };
+    }
+    mountCompiledRootNode(instance.render(), parent, namespace, mount, updater);
+    mount.instances.push(instance);
+    if (instance.componentDidMount) mount.effects.push(() => instance.componentDidMount!());
+    return;
+  }
+  if (typeof type === "function" && !type.prototype?.isReactComponent) {
+    // Hook-free function components render once; one that calls a hook goes to React DOM.
+    const rendered = renderWithoutHooks(type.name || "a function component", () =>
+      (type as (props: unknown) => unknown)(props),
+    );
+    return mountCompiledRootNode(rendered, parent, namespace, mount, updater);
+  }
+  const typeTag = (type as { $$typeof?: unknown } | null)?.$$typeof;
+  if (typeTag === REACT_MEMO_TYPE) {
+    const inner = (type as unknown as { type: unknown }).type;
+    return mountCompiledRootNode(
+      React.createElement(inner as React.ElementType, props),
+      parent,
+      namespace,
+      mount,
+      updater,
+    );
+  }
+  if (typeTag === REACT_FORWARD_REF_TYPE) {
+    const rendered = renderWithoutHooks("a forwardRef component", () =>
+      (type as unknown as { render(props: unknown, ref: unknown): unknown }).render(
+        props,
+        props.ref ?? null,
+      ),
+    );
+    return mountCompiledRootNode(rendered, parent, namespace, mount, updater);
+  }
+  throw new CompiledRootUnsupported("a component React DOM must render");
+}
+
+export interface CompiledRoot {
+  render(element: React.ReactNode): void;
+  unmount(): void;
+}
+
+export interface CompiledRootOptions {
+  /** Passed to React DOM's createRoot() if the root falls back to React DOM. */
+  reactRootOptions?: unknown;
+  /**
+   * Called with the reason when the root uses React DOM instead. The default is silent, so an
+   * app's visitors see nothing in their console; the compiler report lists uncompiled components.
+   */
+  onFallback?(reason: string): void;
+}
+
+interface CompiledRootReactDOM {
+  createRoot(
+    container: Element,
+    options?: never,
+  ): { render(element: React.ReactNode): void; unmount(): void };
+}
+
+/**
+ * Experimental: a createRoot() that mounts a fully compiled tree without loading React DOM.
+ *
+ * It renders host elements, fragments, the compiler runtime's components and hook-free function
+ * components into a detached fragment, then commits it, runs refs and componentDidMount, and
+ * leaves updates to the compiled runtime. Anything else (hooks, context, Suspense, portals,
+ * props React renames) loads React DOM on demand and lets it render the root instead, before
+ * anything is shown. If a mounted compiler component later needs a React re-render (its
+ * fallback, error and refresh paths), React DOM takes over and renders the root again: that
+ * root's compiled state starts over. Pages with Fast Refresh installed use React DOM, which is
+ * the only renderer Fast Refresh updates.
+ */
+export function createCompiledRoot(
+  container: Element,
+  options: CompiledRootOptions,
+  // Supplied by @farm.js/react/compiled-root, so the runtime itself holds no dynamic import of
+  // React DOM: apps that import React DOM statically see no ineffective-dynamic-import warning.
+  loadReactDOM: () => Promise<CompiledRootReactDOM>,
+): CompiledRoot {
+  let mode: "idle" | "compiled" | "pending" | "react" = "idle";
+  let element: React.ReactNode = null;
+  let instances: React.Component[] = [];
+  let reactRoot: { render(element: React.ReactNode): void; unmount(): void } | undefined;
+  let unmounted = false;
+
+  const stopCompiled = () => {
+    for (const type of COMPILED_ROOT_CONTROLLED_FIELD_EVENTS) {
+      container.removeEventListener(type, scheduleControlledFieldRestore);
+    }
+    // React unmounts parents before children.
+    for (const instance of instances.slice().reverse()) {
+      (instance as { componentWillUnmount?(): void }).componentWillUnmount?.();
+    }
+    instances = [];
+  };
+
+  const handOff = (reason?: string) => {
+    if (mode === "pending" || mode === "react") return;
+    if (reason) options.onFallback?.(reason);
+    stopCompiled();
+    mode = "pending";
+    void loadReactDOM().then((client) => {
+      if (unmounted) return;
+      reactRoot = client.createRoot(container, options.reactRootOptions as never);
+      mode = "react";
+      reactRoot.render(element);
+    });
+  };
+
+  const updater = {
+    isMounted: () => mode === "compiled",
+    enqueueSetState: () => handOff("a compiled component needs a React update"),
+    enqueueReplaceState: () => handOff("a compiled component needs a React update"),
+    enqueueForceUpdate: () => handOff("a compiled component needs a React update"),
+  };
+
+  return {
+    render(next) {
+      element = next;
+      if (unmounted) return;
+      if (mode === "react") return reactRoot!.render(next);
+      if (mode === "pending") return;
+      if (mode === "compiled") return handOff("render() was called again");
+      // Fast Refresh applies edits only to React DOM roots, so a page that installed it (a
+      // development server) uses React DOM, as it would without the compiled root.
+      if (typeof (globalThis as { $RefreshReg$?: unknown }).$RefreshReg$ === "function") {
+        return handOff();
+      }
+      const mount: CompiledRootMount = {
+        fragment: document.createDocumentFragment(),
+        effects: [],
+        instances: [],
+      };
+      try {
+        mountCompiledRootNode(next, mount.fragment, null, mount, updater);
+      } catch (error) {
+        if (!(error instanceof CompiledRootUnsupported)) throw error;
+        return handOff(`it contains ${error.message}`);
+      }
+      container.replaceChildren(mount.fragment);
+      instances = mount.instances;
+      mode = "compiled";
+      // React DOM restores a controlled field after an event that changes it; this root does
+      // that here, after the event's handlers have run.
+      for (const type of COMPILED_ROOT_CONTROLLED_FIELD_EVENTS) {
+        container.addEventListener(type, scheduleControlledFieldRestore);
+      }
+      for (const effect of mount.effects) effect();
+    },
+    unmount() {
+      unmounted = true;
+      if (mode === "react") reactRoot!.unmount();
+      else {
+        stopCompiled();
+        container.replaceChildren();
+      }
+    },
+  };
 }

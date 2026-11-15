@@ -145,7 +145,9 @@ async function record(page, action) {
   await page.route("**/*", handler);
   await action();
   await page.waitForLoadState("networkidle");
-  await page.unroute("**/*", handler);
+  // A chunk requested just before the network went idle can still be in the handler; wait for it
+  // so it is counted and fulfilled before the page closes.
+  await page.unrouteAll({ behavior: "wait" });
   return bodies;
 }
 

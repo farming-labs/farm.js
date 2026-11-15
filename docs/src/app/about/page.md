@@ -31,3 +31,4 @@ farmjs.dev is a Farm.js app. Its source lives in the [`docs/`](https://github.co
 - [Read the blog](/blog)
 - [Contact the team](/contact)
 - [Privacy](/privacy)
+- [Terms](/terms)

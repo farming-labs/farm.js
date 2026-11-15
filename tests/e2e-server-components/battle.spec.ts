@@ -234,3 +234,157 @@ test("a client provider in a page gives context to client components in its serv
   await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
   expect(errors).toEqual([]);
 });
+
+test("memo, forwardRef and class client components hydrate and keep working", async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto("/battle/shapes");
+  await page.waitForLoadState("networkidle");
+  await page.getByTestId("memo").click();
+  await expect(page.getByTestId("memo")).toHaveText("memo: 1");
+  await page.getByPlaceholder("type here").fill("typed");
+  await expect(page.getByTestId("ref-echo")).toHaveText("typed");
+  await page.getByTestId("class").click();
+  await expect(page.getByTestId("class")).toHaveText("class: 6");
+  expect(errors).toEqual([]);
+});
+
+test("a lazy component inside a client component renders on the server and hydrates", async ({
+  page,
+  request,
+}) => {
+  expect(await (await request.get("/battle/shapes")).text()).toContain("lazy: 0");
+  const errors = collectErrors(page);
+  await page.goto("/battle/shapes");
+  await page.waitForLoadState("networkidle");
+  await page.getByTestId("lazy").click();
+  await expect(page.getByTestId("lazy")).toHaveText("lazy: 1");
+  expect(errors).toEqual([]);
+});
+
+test("client components that render nothing, a fragment or a string hydrate", async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto("/battle/shapes");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByTestId("appears")).toHaveText("hydrated");
+  await page.getByTestId("fragment").click();
+  await expect(page.getByTestId("fragment-text")).toHaveText("fragment 1");
+  await expect(page.getByTestId("string-root")).toHaveText("just text");
+  expect(errors).toEqual([]);
+});
+
+test("a prop holding </script> and line separators reaches the client unchanged and runs nothing", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/battle/shapes");
+  await page.waitForLoadState("networkidle");
+  const tricky = page.getByTestId("tricky");
+  await expect(tricky).toHaveAttribute("data-hydrated", "true");
+  expect(await tricky.textContent()).toBe(
+    "</script><script>window.__battlePwned = 1</script>     <!-- end",
+  );
+  expect(await page.evaluate(() => (window as { __battlePwned?: number }).__battlePwned)).toBe(
+    undefined,
+  );
+  expect(errors).toEqual([]);
+});
+
+test("a meta tag a client component renders is hoisted into the head and follows its state, as React 19 hoists it", async ({
+  page,
+}) => {
+  // The server sends it in the head, before any JavaScript runs.
+  const html = await (await page.request.get("/battle/shapes")).text();
+  const head = html.slice(0, html.indexOf("</head>"));
+  expect(head).toContain('<meta name="battle-island" content="count 0"/>');
+  expect(html.indexOf('name="battle-island"')).toBe(html.lastIndexOf('name="battle-island"'));
+  const errors = collectErrors(page);
+  await page.goto("/battle/shapes");
+  await page.waitForLoadState("networkidle");
+  const meta = page.locator('head meta[name="battle-island"]');
+  await expect(meta).toHaveAttribute("content", "count 0");
+  await page.getByTestId("meta").click();
+  await expect(meta).toHaveAttribute("content", "count 1");
+  expect(await page.locator('body meta[name="battle-island"]').count()).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test("useSyncExternalStore shows the server snapshot in HTML and the client's after hydration", async ({
+  page,
+  request,
+}) => {
+  expect(await (await request.get("/battle/shapes")).text()).toMatch(
+    /<p data-testid="store">server<\/p>/,
+  );
+  const errors = collectErrors(page);
+  await page.goto("/battle/shapes");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByTestId("store")).toHaveText("client");
+  expect(errors).toEqual([]);
+});
+
+test("an action called in a transition shows pending, then its result", async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto("/battle/shapes");
+  await page.waitForLoadState("networkidle");
+  await page.getByTestId("transition").click();
+  await expect(page.getByTestId("transition-state")).toHaveText("pending");
+  await expect(page.getByTestId("transition-state")).toHaveText("done call 1");
+  await page.getByTestId("transition").click();
+  await expect(page.getByTestId("transition-state")).toHaveText("done call 2");
+  expect(errors).toEqual([]);
+});
+
+test("a client component that renders a list item hydrates inside the list", async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto("/battle/structure");
+  await page.waitForLoadState("networkidle");
+  await page.getByTestId("item-first").click();
+  await expect(page.getByTestId("item-first")).toHaveText("first done");
+  await expect(page.locator("[data-testid=list] li")).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
+test("a client component's list item is a direct child of the server's list, as React Server Components render it", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/battle/structure");
+  await page.waitForLoadState("networkidle");
+  await expect(page.locator("[data-testid=list] > li")).toHaveCount(1);
+  await page.getByTestId("item-first").click();
+  await expect(page.getByTestId("item-first")).toHaveText("first done");
+  expect(errors).toEqual([]);
+});
+
+test("client components render table rows, select options and svg shapes where the server placed them", async ({
+  page,
+  request,
+}) => {
+  // The HTML parser keeps each element where the server wrote it: no marker inside the table,
+  // the select or the svg for it to move or drop.
+  const html = await (await request.get("/battle/structure")).text();
+  const table = /<table data-testid="table">([\s\S]*?)<\/table>/.exec(html)![1]!;
+  const select = /<select[^>]*data-testid="select"[^>]*>([\s\S]*?)<\/select>/.exec(html)![1]!;
+  const svg = /<svg[^>]*data-testid="svg"[^>]*>([\s\S]*?)<\/svg>/.exec(html)![1]!;
+  for (const inner of [table, select, svg]) expect(inner).not.toMatch(/<f-[a-z]/);
+
+  const errors = collectErrors(page);
+  await page.goto("/battle/structure");
+  await page.waitForLoadState("networkidle");
+  await expect(page.locator("[data-testid=table] > tbody > tr")).toHaveCount(2);
+  await page.getByTestId("row-beta").click();
+  await page.getByTestId("row-beta").click();
+  await expect(page.getByTestId("row-beta")).toHaveText("beta 2");
+  await expect(page.getByTestId("row-alpha")).toHaveText("alpha 0");
+
+  await expect(page.locator("[data-testid=select] > option")).toHaveCount(2);
+  await page.getByTestId("select").selectOption("mint");
+  await expect(page.getByTestId("select")).toHaveValue("mint");
+
+  const shape = page.locator("[data-testid=svg] > circle");
+  await expect(shape).toHaveCount(1);
+  expect(await shape.evaluate((node) => node.namespaceURI)).toBe("http://www.w3.org/2000/svg");
+  await shape.click();
+  await expect(shape).toHaveAttribute("r", "8");
+  expect(errors).toEqual([]);
+});

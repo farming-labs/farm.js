@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import postcss from "postcss";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { FIGURES, type FigureKind } from "./figure-scripts";
+import { FIGURES, STAGE, type FigureKind } from "./figure-scripts";
 import { BlogFigure } from "./figures";
 
 const kinds = Object.keys(FIGURES) as FigureKind[];
@@ -73,6 +73,12 @@ describe("launch post figures", () => {
           ).split("\n"))
             expect(shownLine.length).toBeLessThanOrEqual(50);
     }
+  });
+
+  it.each(kinds)("lays out %s no wider than the stage its type is sized for", (kind) => {
+    // Type scales down with a wider stage, so in the blog's 680px column it sits on its 9px floor
+    // and outgrows boxes laid out for the scaled size.
+    expect(FIGURES[kind].stage?.w ?? STAGE.w).toBeLessThanOrEqual(STAGE.w);
   });
 
   it.each(kinds)("draws every %s connector by the end and nothing in the first frame", (kind) => {

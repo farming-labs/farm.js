@@ -1,3 +1,4 @@
+import { normalizeFarmTrailingSlashPathname } from "../trailing-slash";
 import { localizeFarmPathname, type FarmLocalePathConfig } from "./routing";
 
 export interface FarmLocaleAlternateLinkOptions {
@@ -28,7 +29,15 @@ export function renderFarmLocaleAlternateLinks(
   const base = resolveAlternateBase(options);
   const link = (hreflang: string, locale: string) =>
     `<link rel="alternate" hreflang="${escapeHtmlAttribute(hreflang)}" href="${escapeHtmlAttribute(
-      resolveAlternateHref(localizeFarmPathname(pathname, locale, config), base),
+      resolveAlternateHref(
+        // Each alternate is the page's canonical URL in that locale, so it carries the app's
+        // trailingSlash: an alternate the server redirects reads as an error to search engines.
+        normalizeFarmTrailingSlashPathname(
+          localizeFarmPathname(pathname, locale, config),
+          config.trailingSlash === true,
+        ),
+        base,
+      ),
     )}">`;
   const links = config.locales.map((locale) => link(locale, locale));
   links.push(link("x-default", config.defaultLocale));

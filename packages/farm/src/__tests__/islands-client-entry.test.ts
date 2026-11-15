@@ -50,6 +50,54 @@ describe("the islands-mode client entry", () => {
   });
 });
 
+describe("client plugin hydration hooks", () => {
+  it("run around a page whose only client code is its islands", () => {
+    const boundary = { modulePath: "/app/src/counter.tsx", islandStrategy: "load" as const };
+    const entry = generateClientHydrationEntry(
+      [
+        {
+          pattern: "/",
+          modulePath: "/app/src/app/page.tsx",
+          relativePath: "page.tsx",
+          pageShouldHydrate: false,
+          islandStrategy: "load",
+          hasIsolatedClientBoundaries: true,
+          isolatedBoundaries: [boundary],
+        },
+      ],
+      [],
+      [],
+      "/app",
+      "src",
+      false,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [],
+      undefined,
+      undefined,
+      false,
+      [],
+      "/",
+      undefined,
+      undefined,
+      true,
+    );
+    const start = entry.indexOf(
+      "matched.route.hasIsolatedClientBoundaries &&\n    !matched.route.pageShouldHydrate",
+    );
+    expect(start).toBeGreaterThan(-1);
+    const branch = entry.slice(start, entry.indexOf("return;", start));
+    const begin = branch.indexOf("farmClientRuntime.beginHydration(");
+    const islands = branch.indexOf("hydrateFarmIsolatedClientBoundaries(document)");
+    const complete = branch.indexOf("farmClientRuntime.completeHydration(");
+    expect(begin).toBeGreaterThan(-1);
+    expect(islands).toBeGreaterThan(begin);
+    expect(complete).toBeGreaterThan(islands);
+  });
+});
+
 describe("splitFarmClientRouter", () => {
   const source = [
     'import { eagerOnly, both, routerOnly, spreadOnly } from "pkg";',

@@ -36,9 +36,26 @@ describe("keyed target runtime selection", () => {
   });
 
   it.each([
-    ['<ul>{rows.map(row => <li key={row.id}>{marked.has(row.id) ? "Marked" : ""}</li>)}</ul>', ""],
-    ["", '{row.id === "a" ? <span>First</span> : null}'],
-  ])("retains shared target and conditional capabilities", async (sibling, child) => {
+    [
+      '<ul>{rows.map(row => <li key={row.id}>{marked.has(row.id) ? "Marked" : ""}</li>)}</ul>',
+      "",
+      "keyedRowsFilterHintedRuntimeFeature",
+    ],
+    // Compiler-owned host blocks render the conditional and delegate the row's click.
+    ["", '{row.id === "a" ? <span>First</span> : null}', "keyedRowsHostFilterHintedRuntimeFeature"],
+    // An event inside the branch is delegated to the rows container as well.
+    [
+      "",
+      '{row.id === "a" ? <span onClick={() => setSelected("")}>First</span> : null}',
+      "keyedRowsHostFilterHintedRuntimeFeature",
+    ],
+    // The container cannot receive an event that does not bubble, so the rows stay React-owned.
+    [
+      "",
+      '{row.id === "a" ? <span onMouseEnter={() => setSelected("")}>First</span> : null}',
+      "keyedListRuntimeFeature",
+    ],
+  ])("retains shared target and conditional capabilities", async (sibling, child, feature) => {
     const result = await compileReactModule(
       `import { useState } from "react";
       export function Rows() {
@@ -58,10 +75,10 @@ describe("keyed target runtime selection", () => {
     expect(result.compiled).toEqual(["Rows"]);
     expect(result.diagnostics).toEqual([]);
     // React-owned conditional rows do not accept structural filter hints.
-    expect(result.optimizations.keyedArrayFilterHints).toBe(child ? 0 : 1);
-    expect(result.code).toContain(
-      child ? "keyedListRuntimeFeature" : "keyedRowsFilterHintedRuntimeFeature",
+    expect(result.optimizations.keyedArrayFilterHints).toBe(
+      feature === "keyedListRuntimeFeature" ? 0 : 1,
     );
+    expect(result.code).toContain(feature);
     expect(result.code).not.toContain("keyedRowsIdentityFilterHintedRuntimeFeature");
     expect(result.code).not.toContain("keyedRowsIdentityFilterOnlyRuntimeFeature");
   });

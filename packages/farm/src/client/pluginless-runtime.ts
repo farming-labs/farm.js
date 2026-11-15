@@ -1,11 +1,14 @@
 import type { FarmClientNavigationSession } from "./plugin";
+import { createFarmRouteAnnouncer } from "./route-announcer";
 
 /**
  * What the production client entry needs from `FarmClientPluginManager` in an app with no client
- * plugins: a navigation supersedes the one before it, and rendering waits for a painted frame.
+ * plugins: a navigation supersedes the one before it, rendering waits for a painted frame, and a
+ * rendered navigation is announced to screen readers.
  */
 export function createPluginlessClientRuntime() {
   let current: { controller: AbortController; session: FarmClientNavigationSession } | undefined;
+  const announceRoute = createFarmRouteAnnouncer();
   const nothing = async (): Promise<void> => {};
   const clear = (session: FarmClientNavigationSession) => {
     if (current?.session === session) current = undefined;
@@ -42,7 +45,10 @@ export function createPluginlessClientRuntime() {
       return new Promise((resolve) => {
         requestAnimationFrame(() =>
           requestAnimationFrame(() => {
-            if (!session.signal.aborted) clear(session);
+            if (!session.signal.aborted) {
+              announceRoute();
+              clear(session);
+            }
             resolve();
           }),
         );

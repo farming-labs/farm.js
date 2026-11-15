@@ -20,6 +20,10 @@ import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-state";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmRouteRenderPlan } from "../navigation/render-plan";
+import {
+  readFarmPageDataRedirect,
+  type FarmPageDataRedirect,
+} from "../navigation/page-data-redirect";
 import { getFarmIslandValueHeaders } from "./island-value-protocol";
 import { runFarmNavigationDelegates } from "./navigation-delegate";
 
@@ -82,11 +86,12 @@ export interface RouterOptions {
   /**
    * Islands mode in `farm dev`: navigates as the production client does, by fetching the page
    * itself. Resolves the page's data once its shell arrives, or null for a navigation the page-data
-   * endpoint answers instead.
+   * endpoint answers instead. A prefetch (`prefetch: true`) reads the page whole, so the router
+   * caches it like page data and the navigation that follows uses it.
    */
   fetchNavigationDocument?: (
     path: string,
-    context: { signal: AbortSignal; refresh: boolean },
+    context: { signal?: AbortSignal; refresh: boolean; prefetch: boolean },
   ) => Promise<PageData | null>;
 }
 
@@ -109,6 +114,16 @@ interface ViewportPrefetchTask {
 }
 
 const MAX_CONCURRENT_VIEWPORT_PREFETCHES = 4;
+// The browser's own limit for a redirect chain.
+const MAX_PAGE_DATA_REDIRECTS = 20;
+
+/** Page data answered with a redirect: the navigation continues at its target. */
+class FarmPageDataRedirectSignal extends Error {
+  constructor(readonly redirect: FarmPageDataRedirect) {
+    super(`Page data redirected to ${redirect.location}`);
+    this.name = "FarmPageDataRedirect";
+  }
+}
 
 export interface FarmNavigationBlockerContext {
   from: string;
@@ -152,11 +167,24 @@ export type FarmNavigationListener = (state: FarmNavigationState) => void;
 const FARM_PAGE_STATE_KEY = "__farmPageState";
 const FARM_INTERCEPT_FROM_KEY = "__farmInterceptFrom";
 const FARM_HISTORY_INDEX_KEY = "__farmHistoryIndex";
+const FARM_HISTORY_KEY = "__farmHistoryKey";
 
 function readHistoryIndex(state: unknown): number | null {
   if (!state || typeof state !== "object") return null;
   const value = (state as Record<string, unknown>)[FARM_HISTORY_INDEX_KEY];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readHistoryKey(state: unknown): string | null {
+  if (!state || typeof state !== "object") return null;
+  const value = (state as Record<string, unknown>)[FARM_HISTORY_KEY];
+  return typeof value === "string" && value.length > 0 && value.length <= 64 ? value : null;
+}
+
+/** A key for a new history entry. The time keeps keys unique across the reloads and documents
+ * that share a tab's sessionStorage. */
+function createHistoryKey(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 const IDLE_NAVIGATION_STATE: FarmNavigationState = {
   state: "idle",
@@ -207,6 +235,7 @@ export class SPARouter {
   private currentHistoryHash = "";
   private currentInterceptFrom: unknown;
   private currentHistoryIndex: number | null = null;
+  private currentHistoryKey: string | null = null;
   private suppressNextPopState = false;
   private navigationSequence = 0;
   private activeNavigation?: {
@@ -224,6 +253,7 @@ export class SPARouter {
     | "resolveNavigation"
     | "scheduleNavigationRendered"
     | "failNavigation"
+    | "cancelNavigation"
   >;
 
   private readonly onPopState = (event: PopStateEvent) => {
@@ -235,7 +265,7 @@ export class SPARouter {
       event.preventDefault();
       event.returnValue = "";
     }
-    this.saveScrollPosition(window.location.pathname + window.location.search);
+    this.saveScrollPosition(this.currentScrollKey());
   };
 
   constructor(options: RouterOptions = {}) {
@@ -261,22 +291,28 @@ export class SPARouter {
       this.currentHistoryHash = window.location.hash;
       this.currentInterceptFrom = window.history.state?.[FARM_INTERCEPT_FROM_KEY];
       const existingIndex = readHistoryIndex(window.history.state);
-      if (existingIndex == null) {
+      const existingKey = readHistoryKey(window.history.state);
+      if (existingIndex == null || existingKey == null) {
+        const historyKey = existingKey ?? createHistoryKey();
         try {
           window.history.replaceState(
             {
               ...((window.history.state as object | null) ?? {}),
-              [FARM_HISTORY_INDEX_KEY]: 0,
+              [FARM_HISTORY_INDEX_KEY]: existingIndex ?? 0,
+              [FARM_HISTORY_KEY]: historyKey,
             },
             "",
             window.location.href,
           );
-          this.currentHistoryIndex = 0;
+          this.currentHistoryIndex = existingIndex ?? 0;
+          this.currentHistoryKey = historyKey;
         } catch {
-          this.currentHistoryIndex = null;
+          this.currentHistoryIndex = existingIndex;
+          this.currentHistoryKey = existingKey;
         }
       } else {
         this.currentHistoryIndex = existingIndex;
+        this.currentHistoryKey = existingKey;
       }
     }
   }
@@ -319,7 +355,15 @@ export class SPARouter {
   /**
    * Navigate to a new URL
    */
-  async navigate(href: string, options: FarmNavigateOptions = {}): Promise<void> {
+  navigate(href: string, options: FarmNavigateOptions = {}): Promise<void> {
+    return this.runNavigation(href, options, 0);
+  }
+
+  private async runNavigation(
+    href: string,
+    options: FarmNavigateOptions,
+    redirectCount: number,
+  ): Promise<void> {
     const {
       replace = false,
       scroll = true,
@@ -369,21 +413,25 @@ export class SPARouter {
 
     const from = window.location.pathname + window.location.search;
     const action = replace ? "replace" : "push";
-    if (await this.shouldBlockNavigation({ from, to: fullPath, action })) {
-      return;
-    }
-    // A refresh re-renders the page on screen; only a move to another page is offered.
-    if (
-      !(refresh && fullPath === from) &&
-      (await runFarmNavigationDelegates({ url: url.href, from, to: fullPath, action }))
-    ) {
-      this.cancelActiveNavigation();
-      return;
-    }
+    // A redirect continues a navigation that already passed blockers, delegates
+    // and saved the scroll position of the page it leaves.
+    if (redirectCount === 0) {
+      if (await this.shouldBlockNavigation({ from, to: fullPath, action })) {
+        return;
+      }
+      // A refresh re-renders the page on screen; only a move to another page is offered.
+      if (
+        !(refresh && fullPath === from) &&
+        (await runFarmNavigationDelegates({ url: url.href, from, to: fullPath, action }))
+      ) {
+        this.cancelActiveNavigation();
+        return;
+      }
 
-    // Save current scroll position
-    if (this.options.scrollRestoration) {
-      this.saveScrollPosition(window.location.pathname + window.location.search);
+      // Save current scroll position
+      if (this.options.scrollRestoration) {
+        this.saveScrollPosition(this.currentScrollKey());
+      }
     }
 
     const navigation = this.startNavigation({
@@ -402,12 +450,14 @@ export class SPARouter {
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
       // Fetch page data (from cache or server). Islands mode in dev fetches the page itself.
-      const pageData =
-        (await this.options.fetchNavigationDocument?.(fullPath, {
-          signal: navigation.controller.signal,
-          refresh,
-        })) ??
-        (await this.fetchPageData(fullPath, true, from, refresh, navigation.controller.signal));
+      const pageData = await this.fetchPageData(
+        fullPath,
+        true,
+        from,
+        refresh,
+        navigation.controller.signal,
+        true,
+      );
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
@@ -437,6 +487,16 @@ export class SPARouter {
       this.finishNavigation(navigation);
     } catch (error) {
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+      if (error instanceof FarmPageDataRedirectSignal) {
+        await this.followPageDataRedirect(
+          error.redirect,
+          url,
+          options,
+          redirectCount,
+          clientNavigation,
+        );
+        return;
+      }
       if (clientNavigation) {
         await this.clientPlugins?.failNavigation(clientNavigation, error);
       }
@@ -445,6 +505,42 @@ export class SPARouter {
       // Fall back to full page navigation
       window.location.href = href;
     }
+  }
+
+  /**
+   * Continue a navigation whose page data redirected, as a document load
+   * follows a server redirect: the target takes the history entry the
+   * redirecting URL would have had, inherits its fragment when the target has
+   * none, and leaves the app when it is cross-origin.
+   */
+  private followPageDataRedirect(
+    redirect: FarmPageDataRedirect,
+    from: URL,
+    options: FarmNavigateOptions,
+    redirectCount: number,
+    clientNavigation: FarmClientNavigationSession | undefined,
+  ): Promise<void> {
+    if (clientNavigation) this.clientPlugins?.cancelNavigation?.(clientNavigation, "superseded");
+    const target = resolvePageDataRedirectTarget(redirect.location, from);
+    // Landing on the current URL replaces its entry, as the browser does.
+    const replace =
+      options.replace === true ||
+      (target !== null &&
+        target.pathname + target.search === window.location.pathname + window.location.search);
+    if (!target || redirectCount >= MAX_PAGE_DATA_REDIRECTS) {
+      // A redirect loop or an unusable Location: let the browser follow, and
+      // report, the redirect as a document load.
+      this.cancelActiveNavigation();
+      const documentURL = (target ?? from).href;
+      if (replace) window.location.replace(documentURL);
+      else window.location.assign(documentURL);
+      return Promise.resolve();
+    }
+    return this.runNavigation(
+      target.href,
+      { ...options, replace, refresh: true },
+      redirectCount + 1,
+    );
   }
 
   /**
@@ -479,9 +575,12 @@ export class SPARouter {
     this.prefetchingUrls.add(fullPath);
 
     try {
-      await this.fetchPageData(fullPath, false, interceptFrom);
+      await this.fetchPageData(fullPath, false, interceptFrom, false, undefined, true);
     } catch (error) {
-      console.warn("[Farm.js] Prefetch failed:", href, error);
+      // A redirect is not page data: the navigation that follows it fetches the target.
+      if (!(error instanceof FarmPageDataRedirectSignal)) {
+        console.warn("[Farm.js] Prefetch failed:", href, error);
+      }
     } finally {
       this.prefetchingUrls.delete(fullPath);
     }
@@ -633,7 +732,7 @@ export class SPARouter {
 
   registerScrollElement(key: string, element: HTMLElement): () => void {
     this.scrollElements.set(key, element);
-    this.restoreScrollElement(window.location.pathname + window.location.search, key, element);
+    this.restoreScrollElement(this.currentScrollKey(), key, element);
     return () => {
       if (this.scrollElements.get(key) === element) {
         this.scrollElements.delete(key);
@@ -685,12 +784,15 @@ export class SPARouter {
     if (nextHistoryIndex != null) {
       historyState[FARM_HISTORY_INDEX_KEY] = nextHistoryIndex;
     }
+    const historyKey = (options.replace && readHistoryKey(historyState)) || createHistoryKey();
+    historyState[FARM_HISTORY_KEY] = historyKey;
     if (options.replace) {
       window.history.replaceState(historyState, "", historyPath);
     } else {
       window.history.pushState(historyState, "", historyPath);
     }
     this.currentHistoryIndex = nextHistoryIndex;
+    this.currentHistoryKey = historyKey;
     const resolvedHistoryUrl = resolveFarmNavigationURL(historyPath, window.location.href);
     this.currentHistoryPath = resolvedHistoryUrl.pathname + resolvedHistoryUrl.search;
     this.currentHistoryHash = resolvedHistoryUrl.hash;
@@ -715,9 +817,9 @@ export class SPARouter {
         window.scrollTo(0, 0);
       }
     } else if (this.options.scrollRestoration) {
-      const restorePath = this.currentHistoryPath ?? options.fullPath;
-      this.restoreWindowScroll(restorePath);
-      this.restoreScrollElements(restorePath);
+      const restoreKey = this.currentScrollKey();
+      this.restoreWindowScroll(restoreKey);
+      this.restoreScrollElements(restoreKey);
     }
   }
 
@@ -753,6 +855,7 @@ export class SPARouter {
     interceptFrom?: string,
     fresh = false,
     signal?: AbortSignal,
+    readDocument = false,
   ): Promise<PageData> {
     const cacheKey = getPageDataCacheKey(path, interceptFrom);
     // Check cache first
@@ -803,6 +906,20 @@ export class SPARouter {
       }
     };
     try {
+      const documentData =
+        readDocument && this.options.fetchNavigationDocument
+          ? await this.options.fetchNavigationDocument(path, {
+              signal,
+              refresh: fresh,
+              prefetch: !recover,
+            })
+          : null;
+      if (documentData) {
+        // A navigation's document streams in after its shell; only a prefetched one is whole.
+        if (!recover) cacheData(documentData);
+        prefetch?.resolve(documentData);
+        return documentData;
+      }
       return await this.requestPageData(
         path,
         recover,
@@ -853,6 +970,9 @@ export class SPARouter {
       }
       throw error;
     }
+
+    const redirect = await readFarmPageDataRedirect(response);
+    if (redirect) throw new FarmPageDataRedirectSignal(redirect);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch page data: ${response.status}`);
@@ -922,6 +1042,9 @@ export class SPARouter {
       const restoredState: Record<string, unknown> = {
         path: from,
       };
+      if (this.currentHistoryKey != null) {
+        restoredState[FARM_HISTORY_KEY] = this.currentHistoryKey;
+      }
       if (this.currentHistoryIndex != null && eventIndex != null) {
         restoredState[FARM_HISTORY_INDEX_KEY] = eventIndex + 1;
         this.currentHistoryIndex = eventIndex + 1;
@@ -963,6 +1086,7 @@ export class SPARouter {
       this.cancelActiveNavigation();
       this.currentHistoryHash = window.location.hash;
       this.currentHistoryIndex = readHistoryIndex(event.state);
+      this.currentHistoryKey = readHistoryKey(event.state);
       return;
     }
 
@@ -977,10 +1101,17 @@ export class SPARouter {
       return;
     }
 
+    // Save the entry still on screen before tracking the destination.
+    if (this.options.scrollRestoration) {
+      this.saveScrollPosition(this.currentScrollKey());
+    }
+
     this.currentHistoryPath = path;
     this.currentHistoryHash = window.location.hash;
     this.currentInterceptFrom = event.state?.[FARM_INTERCEPT_FROM_KEY];
     this.currentHistoryIndex = readHistoryIndex(event.state);
+    this.currentHistoryKey = readHistoryKey(event.state);
+    const destinationScrollKey = this.currentScrollKey();
 
     const navigation = this.startNavigation({
       from,
@@ -1030,19 +1161,18 @@ export class SPARouter {
       // restored regardless of whether a fragment is present, even when the
       // anchor resolves, so a persistent-layout scroll element is not left at
       // the prior route's offset on a hash-destination popstate.
-      const destinationPath = window.location.pathname + window.location.search;
       if (window.location.hash) {
         const target = getHashTargetElement(window.location.hash);
         if (target) {
           target.scrollIntoView();
         } else if (this.options.scrollRestoration) {
-          this.restoreWindowScroll(destinationPath);
+          this.restoreWindowScroll(destinationScrollKey);
         }
       } else if (this.options.scrollRestoration) {
-        this.restoreWindowScroll(destinationPath);
+        this.restoreWindowScroll(destinationScrollKey);
       }
       if (this.options.scrollRestoration) {
-        this.restoreScrollElements(destinationPath);
+        this.restoreScrollElements(destinationScrollKey);
       }
 
       if (clientNavigation) {
@@ -1052,6 +1182,17 @@ export class SPARouter {
       this.finishNavigation(navigation);
     } catch (error) {
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+      if (error instanceof FarmPageDataRedirectSignal) {
+        // The browser already moved to this entry: the target replaces it.
+        await this.followPageDataRedirect(
+          error.redirect,
+          new URL(window.location.href),
+          { replace: true },
+          0,
+          clientNavigation,
+        );
+        return;
+      }
       if (clientNavigation) {
         await this.clientPlugins?.failNavigation(clientNavigation, error);
       }
@@ -1185,6 +1326,9 @@ export class SPARouter {
       unknown
     >;
 
+    // A push is a new entry; createHistoryState copied the current entry's key into it.
+    const historyKey = (action === "replace" && readHistoryKey(nextState)) || createHistoryKey();
+    nextState[FARM_HISTORY_KEY] = historyKey;
     if (action === "replace") {
       window.history.replaceState(nextState, "", url);
     } else {
@@ -1195,6 +1339,7 @@ export class SPARouter {
       this.currentHistoryIndex =
         this.currentHistoryIndex == null ? null : this.currentHistoryIndex + 1;
     }
+    this.currentHistoryKey = historyKey;
     this.currentHistoryPath = nextPath;
     this.currentHistoryHash = parsedUrl.hash;
     this.currentInterceptFrom = nextState[FARM_INTERCEPT_FROM_KEY];
@@ -1203,17 +1348,29 @@ export class SPARouter {
   }
 
   /**
-   * Save scroll position for a path
+   * The key the history entry on screen saves its scroll positions under: its history key, so
+   * the same URL twice in history keeps two positions, or its path for an entry Farm did not write.
    */
-  private saveScrollPosition(path: string): void {
+  private currentScrollKey(): string {
+    return (
+      this.currentHistoryKey ??
+      this.currentHistoryPath ??
+      window.location.pathname + window.location.search
+    );
+  }
+
+  /**
+   * Save the window and registered element scroll positions under a scroll key.
+   */
+  private saveScrollPosition(scrollKey: string): void {
     try {
       sessionStorage.setItem(
-        `farm-scroll-${path}`,
+        `farm-scroll-${scrollKey}`,
         JSON.stringify({ x: window.scrollX, y: window.scrollY }),
       );
       for (const [key, element] of this.scrollElements) {
         sessionStorage.setItem(
-          getScrollElementStorageKey(path, key),
+          getScrollElementStorageKey(scrollKey, key),
           JSON.stringify({ x: element.scrollLeft, y: element.scrollTop }),
         );
       }
@@ -1223,11 +1380,11 @@ export class SPARouter {
   }
 
   /**
-   * Restore the saved window scroll position for a path.
+   * Restore the saved window scroll position for a scroll key.
    */
-  private restoreWindowScroll(path: string): void {
+  private restoreWindowScroll(scrollKey: string): void {
     try {
-      const saved = sessionStorage.getItem(`farm-scroll-${path}`);
+      const saved = sessionStorage.getItem(`farm-scroll-${scrollKey}`);
       if (saved) {
         const { x, y } = JSON.parse(saved);
         setTimeout(() => window.scrollTo(x, y), 0);
@@ -1242,19 +1399,19 @@ export class SPARouter {
    * are hash-stripped (see getScrollElementStorageKey), so this runs regardless
    * of whether the destination URL carries a fragment.
    */
-  private restoreScrollElements(path: string): void {
+  private restoreScrollElements(scrollKey: string): void {
     try {
       for (const [key, element] of this.scrollElements) {
-        this.restoreScrollElement(path, key, element);
+        this.restoreScrollElement(scrollKey, key, element);
       }
     } catch {
       // Ignore storage errors
     }
   }
 
-  private restoreScrollElement(path: string, key: string, element: HTMLElement): void {
+  private restoreScrollElement(scrollKey: string, key: string, element: HTMLElement): void {
     try {
-      const saved = sessionStorage.getItem(getScrollElementStorageKey(path, key));
+      const saved = sessionStorage.getItem(getScrollElementStorageKey(scrollKey, key));
       if (!saved) return;
       const { x, y } = JSON.parse(saved);
       setTimeout(() => {
@@ -1372,6 +1529,18 @@ function createHistoryState(
   return nextState;
 }
 
+/** A redirect Location resolved against the URL it redirects, inheriting its fragment. */
+function resolvePageDataRedirectTarget(location: string, from: URL): URL | null {
+  let target: URL;
+  try {
+    target = new URL(location, from);
+  } catch {
+    return null;
+  }
+  if (!target.hash && from.hash) target.hash = from.hash;
+  return target;
+}
+
 function getPageDataCacheKey(path: string, interceptFrom?: string): string {
   return interceptFrom ? `${path}\nintercept:${interceptFrom}` : path;
 }
@@ -1385,6 +1554,6 @@ function createNavigationLocation(url: URL): FarmNavigationLocation {
   };
 }
 
-function getScrollElementStorageKey(path: string, key: string): string {
-  return `farm-scroll-${path}:${key}`;
+function getScrollElementStorageKey(scrollKey: string, key: string): string {
+  return `farm-scroll-${scrollKey}:${key}`;
 }

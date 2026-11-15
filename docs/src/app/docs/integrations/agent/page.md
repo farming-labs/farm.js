@@ -51,7 +51,7 @@ export default defineAgent(async (input: { orderId: string }, run) => {
 });
 ```
 
-`run.step` runs once and is replayed from the run's journal afterwards. `run.interrupt` pauses the run until an answer arrives, across restarts and deploys.
+`run.step` runs once and is replayed from the run's journal afterwards. `run.interrupt` pauses the run until an answer arrives, across restarts and deploys. Give it a `timeout`, such as `{ timeout: "24h" }`, and it throws `InterruptTimeoutError` once that passes without an answer; catch it to decide what no answer means. See agent-unit's [interrupt timeouts](https://github.com/farming-labs/agent-unit#stop-waiting-after-a-while).
 
 Agents from the [AI SDK](https://ai-sdk.dev) (`new ToolLoopAgent(…)`), [Mastra](https://mastra.ai) (`new Agent(…)`), [LangGraph](https://langchain-ai.github.io/langgraphjs/) (`graph.compile()`), and the [OpenAI Agents SDK](https://openai.github.io/openai-agents-js/) (`new Agent(…)`) work unchanged. Their own pauses become interrupts: tool approvals, Mastra's `suspend()`, and LangGraph's `interrupt()`. The framework is detected from `package.json`; name it to serve only that framework:
 
@@ -107,7 +107,13 @@ A guard on `basePath` also sees agent-unit's internal `__agent-unit/continue` an
 
 ## Storage and deploy targets
 
-Runs live in any [unstorage](https://unstorage.unjs.io) driver. Without `storage`, a Node server keeps them on disk in `.data/agent-unit`, and targets without a durable disk keep them in memory and warn during the build. Set a shared driver for production, and use `presets` to choose one per target:
+Runs live in [Farm.js storage](https://github.com/farming-labs/agent-unit#farmjs-storage) or any [unstorage](https://unstorage.unjs.io) driver. Without `storage`, the build decides:
+
+- With `FARMJS_API_KEY` in the build's environment, runs are kept in Farm.js storage on every target, with no database to set up. Set the key where the server runs too. It needs the `agents:runtime` permission.
+- Without the key, a Node server keeps them on disk in `.data/agent-unit` and the build warns, since a container without a volume loses them on every redeploy.
+- Without the key, a build for Vercel, Netlify, AWS Lambda, or Cloudflare Workers stops and lists what to set: the key, a `storage` driver, or `storage: "memory"` for runs that may be lost between requests.
+
+`farm dev` keeps runs on disk and makes no calls to Farm.js. `storage: "farmjs"` chooses Farm.js storage whatever the build's environment has, and the key is then read only where the server runs. Use `presets` to choose storage per target:
 
 ```ts
 agent({
@@ -130,7 +136,7 @@ On Vercel, set `CRON_SECRET` in the project's environment variables. Vercel Cron
 | `basePath`  | `"/api/agent"`   | Where the API is mounted, under `/api`.                                              |
 | `agentsDir` | `"src/agents"`   | The folder of agent files, relative to the app root (`agents` in `srcDir`).          |
 | `framework` | detected         | `"ai-sdk"`, `"mastra"`, `"langgraph"`, or `"openai-agents"`.                         |
-| `storage`   | disk on Node     | Run storage, as an unstorage driver config.                                          |
+| `storage`   | per target       | Run storage: `"farmjs"`, `"memory"`, or an unstorage driver config.                  |
 | `presets`   | none             | Settings per deploy target, applied over the top-level ones.                         |
 | `authorize` | none             | Decides every request.                                                               |
 | `name`      | the package name | The name in the manifest, MCP, and A2A.                                              |

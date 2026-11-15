@@ -914,7 +914,7 @@ function getFarmCronTaskName(name: string): string {
 
 function createNitroCronTaskWrapper(job: FarmCronJob, secretEnv: string): string {
   return `
-import { useNitroApp } from "nitro/app";
+import { serverFetch } from "nitro/app";
 import { defineTask } from "nitro/task";
 
 const name = ${JSON.stringify(job.name)};
@@ -939,7 +939,8 @@ export default defineTask({
     const secret = readSecret(event);
     if (secret) headers.set("authorization", "Bearer " + secret);
 
-    const response = await useNitroApp().fetch(path, { method: "GET", headers });
+    // \`serverFetch\` takes a path; the app's own \`fetch\` takes only a Request.
+    const response = await serverFetch(path, { method: "GET", headers });
     const contentType = response.headers.get("content-type") || "";
     const body = response.status === 204
       ? null

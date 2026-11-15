@@ -11,6 +11,8 @@ export interface FarmDocsCompiledResponse {
   statusText: string;
   headers: Array<[string, string]>;
   body: string;
+  /** Binary bodies (raster social images) are stored as base64. */
+  bodyEncoding?: "base64";
 }
 
 export interface FarmDocsCompiledSearch {
@@ -78,9 +80,18 @@ function createResponse(
       replaceOrigin(value, manifest, request),
     ]),
   );
-  let body = replaceOrigin(compiled.body, manifest, request);
-  if (manifest.cspNonceMarker && headers.get("content-type")?.toLowerCase().includes("text/html")) {
-    body = replaceFarmCspNonceMarker(body, manifest.cspNonceMarker);
+  let body: BodyInit;
+  if (compiled.bodyEncoding === "base64") {
+    body = Uint8Array.from(atob(compiled.body), (character) => character.charCodeAt(0));
+  } else {
+    let text = replaceOrigin(compiled.body, manifest, request);
+    if (
+      manifest.cspNonceMarker &&
+      headers.get("content-type")?.toLowerCase().includes("text/html")
+    ) {
+      text = replaceFarmCspNonceMarker(text, manifest.cspNonceMarker);
+    }
+    body = text;
   }
   return new Response(request.method === "HEAD" ? null : body, {
     status: compiled.status,

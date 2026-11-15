@@ -1257,8 +1257,11 @@ function isFontLoaderKind(value: unknown): value is FontLoaderKind {
   return typeof value === "string" && FONT_FUNCTIONS.has(value as FontLoaderKind);
 }
 
+/** Whether the code could call a font loader: it names one and imports from a font module. */
 function containsFontFunction(code: string): boolean {
-  return Array.from(FONT_FUNCTIONS).some((name) => code.includes(name));
+  return (
+    code.includes("@farm.js/core") && Array.from(FONT_FUNCTIONS).some((name) => code.includes(name))
+  );
 }
 
 function requireString(value: unknown, id: string, label: string): string {

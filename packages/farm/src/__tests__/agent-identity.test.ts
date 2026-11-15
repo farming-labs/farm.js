@@ -1,7 +1,11 @@
 // @vitest-environment node
 
 import { afterEach, describe, expect, it } from "vitest";
-import { classifyFarmAgent, FARM_INTERNAL_READ_HEADER } from "../agent-identity";
+import {
+  classifyFarmAgent,
+  classifyFarmClient,
+  FARM_INTERNAL_READ_HEADER,
+} from "../agent-identity";
 import { createFarmLlmsMarkdownReader } from "../llms-txt";
 import { createFarmMarkdownViewResponse } from "../markdown-view";
 import { createFarmApiCatalogResponse } from "../api-catalog";
@@ -47,10 +51,187 @@ describe("classifyFarmAgent", () => {
     expect(classifyFarmAgent(null)).toEqual(unknown);
   });
 
+  it("names coding agents, and keeps search engines and browsers out of AI traffic", () => {
+    expect(
+      classifyFarmAgent("Claude-User (claude-code/2.1.319; +https://support.anthropic.com/)"),
+    ).toEqual({ family: "anthropic", category: "harness", identity: "self-reported" });
+    expect(
+      classifyFarmAgent("codex_cli_rs/0.167.0 (Mac OS 26.2.0; arm64) iTerm.app/3.5.0"),
+    ).toEqual({ family: "openai", category: "harness", identity: "self-reported" });
+    expect(classifyFarmAgent(GOOGLEBOT).identity).toBe("unknown");
+    expect(classifyFarmAgent("curl/8.7.1").identity).toBe("unknown");
+    expect(classifyFarmAgent(CHROME).identity).toBe("unknown");
+  });
+
   it("keeps the Infra analytics classifier on the shared table", () => {
     expect(classifyFarmInfraAgent(userAgent("Perplexity-User/1.0"))).toEqual(
       classifyFarmAgent(userAgent("Perplexity-User/1.0")),
     );
+  });
+});
+
+const CHROME =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const GOOGLEBOT =
+  "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html) Chrome/131.0.6778.69 Safari/537.36";
+// What every browser sends from a secure context, and Node's fetch never does.
+const FETCH_METADATA = {
+  "sec-fetch-site": "none",
+  "sec-fetch-mode": "navigate",
+  "sec-fetch-dest": "document",
+};
+
+function client(userAgent: string | null, headers: Record<string, string> = {}, method = "GET") {
+  return classifyFarmClient(
+    new Request("https://acme.test/", {
+      method,
+      headers: { ...(userAgent === null ? {} : { "user-agent": userAgent }), ...headers },
+    }),
+  );
+}
+
+describe("classifyFarmClient", () => {
+  it.each([
+    [
+      "Claude-User (claude-code/2.1.319; +https://support.anthropic.com/)",
+      "anthropic",
+      "harness",
+      "Claude Code",
+    ],
+    ["codex_cli_rs/0.167.0 (Mac OS 26.2.0; arm64) iTerm.app/3.5.0", "openai", "harness", "Codex"],
+    [userAgent("ChatGPT-User/1.0"), "openai", "agent", "ChatGPT-User"],
+    [userAgent("ClaudeBot/1.0"), "anthropic", "crawler", "ClaudeBot"],
+    [userAgent("GPTBot/1.2"), "openai", "crawler", "GPTBot"],
+    [userAgent("Perplexity-User/1.0"), "perplexity", "agent", "Perplexity-User"],
+    [GOOGLEBOT, "google", "search", "Googlebot"],
+    [
+      "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm) Chrome/116.0.1938.76 Safari/537.36",
+      "microsoft",
+      "search",
+      "Bingbot",
+    ],
+    [
+      "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+      "unknown",
+      "preview",
+      "Slackbot",
+    ],
+    [
+      "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+      "unknown",
+      "preview",
+      "facebookexternalhit",
+    ],
+    [
+      "Mozilla/5.0+(compatible; UptimeRobot/2.0; http://www.uptimerobot.com/)",
+      "unknown",
+      "monitor",
+      "UptimeRobot",
+    ],
+    ["vercel-cron/1.0", "unknown", "monitor", "Vercel Cron"],
+    ["farmjs-clock/1", "unknown", "monitor", "Farm.js clock"],
+    [
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/131.0.0.0 Safari/537.36",
+      "unknown",
+      "bot",
+      "Headless Chrome",
+    ],
+    // These four are exactly what each sent to a local server.
+    ["curl/8.7.1", "unknown", "script", "curl"],
+    ["node", "unknown", "script", "Node.js"],
+    ["Bun/1.2.3", "unknown", "script", "Bun"],
+    ["Python-urllib/3.9", "unknown", "script", "Python-urllib"],
+  ])("names %s", (ua, family, category, name) => {
+    expect(client(ua)).toEqual({ family, category, identity: "self-reported", name });
+  });
+
+  it("counts a browser only when it sends the fetch metadata every browser sends", () => {
+    expect(client(CHROME, FETCH_METADATA)).toEqual({
+      family: "unknown",
+      category: "browser",
+      identity: "self-reported",
+      name: "Chrome",
+    });
+    expect(
+      client(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1",
+        FETCH_METADATA,
+      ).name,
+    ).toBe("Safari");
+    expect(
+      client(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+        FETCH_METADATA,
+      ).name,
+    ).toBe("Firefox");
+    expect(client(`${CHROME} Edg/131.0.0.0`, FETCH_METADATA).name).toBe("Edge");
+    // An in-app browser names no browser we list, and is still a browser.
+    expect(
+      client(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 357.0.0",
+        FETCH_METADATA,
+      ),
+    ).toEqual({ family: "unknown", category: "browser", identity: "self-reported" });
+  });
+
+  it("does not count a script wearing a browser user-agent as a browser", () => {
+    const unknown = { family: "unknown", category: "unknown", identity: "unknown" };
+    expect(client(CHROME)).toEqual(unknown);
+    // What Node's fetch adds by itself: no Sec-Fetch-Site or Sec-Fetch-Dest.
+    expect(client(CHROME, { "sec-fetch-mode": "cors", "accept-language": "*" })).toEqual(unknown);
+    // Bots that dress as a browser give themselves away with "compatible;" or a URL.
+    expect(
+      client("Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)", FETCH_METADATA),
+    ).toEqual({ family: "unknown", category: "bot", identity: "self-reported" });
+  });
+
+  it("recognizes ChatGPT agent by its Web Bot Auth signature agent", () => {
+    expect(
+      client(CHROME, {
+        ...FETCH_METADATA,
+        "signature-agent": '"https://chatgpt.com"',
+        "signature-input": 'sig1=("@authority" "signature-agent");created=1700000000;keyid="k"',
+        signature: "sig1=:AAAA:",
+      }),
+    ).toEqual({
+      family: "openai",
+      category: "agent",
+      identity: "self-reported",
+      name: "ChatGPT agent",
+    });
+    expect(
+      client(CHROME, { ...FETCH_METADATA, "signature-agent": '"https://chatgpt.com.evil.test"' })
+        .category,
+    ).toBe("browser");
+  });
+
+  it("recognizes MCP clients by the Streamable HTTP transport's headers", () => {
+    const mcp = {
+      family: "unknown",
+      category: "harness",
+      identity: "self-reported",
+      name: "MCP client",
+    };
+    expect(client("node", { "mcp-protocol-version": "2025-06-18" })).toEqual(mcp);
+    expect(client(null, { "mcp-session-id": "abc" })).toEqual(mcp);
+    // initialize comes before the client knows a version or a session.
+    expect(client("node", { accept: "application/json, text/event-stream" }, "POST")).toEqual(mcp);
+    expect(client("node", { accept: "application/json, text/event-stream" }).category).toBe(
+      "script",
+    );
+    // A known AI client keeps its own name.
+    expect(
+      client(userAgent("Claude-User/1.0"), { "mcp-protocol-version": "2025-06-18" }).name,
+    ).toBe("Claude-User");
+  });
+
+  it("leaves silent, ambiguous and look-alike clients unknown", () => {
+    const unknown = { family: "unknown", category: "unknown", identity: "unknown" };
+    expect(client(null)).toEqual(unknown);
+    expect(client("")).toEqual(unknown);
+    expect(client(`${userAgent("GPTBot/1.0")} ClaudeBot/1.0`)).toEqual(unknown);
+    expect(client("NotClaudeBot/1.0").category).toBe("bot");
+    expect(client("nodejs-app/1.0")).toEqual(unknown);
   });
 });
 

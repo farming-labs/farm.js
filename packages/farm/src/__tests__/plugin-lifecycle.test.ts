@@ -92,7 +92,8 @@ describe("plugin lifecycle hooks", () => {
     manager.addPlugin(createLoggerPlugin());
     expect(manager.hasHook("beforeRequest")).toBe(false);
     expect(manager.hasHook("afterResponse")).toBe(false);
-    expect(manager.hasRuntimeRequestHooks()).toBe(false);
+    expect(manager.hasRuntimeHook("after")).toBe(true);
+    expect(manager.hasRuntimeHook("before")).toBe(false);
 
     manager.addPlugin(
       createLoggerPlugin({

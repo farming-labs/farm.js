@@ -57,13 +57,18 @@ function parseSourceOrigin(value: string): RequestSourceOriginResult {
  * `trustProxy` with a proxy-emitted `X-Forwarded-Proto: https`, or add the
  * browser origin to `serverActions.allowedOrigins`.
  */
-export function matchesHostHeader(sourceOrigin: string, request: Request): boolean {
+export function matchesHostHeader(
+  sourceOrigin: string,
+  request: Request,
+  /** The request's public origin, when a trusted proxy names one (`trustProxy`). */
+  requestOrigin: string = request.url,
+): boolean {
   const host = request.headers.get("host")?.trim().toLowerCase();
   if (!host) return false;
 
   try {
     const source = new URL(sourceOrigin);
-    const target = new URL(request.url);
+    const target = new URL(requestOrigin);
     return source.protocol === target.protocol && source.host.toLowerCase() === host;
   } catch {
     return false;

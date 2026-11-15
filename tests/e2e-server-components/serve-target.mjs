@@ -83,6 +83,8 @@ async function cloudflare() {
     compatibilityFlags: ["nodejs_compat"],
     modules: true,
     modulesRoot: workerDirectory,
+    // Pages loads every .js and .mjs file in `_worker.js/` as an ES module, as wrangler does.
+    modulesRules: [{ type: "ESModule", include: ["**/*.js", "**/*.mjs"] }],
     scriptPath: path.join(workerDirectory, "index.js"),
     assets: { directory: outputDir, routerConfig: { has_user_worker: true } },
   });

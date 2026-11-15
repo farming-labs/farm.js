@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
 
@@ -191,9 +191,11 @@ describe("production default sitemap", () => {
         expect((await get(`/console${pathname}`)).status, `/console${pathname}`).toBe(200);
         expect((await get(pathname)).status, pathname).toBe(200);
       }
-      expect(locs(await (await get("/console/sitemap.xml")).text())).toContain(
-        "https://acme.test/console/about",
-      );
+      const listed = locs(await (await get("/console/sitemap.xml")).text());
+      expect(listed).toContain("https://acme.test/console/about");
+      // The home page answers at '/console'; '/console/' redirects there.
+      expect(listed).toContain("https://acme.test/console");
+      expect(listed).not.toContain("https://acme.test/console/");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -289,4 +291,222 @@ describe("production default sitemap", () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+
+  it("lists default-locale URLs and answers each agent file unprefixed under i18n", async () => {
+    const files = {
+      "src/app/layout.tsx": [
+        'export const metadata = { title: "Console", metadataBase: new URL("https://acme.test") };',
+        "export default function Layout({ children }) { return <main>{children}</main>; }",
+      ].join("\n"),
+      "src/app/page.tsx": "export default function Page() { return <p>home body</p>; }",
+      "src/app/about/page.tsx": "export default function Page() { return <p>about body</p>; }",
+      "src/app/team/page.tsx": "export default function Page() { return <p>team body</p>; }",
+      // Route files answer the same way as the generated files.
+      "src/app/blog/sitemap.ts":
+        'export default function sitemap() { return [{ url: "https://acme.test/blog" }]; }',
+      "src/app/manifest.ts": 'export default function manifest() { return { name: "Console" }; }',
+      "src/messages/en.json": "{}",
+      "src/messages/fr.json": "{}",
+    };
+    const expectAgentFiles = async (
+      options: Record<string, unknown>,
+      base: string,
+      expected: { sitemap: string[]; llms: string[] },
+    ) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-agent-i18n-"));
+      try {
+        await writeApp(root, files);
+        // '/team' has no mirror, so llms.txt links the page itself.
+        const handler = await buildApp(root, { md: { expose: ["/", "/about"] }, ...options });
+        const get = (pathname: string, headers: Record<string, string> = {}) =>
+          handler.fetch(
+            new Request(`https://acme.test${pathname}`, { redirect: "manual", headers }),
+          );
+        // A French browser: request signals that would pick the 'fr' locale for a page.
+        const french = { "accept-language": "fr" };
+
+        // The agent files answer where they are asked for, unprefixed: no locale redirect, no
+        // locale cookie, and no Vary on request signals. Crawlers read robots.txt at the origin
+        // root only.
+        const agentFiles = [
+          "/robots.txt",
+          "/sitemap.xml",
+          "/llms.txt",
+          "/llms-full.txt",
+          "/manifest.webmanifest",
+          "/blog/sitemap.xml",
+          "/.well-known/farmjs.json",
+          "/.well-known/ai-catalog.json",
+          "/mcp/server-card",
+        ].map((pathname) => `${base}${pathname}`);
+        if (base) agentFiles.push("/robots.txt");
+        for (const pathname of agentFiles) {
+          const response = await get(pathname, french);
+          expect({
+            pathname,
+            status: response.status,
+            location: response.headers.get("location"),
+            cookie: response.headers.get("set-cookie"),
+          }).toEqual({ pathname, status: 200, location: null, cookie: null });
+          expect(response.headers.get("vary") ?? "", pathname).not.toContain("Accept-Language");
+        }
+        const robots = await (await get(`${base}/robots.txt`)).text();
+        expect(robots).toContain(`Sitemap: https://acme.test${base}/sitemap.xml`);
+        const mcp = await handler.fetch(
+          new Request(`https://acme.test${base}/mcp`, {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+          }),
+        );
+        expect(mcp.status).toBe(200);
+
+        // The pages they list are at the default locale's URL, each answering without a redirect.
+        const sitemap = locs(await (await get(`${base}/sitemap.xml`)).text());
+        expect(sitemap).toEqual(expected.sitemap);
+        const llmsTxt = await (await get(`${base}/llms.txt`)).text();
+        const llms = [...llmsTxt.matchAll(/\]\((https:\/\/acme\.test[^)]*)\)/g)]
+          .map((match) => match[1])
+          // Pages only: the MCP section links the endpoint and the AI catalog.
+          .filter((url) => !/\/mcp$|\/\.well-known\//.test(url));
+        expect(llms).toEqual(expected.llms);
+        for (const url of [...sitemap, ...llms]) {
+          const response = await handler.fetch(new Request(url, { redirect: "manual" }));
+          expect({ url, status: response.status }).toEqual({ url, status: 200 });
+        }
+        // llms-full.txt inlines each mirror, read in-process without following redirects.
+        const full = await (await get(`${base}/llms-full.txt`)).text();
+        for (const body of ["home body", "about body"]) {
+          expect(full, body).toContain(body);
+        }
+
+        // Pages still redirect to the detected locale.
+        expect((await get(`${base}/about`, french)).headers.get("location")).toMatch(
+          new RegExp(`^${base}/fr/about/?$`),
+        );
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    };
+    const locales = { locales: ["en", "fr"], defaultLocale: "en" };
+
+    // Every locale is prefixed: '/about' answers with a 307 to '/en/about', and '/about.md'
+    // with a 307 to '/en/about.md'.
+    await expectAgentFiles({ i18n: { ...locales, routing: "prefix-always" } }, "", {
+      sitemap: ["https://acme.test/en", "https://acme.test/en/about", "https://acme.test/en/team"],
+      llms: [
+        "https://acme.test/en/index.md",
+        "https://acme.test/en/about.md",
+        "https://acme.test/en/team",
+      ],
+    });
+    await expectAgentFiles(
+      {
+        basePath: "/console",
+        trailingSlash: true,
+        i18n: { ...locales, routing: "prefix-always" },
+      },
+      "/console",
+      {
+        sitemap: [
+          "https://acme.test/console/en/",
+          "https://acme.test/console/en/about/",
+          "https://acme.test/console/en/team/",
+        ],
+        llms: [
+          "https://acme.test/console/en/index.md",
+          "https://acme.test/console/en/about.md",
+          "https://acme.test/console/en/team/",
+        ],
+      },
+    );
+    // The default locale is unprefixed, so the URLs stay the plain ones, and a French browser
+    // is no longer sent from '/console/sitemap.xml' to '/console/fr/sitemap.xml'.
+    await expectAgentFiles({ basePath: "/console", i18n: locales }, "/console", {
+      sitemap: [
+        "https://acme.test/console",
+        "https://acme.test/console/about",
+        "https://acme.test/console/team",
+      ],
+      llms: [
+        "https://acme.test/console/index.md",
+        "https://acme.test/console/about.md",
+        "https://acme.test/console/team",
+      ],
+    });
+  }, 240_000);
+
+  describe("under trailingSlash and basePath", () => {
+    let root: string;
+    let get: (pathname: string) => Promise<Response>;
+
+    beforeAll(async () => {
+      root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-trailing-slash-"));
+      await writeApp(root, {
+        "src/app/layout.tsx": [
+          'export const metadata = { title: "Console", metadataBase: new URL("https://acme.test") };',
+          "export default function Layout({ children }) { return <main>{children}</main>; }",
+        ].join("\n"),
+        "src/app/page.tsx": "export default function Page() { return <p>home body</p>; }",
+        "src/app/about/page.tsx": "export default function Page() { return <p>about body</p>; }",
+        "src/app/team/page.tsx": "export default function Page() { return <p>team body</p>; }",
+        "src/app/notes/page.md": "# Notes\n\nnotes-source\n",
+      });
+      const handler = await buildApp(root, {
+        basePath: "/console",
+        trailingSlash: true,
+        md: { expose: ["/", "/about", "/notes"] },
+      });
+      get = (pathname) =>
+        handler.fetch(new Request(`https://acme.test${pathname}`, { redirect: "manual" }));
+    }, 180_000);
+
+    afterAll(async () => {
+      if (root) await fs.rm(root, { recursive: true, force: true });
+    });
+
+    it("lists each page at its canonical URL", async () => {
+      // Pages answer at '/console/about/', so that is the URL the sitemap lists, the basePath
+      // home included, and each listed URL answers without the trailing-slash 308.
+      const listed = locs(await (await get("/console/sitemap.xml")).text());
+      expect(listed).toEqual([
+        "https://acme.test/console/",
+        "https://acme.test/console/about/",
+        "https://acme.test/console/notes/",
+        "https://acme.test/console/team/",
+      ]);
+      for (const url of listed) {
+        expect((await get(new URL(url).pathname)).status, url).toBe(200);
+      }
+
+      // llms.txt links a page without a mirror at its canonical URL, and a mirror at its .md URL.
+      const llms = await (await get("/console/llms.txt")).text();
+      expect(llms).toContain("[Home](https://acme.test/console/index.md)");
+      expect(llms).toContain("[About](https://acme.test/console/about.md)");
+      expect(llms).toContain("[Team](https://acme.test/console/team/)");
+      expect(await (await get("/console/robots.txt")).text()).toContain(
+        "Sitemap: https://acme.test/console/sitemap.xml",
+      );
+    });
+
+    it("renders a Markdown mirror's page at its canonical URL", async () => {
+      // A mirror renders its page at '/console/about/' rather than answering with the 308, and a
+      // Markdown page's source passes the anonymous page check made at that URL.
+      for (const [pathname, body] of [
+        ["/console/about.md", "about body"],
+        ["/console/index.md", "home body"],
+        ["/console/notes.md", "notes-source"],
+      ]) {
+        const markdown = await get(pathname);
+        expect(markdown.status, pathname).toBe(200);
+        const text = await markdown.text();
+        expect(text, pathname).not.toContain("# Redirected");
+        expect(text, pathname).toContain(body);
+      }
+      expect((await get("/console/notes.md")).headers.get("x-farm-markdown-source")).toBeTruthy();
+      expect(await (await get("/console/llms-full.txt")).text()).toContain(
+        "URL: https://acme.test/console/about.md\n\n# Console\n\nSource: /console/about\n\nabout body",
+      );
+    });
+  });
 });

@@ -100,6 +100,62 @@ describe("app markdown pages", () => {
     expect(html).toContain('<aside class="callout">Markdown-first pages</aside>');
   });
 
+  it("reads literal route config exports, not ones in a code sample", async () => {
+    const source = [
+      "---",
+      "title: Installation",
+      "---",
+      'export const dynamic = "force-static";',
+      "export const revalidate = 120;",
+      "export const ssg = true",
+      "",
+      "# Installation",
+      "",
+      "```tsx",
+      'export const dynamic = "force-dynamic";',
+      "```",
+      "",
+      "~~~~",
+      "export const revalidate = 1;",
+      "~~~~",
+    ].join("\n");
+    const mod = createFarmMarkdownRouteModule({ filePath: "/app/install/page.mdx", source });
+
+    expect(mod).toMatchObject({ dynamic: "force-static", revalidate: 120, ssg: true });
+    // The exports stay part of the page's MDX module.
+    expect(renderToStaticMarkup(await (mod.default as any)({}))).toContain("<h1>Installation</h1>");
+
+    const computed = createFarmMarkdownRouteModule({
+      filePath: "/app/about/page.mdx",
+      source: "export const revalidate = 60 * 60;\n\n# About\n",
+    });
+    expect(computed.revalidate).toBeUndefined();
+    expect(computed.dynamic).toBeUndefined();
+  });
+
+  it("loads lazily configured components once, on the first render, and retries a failure", async () => {
+    let loads = 0;
+    const mod = createFarmMarkdownRouteModule({
+      filePath: "/app/about/page.mdx",
+      source: ["---", "title: About Farm", "---", "<Callout>Lazy</Callout>"].join("\n"),
+      components: async () => {
+        loads += 1;
+        if (loads === 1) throw new Error("components failed to load");
+        return {
+          Callout: (props) => React.createElement("aside", null, props.children),
+        };
+      },
+    });
+
+    expect(mod.metadata).toMatchObject({ title: "About Farm" });
+    expect(loads).toBe(0);
+    await expect((mod.default as any)({})).rejects.toThrow("components failed to load");
+    for (let render = 0; render < 2; render++) {
+      expect(renderToStaticMarkup(await (mod.default as any)({}))).toContain("<aside>Lazy</aside>");
+    }
+    expect(loads).toBe(2);
+  });
+
   it("serves raw source at the markdown route", async () => {
     const response = await createFarmMarkdownSourceResponse({
       request: new Request("https://farm.test/about.md"),

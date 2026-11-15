@@ -368,16 +368,16 @@ describe("React AOT compiler safety boundaries", () => {
       reason: /ref requires React ownership/i,
     },
     {
-      name: "effect lifecycle",
+      name: "an async effect",
       source: `
         import { useEffect, useState } from "react";
         export function WithEffect() {
           const [count, setCount] = useState(0);
-          useEffect(() => {}, [count]);
+          useEffect(async () => {}, [count]);
           return <button onClick={() => setCount(count + 1)}>{count}</button>;
         }
       `,
-      reason: /top-level useState declarations/i,
+      reason: /useEffect needs one inline synchronous callback/i,
     },
   ])("falls back for $name", async ({ source, reason }) => {
     const result = await compile(source);

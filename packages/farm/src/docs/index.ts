@@ -11,6 +11,7 @@ export {
   createFarmDocsAdapterHandler,
   getFarmDocsConfigModuleRoot,
   hasFarmDocsRuntimeAdapter,
+  listFarmDocsPagePaths,
   type FarmDocsAdapterHandlerOptions,
 } from "./adapter";
 export { createDocsAPI, createFarmDocsAPIHandler, isFarmDocsAPIRequest } from "./api";

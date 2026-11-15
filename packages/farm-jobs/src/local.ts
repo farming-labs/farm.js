@@ -124,6 +124,17 @@ function readNodeEnv(): string | undefined {
     ?.NODE_ENV;
 }
 
+/**
+ * Whether this is a deployed server. Farm's Node server sets NODE_ENV to
+ * production; a Cloudflare worker leaves it unset and carries its bindings on
+ * `globalThis.__env__`, as core's own deployed-runtime check reads them.
+ */
+function isDeployedRuntime(): boolean {
+  if (readNodeEnv() === "production") return true;
+  const bindings = (globalThis as { __env__?: unknown }).__env__;
+  return Boolean(bindings) && typeof bindings === "object";
+}
+
 function randomHex() {
   return globalThis.crypto.randomUUID().replaceAll("-", "");
 }
@@ -288,7 +299,7 @@ function createLocalRuntime(
     const { getStorage } = await storageModule;
     const namespace = (options.storage as string | undefined) ?? "jobs";
     const storage = getStorage(namespace) as unknown as JobsKeyValueStorage;
-    if (readNodeEnv() === "production" && storage.getMount?.("")?.driver?.name === "memory") {
+    if (isDeployedRuntime() && storage.getMount?.("")?.driver?.name === "memory") {
       throw new JobsRuntimeError(
         `local() keeps runs in the "${namespace}" storage namespace, which uses the in-memory driver in this production build, so a restart or a second instance loses them. Configure a persistent driver with \`storage\` in farm.config.ts, or pass local({ storage }) a persistent storage instance.`,
         500,

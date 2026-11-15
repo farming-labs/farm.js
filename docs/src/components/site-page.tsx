@@ -5,10 +5,10 @@ import "../app/blog/blog.css";
 import "../app/design/design.css";
 
 /**
- * A plain reading page in the site chrome: /about, /contact, and /privacy. The content is the
- * route's page.md, which Farm also serves as raw markdown at the page's .md URL. The heading
- * here replaces the markdown's own title on the rendered page, as on /design, and the main
- * element keeps /design's id so its skip link and focus styles apply unchanged.
+ * A plain reading page in the site chrome: /about, /contact, /privacy, and /terms. The content
+ * is the route's page.md, which Farm also serves as raw markdown at the page's .md URL. The
+ * heading here replaces the markdown's own title on the rendered page, as on /design, and the
+ * main element keeps /design's id so its skip link and focus styles apply unchanged.
  */
 export function SiteProsePage({
   children,

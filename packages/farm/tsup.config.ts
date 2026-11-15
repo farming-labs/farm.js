@@ -98,6 +98,7 @@ const entry = {
   "internal/app-markdown-runtime": "src/app-markdown-runtime.ts",
   "internal/docs-precompiled-runtime": "src/docs/precompiled-runtime.ts",
   "internal/compression-runtime": "src/plugins/compression.ts",
+  "internal/vercel-edge-middleware": "src/middleware/vercel-edge.ts",
   "internal/build-runtime": "src/nitro/build-runtime.ts",
   "internal/config-runtime": "src/config-runtime.ts",
   "internal/production-node-env": "src/build/production-node-env.ts",

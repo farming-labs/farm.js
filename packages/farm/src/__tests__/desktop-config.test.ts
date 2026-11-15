@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { pluginHook } from "./plugin-hook";
 import {
   resolveConfig,
   type FarmDesktopContext,
@@ -350,12 +351,17 @@ describe("@farm.js/core/platform", () => {
   });
 
   it("gives browser code a literal platform and no node:fs", () => {
-    const plugin = farmServerOnlyEntriesPlugin() as any;
-    expect(plugin.resolveId("@farm.js/core/platform", "/app/page.tsx", { ssr: true })).toBeNull();
-    const id = plugin.resolveId("@farm.js/core/platform", "/app/page.tsx", { ssr: false });
-    expect(plugin.load(id)).toContain('return "web";');
+    const plugin = farmServerOnlyEntriesPlugin();
+    const resolveId = pluginHook<[string, string, { ssr: boolean }], string | null>(
+      plugin,
+      "resolveId",
+    );
+    const load = pluginHook<[string], string>(plugin, "load");
+    expect(resolveId("@farm.js/core/platform", "/app/page.tsx", { ssr: true })).toBeNull();
+    const id = resolveId("@farm.js/core/platform", "/app/page.tsx", { ssr: false })!;
+    expect(load(id)).toContain('return "web";');
     setPlatform("desktop");
-    const source: string = plugin.load(id);
+    const source = load(id)!;
     expect(source).toContain('return "desktop";');
     expect(source).not.toContain("node:");
     expect(source).toContain("appDataDir() is server-only");

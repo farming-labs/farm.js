@@ -4,7 +4,6 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import fs from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
-import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +18,8 @@ import { reviveDeferredData, type DeferredSettlements } from "../deferred";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
 import { logger } from "../utils";
+import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 const isWindows = process.platform === "win32";
 // Bun is optional: the bun preset's shutdown runs only where it is installed.
@@ -26,8 +27,8 @@ const hasBun = spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-async function createProductionFixture(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-prebuilt-ssr-"));
+async function createProductionFixture(name = "production-prebuilt-ssr"): Promise<string> {
+  const root = await fs.mkdtemp(path.join(packageRoot, `.tmp-${name}-`));
 
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), {
     recursive: true,
@@ -223,43 +224,6 @@ async function linkReact18(root: string): Promise<void> {
   await fs.symlink(reactDOMPath, path.join(root, "node_modules", "react-dom"), "junction");
 }
 
-async function getAvailablePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : 0;
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return port;
-}
-
-async function waitForServer(
-  url: string,
-  processOutput: () => string,
-  hasExited: () => boolean,
-  requestInit?: RequestInit,
-) {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (hasExited()) {
-      throw new Error(`Production server exited before it was ready:\n${processOutput()}`);
-    }
-    try {
-      return await fetch(url, requestInit);
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  throw new Error(
-    `Production server did not become ready: ${String(lastError)}\n${processOutput()}`,
-  );
-}
-
 async function readClientBundle(root: string): Promise<string> {
   const clientDir = path.join(root, ".farm", "client");
   const entries = await fs.readdir(clientDir);
@@ -282,6 +246,11 @@ async function readAllClientJavaScript(root: string): Promise<string> {
   return readDirectory(path.join(root, ".farm", "client"));
 }
 
+/**
+ * The browser halves of these tests run only where Chromium is installed. CI
+ * sets FARM_REQUIRE_TEST_BROWSER=1 in the job that installs it, so a missing
+ * browser fails there instead of skipping those assertions unnoticed.
+ */
 async function resolveInstalledChromiumExecutable(): Promise<string | null> {
   const configured = process.env.FARM_TEST_CHROMIUM_EXECUTABLE_PATH;
   if (configured) return configured;
@@ -290,7 +259,13 @@ async function resolveInstalledChromiumExecutable(): Promise<string | null> {
     const executablePath = chromium.executablePath();
     await fs.access(executablePath);
     return executablePath;
-  } catch {
+  } catch (error) {
+    if (process.env.FARM_REQUIRE_TEST_BROWSER === "1") {
+      throw new Error(
+        "Chromium is required when FARM_REQUIRE_TEST_BROWSER=1. Install it with `pnpm exec playwright install chromium` or set FARM_TEST_CHROMIUM_EXECUTABLE_PATH.",
+        { cause: error },
+      );
+    }
     return null;
   }
 }
@@ -310,51 +285,16 @@ async function runProductionRequest(
   requestInit?: RequestInit,
   env: Record<string, string | undefined> = {},
 ): Promise<void> {
-  const port = await getAvailablePort();
-  const output: string[] = [];
-  let spawnError: Error | undefined;
-  const productionServer = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
-    cwd: serverDir,
-    env: {
-      ...process.env,
-      ...env,
-      HOST: "127.0.0.1",
-      PORT: String(port),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  productionServer.stdout.on("data", (chunk) => output.push(String(chunk)));
-  productionServer.stderr.on("data", (chunk) => output.push(String(chunk)));
-  productionServer.on("error", (error) => {
-    spawnError = error;
-  });
-
+  const production = await startProductionServer(serverDir, { env });
   try {
-    const response = await waitForServer(
-      `http://127.0.0.1:${port}${pathname}`,
-      () => (spawnError ? `${spawnError.message}\n${output.join("")}` : output.join("")),
-      () => spawnError !== undefined || productionServer.exitCode !== null,
-      requestInit,
-    );
+    const response = await fetch(`${production.origin}${pathname}`, requestInit);
     try {
       await assertion(response);
     } catch (error) {
-      throw new Error(`${String(error)}\nProduction output:\n${output.join("")}`);
+      throw new Error(`${String(error)}\nProduction output:\n${production.output()}`);
     }
   } finally {
-    if (productionServer.exitCode === null) {
-      productionServer.kill("SIGTERM");
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          productionServer.kill("SIGKILL");
-          resolve();
-        }, 2_000);
-        productionServer.once("exit", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-      });
-    }
+    await production.stop();
   }
 }
 
@@ -579,7 +519,12 @@ export default { plugins: [
             expect(response.status).toBe(200);
             expect(response.headers.has("x-farm-preload-buffered")).toBe(false);
             expect(response.headers.has("x-farm-preload-streaming")).toBe(false);
-            expect(response.headers.getSetCookie()).toEqual(["a=1; Path=/", "b=2; Path=/"]);
+            // The page's deployment cookie follows the configured ones.
+            expect(response.headers.getSetCookie()).toEqual([
+              "a=1; Path=/",
+              "b=2; Path=/",
+              "__farm_deployment=preload-buffered-response-test; Path=/; HttpOnly; SameSite=Lax",
+            ]);
             const html = await response.text();
             expect(html).toContain("prebuilt SSR output");
             if (withPlugin) {
@@ -815,17 +760,62 @@ export default function Page() {
 }
 `.trim(),
       );
+      // An island that hydrates when visible loads its module then, not with the page.
+      await fs.writeFile(
+        path.join(root, "src", "app", "later.tsx"),
+        `
+"use client";
+import { useState } from "react";
+
+export const island = "visible";
+
+export default function Later() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>later {count}</button>;
+}
+`.trim(),
+      );
       await fs.mkdir(path.join(root, "src", "app", "islands"), { recursive: true });
       await fs.writeFile(
         path.join(root, "src", "app", "islands", "page.tsx"),
         `
 import { Counter } from "../counter";
+import Later from "../later";
 
 export default async function IslandsPage() {
-  return <main><h1>islands</h1><Counter /></main>;
+  return <main><h1>islands</h1><Counter /><Later /></main>;
 }
 `.trim(),
       );
+      // Two pages whose only shared module is a stylesheet: Rolldown gives it a chunk of its
+      // own, which Vite deletes once the CSS is in farm-client.css.
+      await fs.writeFile(path.join(root, "src", "app", "styles.css"), ".styled { color: red; }\n");
+      for (const name of ["a", "b"]) {
+        await fs.mkdir(path.join(root, "src", "app", `styled-${name}`), { recursive: true });
+        await fs.writeFile(
+          path.join(root, "src", "app", `styled-${name}`, "widget.tsx"),
+          `
+"use client";
+import "../styles.css";
+import { useState } from "react";
+
+export function Widget() {
+  const [count, setCount] = useState(0);
+  return <button className="styled" onClick={() => setCount(count + 1)}>${name} {count}</button>;
+}
+`.trim(),
+        );
+        await fs.writeFile(
+          path.join(root, "src", "app", `styled-${name}`, "page.tsx"),
+          `
+import { Widget } from "./widget";
+
+export default function Page() {
+  return <main><Widget /></main>;
+}
+`.trim(),
+        );
+      }
       const userConfig = {
         root,
         srcDir: "src",
@@ -868,6 +858,10 @@ export default async function IslandsPage() {
       const entryImports = manifest.entry.map((index) => manifest.files[index]!);
       const moduleChunk = (moduleId: string) => manifest.files[manifest.modules[moduleId]![0]!]!;
       expect(entryImports.length).toBeGreaterThan(0);
+      // Every file the manifest can list was written, including after Vite removed the
+      // stylesheet-only chunk the styled pages shared.
+      await Promise.all(manifest.files.map((file) => fs.access(path.join(publicDir, file))));
+      expect(manifest.modules["/src/app/styled-a/page.tsx"]).toBeDefined();
       // The entry imports the first one statically.
       expect(entryCode).toMatch(
         new RegExp(
@@ -903,12 +897,25 @@ export default async function IslandsPage() {
           expect(response.status).toBe(200);
           const html = await response.text();
           expect(html).toContain('<f-island src="/src/app/counter.tsx"');
+          expect(html).toMatch(/<f-island src="\/src\/app\/later.tsx"[^>]* strategy="visible"/);
           const files = await preloadsIn(html);
           expect(files).toContain(moduleChunk("/src/app/counter.tsx"));
           expect(files).not.toContain(moduleChunk("/src/app/page.tsx"));
+          expect(files).not.toContain(moduleChunk("/src/app/later.tsx"));
         },
         "/islands",
       );
+      for (const name of ["a", "b"]) {
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            const files = await preloadsIn(await response.text());
+            expect(files).toContain(moduleChunk(`/src/app/styled-${name}/page.tsx`));
+          },
+          `/styled-${name}`,
+        );
+      }
       await runProductionRequest(
         serverDir,
         async (response) => {
@@ -2772,7 +2779,9 @@ export function CopyButton({ text }) {
           { FARMJS_API_KEY: key, FARMJS_API_URL: `http://127.0.0.1:${receiverPort}` },
         );
         expect(received[0]!.headers.authorization).toBe(`Bearer ${key}`);
-        expect(received[0]!.body).not.toContain("private");
+        // The path, never its query string or the request's cookies.
+        expect(received[0]!.body).not.toContain("private-query");
+        expect(received[0]!.body).not.toContain("private-cookie");
         expect(JSON.parse(received[0]!.body)).toEqual({
           schemaVersion: 1,
           events: [
@@ -2782,10 +2791,16 @@ export function CopyButton({ text }) {
               timestamp: expect.any(String),
               kind: "request",
               route: "/users/[id]",
+              path: "/users/private-customer",
               method: "GET",
               status: 200,
               durationMs: expect.any(Number),
-              agent: { family: "anthropic", category: "agent", identity: "self-reported" },
+              agent: {
+                family: "anthropic",
+                category: "agent",
+                identity: "self-reported",
+                name: "Claude-User",
+              },
             },
           ],
         });
@@ -2921,7 +2936,7 @@ export default {
     }
   }, 120_000);
 
-  it("reports built-in endpoints, Markdown mirrors, and docs pages by a route template", async () => {
+  it("reports built-in endpoints and Markdown mirrors by a route template, and docs pages by their path", async () => {
     const root = await createProductionFixture();
     const received: string[] = [];
     const receiver = createHttpServer((request, response) => {
@@ -3007,6 +3022,8 @@ export default {
           expect(await status("/about.md")).toBe(200);
           expect(await status("/.well-known/farmjs.json")).toBe(200);
           expect(await status("/docs/routing")).toBe(200);
+          expect(await status("/docs/routing.md")).toBe(200);
+          expect(await status("/docs/private-missing")).toBe(404);
           expect(await status("/blog/private-post?secret=private-query")).toBe(200);
           expect(await status("/private-missing")).toBe(404);
           await vi.waitFor(
@@ -3020,7 +3037,9 @@ export default {
                   "GET /blog/[slug].md 200",
                   "GET /about.md 200",
                   "GET /.well-known/farmjs.json 200",
-                  "GET /docs/[...slug] 200",
+                  "GET /docs/routing 200",
+                  "GET /docs/routing.md 200",
+                  "GET /docs/[...slug] 404",
                   "GET /blog/[slug] 200",
                   "GET /[unmatched] 404",
                 ]),
@@ -3039,7 +3058,19 @@ export default {
       expect(requests().filter((line) => line.includes("/[unmatched]"))).toEqual([
         "GET /[unmatched] 404",
       ]);
-      expect(received.join("")).not.toContain("private");
+      // Templates never carry the request's own segments; each path is what was asked for.
+      const events = received.flatMap((body) => JSON.parse(body).events);
+      expect(events.map(({ route }) => route).join(" ")).not.toContain("private");
+      expect(events.filter(({ kind }) => kind === "request").map(({ path }) => path)).toEqual(
+        expect.arrayContaining([
+          "/blog/private-post.md",
+          "/docs/private-missing",
+          "/blog/private-post",
+          "/private-missing",
+          "/mcp",
+        ]),
+      );
+      expect(received.join("")).not.toContain("private-query");
     } finally {
       await new Promise((resolve) => receiver.close(resolve));
       await fs.rm(root, { recursive: true, force: true });
@@ -3369,6 +3400,54 @@ export default function Page() {
         fs.readFile(path.join(root, ".farm", ".output", "public", "index.html"), "utf8"),
       ).resolves.toContain('data-prerender-marker="1"');
       expect(process.env.FARM_PRERENDER).toBeUndefined();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("prerenders a serverless target from the prebuilt SSR bundle, outside its function", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `export const ssg = true;
+export default function Page() {
+  return <main data-prerendered="vercel">static</main>;
+}`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          deploy: { target: "vercel" },
+          generateBuildId: () => "vercel-prerender-prebuilt-ssr-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "vercel" });
+
+      const output = path.resolve(root, config.deploy.outputDir);
+      await expect(
+        fs.readFile(path.join(output, "static", "index.html"), "utf8"),
+      ).resolves.toContain('data-prerendered="vercel"');
+      // Nitro's temporary prerender server imported Farm's SSR bundle instead of bundling the
+      // SSR graph a second time, and was built in Nitro's prerender directory.
+      const prerenderServer = path.join(root, ".farm", ".nitro", "prerender");
+      const prerenderPackage = JSON.parse(
+        await fs.readFile(path.join(prerenderServer, "package.json"), "utf8"),
+      );
+      expect(prerenderPackage.imports?.["#farm-ssr-entry"]).toMatch(/^\.\/farm-ssr\//);
+      await expect(fs.stat(path.join(prerenderServer, "farm-ssr"))).resolves.toBeTruthy();
+      // The function the deploy ships bundles the SSR graph as before and holds none of that.
+      const functionDir = path.join(output, "functions", "__nitro.func");
+      await expect(fs.stat(path.join(functionDir, "farm-ssr"))).rejects.toThrow();
+      const functionPackage = await fs
+        .readFile(path.join(functionDir, "package.json"), "utf8")
+        .catch(() => "{}");
+      expect(functionPackage).not.toContain("#farm-ssr-entry");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -4465,11 +4544,19 @@ await server.listen(Number(process.env.PORT));
             await expect
               .poll(() => page.locator("[data-stable-counter]").textContent())
               .toBe("stable:1");
+            await page.locator('[data-live-counter="first"]').evaluate((element) => {
+              (
+                window as typeof window & { __farmParityFirstCounter?: Element }
+              ).__farmParityFirstCounter = element;
+            });
 
             await fs.writeFile(
               path.join(developmentRoot, "src", "components", "live-counter.tsx"),
               isolatedParityCounterSource("after"),
             );
+            // React Fast Refresh, on by default in development, swaps the edited
+            // component inside every live boundary and keeps its state, as it does
+            // for route-wide client components.
             await expect
               .poll(
                 () =>
@@ -4478,7 +4565,17 @@ await server.listen(Number(process.env.PORT));
                     .evaluateAll((elements) => elements.map((element) => element.textContent)),
                 { timeout: 10_000 },
               )
-              .toEqual(["after:first:0", "after:second:0"]);
+              .toEqual(["after:first:1", "after:second:0"]);
+            expect(
+              await page
+                .locator('[data-live-counter="first"]')
+                .evaluate(
+                  (element) =>
+                    element ===
+                    (window as typeof window & { __farmParityFirstCounter?: Element })
+                      .__farmParityFirstCounter,
+                ),
+            ).toBe(true);
 
             expect(await page.locator("[data-stable-counter]").textContent()).toBe("stable:1");
             expect(
@@ -4520,7 +4617,7 @@ await server.listen(Number(process.env.PORT));
               await page
                 .locator("[data-live-counter]")
                 .evaluateAll((elements) => elements.map((element) => element.textContent)),
-            ).toEqual(["after:first:0", "after:second:0"]);
+            ).toEqual(["after:first:1", "after:second:0"]);
             expect(
               await page.evaluate(() =>
                 (
@@ -4750,6 +4847,97 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("builds the client entry when the project path contains a blocked package name", async () => {
+    // The client entry is imported by absolute path. Matching blocked packages as substrings
+    // emptied it on every attempt whenever mkdtemp happened to name a fixture `...-Wnf3nE`.
+    const root = await createProductionFixture("nf3-fsevents-node-pre-gyp");
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          vite: {
+            plugins: [
+              {
+                name: "import-blocked-packages-from-client-entry",
+                transform(code, id) {
+                  if (!id.endsWith("farm-client-entry.tsx")) return null;
+                  // None of these resolve from the fixture, so the build fails unless the
+                  // client guard still stubs each package and its subpaths.
+                  return `import "nf3";\nimport "fsevents/fsevents.js";\nimport "@mapbox/node-pre-gyp";\n${code}`;
+                },
+              },
+            ],
+          },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const clientDir = path.join(root, ".farm", "client");
+      const entry = (await fs.readdir(clientDir)).find((name) =>
+        /^farm-client-h[0-9a-f]+\.js$/.test(name),
+      );
+      expect(entry).toBeDefined();
+      await expect(fs.readFile(path.join(clientDir, entry!), "utf8")).resolves.toContain(
+        "__farmPageState",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("stubs API route modules but keeps a client page whose path holds api and route", async () => {
+    // Only an API route module (a route file under api/) is server-only. The client entry imports
+    // pages by absolute path, so a page such as /docs/api/router has both strings in its path.
+    const root = await createProductionFixture("api-route-page");
+
+    try {
+      const routeDir = path.join(root, "src", "app", "api", "secret");
+      await fs.mkdir(routeDir, { recursive: true });
+      await fs.writeFile(
+        path.join(routeDir, "route.ts"),
+        `export function GET() { return new Response("server-only-api-route-sentinel"); }`,
+      );
+      const pageDir = path.join(root, "src", "app", "docs", "api", "router");
+      await fs.mkdir(pageDir, { recursive: true });
+      await fs.writeFile(
+        path.join(pageDir, "page.tsx"),
+        `"use client";
+
+import { useState } from "react";
+import { GET } from "../../../api/secret/route";
+
+export default function RouterDocs() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>router docs page {typeof GET} {count}</button>;
+}`,
+      );
+      const config = await resolveConfig(
+        { root, srcDir: "src", images: { provider: "none" }, telemetry: false },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const clientDir = path.join(root, ".farm", "client");
+      const clientFiles = await fs.readdir(clientDir, { recursive: true });
+      const clientCode = (
+        await Promise.all(
+          clientFiles
+            .filter((name) => name.endsWith(".js"))
+            .map((name) => fs.readFile(path.join(clientDir, name), "utf8")),
+        )
+      ).join("\n");
+      expect(clientCode).toContain("router docs page");
+      expect(clientCode).not.toContain("server-only-api-route-sentinel");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("includes package client boundaries imported by a server layout in route hydration", async () => {
     const root = await createProductionFixture();
 
@@ -4875,6 +5063,9 @@ export default function RootLayout({ children }) {
     }
   }, 120_000);
 
+  const STANDALONE_DEPLOYMENT_COOKIE =
+    "__farm_deployment=standalone-node-test; Path=/; HttpOnly; SameSite=Lax";
+
   it("boots standalone Node output through the package import mapping", async () => {
     const root = await createProductionFixture();
     const isolatedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "farm-standalone-prebuilt-"));
@@ -4927,6 +5118,7 @@ export default function DynamicPage({ params }) {
           root,
           srcDir: "src",
           images: { provider: "none" },
+          deploymentId: "standalone-node-test",
           redirects: () => [
             {
               source: "/legacy-home",
@@ -5035,6 +5227,7 @@ export default function DynamicPage({ params }) {
           expect(exactResponse.headers.getSetCookie()).toEqual([
             "shared=1; Path=/",
             "about=1; Path=/",
+            STANDALONE_DEPLOYMENT_COOKIE,
           ]);
           await expect(exactResponse.text()).resolves.toContain("exact production route");
         }
@@ -5042,7 +5235,10 @@ export default function DynamicPage({ params }) {
         const dynamicResponse = await fetch(new URL("/contact", response.url));
         expect(dynamicResponse.status).toBe(200);
         expect(dynamicResponse.headers.get("x-header-order")).toBe("dynamic");
-        expect(dynamicResponse.headers.getSetCookie()).toEqual(["shared=1; Path=/"]);
+        expect(dynamicResponse.headers.getSetCookie()).toEqual([
+          "shared=1; Path=/",
+          STANDALONE_DEPLOYMENT_COOKIE,
+        ]);
         const dynamicHtml = await dynamicResponse.text();
         expect(dynamicHtml).toContain("dynamic production route");
         expect(dynamicHtml).toContain("contact");
@@ -5163,30 +5359,15 @@ export default defineConfig({
         await build(config, { root, preset });
 
         const serverDir = path.join(root, ".farm", ".output", "server");
-        const port = await getAvailablePort();
-        const output: string[] = [];
-        const productionServer = spawn(command, [path.join(serverDir, "index.mjs")], {
-          cwd: serverDir,
-          env: {
-            ...process.env,
-            HOST: "127.0.0.1",
-            PORT: String(port),
-          },
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        productionServer.stdout.on("data", (chunk) => output.push(String(chunk)));
-        productionServer.stderr.on("data", (chunk) => output.push(String(chunk)));
+        const production = await startProductionServer(serverDir, { command });
+        const productionServer = production.process;
 
         try {
-          const healthResponse = await waitForServer(
-            `http://127.0.0.1:${port}/health/ready`,
-            () => output.join(""),
-            () => productionServer.exitCode !== null,
-          );
+          const healthResponse = await fetch(`${production.origin}/health/ready`);
           expect(healthResponse.status).toBe(200);
           await expect(healthResponse.json()).resolves.toMatchObject({ status: "ok" });
 
-          const request = fetch(`http://127.0.0.1:${port}/api/slow`);
+          const request = fetch(`${production.origin}/api/slow`);
           for (let attempt = 0; attempt < 100; attempt++) {
             const marker = await fs.readFile(markerPath, "utf8").catch(() => "");
             if (marker.includes("request:start")) break;
@@ -5212,7 +5393,7 @@ export default defineConfig({
             new Promise<never>((_, reject) => {
               shutdownTimeout = setTimeout(() => {
                 productionServer.kill("SIGKILL");
-                reject(new Error(`Production server did not shut down:\n${output.join("")}`));
+                reject(new Error(`Production server did not shut down:\n${production.output()}`));
               }, 5_000);
             }),
           ]).finally(() => clearTimeout(shutdownTimeout));
@@ -5230,20 +5411,10 @@ export default defineConfig({
 
         // An idle server exits right away, still running the shutdown hooks.
         await fs.rm(markerPath);
-        const idleServer = spawn(command, [path.join(serverDir, "index.mjs")], {
-          cwd: serverDir,
-          env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        const idleOutput: string[] = [];
-        idleServer.stdout.on("data", (chunk) => idleOutput.push(String(chunk)));
-        idleServer.stderr.on("data", (chunk) => idleOutput.push(String(chunk)));
+        const idle = await startProductionServer(serverDir, { command });
+        const idleServer = idle.process;
         try {
-          const ready = await waitForServer(
-            `http://127.0.0.1:${port}/health/ready`,
-            () => idleOutput.join(""),
-            () => idleServer.exitCode !== null,
-          );
+          const ready = await fetch(`${idle.origin}/health/ready`);
           await ready.arrayBuffer();
           const exited = new Promise<number | null>((resolve) => idleServer.once("exit", resolve));
           const signalledAt = performance.now();
@@ -6086,6 +6257,7 @@ export default function Page() {
               expect(response.headers.getSetCookie()).toEqual([
                 "first=1; Path=/",
                 "second=2; Path=/",
+                "__farm_deployment=production-runtime-request-context-test; Path=/base; HttpOnly; SameSite=Lax",
               ]);
           },
           "/base/incoming?q=one&q=two",

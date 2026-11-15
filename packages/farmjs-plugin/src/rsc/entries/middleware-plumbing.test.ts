@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -21,7 +21,12 @@ type ConfigHook = (
  */
 async function generateEntry(
   userConfig: Record<string, unknown>,
-  options: { command?: "serve" | "build"; configSource?: string } = {},
+  options: {
+    command?: "serve" | "build";
+    configSource?: string;
+    /** The entries of farm.config.ts's `plugins` for the server to load. */
+    serverPlugins?: { indexes: number[]; count: number };
+  } = {},
 ): Promise<string> {
   const root = mkdtempSync(path.join(tmpdir(), "farm-rsc-middleware-"));
   try {
@@ -29,7 +34,20 @@ async function generateEntry(
     if (options.configSource) {
       writeFileSync(path.join(root, "farm.config.ts"), options.configSource);
     }
-    const plugin = farmRsc().find((candidate) => candidate.name === "@farm.js/plugin/rsc:config");
+    // A build reads each locale's catalog, as core's build does.
+    const i18n = userConfig.i18n as { locales?: string[] } | undefined;
+    if (i18n?.locales) {
+      mkdirSync(path.join(root, "src/messages"), { recursive: true });
+      for (const locale of i18n.locales) {
+        writeFileSync(path.join(root, `src/messages/${locale}.json`), "{}");
+      }
+    }
+    const serverPlugins = options.serverPlugins && {
+      [path.join(root, "farm.config.ts")]: options.serverPlugins,
+    };
+    const plugin = farmRsc({ serverPlugins }).find(
+      (candidate) => candidate.name === "@farm.js/plugin/rsc:config",
+    );
     await (plugin!.config as ConfigHook)(
       { root, experimental: { serverComponents: true }, ...userConfig },
       {
@@ -114,6 +132,40 @@ export default defineConfig({
     await expect(
       generateEntry({ middleware: { matcher: "/private", handler() {} } }),
     ).rejects.toThrow(/requires an importable farm\.config or vite\.config file/);
+  });
+});
+
+describe("plugins reach the production RSC entry", () => {
+  const configSource = `import { recorder } from "./recorder";
+export default { plugins: [recorder()] };`;
+  const serverPlugins = { indexes: [0], count: 1 };
+
+  it("imports the config's plugins when `farm build` asks for them", async () => {
+    const entry = await generateEntry({}, { configSource, serverPlugins });
+    expect(entry).toMatch(/^import ".*farm\.config\.ts\?farm-rsc-plugins";$/m);
+  });
+
+  it("leaves them out of development and of builds that don't ask", async () => {
+    for (const options of [
+      { configSource, serverPlugins, command: "serve" as const },
+      { configSource },
+    ]) {
+      expect(await generateEntry({}, options)).not.toContain("farm-rsc-plugins");
+    }
+  });
+
+  it("fails when the build can't read plugins from the config", async () => {
+    await expect(
+      generateEntry(
+        {},
+        {
+          configSource: `const shared = { plugins: [] };\nexport default { ...shared };`,
+          serverPlugins,
+        },
+      ),
+    ).rejects.toThrow(
+      /Cannot read plugins for the RSC server from .*farm\.config\.ts: plugins may be supplied through a config spread/,
+    );
   });
 });
 

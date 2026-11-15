@@ -1,3 +1,9 @@
+import {
+  createFarmDeploymentCookie,
+  FARM_DEPLOYMENT_ID_HEADER,
+  getFarmDeploymentMismatch,
+  withoutFarmDeploymentCookie,
+} from "../deployment";
 import { _withFarmResponseHeaders } from "../owned-response";
 import type {
   CookieJar,
@@ -905,20 +911,62 @@ export function applyProductionMiddlewareHeaders(
       if (headers.has(key)) continue;
       headers.set(key, value);
     }
-    for (const cookie of setCookies) {
+    if (setCookies.length === 0) return;
+    // Middleware cookies were set before the response existed, so they go first and the
+    // response's own cookies win for the same name, as in the dev runtime: a returned Response
+    // that clears a session another middleware refreshed logs the visitor out.
+    const responseCookies = headers.getSetCookie();
+    headers.delete("Set-Cookie");
+    for (const cookie of [...setCookies, ...responseCookies]) {
       headers.append("Set-Cookie", cookie);
     }
   });
 }
 
 const PRIVATE_CACHE_DIRECTIVE = /(?:^|,)\s*(?:private|no-store)\s*(?:[,=]|$)/i;
-// Directives a CDN reads in place of Cache-Control (RFC 9213 and the platform names).
-const CDN_CACHE_CONTROL_HEADERS = [
+/** @internal Directives a CDN reads in place of Cache-Control (RFC 9213 and the platform names). */
+export const CDN_CACHE_CONTROL_HEADERS = [
   "cdn-cache-control",
   "vercel-cdn-cache-control",
   "netlify-cdn-cache-control",
   "cloudflare-cdn-cache-control",
 ];
+
+/**
+ * Whether a page request carries what makes its render one visitor's: an `Authorization` header
+ * or a cookie. The deployment cookie names a release, not a visitor, so alone it keeps shared
+ * caching, and so does a lone valid locale cookie (`localeCookie`) when the URL names the locale.
+ *
+ * @internal
+ */
+export function _hasPrivateFarmRequestHeaders(
+  request: Request,
+  localeCookie?: { name: string; locales: readonly string[] },
+): boolean {
+  if (request.headers.get("authorization")) return true;
+  const cookieHeader = withoutFarmDeploymentCookie(request.headers.get("cookie"));
+  if (!cookieHeader) return false;
+  return !(localeCookie && isOnlyFarmLocaleCookie(cookieHeader, localeCookie));
+}
+
+function isOnlyFarmLocaleCookie(
+  cookieHeader: string,
+  localeCookie: { name: string; locales: readonly string[] },
+): boolean {
+  const parts = cookieHeader.split(";");
+  if (parts.length !== 1) return false;
+  const cookie = parts[0].trim();
+  const separator = cookie.indexOf("=");
+  if (separator <= 0) return false;
+  try {
+    return (
+      decodeURIComponent(cookie.slice(0, separator).trim()) === localeCookie.name &&
+      localeCookie.locales.includes(decodeURIComponent(cookie.slice(separator + 1).trim()))
+    );
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Keep a response that middleware let through out of shared caches. A CDN keys its copy by URL
@@ -936,5 +984,38 @@ export function _withFarmGuardedResponseCache(response: Response): Response {
   return _withFarmResponseHeaders(response, (headers) => {
     if (shareable) headers.set("Cache-Control", "private, no-store");
     for (const name of CDN_CACHE_CONTROL_HEADERS) headers.delete(name);
+  });
+}
+
+/**
+ * Store the deployment ID in the deployment cookie on a page document a browser loads, so a form
+ * posted from it before JavaScript runs names its deployment. Only a GET page response that names
+ * this deployment and stays out of shared caches carries it: a CDN does not cache a response that
+ * sets a cookie (and one that does would hand it to every visitor), so a prerendered, ISR, PPR, or
+ * otherwise public page is sent as it was.
+ *
+ * @internal
+ */
+export function _withFarmDeploymentCookie(
+  request: Request,
+  response: Response,
+  deploymentId: string,
+  cookiePath: string,
+): Response {
+  if (request.method.toUpperCase() !== "GET") return response;
+  if (response.headers.get(FARM_DEPLOYMENT_ID_HEADER) !== deploymentId) return response;
+  if (!PRIVATE_CACHE_DIRECTIVE.test(response.headers.get("cache-control") ?? "")) return response;
+  if (CDN_CACHE_CONTROL_HEADERS.some((name) => response.headers.has(name))) return response;
+  // A page of another deployment keeps its cookie, so its forms stay refused.
+  if (getFarmDeploymentMismatch(request, deploymentId)) return response;
+  return _withFarmResponseHeaders(response, (headers) => {
+    headers.append(
+      "Set-Cookie",
+      createFarmDeploymentCookie(
+        deploymentId,
+        cookiePath,
+        new URL(request.url).protocol === "https:",
+      ),
+    );
   });
 }
