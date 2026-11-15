@@ -103,6 +103,50 @@ export function classifyFarmDocumentPrefix(markup: string): "document" | "fragme
 }
 
 /**
+ * Split the head elements a component renders (`<meta>`, `<title>`, preloads) off the front of
+ * a render that is not a full document. React writes them ahead of everything else when its root
+ * is not `<html>`; they belong in the document's head, where React puts them when it renders the
+ * document itself. A full document is returned whole: its own head takes them.
+ *
+ * With `complete` false, `markup` is a streamed prefix, and null means the next chunk decides.
+ */
+export function takeFarmHoistedHead(
+  markup: string,
+  complete: boolean,
+): { head: string; body: string } | null {
+  const kind = classifyFarmDocumentPrefix(markup);
+  if (kind === "document") return { head: "", body: markup };
+  if (kind === "pending" && !complete) return null;
+  let head = "";
+  let body = markup;
+  let match: RegExpExecArray | null;
+  while ((match = HOISTED_HEAD_ELEMENT.exec(body.replace(/^\s+/, "")))) {
+    head += match[0];
+    body = body.replace(/^\s+/, "").slice(match[0].length);
+  }
+  if (!complete && endsInsideHoistable(body)) return null;
+  return { head, body };
+}
+
+// A head element the stream cut in two: its tag, or its text and closing tag, is still coming.
+function endsInsideHoistable(body: string): boolean {
+  const open = /^\s*<(meta|link|base|title|script|style)\b/i.exec(body);
+  if (!open) return false;
+  const tag = open[1]!.toLowerCase();
+  if (!body.includes(">")) return true;
+  return (
+    (tag === "title" || tag === "script" || tag === "style") &&
+    !new RegExp(`</${tag}>`, "i").test(body)
+  );
+}
+
+/** Put head elements taken from a render at the end of a document's `<head>`. */
+export function appendFarmHead(document: string, head: string): string {
+  if (!head) return document;
+  return document.replace(/<\/head>/i, () => `${head}\n</head>`);
+}
+
+/**
  * Give a layout's document a `<head>` when it renders none. `<head>` is optional in
  * HTML and React, but Farm's managed head assets (route props, the client runtime,
  * styles) are inserted before `</head>`, and without one they would be dropped and

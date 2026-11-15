@@ -9165,6 +9165,50 @@ function opensFarmFullDocument(markup) {
   return /^<!doctype/i.test(inner) || /^<html[\\s>]/i.test(inner);
 }
 
+// The head elements a component renders (<meta>, <title>, preloads), which React writes ahead of
+// a render whose root is not <html>, split off for the document's head. A full document keeps
+// them: its own head takes them. Matches the dev renderer's takeFarmHoistedHead.
+function takeFarmHoistedHead(markup) {
+  if (opensFarmFullDocument(markup)) return { head: "", body: markup };
+  const hoistable = /${HOISTED_HEAD_ELEMENT.source}/i;
+  let head = "";
+  let body = markup;
+  let match;
+  while ((match = hoistable.exec(body.replace(/^\\s+/, "")))) {
+    head += match[0];
+    body = body.replace(/^\\s+/, "").slice(match[0].length);
+  }
+  return { head: head, body: body };
+}
+
+// A rendered page with the head elements React wrote first moved to its head field, for Farm's shell to
+// put in the document's head. A streamed page's first chunk is its shellHtml: those bytes are
+// dropped from the stream.
+function takeFarmRenderedHead(rendered) {
+  if (rendered.head) return rendered;
+  if (rendered.html !== undefined) {
+    const split = takeFarmHoistedHead(rendered.html);
+    if (!split.head) return rendered;
+    return Object.assign({}, rendered, { html: split.body, shellHtml: split.body, head: split.head });
+  }
+  const shell = rendered.shellHtml || "";
+  const split = takeFarmHoistedHead(shell);
+  if (!split.head) return rendered;
+  let left = new TextEncoder().encode(shell.slice(0, shell.length - split.body.length)).byteLength;
+  const stream = rendered.stream.pipeThrough(new TransformStream({
+    transform(chunk, controller) {
+      if (left > 0) {
+        const dropped = Math.min(left, chunk.byteLength);
+        left -= dropped;
+        chunk = chunk.subarray(dropped);
+        if (chunk.byteLength === 0) return;
+      }
+      controller.enqueue(chunk);
+    },
+  }));
+  return Object.assign({}, rendered, { stream: stream, shellHtml: split.body, head: split.head });
+}
+
 function extractFarmFullDocument(markup) {
   if (!opensFarmFullDocument(markup)) return null;
   const hoisted = peelFarmDocumentPrefix(markup).hoisted;
@@ -11748,13 +11792,14 @@ ${
           wrappedElement = wrapWithFarmIntegrationProviders(wrappedElement);
           return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern, farmFlushToken);
         };
-        const renderedPage = ${
+        // The head elements a component rendered go to the document's head (takeFarmRenderedHead).
+        const renderedPage = takeFarmRenderedHead(${
           hasMiddlewareRuntime
             ? `await _runWithMiddlewareData(middlewareData, () =>
           _runWithMiddlewareContext(middlewareContext, renderPageElement)
         )`
             : "await renderPageElement()"
-        };
+        });
 
         // A completed document is not a reusable PPR shell: it already contains
         // the request's resolved Suspense content. Until the production runtime
@@ -12002,7 +12047,8 @@ ${
             '  <meta charset="utf-8">\\n' +
             '  ' + viewportTags + '\\n' +
             (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
-            '  <title>' + title + '</title>' + metaTags + '\\n' +
+            (suppressDefaultTitle ? '' : '  <title>' + title + '</title>') + metaTags +
+            (rendererHead ? '\\n  ' + rendererHead : '') + '\\n' +
             '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
             '  <link rel="modulepreload" href="/__farm_client_js_src__">' + renderFarmClientModulePreloads(null, route.clientModule) + '\\n' +
             renderFarmRendererHydrationScript() + '\\n' +

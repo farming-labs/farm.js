@@ -24,6 +24,8 @@ import {
   classifyFarmDocumentPrefix,
   createFarmStreamedDocumentTransform,
   extractFarmFullDocument,
+  takeFarmHoistedHead,
+  appendFarmHead,
   openFarmStreamedDocument,
   removeFarmDocumentTitles,
 } from "./full-document";
@@ -1049,7 +1051,11 @@ export class ServerRenderer {
     // Render to completion through the streaming renderer where there is one, so a
     // component that suspends (data hooks, lazy imports) resolves instead of failing
     // React's synchronous renderToString. Production buffers the same stream.
-    return { html: await this.renderElementToCompleteHTML(element, options), head: "" };
+    const { head, body } = takeFarmHoistedHead(
+      await this.renderElementToCompleteHTML(element, options),
+      true,
+    )!;
+    return { html: body, head };
   }
 
   /** Islands mode sends large prop values once, keyed by content (RFC 0003). */
@@ -3926,11 +3932,26 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 <body class="">${earlyClient ? `\n  ${earlyClientScript}` : ""}
   <div id="root">`;
           // A full document opens from React's own <html> instead (documentTransform).
-          const securedShell = streamDocument ? "" : stampDocumentHTML(shell);
-          if (securedShell) {
-            htmlParts.push(securedShell);
-            staticShellParts?.push(securedShell);
-          }
+          // Farm's shell waits for React's first chunk: the head elements React writes first
+          // (a component's <meta> or <title>) go into its head.
+          let pendingShell = streamDocument ? "" : stampDocumentHTML(shell);
+          let heldHead = "";
+          const releaseShell = (complete: boolean): string | null => {
+            const split = takeFarmHoistedHead(heldHead, complete);
+            if (!split) return null;
+            // As in the buffered document, a component's <title> replaces the fallback one.
+            const shellHead =
+              !hasExplicitTitle && /<title[\s>]/i.test(split.head)
+                ? removeFarmDocumentTitles(pendingShell)
+                : pendingShell;
+            const opened = appendFarmHead(shellHead, split.head);
+            pendingShell = "";
+            heldHead = "";
+            htmlParts.push(opened);
+            staticShellParts?.push(opened);
+            res.write(opened);
+            return split.body;
+          };
 
           // A full document: its head gets the assets the buffered path composes in. They are
           // Farm's own markup, so they carry the nonce; the layout's markup kept only the nonces
@@ -4033,6 +4054,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
               // A flush marker goes out in order with React's chunks, and stays out of what is
               // recorded (the PPR shell, the document check).
               if (flushMarker && chunk === flushMarker) {
+                if (pendingShell) releaseShell(true);
                 const marker = documentTransform
                   ? documentTransform.write(flushMarker.toString())
                   : flushMarker;
@@ -4051,9 +4073,20 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                   ? cspStreamDecoder.decode(chunk, { stream: true })
                   : chunk.toString()
                 : String(chunk);
-              const securedChunkText = cspNonceRewriter
+              let securedChunkText = cspNonceRewriter
                 ? cspNonceRewriter.write(chunkText)
                 : chunkText;
+              let held = false;
+              if (pendingShell) {
+                heldHead += securedChunkText;
+                const body = releaseShell(false);
+                if (body === null) {
+                  callback();
+                  return;
+                }
+                securedChunkText = body;
+                held = true;
+              }
               const outputText = documentTransform
                 ? documentTransform.write(securedChunkText)
                 : securedChunkText;
@@ -4068,10 +4101,19 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
               if (documentTransform) {
                 if (outputText) res.write(outputText, onWrite);
                 else callback();
-              } else if (cspNonceRewriter) res.write(securedChunkText, onWrite);
+              } else if (cspNonceRewriter || held) res.write(securedChunkText, onWrite);
               else res.write(chunk, encoding, onWrite);
             },
             final: (callback) => {
+              // React ended before the shell went out: what it held is all there is.
+              if (pendingShell) {
+                const body = releaseShell(true);
+                if (body) {
+                  htmlParts.push(body);
+                  staticShellParts?.push(body);
+                  res.write(body);
+                }
+              }
               if (lateNavigationError) {
                 const navigationError = lateNavigationError;
                 lateNavigationError = null;
@@ -4156,10 +4198,9 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
             resolve();
           };
 
-          // Queue the shell immediately, then start piping the Suspense stream.
-          // Waiting for the write callback can delay the fallback until the whole
-          // response is ready under some dev-server wrappers.
-          res.write(securedShell);
+          // The shell goes out with React's first chunk (releaseShell), without waiting for a
+          // write callback, which can delay the fallback until the whole response is ready under
+          // some dev-server wrappers.
           if (typeof (res as any).flush === "function") {
             (res as any).flush();
           }
