@@ -143,6 +143,7 @@ import {
 import {
   applyFarmCronVercelCrons,
   createFarmCronCloudflareConfig,
+  toFarmCronCloudflareScheduledTasks,
   type FarmCronJob,
   mergeScheduledTasks,
   prepareFarmCronForNitro,
@@ -13482,7 +13483,15 @@ async function buildNitroUniversal(
     );
   }
 
-  const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
+  const portableScheduledTasks = mergeScheduledTasks(
+    farmWorkflows.scheduledTasks,
+    farmCron.scheduledTasks,
+  );
+  // Cloudflare sends the trigger's own schedule as controller.cron, written in its day-of-week
+  // numbering (see toFarmCronCloudflareSchedule), so the tasks are keyed the same way.
+  const scheduledTasks = preset.startsWith("cloudflare")
+    ? toFarmCronCloudflareScheduledTasks(portableScheduledTasks)
+    : portableScheduledTasks;
   const cloudflareCronConfig =
     farmCron.provider === "host" ? createFarmCronCloudflareConfig(farmCron.jobs) : undefined;
 

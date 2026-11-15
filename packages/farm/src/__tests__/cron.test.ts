@@ -14,6 +14,8 @@ import {
   cronRoute,
   createFarmCronCloudflareConfig,
   createFarmCronCloudflareTriggers,
+  toFarmCronCloudflareScheduledTasks,
+  toFarmCronCloudflareSchedule,
   FARM_CRON_MANIFEST,
   mergeScheduledTasks,
   prepareFarmCronForNitro,
@@ -260,6 +262,36 @@ describe("Farm cron", () => {
           crons: ["0 2 * * *", "0 3 * * *"],
         },
       },
+    });
+  });
+
+  it("writes Cloudflare triggers in Cloudflare's day-of-week numbering", () => {
+    // Cloudflare numbers days 1-7 from Sunday; Farm's portable schedules 0-6 from Sunday.
+    expect(toFarmCronCloudflareSchedule("30 8 * * 1-5")).toBe("30 8 * * 2-6");
+    expect(toFarmCronCloudflareSchedule("0 0 * * 0")).toBe("0 0 * * 1");
+    expect(toFarmCronCloudflareSchedule("0 0 * * 6")).toBe("0 0 * * 7");
+    expect(toFarmCronCloudflareSchedule("0 9 * * 0,3,6")).toBe("0 9 * * 1,4,7");
+    expect(toFarmCronCloudflareSchedule("0 9 * * 1-5/2")).toBe("0 9 * * 2-6/2");
+    // A step size and the other fields stay as written.
+    expect(toFarmCronCloudflareSchedule("*/15 0-6 1-7 2 */2")).toBe("*/15 0-6 1-7 2 */2");
+    expect(toFarmCronCloudflareSchedule("0 2 * * *")).toBe("0 2 * * *");
+
+    const jobs = resolveCronConfig({
+      weekdays: { schedule: "30 8 * * 1-5", path: "/api/weekdays" },
+      sundays: { schedule: "0 0 * * 0", path: "/api/sundays" },
+    }).jobs;
+    expect(createFarmCronCloudflareTriggers(jobs)).toEqual(["30 8 * * 2-6", "0 0 * * 1"]);
+    // Nitro finds the tasks by the schedule Cloudflare sends back.
+    expect(
+      toFarmCronCloudflareScheduledTasks({
+        "30 8 * * 1-5": "farm:cron:weekdays",
+        "0 0 * * 0": ["farm:cron:sundays"],
+        "0 0 * * 1": "farm:cron:mondays-portable",
+      }),
+    ).toEqual({
+      "30 8 * * 2-6": "farm:cron:weekdays",
+      "0 0 * * 1": "farm:cron:sundays",
+      "0 0 * * 2": "farm:cron:mondays-portable",
     });
   });
 

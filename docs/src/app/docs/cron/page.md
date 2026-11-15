@@ -249,13 +249,13 @@ Month and weekday names, six-field expressions, and provider-only extensions are
 `farm build` validates the config, generates adapter tasks, and writes `.farm/cron-manifest.json`.
 With the default `cron.provider: "host"`, the platform you deploy to runs the schedules:
 
-| Target            | Production behavior                                                                                                                |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel            | Farm writes each configured path and schedule to Build Output API `crons`. Vercel sends an HTTP GET to the route.                  |
-| Cloudflare Worker | With `deploy.preset: "cloudflare-module"`, Farm writes Wrangler Cron Triggers and dispatches the matching route inside the Worker. |
-| Cloudflare Pages  | Pages output does not install Cron Triggers. Use `cloudflare-module` or call the route from an external scheduler.                 |
-| Node, Bun, Deno   | Nitro runs schedules in the long-lived server process and internally calls the route.                                              |
-| Other targets     | Use the generated manifest to configure the provider's scheduler to call the route with GET and bearer auth.                       |
+| Target            | Production behavior                                                                                                                                                                                                                                                                                                        |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel            | Farm writes each configured path and schedule to Build Output API `crons`. Vercel sends an HTTP GET to the route.                                                                                                                                                                                                          |
+| Cloudflare Worker | With `deploy.preset: "cloudflare-module"`, Farm writes Wrangler Cron Triggers and dispatches the matching route inside the Worker. Cloudflare numbers the days of the week 1-7 from Sunday, so Farm writes each trigger in that numbering (`30 8 * * 1-5` becomes `30 8 * * 2-6`); the schedule still means the same days. |
+| Cloudflare Pages  | Pages output does not install Cron Triggers. Use `cloudflare-module` or call the route from an external scheduler.                                                                                                                                                                                                         |
+| Node, Bun, Deno   | Nitro runs schedules in the long-lived server process and internally calls the route.                                                                                                                                                                                                                                      |
+| Other targets     | Use the generated manifest to configure the provider's scheduler to call the route with GET and bearer auth.                                                                                                                                                                                                               |
 
 With `cron.provider: "farmjs"`, none of these outputs are written and
 [Farm.js Infra runs the jobs](#run-by-farmjs-infra) on any target.
