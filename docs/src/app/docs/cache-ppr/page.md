@@ -85,6 +85,8 @@ rejected instead of being treated as an indefinite cache lifetime.
 
 `clear()` invalidates entries and any fills already in progress. Existing callers still receive
 their result, but an older fill cannot repopulate the cache after it has been cleared.
+With a cache adapter, `await clearAsync()` also removes the entries the adapter stores; with
+`storageCacheAdapter`, every key under its `base` is removed and other keys in the store stay.
 
 ## Memoize a function
 
