@@ -29,6 +29,10 @@ function flush(ms = 40): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function historyKey(): string {
+  return (window.history.state as Record<string, string>).__farmHistoryKey!;
+}
+
 function createScrollElement(): HTMLDivElement {
   const element = document.createElement("div");
   Object.defineProperty(element, "scrollHeight", { configurable: true, value: 2000 });
@@ -75,9 +79,10 @@ describe("SPA router scroll restoration across popstate", () => {
     const unregister = router.registerScrollElement("sidebar", sidebar);
     sidebar.scrollTop = 300;
 
+    const guideKey = historyKey();
     fetchMock.mockResolvedValueOnce(makePage("/other"));
     await router.navigate("/other");
-    expect(sessionStorage.getItem("farm-scroll-/guide:sidebar")).toBe(
+    expect(sessionStorage.getItem(`farm-scroll-${guideKey}:sidebar`)).toBe(
       JSON.stringify({ x: 0, y: 300 }),
     );
 
@@ -109,9 +114,10 @@ describe("SPA router scroll restoration across popstate", () => {
     document.body.appendChild(anchor);
     sidebar.scrollTop = 300;
 
+    const guideKey = historyKey();
     fetchMock.mockResolvedValueOnce(makePage("/other"));
     await router.navigate("/other");
-    expect(sessionStorage.getItem("farm-scroll-/guide:sidebar")).toBe(
+    expect(sessionStorage.getItem(`farm-scroll-${guideKey}:sidebar`)).toBe(
       JSON.stringify({ x: 0, y: 300 }),
     );
 
@@ -144,9 +150,10 @@ describe("SPA router scroll restoration across popstate", () => {
     const unregister = router.registerScrollElement("sidebar", sidebar);
     sidebar.scrollTop = 300;
 
+    const guideKey = historyKey();
     fetchMock.mockResolvedValueOnce(makePage("/other"));
     await router.navigate("/other");
-    expect(sessionStorage.getItem("farm-scroll-/guide:sidebar")).toBe(
+    expect(sessionStorage.getItem(`farm-scroll-${guideKey}:sidebar`)).toBe(
       JSON.stringify({ x: 0, y: 300 }),
     );
 
@@ -179,7 +186,7 @@ describe("SPA router scroll restoration across popstate", () => {
     fetchMock.mockResolvedValueOnce(makePage("/other"));
     await router.navigate("/other");
     // saveScrollPosition is gated on scrollRestoration, so nothing is saved.
-    expect(sessionStorage.getItem("farm-scroll-/guide:sidebar")).toBeNull();
+    expect(Object.keys(sessionStorage).filter((key) => key.startsWith("farm-scroll-"))).toEqual([]);
 
     sidebar.scrollTop = 700;
     scrollTo.mockClear();
@@ -198,7 +205,7 @@ describe("SPA router scroll restoration across popstate", () => {
     anchor.remove();
   });
 
-  it("restores window and scroll elements on a forward navigation that opts out of scrolling to a hash destination", async () => {
+  it("keeps the current scroll on a forward navigation that opts out of scrolling to a hash destination", async () => {
     window.history.replaceState(null, "", "/list");
     const fetchMock = vi.mocked(fetch);
     router = new SPARouter({ scrollRestoration: true });
@@ -209,17 +216,19 @@ describe("SPA router scroll restoration across popstate", () => {
     anchor.id = "optout-anchor";
     anchor.scrollIntoView = vi.fn();
     document.body.appendChild(anchor);
+    sidebar.scrollTop = 120;
+    // A position saved for the URL by an earlier visit belongs to that visit's history entry.
     sessionStorage.setItem("farm-scroll-/guide", JSON.stringify({ x: 0, y: 80 }));
     sessionStorage.setItem("farm-scroll-/guide:sidebar", JSON.stringify({ x: 0, y: 250 }));
 
     scrollTo.mockClear();
     fetchMock.mockResolvedValueOnce(makePage("/guide"));
     await router.navigate("/guide#optout-anchor", { scroll: false });
-    await settle(() => expect(sidebar.scrollTop).toBe(250));
     await flush();
-    expect(scrollTo).toHaveBeenCalledWith(0, 80);
-    // Opting out of scrolling means the anchor is not the scroll target; the
-    // saved positions take precedence.
+    // Opting out of scrolling means neither the anchor nor the top is the scroll target, and a
+    // new history entry has no saved position to restore.
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(sidebar.scrollTop).toBe(120);
     expect(anchor.scrollIntoView as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
     expect(window.location.hash).toBe("#optout-anchor");
     unregister();

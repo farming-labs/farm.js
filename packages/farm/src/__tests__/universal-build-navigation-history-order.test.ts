@@ -149,13 +149,16 @@ describe("react production navigation history", () => {
   });
 
   it("saves the scroll position of the page being left when Back is pressed", async () => {
-    const { router, back } = setup();
+    const { router, entries, back } = setup();
     router.swapContent = vi.fn(async () => true);
     router.saveScrollPosition = vi.fn();
     router.restoreScrollPosition = vi.fn();
 
     await router.navigate("/server-query");
+    // /meta has no history key (the router never wrote its entry), so it saves under its path.
     expect(router.saveScrollPosition).toHaveBeenLastCalledWith("/meta");
+    const serverQueryKey = (entries.at(-1)!.state as Record<string, string>).__farmHistoryKey;
+    expect(serverQueryKey).toEqual(expect.any(String));
 
     // The URL already names /meta when popstate fires; /server-query is still on screen.
     back();
@@ -164,7 +167,40 @@ describe("react production navigation history", () => {
       scroll: false,
       popState: null,
     });
-    expect(router.saveScrollPosition).toHaveBeenLastCalledWith("/server-query");
+    expect(router.saveScrollPosition).toHaveBeenLastCalledWith(serverQueryKey);
     expect(router.restoreScrollPosition).toHaveBeenCalledWith("/meta");
+  });
+
+  it("keeps a scroll position per history entry when the same URL is in history twice", async () => {
+    const { router, entries, back } = setup();
+    router.swapContent = vi.fn(async () => true);
+    router.saveScrollPosition = vi.fn();
+    router.restoreScrollPosition = vi.fn();
+    const keyOf = (index: number) =>
+      (entries[index]!.state as Record<string, string>).__farmHistoryKey;
+
+    await router.navigate("/server-query");
+    await router.navigate("/meta");
+    const [serverQueryKey, secondMetaKey] = [keyOf(1), keyOf(2)];
+    expect(new Set(["/meta", serverQueryKey, secondMetaKey]).size).toBe(3);
+
+    back();
+    await router.navigate("https://example.test/server-query", {
+      action: "pop",
+      scroll: false,
+      popState: entries.at(-1)!.state,
+    });
+    expect(router.saveScrollPosition).toHaveBeenLastCalledWith(secondMetaKey);
+    expect(router.restoreScrollPosition).toHaveBeenLastCalledWith(serverQueryKey);
+
+    back();
+    await router.navigate("https://example.test/meta", {
+      action: "pop",
+      scroll: false,
+      popState: null,
+    });
+    // The first /meta keeps its own position; the second visit saved under its own key.
+    expect(router.saveScrollPosition).toHaveBeenLastCalledWith(serverQueryKey);
+    expect(router.restoreScrollPosition).toHaveBeenLastCalledWith("/meta");
   });
 });
